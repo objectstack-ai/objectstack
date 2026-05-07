@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { SecurityPlugin } from './security-plugin.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { FieldMasker } from './field-masker.js';
-import { RLSCompiler } from './rls-compiler.js';
+import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import type { PermissionSet } from '@objectstack/spec/security';
 
 // ---------------------------------------------------------------------------
@@ -310,36 +310,50 @@ describe('RLSCompiler', () => {
     expect(filter).toEqual({ $or: [{ owner_id: 'u99' }, { status: 'public' }] });
   });
 
-  it('should return null for unsupported expression', () => {
+  it('should fail-closed (deny filter) when expression is unsupported', () => {
+    // Previously returned null, which is fail-OPEN (no RLS applied →
+    // every row visible). Now returns the deny sentinel so a misconfigured
+    // policy doesn't silently disable tenant isolation.
     const compiler = new RLSCompiler();
     const policy: any = { object: 'x', operation: 'select', using: 'complex expression WITH unsupported syntax' };
     const filter = compiler.compileFilter([policy]);
-    expect(filter).toBeNull();
+    expect(filter).toEqual(RLS_DENY_FILTER);
   });
 
-  it('should skip equality policy when user-context value is null', () => {
+  it('should fail-closed when the only policy depends on a missing user-context value', () => {
     // Repro: a logged-in user without an active organization. The
-    // tenant_isolation rule would otherwise emit `organization_id = null`,
-    // which silently exposes un-tenanted rows or breaks queries on system
-    // tables that lack the column. Treating null as "skip" is safe because
-    // the field-existence check + most-permissive permission-set merge
-    // remain in force.
+    // tenant_isolation rule would compile to `organization_id = null`,
+    // which previously either (a) returned every row from tables that
+    // lack `organization_id` (e.g. sys_user) or (b) returned every row
+    // because compileFilter dropped it as null. We now fail-closed so
+    // the user sees zero rows on tenant-aware tables until they pick an
+    // active organization. Per-object rules that *do* compile (e.g.
+    // `sys_user_self`) still grant access — see the next test.
     const compiler = new RLSCompiler();
     const policy: any = { object: '*', operation: 'all', using: 'organization_id = current_user.organization_id' };
     const ctx: any = { userId: 'u1', tenantId: null, roles: [] };
     const filter = compiler.compileFilter([policy], ctx);
-    expect(filter).toBeNull();
+    expect(filter).toEqual(RLS_DENY_FILTER);
   });
 
   it('should still apply policy when only one of multiple has a usable value', () => {
-    // Same scenario as above but combined with a self-row rule. The
-    // organization_id rule should drop out, leaving only `id = current_user.id`.
+    // tenant policy can't compile (null tenantId) but sys_user_self can.
+    // Result: just the self-row filter — the broken tenant policy drops out.
     const compiler = new RLSCompiler();
     const tenantPolicy: any = { object: '*', operation: 'all', using: 'organization_id = current_user.organization_id' };
     const selfPolicy: any = { object: 'sys_user', operation: 'select', using: 'id = current_user.id' };
     const ctx: any = { userId: 'u1', tenantId: null, roles: [] };
     const filter = compiler.compileFilter([tenantPolicy, selfPolicy], ctx);
     expect(filter).toEqual({ id: 'u1' });
+  });
+
+  it('should compile tenant policy normally when an active organization is set', () => {
+    // Sanity check — the deny path is only triggered by *missing* values.
+    const compiler = new RLSCompiler();
+    const policy: any = { object: '*', operation: 'all', using: 'organization_id = current_user.organization_id' };
+    const ctx: any = { userId: 'u1', tenantId: 'org-1', roles: [] };
+    const filter = compiler.compileFilter([policy], ctx);
+    expect(filter).toEqual({ organization_id: 'org-1' });
   });
 
   it('should get applicable policies for object and operation', () => {

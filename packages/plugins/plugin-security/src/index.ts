@@ -9,7 +9,7 @@
 
 export { SecurityPlugin } from './security-plugin.js';
 export { PermissionEvaluator } from './permission-evaluator.js';
-export { RLSCompiler } from './rls-compiler.js';
+export { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 export { FieldMasker } from './field-masker.js';
 export { PermissionDeniedError, isPermissionDeniedError } from './errors.js';
 export {

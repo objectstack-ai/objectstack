@@ -22,6 +22,25 @@ interface RLSUserContext {
 }
 
 /**
+ * Sentinel filter used when applicable RLS policies exist but none can
+ * be compiled against the current execution context (typically because a
+ * required `current_user.*` variable is missing — e.g. the user has no
+ * active organization). The filter compares `id` against a non-printable
+ * UUID-shaped string that no real record will ever carry, so the upstream
+ * SQL layer naturally returns zero rows without raising an error. This
+ * gives us **fail-closed** semantics for select/update/delete on tables
+ * that the user is not entitled to see, without forcing every caller to
+ * handle a thrown `PermissionDeniedError` for what is conceptually an
+ * empty result set.
+ *
+ * Exposed for the SecurityPlugin's optional short-circuit path and for
+ * tests; see {@link RLSCompiler.compileFilter}.
+ */
+export const RLS_DENY_FILTER: Record<string, unknown> = Object.freeze({
+  id: '__rls_deny__:00000000-0000-0000-0000-000000000000',
+});
+
+/**
  * RLSCompiler
  * 
  * Compiles Row-Level Security policy expressions into query filters.
@@ -31,6 +50,15 @@ export class RLSCompiler {
   /**
    * Compile RLS policies into a query filter for the given user context.
    * Multiple policies for the same object/operation are OR-combined (any match allows access).
+   *
+   * Return-value semantics:
+   * - `null`   → no policies applicable → caller applies no RLS filter.
+   * - non-null → caller AND's it onto the existing where clause.
+   * - {@link RLS_DENY_FILTER} → policies were defined but none could be
+   *   compiled (e.g. wildcard `tenant_isolation` against a user with no
+   *   active organization). The caller must treat this as "deny by
+   *   default" — its `id` comparison naturally yields zero rows on
+   *   select/update/delete, which is the safe fail-closed answer.
    */
   compileFilter(
     policies: RowLevelSecurityPolicy[],
@@ -54,7 +82,14 @@ export class RLSCompiler {
       }
     }
 
-    if (filters.length === 0) return null;
+    if (filters.length === 0) {
+      // Policies *were* applicable but every one of them depended on a
+      // `current_user.*` variable that wasn't populated (or used an
+      // expression we couldn't compile). Fail closed — return a sentinel
+      // filter that matches no rows. This prevents the "user without an
+      // active org sees every tenant's data" class of bug.
+      return RLS_DENY_FILTER;
+    }
     if (filters.length === 1) return filters[0];
 
     // Multiple policies: OR-combine (any policy allows access)

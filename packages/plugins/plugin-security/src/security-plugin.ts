@@ -3,7 +3,7 @@
 import { Plugin, PluginContext } from '@objectstack/core';
 import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator.js';
-import { RLSCompiler } from './rls-compiler.js';
+import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { FieldMasker } from './field-masker.js';
 import { PermissionDeniedError } from './errors.js';
 import {
@@ -175,19 +175,33 @@ export class SecurityPlugin implements Plugin {
       // 3. RLS filter injection
       const allRlsPolicies = this.collectRLSPolicies(permissionSets, opCtx.object, opCtx.operation);
       if (allRlsPolicies.length > 0 && opCtx.ast) {
-        // Drop policies whose target field doesn't exist on the object —
-        // wildcard policies like `organization_id = ...` must not corrupt
-        // queries against system tables that lack the column (sys_jwks,
-        // sys_audit_log, etc.). When schema lookup fails we keep the
-        // policy (fail-closed for unknown objects).
-        const objectFields = await this.getObjectFieldNames(metadata, opCtx.object);
-        const safe = objectFields
+        // Field-existence safety: wildcard policies (`object: '*'`) target
+        // fields like `organization_id` that may not exist on every object
+        // (e.g. system tables, CRM apps that haven't yet adopted multi-tenancy).
+        //
+        // We treat such policies as a *deny* contribution rather than dropping
+        // them, so they fail-closed when no per-object policy provides an
+        // alternate match. Any per-object policy that DOES compile against
+        // the object will OR-combine and grant access (e.g. `sys_user_self`).
+        // When the schema lookup itself fails we keep all policies (drivers
+        // will surface column errors clearly during compilation).
+        const objectFields = await this.getObjectFieldNames(metadata, opCtx.object, ql);
+        let dropped = 0;
+        const compilable = objectFields
           ? allRlsPolicies.filter((p) => {
               const targetField = this.extractTargetField(p.using);
-              return targetField ? objectFields.has(targetField) : true;
+              const ok = targetField ? objectFields.has(targetField) : true;
+              if (!ok) dropped++;
+              return ok;
             })
           : allRlsPolicies;
-        const rlsFilter = this.rlsCompiler.compileFilter(safe, opCtx.context);
+        let rlsFilter = this.rlsCompiler.compileFilter(compilable, opCtx.context);
+        // If every applicable policy was dropped because of missing fields,
+        // contribute the deny sentinel (zero rows) — matches the rls-compiler
+        // semantics for "policies were applicable but none compiled".
+        if (rlsFilter == null && dropped > 0) {
+          rlsFilter = { ...RLS_DENY_FILTER };
+        }
         if (rlsFilter) {
           if (opCtx.ast.where) {
             opCtx.ast.where = { $and: [opCtx.ast.where, rlsFilter] };
@@ -241,13 +255,31 @@ export class SecurityPlugin implements Plugin {
   private async getObjectFieldNames(
     metadata: any,
     objectName: string,
+    ql?: any,
   ): Promise<Set<string> | null> {
     try {
-      const obj = await metadata?.get?.('object', objectName);
-      if (!obj || !Array.isArray(obj.fields)) return null;
+      let obj = await metadata?.get?.('object', objectName);
+      // Fallback: in some runtimes the kernel's `metadata` service does not
+      // hold object schemas (those live on the ObjectQL registry instead).
+      // Ask ObjectQL directly so wildcard RLS filtering still works against
+      // identity tables (sys_organization, sys_user, etc.).
+      if ((!obj || !obj.fields) && typeof ql?.getSchema === 'function') {
+        obj = ql.getSchema(objectName);
+      }
+      if (!obj || !obj.fields) return null;
       const set = new Set<string>(['id']);
-      for (const f of obj.fields) {
-        if (f?.name) set.add(String(f.name));
+      if (Array.isArray(obj.fields)) {
+        for (const f of obj.fields) {
+          if (f?.name) set.add(String(f.name));
+        }
+      } else if (typeof obj.fields === 'object') {
+        for (const key of Object.keys(obj.fields)) {
+          set.add(key);
+          const v = (obj.fields as Record<string, any>)[key];
+          if (v && typeof v === 'object' && v.name) set.add(String(v.name));
+        }
+      } else {
+        return null;
       }
       return set;
     } catch {
@@ -262,7 +294,12 @@ export class SecurityPlugin implements Plugin {
    */
   private extractTargetField(using?: string): string | null {
     if (!using) return null;
-    const m = using.match(/^\s*([a-z_][a-z0-9_]*)\s*(=|IN|in)\b/);
+    // Match `field =` or `field IN`/`in`. Note: `\b` is omitted after `=`
+    // because `=` is non-word and the next char (space) is non-word too —
+    // a word boundary cannot exist between two non-word chars, so `=\b`
+    // would never match. We instead require the alternation token to be
+    // followed by whitespace or `(`.
+    const m = using.match(/^\s*([a-z_][a-z0-9_]*)\s*(?:=|IN|in)(?=\s|\()/);
     return m ? m[1] : null;
   }
 }
