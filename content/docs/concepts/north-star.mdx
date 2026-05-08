@@ -469,7 +469,7 @@ Subsequent requests reuse the cached artifact. Cache invalidation strategy
 
 ## 7. Alignment Check
 
-Honest state of the platform as of 2026-05-01, **re-classified under the Phase
+Honest state of the platform as of 2026-05-08, **re-classified under the Phase
 1 code-first, version-first model**. Every future architectural decision should
 preserve Built, reduce Drift, and advance Missing.
 
@@ -513,6 +513,29 @@ preserve Built, reduce Drift, and advance Missing.
   在 boot 时直接查控制面表拿业务 DB 坐标和凭据，破坏了 §8「ObjectOS 只通过
   Artifact API 接触控制面」的边界。修复方向：业务 DB 坐标和凭据归 Deployment
   Config（§6.3 B），通过启动时注入而非控制面 DB 直连。
+- **Custom Salesforce-flavor formula engine.**
+  [packages/objectql/src/formula.ts](packages/objectql/src/formula.ts) 是一个 433
+  LoC、22 函数、手写递归下降的私有 DSL。它没有公开训练语料，AI agent 每次都要从
+  prompt 里学一遍语法；`evaluateFormula` 用 `try { … } catch { return undefined }`
+  吞掉所有错误，业务规则静默失败；无递归深度上限/求值步数上限/超时，是潜在的 DoS
+  通道。修复方向：删除并替换为 CEL（Apache-2.0、Google CEL spec、K8s/GCP IAM/
+  Firestore 训练语料丰富、形式语法、AST-first、有界执行）。详见 ROADMAP M9。
+- **Untyped `z.string()` expression fields scattered across spec.** ~25 个
+  `formula / condition / expression / criteria / visible / visibleOn` 字段散布在
+  Data / UI / Security / Automation / AI / Kernel 各域，全部声明为裸
+  `z.string()` 并附 `.describe('Formula expression')`。这些字段实际涉及多种语言
+  （Salesforce-style formula、CEL-style predicate、JS expression、cron、SQL、
+  OpenAPI runtime expression），但 schema 层既不区分 dialect 也不强制 AST 形式。
+  修复方向：统一替换为 `ExpressionSchema { dialect, ast }`（详见 ROADMAP M9.3）。
+- **Compile-time-frozen seed timestamps.**
+  [examples/app-crm/src/data/index.ts](examples/app-crm/src/data/index.ts) 的种子
+  记录用 `new Date(Date.now() + 86400000 * 30)` 形式生成日期。这些表达式在 TS
+  编译期就被求值，把开发者的 wall-clock 烧进 `dist/objectstack.json`：(1) 两次
+  连续 `objectstack build` 的产物**不字节一致**，破坏 cacheable artifact 的隐式
+  契约；(2) 客户后续安装得到的种子日期是**开发者的**「今天 + 30 天」，dynamic
+  semantics 完全丢失。修复方向：种子记录里使用
+  `{ dialect: 'cel', ast: <os.now() + duration("P30D")> }`，由 SeedLoader 在
+  install 时按客户时钟求值。详见 ROADMAP M9.4。
 
 ### <Globe className="inline" /> Missing (Not Started)
 
@@ -520,6 +543,19 @@ preserve Built, reduce Drift, and advance Missing.
 - **Current Version pointer** - add a project-level pointer that decides which Version ObjectOS serves; rollback/promote should update this pointer without mutating Version rows.
 - **Studio version/artifact viewer** - browse current version, publish history, artifact envelope, version id, commit id, checksum, logs, and runtime health. No metadata editing.
 - **UI auto-generation** - artifact schemas -> Amis/React components without hand-wiring.
+- **Unified `ExpressionSchema` + AST-first persistence.** Single
+  `{ dialect, ast }` envelope replacing all scattered `z.string()` formula
+  fields. Persisted artifact contains AST only; source strings are an
+  authoring-time DX shorthand normalized away by `objectstack compile`. See
+  ROADMAP M9.1 / M9.2 / M9.3.
+- **`packages/formula` + ObjectStack CEL stdlib.** New package wrapping
+  `cel-js` with a registry (`cel` / `js` / `cron` dialects) and an ObjectStack
+  standard function namespace (`os.now()`, `os.today()`, `os.user.*`,
+  `os.org.*`, `os.exists()`, `os.lookup()`, etc.). See ROADMAP M9.1.
+- **AI structured-output for expressions.** Publish `CelExprSchema` as JSON
+  Schema, mandate AST-only output in `skills/objectstack-formula/SKILL.md`,
+  wire constrained decoding into Studio AI assistant + CLI scaffolding. See
+  ROADMAP M9.7.
 
 ## 8. Non-Goals and Anti-Patterns
 
@@ -556,6 +592,8 @@ without explicit project-level buy-in.
 - <AlertTriangle className="inline" /> **No direct-DB SDK.** Every client access goes through ObjectQL - no bypass, no "just for perf" exception.
 - <AlertTriangle className="inline" /> **No deprecated-alias enums.** When refactoring enums (plugin scope, metadata types, etc.), break cleanly with a migration. Do not ship "old value still accepted" aliases.
 - <AlertTriangle className="inline" /> **No hand-written content in `content/docs/references/`.** That tree is regenerated from Zod schemas.
+- <AlertTriangle className="inline" /> **No private expression DSL.** Any "expression" string in metadata MUST declare a `dialect` and persist as an AST. New private grammars (Salesforce-flavor formula, custom predicate languages, ad-hoc condition syntax) are forbidden — they have no public training corpus, no formal grammar, and no AST round-trip story, all of which are required for the AI-native authoring path. The canonical dialects are `cel` (formulas + predicates), `js` (sandboxed L2 hook bodies), and `cron` (job schedules). SQL fragments stay driver-native and are not part of the expression registry.
+- <AlertTriangle className="inline" /> **Artifacts must be deterministic.** `objectstack compile` of unchanged source MUST produce a byte-identical `objectstack.json`. Anything that drifts between two consecutive builds — wall-clock timestamps, `Date.now()` / `Math.random()` / process IDs / absolute machine paths inside seed values, hostname-dependent data — is a bug. Dynamic semantics (e.g. "30 days from install time") belong in `ExpressionSchema` AST, evaluated at install time by the runtime, not at compile time by the author's clock. CI gate (M9.6): `objectstack build` twice, `sha256` must match.
 
 ## 9. Open Questions
 

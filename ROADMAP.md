@@ -1,6 +1,6 @@
 # ObjectStack - Road Map
 
-> **Last Updated:** 2026-04-26 (Phase 1 foundation: M1 + D1 + D4 + D5 + D7 landed)
+> **Last Updated:** 2026-05-08 (M9 Expression Unification + D9/D10/D11 added — CEL/AST-first migration plan)
 > **Authoritative Spec:** [content/docs/concepts/north-star.mdx](content/docs/concepts/north-star.mdx) - §7 Alignment Check is the single source of truth for Built / Drift / Missing.
 > This file is the **actionable checklist** derived from that ledger. When north-star §7 changes, update this file too.
 
@@ -52,7 +52,7 @@ Code that exists and matches the intended architecture. Do not regress these.
 | **M3 / M4** Cloud Artifact API + runtime loader (`/cloud/resolve-hostname`, `/cloud/projects/:id/artifact`, `/cloud/projects/:id/metadata` + `ArtifactKernelFactory`) | [packages/services/service-cloud/src/cloud-artifact-api-plugin.ts](packages/services/service-cloud/src/cloud-artifact-api-plugin.ts) |
 | Single-project boot mode (`OS_MODE=standalone`) — `createSingleProjectPlugin` seeds local org/project + serves `studio/runtime-config` | [packages/services/service-cloud/src/single-project-plugin.ts](packages/services/service-cloud/src/single-project-plugin.ts) |
 | Static Setup App (no runtime `SetupPlugin`) — fixed `App` artifact registered by `plugin-auth` | [packages/platform-objects/src/apps/setup.app.ts](packages/platform-objects/src/apps/setup.app.ts) |
-| Formula expression evaluator (text / math / date / logical) | [packages/objectql/src/formula.ts](packages/objectql/src/formula.ts) |
+| ~~Formula expression evaluator (text / math / date / logical)~~ — see D9 (replaced by CEL via M9) | [packages/objectql/src/formula.ts](packages/objectql/src/formula.ts) |
 | Studio Flow Viewer + Flow Test Runner + Flow Runs panel | [apps/studio/src/components/FlowViewer.tsx](apps/studio/src/components/FlowViewer.tsx) |
 | Automation: flow auto-discovery from ObjectQL registry | [packages/services/service-automation/src/plugin.ts](packages/services/service-automation/src/plugin.ts) |
 | **D1** ObjectOS metadata DB bridge removed - `MetadataPlugin` no longer registers `sys_metadata` / `sys_metadata_history` or auto-bridges ObjectQL to `DatabaseLoader` | [packages/metadata/src/plugin.ts](packages/metadata/src/plugin.ts) |
@@ -124,6 +124,43 @@ Anchors:
 - [packages/plugins/plugin-auth/src/manifest.ts](packages/plugins/plugin-auth/src/manifest.ts)
 - [packages/plugins/plugin-security/src/manifest.ts](packages/plugins/plugin-security/src/manifest.ts)
 - [packages/services/service-tenant/src/manifest.ts](packages/services/service-tenant/src/manifest.ts)
+
+### D9 - Custom Salesforce-flavor formula engine (replace with CEL)
+
+[packages/objectql/src/formula.ts](packages/objectql/src/formula.ts) is a hand-written 433 LoC recursive-descent parser exposing 22 functions (UPPER / NOW / TODAY / IF / AND …). It is the only "real" expression engine in the repo, but:
+
+- **No public training corpus.** AI agents have to learn our private DSL from scratch every prompt.
+- **Silent failure mode.** `evaluateFormula` wraps the whole evaluator in `try { … } catch { return undefined }`. Business rules fail open with no signal.
+- **No execution bounds.** No recursion depth limit, no step counter, no timeout. Untrusted input is a DoS vector.
+- **Salesforce-incomplete.** 22 functions vs 100+ in the language we'd be cloning.
+- **Single-engine bet.** All formula / predicate / condition fields share the same evaluator regardless of security posture.
+
+**Decision (2026-05-08):** delete and replace with CEL. Salesforce compatibility is **not** a goal — see `content/docs/concepts/north-star.mdx` §8. See M9 Expression Unification below.
+
+### D10 - Untyped `z.string()` expression fields scattered across spec
+
+~25 fields named `formula / condition / expression / criteria / visible / visibleOn` are declared as bare `z.string()` with `.describe('Formula expression')`. These are not all the same language — they include Salesforce-style formulas, predicate conditions, JS expressions (mapping), cron expressions (job), SQL fragments (analytics joins, partial indexes), and OpenAPI runtime expressions (rest-server callbacks). None are typed, none declare a dialect.
+
+Anchors (non-exhaustive):
+- [packages/spec/src/data/field.zod.ts](packages/spec/src/data/field.zod.ts) — `formula.expression`, `conditionalRequired`
+- [packages/spec/src/data/validation.zod.ts](packages/spec/src/data/validation.zod.ts) — `condition`, `scope`
+- [packages/spec/src/data/hook.zod.ts](packages/spec/src/data/hook.zod.ts) — `condition`
+- [packages/spec/src/ui/{app,page,view,action}.zod.ts](packages/spec/src/ui) — `visible / visibility / visibleOn / disabled`
+- [packages/spec/src/security/sharing.zod.ts](packages/spec/src/security/sharing.zod.ts) — `condition`
+- [packages/spec/src/automation/{workflow,approval}.zod.ts](packages/spec/src/automation) — `criteria`, `entryCriteria`
+- [packages/spec/src/ai/{orchestration,predictive}.zod.ts](packages/spec/src/ai) — `condition`, `entryCriteria`, `dataFilter`
+- [packages/spec/src/kernel/feature.zod.ts](packages/spec/src/kernel/feature.zod.ts) — `expression`
+
+**Resolved by:** M9 — replace with `ExpressionSchema { dialect, ast }` (string shorthand accepted as input, AST emitted in artifact).
+
+### D11 - Compile-time-frozen seed timestamps in `Dataset.records`
+
+[examples/app-crm/src/data/index.ts](examples/app-crm/src/data/index.ts) uses `new Date(Date.now() + 86400000 * 30)` and similar patterns inside seed records. These are evaluated at TS compile time, baking the developer's wall-clock into `dist/objectstack.json`:
+
+- Two consecutive `objectstack build` runs produce **non-byte-identical** artifacts (timestamps drift seconds-to-minutes apart). This violates the implicit "deterministic build" contract for cacheable artifacts.
+- Customers installing the package later receive seed dates anchored to **the developer's** "today + 30 days", forever. The dynamic semantics intended by the developer are lost.
+
+**Resolved by:** M9 — `Dataset.records` accepts `SeedValue = primitive | Expression`; SeedLoader evaluates expressions at install time using the customer's clock and identity context.
 
 ### D8 - `apps/objectos` is a hybrid (Control Plane + ObjectOS in one process)
 
@@ -247,6 +284,83 @@ Code anchor: [packages/services/service-cloud/src/artifact-kernel-factory.ts](pa
 
 - [ ] Artifact schemas -> Amis/React components without hand-wiring.
 
+### M9 - Expression Unification (CEL + AST-first)
+
+Single canonical expression language across all metadata domains. Replace the
+custom formula engine (D9), the scattered `z.string()` expression fields (D10),
+and the compile-time-frozen seed timestamps (D11) with one tagged
+`ExpressionSchema { dialect, ast }` whose persisted form is always an AST.
+
+**Strategic rationale.** Future authors of metadata and formulas are AI agents,
+not human admins. The wire format must therefore have (a) abundant public
+training corpus, (b) formal grammar, (c) AST-first persistence (no parsing
+ambiguity, structured-output friendly), (d) sandboxed bounded execution.
+**CEL** (Google Common Expression Language, Apache-2.0) satisfies all four;
+the existing custom DSL satisfies none. **Salesforce flavor is explicitly not
+a goal** — see north-star §8.
+
+**Dialect map:**
+
+| dialect | engine | use cases |
+|:---|:---|:---|
+| `cel` | `cel-js` + ObjectStack stdlib | formula fields, predicates (condition / criteria / visible), seed dynamic values |
+| `js` | isolated-vm / quickjs (existing) | L2 hook bodies (`packages/spec/src/data/hook-body.zod.ts` ScriptBody) |
+| `cron` | `cron-parser` | `system/job.zod.ts` schedule |
+
+SQL fragments (analytics joins, partial indexes) stay driver-native and are
+**not** unified into the expression registry — they have a different security
+and portability posture.
+
+#### M9.1 - `packages/formula` package + ExpressionSchema
+
+- [ ] New `packages/formula/` with `cel-js` integration.
+- [ ] ObjectStack CEL stdlib: `os.now()`, `os.today()`, `os.daysFromNow(n)`, `os.user.*`, `os.org.*`, `os.env`, `os.exists(obj, predicate)`, `os.count(obj, predicate)`, `os.lookup(obj, id)`, `record.*`, `previous.*`, `input.*`.
+- [ ] `packages/spec/src/shared/expression.zod.ts` exports `ExpressionDialect`, `CelExprSchema`, `ExpressionSchema`.
+- [ ] `ExpressionEngine` registry with `evaluate(expr, ctx)` single entrypoint.
+
+**Prerequisite for:** M9.2–M9.6.
+
+#### M9.2 - DX shorthand (build-time only)
+
+- [ ] `cel\`...\``, `F\`...\`` (formula), `P\`...\`` (predicate) tagged-template helpers exported from `@objectstack/spec`.
+- [ ] `objectstack compile` normalizes any `source` string in input metadata into `ast`. **Persisted artifact contains AST only — no source strings.**
+
+#### M9.3 - Replace scattered `z.string()` expression fields
+
+- [ ] Audit and migrate all ~25 fields listed in D10 to `ExpressionSchema` (input accepts `string | Expression` for back-compat; output is `Expression`).
+- [ ] Update generated JSON Schemas; regenerate `content/docs/references/`.
+
+**Resolves:** D10.
+
+#### M9.4 - Seed dynamic values
+
+- [ ] `Dataset.records` accepts `SeedValue = primitive | Expression | nested`.
+- [ ] `SeedLoader.load()` walks records, calls `ExpressionEngine.evaluate('cel', ast, seedCtx)` before write. `seedCtx` exposes `os.now / os.user / os.org / os.env` from the install environment, with a single snapshotted `now` per load run for determinism.
+
+**Resolves:** D11.
+
+#### M9.5 - Delete custom formula engine
+
+- [ ] `packages/objectql/src/engine.ts` (computed fields) and `packages/objectql/src/hook-wrappers.ts` (hook conditions) call `ExpressionEngine.evaluate` instead of `evaluateFormula`.
+- [ ] **Delete** [packages/objectql/src/formula.ts](packages/objectql/src/formula.ts) and [packages/spec/docs/formula-functions.md](packages/spec/docs/formula-functions.md).
+
+**Resolves:** D9.
+
+#### M9.6 - Migrate `examples/app-crm`
+
+- [ ] Re-write all CRM example formulas, conditions, criteria, and seed dates in CEL.
+- [ ] CI gate: run `objectstack build` twice in succession; assert `dist/objectstack.json` is byte-identical (sha256 match). This locks in deterministic builds going forward.
+
+#### M9.7 - AI structured-output integration
+
+- [ ] Publish `CelExprSchema` as JSON Schema for AI constrained decoding.
+- [ ] New `skills/objectstack-formula/SKILL.md` mandating "AI agents MUST emit AST, not source strings."
+- [ ] Wire structured-output prompts into Studio AI assistant + CLI scaffolding.
+
+#### M9.8 - Studio visual expression editor
+
+- [ ] Node-graph editor backed directly by `CelExprSchema`. No string parser needed in Studio. Deferred — depends on M6.
+
 ---
 
 ## ⛔ Explicit Non-Goals (Phase 1)
@@ -260,6 +374,7 @@ Code anchor: [packages/services/service-cloud/src/artifact-kernel-factory.ts](pa
 | `objectstack pull` JSON -> TS emitter | Deferred until there is a control-plane writer that can change metadata outside local TS. |
 | Merge/conflict UX | Deferred. `commitId` identifies revisions and artifacts, not collaborative merge state. |
 | Versioning / Release / Tag entity | Deferred. Freezing current metadata into immutable releases comes later. |
+| Salesforce-flavor formula compatibility | Deferred / not pursued. The legacy 22-function custom DSL (D9) is replaced by CEL (M9), not extended. Authors targeting Salesforce semantics rewrite in CEL — see north-star §8 anti-pattern "No private DSL". |
 | S3 artifact backend | Deferred. Artifact API response shape should allow it later, but backend is control-plane DB now. |
 
 ---
@@ -304,8 +419,18 @@ M1 Artifact format v0
 
 M7 objectstack dev offline boot  (parallel after M1)
 M8 UI auto-generation            (long tail after artifact schema stabilizes)
+M9 Expression unification        (parallel; spec-only changes, no Phase-1 prereq)
+   ├── M9.1 packages/formula + ExpressionSchema
+   ├── M9.2 DX shorthand (cel`…`, F`…`, P`…`) + compile normalization
+   ├── M9.3 Replace ~25 z.string() expression fields → resolves D10
+   ├── M9.4 Dataset SeedValue + SeedLoader expression eval → resolves D11
+   ├── M9.5 Delete packages/objectql/src/formula.ts → resolves D9
+   ├── M9.6 Migrate examples/app-crm + byte-identical-build CI gate
+   ├── M9.7 AI structured-output (publish JSON Schema + skill doc)
+   └── M9.8 Studio visual editor   (after M6)
 D3 remove env_id                 (after M2 ownership columns exist)
 D8 split apps/cloud + apps/objectos(after M3/M4 make ObjectOS standalone)
+D9 / D10 / D11                   (resolved through M9 sub-tasks above)
 ```
 
 ---

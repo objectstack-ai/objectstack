@@ -19958,7 +19958,7 @@
           "amount": 150000,
           "stage": "proposal",
           "probability": 60,
-          "close_date": "2026-06-07T13:09:59.865Z",
+          "close_date": "2026-06-07T13:35:28.758Z",
           "type": "existing_business",
           "forecast_category": "pipeline"
         },
@@ -19968,7 +19968,7 @@
           "amount": 500000,
           "stage": "qualification",
           "probability": 30,
-          "close_date": "2026-07-07T13:09:59.866Z",
+          "close_date": "2026-07-07T13:35:28.758Z",
           "type": "new_business",
           "forecast_category": "pipeline"
         },
@@ -19978,7 +19978,7 @@
           "amount": 1200000,
           "stage": "negotiation",
           "probability": 75,
-          "close_date": "2026-05-22T13:09:59.866Z",
+          "close_date": "2026-05-22T13:35:28.758Z",
           "type": "new_business",
           "forecast_category": "commit"
         },
@@ -19988,7 +19988,7 @@
           "amount": 80000,
           "stage": "needs_analysis",
           "probability": 25,
-          "close_date": "2026-06-22T13:09:59.866Z",
+          "close_date": "2026-06-22T13:35:28.758Z",
           "type": "existing_business",
           "forecast_category": "best_case"
         }
@@ -20048,19 +20048,19 @@
           "subject": "Follow up with Acme on proposal",
           "status": "not_started",
           "priority": "high",
-          "due_date": "2026-05-10T13:09:59.866Z"
+          "due_date": "2026-05-10T13:35:28.758Z"
         },
         {
           "subject": "Schedule demo for Globex team",
           "status": "in_progress",
           "priority": "normal",
-          "due_date": "2026-05-13T13:09:59.866Z"
+          "due_date": "2026-05-13T13:35:28.758Z"
         },
         {
           "subject": "Prepare contract for Wayne Enterprises",
           "status": "not_started",
           "priority": "urgent",
-          "due_date": "2026-05-09T13:09:59.866Z"
+          "due_date": "2026-05-09T13:35:28.758Z"
         },
         {
           "subject": "Send welcome package to Stark Medical",
@@ -20071,7 +20071,7 @@
           "subject": "Update CRM pipeline report",
           "status": "not_started",
           "priority": "normal",
-          "due_date": "2026-05-15T13:09:59.866Z"
+          "due_date": "2026-05-15T13:35:28.758Z"
         }
       ]
     },
@@ -20097,7 +20097,7 @@
           "is_closed": false,
           "is_sla_violated": false,
           "is_escalated": false,
-          "created_date": "2026-05-06T13:09:59.866Z"
+          "created_date": "2026-05-06T13:35:28.758Z"
         },
         {
           "subject": "Data export timing out for large datasets",
@@ -20112,7 +20112,7 @@
           "is_sla_violated": true,
           "is_escalated": true,
           "escalation_reason": "Customer threatening churn",
-          "created_date": "2026-05-03T13:09:59.866Z"
+          "created_date": "2026-05-03T13:35:28.758Z"
         },
         {
           "subject": "How to configure SSO with Okta?",
@@ -20127,7 +20127,7 @@
           "is_sla_violated": false,
           "is_escalated": false,
           "resolution_time_hours": 4.5,
-          "created_date": "2026-05-05T13:09:59.866Z"
+          "created_date": "2026-05-05T13:35:28.758Z"
         },
         {
           "subject": "API rate limit exceeded on production",
@@ -20142,8 +20142,8 @@
           "is_sla_violated": false,
           "is_escalated": false,
           "resolution_time_hours": 2,
-          "created_date": "2026-05-01T13:09:59.866Z",
-          "closed_date": "2026-05-02T13:09:59.866Z"
+          "created_date": "2026-05-01T13:35:28.758Z",
+          "closed_date": "2026-05-02T13:35:28.758Z"
         },
         {
           "subject": "PDF reports not rendering charts correctly",
@@ -20157,7 +20157,7 @@
           "is_closed": false,
           "is_sla_violated": false,
           "is_escalated": false,
-          "created_date": "2026-05-07T13:09:59.866Z"
+          "created_date": "2026-05-07T13:35:28.758Z"
         },
         {
           "subject": "Billing discrepancy on last invoice",
@@ -20171,7 +20171,7 @@
           "is_closed": false,
           "is_sla_violated": false,
           "is_escalated": false,
-          "created_date": "2026-05-04T13:09:59.866Z"
+          "created_date": "2026-05-04T13:35:28.758Z"
         },
         {
           "subject": "Mobile app crashes on iOS 17",
@@ -20186,7 +20186,7 @@
           "is_sla_violated": true,
           "is_escalated": true,
           "escalation_reason": "Affects 30% of mobile users",
-          "created_date": "2026-05-05T13:09:59.866Z"
+          "created_date": "2026-05-05T13:35:28.758Z"
         },
         {
           "subject": "Request: bulk import via CSV",
@@ -20201,8 +20201,8 @@
           "is_sla_violated": false,
           "is_escalated": false,
           "resolution_time_hours": 8,
-          "created_date": "2026-04-28T13:09:59.866Z",
-          "closed_date": "2026-04-30T13:09:59.866Z"
+          "created_date": "2026-04-28T13:35:28.758Z",
+          "closed_date": "2026-04-30T13:35:28.758Z"
         }
       ]
     },
@@ -20222,8 +20222,8 @@
           "type": "email",
           "channel": "email",
           "status": "in_progress",
-          "start_date": "2026-04-08T13:09:59.866Z",
-          "end_date": "2026-06-07T13:09:59.866Z",
+          "start_date": "2026-04-08T13:35:28.758Z",
+          "end_date": "2026-06-07T13:35:28.758Z",
           "budgeted_cost": 25000,
           "actual_cost": 12500,
           "expected_revenue": 500000,
@@ -20237,8 +20237,8 @@
           "type": "webinar",
           "channel": "digital",
           "status": "completed",
-          "start_date": "2026-02-07T13:09:59.866Z",
-          "end_date": "2026-04-08T13:09:59.866Z",
+          "start_date": "2026-02-07T13:35:28.758Z",
+          "end_date": "2026-04-08T13:35:28.758Z",
           "budgeted_cost": 15000,
           "actual_cost": 14200,
           "expected_revenue": 300000,
@@ -20253,8 +20253,8 @@
           "type": "trade_show",
           "channel": "events",
           "status": "planning",
-          "start_date": "2026-07-07T13:09:59.866Z",
-          "end_date": "2026-07-10T13:09:59.866Z",
+          "start_date": "2026-07-07T13:35:28.758Z",
+          "end_date": "2026-07-10T13:35:28.758Z",
           "budgeted_cost": 75000,
           "expected_revenue": 1200000,
           "target_size": 3000,
@@ -20266,8 +20266,8 @@
           "type": "content",
           "channel": "digital",
           "status": "in_progress",
-          "start_date": "2026-03-09T13:09:59.866Z",
-          "end_date": "2026-08-06T13:09:59.866Z",
+          "start_date": "2026-03-09T13:35:28.758Z",
+          "end_date": "2026-08-06T13:35:28.758Z",
           "budgeted_cost": 40000,
           "actual_cost": 18000,
           "expected_revenue": 250000,
@@ -20281,8 +20281,8 @@
           "type": "partner",
           "channel": "partner",
           "status": "planning",
-          "start_date": "2026-05-22T13:09:59.866Z",
-          "end_date": "2026-09-05T13:09:59.866Z",
+          "start_date": "2026-05-22T13:35:28.758Z",
+          "end_date": "2026-09-05T13:35:28.758Z",
           "budgeted_cost": 50000,
           "expected_revenue": 800000,
           "target_size": 2000,
@@ -20307,15 +20307,15 @@
           "opportunity": "Acme Platform Upgrade",
           "status": "activated",
           "contract_term_months": 12,
-          "start_date": "2026-04-08T13:09:59.866Z",
-          "end_date": "2027-04-08T13:09:59.866Z",
+          "start_date": "2026-04-08T13:35:28.758Z",
+          "end_date": "2027-04-08T13:35:28.758Z",
           "contract_value": 150000,
           "billing_frequency": "annually",
           "payment_terms": "net_30",
           "auto_renewal": true,
           "renewal_notice_days": 60,
           "contract_type": "subscription",
-          "signed_date": "2026-04-06T13:09:59.866Z",
+          "signed_date": "2026-04-06T13:35:28.758Z",
           "signed_by": "John Smith",
           "description": "Annual platform subscription with premium support tier."
         },
@@ -20326,8 +20326,8 @@
           "opportunity": "Wayne Enterprise License",
           "status": "in_approval",
           "contract_term_months": 36,
-          "start_date": "2026-05-22T13:09:59.866Z",
-          "end_date": "2029-05-21T13:09:59.866Z",
+          "start_date": "2026-05-22T13:35:28.758Z",
+          "end_date": "2029-05-21T13:35:28.758Z",
           "contract_value": 1200000,
           "billing_frequency": "annually",
           "payment_terms": "net_60",
@@ -20342,15 +20342,15 @@
           "contact": "mchen@initech.example.com",
           "status": "expired",
           "contract_term_months": 12,
-          "start_date": "2025-04-03T13:09:59.866Z",
-          "end_date": "2026-04-03T13:09:59.866Z",
+          "start_date": "2025-04-03T13:35:28.758Z",
+          "end_date": "2026-04-03T13:35:28.758Z",
           "contract_value": 60000,
           "billing_frequency": "quarterly",
           "payment_terms": "net_30",
           "auto_renewal": false,
           "renewal_notice_days": 30,
           "contract_type": "service",
-          "signed_date": "2025-03-29T13:09:59.866Z",
+          "signed_date": "2025-03-29T13:35:28.758Z",
           "signed_by": "Michael Chen",
           "description": "Initial service agreement, pending renewal discussion."
         },
@@ -20360,8 +20360,8 @@
           "contact": "emily.d@starkmed.example.com",
           "status": "draft",
           "contract_term_months": 24,
-          "start_date": "2026-06-07T13:09:59.866Z",
-          "end_date": "2028-06-06T13:09:59.866Z",
+          "start_date": "2026-06-07T13:35:28.758Z",
+          "end_date": "2028-06-06T13:35:28.758Z",
           "contract_value": 350000,
           "billing_frequency": "monthly",
           "payment_terms": "net_30",
@@ -20389,8 +20389,8 @@
           "contact": "john.smith@acme.example.com",
           "opportunity": "Acme Platform Upgrade",
           "status": "accepted",
-          "quote_date": "2026-03-24T13:09:59.866Z",
-          "expiration_date": "2026-04-23T13:09:59.866Z",
+          "quote_date": "2026-03-24T13:35:28.758Z",
+          "expiration_date": "2026-04-23T13:35:28.758Z",
           "subtotal": 150000,
           "discount": 10,
           "discount_amount": 15000,
@@ -20407,8 +20407,8 @@
           "contact": "sarah.j@globex.example.com",
           "opportunity": "Globex Manufacturing Suite",
           "status": "presented",
-          "quote_date": "2026-05-01T13:09:59.866Z",
-          "expiration_date": "2026-05-31T13:09:59.866Z",
+          "quote_date": "2026-05-01T13:35:28.758Z",
+          "expiration_date": "2026-05-31T13:35:28.758Z",
           "subtotal": 500000,
           "discount": 5,
           "discount_amount": 25000,
@@ -20425,8 +20425,8 @@
           "contact": "rwilson@wayne.example.com",
           "opportunity": "Wayne Enterprise License",
           "status": "in_review",
-          "quote_date": "2026-05-05T13:09:59.866Z",
-          "expiration_date": "2026-06-04T13:09:59.866Z",
+          "quote_date": "2026-05-05T13:35:28.758Z",
+          "expiration_date": "2026-06-04T13:35:28.758Z",
           "subtotal": 1200000,
           "discount": 15,
           "discount_amount": 180000,
@@ -20443,8 +20443,8 @@
           "contact": "mchen@initech.example.com",
           "opportunity": "Initech Cloud Migration",
           "status": "draft",
-          "quote_date": "2026-05-07T13:09:59.866Z",
-          "expiration_date": "2026-06-06T13:09:59.866Z",
+          "quote_date": "2026-05-07T13:35:28.758Z",
+          "expiration_date": "2026-06-06T13:35:28.758Z",
           "subtotal": 80000,
           "discount": 0,
           "discount_amount": 0,
@@ -20460,8 +20460,8 @@
           "account": "Stark Medical",
           "contact": "emily.d@starkmed.example.com",
           "status": "rejected",
-          "quote_date": "2026-03-09T13:09:59.866Z",
-          "expiration_date": "2026-04-08T13:09:59.866Z",
+          "quote_date": "2026-03-09T13:35:28.758Z",
+          "expiration_date": "2026-04-08T13:35:28.758Z",
           "subtotal": 45000,
           "discount": 0,
           "discount_amount": 0,
