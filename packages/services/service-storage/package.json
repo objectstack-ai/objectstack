@@ -26,11 +26,15 @@
     "@aws-sdk/s3-request-presigner": "^3.0.0"
   },
   "peerDependenciesMeta": {
-    "@aws-sdk/client-s3": { "optional": true },
-    "@aws-sdk/s3-request-presigner": { "optional": true }
+    "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "@aws-sdk/s3-request-presigner": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
+    "@types/node": "^25.6.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
   },

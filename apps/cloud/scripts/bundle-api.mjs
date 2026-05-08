@@ -57,8 +57,18 @@ await build({
   banner: {
     js: [
       '// Bundled by esbuild — see scripts/bundle-api.mjs',
-      'import { createRequire } from "module";',
-      'const require = createRequire(import.meta.url);',
+      'import { createRequire as __objectstack_createRequire } from "module";',
+      'import { fileURLToPath as __objectstack_fileURLToPath } from "url";',
+      'import { dirname as __objectstack_dirname } from "path";',
+      'const require = __objectstack_createRequire(import.meta.url);',
+      // Some bundled CJS deps (e.g. `bindings`, used transitively by knex's
+      // better-sqlite3 dialect) reference `__filename`/`__dirname` directly.
+      // esbuild does NOT auto-shim these in ESM output, so without the
+      // assignment below the function crashes with `__filename is not defined`
+      // the first time the dialect is touched (e.g. when SeedLoader resolves
+      // a knex dialect during project bootstrap on Vercel).
+      'const __filename = __objectstack_fileURLToPath(import.meta.url);',
+      'const __dirname = __objectstack_dirname(__filename);',
     ].join('\n'),
   },
 });

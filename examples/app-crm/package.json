@@ -20,16 +20,16 @@
     "test:e2e:drivers": "./scripts/run-driver-acceptance.sh"
   },
   "dependencies": {
-    "@objectstack/spec": "workspace:*",
+    "@objectstack/driver-mongodb": "workspace:*",
     "@objectstack/runtime": "workspace:*",
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
-    "@objectstack/driver-mongodb": "workspace:*",
-    "pg": "^8.13.1"
+    "@objectstack/spec": "workspace:*",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "@objectstack/cli": "workspace:*",
-    "@playwright/test": "^1.49.1",
+    "@playwright/test": "^1.59.1",
     "typescript": "^6.0.3"
   }
 }

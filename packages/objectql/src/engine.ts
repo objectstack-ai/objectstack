@@ -1201,6 +1201,12 @@ export class ObjectQL implements IDataEngine {
     // tolerance and Salesforce/Postgres behavior of `SELECT *` semantics.
     if (_findSchema?.fields && Array.isArray(ast.fields) && ast.fields.length > 0) {
       const known = new Set(Object.keys(_findSchema.fields));
+      // Always allow the primary key + audit columns even if not present in
+      // schema.fields. Without this, callers requesting `select=id,name`
+      // silently get the `id` projected away, breaking record navigation.
+      known.add('id');
+      known.add('created_at');
+      known.add('updated_at');
       const filtered = (ast.fields as string[]).filter(f => {
         // Keep relationship paths like `owner.name` — the engine will
         // resolve those via populate; only validate top-level segment.
@@ -1276,6 +1282,11 @@ export class ObjectQL implements IDataEngine {
     // Drop unknown fields — see equivalent block in `find()` for rationale.
     if (_findOneSchema?.fields && Array.isArray(ast.fields) && ast.fields.length > 0) {
       const known = new Set(Object.keys(_findOneSchema.fields));
+      // Always allow the primary key + audit columns even if not present
+      // in schema.fields (matches `find()` behavior).
+      known.add('id');
+      known.add('created_at');
+      known.add('updated_at');
       const filtered = (ast.fields as string[]).filter(f => known.has(String(f).split('.')[0]));
       ast.fields = filtered.length > 0 ? filtered : undefined;
     }
