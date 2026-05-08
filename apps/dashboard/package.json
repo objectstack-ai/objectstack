@@ -29,13 +29,13 @@
     "@object-ui/plugin-dashboard": "^4.0.6",
     "@object-ui/plugin-detail": "^4.0.6",
     "@object-ui/plugin-form": "^4.0.6",
+    "@object-ui/plugin-gantt": "^4.0.6",
     "@object-ui/plugin-grid": "^4.0.6",
     "@object-ui/plugin-kanban": "^4.0.6",
     "@object-ui/plugin-list": "^4.0.6",
     "@object-ui/plugin-map": "^4.0.6",
-    "@object-ui/plugin-gantt": "^4.0.6",
-    "@object-ui/plugin-timeline": "^4.0.6",
     "@object-ui/plugin-report": "^4.0.6",
+    "@object-ui/plugin-timeline": "^4.0.6",
     "@object-ui/plugin-view": "^4.0.6",
     "@object-ui/react": "^4.0.6",
     "@object-ui/types": "^4.0.6",
@@ -47,11 +47,11 @@
     "sonner": "^2.0.7"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.2.4",
+    "@tailwindcss/postcss": "^4.3.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
-    "tailwindcss": "^4.2.4",
+    "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.11"
   }
