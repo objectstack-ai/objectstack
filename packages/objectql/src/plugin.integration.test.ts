@@ -988,4 +988,129 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       }
     });
   });
+
+  describe('Audit Hook Field Awareness', () => {
+    /**
+     * Regression: the built-in `sys_stamp_audit_insert` hook used to
+     * blindly stamp `created_by`/`updated_by`/`tenant_id` on every insert,
+     * which produced `SQLITE_ERROR: table X has no column named created_by`
+     * when the object schema did not declare those audit fields. The hook
+     * must only stamp values for fields the user has explicitly declared.
+     */
+    it('should NOT stamp created_by/updated_by/tenant_id when the schema does not declare them', async () => {
+      const captured: Record<string, any>[] = [];
+      const mockDriver = {
+        name: 'capture-driver',
+        version: '1.0.0',
+        connect: async () => {},
+        disconnect: async () => {},
+        find: async () => [],
+        findOne: async () => null,
+        create: async (_o: string, d: any) => {
+          captured.push({ ...d });
+          return { id: 'rec-1', ...d };
+        },
+        update: async (_o: string, _i: any, d: any) => d,
+        delete: async () => true,
+        syncSchema: async () => {},
+      };
+
+      await kernel.use({
+        name: 'capture-driver-plugin',
+        type: 'driver',
+        version: '1.0.0',
+        init: async (ctx) => {
+          ctx.registerService('driver.capture', mockDriver);
+        },
+      });
+
+      const plugin = new ObjectQLPlugin();
+      await kernel.use(plugin);
+      await kernel.bootstrap();
+
+      const objectql = kernel.getService('objectql') as any;
+      const lite: ObjectSchema = {
+        name: 'lite_lead',
+        label: 'Lite Lead',
+        datasource: 'capture-driver',
+        fields: {
+          first_name: { name: 'first_name', label: 'First Name', type: 'text' },
+        },
+      };
+      objectql.registry.registerObject(lite, 'test', 'test');
+
+      await objectql.insert(
+        'lite_lead',
+        { first_name: 'xxx' },
+        { context: { userId: 'user-1', tenantId: 'org-1' } },
+      );
+
+      expect(captured.length).toBe(1);
+      const row = captured[0];
+      expect(row.first_name).toBe('xxx');
+      expect(row).not.toHaveProperty('created_by');
+      expect(row).not.toHaveProperty('updated_by');
+      expect(row).not.toHaveProperty('tenant_id');
+      expect(row.created_at).toBeTruthy();
+      expect(row.updated_at).toBeTruthy();
+    });
+
+    it('should stamp created_by/updated_by/tenant_id when the schema declares them', async () => {
+      const captured: Record<string, any>[] = [];
+      const mockDriver = {
+        name: 'capture-driver-2',
+        version: '1.0.0',
+        connect: async () => {},
+        disconnect: async () => {},
+        find: async () => [],
+        findOne: async () => null,
+        create: async (_o: string, d: any) => {
+          captured.push({ ...d });
+          return { id: 'rec-1', ...d };
+        },
+        update: async (_o: string, _i: any, d: any) => d,
+        delete: async () => true,
+        syncSchema: async () => {},
+      };
+
+      await kernel.use({
+        name: 'capture-driver-2-plugin',
+        type: 'driver',
+        version: '1.0.0',
+        init: async (ctx) => {
+          ctx.registerService('driver.capture-driver-2', mockDriver);
+        },
+      });
+
+      const plugin = new ObjectQLPlugin();
+      await kernel.use(plugin);
+      await kernel.bootstrap();
+
+      const objectql = kernel.getService('objectql') as any;
+      const audited: ObjectSchema = {
+        name: 'audited_obj',
+        label: 'Audited Obj',
+        datasource: 'capture-driver-2',
+        fields: {
+          name: { name: 'name', label: 'Name', type: 'text' },
+          created_by: { name: 'created_by', label: 'Created By', type: 'text' },
+          updated_by: { name: 'updated_by', label: 'Updated By', type: 'text' },
+          tenant_id: { name: 'tenant_id', label: 'Tenant', type: 'text' },
+        },
+      };
+      objectql.registry.registerObject(audited, 'test', 'test');
+
+      await objectql.insert(
+        'audited_obj',
+        { name: 'a' },
+        { context: { userId: 'user-42', tenantId: 'org-7' } },
+      );
+
+      expect(captured.length).toBe(1);
+      const row = captured[0];
+      expect(row.created_by).toBe('user-42');
+      expect(row.updated_by).toBe('user-42');
+      expect(row.tenant_id).toBe('org-7');
+    });
+  });
 });
