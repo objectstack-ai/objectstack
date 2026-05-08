@@ -7,6 +7,7 @@ import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { FieldMasker } from './field-masker.js';
 import { PermissionDeniedError } from './errors.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
+import { claimOrphanTenantRows } from './claim-orphan-tenant-rows.js';
 import {
   securityObjects,
   securityDefaultPermissionSets,
@@ -352,6 +353,52 @@ export class SecurityPlugin implements Plugin {
         await runBootstrap();
       }
     });
+
+    // After a sys_organization insert, if this is the FIRST organization
+    // in the system, back-fill `organization_id` on every seed-loaded
+    // user-defined row that landed with `organization_id IS NULL`. Seeds
+    // run as `isSystem` (no auto-fill), so without this hook, demo data
+    // shipped with `defineDataset()` would be invisible to anyone with
+    // an active organization. Idempotent: only fires when row count
+    // before this insert was zero, then never again.
+    if (this.multiTenant) {
+      ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+        await next();
+        if (
+          opCtx?.object !== 'sys_organization' ||
+          (opCtx?.operation !== 'create' && opCtx?.operation !== 'insert')
+        ) {
+          return;
+        }
+        const newOrgId = opCtx?.result?.id ?? opCtx?.data?.id;
+        if (!newOrgId) return;
+        try {
+          const allOrgs = await ql.find(
+            'sys_organization',
+            { limit: 2, fields: ['id'] },
+            { context: { isSystem: true } },
+          );
+          const list: any[] = Array.isArray(allOrgs)
+            ? allOrgs
+            : Array.isArray(allOrgs?.records)
+              ? allOrgs.records
+              : [];
+          if (list.length !== 1) return;
+          const claims = await claimOrphanTenantRows(ql, newOrgId, { logger: ctx.logger });
+          if (claims.length > 0) {
+            const total = claims.reduce((s, c) => s + c.count, 0);
+            ctx.logger.info(
+              `[security] claimed ${total} orphan seed row(s) for first organization ${newOrgId}`,
+              { breakdown: claims },
+            );
+          }
+        } catch (e) {
+          ctx.logger.warn('[security] claim-orphan-tenant-rows failed', {
+            error: (e as Error).message,
+          });
+        }
+      });
+    }
   }
 
   async destroy(): Promise<void> {
