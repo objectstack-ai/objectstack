@@ -1,9 +1,9 @@
 {
-  "name": "@objectstack/dashboard",
+  "name": "@objectstack/console",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "ObjectStack Dashboard - opinionated, fork-ready console built on @object-ui/app-shell with the full plugin set wired up.",
+  "description": "ObjectStack Console - opinionated, fork-ready runtime console built on @object-ui/app-shell with the full plugin set wired up.",
   "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",

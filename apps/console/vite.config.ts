@@ -17,7 +17,7 @@ const objectUiPkg = (name: string) => (id: string) =>
   id.includes(`\\@object-ui+${name}@`);
 
 export default defineConfig({
-  base: process.env.VITE_BASE || '/_dashboard/',
+  base: process.env.VITE_BASE || '/_console/',
   resolve: {
     dedupe: ['react', 'react-dom', 'lucide-react', 'react-router-dom', 'react-router'],
     alias: {

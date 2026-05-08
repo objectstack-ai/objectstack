@@ -1,5 +1,5 @@
 /**
- * ObjectStack Dashboard — fork-ready console template.
+ * ObjectStack Console — fork-ready runtime console template.
  *
  * Auth UI lives in the Account SPA at `/_account/*`. This file owns the
  * console routing tree only — sign-in / sign-up / forgot-password URLs are

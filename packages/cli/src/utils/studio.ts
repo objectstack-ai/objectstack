@@ -293,10 +293,10 @@ export function createStudioStaticPlugin(distPath: string, options?: { isDev?: b
       const readIndexHtml = () => fs.readFileSync(indexPath, 'utf-8');
 
       // In dev mode, redirect root to Studio for convenience — but only
-      // when no other UI (e.g. Dashboard) has claimed `/`. Dashboard is
-      // the preferred default in modern deployments, so the orchestrator
-      // (CLI `serve`) passes `rootRedirect: false` whenever Dashboard is
-      // also mounted.
+      // when no other UI (e.g. the runtime Console) has claimed `/`. The
+      // Console is the preferred default in modern deployments, so the
+      // orchestrator (CLI `serve`) passes `rootRedirect: false` whenever
+      // the Console is also mounted.
       if (options?.isDev && options?.rootRedirect !== false) {
         app.get('/', (c: any) => c.redirect(`${STUDIO_PATH}/`));
       }

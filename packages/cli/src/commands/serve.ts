@@ -30,11 +30,11 @@ import {
   createAccountStaticPlugin,
 } from '../utils/account.js';
 import {
-  DASHBOARD_PATH,
-  resolveDashboardPath,
-  hasDashboardDist,
-  createDashboardStaticPlugin,
-} from '../utils/dashboard.js';
+  CONSOLE_PATH,
+  resolveConsolePath,
+  hasConsoleDist,
+  createConsoleStaticPlugin,
+} from '../utils/console.js';
 import dotenvFlow from 'dotenv-flow';
 
 // Helper to find available port
@@ -833,10 +833,10 @@ export default class Serve extends Command {
       const enableUI = flags.ui && tierEnabled('ui');
 
       if (enableUI) {
-        // Pre-detect Dashboard availability so we can demote Studio's root
-        // redirect when Dashboard is going to claim `/`.
-        const dashboardPath = resolveDashboardPath();
-        const dashboardWillMount = !!(dashboardPath && hasDashboardDist(dashboardPath));
+        // Pre-detect Console availability so we can demote Studio's root
+        // redirect when the Console is going to claim `/`.
+        const consolePath = resolveConsolePath();
+        const consoleWillMount = !!(consolePath && hasConsoleDist(consolePath));
 
         const studioPath = resolveStudioPath();
         if (!studioPath) {
@@ -845,7 +845,7 @@ export default class Serve extends Command {
           const distPath = path.join(studioPath, 'dist');
           await kernel.use(createStudioStaticPlugin(distPath, {
             isDev,
-            rootRedirect: !dashboardWillMount,
+            rootRedirect: !consoleWillMount,
           }));
           trackPlugin('StudioUI');
         } else {
@@ -867,19 +867,19 @@ export default class Serve extends Command {
           console.warn(chalk.yellow(`  ⚠ Account dist not found — run "pnpm --filter @objectstack/account build" first`));
         }
 
-        // ── Dashboard portal ────────────────────────────────────────
-        // The opinionated, fork-ready console (`@objectstack/dashboard`)
-        // mounts under `/_dashboard/` exactly like Studio/Account. When
+        // ── Console portal ──────────────────────────────────────────
+        // The opinionated, fork-ready runtime console (`@objectstack/console`)
+        // mounts under `/_console/` exactly like Studio/Account. When
         // present, it owns root `/` redirect (preferred default UI). It
         // is optional — we only mount it when the package resolves and
         // a pre-built `dist/` is present.
-        if (dashboardPath) {
-          if (dashboardWillMount) {
-            const dashboardDistPath = path.join(dashboardPath, 'dist');
-            await kernel.use(createDashboardStaticPlugin(dashboardDistPath, { isDev }));
-            trackPlugin('DashboardUI');
+        if (consolePath) {
+          if (consoleWillMount) {
+            const consoleDistPath = path.join(consolePath, 'dist');
+            await kernel.use(createConsoleStaticPlugin(consoleDistPath, { isDev }));
+            trackPlugin('ConsoleUI');
           } else {
-            console.warn(chalk.yellow(`  ⚠ Dashboard dist not found — run "pnpm --filter @objectstack/dashboard build" first`));
+            console.warn(chalk.yellow(`  ⚠ Console dist not found — run "pnpm --filter @objectstack/console build" first`));
           }
         }
       }
@@ -919,7 +919,7 @@ export default class Serve extends Command {
         uiEnabled: enableUI,
         studioPath: STUDIO_PATH,
         accountPath: ACCOUNT_PATH,
-        dashboardPath: loadedPlugins.includes('DashboardUI') ? DASHBOARD_PATH : undefined,
+        consolePath: loadedPlugins.includes('ConsoleUI') ? CONSOLE_PATH : undefined,
         driverLabel: resolvedDriverLabel,
         databaseUrl: redactDbUrl(resolvedDatabaseUrl),
         multiTenant: String(process.env.OS_MULTI_TENANT ?? 'true').toLowerCase() !== 'false',

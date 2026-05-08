@@ -186,7 +186,7 @@ export interface ServerReadyOptions {
   uiEnabled?: boolean;
   studioPath?: string;
   accountPath?: string;
-  dashboardPath?: string;
+  consolePath?: string;
   /** Resolved storage driver display name (e.g. "MongoDBDriver", "SqlDriver(pg)"). */
   driverLabel?: string;
   /** Resolved DB URL with credentials redacted. */
@@ -207,8 +207,8 @@ export function printServerReady(opts: ServerReadyOptions) {
   if (opts.uiEnabled && opts.accountPath) {
     console.log(chalk.cyan('  ➜') + chalk.bold('  Account:   ') + chalk.cyan(base + opts.accountPath + '/'));
   }
-  if (opts.uiEnabled && opts.dashboardPath) {
-    console.log(chalk.cyan('  ➜') + chalk.bold('  Dashboard: ') + chalk.cyan(base + opts.dashboardPath + '/'));
+  if (opts.uiEnabled && opts.consolePath) {
+    console.log(chalk.cyan('  ➜') + chalk.bold('  Console:   ') + chalk.cyan(base + opts.consolePath + '/'));
   }
   console.log('');
   console.log(chalk.dim(`  Config:  ${opts.configFile}`));

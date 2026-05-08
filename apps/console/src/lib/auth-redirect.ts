@@ -3,32 +3,33 @@
 /**
  * Cross-SPA auth redirect helpers.
  *
- * Dashboard defers all sign-in / sign-up UI to the Account SPA mounted at
- * `/_account/`. These helpers build absolute URLs preserving the original
- * Dashboard location so the user lands back where they started after auth.
+ * The Console defers all sign-in / sign-up UI to the Account SPA mounted
+ * at `/_account/`. These helpers build absolute URLs preserving the
+ * original Console location so the user lands back where they started
+ * after auth.
  */
 
 const ACCOUNT_BASE = '/_account';
 
-/** Compose a Dashboard absolute path from `pathname + search`. */
-function currentDashboardHref(): string {
+/** Compose a Console absolute path from `pathname + search`. */
+function currentConsoleHref(): string {
   if (typeof window === 'undefined') return '/';
   return window.location.pathname + window.location.search;
 }
 
 /**
  * Hard-navigate the browser to the Account login page, preserving the
- * current Dashboard path as `?redirect=...`.
+ * current Console path as `?redirect=...`.
  */
 export function gotoAccountLogin(redirect?: string): void {
-  const target = redirect ?? currentDashboardHref();
+  const target = redirect ?? currentConsoleHref();
   const url = `${ACCOUNT_BASE}/login?redirect=${encodeURIComponent(target)}`;
   window.location.assign(url);
 }
 
 /** Hard-navigate to the Account registration page. */
 export function gotoAccountRegister(redirect?: string): void {
-  const target = redirect ?? currentDashboardHref();
+  const target = redirect ?? currentConsoleHref();
   const url = `${ACCOUNT_BASE}/register?redirect=${encodeURIComponent(target)}`;
   window.location.assign(url);
 }

@@ -19,9 +19,9 @@ set -euo pipefail
 echo "[build-vercel] Starting server build..."
 
 # 1. Build the project with turbo (from monorepo root)
-# This builds server, studio, account, and the dashboard portal.
+# This builds server, studio, account, and the runtime console portal.
 cd ../..
-pnpm turbo run build --filter=@objectstack/objectos --filter=@objectstack/studio --filter=@objectstack/account --filter=@objectstack/dashboard
+pnpm turbo run build --filter=@objectstack/objectos --filter=@objectstack/studio --filter=@objectstack/account --filter=@objectstack/console
 cd apps/objectos
 
 # 1b. Compile objectstack.config.ts → dist/objectstack.json (the metadata artifact).
@@ -68,15 +68,15 @@ else
   echo "[build-vercel]   ⚠ Account dist not found (skipped)"
 fi
 
-# 3c. Copy the dashboard SPA to public/_dashboard/ — same pattern as studio.
-# Dashboard is built with base: '/_dashboard/'.
-echo "[build-vercel] Copying dashboard dist to public/_dashboard/..."
-mkdir -p public/_dashboard
-if [ -d "../dashboard/dist" ]; then
-  cp -r ../dashboard/dist/. public/_dashboard/
-  echo "[build-vercel]   ✓ Copied dashboard dist to public/_dashboard/"
+# 3c. Copy the runtime Console SPA to public/_console/ — same pattern as
+# studio. The Console is built with base: '/_console/'.
+echo "[build-vercel] Copying console dist to public/_console/..."
+mkdir -p public/_console
+if [ -d "../console/dist" ]; then
+  cp -r ../console/dist/. public/_console/
+  echo "[build-vercel]   ✓ Copied console dist to public/_console/"
 else
-  echo "[build-vercel]   ⚠ Dashboard dist not found (skipped)"
+  echo "[build-vercel]   ⚠ Console dist not found (skipped)"
 fi
 
 # 4. Install external dependencies in api/node_modules/ (no symlinks)

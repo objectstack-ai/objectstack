@@ -3,7 +3,7 @@
 /**
  * AccountLoginRedirect — element used as `AuthGuard`'s fallback. On mount
  * it hard-navigates the browser to `/_account/login?redirect=<current>` so
- * the user lands back on the original Dashboard URL after signing in.
+ * the user lands back on the original Console URL after signing in.
  */
 
 import { useEffect } from 'react';

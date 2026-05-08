@@ -1,6 +1,6 @@
-# @objectstack/dashboard
+# @objectstack/console
 
-Opinionated, fork-ready ObjectStack console template built on
+Opinionated, fork-ready ObjectStack runtime console built on
 [`@object-ui/app-shell`](https://www.objectui.org/docs/layout/app-shell) with the
 full ObjectUI plugin set wired up (grid, kanban, calendar, charts, list, detail,
 view, form, dashboard, report, chatbot).
@@ -10,12 +10,16 @@ This app mirrors the upstream
 template, repackaged as a first-party app inside the framework monorepo so it
 can be served alongside `apps/objectos` / `apps/cloud`.
 
+> Renamed from `apps/dashboard` to avoid confusion with the spec-level
+> `Dashboard` metadata type. The Console is the runtime UI shell that *renders*
+> dashboards (and views/pages/reports), it is not itself a dashboard.
+
 ## Develop
 
 ```bash
 # from the repo root
 pnpm install
-pnpm dev:dashboard          # runs on http://localhost:5175/_dashboard/
+pnpm dev:console            # runs on http://localhost:5175/_console/
 ```
 
 By default the dev server proxies `/api` and `/.well-known` to
@@ -24,7 +28,7 @@ listens. Override the upstream server with `VITE_SERVER_URL` in
 `.env.development` if you point the console at a remote ObjectStack instance.
 
 > Pair it with the CRM example server: `pnpm dev:crm` (port 3001) and launch
-> with `VITE_SERVER_URL=http://localhost:3001 VITE_PROXY_TARGET=http://localhost:3001 pnpm dev:dashboard`.
+> with `VITE_SERVER_URL=http://localhost:3001 VITE_PROXY_TARGET=http://localhost:3001 pnpm dev:console`.
 
 ### Workspace alias requirement
 

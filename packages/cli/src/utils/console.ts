@@ -1,14 +1,19 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Dashboard UI Integration Utilities
+ * Console UI Integration Utilities
  *
  * Mirrors `studio.ts` / `account.ts` but for the opinionated, fork-ready
- * console (`@objectstack/dashboard`). The dashboard SPA is mounted at
- * `/_dashboard/` by every deployment that opts in (CLI dev server,
+ * runtime console (`@objectstack/console`). The Console SPA is mounted at
+ * `/_console/` by every deployment that opts in (CLI dev server,
  * self-host, Vercel) — exactly the same convention as `_studio` and
- * `_account`. The dashboard is built with `base: '/_dashboard/'`, so its
+ * `_account`. The Console is built with `base: '/_console/'`, so its
  * pre-built `dist/` is served verbatim.
+ *
+ * Note: this module was previously named `dashboard.ts` (and the SPA was
+ * `apps/dashboard`). It was renamed to disambiguate from the spec-level
+ * `Dashboard` metadata type — the Console *renders* dashboards, it is not
+ * itself a dashboard.
  */
 import path from 'path';
 import fs from 'fs';
@@ -17,23 +22,23 @@ import { pathToFileURL } from 'url';
 
 // ─── Constants ──────────────────────────────────────────────────────
 
-/** URL mount path for the Dashboard portal inside the ObjectStack server */
-export const DASHBOARD_PATH = '/_dashboard';
+/** URL mount path for the Console portal inside the ObjectStack server */
+export const CONSOLE_PATH = '/_console';
 
 // ─── Path Resolution ────────────────────────────────────────────────
 
 /**
- * Resolve the filesystem path to the @objectstack/dashboard package.
+ * Resolve the filesystem path to the @objectstack/console package.
  * Searches workspace locations first, then falls back to node_modules.
  */
-export function resolveDashboardPath(): string | null {
+export function resolveConsolePath(): string | null {
   const cwd = process.cwd();
 
   // Workspace candidates (monorepo layouts)
   const candidates = [
-    path.resolve(cwd, 'apps/dashboard'),
-    path.resolve(cwd, '../../apps/dashboard'),
-    path.resolve(cwd, '../apps/dashboard'),
+    path.resolve(cwd, 'apps/console'),
+    path.resolve(cwd, '../../apps/console'),
+    path.resolve(cwd, '../apps/console'),
   ];
 
   for (const candidate of candidates) {
@@ -41,7 +46,7 @@ export function resolveDashboardPath(): string | null {
     if (fs.existsSync(pkgPath)) {
       try {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-        if (pkg.name === '@objectstack/dashboard') return candidate;
+        if (pkg.name === '@objectstack/console') return candidate;
       } catch {
         // Skip invalid package.json
       }
@@ -57,7 +62,7 @@ export function resolveDashboardPath(): string | null {
   for (const base of resolutionBases) {
     try {
       const req = createRequire(base);
-      const resolved = req.resolve('@objectstack/dashboard/package.json');
+      const resolved = req.resolve('@objectstack/console/package.json');
       return path.dirname(resolved);
     } catch {
       // Not resolvable from this base — try next
@@ -65,7 +70,7 @@ export function resolveDashboardPath(): string | null {
   }
 
   // Last resort: direct filesystem check in cwd/node_modules
-  const directPath = path.join(cwd, 'node_modules', '@objectstack', 'dashboard');
+  const directPath = path.join(cwd, 'node_modules', '@objectstack', 'console');
   if (fs.existsSync(path.join(directPath, 'package.json'))) {
     return directPath;
   }
@@ -74,37 +79,37 @@ export function resolveDashboardPath(): string | null {
 }
 
 /**
- * Check whether the Dashboard portal has a pre-built `dist/` directory.
+ * Check whether the Console portal has a pre-built `dist/` directory.
  */
-export function hasDashboardDist(dashboardPath: string): boolean {
-  return fs.existsSync(path.join(dashboardPath, 'dist', 'index.html'));
+export function hasConsoleDist(consolePath: string): boolean {
+  return fs.existsSync(path.join(consolePath, 'dist', 'index.html'));
 }
 
 // ─── Plugin Factory ─────────────────────────────────────────────────
 
 /**
- * Create a lightweight kernel plugin that serves the pre-built Dashboard
- * portal static files at `/_dashboard/*`.
+ * Create a lightweight kernel plugin that serves the pre-built Console
+ * portal static files at `/_console/*`.
  *
  * Identical SPA-fallback semantics to `createStudioStaticPlugin` and
  * `createAccountStaticPlugin`:
  *   - `index.html` is read fresh on every fallback hit (so a rebuild
  *     producing new hashed asset names doesn't leave the browser
  *     pointing at stale URLs).
- *   - Hashed asset paths under `/_dashboard/assets/*` never SPA-fallback —
+ *   - Hashed asset paths under `/_console/assets/*` never SPA-fallback —
  *     a real 404 surfaces a rebuild/deploy mismatch instead of the
  *     dreaded "asset returns text/html" silent failure.
  */
-export function createDashboardStaticPlugin(distPath: string, options?: { isDev?: boolean }) {
+export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: boolean }) {
   return {
-    name: 'com.objectstack.dashboard-static',
+    name: 'com.objectstack.console-static',
 
     init: async () => {},
 
     start: async (ctx: any) => {
       const httpServer = ctx.getService?.('http.server');
       if (!httpServer?.getRawApp) {
-        ctx.logger?.warn?.('Dashboard static: http.server service not found — skipping');
+        ctx.logger?.warn?.('Console static: http.server service not found — skipping');
         return;
       }
 
@@ -113,25 +118,25 @@ export function createDashboardStaticPlugin(distPath: string, options?: { isDev?
 
       const indexPath = path.join(absoluteDist, 'index.html');
       if (!fs.existsSync(indexPath)) {
-        ctx.logger?.warn?.(`Dashboard static: dist not found at ${absoluteDist}`);
+        ctx.logger?.warn?.(`Console static: dist not found at ${absoluteDist}`);
         return;
       }
 
       const readIndexHtml = () => fs.readFileSync(indexPath, 'utf-8');
 
-      // In dev mode, the Dashboard is the default UI surface — root `/`
+      // In dev mode, the Console is the default UI surface — root `/`
       // redirects here. Mirrors the convention Studio used to own; we now
-      // prefer Dashboard because it is the opinionated end-user console.
+      // prefer the Console because it is the opinionated end-user surface.
       if (options?.isDev) {
-        app.get('/', (c: any) => c.redirect(`${DASHBOARD_PATH}/`));
+        app.get('/', (c: any) => c.redirect(`${CONSOLE_PATH}/`));
       }
 
       // Redirect bare path to trailing-slash (SPA convention)
-      app.get(DASHBOARD_PATH, (c: any) => c.redirect(`${DASHBOARD_PATH}/`));
+      app.get(CONSOLE_PATH, (c: any) => c.redirect(`${CONSOLE_PATH}/`));
 
       // Serve static files with SPA fallback
-      app.get(`${DASHBOARD_PATH}/*`, async (c: any) => {
-        const reqPath = c.req.path.substring(DASHBOARD_PATH.length) || '/';
+      app.get(`${CONSOLE_PATH}/*`, async (c: any) => {
+        const reqPath = c.req.path.substring(CONSOLE_PATH.length) || '/';
         const filePath = path.join(absoluteDist, reqPath);
 
         // Security: prevent path traversal
