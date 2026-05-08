@@ -145,16 +145,14 @@ export async function createRuntimeStack(config?: RuntimeStackConfig): Promise<R
     const artifactPath = cfg.artifactPath
         ?? process.env.OS_ARTIFACT_PATH
         ?? resolvePath(cwd, 'dist/objectstack.json');
-    const dataDir = cfg.dataDir ?? resolveDefaultDataDir();
-    mkdirSync(dataDir, { recursive: true });
 
-    // Control-plane DB. In single-project local mode this is the framework's
-    // bookkeeping DB (sys_organization / sys_project / …). It defaults to a
-    // local SQLite file. Users can override with `OS_CONTROL_DATABASE_URL`
-    // (preferred); `OS_DATABASE_URL` is reserved for the *project's* data.
-    const controlDbUrl = process.env.OS_CONTROL_DATABASE_URL?.trim()
-        || `file:${resolvePath(dataDir, 'control.db')}`;
-
+    // Resolve DB URLs *before* deciding on a local data dir. When both the
+    // control plane and the project DB are remote (libsql/postgres/…) we
+    // never touch the filesystem — important on Vercel/Lambda where the
+    // bundle is read-only and `mkdirSync('.objectstack/data')` would crash
+    // at boot. The data dir (and its mkdir) is only needed for the
+    // file-backed SQLite fallback paths.
+    const envControlUrl = process.env.OS_CONTROL_DATABASE_URL?.trim();
     // Project DB. This is the user's business-data DB. When `OS_DATABASE_URL`
     // is set, honour it (and infer the driver from its scheme unless
     // `OS_DATABASE_DRIVER` overrides). On Vercel/Turso deployments the
@@ -164,7 +162,23 @@ export async function createRuntimeStack(config?: RuntimeStackConfig): Promise<R
     // file beside `control.db`.
     const envProjectDbUrl = process.env.OS_DATABASE_URL?.trim()
         || process.env.TURSO_DATABASE_URL?.trim();
-    const projectDbUrl = envProjectDbUrl || `file:${resolvePath(dataDir, `${projectId}.db`)}`;
+
+    const needsLocalDataDir = !envControlUrl || !envProjectDbUrl;
+    const dataDir = cfg.dataDir
+        ?? (needsLocalDataDir ? resolveDefaultDataDir() : '');
+    if (needsLocalDataDir && dataDir) {
+        mkdirSync(dataDir, { recursive: true });
+    }
+
+    // Control-plane DB. In single-project local mode this is the framework's
+    // bookkeeping DB (sys_organization / sys_project / …). It defaults to a
+    // local SQLite file. Users can override with `OS_CONTROL_DATABASE_URL`
+    // (preferred); `OS_DATABASE_URL` is reserved for the *project's* data.
+    const controlDbUrl = envControlUrl
+        || `file:${resolvePath(dataDir || cwd, 'control.db')}`;
+
+    const projectDbUrl = envProjectDbUrl
+        || `file:${resolvePath(dataDir || cwd, `${projectId}.db`)}`;
     const projectDbDriver = (process.env.OS_DATABASE_DRIVER?.trim().toLowerCase())
         || inferDriverFromUrl(projectDbUrl)
         || 'sqlite';
