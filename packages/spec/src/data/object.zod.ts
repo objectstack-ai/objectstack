@@ -341,6 +341,41 @@ const ObjectSchemaBase = z.object({
     'Hint that this object is managed by an external subsystem; clients should hide generic CRUD UI and route mutations through the corresponding API.',
   ),
 
+  /**
+   * System-field auto-injection control.
+   *
+   * The `SchemaRegistry` augments every user object with a small set of
+   * implicit system fields at registration time so authors don't have to
+   * declare them per-object (Salesforce-style). Currently injected:
+   *
+   *   - `organization_id` — `lookup → sys_organization`. Injected only when
+   *     the kernel runs in multi-tenant mode (`OS_MULTI_TENANT !== 'false'`).
+   *     Required for the default `tenant_isolation` RLS policy and the
+   *     SecurityPlugin's auto-fill on insert to take effect.
+   *
+   * Author-declared fields with the same name always win over injection
+   * (no overwrite). Objects with `managedBy` set are skipped entirely —
+   * better-auth/system/platform tables already declare what they need.
+   *
+   * Set `systemFields: false` to opt the object out completely. Pass an
+   * options object to selectively disable individual injections (currently
+   * only `tenant`, but reserved keys `owner`/`audit` are pre-defined for
+   * future expansion).
+   *
+   * @default undefined (= injection enabled, gated by kernel mode)
+   */
+  systemFields: z
+    .union([
+      z.literal(false),
+      z.object({
+        tenant: z.boolean().optional().describe('Inject organization_id (multi-tenant only). Default true.'),
+        owner: z.boolean().optional().describe('Reserved for future owner_id auto-injection.'),
+        audit: z.boolean().optional().describe('Reserved for future created_by/updated_by auto-injection.'),
+      }),
+    ])
+    .optional()
+    .describe('Opt out of, or selectively disable, registry-level system-field auto-injection.'),
+
   /** 
    * Storage & Virtualization 
    */

@@ -33,7 +33,7 @@ import { createSingleProjectPlugin } from './single-project-plugin.js';
 import { resolveAuthSecret, resolveBaseUrl } from './boot-env.js';
 import type { AppBundleResolver } from './project-kernel-factory.js';
 import { createObjectOSStack } from './objectos-stack.js';
-import { resolveDefaultDataDir } from './data-dir.js';
+import { resolveDefaultDataDir, isServerlessReadOnlyFs } from './data-dir.js';
 
 /**
  * Infer the storage driver type from a database connection-URL scheme.
@@ -164,10 +164,35 @@ export async function createRuntimeStack(config?: RuntimeStackConfig): Promise<R
         || process.env.TURSO_DATABASE_URL?.trim();
 
     const needsLocalDataDir = !envControlUrl || !envProjectDbUrl;
-    const dataDir = cfg.dataDir
-        ?? (needsLocalDataDir ? resolveDefaultDataDir() : '');
+    let dataDir = cfg.dataDir ?? '';
+    if (needsLocalDataDir && !dataDir) {
+        // On serverless read-only filesystems (Vercel/Lambda/Netlify) the
+        // bundle root is not writable. If the operator has set at least
+        // *one* remote DB URL we can keep booting by parking any leftover
+        // SQLite fallback files in `/tmp` (per-instance, ephemeral but
+        // writable). The remote DB carries all real state — the local
+        // file is only a placeholder we never actually read in this case.
+        if (isServerlessReadOnlyFs()) {
+            dataDir = resolvePath('/tmp', 'objectstack-data');
+            // eslint-disable-next-line no-console
+            console.warn(
+                `[runtime-stack] serverless filesystem detected; using ephemeral ${dataDir} for SQLite fallback. ` +
+                `Set OS_CONTROL_DATABASE_URL and OS_DATABASE_URL (or TURSO_DATABASE_URL) to remote URLs to avoid touching disk entirely.`,
+            );
+        } else {
+            dataDir = resolveDefaultDataDir();
+        }
+    }
     if (needsLocalDataDir && dataDir) {
-        mkdirSync(dataDir, { recursive: true });
+        try {
+            mkdirSync(dataDir, { recursive: true });
+        } catch (err: any) {
+            // Non-fatal on serverless: if we couldn't create the dir but
+            // both DBs end up remote anyway, the file paths below are
+            // never opened. Surface a warning instead of crashing boot.
+            // eslint-disable-next-line no-console
+            console.warn(`[runtime-stack] mkdir ${dataDir} failed (${err?.code ?? err?.message}); continuing — ensure both control and project DB URLs are remote.`);
+        }
     }
 
     // Control-plane DB. In single-project local mode this is the framework's
