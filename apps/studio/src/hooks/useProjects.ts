@@ -410,6 +410,41 @@ export function useRevisions(projectId: string | undefined) {
   return { items, loading, error, reload };
 }
 
+export interface ProjectMemberRow {
+  id: string;
+  user_id: string;
+  role: string;
+  created_at?: string;
+  user?: { id: string; name?: string; email?: string; image?: string };
+}
+
+export function useProjectMembers(projectId: string | undefined) {
+  const client = useClient() as any;
+  const [items, setItems] = useState<ProjectMemberRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!projectId || !client?.projects?.listMembers) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await client.projects.listMembers(projectId);
+      setItems((res?.members ?? []) as ProjectMemberRow[]);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, [client, projectId]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { items, loading, error, reload };
+}
+
 export function useActivateRevision() {
   const client = useClient() as any;
   const [activating, setActivating] = useState(false);

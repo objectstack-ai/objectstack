@@ -1392,6 +1392,22 @@ export class HttpDispatcher {
      * Physical database addressing (database_url, database_driver, etc.)
      * is stored directly on the sys_project row.
      */
+    /**
+     * Resolve the calling user id from the request session, if any.
+     * Returns `undefined` for anonymous calls or when auth is not wired up.
+     */
+    private async resolveCallerUserId(context: HttpProtocolContext): Promise<string | undefined> {
+        try {
+            const authService: any = await this.resolveService(CoreServiceName.enum.auth);
+            const sessionData = await authService?.api?.getSession?.({
+                headers: context.request?.headers,
+            });
+            return sessionData?.user?.id ?? sessionData?.session?.userId;
+        } catch {
+            return undefined;
+        }
+    }
+
     async handleCloud(path: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
         const m = method.toUpperCase();
         const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
@@ -2006,7 +2022,13 @@ export class HttpDispatcher {
                     const envRow = await findOne(ENV, { id });
                     if (!envRow) return { handled: true, response: this.error(`Project '${id}' not found`, 404) };
                     const credRow = await findOne(CRED, { project_id: id, status: 'active' });
-                    const membership = await findOne(MEM, { project_id: id });
+                    // Scope membership lookup to the calling user when possible so the
+                    // returned `membership.role` reflects the caller, not some other
+                    // arbitrary member of the project.
+                    const callerUserId = await this.resolveCallerUserId(_context);
+                    const membership = callerUserId
+                        ? await findOne(MEM, { project_id: id, user_id: callerUserId })
+                        : await findOne(MEM, { project_id: id });
                     // Omit the ciphertext from responses — metadata only.
                     const credMeta = credRow
                         ? {
@@ -2375,7 +2397,30 @@ export class HttpDispatcher {
                 let rows = await ql.find(MEM, { where: { project_id: id } } as any);
                 if (rows && (rows as any).value) rows = (rows as any).value;
                 const members = Array.isArray(rows) ? rows : [];
-                return { handled: true, response: this.success({ members }) };
+                // Enrich with user display info (best-effort).
+                const userIds = Array.from(new Set(members.map((mem: any) => mem.user_id).filter(Boolean)));
+                const userMap = new Map<string, any>();
+                for (const uid of userIds) {
+                    let row: any = null;
+                    for (const tableName of ['sys_user', 'user']) {
+                        try {
+                            const u = await ql.findOne(tableName as any, { where: { id: uid } } as any);
+                            row = (u as any)?.value ?? u;
+                            if (row) break;
+                        } catch { /* try next table */ }
+                    }
+                    if (row) userMap.set(String(uid), {
+                        id: row.id,
+                        name: row.name ?? row.display_name,
+                        email: row.email,
+                        image: row.image ?? row.avatar_url,
+                    });
+                }
+                const enriched = members.map((mem: any) => ({
+                    ...mem,
+                    user: userMap.get(String(mem.user_id)) ?? undefined,
+                }));
+                return { handled: true, response: this.success({ members: enriched }) };
             }
 
             // ----- /cloud/projects/:envId/packages -----

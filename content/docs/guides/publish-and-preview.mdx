@@ -52,6 +52,7 @@ Common flags:
 | `--server`, `-s`    | `OS_CLOUD_URL`        | `http://localhost:4000`  | Control-plane URL |
 | `--project`, `-p`   | `OS_PROJECT_ID`       | — (required)             | Target project id |
 | `--token`,   `-t`   | `OS_CLOUD_API_KEY`    | —                        | Bearer token (when auth is enabled) |
+| `--note`,    `-n`   | —                     | —                        | Optional human-readable note attached to the revision (shown in Studio) |
 | `--timeout`         | `OS_CLOUD_TIMEOUT_MS` | `60000` (60 s)           | Set higher for slow networks; `0` disables |
 
 `publish` POSTs to `/api/v1/cloud/projects/:id/metadata`. The control plane:
@@ -188,7 +189,15 @@ item before the kernel marks itself ready.
 
 ## 6. Rollback
 
-Every publish is preserved. To roll back:
+Every publish is preserved. The fastest way to roll back is the CLI:
+
+```bash
+# Accepts either the full 16-char commitId or any unambiguous prefix (≥ 8 chars).
+OS_CLOUD_URL=http://localhost:4000 OS_PROJECT_ID=proj_crm \
+  objectstack rollback --commit 9ce1bd48
+```
+
+Equivalent raw HTTP:
 
 ```bash
 curl -X POST http://localhost:4000/api/v1/cloud/projects/proj_crm/revisions/9ce1bd48dd7022b8/activate
@@ -197,6 +206,21 @@ curl -X POST http://localhost:4000/api/v1/cloud/projects/proj_crm/revisions/9ce1
 The next `GET /artifact` (no `?commit`) — and any runtime node restarted
 without a pinned `commitId` — will pick up the older revision. Roll forward
 the same way.
+
+### Pruning old revisions
+
+History grows with every publish. Use the prune endpoint to enforce a
+retention policy. The current revision is **always** preserved.
+
+```bash
+curl -X POST http://localhost:4000/api/v1/cloud/projects/proj_crm/revisions/prune \
+  -H 'Content-Type: application/json' \
+  -d '{"keepN": 50, "keepDays": 30}'
+```
+
+Defaults are `keepN = 50` and `keepDays = 30`. Any row outside both windows
+is deleted from the table **and** the underlying object-storage key is
+removed (best-effort — orphaned keys won't block the row deletion).
 
 ---
 
@@ -249,11 +273,15 @@ share-preview links you mail to colleagues, not for crawling.
 
 ### Public endpoints
 
-- `GET /api/v1/pub/v1/projects/:id/artifact[?commit=<id>]`
+- `GET /api/v1/pub/v1/projects/:id/artifact[?commit=<id>][&redirect=1]`
   Returns the same envelope as the private route. **No auth header required.**
   Sets `Cache-Control: public, max-age=31536000, immutable` and
   `ETag: "<commitId>"` so a CDN (Cloudflare, CloudFront, …) in front of the
   control plane serves it from the edge for free.
+  When the storage adapter is S3 / R2 (or anything that implements
+  `getSignedUrl`), passing `?redirect=1` makes the control plane respond
+  with a `302` to a short-lived (5 min) signed URL — bandwidth then comes
+  straight from the bucket and the control plane is no longer the chokepoint.
 - `GET /api/v1/pub/v1/projects/:id/revisions?limit=N` — public history.
 - `GET /api/v1/pub/v1/projects/:id/manifest.json` — lightweight project info
   (`projectId`, `displayName`, `currentCommitId`, `currentChecksum`, `builtAt`).

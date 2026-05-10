@@ -466,6 +466,32 @@ export class ProjectProvisioningService {
           created_at: credential.createdAt,
           updated_at: nowIso,
         });
+
+        // Auto-add the project creator as the initial owner so they show up
+        // in `sys_project_member` and the dispatcher's per-user membership
+        // lookup returns a role on the very first detail load.
+        if (project.createdBy) {
+          try {
+            await this.config.controlPlaneDriver.create('sys_project_member', {
+              id: randomUUID(),
+              project_id: project.id,
+              user_id: project.createdBy,
+              role: 'owner',
+              invited_by: project.createdBy,
+              organization_id: project.organizationId,
+              created_at: project.createdAt,
+              updated_at: project.updatedAt,
+            });
+          } catch (memberErr) {
+            // Non-fatal: if the row already exists (re-provisioning) or the
+            // table isn't there yet (test setups), surface as a warning.
+            warnings.push(
+              `Failed to seed project owner membership: ${
+                memberErr instanceof Error ? memberErr.message : String(memberErr)
+              }`,
+            );
+          }
+        }
       } catch (error) {
         warnings.push(
           `Failed to persist control-plane rows: ${

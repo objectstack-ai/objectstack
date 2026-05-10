@@ -35,6 +35,10 @@ export default class Publish extends Command {
       env: 'OS_CLOUD_TIMEOUT_MS',
       default: 60_000,
     }),
+    note: Flags.string({
+      char: 'n',
+      description: 'Optional human-readable note to attach to this revision',
+    }),
   };
 
   async run(): Promise<void> {
@@ -62,7 +66,8 @@ export default class Publish extends Command {
       printSuccess(`Loaded artifact (${(artifactRaw.length / 1024).toFixed(1)} KB)`);
 
       // 2. POST to the control-plane publish endpoint
-      const serverUrl = `${flags.server}/api/v1/cloud/projects/${flags.project}/metadata`;
+      const noteQs = flags.note ? `?note=${encodeURIComponent(flags.note)}` : '';
+      const serverUrl = `${flags.server}/api/v1/cloud/projects/${flags.project}/metadata${noteQs}`;
       printStep(`Publishing to ${serverUrl}...`);
 
       const response = await (async () => {

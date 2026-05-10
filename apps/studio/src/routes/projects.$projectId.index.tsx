@@ -67,6 +67,7 @@ import {
   useDeleteProject,
   useUpdateVisibility,
   useRevisions,
+  useProjectMembers,
 } from '@/hooks/useProjects';
 import { useEnvAwarePackages } from '@/hooks/useProjectAwarePackages';
 import { useClient } from '@objectstack/client-react';
@@ -91,6 +92,7 @@ function ProjectOverviewComponent() {
 function RealProjectOverview({ projectId }: { projectId: string }) {
   const { detail, loading, reload } = useProjectDetail(projectId);
   const { items: revisions, loading: revisionsLoading } = useRevisions(projectId);
+  const { items: members } = useProjectMembers(projectId);
   const { packages } = useEnvAwarePackages(projectId);
   const client = useClient() as any;
   const navigate = useNavigate();
@@ -280,7 +282,7 @@ function RealProjectOverview({ projectId }: { projectId: string }) {
                       {project.display_name}
                     </h1>
                     {project.is_default && <Badge variant="outline">default</Badge>}
-                    <ProjectStatusBadge status={project.status} />
+                    <ProjectStatusBadge status={(project.status ?? 'provisioning') as any} />
                     <VisibilityControl
                       projectId={project.id}
                       value={(project as any).visibility ?? 'private'}
@@ -432,13 +434,15 @@ function RealProjectOverview({ projectId }: { projectId: string }) {
                 <Card className="p-4">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
                     <Users className="h-3.5 w-3.5" />
-                    Your role
+                    Members
                   </div>
-                  <div className="mt-2 text-sm font-medium capitalize">
-                    {detail?.membership?.role ?? '—'}
+                  <div className="mt-2 text-sm font-medium">
+                    {members.length || (detail?.membership ? 1 : '—')}
                   </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {detail?.organization
+                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                    {detail?.membership?.role
+                      ? `Your role: ${detail.membership.role}`
+                      : detail?.organization
                       ? `In ${detail.organization.displayName ?? detail.organization.name}`
                       : 'Membership unavailable'}
                   </div>
@@ -682,6 +686,47 @@ function RealProjectOverview({ projectId }: { projectId: string }) {
                         </div>
                       )}
                     </dl>
+                  </Card>
+
+                  {/* Members */}
+                  <Card className="p-5">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        <Users className="h-3.5 w-3.5" />
+                        Members
+                      </h2>
+                      <span className="text-xs text-muted-foreground">{members.length}</span>
+                    </div>
+                    {members.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No members yet. The project creator becomes the owner automatically.
+                      </p>
+                    ) : (
+                      <ul className="space-y-2 text-sm">
+                        {members.slice(0, 6).map((m) => (
+                          <li key={m.id} className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate font-medium">
+                                {m.user?.name || m.user?.email || m.user_id}
+                              </div>
+                              {m.user?.email && m.user?.name && (
+                                <div className="truncate text-xs text-muted-foreground">
+                                  {m.user.email}
+                                </div>
+                              )}
+                            </div>
+                            <Badge variant="secondary" className="capitalize">
+                              {m.role}
+                            </Badge>
+                          </li>
+                        ))}
+                        {members.length > 6 && (
+                          <li className="pt-1 text-xs text-muted-foreground">
+                            …and {members.length - 6} more
+                          </li>
+                        )}
+                      </ul>
+                    )}
                   </Card>
 
                   {/* Credential */}

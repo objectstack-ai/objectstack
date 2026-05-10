@@ -355,7 +355,7 @@ export function createCloudArtifactApiPlugin(options: CloudArtifactApiPluginOpti
                             built_at: (body as any).builtAt ?? new Date().toISOString(),
                             built_with: (body as any).builtWith ? JSON.stringify((body as any).builtWith) : null,
                             published_at: new Date().toISOString(),
-                            note: (body as any).note ?? null,
+                            note: (body as any).note ?? (req.query?.note ? String(req.query.note) : null),
                             is_current: true,
                         });
                         revisionCreated = true;
@@ -460,9 +460,22 @@ export function createCloudArtifactApiPlugin(options: CloudArtifactApiPluginOpti
                 if (!driver) return res.status(503).json(fail('control plane unavailable', 503));
 
                 try {
-                    const target = await (driver.findOne as any)('sys_project_revision', {
+                    // Accept full commit id or a 12+ char prefix (matches the
+                    // 12-char display in the Studio recent-revisions list).
+                    let target = await (driver.findOne as any)('sys_project_revision', {
                         where: { project_id: projectId, commit_id: commitId },
                     });
+                    if (!target && commitId.length >= 8) {
+                        const candidates = await (driver.find as any)('sys_project_revision', {
+                            where: { project_id: projectId, commit_id: { $like: `${commitId}%` } },
+                            limit: 2,
+                        });
+                        if (Array.isArray(candidates) && candidates.length === 1) {
+                            target = candidates[0];
+                        } else if (Array.isArray(candidates) && candidates.length > 1) {
+                            return res.status(409).json(fail(`Commit prefix '${commitId}' is ambiguous (${candidates.length} matches)`, 409));
+                        }
+                    }
                     if (!target) return res.status(404).json(fail(`Revision '${commitId}' not found`, 404));
 
                     // Flip old current → false
@@ -480,20 +493,105 @@ export function createCloudArtifactApiPlugin(options: CloudArtifactApiPluginOpti
                     const project = await (driver.findOne as any)('sys_project', { where: { id: projectId } });
                     if (project) {
                         const meta = parseMetadata(project.metadata);
-                        meta.current_commit_id = commitId;
+                        meta.current_commit_id = target.commit_id;
                         meta.artifact_storage_key = target.storage_key;
                         await (driver.update as any)('sys_project', projectId, { metadata: JSON.stringify(meta) });
                     }
 
                     return res.json(ok({
                         projectId,
-                        commitId,
+                        commitId: target.commit_id,
                         activated: true,
                         previousCommitId: oldCurrent?.commit_id ?? null,
                     }));
                 } catch (err: any) {
                     console.error('[CloudArtifactAPI] Failed to activate revision:', err?.message ?? err);
                     return res.status(500).json(fail('Failed to activate revision', 500));
+                }
+            });
+
+            // ================================================================
+            // POST /cloud/projects/:id/revisions/prune
+            //   body: { keepN?: number, keepDays?: number }   (defaults: 50, 30)
+            // Removes old revision rows + their object-storage keys.
+            // The current revision is ALWAYS preserved.
+            // ================================================================
+            server.post(`${prefix}/cloud/projects/:id/revisions/prune`, async (req: any, res: any) => {
+                const auth = checkAuth(req);
+                if (!auth.ok) return res.status(auth.status).json(auth.body);
+                const projectId = String(req.params?.id ?? '').trim();
+                if (!projectId) return res.status(400).json(fail('project id required'));
+
+                const driver = await getDriver();
+                if (!driver) return res.status(503).json(fail('control plane unavailable', 503));
+
+                const body = (req.body ?? {}) as { keepN?: number; keepDays?: number };
+                const keepN = Math.max(1, Math.min(1000, Number(body.keepN ?? 50)));
+                const keepDays = Math.max(0, Math.min(3650, Number(body.keepDays ?? 30)));
+                const cutoffIso = keepDays > 0
+                    ? new Date(Date.now() - keepDays * 86_400_000).toISOString()
+                    : null;
+
+                try {
+                    // Fetch all revisions for this project, newest first.
+                    const all = (await (driver.find as any)('sys_project_revision', {
+                        where: { project_id: projectId },
+                        orderBy: [{ field: 'published_at', direction: 'desc' }],
+                        limit: 10_000,
+                    })) as any[];
+
+                    // Decide what to KEEP:
+                    //   - the current revision (always)
+                    //   - the most recent `keepN` rows
+                    //   - anything published within the last `keepDays`
+                    const keepIds = new Set<string>();
+                    const recent = all.slice(0, keepN);
+                    for (const r of recent) keepIds.add(r.id);
+                    for (const r of all) {
+                        if (r.is_current) keepIds.add(r.id);
+                        if (cutoffIso && r.published_at && r.published_at >= cutoffIso) {
+                            keepIds.add(r.id);
+                        }
+                    }
+
+                    const toDelete = all.filter((r) => !keepIds.has(r.id));
+                    let deletedRows = 0;
+                    let deletedKeys = 0;
+                    let storageErrors = 0;
+
+                    for (const r of toDelete) {
+                        // Best-effort storage delete; rows still go away even if
+                        // the bucket call fails so the table doesn't grow forever.
+                        if (r.storage_key && storage) {
+                            try {
+                                await storage.delete(r.storage_key);
+                                deletedKeys++;
+                            } catch (storageErr: any) {
+                                storageErrors++;
+                                console.warn('[CloudArtifactAPI] Failed to delete artifact', r.storage_key, storageErr?.message);
+                            }
+                        }
+                        try {
+                            await (driver.delete as any)('sys_project_revision', r.id);
+                            deletedRows++;
+                        } catch (delErr: any) {
+                            console.warn('[CloudArtifactAPI] Failed to delete revision row', r.id, delErr?.message);
+                        }
+                    }
+
+                    return res.json(ok({
+                        projectId,
+                        scanned: all.length,
+                        kept: keepIds.size,
+                        deletedRows,
+                        deletedKeys,
+                        storageErrors,
+                        keepN,
+                        keepDays,
+                    }));
+                } catch (err: any) {
+                    console.error('[CloudArtifactAPI] Failed to prune revisions:', err?.message ?? err);
+                    return res.status(500).json(fail('Failed to prune revisions', 500));
                 }
             });
 
@@ -594,6 +692,26 @@ export function createCloudArtifactApiPlugin(options: CloudArtifactApiPluginOpti
 
                 const exists = await storage!.exists(rev.storage_key);
                 if (!exists) return res.status(404).json(fail('not found', 404));
+
+                // Optional: skip the proxy and redirect the caller to a short-lived
+                // signed URL (S3 / R2). This offloads bandwidth from the control
+                // plane. Triggered by `?redirect=1` and only when the configured
+                // storage adapter supports `getSignedUrl`.
+                const wantRedirect = req.query?.redirect === '1' || req.query?.redirect === 'true';
+                if (wantRedirect && typeof storage!.getSignedUrl === 'function') {
+                    try {
+                        const signed = await storage!.getSignedUrl(rev.storage_key, 300);
+                        if (signed) {
+                            if (typeof res.set === 'function') {
+                                res.set('Cache-Control', 'private, max-age=60');
+                                res.set('X-Commit-Id', rev.commit_id);
+                            }
+                            return res.redirect(302, signed);
+                        }
+                    } catch (signErr: any) {
+                        console.warn('[CloudArtifactAPI] getSignedUrl failed, falling back to inline:', signErr?.message);
+                    }
+                }
 
                 const buf = await storage!.download(rev.storage_key);
                 const body = JSON.parse(buf.toString('utf-8'));
