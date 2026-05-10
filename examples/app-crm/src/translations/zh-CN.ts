@@ -594,7 +594,7 @@ export const zhCN: TranslationData = {
       widgets: {
         total_revenue: { title: '总收入', description: '本期已成交收入' },
         active_deals: { title: '活跃商机', description: '管道中进行中的商机' },
-        win_rate: { title: '赢单率', description: '本期已结案商机中赢单的比例' },
+        won_deals: { title: '赢单数', description: '本期已结案商机中赢单的总数' },
         avg_deal_size: { title: '平均订单金额', description: '已成交商机的平均金额' },
         revenue_trends: { title: '收入趋势', description: '过去 12 个月的已成交收入' },
         lead_source: { title: '线索来源', description: '按获客渠道统计的管道金额' },

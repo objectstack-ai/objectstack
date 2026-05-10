@@ -521,7 +521,7 @@ export const esES: TranslationData = {
       widgets: {
         total_revenue: { title: 'Ingresos totales', description: 'Ingresos cerrados ganados en este período' },
         active_deals: { title: 'Negocios activos', description: 'Oportunidades abiertas en el pipeline' },
-        win_rate: { title: 'Tasa de éxito', description: 'Proporción de negocios cerrados ganados sobre los resueltos en este período' },
+        won_deals: { title: 'Negocios ganados', description: 'Negocios cerrados ganados en este período' },
         avg_deal_size: { title: 'Tamaño medio del negocio', description: 'Valor medio de los negocios cerrados ganados' },
         revenue_trends: { title: 'Tendencia de ingresos', description: 'Ingresos cerrados ganados de los últimos 12 meses' },
         lead_source: { title: 'Origen del prospecto', description: 'Valor del pipeline por canal de adquisición' },

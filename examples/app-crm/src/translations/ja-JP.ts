@@ -521,7 +521,7 @@ export const jaJP: TranslationData = {
       widgets: {
         total_revenue: { title: '総売上', description: '当期の成立済み売上' },
         active_deals: { title: '進行中の商談', description: 'パイプライン上のオープン商談' },
-        win_rate: { title: '勝率', description: '当期に決着した商談における成立比率' },
+        won_deals: { title: '勝利商談数', description: '当期に成立した商談の総数' },
         avg_deal_size: { title: '平均商談規模', description: '成立済み商談の平均金額' },
         revenue_trends: { title: '売上トレンド', description: '過去12か月の成立済み売上' },
         lead_source: { title: 'リードソース', description: '獲得チャネル別のパイプライン金額' },

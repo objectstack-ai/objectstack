@@ -522,7 +522,7 @@ export const en: TranslationData = {
       widgets: {
         total_revenue: { title: 'Total Revenue', description: 'Closed-won revenue this period' },
         active_deals: { title: 'Active Deals', description: 'Open opportunities in the pipeline' },
-        win_rate: { title: 'Win Rate', description: 'Closed-won share of resolved deals this period' },
+        won_deals: { title: 'Won Deals', description: 'Closed-won deals this period' },
         avg_deal_size: { title: 'Avg Deal Size', description: 'Average value of closed-won deals' },
         revenue_trends: { title: 'Revenue Trends', description: 'Closed-won revenue over the last 12 months' },
         lead_source: { title: 'Lead Source', description: 'Pipeline value by acquisition channel' },

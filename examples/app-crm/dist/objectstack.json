@@ -1075,9 +1075,9 @@
                 "title": "Active Deals",
                 "description": "Open opportunities in the pipeline"
               },
-              "win_rate": {
-                "title": "Win Rate",
-                "description": "Closed-won share of resolved deals this period"
+              "won_deals": {
+                "title": "Won Deals",
+                "description": "Closed-won deals this period"
               },
               "avg_deal_size": {
                 "title": "Avg Deal Size",
@@ -2434,9 +2434,9 @@
                 "title": "活跃商机",
                 "description": "管道中进行中的商机"
               },
-              "win_rate": {
-                "title": "赢单率",
-                "description": "本期已结案商机中赢单的比例"
+              "won_deals": {
+                "title": "赢单数",
+                "description": "本期已结案商机中赢单的总数"
               },
               "avg_deal_size": {
                 "title": "平均订单金额",
@@ -3693,9 +3693,9 @@
                 "title": "進行中の商談",
                 "description": "パイプライン上のオープン商談"
               },
-              "win_rate": {
-                "title": "勝率",
-                "description": "当期に決着した商談における成立比率"
+              "won_deals": {
+                "title": "勝利商談数",
+                "description": "当期に成立した商談の総数"
               },
               "avg_deal_size": {
                 "title": "平均商談規模",
@@ -4952,9 +4952,9 @@
                 "title": "Negocios activos",
                 "description": "Oportunidades abiertas en el pipeline"
               },
-              "win_rate": {
-                "title": "Tasa de éxito",
-                "description": "Proporción de negocios cerrados ganados sobre los resueltos en este período"
+              "won_deals": {
+                "title": "Negocios ganados",
+                "description": "Negocios cerrados ganados en este período"
               },
               "avg_deal_size": {
                 "title": "Tamaño medio del negocio",
@@ -14923,9 +14923,9 @@
           }
         },
         {
-          "id": "win_rate",
-          "title": "Win Rate",
-          "description": "Closed-won share of resolved deals this period",
+          "id": "won_deals",
+          "title": "Won Deals",
+          "description": "Closed-won deals this period",
           "type": "metric",
           "colorVariant": "purple",
           "actionUrl": "/reports/win-rate",
@@ -14933,15 +14933,10 @@
           "actionIcon": "ArrowUpRight",
           "object": "opportunity",
           "filter": {
-            "stage": {
-              "$in": [
-                "closed_won",
-                "closed_lost"
-              ]
-            }
+            "stage": "closed_won"
           },
-          "valueField": "is_won",
-          "aggregate": "avg",
+          "valueField": "id",
+          "aggregate": "count",
           "layout": {
             "x": 6,
             "y": 0,
@@ -14950,8 +14945,7 @@
           },
           "options": {
             "icon": "Trophy",
-            "format": "0%",
-            "suffix": "%",
+            "format": "0,0",
             "trend": {
               "value": 4.3,
               "direction": "up",
@@ -15127,7 +15121,7 @@
             },
             "yAxis": [
               {
-                "field": "price",
+                "field": "list_price",
                 "title": "Revenue",
                 "format": "$0,0",
                 "showGridLines": true,
@@ -15143,7 +15137,7 @@
           "colorVariant": "blue",
           "object": "product",
           "categoryField": "category",
-          "valueField": "price",
+          "valueField": "list_price",
           "aggregate": "sum",
           "layout": {
             "x": 6,
