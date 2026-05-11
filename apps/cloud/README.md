@@ -56,12 +56,38 @@ Files:
 - `wrangler.toml` — Worker + Container binding.
 - `cloudflare/worker.ts` — fetch handler that proxies HTTP into the
   `CloudContainer` Durable Object.
+- `scripts/deploy-cloudflare.sh` — `build → push → deploy` pipeline.
+- `scripts/setup-cloudflare-secrets.sh` — bulk `wrangler secret put` from
+  a local env file.
 
-Quick start (see `wrangler.toml` for the full workflow):
+### Quickstart (automated)
+
+```bash
+# One-time setup
+npx wrangler login
+cp apps/cloud/.env.cloudflare.example          apps/cloud/.env.cloudflare
+cp apps/cloud/.env.cloudflare.secrets.example  apps/cloud/.env.cloudflare.secrets
+# Fill in CF_ACCOUNT_ID + secrets (see comments inside each file)
+
+# Push secrets (once, or any time they change)
+pnpm --filter @objectstack/cloud cf:secrets
+
+# Build → push → deploy
+pnpm --filter @objectstack/cloud cf:deploy
+
+# Live tail
+pnpm --filter @objectstack/cloud cf:tail
+```
+
+Useful flags on `cf:deploy`: `--tag <name>`, `--skip-build`, `--skip-push`,
+`--dry-run`.
+
+### Manual (if you don't want the script)
 
 ```bash
 # Build from repo root (Dockerfile expects the full pnpm workspace)
-docker build -f apps/cloud/Dockerfile \
+docker buildx build --platform linux/amd64 \
+  -f apps/cloud/Dockerfile \
   -t registry.cloudflare.com/<account-id>/objectstack-cloud:latest .
 
 wrangler containers push \

@@ -363,18 +363,50 @@ Files:
 - `wrangler.toml` — Worker + Container binding.
 - `cloudflare/worker.ts` — fetch handler that proxies HTTP into the
   `ObjectOSContainer` Durable Object.
+- `scripts/deploy-cloudflare.sh` — `build → push → deploy` pipeline.
+- `scripts/setup-cloudflare-secrets.sh` — bulk `wrangler secret put` from
+  a local env file.
 
-Quick start (see `wrangler.toml` for the full workflow):
+### Quickstart (automated)
+
+```bash
+# One-time setup
+npx wrangler login
+cp apps/objectos/.env.cloudflare.example          apps/objectos/.env.cloudflare
+cp apps/objectos/.env.cloudflare.secrets.example  apps/objectos/.env.cloudflare.secrets
+# Fill in CF_ACCOUNT_ID + secrets (see comments inside each file)
+
+# Push secrets (once, or any time they change)
+pnpm --filter @objectstack/objectos cf:secrets
+
+# Build → push → deploy (run as often as you ship)
+pnpm --filter @objectstack/objectos cf:deploy
+
+# Live tail
+pnpm --filter @objectstack/objectos cf:tail
+```
+
+Useful flags on `cf:deploy`:
+
+| Flag | Effect |
+|---|---|
+| `--tag v2` | Override image tag (default = current git short SHA). |
+| `--skip-build` | Reuse the last-built image (just push + deploy). |
+| `--skip-push` | Already pushed; just deploy current `wrangler.toml`. |
+| `--dry-run` | Print every step without executing it. |
+
+### Manual (if you don't want the script)
 
 ```bash
 # Build from repo root (Dockerfile expects the full pnpm workspace)
-docker build -f apps/objectos/Dockerfile \
+docker buildx build --platform linux/amd64 \
+  -f apps/objectos/Dockerfile \
   -t registry.cloudflare.com/<account-id>/objectos:latest .
 
 wrangler containers push registry.cloudflare.com/<account-id>/objectos:latest
 
 # Push secrets — control plane MUST point at remote libSQL/Turso, the
-# container filesystem is ephemeral.
+# container filesystem is wiped on cold-start.
 wrangler secret put OS_DATABASE_URL --config apps/objectos/wrangler.toml
 wrangler secret put OS_DATABASE_AUTH_TOKEN --config apps/objectos/wrangler.toml
 wrangler secret put AUTH_SECRET --config apps/objectos/wrangler.toml

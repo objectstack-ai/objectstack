@@ -32,7 +32,7 @@ RUN corepack enable
 
 # Bring in lockfile + workspace manifest first to maximise layer cache hits
 # on subsequent rebuilds where only source code changes.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsup.config.ts ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json tsup.config.ts ./
 
 # Copy every workspace member required at runtime.
 # Studio / docs are excluded to keep the image slim (see .dockerignore).
@@ -44,7 +44,7 @@ RUN pnpm install --frozen-lockfile --prod=false
 
 # Build upstream packages that apps/cloud depends on via workspace: protocol.
 # `...` expands to "package + all transitive deps in the workspace".
-RUN pnpm --filter '@objectstack/cloud...' build || true
+RUN pnpm --filter '@objectstack/cloud...' build
 
 
 # ──────────────────────────────────────────────────────────────────────────

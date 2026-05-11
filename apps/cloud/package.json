@@ -12,6 +12,12 @@
     "typecheck": "tsc --noEmit",
     "test": "objectstack test",
     "test:production-flow": "tsx test/production-flow.test.ts",
+    "cf:build": "bash scripts/deploy-cloudflare.sh --skip-push --skip-deploy",
+    "cf:push": "bash scripts/deploy-cloudflare.sh --skip-build --skip-deploy",
+    "cf:deploy": "bash scripts/deploy-cloudflare.sh",
+    "cf:deploy:dry": "bash scripts/deploy-cloudflare.sh --dry-run",
+    "cf:secrets": "bash scripts/setup-cloudflare-secrets.sh",
+    "cf:tail": "wrangler tail --config wrangler.toml",
     "clean": "rm -rf dist node_modules"
   },
   "dependencies": {

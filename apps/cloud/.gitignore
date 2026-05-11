@@ -21,3 +21,7 @@ node_modules/
 Thumbs.db
 .vercel
 .env*.local
+
+# Cloudflare Containers deploy config (real values, not examples)
+.env.cloudflare
+.env.cloudflare.secrets

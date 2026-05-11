@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added — Cloudflare Containers deployment for `apps/objectos` & `apps/cloud`
+- **`apps/{objectos,cloud}/scripts/deploy-cloudflare.sh`** — Idempotent `build → push → deploy` pipeline. Reads config from `.env.cloudflare` (gitignored) or env vars; auto-tags images with the current git short SHA; in-place rewrites the `image = "..."` line in `wrangler.toml` (BSD/GNU sed compatible); supports `--tag`, `--skip-build`, `--skip-push`, `--skip-deploy`, `--dry-run`. Forces `--platform linux/amd64` (Cloudflare Containers requirement).
+- **`apps/{objectos,cloud}/scripts/setup-cloudflare-secrets.sh`** — Bulk `wrangler secret put` from a local `.env.cloudflare.secrets` file. Per-app key allow-list lets one shared file feed both Workers; unset keys are skipped (not cleared). Safe to re-run.
+- **npm scripts** in both apps: `cf:build`, `cf:push`, `cf:deploy`, `cf:deploy:dry`, `cf:secrets`, `cf:tail`.
+- **`.env.cloudflare.example` + `.env.cloudflare.secrets.example`** templates per app, with all required keys documented and the real files added to each app's `.gitignore`.
+
 - **`apps/cloud/Dockerfile` + `.dockerignore`** — Production multi-stage image mirroring `apps/objectos/Dockerfile` (Node 22, pnpm workspace builder, slim runtime). Defaults `PORT=4000` to match `pnpm dev`, sets `OS_DISABLE_CONSOLE=1`, builds `@objectstack/cloud...` and serves via `objectstack serve --prebuilt`.
 - **`apps/{objectos,cloud}/wrangler.toml`** — Cloudflare Containers configs that wrap the production image in a Container-class Durable Object (`ObjectOSContainer` / `CloudContainer`) and front it with a fetch-forwarding Worker. Uses `instance_type = "standard-1"`, `nodejs_compat`, `[[migrations]] new_sqlite_classes`, and references a pre-pushed image tag (recommended workflow: `docker build` from repo root → `wrangler containers push` → `wrangler deploy`).
 - **`apps/{objectos,cloud}/cloudflare/worker.ts`** — Tiny Worker entrypoint using `@cloudflare/containers`. Pinned single-instance routing (`getContainer(env.X, 'singleton')`), inline `envVars` block for non-secret runtime config; secrets (`OS_DATABASE_URL`, `OS_DATABASE_AUTH_TOKEN`, `AUTH_SECRET`, `TURSO_*`) are injected via `wrangler secret put`.
