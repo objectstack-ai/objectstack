@@ -93,10 +93,14 @@ docker buildx build --platform linux/amd64 \
 wrangler containers push \
   registry.cloudflare.com/<account-id>/objectstack-cloud:latest
 
-# Secrets — the control plane MUST be on remote libSQL/Turso; the
-# container filesystem is wiped on cold-start.
+# Secrets — the control plane MUST be on a remote database. The container
+# filesystem is wiped on cold-start, so file:/... will lose all data.
+# For production, Postgres is recommended:
+#   postgres://user:pass@host:5432/db
+# libSQL/Turso also works:
+#   libsql://<db>.turso.io  +  OS_DATABASE_AUTH_TOKEN
 wrangler secret put OS_DATABASE_URL        --config apps/cloud/wrangler.toml
-wrangler secret put OS_DATABASE_AUTH_TOKEN --config apps/cloud/wrangler.toml
+wrangler secret put OS_DATABASE_AUTH_TOKEN --config apps/cloud/wrangler.toml   # libSQL only
 wrangler secret put AUTH_SECRET            --config apps/cloud/wrangler.toml
 wrangler secret put TURSO_API_TOKEN        --config apps/cloud/wrangler.toml
 wrangler secret put TURSO_ORG_NAME         --config apps/cloud/wrangler.toml
@@ -109,10 +113,32 @@ Required runtime env vars (set as Cloudflare secrets, **not** in
 
 | Var | Purpose |
 |---|---|
-| `OS_DATABASE_URL` | `libsql://<db>.turso.io` — control DB. |
-| `OS_DATABASE_AUTH_TOKEN` | Turso auth token. |
+| `OS_DATABASE_URL` | Control-plane DB URL. Supports `postgres://…`, `postgresql://…`, `libsql://…`, `https://…` (Turso), or `file:/…` (local Docker only). |
+| `OS_CONTROL_DATABASE_URL` | Optional override for the control DB when it differs from `OS_DATABASE_URL`. Takes priority when both are set. |
+| `OS_DATABASE_AUTH_TOKEN` | Auth token for libSQL/Turso. Unused for Postgres (put the password in the URL). |
+| `OS_CONTROL_PG_POOL_MIN` / `OS_CONTROL_PG_POOL_MAX` | Postgres pool sizing (default `0` / `10`). |
 | `AUTH_SECRET` | Cookie/session signing secret. |
 | `TURSO_API_TOKEN` / `TURSO_ORG_NAME` | Used by the provisioning workflow to create per-project Turso DBs. |
+
+### Postgres in production
+
+`apps/cloud` ships with the `pg` driver included. To run the control plane
+on Postgres (Neon / Supabase / RDS / Cloudflare Hyperdrive / self-hosted):
+
+```bash
+export OS_DATABASE_URL='postgres://user:pass@host:5432/objectstack_cloud'
+# Optional fine-tuning:
+export OS_CONTROL_PG_POOL_MAX=20
+```
+
+Schema migrations are applied automatically on first boot by the
+`@objectstack/driver-sql` engine using knex. The cloud control plane
+expects a database it can DDL freely — point it at a dedicated database
+(not one shared with unrelated tables).
+
+> **Hyperdrive note**: Cloudflare Hyperdrive accelerates Postgres
+> connections from Workers, not Containers. For Containers, point
+> `OS_DATABASE_URL` directly at your Postgres instance.
 
 Pair this with an `apps/objectos` deployment (see its README) and set
 `OS_CLOUD_URL=https://<cloud-worker>.<account>.workers.dev` on the

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Cloud control plane: Postgres driver support ⭐
+- **`buildControlDriver` in `@objectstack/service-cloud/cloud-stack.ts`** now recognises `postgres://`, `postgresql://`, and `pg://` URLs and dispatches them to `@objectstack/driver-sql` with `client: 'pg'`. Previously only `libsql:` / `https:` (Turso) and `file:` (SQLite) were recognised, so a `postgres://…` value was silently rewritten into a SQLite filename — a particularly nasty data-routing bug in production. The function now eagerly `import('pg')` so a missing-driver situation surfaces with an explicit, actionable error at boot.
+- **Pool sizing knobs**: `OS_CONTROL_PG_POOL_MIN` (default `0`) and `OS_CONTROL_PG_POOL_MAX` (default `10`) tune the knex `pg` pool without code changes.
+- **`pg` promoted to a runtime dependency of `apps/cloud`** so `pnpm deploy --prod` ships it inside the Docker image; image size unchanged at ~691 MB.
+- **`.env.cloudflare.secrets.example`, `setup-cloudflare-secrets.sh` (cloud + objectos), and `apps/cloud/README.md`** updated with the new env vars and a "Postgres in production" section that covers Neon / Supabase / RDS / Hyperdrive guidance.
+- **End-to-end verified**: `docker run` with `OS_CONTROL_DATABASE_URL=postgres://os:test@pg-test:5432/cloud` boots cleanly, `/api/v1/health` returns 200, and the full `sys_*` control-plane schema (Accounts, Activity, Agent, API Keys, Apps, Audit, Flows, OAuth, Organization, Packages, …) is materialised in Postgres on first boot.
+
 ### Changed — Slimmer production Docker images (`apps/objectos`, `apps/cloud`)
 - **3-stage builder → pruner → runner Dockerfiles**: full pnpm workspace is restored only in the builder; the pruner runs `pnpm --filter ... deploy --prod --legacy /deploy` to materialize a flat, devDeps-stripped tree; the runner copies just `/deploy` plus the freshly built `dist/` of the target app. CMD now runs `node node_modules/@objectstack/cli/bin/run.js serve dist/objectstack.config.js --prebuilt` directly — no `pnpm` at runtime.
 - **`@objectstack/cli` promoted to `dependencies`** in both `apps/objectos/package.json` and `apps/cloud/package.json` so the production entrypoint survives `--prod` pruning.

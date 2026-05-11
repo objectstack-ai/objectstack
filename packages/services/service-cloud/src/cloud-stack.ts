@@ -50,9 +50,37 @@ export interface CloudStackConfig {
 
 async function buildControlDriver(url: string, authToken?: string): Promise<{
     driver: IDataDriver;
-    driverName: 'sqlite' | 'turso';
+    driverName: 'sqlite' | 'turso' | 'postgres';
     databaseUrl: string;
 }> {
+    // Postgres / CockroachDB / any pg-wire database.
+    // Accept both `postgres://` and `postgresql://` schemes; `pg://` is also recognised
+    // for parity with the per-tenant artifact registry.
+    if (/^(postgres(ql)?|pg):\/\//i.test(url)) {
+        const { SqlDriver } = await import('@objectstack/driver-sql');
+        // `pg` is a peer/optional dep of knex; bring it in here so a clear error
+        // surfaces at boot if the host forgot to install it.
+        try {
+            await import('pg');
+        } catch (err) {
+            throw new Error(
+                `[service-cloud] Control-plane URL "${url}" requires the "pg" driver. `
+                + `Add \`pg\` to your application dependencies. Original: ${(err as Error).message}`,
+            );
+        }
+        const poolMin = Number.parseInt(process.env.OS_CONTROL_PG_POOL_MIN ?? '0', 10);
+        const poolMax = Number.parseInt(process.env.OS_CONTROL_PG_POOL_MAX ?? '10', 10);
+        const driver = new SqlDriver({
+            client: 'pg',
+            connection: url,
+            pool: {
+                min: Number.isFinite(poolMin) ? poolMin : 0,
+                max: Number.isFinite(poolMax) ? poolMax : 10,
+            },
+        });
+        return { driver: driver as unknown as IDataDriver, driverName: 'postgres', databaseUrl: url };
+    }
+
     if (/^(libsql|https?):\/\//i.test(url)) {
         const { TursoDriver } = await import('@objectstack/driver-turso');
         const driver = new TursoDriver({ url, authToken });

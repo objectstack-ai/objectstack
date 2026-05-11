@@ -228,6 +228,9 @@ importers:
       hono:
         specifier: ^4.12.18
         version: 4.12.18
+      pg:
+        specifier: ^8.20.0
+        version: 8.20.0
     devDependencies:
       '@cloudflare/containers':
         specifier: ^0.3.3
@@ -235,6 +238,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20260510.1
         version: 4.20260510.1
+      '@types/pg':
+        specifier: ^8.20.0
+        version: 8.20.0
       esbuild:
         specifier: ^0.28.0
         version: 0.28.0
@@ -5538,6 +5544,9 @@ packages:
 
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
+
+  '@types/pg@8.20.0':
+    resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
 
   '@types/prismjs@1.26.6':
     resolution: {integrity: sha512-vqlvI7qlMvcCBbVe0AKAb4f97//Hy0EBTaiW8AalRnG/xAN5zOiWWyrNqNXeq8+KAuvRewjCVY1+IPxk4RdNYw==}
@@ -14066,6 +14075,12 @@ snapshots:
       undici-types: 7.19.2
 
   '@types/normalize-package-data@2.4.4': {}
+
+  '@types/pg@8.20.0':
+    dependencies:
+      '@types/node': 25.6.2
+      pg-protocol: 1.13.0
+      pg-types: 2.2.0
 
   '@types/prismjs@1.26.6': {}
 
