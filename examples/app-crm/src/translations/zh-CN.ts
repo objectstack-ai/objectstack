@@ -338,13 +338,13 @@ export const zhCN: TranslationData = {
         status: {
           label: '状态',
           options: {
-            not_started: '未开始', in_progress: '进行中',
-            completed: '已完成', deferred: '已推迟', cancelled: '已取消',
+            not_started: '未开始', in_progress: '进行中', waiting: '等待中',
+            completed: '已完成', deferred: '已推迟',
           },
         },
         priority: {
           label: '优先级',
-          options: { low: '低', normal: '普通', high: '高' },
+          options: { low: '低', normal: '普通', high: '高', urgent: '紧急' },
         },
         due_date: { label: '截止日期' },
         assigned_to: { label: '负责人' },

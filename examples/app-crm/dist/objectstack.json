@@ -1974,9 +1974,9 @@
                 "options": {
                   "not_started": "未开始",
                   "in_progress": "进行中",
+                  "waiting": "等待中",
                   "completed": "已完成",
-                  "deferred": "已推迟",
-                  "cancelled": "已取消"
+                  "deferred": "已推迟"
                 }
               },
               "priority": {
@@ -1984,7 +1984,8 @@
                 "options": {
                   "low": "低",
                   "normal": "普通",
-                  "high": "高"
+                  "high": "高",
+                  "urgent": "紧急"
                 }
               },
               "due_date": {
