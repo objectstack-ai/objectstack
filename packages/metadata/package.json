@@ -56,7 +56,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.6.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.6"
   },
   "author": "ObjectStack",
   "repository": {

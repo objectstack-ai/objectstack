@@ -22,9 +22,9 @@
   },
   "devDependencies": {
     "@objectstack/runtime": "workspace:*",
-    "@sveltejs/kit": "^2.59.1",
+    "@sveltejs/kit": "^2.60.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.6"
   },
   "description": "SvelteKit adapter for ObjectStack — server endpoints for the ObjectStack REST API.",
   "keywords": [

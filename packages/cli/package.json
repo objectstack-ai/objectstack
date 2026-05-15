@@ -79,12 +79,12 @@
     "@objectstack/core": "workspace:^"
   },
   "devDependencies": {
-    "@oclif/plugin-help": "^6.2.46",
-    "@oclif/plugin-plugins": "^5.4.64",
+    "@oclif/plugin-help": "^6.2.48",
+    "@oclif/plugin-plugins": "^5.4.67",
     "@types/node": "^25.6.2",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.6"
   },
   "repository": {
     "type": "git",

@@ -39,7 +39,7 @@
     "@types/node": "^25.6.2",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
-    "turbo": "^2.9.11",
+    "turbo": "^2.9.14",
     "typescript": "^6.0.3"
   },
   "engines": {
