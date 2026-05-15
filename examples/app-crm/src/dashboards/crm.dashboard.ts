@@ -69,7 +69,6 @@ export const CrmOverviewDashboard: Dashboard = {
       options: {
         icon: 'DollarSign',
         format: '$0,0',
-        prefix: '$',
         trend: { value: 12.5, direction: 'up', label: 'vs last month' },
       },
     },
@@ -129,7 +128,6 @@ export const CrmOverviewDashboard: Dashboard = {
       options: {
         icon: 'bar-chart',
         format: '$0,0',
-        prefix: '$',
         trend: { value: 1.2, direction: 'up', label: 'vs last month' },
       },
     },
