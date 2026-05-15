@@ -29,6 +29,8 @@ export interface SysCredentialRow {
     database_driver?: string;
     database_url?: string;
     database_auth_token?: string;
+    /** The encrypted (or, with NoopSecretEncryptor, plaintext) DB secret. */
+    secret_ciphertext?: string;
 }
 
 export interface SysProjectRevisionRow {
@@ -261,7 +263,9 @@ export function buildRuntimeBlock(project: SysProjectRow, cred: SysCredentialRow
         databaseDriver: driver,
         databaseUrl: url,
     };
-    const token = cred?.database_auth_token ?? project.database_auth_token;
+    const token = cred?.database_auth_token
+        ?? cred?.secret_ciphertext
+        ?? project.database_auth_token;
     if (token) out.databaseAuthToken = token;
     return out;
 }
