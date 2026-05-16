@@ -34,6 +34,7 @@
     "@objectstack/plugin-auth": "workspace:^",
     "@objectstack/plugin-security": "workspace:^",
     "@objectstack/runtime": "workspace:^",
+    "@objectstack/service-i18n": "workspace:^",
     "@objectstack/service-package": "workspace:^",
     "@objectstack/service-storage": "workspace:*",
     "@objectstack/service-tenant": "workspace:^",

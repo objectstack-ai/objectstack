@@ -48,6 +48,7 @@
     "@objectstack/service-automation": "workspace:*",
     "@objectstack/service-cloud": "workspace:*",
     "@objectstack/service-feed": "workspace:*",
+    "@objectstack/service-i18n": "workspace:*",
     "@objectstack/service-package": "workspace:*",
     "@objectstack/service-tenant": "workspace:*",
     "@objectstack/spec": "workspace:*",

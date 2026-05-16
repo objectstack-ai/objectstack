@@ -260,9 +260,12 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             });
 
             // ── Analytics ───────────────────────────────────────────────
+            // Route via dispatch() (not handleAnalytics directly) so the host
+            // dispatcher's project-aware kernel swap runs first — the per-project
+            // kernel owns the `analytics` service (registered by ObjectQLPlugin).
             server.post(`${prefix}/analytics/query`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.handleAnalytics('query', 'POST', req.body, { request: req });
+                    const result = await dispatcher.dispatch('POST', '/analytics/query', req.body, req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
@@ -271,7 +274,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             server.get(`${prefix}/analytics/meta`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.handleAnalytics('meta', 'GET', {}, { request: req });
+                    const result = await dispatcher.dispatch('GET', '/analytics/meta', undefined, req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
@@ -280,7 +283,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             server.post(`${prefix}/analytics/sql`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.handleAnalytics('sql', 'POST', req.body, { request: req });
+                    const result = await dispatcher.dispatch('POST', '/analytics/sql', req.body, req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
@@ -609,11 +612,15 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             });
 
             // ── i18n ────────────────────────────────────────────────────
-            // Bridges to HttpDispatcher.handleI18n() which resolves the i18n
-            // service from the kernel (either I18nServicePlugin or memory fallback).
+            // Route via dispatch() (not handleI18n directly) so the host
+            // dispatcher's project-aware kernel swap runs first. Without this,
+            // i18n requests hit the host kernel's in-memory fallback (which
+            // is always empty) instead of the per-project I18nServicePlugin
+            // populated by ArtifactKernelFactory with the artifact's
+            // translation bundles.
             server.get(`${prefix}/i18n/locales`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.handleI18n('/locales', 'GET', req.query, { request: req });
+                    const result = await dispatcher.dispatch('GET', '/i18n/locales', undefined, req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
@@ -622,7 +629,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             server.get(`${prefix}/i18n/translations/:locale`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.handleI18n(`/translations/${req.params.locale}`, 'GET', req.query, { request: req });
+                    const result = await dispatcher.dispatch('GET', `/i18n/translations/${req.params.locale}`, undefined, req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
@@ -631,7 +638,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             server.get(`${prefix}/i18n/labels/:object/:locale`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.handleI18n(`/labels/${req.params.object}/${req.params.locale}`, 'GET', req.query, { request: req });
+                    const result = await dispatcher.dispatch('GET', `/i18n/labels/${req.params.object}/${req.params.locale}`, undefined, req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);

@@ -3,7 +3,7 @@
 import type { IDataEngine } from '@objectstack/spec/contracts';
 
 /**
- * Persisted file metadata record (matches `system_file` object schema).
+ * Persisted file metadata record (matches `sys_file` object schema).
  */
 export interface FileRecord {
   id: string;
@@ -23,7 +23,7 @@ export interface FileRecord {
 }
 
 /**
- * Persisted upload-session record (matches `system_upload_session` object schema).
+ * Persisted upload-session record (matches `sys_upload_session` object schema).
  */
 export interface UploadSessionRecord {
   id: string;
@@ -71,7 +71,7 @@ export class StorageMetadataStore {
     this.files.set(full.id, full);
     if (this.engine) {
       try {
-        await this.engine.insert('system_file', full);
+        await this.engine.insert('sys_file', full);
       } catch {
         /* engine not available or schema not migrated — keep in-memory only */
       }
@@ -82,7 +82,7 @@ export class StorageMetadataStore {
   async getFile(id: string): Promise<FileRecord | null> {
     if (this.engine) {
       try {
-        const found = await this.engine.findOne('system_file', { where: { id } });
+        const found = await this.engine.findOne('sys_file', { where: { id } });
         if (found) return found as FileRecord;
       } catch {
         /* fall through to memory */
@@ -98,7 +98,7 @@ export class StorageMetadataStore {
     this.files.set(id, merged);
     if (this.engine) {
       try {
-        await this.engine.update('system_file', merged as any, { where: { id } } as any);
+        await this.engine.update('sys_file', merged as any, { where: { id } } as any);
       } catch {
         /* ignore */
       }
@@ -110,7 +110,7 @@ export class StorageMetadataStore {
     this.files.delete(id);
     if (this.engine) {
       try {
-        await this.engine.delete('system_file', { where: { id } } as any);
+        await this.engine.delete('sys_file', { where: { id } } as any);
       } catch {
         /* ignore */
       }
@@ -134,7 +134,7 @@ export class StorageMetadataStore {
     this.sessions.set(full.id, full);
     if (this.engine) {
       try {
-        await this.engine.insert('system_upload_session', full);
+        await this.engine.insert('sys_upload_session', full);
       } catch {
         /* ignore */
       }
@@ -145,7 +145,7 @@ export class StorageMetadataStore {
   async getSession(id: string): Promise<UploadSessionRecord | null> {
     if (this.engine) {
       try {
-        const found = await this.engine.findOne('system_upload_session', { where: { id } });
+        const found = await this.engine.findOne('sys_upload_session', { where: { id } });
         if (found) return found as UploadSessionRecord;
       } catch {
         /* ignore */
@@ -166,7 +166,7 @@ export class StorageMetadataStore {
     this.sessions.set(id, merged);
     if (this.engine) {
       try {
-        await this.engine.update('system_upload_session', merged as any, { where: { id } } as any);
+        await this.engine.update('sys_upload_session', merged as any, { where: { id } } as any);
       } catch {
         /* ignore */
       }
@@ -178,7 +178,7 @@ export class StorageMetadataStore {
     this.sessions.delete(id);
     if (this.engine) {
       try {
-        await this.engine.delete('system_upload_session', { where: { id } } as any);
+        await this.engine.delete('sys_upload_session', { where: { id } } as any);
       } catch {
         /* ignore */
       }

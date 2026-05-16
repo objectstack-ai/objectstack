@@ -7,7 +7,7 @@ Storage Service for ObjectStack — implements `IStorageService` with local file
 - **Multiple Adapters**: Local filesystem (development) and S3-compatible storage (production)
 - **Presigned Uploads**: Browser-direct upload via presigned URLs (S3 native, local HMAC-signed tokens)
 - **Chunked / Multipart Upload**: Resumable large file uploads with progress tracking
-- **File Metadata Store**: `system_file` object tracks fileId → key mapping and lifecycle status
+- **File Metadata Store**: `sys_file` object tracks fileId → key mapping and lifecycle status
 - **REST Routes**: Auto-mounted `/api/v1/storage/*` endpoints consumed by `@objectstack/client`
 - **Type-Safe**: Full TypeScript support with Zod-validated API contracts
 
@@ -125,7 +125,7 @@ const completed = await client.storage.resumeUpload(
                               ▼                         ▼
                      ┌─────────────────┐      ┌─────────────────┐
                      │ MetadataStore   │      │ Filesystem / S3  │
-                     │ (system_file)   │      │ (actual bytes)   │
+                     │ (sys_file)      │      │ (actual bytes)   │
                      └─────────────────┘      └─────────────────┘
 ```
 
@@ -133,8 +133,8 @@ const completed = await client.storage.resumeUpload(
 
 The plugin registers two system objects via the manifest service:
 
-- **`system_file`** — File metadata (fileId, key, name, mimeType, size, scope, status)
-- **`system_upload_session`** — Chunked upload state (progress, parts, resumeToken)
+- **`sys_file`** — File metadata (fileId, key, name, mimeType, size, scope, status)
+- **`sys_upload_session`** — Chunked upload state (progress, parts, resumeToken)
 
 ## License
 

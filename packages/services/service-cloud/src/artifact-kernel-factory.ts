@@ -165,10 +165,57 @@ export class ArtifactKernelFactory implements ProjectKernelFactory {
             this.logger.warn?.('[ArtifactKernelFactory] OS_AUTH_SECRET not set — per-project AuthPlugin skipped (auth endpoints will return 404)', { projectId });
         }
 
+        // Per-project SecurityPlugin — provides RBAC + tenant_isolation RLS
+        // AND, crucially, the `sys_user` insert middleware that auto-creates
+        // a personal organization for new self-service signups (without it,
+        // a freshly registered user lands on a UI showing "No data" because
+        // they have zero `sys_member` rows and the default RLS denies all).
+        // The CLI's `objectstack serve` does this for `pnpm dev`; we have
+        // to mirror that behaviour for cloud-deployed per-project kernels.
+        try {
+            const { SecurityPlugin } = await import('@objectstack/plugin-security');
+            const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'true').toLowerCase() !== 'false';
+            await kernel.use(new SecurityPlugin({ multiTenant }) as any);
+        } catch (err: any) {
+            this.logger.warn?.('[ArtifactKernelFactory] SecurityPlugin not registered', {
+                projectId,
+                error: err?.message,
+            });
+        }
+
         const projectName = project.hostname ?? projectId;
         const bundle = artifact.metadata as any;
         const sys = bundle?.manifest ?? bundle;
         const packageId = sys?.packageId ?? sys?.package_id ?? bundle?.packageId;
+
+        // Per-project i18n: register I18nServicePlugin BEFORE AppPlugin so
+        // AppPlugin.loadTranslations() finds an i18n service to populate.
+        // Without this, the artifact's `translations` array is silently
+        // dropped and the `/api/v1/i18n/*` endpoints return empty payloads.
+        const i18nCfg = (bundle?.i18n ?? sys?.i18n ?? {}) as Record<string, any>;
+        const trArr = Array.isArray(bundle?.translations) ? bundle.translations
+            : Array.isArray(sys?.translations) ? sys.translations : [];
+        // Always register — even with no inline translations the service
+        // can serve labels/locales loaded by hosted apps. Cheap to register.
+        try {
+            const { I18nServicePlugin } = await import('@objectstack/service-i18n');
+            await kernel.use(new I18nServicePlugin({
+                defaultLocale: i18nCfg.defaultLocale,
+                fallbackLocale: i18nCfg.fallbackLocale ?? i18nCfg.defaultLocale ?? 'en',
+                // Routes are dispatched by HttpDispatcher.handleI18n via
+                // kernel.getService('i18n'); the host worker owns the
+                // HTTP server. Skip self-registration to avoid warnings.
+                registerRoutes: false,
+            } as any));
+            console.warn(
+                `[ArtifactKernelFactory] I18nServicePlugin registered (project=${projectId}, translations=${trArr.length}, defaultLocale=${i18nCfg.defaultLocale ?? 'en'})`,
+            );
+        } catch (err: any) {
+            this.logger.warn?.('[ArtifactKernelFactory] I18nServicePlugin not registered', {
+                projectId,
+                error: err?.message,
+            });
+        }
 
         await kernel.use(new AppPlugin(bundle, {
             projectId,
@@ -179,6 +226,54 @@ export class ArtifactKernelFactory implements ProjectKernelFactory {
         } as any));
 
         await kernel.bootstrap();
+
+        // Belt-and-braces: load translation bundles directly into the i18n
+        // service after bootstrap. AppPlugin.loadTranslations should do this
+        // during its `start` phase, but several conditions (missing objectql
+        // service, runtime.onEnable throwing, bundle keys mismatch) can cause
+        // it to bail before reaching the i18n step. Loading here guarantees
+        // the bundles attached to the artifact metadata are always served via
+        // `/api/v1/i18n/*`, regardless of AppPlugin's runtime path.
+        let i18nSvc: any = null;
+        try {
+            i18nSvc = (kernel as any).getService?.('i18n');
+        } catch {
+            // getService throws when service isn't registered — leave null
+            i18nSvc = null;
+        }
+        try {
+            if (i18nSvc && typeof i18nSvc.loadTranslations === 'function') {
+                if (i18nCfg.defaultLocale && typeof i18nSvc.setDefaultLocale === 'function') {
+                    i18nSvc.setDefaultLocale(i18nCfg.defaultLocale);
+                }
+                let loaded = 0;
+                for (const tbundle of trArr) {
+                    if (!tbundle || typeof tbundle !== 'object') continue;
+                    for (const [locale, data] of Object.entries(tbundle)) {
+                        if (data && typeof data === 'object') {
+                            try {
+                                i18nSvc.loadTranslations(locale, data as Record<string, unknown>);
+                                loaded++;
+                            } catch (err: any) {
+                                this.logger.warn?.('[ArtifactKernelFactory] i18n loadTranslations failed', {
+                                    projectId, locale, error: err?.message,
+                                });
+                            }
+                        }
+                    }
+                }
+                if (loaded > 0) {
+                    this.logger.info?.('[ArtifactKernelFactory] i18n direct-load complete', {
+                        projectId, locales: loaded, bundles: trArr.length,
+                    });
+                }
+            }
+        } catch (err: any) {
+            this.logger.warn?.('[ArtifactKernelFactory] i18n direct-load failed', {
+                projectId,
+                error: err?.message,
+            });
+        }
 
         this.logger.info?.('[ArtifactKernelFactory] kernel ready', {
             projectId,

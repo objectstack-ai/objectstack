@@ -174,6 +174,67 @@ export class RemoteTransport {
     }
   }
 
+  async aggregate(object: string, query: any): Promise<Record<string, unknown>[]> {
+    await this.ensureConnected();
+    this.assertSafeIdentifier(object);
+
+    const selectParts: string[] = [];
+    const groupBy: string[] = Array.isArray(query?.groupBy) ? query.groupBy : [];
+
+    for (const field of groupBy) {
+      this.assertSafeIdentifier(field);
+      selectParts.push(`"${field}"`);
+    }
+
+    const aggregations = query?.aggregations || query?.aggregate || [];
+    for (const agg of aggregations) {
+      const funcRaw = String(agg.function || agg.func || '').toLowerCase();
+      if (!['count', 'sum', 'avg', 'min', 'max'].includes(funcRaw)) {
+        throw new Error(`Unsupported aggregate function: ${funcRaw}`);
+      }
+      const field = agg.field || '*';
+      let fieldSql: string;
+      if (field === '*') {
+        fieldSql = '*';
+      } else {
+        this.assertSafeIdentifier(field);
+        fieldSql = `"${field}"`;
+      }
+      const alias = agg.alias || `${funcRaw}_${field === '*' ? 'all' : field}`;
+      this.assertSafeIdentifier(alias);
+      selectParts.push(`${funcRaw}(${fieldSql}) AS "${alias}"`);
+    }
+
+    if (selectParts.length === 0) selectParts.push('*');
+
+    let sql = `SELECT ${selectParts.join(', ')} FROM "${object}"`;
+    const args: any[] = [];
+
+    const { whereClauses, args: whereArgs } = this.buildWhereSQL(query?.where);
+    if (whereClauses) {
+      sql += ` WHERE ${whereClauses}`;
+      args.push(...whereArgs);
+    }
+
+    if (groupBy.length > 0) {
+      sql += ` GROUP BY ${groupBy.map((f) => `"${f}"`).join(', ')}`;
+    }
+
+    try {
+      const result = await this.client!.execute({ sql, args });
+      return this.mapRows(result);
+    } catch (error: any) {
+      if (
+        error.message &&
+        (error.message.includes('no such table') ||
+          error.message.includes('no such column'))
+      ) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
   async create(object: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
     await this.ensureConnected();
 
@@ -765,11 +826,15 @@ export class RemoteTransport {
 
   /**
    * Serialize a value for @libsql/client args.
-   * JSON objects/arrays are stringified; booleans are kept as-is (libsql handles them).
+   * - `Date` → ISO 8601 string (avoids libsql HTTP transport coercing the
+   *   value to a REAL column and round-tripping it as `"<epoch>.0"`).
+   * - JSON objects/arrays are stringified.
+   * - booleans are kept as-is (libsql handles them).
    */
   private serializeValue(value: unknown): any {
     if (value === null || value === undefined) return null;
-    if (typeof value === 'object' && !(value instanceof Date)) {
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'object') {
       return JSON.stringify(value);
     }
     return value;

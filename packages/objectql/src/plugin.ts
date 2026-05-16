@@ -149,6 +149,28 @@ export class ObjectQLPlugin implements Plugin {
 
     ctx.registerService('protocol', protocolShim);
     ctx.logger.info('Protocol service registered');
+
+    // Register an `analytics` service adapter that maps the dispatcher's
+    // expected interface (query / getMeta / generateSql) onto the
+    // protocol shim's `analyticsQuery`. Without this, HttpDispatcher's
+    // `handleAnalytics` cannot resolve a service and `/api/v1/analytics/*`
+    // returns ROUTE_NOT_FOUND, even though discovery advertises the route
+    // (objectql's getDiscovery hardcodes `analytics: enabled:true`). The
+    // adapter delegates `query` to the cube → engine.aggregate translator
+    // already implemented in protocol.ts; getMeta/generateSql return a
+    // structured "not implemented" payload so callers see something
+    // useful instead of a 500.
+    ctx.registerService('analytics', {
+      query: (body: any) => protocolShim.analyticsQuery(body),
+      getMeta: async () => ({
+        cubes: [],
+        message: 'Analytics meta endpoint not implemented by ObjectQL adapter',
+      }),
+      generateSql: async (_body: any) => ({
+        sql: null,
+        message: 'Analytics SQL generation not implemented by ObjectQL adapter',
+      }),
+    });
   }
 
   start = async (ctx: PluginContext) => {

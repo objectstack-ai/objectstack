@@ -19,7 +19,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * "protocol + service ownership" pattern used by `service-feed`.
  */
 export const SystemFile = ObjectSchema.create({
-  name: 'system_file',
+  name: 'sys_file',
   label: 'System File',
   pluralLabel: 'System Files',
   icon: 'file',

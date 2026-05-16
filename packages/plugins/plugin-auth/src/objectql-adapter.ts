@@ -31,6 +31,73 @@ export function resolveProtocolName(model: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * better-auth datetime columns (snake_case) per model.
+ *
+ * When the underlying driver stored these as JavaScript `Date` objects
+ * (legacy behaviour), the libsql HTTP transport coerces the value to a REAL
+ * column and round-trips it as a string like `"1779497911249.0"`. That
+ * string is not a valid Date string (it has a trailing `.0`), so
+ * `new Date(...)` produces `Invalid Date` and better-auth's client treats
+ * the session as expired — causing a login/redirect loop.
+ *
+ * We normalise these legacy values back to ISO strings on **read** so the
+ * factory's `supportsDates: false` parser can turn them into real Date
+ * objects. New writes always go through better-auth's own
+ * `Date → ISO string` conversion (because we declare `supportsDates: false`
+ * below), so no further `.0`-suffixed values will ever be created.
+ */
+const LEGACY_DATETIME_FIELDS_BY_MODEL: Record<string, string[]> = {
+  user: ['created_at', 'updated_at'],
+  session: ['expires_at', 'created_at', 'updated_at'],
+  account: [
+    'access_token_expires_at',
+    'refresh_token_expires_at',
+    'created_at',
+    'updated_at',
+  ],
+  verification: ['expires_at', 'created_at', 'updated_at'],
+};
+
+const NUMERIC_STRING_RE = /^-?\d+(\.\d+)?$/;
+
+/**
+ * If `value` looks like a stringified epoch-ms (optionally with `.0`),
+ * convert it to an ISO 8601 string. Otherwise return it unchanged.
+ */
+function normaliseLegacyDate(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  if (!NUMERIC_STRING_RE.test(value)) return value;
+  const n = parseFloat(value);
+  if (!Number.isFinite(n)) return value;
+  // Heuristic: epoch milliseconds are at least 10 digits (year 2001+).
+  if (Math.abs(n) < 1e10) return value;
+  const d = new Date(n);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toISOString();
+}
+
+/**
+ * Walk a record and rewrite any legacy `.0`-suffixed datetime values
+ * into ISO strings. Mutates and returns the record.
+ */
+function normaliseLegacyDates<T extends Record<string, any> | null | undefined>(
+  model: string,
+  record: T,
+): T {
+  if (!record) return record;
+  const cols = LEGACY_DATETIME_FIELDS_BY_MODEL[model];
+  if (!cols) return record;
+  for (const col of cols) {
+    if (col in record) {
+      (record as Record<string, unknown>)[col] = normaliseLegacyDate(
+        (record as Record<string, unknown>)[col],
+      );
+    }
+  }
+  return record;
+}
+
+/**
  * Convert better-auth where clause to ObjectQL query format.
  *
  * Field names in the incoming {@link CleanedWhere} are expected to already be
@@ -88,9 +155,13 @@ export function createObjectQLAdapterFactory(dataEngine: IDataEngine) {
   return createAdapterFactory({
     config: {
       adapterId: 'objectql',
-      // ObjectQL natively supports these types — no extra conversion needed
-      supportsBooleans: true,
-      supportsDates: true,
+      // We let better-auth handle Date↔string and boolean↔0/1 conversion so
+      // that values land in the underlying SQL driver as primitive strings
+      // and integers. Some drivers (e.g. libsql over the HTTP transport)
+      // otherwise mangle `Date` objects into `"<epoch>.0"` strings that
+      // break the client-side session parser.
+      supportsBooleans: false,
+      supportsDates: false,
       supportsJSON: true,
     },
     adapter: () => ({
@@ -98,7 +169,7 @@ export function createObjectQLAdapterFactory(dataEngine: IDataEngine) {
         { model, data, select: _select }: { model: string; data: T; select?: string[] },
       ): Promise<T> => {
         const result = await dataEngine.insert(model, data);
-        return result as T;
+        return normaliseLegacyDates(model, result) as T;
       },
 
       findOne: async <T>(
@@ -108,7 +179,7 @@ export function createObjectQLAdapterFactory(dataEngine: IDataEngine) {
 
         const result = await dataEngine.findOne(model, { where: filter, fields: select });
 
-        return result ? (result as T) : null;
+        return result ? (normaliseLegacyDates(model, result) as T) : null;
       },
 
       findMany: async <T>(
@@ -130,7 +201,7 @@ export function createObjectQLAdapterFactory(dataEngine: IDataEngine) {
           orderBy,
         });
 
-        return results as T[];
+        return results.map((r) => normaliseLegacyDates(model, r as Record<string, any>)) as T[];
       },
 
       count: async (
@@ -150,7 +221,7 @@ export function createObjectQLAdapterFactory(dataEngine: IDataEngine) {
         if (!record) return null;
 
         const result = await dataEngine.update(model, { ...(update as any), id: record.id });
-        return result ? (result as T) : null;
+        return result ? (normaliseLegacyDates(model, result) as T) : null;
       },
 
       updateMany: async (

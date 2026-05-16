@@ -187,6 +187,7 @@ export class DefaultProjectKernelFactory implements ProjectKernelFactory {
 
     for (const p of basePlugins) await kernel.use(p);
     const projectName = (project as any).name ?? (project as any).hostname;
+    await this.maybeRegisterI18n(kernel, bundles, projectId);
     for (const b of bundles) {
       const sys = b?.manifest || b;
       const packageId = sys?.packageId ?? sys?.package_id ?? b?.packageId;
@@ -274,6 +275,7 @@ export class DefaultProjectKernelFactory implements ProjectKernelFactory {
     for (const p of basePlugins) await kernel.use(p);
 
     const projectName = syntheticProject.hostname ?? projectId;
+    await this.maybeRegisterI18n(kernel, bundles, projectId);
     for (const b of bundles) {
       const sys = b?.manifest || b;
       const packageId = sys?.packageId ?? sys?.package_id ?? b?.packageId;
@@ -381,6 +383,48 @@ export class DefaultProjectKernelFactory implements ProjectKernelFactory {
       }
       default:
         throw new Error(`[ProjectKernelFactory] Unsupported driver type: ${driverType}`);
+    }
+  }
+
+  /**
+   * Inspect the resolved app bundles for translation data and, if present,
+   * register {@link I18nServicePlugin} on the kernel BEFORE AppPlugin so
+   * AppPlugin.loadTranslations() finds an i18n service to populate.
+   *
+   * Without this, the artifact's `translations` array is silently dropped
+   * and the `/api/v1/i18n/*` endpoints return empty payloads.
+   */
+  private async maybeRegisterI18n(kernel: ObjectKernel, bundles: any[], projectId: string): Promise<void> {
+    if (!Array.isArray(bundles) || bundles.length === 0) return;
+
+    let defaultLocale: string | undefined;
+    let fallbackLocale: string | undefined;
+    let hasTranslations = false;
+
+    for (const b of bundles) {
+      const sys = b?.manifest ?? b;
+      const i18nCfg = (b?.i18n ?? sys?.i18n ?? {}) as Record<string, any>;
+      if (Array.isArray(b?.translations) && b.translations.length > 0) hasTranslations = true;
+      if (Array.isArray(sys?.translations) && sys.translations.length > 0) hasTranslations = true;
+      if (i18nCfg && Object.keys(i18nCfg).length > 0) hasTranslations = true;
+      defaultLocale ??= i18nCfg.defaultLocale;
+      fallbackLocale ??= i18nCfg.fallbackLocale;
+    }
+
+    if (!hasTranslations) return;
+
+    try {
+      const { I18nServicePlugin } = await import('@objectstack/service-i18n');
+      await kernel.use(new I18nServicePlugin({
+        defaultLocale,
+        fallbackLocale: fallbackLocale ?? defaultLocale ?? 'en',
+        registerRoutes: false,
+      } as any));
+    } catch (err: any) {
+      this.logger.warn?.('[ProjectKernelFactory] I18nServicePlugin not registered', {
+        projectId,
+        error: err?.message,
+      });
     }
   }
 }

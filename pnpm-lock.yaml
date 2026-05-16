@@ -528,6 +528,9 @@ importers:
       '@objectstack/service-feed':
         specifier: workspace:*
         version: link:../../packages/services/service-feed
+      '@objectstack/service-i18n':
+        specifier: workspace:*
+        version: link:../../packages/services/service-i18n
       '@objectstack/service-package':
         specifier: workspace:*
         version: link:../../packages/services/service-package
@@ -1795,6 +1798,9 @@ importers:
       '@objectstack/runtime':
         specifier: workspace:^
         version: link:../../runtime
+      '@objectstack/service-i18n':
+        specifier: workspace:^
+        version: link:../service-i18n
       '@objectstack/service-package':
         specifier: workspace:^
         version: link:../service-package

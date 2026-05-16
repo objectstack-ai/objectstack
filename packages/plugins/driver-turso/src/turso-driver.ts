@@ -491,6 +491,11 @@ export class TursoDriver extends SqlDriver {
     return super.count(object, query, options);
   }
 
+  override async aggregate(object: string, query: any, options?: any): Promise<any> {
+    if (this.isRemote) return this.remoteTransport!.aggregate(object, query);
+    return super.aggregate(object, query, options);
+  }
+
   // ===================================
   // Bulk Operations (remote mode overrides)
   // ===================================

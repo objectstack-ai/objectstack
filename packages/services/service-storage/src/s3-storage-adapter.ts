@@ -240,7 +240,7 @@ export class S3StorageAdapter implements IStorageService {
     const s3 = await this.s3Mod();
     // We need the key — store the relationship elsewhere or pass via metadata.
     // For the S3 adapter, `uploadId` is the S3-native UploadId. The key is
-    // tracked in the StorageMetadataStore (system_upload_session.key).
+    // tracked in the StorageMetadataStore (sys_upload_session.key).
     // Here we retrieve it from session state; the plugin ensures the correct
     // key is passed. However, the IStorageService contract doesn't include key
     // in uploadChunk — so we work around by storing the mapping in a WeakMap

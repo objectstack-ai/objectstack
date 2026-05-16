@@ -12,7 +12,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * cleaned up by the storage service on `complete` / `abort` / TTL expiry.
  */
 export const SystemUploadSession = ObjectSchema.create({
-  name: 'system_upload_session',
+  name: 'sys_upload_session',
   label: 'System Upload Session',
   pluralLabel: 'System Upload Sessions',
   icon: 'upload-cloud',
