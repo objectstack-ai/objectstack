@@ -500,9 +500,16 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         }
 
         // 2. In-memory SchemaRegistry (artifact-loaded out-of-box values).
-        //    Project kernels skip the process-wide registry to avoid cross-
-        //    project leakage; their artifact source is MetadataService below.
-        if (item === undefined && this.projectId === undefined) {
+        //    Both control-plane (unscoped) and project kernels consult the
+        //    registry. The previous guard that skipped the registry for
+        //    project kernels was meant to prevent cross-project leakage at
+        //    the LIST level — but for a single-item lookup the kernel's own
+        //    `engine.registry` is project-local (each ObjectQL instance has
+        //    its own SchemaRegistry), so reading from it is safe and
+        //    necessary. Without this, project-kernel callers of
+        //    `GET /api/v1/meta/object/<name>` 404 even though the object is
+        //    registered and visible via the list endpoint.
+        if (item === undefined) {
             item = this.engine.registry.getItem(request.type, request.name);
             if (item === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];

@@ -88,6 +88,8 @@ Dashboard header action
 | **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'grouped-bar' \| 'stacked-bar' \| 'bi-polar-bar' \| 'line' \| 'area' \| 'stacked-area' \| 'step-line' \| 'spline' \| 'pie' \| 'donut' \| 'funnel' \| 'pyramid' \| 'scatter' \| 'bubble' \| 'treemap' \| 'sunburst' \| 'sankey' \| 'word-cloud' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'choropleth' \| 'bubble-map' \| 'gl-map' \| 'heatmap' \| 'radar' \| 'waterfall' \| 'box-plot' \| 'violin' \| 'candlestick' \| 'stock' \| 'table' \| 'pivot'>` | ✅ | Visualization type |
 | **chartConfig** | `Object` | optional | Chart visualization configuration |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
+| **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
+| **requiresService** | `string` | optional | Hide the widget unless the named kernel service is registered |
 | **actionUrl** | `string` | optional | URL or target for the widget action button |
 | **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api'>` | optional | Type of action for the widget action button |
 | **actionIcon** | `string` | optional | Icon identifier for the widget action button |

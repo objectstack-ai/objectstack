@@ -71,9 +71,15 @@ export const SETUP_APP: App = {
       label: 'Platform',
       icon: 'layers',
       children: [
-        { id: 'nav_apps', type: 'object', label: 'Apps', objectName: 'sys_app', icon: 'layout-grid' },
-        { id: 'nav_packages', type: 'object', label: 'Packages', objectName: 'sys_package', icon: 'package' },
-        { id: 'nav_package_installations', type: 'object', label: 'Installations', objectName: 'sys_package_installation', icon: 'package-check' },
+        // `sys_app` / `sys_package` / `sys_package_installation` are
+        // contributed by `@objectstack/service-tenant` (control-plane scope).
+        // Single-project runtimes do not register them — the `requiresObject`
+        // capability flag tells the frontend to hide these entries when the
+        // backing object is not in the SchemaRegistry, avoiding the
+        // 404-when-clicked trap.
+        { id: 'nav_apps', type: 'object', label: 'Apps', objectName: 'sys_app', icon: 'layout-grid', requiresObject: 'sys_app' },
+        { id: 'nav_packages', type: 'object', label: 'Packages', objectName: 'sys_package', icon: 'package', requiresObject: 'sys_package' },
+        { id: 'nav_package_installations', type: 'object', label: 'Installations', objectName: 'sys_package_installation', icon: 'package-check', requiresObject: 'sys_package_installation' },
         { id: 'nav_metadata', type: 'object', label: 'All Metadata', objectName: 'sys_metadata', icon: 'file-cog' },
       ],
     },

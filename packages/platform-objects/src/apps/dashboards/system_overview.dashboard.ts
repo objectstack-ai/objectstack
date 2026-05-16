@@ -81,6 +81,9 @@ export const SystemOverviewDashboard = Dashboard.create({
       title: 'Packages Installed',
       type: 'metric',
       object: 'sys_package_installation',
+      // Cloud-only object — only registered when service-tenant is loaded.
+      // Hide this widget gracefully in single-project runtimes.
+      requiresObject: 'sys_package_installation',
       layout: {
         x: 9,
         y: 0,

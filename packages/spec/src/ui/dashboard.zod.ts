@@ -107,6 +107,27 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
   /** Color variant for the widget (e.g., KPI card accent color) */
   colorVariant: WidgetColorVariantSchema.optional().describe('Widget color variant for theming'),
 
+  /**
+   * Runtime capability gate — widget is hidden when the named object is
+   * not registered in the runtime's SchemaRegistry. Mirrors
+   * `NavigationItem.requiresObject` so cloud-only widgets (e.g. those
+   * keyed on `sys_app` / `sys_package_installation`) silently disappear
+   * in single-project runtimes instead of rendering a 404 error.
+   *
+   * Defaults to the widget's `object` field when not explicitly set —
+   * any widget that targets an object will be gated on that object's
+   * registration. Set this to a different value (or empty string to
+   * disable) when the widget should appear even if its `object` is
+   * unavailable.
+   */
+  requiresObject: z.string().optional().describe('Hide the widget unless the named object is registered'),
+
+  /**
+   * Runtime capability gate — widget is hidden when the named kernel
+   * service is not registered. Mirrors `NavigationItem.requiresService`.
+   */
+  requiresService: z.string().optional().describe('Hide the widget unless the named kernel service is registered'),
+
   /** Action URL for the widget header action button */
   actionUrl: z.string().optional().describe('URL or target for the widget action button'),
 

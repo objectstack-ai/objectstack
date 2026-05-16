@@ -48,6 +48,31 @@ const BaseNavItemSchema = z.object({
 
   /** Permissions required to see/access this navigation item */
   requiredPermissions: z.array(z.string()).optional().describe('Permissions required to access this item'),
+
+  /**
+   * Capability gate — registered object name.
+   *
+   * When set, the frontend MUST hide (or render disabled) this navigation
+   * entry if the named object is not registered in the runtime's
+   * SchemaRegistry. Useful for cloud-only objects (e.g. `sys_app`,
+   * `sys_package`, `sys_package_installation`) that don't exist in
+   * single-project runtimes — declaring the dependency here avoids
+   * 404-when-clicked traps without hard-coding environment checks in the
+   * UI.
+   *
+   * Independent of `visible` (CEL) and `requiredPermissions` (RBAC) —
+   * this gates on runtime *capability*, not user authorization.
+   */
+  requiresObject: z.string().optional().describe('Hide/disable this entry unless the named object is registered in the runtime'),
+
+  /**
+   * Capability gate — registered service name.
+   *
+   * Same idea as `requiresObject` but keyed on a kernel service
+   * (e.g. `'ai'`, `'tenant'`, `'realtime'`). Hide the entry when the
+   * service isn't installed.
+   */
+  requiresService: z.string().optional().describe('Hide/disable this entry unless the named kernel service is registered'),
 });
 
 /**
