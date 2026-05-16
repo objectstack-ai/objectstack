@@ -53,11 +53,27 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             ).rejects.toThrow('Item data is required');
         });
 
-        it('should register item in SchemaRegistry', async () => {
+        it('should NOT mutate the SchemaRegistry for non-object types (ADR-0005)', async () => {
+            // ADR-0005: sys_metadata is the authoritative overlay store.
+            // saveMetaItem must not pollute the artifact-loaded registry for
+            // overlay-eligible types (view/dashboard/etc.) — getMetaItem reads
+            // sys_metadata first, so the registry stays at the artifact value.
             await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp });
 
             const stored = registry.getItem('app', 'test_app');
-            expect(stored).toEqual(sampleApp);
+            expect(stored).toBeUndefined();
+        });
+
+        it('should register `object` type items in SchemaRegistry (engine schema-sync needs it)', async () => {
+            await protocol.saveMetaItem({
+                type: 'object',
+                name: 'test_obj',
+                item: { name: 'test_obj', label: 'Test', fields: {} },
+            });
+
+            const stored = registry.getItem('object', 'test_obj');
+            expect(stored).toBeDefined();
+            expect((stored as any).name).toBe('test_obj');
         });
 
         it('should insert a new record in the database when item does not exist', async () => {
@@ -66,7 +82,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp });
 
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', name: 'test_app' }
+                where: { type: 'app', name: 'test_app', project_id: null }
             });
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 name: 'test_app',
@@ -93,35 +109,31 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(mockEngine.insert).not.toHaveBeenCalled();
         });
 
-        it('should return success=true and "Saved to database and registry" on DB success', async () => {
+        it('should return success=true on DB success (control-plane path)', async () => {
             const result = await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp });
 
             expect(result.success).toBe(true);
+            // control-plane (no projectId) returns the legacy message
             expect(result.message).toBe('Saved to database and registry');
         });
 
-        it('should degrade gracefully when DB is unavailable', async () => {
+        it('should fail-fast with 500 when DB findOne is unavailable (ADR-0005)', async () => {
+            // ADR-0005 removed the silent in-memory degrade — DB write failures
+            // must surface as a 500 so callers know persistence failed.
             mockEngine.findOne.mockRejectedValue(new Error('Connection refused'));
 
-            const result = await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp });
-
-            expect(result.success).toBe(true);
-            expect(result.message).toContain('memory registry');
-            expect((result as any).warning).toContain('Connection refused');
-
-            // Registry should still be updated
-            const stored = registry.getItem('app', 'test_app');
-            expect(stored).toEqual(sampleApp);
+            await expect(
+                protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp })
+            ).rejects.toThrow(/Failed to persist customization overlay/);
         });
 
-        it('should degrade gracefully when DB insert fails', async () => {
+        it('should fail-fast with 500 when DB insert fails (ADR-0005)', async () => {
             mockEngine.findOne.mockResolvedValue(null);
             mockEngine.insert.mockRejectedValue(new Error('Table not found'));
 
-            const result = await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp });
-
-            expect(result.success).toBe(true);
-            expect(result.message).toContain('memory registry');
+            await expect(
+                protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp })
+            ).rejects.toThrow(/Failed to persist customization overlay/);
         });
 
         it('should use version=1 for initial insert when existing record has no version', async () => {
@@ -150,17 +162,32 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
     // ═══════════════════════════════════════════════════════════════
 
     describe('getMetaItem', () => {
-        it('should return item from SchemaRegistry when it exists', async () => {
+        it('should consult sys_metadata FIRST even when registry has the item (ADR-0005)', async () => {
+            // ADR-0005 read order: sys_metadata (overlay) wins over the
+            // artifact-loaded registry. Customer customizations must always
+            // override factory defaults.
             registry.registerItem('app', sampleApp, 'name');
 
             const result = await protocol.getMetaItem({ type: 'app', name: 'test_app' });
 
+            // Registry value is still returned (no overlay row exists),
+            // but sys_metadata MUST have been queried.
             expect(result.item).toEqual(sampleApp);
-            // DB should NOT be queried
-            expect(mockEngine.findOne).not.toHaveBeenCalled();
+            expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
+                where: expect.objectContaining({ type: 'app', name: 'test_app', state: 'active' }),
+            }));
         });
 
-        it('should fall back to DB when item is not in registry', async () => {
+        it('should fall back to registry when no overlay row exists', async () => {
+            registry.registerItem('app', sampleApp, 'name');
+            mockEngine.findOne.mockResolvedValue(null);
+
+            const result = await protocol.getMetaItem({ type: 'app', name: 'test_app' });
+
+            expect(result.item).toEqual(sampleApp);
+        });
+
+        it('should return overlay row content from DB when present', async () => {
             mockEngine.findOne.mockResolvedValue({
                 type: 'app',
                 name: 'test_app',
@@ -176,7 +203,9 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             });
         });
 
-        it('should hydrate registry after DB fallback', async () => {
+        it('should NOT hydrate registry after reading overlay (ADR-0005)', async () => {
+            // The registry is reserved for artifact-loaded factory values.
+            // Overlay reads stay ephemeral; the next read re-queries sys_metadata.
             mockEngine.findOne.mockResolvedValue({
                 type: 'app',
                 name: 'test_app',
@@ -186,9 +215,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             await protocol.getMetaItem({ type: 'app', name: 'test_app' });
 
-            // Should now be in registry
             const cached = registry.getItem('app', 'test_app');
-            expect(cached).toEqual(sampleApp);
+            expect(cached).toBeUndefined();
         });
 
         it('should try alternate type name in DB when primary type not found', async () => {

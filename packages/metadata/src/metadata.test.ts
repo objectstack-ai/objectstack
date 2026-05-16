@@ -597,7 +597,7 @@ describe('MetadataPlugin', () => {
     expect(ctx.registerService).toHaveBeenCalledWith('metadata', expect.anything());
   });
 
-  it('should not register metadata persistence tables in the ObjectOS manifest', async () => {
+  it('should register metadata storage objects in the ObjectOS manifest', async () => {
     const { MetadataPlugin } = await import('./plugin.js');
     const plugin = new MetadataPlugin({ rootDir: '/tmp/test', watch: false });
 
@@ -613,9 +613,8 @@ describe('MetadataPlugin', () => {
     const registeredObjects = manifestService.register.mock.calls
       .flatMap(([manifest]) => manifest.objects ?? [])
       .map((object) => object.name);
-    expect(registeredObjects).not.toContain('sys_metadata');
-    expect(registeredObjects).not.toContain('sys_metadata_history');
-    expect(registeredObjects).toContain('sys_object');
+    expect(registeredObjects).toContain('sys_metadata');
+    expect(registeredObjects).toContain('sys_metadata_history');
   });
 
   it('should call start and attempt to load metadata types', async () => {

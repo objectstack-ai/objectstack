@@ -33,10 +33,11 @@ export const AiConversationObject = ObjectSchema.create({
       description: 'Conversation title or summary',
     }),
 
-    agent_id: Field.lookup('sys_agent', {
+    agent_id: Field.text({
       label: 'Agent',
       required: false,
-      description: 'Associated AI agent',
+      maxLength: 128,
+      description: 'Associated AI agent (metadata name — agents live as JSON in sys_metadata, no lookup table)',
     }),
 
     user_id: Field.lookup('sys_user', {

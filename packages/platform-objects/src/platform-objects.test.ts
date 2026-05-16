@@ -33,13 +33,8 @@ import {
   SysProjectMember,
 } from './tenant/index.js';
 import {
-  SysAgent,
-  SysFlow,
   SysMetadata,
   SysMetadataHistoryObject,
-  SysObject,
-  SysTool,
-  SysView,
 } from './metadata/index.js';
 
 const systemObjects = [
@@ -70,11 +65,6 @@ const systemObjects = [
   ['SysPackageInstallation', SysPackageInstallation, 'sys_package_installation'],
   ['SysMetadata', SysMetadata, 'sys_metadata'],
   ['SysMetadataHistoryObject', SysMetadataHistoryObject, 'sys_metadata_history'],
-  ['SysObject', SysObject, 'sys_object'],
-  ['SysView', SysView, 'sys_view'],
-  ['SysAgent', SysAgent, 'sys_agent'],
-  ['SysTool', SysTool, 'sys_tool'],
-  ['SysFlow', SysFlow, 'sys_flow'],
 ] as const;
 
 describe('@objectstack/platform-objects', () => {

@@ -13,9 +13,6 @@ export { MetadataManager, type WatchCallback, type MetadataManagerOptions } from
 // Plugin
 export { MetadataPlugin } from './plugin.js';
 
-// Projection
-export { MetadataProjector, type MetadataProjectorOptions } from './projection/index.js';
-
 // Loaders
 export { type MetadataLoader } from './loaders/loader-interface.js';
 export { MemoryLoader } from './loaders/memory-loader.js';

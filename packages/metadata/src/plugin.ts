@@ -8,14 +8,22 @@ import { MemoryLoader } from './loaders/memory-loader.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import {
-    SysAgent,
-    SysFlow,
-    SysObject,
-    SysTool,
-    SysView,
+    SysMetadataObject,
+    SysMetadataHistoryObject,
 } from '@objectstack/platform-objects/metadata';
 
-const queryableMetadataObjects = [SysObject, SysView, SysFlow, SysAgent, SysTool];
+// `SysMetadataObject` + `SysMetadataHistoryObject` are the customer overlay
+// storage substrate (ADR-0005). They must always be auto-provisioned so
+// `PUT /api/v1/meta/{view,dashboard}/...` has a place to write. All other
+// metadata types (object/view/flow/agent/tool/dashboard/app/...) live as
+// JSON inside `sys_metadata` — there are no separate per-type tables. The
+// previously shipped `SysObject` / `SysView` / `SysFlow` / `SysAgent` /
+// `SysTool` projection objects were removed in 2026-05 (see ADR 0005
+// addendum); the projection pipeline was removed at the same time.
+const queryableMetadataObjects = [
+    SysMetadataObject,
+    SysMetadataHistoryObject,
+];
 
 // Map from ObjectStackDefinition field name to MetadataType name
 const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
@@ -64,9 +72,8 @@ export interface MetadataPluginOptions {
         | { mode: 'local-file'; path: string; fetchTimeoutMs?: number }
         | { mode: 'artifact-api'; url: string; token?: string; commitId?: string; fetchTimeoutMs?: number };
     /**
-     * Register the queryable system metadata-storage objects
-     * (`sys_object`, `sys_view`, `sys_flow`, `sys_agent`, `sys_tool`) on this
-     * kernel. Default `true` for backward compatibility.
+     * Register the `sys_metadata` + `sys_metadata_history` storage objects
+     * on this kernel. Default `true` for backward compatibility.
      *
      * Set to `false` for **per-project** kernels: in cloud / project mode the
      * control plane is the sole owner of metadata storage tables — exposing

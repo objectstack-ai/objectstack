@@ -11,7 +11,7 @@
  *   @objectstack/platform-objects/security  — role, permission-set
  *   @objectstack/platform-objects/audit     — audit-log, presence
  *   @objectstack/platform-objects/tenant    — project, app, package, ...
- *   @objectstack/platform-objects/metadata  — sys_metadata, sys_object, sys_view, ...
+ *   @objectstack/platform-objects/metadata  — sys_metadata, sys_metadata_history
  *   @objectstack/platform-objects/apps      — built-in platform Apps (Setup, ...)
  */
 

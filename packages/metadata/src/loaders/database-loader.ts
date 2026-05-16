@@ -24,7 +24,6 @@ import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import type { MetadataLoader } from './loader-interface.js';
 import { calculateChecksum } from '../utils/metadata-history-utils.js';
 import { LRUCache } from '../utils/lru-cache.js';
-import { MetadataProjector } from '../projection/metadata-projector.js';
 
 /**
  * Cache configuration for `DatabaseLoader`.
@@ -79,9 +78,6 @@ export interface DatabaseLoaderOptions {
   /** Enable history tracking (default: true) */
   trackHistory?: boolean;
 
-  /** Enable metadata projection to type-specific tables (default: true) */
-  enableProjection?: boolean;
-
   /**
    * Read-through cache configuration. Pass `{ enabled: false }` to disable
    * caching outright (useful in tests or when the caller wants the loader to
@@ -118,8 +114,6 @@ export class DatabaseLoader implements MetadataLoader {
   private trackHistory: boolean;
   private schemaReady = false;
   private historySchemaReady = false;
-  private enableProjection: boolean;
-  private projector?: MetadataProjector;
 
   /** (type, name) → metadata payload — primes `load()` */
   private readonly loadCache?: LRUCache<string, Record<string, unknown> | null>;
@@ -141,17 +135,6 @@ export class DatabaseLoader implements MetadataLoader {
     this.organizationId = options.organizationId;
     this.projectId = options.projectId;
     this.trackHistory = options.trackHistory !== false; // Default to true
-    this.enableProjection = options.enableProjection !== false; // Default to true
-
-    // Initialize projector if projection is enabled
-    if (this.enableProjection) {
-      this.projector = new MetadataProjector({
-        driver: this.driver,
-        engine: this.engine,
-        organizationId: this.organizationId,
-        projectId: this.projectId,
-      });
-    }
 
     // Wire cache. Default: enabled with 500 entries / 60s TTL.
     const cacheOpts = options.cache;
@@ -886,11 +869,6 @@ export class DatabaseLoader implements MetadataLoader {
           previousChecksum
         );
 
-        // Project to type-specific table
-        if (this.projector) {
-          await this.projector.project(type, name, data);
-        }
-
         return {
           success: true,
           path: `datasource://${this.tableName}/${type}/${name}`,
@@ -930,11 +908,6 @@ export class DatabaseLoader implements MetadataLoader {
           'create'
         );
 
-        // Project to type-specific table
-        if (this.projector) {
-          await this.projector.project(type, name, data);
-        }
-
         return {
           success: true,
           path: `datasource://${this.tableName}/${type}/${name}`,
@@ -971,11 +944,6 @@ export class DatabaseLoader implements MetadataLoader {
     await this._delete(this.tableName, existing.id as string);
 
     this.invalidate(type, name);
-
-    // Delete projection from type-specific table
-    if (this.projector) {
-      await this.projector.deleteProjection(type, name);
-    }
   }
 }
 

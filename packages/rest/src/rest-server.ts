@@ -952,20 +952,72 @@ export class RestServer {
                         return;
                     }
 
+                    // Accept both `{ ...itemFields }` (bare) and `{ metadata: {...} }`
+                    // / `{ item: {...} }` envelope shapes. Studio and direct API
+                    // callers historically use either; ADR-0005 settles on
+                    // unwrapping to a single payload before persistence.
+                    const body = req.body ?? {};
+                    const item = (body && typeof body === 'object' && 'metadata' in body)
+                        ? (body as any).metadata
+                        : (body && typeof body === 'object' && 'item' in body)
+                            ? (body as any).item
+                            : body;
+
                     const result = await p.saveMetaItem({
                         type: req.params.type,
                         name: req.params.name,
-                        item: req.body,
+                        item,
                         ...(projectId ? { projectId } : {}),
                     } as any);
                     res.json(result);
                 } catch (error: any) {
                     logError("[REST] Unhandled error:", error);
-                    res.status(400).json({ error: error.message });
+                    const status = typeof error?.status === 'number' ? error.status : 400;
+                    res.status(status).json({
+                        error: error.message,
+                        ...(error.code ? { code: error.code } : {}),
+                    });
                 }
             },
             metadata: {
                 summary: 'Save specific metadata item',
+                tags: ['metadata'],
+            },
+        });
+
+        // DELETE /meta/:type/:name - Reset metadata item to artifact default
+        // Removes a customization overlay row from sys_metadata (ADR-0005).
+        // Returns 200 even when no overlay existed (idempotent reset).
+        this.routeManager.register({
+            method: 'DELETE',
+            path: `${metaPath}/:type/:name`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const p = await this.resolveProtocol(projectId, req);
+                    if (!(p as any).deleteMetaItem) {
+                        res.status(501).json({
+                            error: 'Reset operation not supported by protocol implementation',
+                        });
+                        return;
+                    }
+                    const result = await (p as any).deleteMetaItem({
+                        type: req.params.type,
+                        name: req.params.name,
+                        ...(projectId ? { projectId } : {}),
+                    });
+                    res.json(result);
+                } catch (error: any) {
+                    logError("[REST] Unhandled error:", error);
+                    const status = typeof error?.status === 'number' ? error.status : 400;
+                    res.status(status).json({
+                        error: error.message,
+                        ...(error.code ? { code: error.code } : {}),
+                    });
+                }
+            },
+            metadata: {
+                summary: 'Reset metadata item to artifact default (deletes customization overlay)',
                 tags: ['metadata'],
             },
         });

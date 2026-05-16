@@ -258,8 +258,11 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         // entries (the previous fallback-only logic meant project metadata
         // was never surfaced whenever system-bridged items populated the
         // registry). Deduplicate against whatever the registry returned.
-        // Skip on project kernels — sys_metadata is control-plane only.
-        if (this.projectId === undefined) try {
+        //
+        // ADR-0005 Phase 4: project kernels also consult sys_metadata so that
+        // customer-saved view/dashboard overlays show up in list endpoints
+        // alongside the artifact-loaded items.
+        try {
             const whereClause: Record<string, unknown> = {
                 type: request.type,
                 state: 'active',
@@ -349,71 +352,56 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     async getMetaItem(request: { type: string, name: string, packageId?: string }) {
         let item: unknown;
 
-        // When scoped to a project, SchemaRegistry (a process-wide static
-        // singleton) cannot be trusted — it's shared across every project
-        // kernel in this process and would leak one project's definitions
-        // into another's responses. Go straight to the database so the
-        // project_id filter guarantees isolation.
-        if (this.projectId === undefined) {
+        // 1. Customization overlay lookup (sys_metadata).
+        //    Per ADR-0005, overlay rows are the customer-managed delta and win
+        //    over the artifact-loaded registry. Both project-kernel and
+        //    control-plane modes participate (control-plane scope = NULL).
+        try {
+            const scopedWhere: Record<string, unknown> = {
+                type: request.type,
+                name: request.name,
+                state: 'active',
+                project_id: this.projectId ?? null,
+            };
+            const record = await this.engine.findOne('sys_metadata', { where: scopedWhere });
+            if (record) {
+                item = typeof record.metadata === 'string'
+                    ? JSON.parse(record.metadata)
+                    : record.metadata;
+            } else {
+                // Try alternate type name using explicit singular/plural mapping
+                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
+                if (alt) {
+                    const altWhere: Record<string, unknown> = {
+                        type: alt,
+                        name: request.name,
+                        state: 'active',
+                        project_id: this.projectId ?? null,
+                    };
+                    const altRecord = await this.engine.findOne('sys_metadata', { where: altWhere });
+                    if (altRecord) {
+                        item = typeof altRecord.metadata === 'string'
+                            ? JSON.parse(altRecord.metadata)
+                            : altRecord.metadata;
+                    }
+                }
+            }
+        } catch {
+            // DB not available — fall through to registry / MetadataService
+        }
+
+        // 2. In-memory SchemaRegistry (artifact-loaded out-of-box values).
+        //    Project kernels skip the process-wide registry to avoid cross-
+        //    project leakage; their artifact source is MetadataService below.
+        if (item === undefined && this.projectId === undefined) {
             item = this.engine.registry.getItem(request.type, request.name);
-            // Normalize singular/plural using explicit mapping
             if (item === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                 if (alt) item = this.engine.registry.getItem(alt, request.name);
             }
         }
 
-        // Fallback to database if not in registry.
-        // Skip on project kernels — sys_metadata is control-plane only;
-        // project kernels source metadata from the artifact via MetadataService below.
-        if (item === undefined && this.projectId === undefined) {
-            try {
-                const scopedWhere: Record<string, unknown> = {
-                    type: request.type,
-                    name: request.name,
-                    state: 'active',
-                };
-                // Always filter by project_id: project kernels use their projectId,
-                // control-plane kernels use NULL (global scope only).
-                scopedWhere.project_id = this.projectId ?? null;
-                const record = await this.engine.findOne('sys_metadata', {
-                    where: scopedWhere,
-                });
-                if (record) {
-                    item = typeof record.metadata === 'string'
-                        ? JSON.parse(record.metadata)
-                        : record.metadata;
-                    // Only hydrate the global registry for unscoped calls,
-                    // see getMetaItem preamble for why scoped calls must not.
-                    if (this.projectId === undefined) {
-                        this.engine.registry.registerItem(request.type, item, 'name' as any);
-                    }
-                } else {
-                    // Try alternate type name using explicit mapping
-                    const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                    if (alt) {
-                        const altWhere: Record<string, unknown> = { type: alt, name: request.name, state: 'active' };
-                        altWhere.project_id = this.projectId ?? null;
-                        const altRecord = await this.engine.findOne('sys_metadata', { where: altWhere });
-                        if (altRecord) {
-                            item = typeof altRecord.metadata === 'string'
-                                ? JSON.parse(altRecord.metadata)
-                                : altRecord.metadata;
-                            // Only hydrate back into the global registry
-                            // when we're NOT scoped — otherwise the entry
-                            // would leak into other projects in this process.
-                            if (this.projectId === undefined) {
-                                this.engine.registry.registerItem(request.type, item, 'name' as any);
-                            }
-                        }
-                    }
-                }
-            } catch {
-                // DB not available, return undefined
-            }
-        }
-
-        // Fallback to MetadataService for runtime-registered items (agents, tools, etc.)
+        // 3. Fallback to MetadataService for runtime-registered items (agents, tools, etc.)
         if (item === undefined) {
             try {
                 const services = this.getServicesRegistry?.();
@@ -727,26 +715,11 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
 
     async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest }): Promise<MetadataCacheResponse> {
         try {
-            let item = this.engine.registry.getItem(request.type, request.name);
-
-            // Normalize singular/plural using explicit mapping
-            if (!item) {
-                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) item = this.engine.registry.getItem(alt, request.name);
-            }
-
-            // Fallback to MetadataService (e.g. agents, tools registered in MetadataManager)
-            if (!item) {
-                try {
-                    const services = this.getServicesRegistry?.();
-                    const metadataService = services?.get('metadata');
-                    if (metadataService && typeof metadataService.get === 'function') {
-                        item = await metadataService.get(request.type, request.name);
-                    }
-                } catch {
-                    // MetadataService not available
-                }
-            }
+            // Delegate to getMetaItem so the customization-overlay read order
+            // (sys_metadata → registry → MetadataService) is honoured here too
+            // (ADR-0005). Without this, cached reads silently bypass overlays.
+            const result = await this.getMetaItem({ type: request.type, name: request.name });
+            const item = (result as any)?.item;
 
             if (!item) {
                 throw new Error(`Metadata item ${request.type}/${request.name} not found`);
@@ -1093,78 +1066,68 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         });
     }
 
+    /**
+     * Metadata types that are customer-overridable via {@link saveMetaItem}/
+     * {@link deleteMetaItem} in project-kernel mode. See ADR-0005 §"Whitelist
+     * enforcement". Expand this set type-by-type as the runtime machinery
+     * (e.g. object-level schema migration on overlay) lands.
+     */
+    private static readonly OVERLAY_ALLOWED_TYPES: ReadonlySet<string> = new Set([
+        'view', 'views',
+        'dashboard', 'dashboards',
+    ]);
+
     async saveMetaItem(request: { type: string, name: string, item?: any }) {
         if (!request.item) {
             throw new Error('Item data is required');
         }
 
-        // Project kernels (projectId set) never persist to sys_metadata
-        // locally — runtime metadata is sourced from the artifact and writes
-        // belong to the control plane. Update the in-memory registry AND the
-        // runtime MetadataService so subsequent getMetaItem calls (which on
-        // scoped kernels read exclusively from MetadataService) see the new
-        // value. Without the MetadataService.register, save/get target
-        // different stores and the write appears to vanish.
-        if (this.projectId !== undefined) {
-            this.engine.registry.registerItem(request.type, request.item, 'name');
-            if (request.type === 'object' || request.type === 'objects') {
-                try {
-                    this.engine.registry.registerObject(request.item as any, 'sys_metadata');
-                } catch (err: any) {
-                    console.warn(
-                        `[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`,
-                    );
-                }
-            }
-            try {
-                const services = this.getServicesRegistry?.();
-                const metadataService = services?.get('metadata');
-                if (metadataService && typeof metadataService.register === 'function') {
-                    await metadataService.register(request.type, request.name, request.item);
-                }
-            } catch (err: any) {
-                console.warn(
-                    `[Protocol] metadataService.register failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
-                );
-            }
-            return {
-                success: true,
-                message: 'Saved to memory registry (project kernel — sys_metadata is control-plane only)',
-            };
+        // Phase 1 whitelist (ADR-0005): project-kernel customization is limited
+        // to view + dashboard while the safety machinery for other types is
+        // built out. Single-kernel deployments keep their pre-ADR behaviour.
+        if (this.projectId !== undefined
+            && !ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES.has(request.type)) {
+            const err = new Error(
+                `[customization_not_allowed] Metadata type '${request.type}' is not overridable in project-kernel mode. `
+                + `Phase 1 allow-list = ${Array.from(ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES).join(', ')}. `
+                + `See docs/adr/0005-metadata-customization-overlay.md.`
+            );
+            (err as any).code = 'customization_not_allowed';
+            (err as any).status = 400;
+            throw err;
         }
 
-        // 1. Always update the in-memory registry (runtime cache).
-        //    For `type === 'object'` we additionally register in the
-        //    dedicated objects map so that downstream calls (e.g.
-        //    `/meta/objects/:name`, `registry.getObject(name)`, and the
-        //    engine's schema sync) pick the new definition up without a
-        //    kernel restart. Without this mirror the HTTP dispatcher
-        //    returns 404 for freshly-created objects even though the
-        //    generic item collection has them.
-        this.engine.registry.registerItem(request.type, request.item, 'name');
+        // 1. Update the in-memory registry (runtime cache) ONLY for the
+        //    `object` type — schema definitions feed engine.syncSchema and
+        //    must be reflected immediately for CRUD to work. For all other
+        //    metadata types (view, dashboard, ...) we deliberately do NOT
+        //    mutate the artifact-loaded registry — sys_metadata is the
+        //    authoritative overlay store and `getMetaItem` consults it
+        //    first (ADR-0005). Mutating the registry here would create a
+        //    "stale overlay" hazard: `deleteMetaItem` cannot restore the
+        //    original artifact value because it was overwritten in-place.
         if (request.type === 'object' || request.type === 'objects') {
+            this.engine.registry.registerItem(request.type, request.item, 'name');
             try {
                 this.engine.registry.registerObject(request.item as any, 'sys_metadata');
             } catch (err: any) {
                 console.warn(
-                    `[Protocol] this.engine.registry.registerObject failed for ${request.name}: ${err?.message ?? err}`,
+                    `[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`,
                 );
             }
         }
 
-        // 2. Persist to database via data engine
+        // 2. Persist to sys_metadata as a customization overlay row.
+        //    Both project-kernel (project_id = this.projectId) and
+        //    control-plane (project_id = NULL) modes participate. Per ADR-0005
+        //    we store the entire item document — no field-level patch.
         try {
             const now = new Date().toISOString();
-            // Scope to the current project when configured. A missing
-            // projectId means "platform-global" (single-kernel deploys,
-            // legacy callers) — kept as the default to preserve back-compat.
             const scopedWhere: Record<string, unknown> = {
                 type: request.type,
                 name: request.name,
+                project_id: this.projectId ?? null,
             };
-            if (this.projectId !== undefined) {
-                scopedWhere.project_id = this.projectId;
-            }
             const existing = await this.engine.findOne('sys_metadata', {
                 where: scopedWhere,
             });
@@ -1174,6 +1137,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     metadata: JSON.stringify(request.item),
                     updated_at: now,
                     version: (existing.version || 0) + 1,
+                    state: 'active',
                 }, {
                     where: { id: existing.id }
                 });
@@ -1187,9 +1151,8 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     id,
                     name: request.name,
                     type: request.type,
-                    // `scope` tracks platform vs project authorship. With
-                    // project_id carries the project id, 'project' is the
-                    // honest label whenever we know we're inside one.
+                    // `scope` is informational; `project_id` is the authoritative
+                    // isolation key (see sys-metadata schema unique index).
                     scope: this.projectId !== undefined ? 'project' : 'platform',
                     metadata: JSON.stringify(request.item),
                     state: 'active',
@@ -1205,16 +1168,98 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
 
             return {
                 success: true,
-                message: 'Saved to database and registry'
+                message: this.projectId !== undefined
+                    ? `Saved customization overlay to sys_metadata (project scope) — type=${request.type}, name=${request.name}`
+                    : 'Saved to database and registry',
             };
         } catch (dbError: any) {
-            // DB write failed but in-memory registry was updated — degrade gracefully
-            console.warn(`[Protocol] DB persistence failed for ${request.type}/${request.name}: ${dbError.message}`);
+            // DB write failed — surface as an error rather than silently
+            // succeeding (regression from the pre-ADR-0005 "silent loss" bug).
+            console.error(
+                `[Protocol] sys_metadata persistence failed for ${request.type}/${request.name}: ${dbError.message}`,
+            );
+            const err = new Error(
+                `Failed to persist customization overlay to sys_metadata: ${dbError.message}. `
+                + `In-memory registry was updated but will be lost on restart.`,
+            );
+            (err as any).code = 'overlay_persistence_failed';
+            (err as any).status = 500;
+            throw err;
+        }
+    }
+
+    /**
+     * Remove a customization overlay row for the given metadata item, so the
+     * next read falls through to the artifact-loaded default. Implements the
+     * "Reset to factory default" semantic from ADR-0005. Whitelist is shared
+     * with {@link saveMetaItem}.
+     */
+    async deleteMetaItem(request: { type: string; name: string }): Promise<{
+        success: boolean;
+        message?: string;
+        reset?: boolean;
+    }> {
+        if (this.projectId !== undefined
+            && !ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES.has(request.type)) {
+            const err = new Error(
+                `[customization_not_allowed] Metadata type '${request.type}' is not overridable in project-kernel mode. `
+                + `See docs/adr/0005-metadata-customization-overlay.md.`
+            );
+            (err as any).code = 'customization_not_allowed';
+            (err as any).status = 400;
+            throw err;
+        }
+
+        const scopedWhere: Record<string, unknown> = {
+            type: request.type,
+            name: request.name,
+            project_id: this.projectId ?? null,
+        };
+
+        try {
+            const existing = await this.engine.findOne('sys_metadata', { where: scopedWhere });
+            if (!existing) {
+                return {
+                    success: true,
+                    reset: false,
+                    message: `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`,
+                };
+            }
+            await this.engine.delete('sys_metadata', { where: { id: existing.id } });
+
+            // Refresh in-memory state from the artifact source so subsequent
+            // reads don't return the stale overlay value via MetadataService.
+            // The registry is intentionally NOT cleared on project kernels (it
+            // is process-global there and shared); the next getMetaItem call
+            // queries sys_metadata first (now empty) and falls through to
+            // MetadataService, which retains the artifact value.
+            if (this.projectId === undefined) {
+                // For control-plane kernels we can safely re-register the
+                // artifact-side value into the global registry from the
+                // MetadataService, mirroring what saveMetaItem did inversely.
+                try {
+                    const services = this.getServicesRegistry?.();
+                    const metadataService = services?.get('metadata');
+                    if (metadataService && typeof metadataService.get === 'function') {
+                        const artifactItem = await metadataService.get(request.type, request.name);
+                        if (artifactItem !== undefined) {
+                            this.engine.registry.registerItem(request.type, artifactItem, 'name');
+                        }
+                    }
+                } catch {
+                    // Best-effort registry refresh; next read fixes it anyway
+                }
+            }
+
             return {
                 success: true,
-                message: 'Saved to memory registry (DB persistence unavailable)',
-                warning: dbError.message
+                reset: true,
+                message: `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default.`,
             };
+        } catch (err: any) {
+            const e = new Error(`Failed to delete customization overlay: ${err.message}`);
+            (e as any).status = 500;
+            throw e;
         }
     }
 
@@ -1222,14 +1267,12 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
      * Hydrate SchemaRegistry from the database on startup.
      * Loads all active metadata records and registers them in the in-memory registry.
      * Safe to call repeatedly — idempotent (latest DB record wins).
+     *
+     * Per ADR-0005, project-kernel mode ALSO hydrates from sys_metadata —
+     * customization overlay rows must survive restart. Scope filter
+     * (`project_id = this.projectId ?? null`) keeps tenants isolated.
      */
     async loadMetaFromDb(): Promise<{ loaded: number; errors: number }> {
-        // Project kernels never read sys_metadata locally — the table only
-        // exists on the control plane. Metadata is sourced from the artifact
-        // (MetadataPlugin) or routed via ControlPlaneProxyDriver.
-        if (this.projectId !== undefined) {
-            return { loaded: 0, errors: 0 };
-        }
         let loaded = 0;
         let errors = 0;
         try {

@@ -205,6 +205,26 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Delete Metadata Item Request
+ * Removes a customization overlay row from sys_metadata (ADR-0005).
+ */
+export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+}));
+
+/**
+ * Delete Metadata Item Response
+ * `reset === true` means a row was deleted (item is now at artifact default).
+ * `reset === false` means no overlay row existed (already at artifact default).
+ */
+export const DeleteMetaItemResponseSchema = lazySchema(() => z.object({
+  success: z.boolean(),
+  reset: z.boolean().optional(),
+  message: z.string().optional(),
+}));
+
+/**
  * Get Metadata Item with Cache Request
  * Get a specific metadata item with HTTP cache validation support
  */
@@ -963,6 +983,8 @@ export const ObjectStackProtocolSchema = lazySchema(() => z.object({
     .describe('Get a specific metadata item'),
   saveMetaItem: z.function()
     .describe('Save metadata item'),
+  deleteMetaItem: z.function()
+    .describe('Delete a customization overlay row (reset to artifact default — ADR-0005)'),
   getMetaItemCached: z.function()
     .describe('Get a metadata item with cache validation'),
 
@@ -1153,6 +1175,8 @@ export type GetMetaItemRequest = z.infer<typeof GetMetaItemRequestSchema>;
 export type GetMetaItemResponse = z.infer<typeof GetMetaItemResponseSchema>;
 export type SaveMetaItemRequest = z.infer<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.infer<typeof SaveMetaItemResponseSchema>;
+export type DeleteMetaItemRequest = z.infer<typeof DeleteMetaItemRequestSchema>;
+export type DeleteMetaItemResponse = z.infer<typeof DeleteMetaItemResponseSchema>;
 export type GetMetaItemCachedRequest = z.infer<typeof GetMetaItemCachedRequestSchema>;
 export type GetMetaItemCachedResponse = z.infer<typeof GetMetaItemCachedResponseSchema>;
 export type GetUiViewRequest = z.infer<typeof GetUiViewRequestSchema>;
@@ -1339,6 +1363,13 @@ export interface ObjectStackProtocol {
   getMetaItems(request: GetMetaItemsRequest): Promise<GetMetaItemsResponse>;
   getMetaItem(request: GetMetaItemRequest): Promise<GetMetaItemResponse>;
   saveMetaItem(request: SaveMetaItemRequest): Promise<SaveMetaItemResponse>;
+  /**
+   * Delete a metadata customization overlay row. Per ADR-0005 this is the
+   * "reset to artifact factory default" semantic — it removes a sys_metadata
+   * row (if present) so subsequent reads fall through to the compiled
+   * artifact. Whitelisted to view + dashboard in project-kernel mode.
+   */
+  deleteMetaItem?(request: DeleteMetaItemRequest): Promise<DeleteMetaItemResponse>;
   getMetaItemCached?(request: GetMetaItemCachedRequest): Promise<GetMetaItemCachedResponse>;
   getUiView?(request: GetUiViewRequest): Promise<GetUiViewResponse>;
   

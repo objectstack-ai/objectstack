@@ -18,9 +18,9 @@
       "require": "./dist/node.cjs"
     },
     "./migrations": {
-      "types": "./dist/migrations/migrate-env-id-to-project-id.d.ts",
-      "import": "./dist/migrations/migrate-env-id-to-project-id.js",
-      "require": "./dist/migrations/migrate-env-id-to-project-id.cjs"
+      "types": "./dist/migrations/index.d.ts",
+      "import": "./dist/migrations/index.js",
+      "require": "./dist/migrations/index.cjs"
     }
   },
   "files": [

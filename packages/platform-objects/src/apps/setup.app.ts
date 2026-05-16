@@ -71,11 +71,6 @@ export const SETUP_APP: App = {
       label: 'Platform',
       icon: 'layers',
       children: [
-        { id: 'nav_objects', type: 'object', label: 'Objects', objectName: 'sys_object', icon: 'database' },
-        { id: 'nav_views', type: 'object', label: 'Views', objectName: 'sys_view', icon: 'table' },
-        { id: 'nav_flows', type: 'object', label: 'Flows', objectName: 'sys_flow', icon: 'workflow' },
-        { id: 'nav_agents', type: 'object', label: 'AI Agents', objectName: 'sys_agent', icon: 'bot' },
-        { id: 'nav_tools', type: 'object', label: 'AI Tools', objectName: 'sys_tool', icon: 'wrench' },
         { id: 'nav_apps', type: 'object', label: 'Apps', objectName: 'sys_app', icon: 'layout-grid' },
         { id: 'nav_packages', type: 'object', label: 'Packages', objectName: 'sys_package', icon: 'package' },
         { id: 'nav_package_installations', type: 'object', label: 'Installations', objectName: 'sys_package_installation', icon: 'package-check' },

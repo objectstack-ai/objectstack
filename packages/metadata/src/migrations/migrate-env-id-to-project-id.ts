@@ -3,14 +3,13 @@
 /**
  * Migration: env_id → project_id
  *
- * Renames the `env_id` column to `project_id` across all metadata tables:
+ * Renames the `env_id` column to `project_id` on the metadata storage tables:
  *   - sys_metadata
  *   - sys_metadata_history
- *   - sys_object
- *   - sys_view
- *   - sys_flow
- *   - sys_agent
- *   - sys_tool
+ *
+ * (The per-type projection tables `sys_object` / `sys_view` / `sys_flow` /
+ * `sys_agent` / `sys_tool` were removed in 2026-05 along with the projection
+ * pipeline — see ADR 0005 addendum. They are intentionally not included.)
  *
  * Safe to run multiple times (idempotent): checks for column existence before
  * attempting to rename. If `project_id` already exists, the step is skipped.
@@ -25,11 +24,6 @@ import type { IDataDriver } from '@objectstack/spec/contracts';
 const AFFECTED_TABLES = [
     'sys_metadata',
     'sys_metadata_history',
-    'sys_object',
-    'sys_view',
-    'sys_flow',
-    'sys_agent',
-    'sys_tool',
 ] as const;
 
 export interface MigrationResult {
