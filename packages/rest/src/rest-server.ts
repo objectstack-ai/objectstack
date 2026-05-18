@@ -134,6 +134,31 @@ function mapDataError(error: any, object?: string): { status: number; body: Reco
 }
 
 /**
+ * Centralized error responder for all REST handlers. Ensures raw driver
+ * messages (SQLite/Postgres dumps, stack traces, unique-constraint
+ * payloads with table names, etc.) never reach clients. Honors
+ * structured errors that already carry an explicit `status` so callers
+ * can surface domain-specific codes (e.g. 422 from a metadata save
+ * validator), and routes everything else through `mapDataError` so the
+ * security / validation / SQL-leak / unknown-object envelopes apply
+ * uniformly across CRUD, batch, metadata, UI and discovery routes.
+ */
+function sendError(res: any, error: any, object?: string): void {
+    if (typeof error?.status === 'number' && error.status >= 400 && error.status < 600) {
+        const safeMsg = typeof error.message === 'string' && error.message.length < 500
+            ? error.message
+            : 'Request failed';
+        res.status(error.status).json({
+            error: safeMsg,
+            ...(error.code ? { code: error.code } : {}),
+        });
+        return;
+    }
+    const mapped = mapDataError(error, object);
+    res.status(mapped.status).json(mapped.body);
+}
+
+/**
  * Whether a mapped data-error status represents an *expected* client/lifecycle
  * outcome (and therefore shouldn't be logged as "[REST] Unhandled error").
  *  - 403 PERMISSION_DENIED is a normal RBAC denial
@@ -877,7 +902,7 @@ export class RestServer {
                     res.json(discovery);
                 } catch (error: any) {
                     logError("[REST] Unhandled error:", error);
-                    res.status(500).json({ error: error.message });
+                    sendError(res, error);
                 }
             };
 
@@ -925,7 +950,7 @@ export class RestServer {
                         res.json(types);
                     } catch (error: any) {
                         logError("[REST] Unhandled error:", error);
-                        res.status(500).json({ error: error.message });
+                        sendError(res, error);
                     }
                 },
                 metadata: {
@@ -955,7 +980,7 @@ export class RestServer {
                         res.json(translated);
                     } catch (error: any) {
                         logError("[REST] Unhandled error:", error);
-                        res.status(404).json({ error: error.message });
+                        sendError(res, error);
                     }
                 },
                 metadata: {
@@ -1026,7 +1051,7 @@ export class RestServer {
                         }
                     } catch (error: any) {
                         logError("[REST] Unhandled error:", error);
-                        res.status(404).json({ error: error.message });
+                        sendError(res, error);
                     }
                 },
                 metadata: {
@@ -1071,11 +1096,7 @@ export class RestServer {
                     res.json(result);
                 } catch (error: any) {
                     logError("[REST] Unhandled error:", error);
-                    const status = typeof error?.status === 'number' ? error.status : 400;
-                    res.status(status).json({
-                        error: error.message,
-                        ...(error.code ? { code: error.code } : {}),
-                    });
+                    sendError(res, error);
                 }
             },
             metadata: {
@@ -1108,11 +1129,7 @@ export class RestServer {
                     res.json(result);
                 } catch (error: any) {
                     logError("[REST] Unhandled error:", error);
-                    const status = typeof error?.status === 'number' ? error.status : 400;
-                    res.status(status).json({
-                        error: error.message,
-                        ...(error.code ? { code: error.code } : {}),
-                    });
+                    sendError(res, error);
                 }
             },
             metadata: {
@@ -1144,7 +1161,7 @@ export class RestServer {
                         res.json(await this.translateMetaItem(req, req.params.type, projectId, item));
                     } catch (error: any) {
                         logError("[REST] Unhandled error:", error);
-                        res.status(404).json({ error: error.message });
+                        sendError(res, error);
                     }
                 },
                 metadata: {
@@ -1177,7 +1194,7 @@ export class RestServer {
                     res.json(result);
                 } catch (error: any) {
                     logError("[REST] Unhandled error:", error);
-                    res.status(400).json({ error: error.message });
+                    sendError(res, error);
                 }
             },
             metadata: {
@@ -1214,7 +1231,7 @@ export class RestServer {
                     }
                 } catch (error: any) {
                     logError("[REST] Unhandled error:", error);
-                    res.status(404).json({ error: error.message });
+                    sendError(res, error, req.params?.object);
                 }
             },
             metadata: {
@@ -1476,7 +1493,7 @@ export class RestServer {
                         res.json(result);
                     } catch (error: any) {
                         logError("[REST] Unhandled error:", error);
-                        res.status(400).json({ error: error.message });
+                        sendError(res, error, req.params?.object);
                     }
                 },
                 metadata: {
@@ -1506,7 +1523,7 @@ export class RestServer {
                         res.status(201).json(result);
                     } catch (error: any) {
                         logError("[REST] Unhandled error:", error);
-                        res.status(400).json({ error: error.message });
+                        sendError(res, error, req.params?.object);
                     }
                 },
                 metadata: {
@@ -1536,7 +1553,7 @@ export class RestServer {
                         res.json(result);
                     } catch (error: any) {
                         logError("[REST] Unhandled error:", error);
-                        res.status(400).json({ error: error.message });
+                        sendError(res, error, req.params?.object);
                     }
                 },
                 metadata: {
@@ -1566,7 +1583,7 @@ export class RestServer {
                         res.json(result);
                     } catch (error: any) {
                         logError("[REST] Unhandled error:", error);
-                        res.status(400).json({ error: error.message });
+                        sendError(res, error, req.params?.object);
                     }
                 },
                 metadata: {
