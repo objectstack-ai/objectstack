@@ -680,6 +680,68 @@ describe('RestServer', () => {
       expect(lines.length).toBe(50_001);
     });
   });
+
+  // -----------------------------------------------------------------------
+  // POST /email/send — IEmailService bridge (M11.B1 / M10.7)
+  // -----------------------------------------------------------------------
+  describe('email send handler', () => {
+    function getEmailRoute(rest: any) {
+      const routes = rest.getRoutes();
+      return routes.find(
+        (r: any) => r.method === 'POST' && r.path === '/api/v1/email/send',
+      );
+    }
+
+    it('returns 501 when no email service provider is wired', async () => {
+      const rest = new RestServer(server as any, protocol as any);
+      rest.registerRoutes();
+      const route = getEmailRoute(rest);
+      expect(route).toBeDefined();
+      const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+      await route!.handler({ body: { to: 'a@b.com', subject: 'Hi', text: 'x' } } as any, res as any);
+      expect(res.status).toHaveBeenCalledWith(501);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'NOT_IMPLEMENTED' }));
+    });
+
+    it('calls email service and returns the SendEmailResult on success', async () => {
+      const send = vi.fn(async () => ({ id: 'em-1', status: 'sent', messageId: '<m1@x>' }));
+      const provider = async () => ({ send });
+      const rest = new RestServer(
+        server as any, protocol as any, {},
+        undefined, undefined, undefined, undefined, undefined,
+        provider as any,
+      );
+      rest.registerRoutes();
+      const route = getEmailRoute(rest);
+      const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+      await route!.handler({
+        body: { to: 'a@b.com', from: 'no@reply.com', subject: 'Hi', text: 'x' },
+      } as any, res as any);
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({
+        to: 'a@b.com', from: 'no@reply.com', subject: 'Hi',
+      }));
+      expect(res.json).toHaveBeenCalledWith({ id: 'em-1', status: 'sent', messageId: '<m1@x>' });
+    });
+
+    it('translates VALIDATION_FAILED errors into 400', async () => {
+      const send = vi.fn(async () => { throw new Error('VALIDATION_FAILED: subject is required'); });
+      const provider = async () => ({ send });
+      const rest = new RestServer(
+        server as any, protocol as any, {},
+        undefined, undefined, undefined, undefined, undefined,
+        provider as any,
+      );
+      rest.registerRoutes();
+      const route = getEmailRoute(rest);
+      const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+      await route!.handler({ body: { to: 'a@b.com', subject: '', text: 'x' } } as any, res as any);
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        code: 'VALIDATION_FAILED',
+        error: 'subject is required',
+      }));
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

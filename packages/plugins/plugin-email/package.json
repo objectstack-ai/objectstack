@@ -1,0 +1,35 @@
+{
+  "name": "@objectstack/plugin-email",
+  "version": "4.0.0",
+  "license": "Apache-2.0",
+  "description": "Email service plugin for ObjectStack — IEmailService + transport-pluggable outbound delivery with sys_email persistence.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../../tsup.config.ts",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/platform-objects": "workspace:*",
+    "@objectstack/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  },
+  "keywords": [
+    "objectstack",
+    "plugin",
+    "email",
+    "smtp"
+  ]
+}

@@ -397,6 +397,7 @@ export class RestServer {
     private defaultProjectIdProvider?: () => string | undefined;
     private authServiceProvider?: (projectId?: string) => Promise<any | undefined>;
     private objectQLProvider?: (projectId?: string) => Promise<any | undefined>;
+    private emailServiceProvider?: (projectId?: string) => Promise<any | undefined>;
 
     constructor(
         server: IHttpServer,
@@ -407,6 +408,7 @@ export class RestServer {
         defaultProjectIdProvider?: () => string | undefined,
         authServiceProvider?: (projectId?: string) => Promise<any | undefined>,
         objectQLProvider?: (projectId?: string) => Promise<any | undefined>,
+        emailServiceProvider?: (projectId?: string) => Promise<any | undefined>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -416,6 +418,7 @@ export class RestServer {
         this.defaultProjectIdProvider = defaultProjectIdProvider;
         this.authServiceProvider = authServiceProvider;
         this.objectQLProvider = objectQLProvider;
+        this.emailServiceProvider = emailServiceProvider;
     }
 
     /**
@@ -926,6 +929,7 @@ export class RestServer {
             if (this.config.api.enableSearch ?? true) {
                 this.registerSearchEndpoints(bp);
             }
+            this.registerEmailEndpoints(bp);
             this.registerDataActionEndpoints(bp);
             if (this.config.api.enableBatch) {
                 this.registerBatchEndpoints(bp);
@@ -1857,6 +1861,100 @@ export class RestServer {
             metadata: {
                 summary: 'Global cross-object search',
                 tags: ['search'],
+            },
+        });
+    }
+
+    /**
+     * Register email endpoints (M11.B1 / M10.7).
+     *
+     * POST {basePath}/email/send — send a transactional email via the
+     * `IEmailService` provider registered by EmailServicePlugin. Returns
+     * 501 when no provider is wired so deployments without email
+     * configured fail cleanly.
+     *
+     * Request body:
+     *   {
+     *     to: "a@b.com" | ["a@b.com", { name, address }],
+     *     from?: ..., cc?: ..., bcc?: ..., replyTo?: ...,
+     *     subject: string,
+     *     text?: string, html?: string,  // at least one required
+     *     attachments?: [{ filename, content, contentType?, cid? }],
+     *     headers?: { [name]: value },
+     *     relatedObject?: string, relatedId?: string,
+     *   }
+     */
+    private registerEmailEndpoints(basePath: string): void {
+        const isScoped = basePath.includes('/projects/:projectId');
+        this.routeManager.register({
+            method: 'POST',
+            path: `${basePath}/email/send`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const context = await this.resolveExecCtx(projectId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+
+                    if (!this.emailServiceProvider) {
+                        res.status(501).json({
+                            code: 'NOT_IMPLEMENTED',
+                            message: 'Email service is not configured on this deployment',
+                        });
+                        return;
+                    }
+                    const emailService = await this.emailServiceProvider(projectId).catch(() => undefined);
+                    if (!emailService || typeof emailService.send !== 'function') {
+                        res.status(501).json({
+                            code: 'NOT_IMPLEMENTED',
+                            message: 'Email service is not configured on this deployment',
+                        });
+                        return;
+                    }
+
+                    const body = req.body ?? {};
+                    if (!body || typeof body !== 'object') {
+                        res.status(400).json({ code: 'INVALID_REQUEST', error: 'JSON body required' });
+                        return;
+                    }
+                    // Stamp sentBy from the authenticated context when caller didn't supply one.
+                    const input = {
+                        ...body,
+                        ...(body.sentBy === undefined && (context as any)?.userId
+                            ? { sentBy: (context as any).userId }
+                            : {}),
+                    };
+
+                    try {
+                        const result = await emailService.send(input);
+                        if (result?.status === 'sent') {
+                            res.status(200).json(result);
+                        } else {
+                            // failed / queued — still surface to client with 200 so clients can branch on status.
+                            res.status(200).json(result);
+                        }
+                    } catch (err: any) {
+                        // Validation errors from normalizeMessage are surfaced as 400.
+                        const message = String(err?.message ?? err ?? 'send failed');
+                        if (message.startsWith('VALIDATION_FAILED')) {
+                            res.status(400).json({
+                                code: 'VALIDATION_FAILED',
+                                error: message.replace(/^VALIDATION_FAILED:\s*/, ''),
+                            });
+                            return;
+                        }
+                        throw err;
+                    }
+                } catch (error: any) {
+                    logError('[REST] Email send unhandled error:', error);
+                    res.status(500).json({
+                        code: 'EMAIL_SEND_FAILED',
+                        error: String(error?.message ?? error ?? 'send failed').slice(0, 500),
+                    });
+                }
+            },
+            metadata: {
+                summary: 'Send a transactional email via the configured EmailService',
+                tags: ['email'],
             },
         });
     }

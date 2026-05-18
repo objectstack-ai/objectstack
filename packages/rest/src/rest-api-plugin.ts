@@ -107,6 +107,15 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 } catch { return undefined; }
             };
 
+            // Email service resolver — used by POST /email/send. Single-
+            // kernel deployments resolve from the local kernel; multi-
+            // tenant paths would resolve via kernelManager.getOrCreate.
+            const emailServiceProvider = async (_projectId?: string): Promise<any | undefined> => {
+                try {
+                    return ctx.getService<any>('email');
+                } catch { return undefined; }
+            };
+
             if (!server) {
                 ctx.logger.warn(`RestApiPlugin: HTTP Server service '${serverService}' not found. REST routes skipped.`);
                 return;
@@ -120,7 +129,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             ctx.logger.info('Hydrating REST API from Protocol...');
             
             try {
-                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultProjectIdProvider, authServiceProvider, objectQLProvider);
+                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultProjectIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');
