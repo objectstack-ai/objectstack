@@ -13,3 +13,6 @@ export { SysNotification } from './sys-notification.object.js';
 export { SysEmail } from './sys-email.object.js';
 export { SysSavedReport } from './sys-saved-report.object.js';
 export { SysReportSchedule } from './sys-report-schedule.object.js';
+export { SysApprovalProcess } from './sys-approval-process.object.js';
+export { SysApprovalRequest } from './sys-approval-request.object.js';
+export { SysApprovalAction } from './sys-approval-action.object.js';

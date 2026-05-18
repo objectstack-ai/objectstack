@@ -1,0 +1,80 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+/**
+ * sys_approval_action — Audit trail row per approval action.
+ *
+ * Append-only: every `submit`, `approve`, `reject`, `recall`, or
+ * `escalate` event lands here. The engine reads back per-step approval
+ * rows to evaluate `behavior: 'unanimous'` (all approvers must approve
+ * before advancing) versus `first_response` (any single approval
+ * advances the step).
+ *
+ * @namespace sys
+ */
+export const SysApprovalAction = ObjectSchema.create({
+  name: 'sys_approval_action',
+  label: 'Approval Action',
+  pluralLabel: 'Approval Actions',
+  icon: 'check-circle',
+  isSystem: true,
+  description: 'Append-only audit trail for approval actions',
+  displayNameField: 'id',
+  titleFormat: '{action} · {step_name}',
+  compactLayout: ['request_id', 'step_name', 'action', 'actor_id', 'created_at'],
+
+  fields: {
+    id: Field.text({ label: 'Action ID', required: true, readonly: true, group: 'System' }),
+
+    request_id: Field.lookup('sys_approval_request', {
+      label: 'Request',
+      required: true,
+      group: 'Target',
+    }),
+
+    step_name: Field.text({
+      label: 'Step',
+      required: false,
+      maxLength: 100,
+      description: 'Machine name of the step at the time of the action',
+      group: 'Target',
+    }),
+
+    step_index: Field.number({
+      label: 'Step Index',
+      required: false,
+      group: 'Target',
+    }),
+
+    action: Field.select(
+      ['submit', 'approve', 'reject', 'recall', 'escalate'],
+      {
+        label: 'Action',
+        required: true,
+        group: 'Action',
+      },
+    ),
+
+    actor_id: Field.lookup('sys_user', {
+      label: 'Actor',
+      required: false,
+      group: 'Action',
+    }),
+
+    comment: Field.textarea({ label: 'Comment', required: false, group: 'Action' }),
+
+    created_at: Field.datetime({
+      label: 'Created At',
+      required: true,
+      defaultValue: 'NOW()',
+      readonly: true,
+      group: 'System',
+    }),
+  },
+
+  indexes: [
+    { fields: ['request_id', 'created_at'] },
+    { fields: ['request_id', 'step_index', 'action'] },
+  ],
+});

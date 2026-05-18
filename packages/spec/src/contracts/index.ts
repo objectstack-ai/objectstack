@@ -38,6 +38,7 @@ export * from './export-service.js';
 export * from './email-service.js';
 export * from './sharing-service.js';
 export * from './report-service.js';
+export * from './approval-service.js';
 export * from './package-service.js';
 
 // Provisioning & Deployment

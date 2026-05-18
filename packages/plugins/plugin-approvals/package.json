@@ -1,0 +1,36 @@
+{
+  "name": "@objectstack/plugin-approvals",
+  "version": "4.0.0",
+  "license": "Apache-2.0",
+  "description": "Multi-step approval engine for ObjectStack — sys_approval_process + sys_approval_request + sys_approval_action + IApprovalService.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../../tsup.config.ts",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/platform-objects": "workspace:*",
+    "@objectstack/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  },
+  "keywords": [
+    "objectstack",
+    "plugin",
+    "approval",
+    "workflow",
+    "process"
+  ]
+}

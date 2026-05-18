@@ -932,6 +932,26 @@ export default class Serve extends Command {
           export: 'PackageServicePlugin',
           nameMatch: ['service-package', 'PackageServicePlugin'],
         },
+        email: {
+          pkg: '@objectstack/plugin-email',
+          export: 'EmailServicePlugin',
+          nameMatch: ['plugin-email', 'EmailServicePlugin'],
+        },
+        sharing: {
+          pkg: '@objectstack/plugin-sharing',
+          export: 'SharingServicePlugin',
+          nameMatch: ['plugin-sharing', 'SharingServicePlugin', 'SharingPlugin'],
+        },
+        reports: {
+          pkg: '@objectstack/plugin-reports',
+          export: 'ReportsServicePlugin',
+          nameMatch: ['plugin-reports', 'ReportsServicePlugin'],
+        },
+        approvals: {
+          pkg: '@objectstack/plugin-approvals',
+          export: 'ApprovalsServicePlugin',
+          nameMatch: ['plugin-approvals', 'ApprovalsServicePlugin'],
+        },
       };
 
       const hasPluginMatching = (fragments: string[]) =>

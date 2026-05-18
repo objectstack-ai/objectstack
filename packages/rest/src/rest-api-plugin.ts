@@ -130,6 +130,13 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 } catch { return undefined; }
             };
 
+            // Approvals service resolver — used by /data/approvals/* routes.
+            const approvalsServiceProvider = async (_projectId?: string): Promise<any | undefined> => {
+                try {
+                    return ctx.getService<any>('approvals');
+                } catch { return undefined; }
+            };
+
             if (!server) {
                 ctx.logger.warn(`RestApiPlugin: HTTP Server service '${serverService}' not found. REST routes skipped.`);
                 return;
@@ -143,7 +150,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             ctx.logger.info('Hydrating REST API from Protocol...');
             
             try {
-                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultProjectIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider);
+                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultProjectIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');

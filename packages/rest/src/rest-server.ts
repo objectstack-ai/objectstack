@@ -400,6 +400,7 @@ export class RestServer {
     private emailServiceProvider?: (projectId?: string) => Promise<any | undefined>;
     private sharingServiceProvider?: (projectId?: string) => Promise<any | undefined>;
     private reportsServiceProvider?: (projectId?: string) => Promise<any | undefined>;
+    private approvalsServiceProvider?: (projectId?: string) => Promise<any | undefined>;
 
     constructor(
         server: IHttpServer,
@@ -413,6 +414,7 @@ export class RestServer {
         emailServiceProvider?: (projectId?: string) => Promise<any | undefined>,
         sharingServiceProvider?: (projectId?: string) => Promise<any | undefined>,
         reportsServiceProvider?: (projectId?: string) => Promise<any | undefined>,
+        approvalsServiceProvider?: (projectId?: string) => Promise<any | undefined>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -425,6 +427,7 @@ export class RestServer {
         this.emailServiceProvider = emailServiceProvider;
         this.sharingServiceProvider = sharingServiceProvider;
         this.reportsServiceProvider = reportsServiceProvider;
+        this.approvalsServiceProvider = approvalsServiceProvider;
     }
 
     /**
@@ -929,15 +932,19 @@ export class RestServer {
             if (this.config.api.enableUi) {
                 this.registerUiEndpoints(bp);
             }
-            if (this.config.api.enableCrud) {
-                this.registerCrudEndpoints(bp);
-            }
             if (this.config.api.enableSearch ?? true) {
                 this.registerSearchEndpoints(bp);
             }
             this.registerEmailEndpoints(bp);
             this.registerSharingEndpoints(bp);
             this.registerReportsEndpoints(bp);
+            this.registerApprovalsEndpoints(bp);
+            // CRUD's generic `/:object` route is greedy, so it must be
+            // registered AFTER any sub-namespace routes like /approvals/*,
+            // /reports/*, /sharing/* — otherwise `:object` swallows them.
+            if (this.config.api.enableCrud) {
+                this.registerCrudEndpoints(bp);
+            }
             this.registerDataActionEndpoints(bp);
             if (this.config.api.enableBatch) {
                 this.registerBatchEndpoints(bp);
@@ -2333,6 +2340,293 @@ export class RestServer {
                 }
             },
             metadata: { summary: 'Delete a report schedule by id', tags: ['reports'] },
+        });
+    }
+
+    /**
+     * Register approval engine endpoints.
+     *
+     * Routes (all under {dataPath}/approvals):
+     *   GET    /processes                       — list approval processes
+     *   POST   /processes                       — upsert (defineProcess)
+     *   GET    /processes/:id                   — get by id or name
+     *   DELETE /processes/:id                   — delete process
+     *   POST   /requests                        — submit
+     *   GET    /requests                        — list (filters: status, object, recordId, approverId, submitterId)
+     *   GET    /requests/:id                    — get request
+     *   POST   /requests/:id/approve            — approve current step
+     *   POST   /requests/:id/reject             — reject current step
+     *   POST   /requests/:id/recall             — recall (submitter only)
+     *   GET    /requests/:id/actions            — audit trail
+     *
+     * Returns 501 when `approvalsServiceProvider` is unset so deployments
+     * without `@objectstack/plugin-approvals` fail cleanly.
+     */
+    private registerApprovalsEndpoints(basePath: string): void {
+        const { crud } = this.config;
+        const dataPath = `${basePath}${crud.dataPrefix}`;
+        const isScoped = basePath.includes('/projects/:projectId');
+
+        const resolveService = async (projectId?: string) => {
+            if (!this.approvalsServiceProvider) return undefined;
+            try { return await this.approvalsServiceProvider(projectId); }
+            catch { return undefined; }
+        };
+        const respond501 = (res: any) => res.status(501).json({
+            code: 'NOT_IMPLEMENTED',
+            message: 'Approvals service is not configured on this deployment',
+        });
+        const handleApprovalError = (res: any, err: any): boolean => {
+            const msg = String(err?.message ?? err ?? '');
+            const mapping: Array<[RegExp, number, string]> = [
+                [/^VALIDATION_FAILED/, 400, 'VALIDATION_FAILED'],
+                [/^DUPLICATE_REQUEST/, 409, 'DUPLICATE_REQUEST'],
+                [/^INVALID_STATE/, 409, 'INVALID_STATE'],
+                [/^FORBIDDEN/, 403, 'FORBIDDEN'],
+                [/^NO_ACTIVE_PROCESS/, 404, 'NO_ACTIVE_PROCESS'],
+                [/^PROCESS_NOT_FOUND/, 404, 'PROCESS_NOT_FOUND'],
+                [/^REQUEST_NOT_FOUND/, 404, 'REQUEST_NOT_FOUND'],
+            ];
+            for (const [re, status, code] of mapping) {
+                if (re.test(msg)) {
+                    res.status(status).json({ code, error: msg.replace(/^[A-Z_]+:\s*/, '') });
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // ── Processes ─────────────────────────────────────────────
+        this.routeManager.register({
+            method: 'GET',
+            path: `${dataPath}/approvals/processes`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const context = await this.resolveExecCtx(projectId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+                    const svc = await resolveService(projectId);
+                    if (!svc) return respond501(res);
+                    const q = req.query ?? {};
+                    const rows = await svc.listProcesses({
+                        object: q.object,
+                        activeOnly: q.activeOnly === 'true' || q.activeOnly === true,
+                    }, context ?? {});
+                    res.json({ data: rows });
+                } catch (error: any) {
+                    logError('[REST] List approval processes error:', error);
+                    res.status(500).json({ code: 'APPROVAL_PROCESS_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                }
+            },
+            metadata: { summary: 'List approval processes', tags: ['approvals'] },
+        });
+
+        this.routeManager.register({
+            method: 'POST',
+            path: `${dataPath}/approvals/processes`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const context = await this.resolveExecCtx(projectId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+                    const svc = await resolveService(projectId);
+                    if (!svc) return respond501(res);
+                    try {
+                        const row = await svc.defineProcess(req.body ?? {}, context ?? {});
+                        res.status(201).json(row);
+                    } catch (err: any) {
+                        if (handleApprovalError(res, err)) return;
+                        throw err;
+                    }
+                } catch (error: any) {
+                    logError('[REST] Define approval process error:', error);
+                    res.status(500).json({ code: 'APPROVAL_PROCESS_DEFINE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                }
+            },
+            metadata: { summary: 'Define (upsert) an approval process', tags: ['approvals'] },
+        });
+
+        this.routeManager.register({
+            method: 'GET',
+            path: `${dataPath}/approvals/processes/:id`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const context = await this.resolveExecCtx(projectId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+                    const svc = await resolveService(projectId);
+                    if (!svc) return respond501(res);
+                    const row = await svc.getProcess(req.params.id, context ?? {});
+                    if (!row) {
+                        res.status(404).json({ code: 'PROCESS_NOT_FOUND', error: `Approval process '${req.params.id}' not found` });
+                        return;
+                    }
+                    res.json(row);
+                } catch (error: any) {
+                    logError('[REST] Get approval process error:', error);
+                    res.status(500).json({ code: 'APPROVAL_PROCESS_GET_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                }
+            },
+            metadata: { summary: 'Get an approval process by id or name', tags: ['approvals'] },
+        });
+
+        this.routeManager.register({
+            method: 'DELETE',
+            path: `${dataPath}/approvals/processes/:id`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const context = await this.resolveExecCtx(projectId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+                    const svc = await resolveService(projectId);
+                    if (!svc) return respond501(res);
+                    await svc.deleteProcess(req.params.id, context ?? {});
+                    res.status(204).end();
+                } catch (error: any) {
+                    logError('[REST] Delete approval process error:', error);
+                    res.status(500).json({ code: 'APPROVAL_PROCESS_DELETE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                }
+            },
+            metadata: { summary: 'Delete an approval process', tags: ['approvals'] },
+        });
+
+        // ── Requests ──────────────────────────────────────────────
+        this.routeManager.register({
+            method: 'POST',
+            path: `${dataPath}/approvals/requests`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const context = await this.resolveExecCtx(projectId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+                    const svc = await resolveService(projectId);
+                    if (!svc) return respond501(res);
+                    const body = req.body ?? {};
+                    try {
+                        const row = await svc.submit({
+                            object: body.object,
+                            recordId: body.recordId ?? body.record_id,
+                            processName: body.processName ?? body.process_name,
+                            submitterId: body.submitterId ?? body.submitter_id ?? context?.userId,
+                            comment: body.comment,
+                            payload: body.payload,
+                        }, context ?? {});
+                        res.status(201).json(row);
+                    } catch (err: any) {
+                        if (handleApprovalError(res, err)) return;
+                        throw err;
+                    }
+                } catch (error: any) {
+                    logError('[REST] Submit approval error:', error);
+                    res.status(500).json({ code: 'APPROVAL_SUBMIT_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                }
+            },
+            metadata: { summary: 'Submit a record for approval', tags: ['approvals'] },
+        });
+
+        this.routeManager.register({
+            method: 'GET',
+            path: `${dataPath}/approvals/requests`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const context = await this.resolveExecCtx(projectId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+                    const svc = await resolveService(projectId);
+                    if (!svc) return respond501(res);
+                    const q = req.query ?? {};
+                    const rows = await svc.listRequests({
+                        object: q.object,
+                        recordId: q.recordId ?? q.record_id,
+                        status: q.status,
+                        approverId: q.approverId ?? q.approver_id,
+                        submitterId: q.submitterId ?? q.submitter_id,
+                    }, context ?? {});
+                    res.json({ data: rows });
+                } catch (error: any) {
+                    logError('[REST] List approval requests error:', error);
+                    res.status(500).json({ code: 'APPROVAL_REQUEST_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                }
+            },
+            metadata: { summary: 'List approval requests', tags: ['approvals'] },
+        });
+
+        this.routeManager.register({
+            method: 'GET',
+            path: `${dataPath}/approvals/requests/:id`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const context = await this.resolveExecCtx(projectId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+                    const svc = await resolveService(projectId);
+                    if (!svc) return respond501(res);
+                    const row = await svc.getRequest(req.params.id, context ?? {});
+                    if (!row) {
+                        res.status(404).json({ code: 'REQUEST_NOT_FOUND', error: `Approval request '${req.params.id}' not found` });
+                        return;
+                    }
+                    res.json(row);
+                } catch (error: any) {
+                    logError('[REST] Get approval request error:', error);
+                    res.status(500).json({ code: 'APPROVAL_REQUEST_GET_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                }
+            },
+            metadata: { summary: 'Get an approval request by id', tags: ['approvals'] },
+        });
+
+        const decisionRoute = (suffix: 'approve' | 'reject' | 'recall', method: 'approve' | 'reject' | 'recall') => {
+            this.routeManager.register({
+                method: 'POST',
+                path: `${dataPath}/approvals/requests/:id/${suffix}`,
+                handler: async (req: any, res: any) => {
+                    try {
+                        const projectId = isScoped ? req.params?.projectId : undefined;
+                        const context = await this.resolveExecCtx(projectId, req);
+                        if (this.enforceAuth(req, res, context)) return;
+                        const svc = await resolveService(projectId);
+                        if (!svc) return respond501(res);
+                        const body = req.body ?? {};
+                        try {
+                            const out = await svc[method](req.params.id, {
+                                actorId: body.actorId ?? body.actor_id ?? context?.userId,
+                                comment: body.comment,
+                            }, context ?? {});
+                            res.json(out);
+                        } catch (err: any) {
+                            if (handleApprovalError(res, err)) return;
+                            throw err;
+                        }
+                    } catch (error: any) {
+                        logError(`[REST] ${suffix} approval error:`, error);
+                        res.status(500).json({ code: `APPROVAL_${suffix.toUpperCase()}_FAILED`, error: String(error?.message ?? error).slice(0, 500) });
+                    }
+                },
+                metadata: { summary: `${suffix[0].toUpperCase()}${suffix.slice(1)} an approval request`, tags: ['approvals'] },
+            });
+        };
+        decisionRoute('approve', 'approve');
+        decisionRoute('reject', 'reject');
+        decisionRoute('recall', 'recall');
+
+        this.routeManager.register({
+            method: 'GET',
+            path: `${dataPath}/approvals/requests/:id/actions`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const context = await this.resolveExecCtx(projectId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+                    const svc = await resolveService(projectId);
+                    if (!svc) return respond501(res);
+                    const rows = await svc.listActions(req.params.id, context ?? {});
+                    res.json({ data: rows });
+                } catch (error: any) {
+                    logError('[REST] List approval actions error:', error);
+                    res.status(500).json({ code: 'APPROVAL_ACTIONS_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                }
+            },
+            metadata: { summary: 'List actions (audit trail) for an approval request', tags: ['approvals'] },
         });
     }
 

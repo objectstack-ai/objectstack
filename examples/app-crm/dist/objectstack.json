@@ -18964,6 +18964,48 @@
       }
     }
   ],
+  "approvals": [
+    {
+      "name": "opportunity_discount_approval",
+      "label": "Opportunity Discount Approval",
+      "object": "opportunity",
+      "active": true,
+      "description": "High-value opportunities (amount > 100k) require manager + director sign-off.",
+      "entryCriteria": {
+        "dialect": "cel",
+        "source": "record.amount > 100000"
+      },
+      "lockRecord": true,
+      "steps": [
+        {
+          "name": "manager_review",
+          "label": "Sales Manager Review",
+          "description": "First-line review by the sales manager.",
+          "approvers": [
+            {
+              "type": "role",
+              "value": "sales_manager"
+            }
+          ],
+          "behavior": "first_response",
+          "rejectionBehavior": "back_to_previous"
+        },
+        {
+          "name": "director_signoff",
+          "label": "Sales Director Sign-off",
+          "description": "Final sign-off for the discounted deal.",
+          "approvers": [
+            {
+              "type": "role",
+              "value": "sales_director"
+            }
+          ],
+          "behavior": "first_response",
+          "rejectionBehavior": "back_to_previous"
+        }
+      ]
+    }
+  ],
   "flows": [
     {
       "name": "campaign_enrollment",
@@ -22561,6 +22603,7 @@
     "analytics",
     "auth",
     "ui",
-    "storage"
+    "storage",
+    "approvals"
   ]
 }

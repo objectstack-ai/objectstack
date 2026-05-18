@@ -986,21 +986,33 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:^
         version: link:../objectql
+      '@objectstack/plugin-approvals':
+        specifier: workspace:*
+        version: link:../plugins/plugin-approvals
       '@objectstack/plugin-audit':
         specifier: workspace:*
         version: link:../plugins/plugin-audit
       '@objectstack/plugin-auth':
         specifier: workspace:*
         version: link:../plugins/plugin-auth
+      '@objectstack/plugin-email':
+        specifier: workspace:*
+        version: link:../plugins/plugin-email
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
       '@objectstack/plugin-mcp-server':
         specifier: workspace:*
         version: link:../plugins/plugin-mcp-server
+      '@objectstack/plugin-reports':
+        specifier: workspace:*
+        version: link:../plugins/plugin-reports
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugins/plugin-security
+      '@objectstack/plugin-sharing':
+        specifier: workspace:*
+        version: link:../plugins/plugin-sharing
       '@objectstack/rest':
         specifier: workspace:*
         version: link:../rest
@@ -1389,6 +1401,28 @@ importers:
       better-sqlite3:
         specifier: ^12.10.0
         version: 12.10.0
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.6
+        version: 4.1.6(@opentelemetry/api@1.9.1)(@types/node@25.9.0)(@vitest/coverage-v8@4.1.6)(happy-dom@20.9.0)(msw@2.14.6(@types/node@25.9.0)(typescript@6.0.3))(vite@8.0.13(@types/node@25.9.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.2)(yaml@2.9.0))
+
+  packages/plugins/plugin-approvals:
+    dependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.0
+        version: 25.9.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

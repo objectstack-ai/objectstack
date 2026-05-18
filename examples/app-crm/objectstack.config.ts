@@ -14,6 +14,7 @@ import * as ragPipelines from './src/rag';
 import * as profiles from './src/profiles';
 import * as apps from './src/apps';
 import * as views from './src/views';
+import * as approvals from './src/approvals';
 import * as translations from './src/translations';
 import { CrmSeedData } from './src/data';
 
@@ -46,7 +47,7 @@ export default defineStack({
   // `ui`   serves the Studio shell and CRM apps under /_studio/.
   // Both are required for a clickable login flow when running `objectstack start`
   // off the compiled artifact.
-  requires: ['ai', 'automation', 'analytics', 'auth', 'ui', 'storage'],
+  requires: ['ai', 'automation', 'analytics', 'auth', 'ui', 'storage', 'approvals'],
 
   objects: Object.values(objects),
   actions: Object.values(actions),
@@ -59,6 +60,7 @@ export default defineStack({
   permissions: Object.values(profiles),
   apps: Object.values(apps),
   views: Object.values(views),
+  approvals: Object.values(approvals),
   analyticsCubes: Object.values(cubes),
 
   hooks: allHooks,

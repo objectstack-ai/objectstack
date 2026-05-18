@@ -234,6 +234,53 @@ export class AppPlugin implements Plugin {
             });
         }
 
+        // ── Auto-register declarative Approval Processes ────────────────
+        // Approval processes declared via `defineStack({ approvals })` are
+        // upserted into the running `approvals` service. The `approvals`
+        // service itself registers on `kernel:ready`, so we defer to the
+        // same hook to avoid a chicken-and-egg.
+        try {
+            const approvals: any[] = Array.isArray(this.bundle.approvals)
+                ? this.bundle.approvals
+                : Array.isArray((this.bundle.manifest || {}).approvals)
+                    ? (this.bundle.manifest as any).approvals
+                    : [];
+            if (approvals.length > 0) {
+                ctx.hook('kernel:ready', async () => {
+                    let svc: any;
+                    try { svc = ctx.getService('approvals'); } catch { /* not installed */ }
+                    if (!svc || typeof svc.defineProcess !== 'function') {
+                        ctx.logger.warn('[AppPlugin] approvals service not registered — skipping declarative processes', {
+                            appId, processCount: approvals.length,
+                        });
+                        return;
+                    }
+                    const sysCtx = { isSystem: true, roles: [], permissions: [] };
+                    let ok = 0;
+                    for (const proc of approvals) {
+                        try {
+                            await svc.defineProcess({
+                                name: proc.name,
+                                label: proc.label,
+                                object: proc.object,
+                                description: proc.description,
+                                active: proc.active !== false,
+                                definition: proc,
+                            }, sysCtx);
+                            ok++;
+                        } catch (err: any) {
+                            ctx.logger.warn('[AppPlugin] Failed to register approval process', {
+                                appId, process: proc?.name, error: err?.message ?? String(err),
+                            });
+                        }
+                    }
+                    ctx.logger.info('[AppPlugin] Registered approval processes', { appId, count: ok });
+                });
+            }
+        } catch (err: any) {
+            ctx.logger.error('[AppPlugin] Failed to schedule approval-process registration', err as Error, { appId });
+        }
+
         // ── Org-Scoped App Catalog Sync ──────────────────────────────────
         // Emit `app:registered` so AppCatalogService (running on the
         // control-plane kernel) can mirror this app into `sys_app`. Skipped
