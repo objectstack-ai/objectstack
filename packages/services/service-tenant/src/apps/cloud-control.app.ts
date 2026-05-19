@@ -32,9 +32,10 @@ export const CLOUD_CONTROL_APP: App = {
   branding: {
     primaryColor: '#2563eb', // Blue-600 — distinct from Setup's slate
   },
-  // Only org owners/admins see this app. The control-plane API itself
-  // also enforces this; nav-time check is cosmetic.
-  requiredPermissions: ['cloud.control.access'],
+  // No App-level permission gate: any authenticated user can open the
+  // Cloud Control App to create/manage their own organizations and
+  // projects. Data-level isolation (which orgs/projects each user sees)
+  // is enforced by sharing rules on sys_organization, sys_project, etc.
 
   navigation: [
     {
