@@ -561,8 +561,8 @@ D9 / D10 / D11                   (resolved through M9 sub-tasks above)
 
 ### M10 P2 — Important (50%+ of customers need these)
 
-- [ ] M10.15 — Workflow / approval engine (`sys_workflow`).
-- [ ] M10.16 — Saved reports + scheduled email (`sys_report`).
+- [x] M10.15 — Workflow / approval engine — delivered as M11.C15 (`@objectstack/plugin-approvals` + `sys_approval_process` / `sys_approval_request` / `sys_approval_action`, tenant-scoped REST surface, autopilot lifecycle hooks).
+- [x] M10.16 — Saved reports + scheduled email — delivered as M11.C16 (`@objectstack/plugin-reports` + matrix `groupBy` with `dateGranularity`).
 - [ ] M10.17 — Record-level sharing rules (`sys_sharing_rule`) + team hierarchy (`sys_team`).
 - [ ] M10.18 — Tags (`sys_tag`).
 - [ ] M10.19 — Re-enable GraphQL (currently 501) and OpenAPI spec endpoint (currently 404).
