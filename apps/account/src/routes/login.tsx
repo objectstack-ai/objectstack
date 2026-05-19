@@ -14,9 +14,20 @@ import { SocialSignInButtons } from '@/components/auth/social-sign-in-buttons';
 import { GalleryVerticalEnd } from 'lucide-react';
 
 export const Route = createFileRoute('/login')({
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } => {
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { redirect?: string; fallback?: boolean } => {
     const r = search.redirect;
-    return typeof r === 'string' ? { redirect: r } : {};
+    const f = search.fallback;
+    return {
+      ...(typeof r === 'string' ? { redirect: r } : {}),
+      // Escape hatch for the platform-SSO auto-redirect (see useEffect below).
+      // Any truthy value (`?fallback=1`, `?fallback=true`) flips the page back
+      // to the legacy local email/password form. Used by:
+      //   - the SSO `errorCallbackURL` so a failed cloud bounce doesn't loop
+      //   - operators needing local sign-in when the cloud IdP is unreachable
+      ...(f === '1' || f === 'true' || f === true ? { fallback: true } : {}),
+    };
   },
   component: LoginPage,
 });
@@ -42,7 +53,7 @@ function resolveRedirect(target: string): string {
 function LoginPage() {
   const { t } = useObjectTranslation();
   const navigate = useNavigate();
-  const { redirect } = Route.useSearch();
+  const { redirect, fallback } = Route.useSearch();
   const client = useClient() as any;
   const {
     session,
@@ -57,6 +68,92 @@ function LoginPage() {
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [autoSelectingOrg, setAutoSelectingOrg] = useState(false);
+  // Platform-SSO auto-redirect state — see effect below. Starts `true` so the
+  // page renders the redirect splash instead of the local form during the
+  // initial config probe, eliminating the brief flash-of-form on
+  // SSO-enabled deployments (Airtable-style UX).
+  const [ssoAutoRedirecting, setSsoAutoRedirecting] = useState<boolean>(!fallback);
+
+  // Platform-SSO auto-redirect.
+  //
+  // Cloud-managed projects expose the cloud control plane as a platform-SSO
+  // identity provider (registered as the social provider id
+  // `objectstack-cloud`). When present, presenting a *second* local login
+  // form alongside the SSO button just confuses end users — they bounce
+  // between two near-identical login screens during the OAuth dance.
+  //
+  // This effect detects "we're an RP for cloud platform SSO" by probing
+  // `/api/v1/auth/config` for the `objectstack-cloud` provider, and if so
+  // immediately triggers the OAuth flow — no local form is ever rendered.
+  //
+  // Skip conditions:
+  //   - `?fallback=1` on the URL (operator escape hatch)
+  //   - we're inside the IdP-side login (cloud's own /_account/login does
+  //     NOT advertise `objectstack-cloud` as a provider — only RP projects do)
+  //   - we're inside an in-flight oauth2 authorize hand-off
+  //     (`?client_id=...&redirect_uri=...`) — that path is handled by the
+  //     post-login useEffect further down, and re-triggering signIn here
+  //     would clobber the original RP's request
+  useEffect(() => {
+    if (fallback) {
+      setSsoAutoRedirecting(false);
+      return;
+    }
+    if (user) {
+      // Already authenticated — let the post-login effect handle navigation.
+      setSsoAutoRedirecting(false);
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.has('client_id') && sp.has('redirect_uri')) {
+        setSsoAutoRedirecting(false);
+        return;
+      }
+    }
+    if (!client?.auth?.getConfig || !client?.auth?.signInWithProvider) {
+      setSsoAutoRedirecting(false);
+      return;
+    }
+    let cancelled = false;
+    client.auth.getConfig()
+      .then((res: any) => {
+        if (cancelled) return;
+        const list: Array<{ id: string; enabled: boolean; type?: string }> =
+          res?.socialProviders ?? res?.data?.socialProviders ?? [];
+        const cloud = list.find(
+          (p) => p.enabled && p.id === 'objectstack-cloud',
+        );
+        if (!cloud) {
+          setSsoAutoRedirecting(false);
+          return;
+        }
+        const base = window.location.origin + import.meta.env.BASE_URL;
+        const fallbackQs = new URLSearchParams({ fallback: '1' });
+        if (redirect) fallbackQs.set('redirect', redirect);
+        const errorUrl = `${base}login?${fallbackQs.toString()}`;
+        const successUrl = isSafeRedirect(redirect)
+          ? window.location.origin + resolveRedirect(redirect)
+          : window.location.origin + '/';
+        client.auth
+          .signInWithProvider(cloud.id, {
+            callbackURL: successUrl,
+            errorCallbackURL: errorUrl,
+            type: (cloud.type as any) ?? 'oidc',
+          })
+          .catch((err: unknown) => {
+            console.warn('[LoginPage] platform SSO auto-redirect failed', err);
+            if (!cancelled) setSsoAutoRedirecting(false);
+          });
+      })
+      .catch((err: unknown) => {
+        console.warn('[LoginPage] failed to probe auth config', err);
+        if (!cancelled) setSsoAutoRedirecting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, fallback, redirect, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -147,6 +244,12 @@ function LoginPage() {
 
   return (
     <div className="flex min-h-svh w-full flex-col items-center justify-center gap-6 bg-muted p-6 md:p-10">
+      {ssoAutoRedirecting ? (
+        <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
+          <div className="size-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+          <span>{t('auth.login.redirecting', { defaultValue: 'Redirecting to ObjectStack…' })}</span>
+        </div>
+      ) : (
       <div className="flex w-full max-w-sm flex-col gap-6">
         <a href="#" className="flex items-center gap-2 self-center font-medium">
           <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
@@ -218,6 +321,7 @@ function LoginPage() {
           </p>
         </div>
       </div>
+      )}
     </div>
   );
 }
