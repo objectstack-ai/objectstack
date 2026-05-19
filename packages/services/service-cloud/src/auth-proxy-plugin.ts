@@ -116,6 +116,44 @@ export class AuthProxyPlugin implements Plugin {
                         try { authSvc = (projectKernel as any).getService?.('auth'); } catch { /* ignore */ }
                     }
 
+                    // Custom non-better-auth endpoints. better-auth has no
+                    // /config or /bootstrap-status route, so without these
+                    // short-circuits the request would fall through to the
+                    // better-auth handler and 404. The Account SPA needs
+                    // /config to render the "Continue with ObjectStack"
+                    // platform SSO button via SocialSignInButtons.
+                    const subPath = url.pathname.startsWith(AUTH_PREFIX + '/')
+                        ? url.pathname.substring(AUTH_PREFIX.length + 1)
+                        : '';
+                    if (c.req.method === 'GET' && (subPath === 'config' || subPath === 'bootstrap-status')) {
+                        if (subPath === 'config') {
+                            try {
+                                const config = typeof authSvc?.getPublicConfig === 'function'
+                                    ? authSvc.getPublicConfig()
+                                    : null;
+                                if (config) {
+                                    return c.json({ success: true, data: config });
+                                }
+                                return c.json({ success: false, error: { code: 'auth_config_unavailable', message: 'AuthManager has no getPublicConfig()' } }, 503);
+                            } catch (e: any) {
+                                return c.json({ success: false, error: { code: 'auth_config_error', message: String(e?.message ?? e) } }, 500);
+                            }
+                        }
+                        // bootstrap-status
+                        try {
+                            const dataEngine = typeof authSvc?.getDataEngine === 'function'
+                                ? authSvc.getDataEngine()
+                                : null;
+                            if (!dataEngine || typeof dataEngine.count !== 'function') {
+                                return c.json({ hasOwner: true });
+                            }
+                            const count = await dataEngine.count('sys_user', {});
+                            return c.json({ hasOwner: (count ?? 0) > 0 });
+                        } catch {
+                            return c.json({ hasOwner: true });
+                        }
+                    }
+
                     const fn = await resolveAuthHandler(authSvc);
                     if (!fn) {
                         return c.json({ error: 'auth_service_unavailable', projectId }, 503);
