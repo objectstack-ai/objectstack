@@ -40,6 +40,20 @@ export const SysInvitation = ObjectSchema.create({
         { field: 'role', required: true },
       ],
     },
+    {
+      name: 'cancel_invitation',
+      label: 'Cancel Invitation',
+      icon: 'x-circle',
+      variant: 'danger',
+      mode: 'delete',
+      locations: ['list_item'],
+      type: 'api',
+      target: '/api/v1/auth/organization/cancel-invitation',
+      recordIdParam: 'invitationId',
+      confirmText: 'Cancel this invitation? The recipient will no longer be able to accept it.',
+      successMessage: 'Invitation canceled',
+      refreshAfter: true,
+    },
   ],
 
   listViews: {

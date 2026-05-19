@@ -20,7 +20,42 @@ export const SysMember = ObjectSchema.create({
   description: 'Organization membership records',
   titleFormat: '{user_id} in {organization_id}',
   compactLayout: ['user_id', 'organization_id', 'role'],
-  
+
+  // Row-level actions: better-auth `organization/update-member-role` and
+  // `organization/remove-member`. Generic CRUD is suppressed on better-auth
+  // managed tables, so these are the canonical edit/delete entry points.
+  actions: [
+    {
+      name: 'update_member_role',
+      label: 'Change Role',
+      icon: 'shield',
+      mode: 'edit',
+      locations: ['list_item'],
+      type: 'api',
+      target: '/api/v1/auth/organization/update-member-role',
+      recordIdParam: 'memberId',
+      successMessage: 'Member role updated',
+      refreshAfter: true,
+      params: [
+        { field: 'role', required: true, defaultFromRow: true },
+      ],
+    },
+    {
+      name: 'remove_member',
+      label: 'Remove Member',
+      icon: 'user-minus',
+      variant: 'danger',
+      mode: 'delete',
+      locations: ['list_item'],
+      type: 'api',
+      target: '/api/v1/auth/organization/remove-member',
+      recordIdParam: 'memberIdOrEmail',
+      confirmText: 'Remove this member from the organization? They will lose access to all org resources.',
+      successMessage: 'Member removed',
+      refreshAfter: true,
+    },
+  ],
+
   fields: {
     id: Field.text({
       label: 'Member ID',

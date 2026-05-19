@@ -55,6 +55,12 @@ export const ActionParamSchema = lazySchema(() => z.object({
   helpText: z.string().optional(),
   /** Default value for the dialog input. */
   defaultValue: z.unknown().optional(),
+  /**
+   * When true, the param's default value is pulled from the current row record
+   * (key = the resolved field name) when the action runs from a list_item
+   * context. Useful for edit dialogs that pre-fill from the selected row.
+   */
+  defaultFromRow: z.boolean().optional(),
 }).refine(
   (p) => Boolean(p.name) || Boolean(p.field),
   { message: 'ActionParam requires either "name" or "field"' },
@@ -189,6 +195,34 @@ export const ActionSchema = lazySchema(() => z.object({
 
   /** Bulk Operations */
   bulkEnabled: z.boolean().optional().describe('Whether this action can be applied to multiple selected records'),
+
+  /**
+   * Row-context: when the action runs from a list_item location, this body key
+   * receives the row's id (or the field named by `recordIdField`). Defaults to
+   * `id` when omitted but `recordIdField` is set; otherwise no injection.
+   */
+  recordIdParam: z.string().optional().describe('Body key to inject the row id into when running from a list_item context.'),
+  /**
+   * Row field whose value seeds `recordIdParam`. Defaults to `'id'` when
+   * `recordIdParam` is set. Use this when the body key expects a non-id value
+   * (e.g. `token` for `revoke-session`).
+   */
+  recordIdField: z.string().optional().describe('Row field whose value seeds recordIdParam. Defaults to "id".'),
+  /**
+   * Request-body shape. `'flat'` (default) sends collected params at the top
+   * level. `{ wrap: 'data' }` nests the user-collected params under that key
+   * (used by better-auth `organization/update`), while `recordIdParam` and
+   * other top-level keys stay flat.
+   */
+  bodyShape: z.union([
+    z.literal('flat'),
+    z.object({ wrap: z.string() }),
+  ]).optional().describe('Body wrapping: flat (default) or { wrap: key } to nest user-collected params under a key.'),
+  /**
+   * Semantic mode hint — UI / runtime can use this to pick confirm copy,
+   * default variants, success messaging. Pure metadata; no runtime branching.
+   */
+  mode: z.enum(['create', 'edit', 'delete', 'custom']).optional().describe('Semantic mode of the action.'),
 
   /** Execution */
   timeout: z.number().optional().describe('Maximum execution time in milliseconds for the action'),

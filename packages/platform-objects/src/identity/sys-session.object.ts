@@ -44,6 +44,22 @@ export const SysSession = ObjectSchema.create({
       successMessage: 'All other sessions revoked',
       refreshAfter: true,
     },
+    {
+      name: 'revoke_session',
+      label: 'Revoke Session',
+      icon: 'log-out',
+      variant: 'danger',
+      mode: 'delete',
+      locations: ['list_item'],
+      type: 'api',
+      target: '/api/v1/auth/revoke-session',
+      // better-auth `revoke-session` keys off the session token, not the id.
+      recordIdParam: 'token',
+      recordIdField: 'token',
+      confirmText: 'Revoke this session? The user will be signed out from that device.',
+      successMessage: 'Session revoked',
+      refreshAfter: true,
+    },
   ],
 
   listViews: {
