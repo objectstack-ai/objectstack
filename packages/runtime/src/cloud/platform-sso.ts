@@ -152,9 +152,10 @@ export async function seedPlatformSsoClient(opts: SeedPlatformSsoClientOptions):
         try {
             await ql.insert('sys_oauth_application', {
                 id: `oauthc_${projectId}`,
+                name: `Project ${projectId}`,
                 client_id: clientId,
                 client_secret: clientSecret,
-                client_name: `Project ${projectId}`,
+                type: 'web',
                 redirect_uris: JSON.stringify(redirects),
                 grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
                 response_types: JSON.stringify(['code']),
@@ -162,6 +163,7 @@ export async function seedPlatformSsoClient(opts: SeedPlatformSsoClientOptions):
                 token_endpoint_auth_method: 'client_secret_basic',
                 require_pkce: false,
                 skip_consent: true,
+                disabled: false,
                 subject_type: 'public',
                 created_at: nowIso,
                 updated_at: nowIso,

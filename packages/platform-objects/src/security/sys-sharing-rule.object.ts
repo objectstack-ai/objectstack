@@ -32,7 +32,13 @@ export const SysSharingRule = ObjectSchema.create({
   icon: 'shield-check',
   isSystem: true,
   managedBy: 'config',
-  description: 'Declarative sharing rule that auto-materialises sys_record_share grants',
+  // Sharing rules currently embed criteria as `criteria_json` — a
+  // FilterCondition that admins cannot reasonably hand-write. Suppress
+  // generic CRUD until a visual criteria builder ships. Real authoring
+  // path: `defineSharingRule({...})` in code, seeded via the sharing
+  // service. (Same pattern as sys_approval_process.)
+  userActions: { create: false, edit: false, delete: false, import: false },
+  description: 'Declarative sharing rule that auto-materialises sys_record_share grants. Authored via defineSharingRule() in code; visual builder is on the roadmap.',
   displayNameField: 'name',
   titleFormat: '{label}',
   compactLayout: ['name', 'object_name', 'recipient_type', 'recipient_id', 'access_level', 'active'],

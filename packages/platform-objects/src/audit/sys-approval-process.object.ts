@@ -25,7 +25,17 @@ export const SysApprovalProcess = ObjectSchema.create({
   icon: 'check-square',
   isSystem: true,
   managedBy: 'config',
-  description: 'Persisted approval process definition (ApprovalProcess JSON)',
+  // Authoring an approval process requires a visual step designer that
+  // doesn't yet exist — the embedded `definition_json` textarea would
+  // force admins to hand-write a multi-page ApprovalProcess envelope.
+  // Suppress generic CRUD until the designer lands. Real authoring path:
+  // call `defineApprovalProcess({...})` in code and seed via the
+  // approvals service (`POST /api/v1/approvals/processes`) or commit the
+  // definition as a fixture. Editing existing rows (e.g. toggling
+  // `active`) is also suppressed for now because the same textarea would
+  // appear; use the service API or a future designer instead.
+  userActions: { create: false, edit: false, delete: false, import: false },
+  description: 'Persisted approval process definition. Authored via defineApprovalProcess() in code; visual designer is on the roadmap.',
   displayNameField: 'name',
   titleFormat: '{label}',
   compactLayout: ['name', 'object_name', 'active', 'updated_at'],
