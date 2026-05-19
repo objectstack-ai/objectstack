@@ -3,18 +3,18 @@
 /**
  * ObjectStack Cloud — Host Configuration
  *
+ * apps/cloud is the **control plane**: it owns the control-plane DB
+ * (organizations, projects, packages, billing), authentication
+ * (better-auth), the cloud_control metadata-driven App, and the
+ * artifact distribution API. It does NOT run per-project tenant
+ * kernels — apps/objectos is the runtime that pulls compiled
+ * artifacts from here and serves project data.
+ *
  * Booted by `objectstack dev` / `objectstack serve` (see `package.json`)
  * and by the Vercel / Cloudflare serverless entrypoints.
- *
- * This config is **cloud-only** — multi-project control plane with the
- * Studio template registry and filesystem-backed app bundle resolver
- * wired in. `apps/objectos` is the runtime that talks to this control
- * plane; their boot configs are now fully independent (no shared
- * `createBootStack` dispatcher).
  */
 
 import { createCloudStack } from '@objectstack/service-cloud';
-import { createFsAppBundleResolver } from './server/fs-app-bundle-resolver.js';
 import { templateRegistry } from './server/templates/registry.js';
 
 const authSecret = process.env.AUTH_SECRET
@@ -33,7 +33,6 @@ const config = await createCloudStack({
     authSecret,
     baseUrl,
     templates: templateRegistry,
-    appBundles: createFsAppBundleResolver(),
 });
 
 export default config;

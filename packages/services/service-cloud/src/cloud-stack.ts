@@ -14,9 +14,7 @@
 
 import { resolve as resolvePath } from 'node:path';
 import type * as Contracts from '@objectstack/spec/contracts';
-import type { BasePluginsFactory, AppBundleResolver } from './project-kernel-factory.js';
 import type { ProjectTemplate } from './multi-project-plugin.js';
-import { MultiProjectPlugin } from './multi-project-plugin.js';
 import { createControlPlanePlugins } from './control-plane-preset.js';
 import { createStudioRuntimeConfigPlugin, createTemplatesRoutePlugin } from './multi-project-plugins.js';
 import { createCloudArtifactApiPlugin } from './cloud-artifact-api-plugin.js';
@@ -25,6 +23,19 @@ import { resolveStoragePluginFromEnv, resolveStorageFromEnv } from './storage-en
 
 type IDataDriver = Contracts.IDataDriver;
 
+/**
+ * Cloud (control-plane) stack configuration.
+ *
+ * apps/cloud is intentionally narrow: it owns the control-plane DB
+ * (organizations, projects, packages, billing), authentication
+ * (better-auth), the cloud_control metadata-driven App, and the
+ * artifact distribution API consumed by apps/objectos.
+ *
+ * It deliberately does NOT load per-project tenant kernels or
+ * compiled app bundles — that responsibility lives in apps/objectos
+ * (`createObjectOSStack`), which pulls artifacts from this stack
+ * over HTTP and boots per-project kernels on demand.
+ */
 export interface CloudStackConfig {
     authSecret: string;
     baseUrl: string;
@@ -32,18 +43,12 @@ export interface CloudStackConfig {
     controlDriverUrl?: string;
     /** Auth token for libSQL/Turso control-plane driver. */
     controlDriverAuthToken?: string;
-    /** Per-project base plugins factory. */
-    basePlugins?: BasePluginsFactory;
-    /** Per-project app bundle resolver. */
-    appBundles?: AppBundleResolver;
-    /** Template registry for provisioning-time seeding. */
+    /**
+     * Template registry. Only the metadata (id/label/description/category)
+     * is exposed via `GET /cloud/templates`; the actual seed bundles are
+     * applied at runtime by the consumer of this control plane.
+     */
     templates?: Record<string, ProjectTemplate>;
-    /** KernelManager LRU size. Default: 32. */
-    kernelCacheSize?: number;
-    /** KernelManager idle TTL (ms). Default: 15 min. */
-    kernelTtlMs?: number;
-    /** EnvironmentDriverRegistry cache TTL (ms). Default: 5 min. */
-    envCacheTtlMs?: number;
     /** API prefix. Default: /api/v1. */
     apiPrefix?: string;
 }
@@ -106,12 +111,7 @@ export async function createCloudStack(config: CloudStackConfig): Promise<{
         // resolveDefaultDataDir() throw-on-serverless guard.
         controlDriverUrl,
         controlDriverAuthToken,
-        basePlugins,
-        appBundles,
         templates = {},
-        kernelCacheSize,
-        kernelTtlMs,
-        envCacheTtlMs,
         apiPrefix,
     } = config;
 
@@ -138,67 +138,18 @@ export async function createCloudStack(config: CloudStackConfig): Promise<{
         process.env.OS_CONTROL_DATABASE_AUTH_TOKEN || process.env.OS_DATABASE_AUTH_TOKEN || process.env.TURSO_AUTH_TOKEN || controlDriverAuthToken,
     );
 
-    // Default base plugins (per-project kernel — business data only).
-    //
-    // Identity, authentication, security, audit, and tenant catalogs are owned
-    // exclusively by the control-plane kernel (see control-plane-preset.ts).
-    // Their tables live in the control DB and must NOT be duplicated per project.
-    // Each per-project kernel only registers the engines needed to materialise
-    // that project's business-data schemas and records.
-    const resolvedBasePlugins: BasePluginsFactory = basePlugins ?? (async ({ projectId, project }) => {
-        const { ObjectQLPlugin } = await import('@objectstack/objectql');
-        const { MetadataPlugin } = await import('@objectstack/metadata');
-        const orgId = project.organization_id;
-        return [
-            new ObjectQLPlugin({ projectId: projectId }),
-            new MetadataPlugin({
-                watch: false,
-                projectId: projectId,
-                organizationId: orgId,
-                // sys_* metadata-storage tables live in the control plane only.
-                registerSystemObjects: false,
-            }),
-        ];
-    });
-
-    // Resolve storage ONCE so we can wire both StorageServicePlugin (kernel
-    // service registration + REST routes) AND pass the raw adapter directly to
-    // MultiProjectPlugin (avoids cross-plugin kernel.getService lookup which
-    // is unreliable through the proxy wrapper used here).
+    // Storage service — used by the artifact API to persist published
+    // project bundles. Wires from env: OS_STORAGE_ADAPTER=s3 +
+    // OS_S3_BUCKET/OS_S3_REGION/... Falls back to a local-FS adapter
+    // (rooted at OS_STORAGE_LOCAL_DIR or <data-dir>/storage). On
+    // serverless without S3 env vars the cloud-artifact plugin will warn
+    // — set OS_STORAGE_ADAPTER=s3 in production.
     const storageEnv = await resolveStorageFromEnv();
 
-    const multiProjectPluginProxy: any = {
-        name: 'com.objectstack.multi-project',
-        version: '0.0.0',
-        _impl: null as any,
-        async init(ctx: any) {
-            try {
-                const { driver: controlDriver } = await controlDriverPromise;
-                this._impl = new MultiProjectPlugin({
-                    controlDriver,
-                    basePlugins: resolvedBasePlugins,
-                    appBundles,
-                    templates,
-                    maxSize: Number(process.env.OS_KERNEL_CACHE_SIZE ?? kernelCacheSize ?? 32),
-                    ttlMs: Number(process.env.OS_KERNEL_TTL_MS ?? kernelTtlMs ?? 15 * 60 * 1000),
-                    cacheTTLMs: Number(process.env.OS_ENV_CACHE_TTL_MS ?? envCacheTtlMs ?? 5 * 60 * 1000),
-                    storage: storageEnv.storage,
-                    storageAdapterName: storageEnv.adapterName,
-                });
-                if (this._impl.init) await this._impl.init(ctx);
-            } catch (err: any) {
-                console.error('[MultiProjectPlugin] init failed:', err?.stack ?? err?.message ?? err);
-            }
-        },
-        async start(ctx: any) {
-            if (this._impl?.start) await this._impl.start(ctx);
-        },
-        async stop(ctx: any) {
-            if (this._impl?.stop) await this._impl.stop(ctx);
-        },
-    };
-
-    // List templates for the static /cloud/templates route
+    // List templates for the static /cloud/templates route. We expose
+    // only the metadata (id/label/description/category); the actual seed
+    // bundles are applied at runtime by whoever consumes this control
+    // plane (apps/objectos), not here.
     const templateList = Object.values(templates).map(({ id, label, description, category }) => ({
         id, label, description, category,
     }));
@@ -209,13 +160,7 @@ export async function createCloudStack(config: CloudStackConfig): Promise<{
             authSecret,
             baseUrl,
         }),
-        // Storage service (for artifact persistence + future file uploads).
-        // Wires from env: OS_STORAGE_ADAPTER=s3 + OS_S3_BUCKET/OS_S3_REGION/...
-        // Falls back to local-FS adapter (rooted at OS_STORAGE_LOCAL_DIR or
-        // <data-dir>/storage). On serverless without S3 env vars, the cloud-
-        // artifact plugin will warn — set OS_STORAGE_ADAPTER=s3 in production.
         ...(storageEnv.plugin ? [storageEnv.plugin] : []),
-        multiProjectPluginProxy,
         createStudioRuntimeConfigPlugin({ apiPrefix }),
         createTemplatesRoutePlugin(templateList, { apiPrefix }),
         createCloudArtifactApiPlugin({ controlDriverPromise, apiPrefix }),
@@ -224,6 +169,12 @@ export async function createCloudStack(config: CloudStackConfig): Promise<{
     return {
         plugins,
         api: {
+            // Project scoping stays enabled so the reserved virtual id
+            // `/api/v1/projects/platform/...` continues to resolve to the
+            // control-plane protocol. Real per-project IDs (proj_xxx) have
+            // no kernel here and will fall through to the same control-
+            // plane protocol — apps/objectos is the runtime that owns
+            // per-project data.
             enableProjectScoping: true,
             projectResolution: 'auto',
         },
