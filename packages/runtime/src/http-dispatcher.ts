@@ -467,7 +467,7 @@ export class HttpDispatcher {
         if (!this.enforceMembership) return null;
 
         // Control-plane paths — never gated by project membership.
-        const skipPaths = ['/auth', '/cloud', '/health', '/discovery'];
+        const skipPaths = ['/auth', '/cloud', '/health', '/discovery', '/_diag'];
         if (skipPaths.some(p => path.startsWith(p))) return null;
 
         const projectId = context.projectId;
@@ -3720,6 +3720,18 @@ export class HttpDispatcher {
                     version: '1.0.0',
                     uptime: typeof process !== 'undefined' ? process.uptime() : undefined,
                 }),
+            };
+        }
+
+        // 0c. Plan-A diagnostic: surface the most recent owner/org seed
+        // replay outcome for this project kernel. Kept public + unauth so
+        // it can be probed during cold-boot debugging without a session.
+        // TODO(plan-a): remove once seeding is confirmed working in prod.
+        if (cleanPath === '/_diag/seed' && method === 'GET') {
+            const diag = (this.kernel as any)?.__seedDiag ?? null;
+            return {
+                handled: true,
+                response: this.success({ seed: diag }),
             };
         }
 

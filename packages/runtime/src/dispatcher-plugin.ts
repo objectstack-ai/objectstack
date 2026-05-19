@@ -229,6 +229,20 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 }
             });
 
+            // ── Plan-A diagnostic: seed-replay outcome ──────────────────
+            // Temporary unauthenticated probe used while validating cloud
+            // org/owner seed replay in per-project kernels. Surface the
+            // last-known seed result so curl can verify cold-boot behaviour
+            // without container stdout. TODO(plan-a): remove after rollout.
+            server.get(`${prefix}/_diag/seed`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.dispatch('GET', '/_diag/seed', undefined, {}, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+
             // ── Auth ────────────────────────────────────────────────────
             // NOTE: /auth/* wildcard is mounted by AuthProxyPlugin (cloud)
             // or AuthPlugin (single-tenant) directly on the raw Hono app —

@@ -74,6 +74,18 @@ function deriveProjectAuthSecret(baseSecret: string, projectId: string): string 
     return createHmac('sha256', baseSecret).update(`project:${projectId}`).digest('hex');
 }
 
+/**
+ * Per-project diagnostic record from the most recent kernel cold-boot.
+ * Captures seed-replay outcomes (ownerSeed / orgSeed / member) so they
+ * can be inspected via an HTTP endpoint when the container's stdout
+ * is not reachable (Cloudflare Containers do not surface stdout to
+ * `wrangler tail`).
+ */
+const __lastSeedDiagByProject = new Map<string, any>();
+export function getLastSeedDiag(projectId: string): any {
+    return __lastSeedDiagByProject.get(projectId) ?? null;
+}
+
 export class ArtifactKernelFactory implements ProjectKernelFactory {
     private readonly client: ArtifactApiClient;
     private readonly envRegistry: EnvironmentDriverRegistry;
@@ -341,16 +353,25 @@ export class ArtifactKernelFactory implements ProjectKernelFactory {
                 metaType: typeof (project as any)?.metadata,
             });
 
+            const diag: Record<string, any> = {
+                hasOwnerSeed: !!ownerSeed?.userId,
+                hasOrgSeed: !!orgSeed?.id,
+                metaType: typeof (project as any)?.metadata,
+                results: {} as Record<string, any>,
+            };
+
             if (orgSeed?.id && orgSeed?.name) {
                 const { seedProjectOrganization } = await import('./project-org-seed.js');
                 const result = await seedProjectOrganization(kernel, orgSeed, this.logger);
                 console.warn('[ArtifactKernelFactory] orgSeed →', result);
+                diag.results.org = result;
             }
 
             if (ownerSeed?.userId && ownerSeed?.email) {
                 const { seedProjectOwner } = await import('./project-owner-seed.js');
                 const ownerResult = await seedProjectOwner(kernel, ownerSeed, this.logger);
                 console.warn('[ArtifactKernelFactory] ownerSeed →', ownerResult);
+                diag.results.owner = ownerResult;
 
                 if (orgSeed?.id) {
                     const { seedProjectMember } = await import('./project-org-seed.js');
@@ -360,14 +381,21 @@ export class ArtifactKernelFactory implements ProjectKernelFactory {
                         this.logger,
                     );
                     console.warn('[ArtifactKernelFactory] memberSeed →', memberResult);
+                    diag.results.member = memberResult;
                 }
             }
+
+            (kernel as any).__seedDiag = diag;
+            __lastSeedDiagByProject.set(projectId, diag);
         } catch (err: any) {
             this.logger.warn?.('[ArtifactKernelFactory] owner/org seed skipped', {
                 projectId,
                 error: err?.message,
             });
             console.warn('[ArtifactKernelFactory] seed THREW', err?.message);
+            const diag = { error: err?.message ?? String(err), stack: err?.stack };
+            (kernel as any).__seedDiag = diag;
+            __lastSeedDiagByProject.set(projectId, diag);
         }
 
         // Belt-and-braces: load translation bundles directly into the i18n
