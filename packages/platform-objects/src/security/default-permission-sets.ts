@@ -130,6 +130,15 @@ export const defaultPermissionSets: PermissionSet[] = [
       },
       // ── better-auth system tables that lack `organization_id` and would
       //    otherwise be left unprotected by the wildcard rule above. ────
+      //
+      // The security plugin's RLS injector treats wildcard policies that
+      // target a missing field as `RLS_DENY_FILTER` (zero rows) unless a
+      // per-object policy contributes an alternate match. Each `*_self`
+      // policy below restores per-user visibility on a better-auth table
+      // that has `user_id` but no `organization_id`. Tables without
+      // `user_id` (`sys_verification`, `sys_jwks`, empty `sys_passkey`)
+      // stay DENY for non-admins by design — only platform admins (via
+      // `admin_full_access`, which has no RLS) should inspect them.
       {
         name: 'sys_organization_self',
         object: 'sys_organization',
@@ -141,6 +150,66 @@ export const defaultPermissionSets: PermissionSet[] = [
         object: 'sys_user',
         operation: 'select',
         using: 'id = current_user.id',
+      },
+      {
+        name: 'sys_session_self',
+        object: 'sys_session',
+        operation: 'all',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_account_self',
+        object: 'sys_account',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_team_member_self',
+        object: 'sys_team_member',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_two_factor_self',
+        object: 'sys_two_factor',
+        operation: 'all',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_user_preference_self',
+        object: 'sys_user_preference',
+        operation: 'all',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_api_key_self',
+        object: 'sys_api_key',
+        operation: 'all',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_device_code_self',
+        object: 'sys_device_code',
+        operation: 'all',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_oauth_access_token_self',
+        object: 'sys_oauth_access_token',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_oauth_refresh_token_self',
+        object: 'sys_oauth_refresh_token',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_oauth_consent_self',
+        object: 'sys_oauth_consent',
+        operation: 'all',
+        using: 'user_id = current_user.id',
       },
     ],
   }),
@@ -178,6 +247,68 @@ export const defaultPermissionSets: PermissionSet[] = [
         object: 'sys_user',
         operation: 'select',
         using: 'id = current_user.id',
+      },
+      // ── Per-user visibility on better-auth tables that lack
+      //    `organization_id` (matches the `member_default` carve-outs).
+      {
+        name: 'sys_session_self',
+        object: 'sys_session',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_account_self',
+        object: 'sys_account',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_team_member_self',
+        object: 'sys_team_member',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_two_factor_self',
+        object: 'sys_two_factor',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_user_preference_self',
+        object: 'sys_user_preference',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_api_key_self',
+        object: 'sys_api_key',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_device_code_self',
+        object: 'sys_device_code',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_oauth_access_token_self',
+        object: 'sys_oauth_access_token',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_oauth_refresh_token_self',
+        object: 'sys_oauth_refresh_token',
+        operation: 'select',
+        using: 'user_id = current_user.id',
+      },
+      {
+        name: 'sys_oauth_consent_self',
+        object: 'sys_oauth_consent',
+        operation: 'select',
+        using: 'user_id = current_user.id',
       },
     ],
   }),
