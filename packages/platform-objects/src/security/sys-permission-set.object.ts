@@ -17,6 +17,7 @@ export const SysPermissionSet = ObjectSchema.create({
   pluralLabel: 'Permission Sets',
   icon: 'lock',
   isSystem: true,
+  managedBy: 'config',
   description: 'Named permission groupings for fine-grained access control',
   displayNameField: 'label',
   titleFormat: '{label}',

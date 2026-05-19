@@ -24,6 +24,7 @@ export const SysEmail = ObjectSchema.create({
   pluralLabel: 'Emails',
   icon: 'mail',
   isSystem: true,
+  managedBy: 'append-only',
   description: 'Outbound email delivery log',
   displayNameField: 'subject',
   titleFormat: '{subject}',

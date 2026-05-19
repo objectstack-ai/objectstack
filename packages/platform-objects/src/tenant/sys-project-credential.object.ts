@@ -21,6 +21,7 @@ export const SysProjectCredential = ObjectSchema.create({
   pluralLabel: 'Project Credentials',
   icon: 'key',
   isSystem: true,
+  managedBy: 'config',
   description: 'Rotatable encrypted credentials for project databases.',
   titleFormat: '{id}',
   compactLayout: ['project_id', 'status', 'authorization', 'expires_at'],

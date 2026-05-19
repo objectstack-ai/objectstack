@@ -22,6 +22,7 @@ export const SysMetadataHistoryObject = ObjectSchema.create({
   pluralLabel: 'Metadata History',
   icon: 'history',
   isSystem: true,
+  managedBy: 'system',
   description: 'Version history and audit trail for metadata changes',
 
   fields: {

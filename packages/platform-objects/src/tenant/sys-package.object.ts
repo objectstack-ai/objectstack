@@ -26,6 +26,7 @@ export const SysPackage = ObjectSchema.create({
   pluralLabel: 'Packages',
   icon: 'package',
   isSystem: true,
+  managedBy: 'config',
   description: 'Control-plane registry of installable packages / solutions (sys_package).',
   titleFormat: '{display_name}',
   compactLayout: ['display_name', 'manifest_id', 'visibility', 'created_at'],

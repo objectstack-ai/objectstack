@@ -19,6 +19,7 @@ export const SysApprovalAction = ObjectSchema.create({
   pluralLabel: 'Approval Actions',
   icon: 'check-circle',
   isSystem: true,
+  managedBy: 'append-only',
   description: 'Append-only audit trail for approval actions',
   displayNameField: 'id',
   titleFormat: '{action} · {step_name}',

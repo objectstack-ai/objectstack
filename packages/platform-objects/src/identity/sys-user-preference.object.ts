@@ -22,6 +22,7 @@ export const SysUserPreference = ObjectSchema.create({
   pluralLabel: 'User Preferences',
   icon: 'settings',
   isSystem: true,
+  managedBy: 'platform',
   description: 'Per-user key-value preferences (theme, locale, etc.)',
   titleFormat: '{key}',
   compactLayout: ['user_id', 'key'],

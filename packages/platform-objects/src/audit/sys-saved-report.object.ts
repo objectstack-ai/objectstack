@@ -29,6 +29,7 @@ export const SysSavedReport = ObjectSchema.create({
   pluralLabel: 'Saved Reports',
   icon: 'bar-chart',
   isSystem: true,
+  managedBy: 'platform',
   description: 'Persisted ObjectQL report definition — re-runnable and schedulable',
   displayNameField: 'name',
   titleFormat: '{name}',

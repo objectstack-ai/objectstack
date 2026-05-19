@@ -20,6 +20,7 @@ export const SysPresence = ObjectSchema.create({
   pluralLabel: 'Presences',
   icon: 'wifi',
   isSystem: true,
+  managedBy: 'append-only',
   description: 'Real-time user presence and activity tracking',
   titleFormat: '{user_id} ({status})',
   compactLayout: ['user_id', 'status', 'last_seen'],

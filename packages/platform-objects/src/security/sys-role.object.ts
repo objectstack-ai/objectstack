@@ -16,6 +16,7 @@ export const SysRole = ObjectSchema.create({
   pluralLabel: 'Roles',
   icon: 'shield',
   isSystem: true,
+  managedBy: 'config',
   description: 'Role definitions for RBAC access control',
   displayNameField: 'label',
   titleFormat: '{label}',

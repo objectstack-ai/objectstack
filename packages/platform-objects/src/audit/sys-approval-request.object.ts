@@ -27,6 +27,7 @@ export const SysApprovalRequest = ObjectSchema.create({
   pluralLabel: 'Approval Requests',
   icon: 'inbox',
   isSystem: true,
+  managedBy: 'system',
   description: 'Live approval instance tracked per submission',
   displayNameField: 'id',
   titleFormat: '{process_name} · {record_id}',

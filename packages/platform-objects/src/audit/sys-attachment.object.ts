@@ -28,6 +28,7 @@ export const SysAttachment = ObjectSchema.create({
   pluralLabel: 'Attachments',
   icon: 'paperclip',
   isSystem: true,
+  managedBy: 'platform',
   description: 'Polymorphic link between a sys_file and any other record',
   titleFormat: '{file_name} → {parent_object}/{parent_id}',
   compactLayout: ['created_at', 'parent_object', 'file_name', 'mime_type', 'size'],

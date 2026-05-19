@@ -28,6 +28,7 @@ export const SysPackageInstallation = ObjectSchema.create({
   pluralLabel: 'Package Installations',
   icon: 'package',
   isSystem: true,
+  managedBy: 'config',
   description: 'Per-project package installation registry (sys_package_installation).',
   titleFormat: '{package_id} @ {project_id}',
   compactLayout: ['package_version_id', 'project_id', 'status', 'installed_at'],

@@ -31,6 +31,7 @@ export const SysSharingRule = ObjectSchema.create({
   pluralLabel: 'Sharing Rules',
   icon: 'shield-check',
   isSystem: true,
+  managedBy: 'config',
   description: 'Declarative sharing rule that auto-materialises sys_record_share grants',
   displayNameField: 'name',
   titleFormat: '{label}',

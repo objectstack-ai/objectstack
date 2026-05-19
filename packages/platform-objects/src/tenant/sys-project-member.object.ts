@@ -20,6 +20,7 @@ export const SysProjectMember = ObjectSchema.create({
   pluralLabel: 'Project Members',
   icon: 'users',
   isSystem: true,
+  managedBy: 'config',
   description: 'Per-project user/role assignments.',
   titleFormat: '{user_id} @ {project_id}',
   compactLayout: ['user_id', 'project_id', 'role'],

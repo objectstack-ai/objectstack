@@ -20,6 +20,7 @@ export const SysMetadataObject = ObjectSchema.create({
   pluralLabel: 'System Metadata',
   icon: 'settings',
   isSystem: true,
+  managedBy: 'config',
   description: 'Stores platform and user-scope metadata records (objects, views, flows, etc.)',
 
   fields: {

@@ -28,6 +28,7 @@ export const SysApp = ObjectSchema.create({
   pluralLabel: 'Apps',
   icon: 'layout-grid',
   isSystem: true,
+  managedBy: 'config',
   description: 'Org-scoped catalog of apps across all projects (sys_app).',
   titleFormat: '{label}',
   compactLayout: ['label', 'project_name', 'source', 'active'],

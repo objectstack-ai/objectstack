@@ -23,6 +23,7 @@ export const SysComment = ObjectSchema.create({
   pluralLabel: 'Comments',
   icon: 'message-square',
   isSystem: true,
+  managedBy: 'platform',
   description: 'Threaded comments attached to records via thread_id',
   displayNameField: 'body',
   titleFormat: '{author_name}: {body}',

@@ -22,6 +22,7 @@ export const SysActivity = ObjectSchema.create({
   pluralLabel: 'Activities',
   icon: 'activity',
   isSystem: true,
+  managedBy: 'append-only',
   description: 'Recent activity stream entries (lightweight, denormalized)',
   displayNameField: 'summary',
   titleFormat: '{type} · {summary}',

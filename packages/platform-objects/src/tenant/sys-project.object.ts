@@ -21,6 +21,7 @@ export const SysProject = ObjectSchema.create({
   pluralLabel: 'Projects',
   icon: 'layers',
   isSystem: true,
+  managedBy: 'config',
   description: 'Control-plane registry of tenant projects (prod/test/dev/sandbox).',
   titleFormat: '{display_name}',
   compactLayout: ['display_name', 'status', 'is_default'],

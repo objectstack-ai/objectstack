@@ -19,6 +19,7 @@ export const SysAuditLog = ObjectSchema.create({
   pluralLabel: 'Audit Logs',
   icon: 'scroll-text',
   isSystem: true,
+  managedBy: 'append-only',
   description: 'Immutable audit trail for platform events',
   displayNameField: 'action',
   titleFormat: '{action} · {object_name}',

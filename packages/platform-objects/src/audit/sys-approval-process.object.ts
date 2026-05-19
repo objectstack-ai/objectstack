@@ -24,6 +24,7 @@ export const SysApprovalProcess = ObjectSchema.create({
   pluralLabel: 'Approval Processes',
   icon: 'check-square',
   isSystem: true,
+  managedBy: 'config',
   description: 'Persisted approval process definition (ApprovalProcess JSON)',
   displayNameField: 'name',
   titleFormat: '{label}',

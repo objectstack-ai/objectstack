@@ -29,6 +29,7 @@ export const SysProjectRevision = ObjectSchema.create({
   pluralLabel: 'Project Revisions',
   icon: 'git-commit',
   isSystem: true,
+  managedBy: 'config',
   description: 'Immutable history of compiled artifacts published per project.',
   titleFormat: '{commit_id}',
   compactLayout: ['commit_id', 'project_id', 'is_current', 'published_at'],

@@ -34,6 +34,7 @@ export const SysReportSchedule = ObjectSchema.create({
   pluralLabel: 'Report Schedules',
   icon: 'clock',
   isSystem: true,
+  managedBy: 'platform',
   description: 'Recurring delivery of a sys_saved_report via email',
   titleFormat: '{report_id} → {recipients}',
   compactLayout: ['report_id', 'recipients', 'interval_minutes', 'active', 'next_run_at'],

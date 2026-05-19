@@ -27,6 +27,7 @@ export const SysPackageVersion = ObjectSchema.create({
   pluralLabel: 'Package Versions',
   icon: 'tag',
   isSystem: true,
+  managedBy: 'config',
   description: 'Immutable release snapshot of a package (sys_package_version).',
   titleFormat: '{package_id} v{version}',
   compactLayout: ['package_id', 'version', 'status', 'published_at'],

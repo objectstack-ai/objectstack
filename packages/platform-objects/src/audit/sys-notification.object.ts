@@ -23,6 +23,7 @@ export const SysNotification = ObjectSchema.create({
   pluralLabel: 'Notifications',
   icon: 'bell',
   isSystem: true,
+  managedBy: 'system',
   description: 'Per-user notification inbox entries',
   displayNameField: 'title',
   titleFormat: '{title}',
