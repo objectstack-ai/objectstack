@@ -35,7 +35,7 @@
  *      projects that were created before this code shipped.
  */
 
-import { createHmac } from 'node:crypto';
+import { createHmac, createHash } from 'node:crypto';
 
 /**
  * Provider id used in better-auth's `genericOAuth` and as part of the
@@ -59,9 +59,32 @@ export function derivePlatformSsoClientId(projectId: string): string {
  *   - stable across container cold-starts (no DB lookup needed)
  *   - independent per project (compromising one does not compromise others)
  *   - rotatable via OS_AUTH_SECRET rotation (invalidates all SSO clients)
+ *
+ * This is the **plaintext** value the RP must present at the token endpoint.
+ * The cloud-side `sys_oauth_application.client_secret` column instead stores
+ * {@link hashPlatformSsoClientSecret}(plaintext) — better-auth's oauth-provider
+ * defaults to `storeClientSecret: 'hashed'` (SHA-256 + base64url) when the JWT
+ * plugin is enabled, and looks up the row by hashing the presented secret.
  */
 export function derivePlatformSsoClientSecret(baseSecret: string, projectId: string): string {
     return createHmac('sha256', baseSecret).update(`oauth-client:${projectId}`).digest('hex');
+}
+
+/**
+ * Hash the plaintext client_secret the same way `@better-auth/oauth-provider`'s
+ * `defaultHasher` does it: SHA-256 → base64url (no padding). This MUST match
+ * exactly or the token endpoint returns `invalid_client / invalid client_secret`
+ * even though the row is present.
+ *
+ * Reference: `node_modules/@better-auth/oauth-provider/dist/utils-*.mjs` →
+ *   `const defaultHasher = async (value) => base64Url.encode(SHA-256(value))`
+ */
+export function hashPlatformSsoClientSecret(plaintext: string): string {
+    return createHash('sha256').update(plaintext)
+        .digest('base64')
+        .replace(/=+$/, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
 }
 
 /**
@@ -125,7 +148,8 @@ export async function seedPlatformSsoClient(opts: SeedPlatformSsoClientOptions):
         return;
     }
     const clientId = derivePlatformSsoClientId(projectId);
-    const clientSecret = derivePlatformSsoClientSecret(baseSecret, projectId);
+    const clientSecretPlaintext = derivePlatformSsoClientSecret(baseSecret, projectId);
+    const clientSecretStored = hashPlatformSsoClientSecret(clientSecretPlaintext);
     const desiredRedirect = hostname ? buildPlatformSsoRedirectUri(hostname) : null;
 
     let existing: any = null;
@@ -154,7 +178,7 @@ export async function seedPlatformSsoClient(opts: SeedPlatformSsoClientOptions):
                 id: `oauthc_${projectId}`,
                 name: `Project ${projectId}`,
                 client_id: clientId,
-                client_secret: clientSecret,
+                client_secret: clientSecretStored,
                 type: 'web',
                 redirect_uris: JSON.stringify(redirects),
                 grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
@@ -182,36 +206,56 @@ export async function seedPlatformSsoClient(opts: SeedPlatformSsoClientOptions):
         return;
     }
 
-    // Row exists — merge the new redirect_uri in if we have one and it's
-    // not already present. Avoids the common gotcha of a project being
-    // re-provisioned under a new hostname and SSO callbacks silently 4xx.
-    if (!desiredRedirect) return;
+    // Row exists — repair it. We always overwrite the canonical fields
+    // (client_secret, grant_types, response_types, scopes, token_endpoint_auth_method,
+    // require_pkce, skip_consent, subject_type, type, disabled) because older code
+    // paths may have written rows with missing or wrong-shape values, and
+    // re-running the seed should converge to the known-good shape.
+    // For redirect_uris we MERGE — re-provisioning a project under an
+    // additional hostname should add the new URI without dropping the old one.
     let currentRedirects: string[] = [];
     try {
         const raw = existing.redirect_uris;
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (Array.isArray(parsed)) currentRedirects = parsed.filter((s): s is string => typeof s === 'string');
     } catch { /* malformed JSON — treat as empty */ }
-    if (currentRedirects.includes(desiredRedirect)) return;
+    const mergedRedirects = desiredRedirect && !currentRedirects.includes(desiredRedirect)
+        ? [...currentRedirects, desiredRedirect]
+        : currentRedirects;
 
-    const merged = [...currentRedirects, desiredRedirect];
+    const repairPatch: Record<string, any> = {
+        name: existing.name || `Project ${projectId}`,
+        client_secret: clientSecretStored,
+        type: existing.type || 'web',
+        redirect_uris: JSON.stringify(mergedRedirects),
+        grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+        response_types: JSON.stringify(['code']),
+        scopes: JSON.stringify(['openid', 'email', 'profile']),
+        token_endpoint_auth_method: 'client_secret_basic',
+        require_pkce: false,
+        skip_consent: true,
+        disabled: false,
+        subject_type: 'public',
+        updated_at: nowIso,
+    };
     try {
         await ql.update(
             'sys_oauth_application',
-            { redirect_uris: JSON.stringify(merged), updated_at: nowIso },
+            repairPatch,
             { where: { id: existing.id } },
             { context: { isSystem: true } },
         );
-        logger?.info?.('[platform-sso] sys_oauth_application redirect_uris updated', {
+        logger?.info?.('[platform-sso] sys_oauth_application repaired', {
             projectId,
             clientId,
-            redirect_uri: desiredRedirect,
+            redirect_uris: mergedRedirects,
         });
     } catch (err) {
-        logger?.warn?.('[platform-sso] sys_oauth_application update failed', {
+        logger?.warn?.('[platform-sso] sys_oauth_application repair failed', {
             projectId,
             error: (err as Error)?.message,
         });
+        if (throwOnError) throw err;
     }
 }
 

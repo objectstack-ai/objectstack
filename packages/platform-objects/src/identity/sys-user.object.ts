@@ -25,6 +25,25 @@ export const SysUser = ObjectSchema.create({
   titleFormat: '{name}',
   compactLayout: ['name', 'email', 'email_verified'],
 
+  // Custom actions — generic CRUD is suppressed because user accounts are
+  // managed by better-auth, but we still need first-class affordances for
+  // common operations. Each action delegates to a Console-side named script
+  // registered on the ActionRunner (see objectui `AppContent.tsx`). Adding
+  // new affordances (reset password, revoke session, …) is now a pure
+  // schema + script-registration change — no per-view code.
+  actions: [
+    {
+      name: 'invite_user',
+      label: 'Invite User',
+      icon: 'user-plus',
+      variant: 'primary',
+      locations: ['list_toolbar'],
+      type: 'script',
+      target: 'invite_user',
+      description: 'Send an invitation email to add a new user to the active organization. Handled by the better-auth invite-member flow.',
+    },
+  ],
+
   listViews: {
     all_users: {
       type: 'grid',
