@@ -2011,6 +2011,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -2052,6 +2055,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
