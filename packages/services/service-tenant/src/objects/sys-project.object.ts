@@ -150,14 +150,6 @@ export const SysProject = ObjectSchema.create({
           defaultValue: 1024,
         },
         {
-          name: 'hostname',
-          label: 'Hostname (optional)',
-          type: 'text',
-          required: false,
-          placeholder: 'acme-dev.objectstack.app',
-          helpText: 'Leave blank to auto-generate.',
-        },
-        {
           name: 'visibility',
           label: 'Visibility',
           type: 'select',
@@ -254,7 +246,15 @@ export const SysProject = ObjectSchema.create({
       successMessage: 'Hostname updated.',
       refreshAfter: true,
       params: [
-        { name: 'hostname', label: 'New Hostname', type: 'text', required: true, placeholder: 'api.acme.com' },
+        {
+          name: 'subdomain',
+          label: 'New Subdomain',
+          type: 'text',
+          required: true,
+          placeholder: 'my-project',
+          helpText:
+            'Just the subdomain — the root domain (e.g. .objectstack.app) is appended automatically. Allowed: lowercase letters, digits, hyphens.',
+        },
       ],
     },
   ],

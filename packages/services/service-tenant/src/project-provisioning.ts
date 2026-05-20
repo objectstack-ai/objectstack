@@ -357,6 +357,39 @@ export class ProjectProvisioningService {
     // Turso requires database names ≤ 26 chars; use 'p-' prefix + first 24 hex chars
     const databaseName = `p-${projectId.replace(/-/g, '').slice(0, 24)}`;
 
+    // ── Hostname auto-generation ────────────────────────────────────────
+    // Format: `{orgSlug}-{shortId}.{rootDomain}` — matches the legacy
+    // `http-dispatcher` POST /environment behaviour so existing tenant
+    // resolution code keeps working. The user only needs to type a
+    // display name; the hostname is computed deterministically from the
+    // org slug + project id. Suffix is configurable via OS_ROOT_DOMAIN
+    // (falls back to `objectstack.app`).
+    let resolvedHostname = parsed.hostname?.trim();
+    if (!resolvedHostname) {
+      const shortId = projectId.replace(/-/g, '').slice(0, 8);
+      const rootDomain =
+        process.env.OS_ROOT_DOMAIN || process.env.ROOT_DOMAIN || 'objectstack.app';
+      let orgSlug: string | undefined;
+      if (this.config.controlPlaneDriver) {
+        try {
+          const orgRow = await (this.config.controlPlaneDriver.findOne as any)(
+            'sys_organization',
+            { where: { id: parsed.organizationId } },
+          );
+          orgSlug = orgRow?.slug || undefined;
+        } catch {
+          /* sys_organization may not exist yet — fall through */
+        }
+      }
+      // Sanitise slug: lowercase alnum + dashes only, fall back to "org".
+      const sanitised = (orgSlug ?? parsed.organizationId)
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'org';
+      resolvedHostname = `${sanitised}-${shortId}.${rootDomain}`;
+    }
+
     // Enforce "exactly one default project per org" invariant.
     if (parsed.isDefault && this.config.controlPlaneDriver) {
       const existingDefault = await this.findDefaultProject(parsed.organizationId);
@@ -419,7 +452,7 @@ export class ProjectProvisioningService {
       databaseDriver: driver,
       storageLimitMb,
       provisionedAt: nowIso,
-      hostname: parsed.hostname,
+      hostname: resolvedHostname,
       visibility: parsed.visibility ?? 'private',
     };
 
