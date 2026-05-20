@@ -18,6 +18,20 @@ import { nanoid } from 'nanoid';
  */
 const DEFAULT_ID_LENGTH = 16;
 
+/**
+ * Internal table that persists per-(object, tenant, field) auto-number
+ * counters so sequences are monotonic, tenant-isolated, and resilient to
+ * concurrent writers. Lazily created on first autonumber-bearing insert.
+ */
+const SEQUENCES_TABLE = '_objectstack_sequences';
+
+/**
+ * Sentinel tenant_id used when an object has no tenant field (org-less
+ * objects like Setup-side singletons). Keeps the (object, tenant, field)
+ * primary key non-null.
+ */
+const GLOBAL_TENANT = '__global__';
+
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 export interface IntrospectedColumn {
@@ -130,14 +144,27 @@ export class SqlDriver implements IDataDriver {
   protected tablesWithTimestamps: Set<string> = new Set();
   /**
    * Autonumber field configs per table, captured during initObjects.
-   * Each entry is rendered on insert as `prefix + padded(n)` where `n` is
-   * MAX(existing matching value) + 1 (parsed from the field column itself).
-   * Format placeholder `{0000}` controls zero-padding width.
+   *
+   * Each entry records:
+   *   - `prefix` + `padWidth`: how to render the next value (`CTR-0007`)
+   *   - `tenantField`: the column to scope the sequence by (defaults to
+   *     `organization_id` if the object has that field, otherwise null →
+   *     sequence is shared globally for that field)
+   *
+   * Numbering is backed by the `_objectstack_sequences` row keyed by
+   * `(object, tenant_id, field)`, not by scanning the data table on each
+   * insert. The sequence row is bootstrapped from the existing MAX on
+   * first use so legacy data is respected.
    */
   protected autoNumberFields: Record<
     string,
-    Array<{ name: string; format: string; prefix: string; padWidth: number }>
+    Array<{ name: string; format: string; prefix: string; padWidth: number; tenantField: string | null }>
   > = {};
+
+  /** Whether the sequences table has been ensured this process. */
+  protected sequencesTableReady = false;
+  /** In-flight ensure promise; deduplicates concurrent first calls. */
+  protected sequencesTableEnsurePromise: Promise<void> | null = null;
 
   /** Whether the underlying database is a SQLite variant (sqlite3 or better-sqlite3). */
   protected get isSqlite(): boolean {
@@ -366,15 +393,147 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * For each `auto_number` field on the object that the caller did not
-   * provide a value for, compute the next value by scanning existing rows
-   * with the same prefix and incrementing the highest numeric suffix.
+   * Ensure the sequence-counter table exists. Idempotent and cheap after
+   * the first call (cached via `sequencesTableReady`).
+   */
+  protected async ensureSequencesTable(): Promise<void> {
+    if (this.sequencesTableReady) return;
+    if (this.sequencesTableEnsurePromise) {
+      await this.sequencesTableEnsurePromise;
+      return;
+    }
+    this.sequencesTableEnsurePromise = (async () => {
+      const exists = await this.knex.schema.hasTable(SEQUENCES_TABLE);
+      if (!exists) {
+        try {
+          await this.knex.schema.createTable(SEQUENCES_TABLE, (t) => {
+            t.string('object').notNullable();
+            t.string('tenant_id').notNullable();
+            t.string('field').notNullable();
+            t.bigInteger('last_value').notNullable().defaultTo(0);
+            t.timestamp('updated_at').defaultTo(this.knex.fn.now());
+            t.primary(['object', 'tenant_id', 'field']);
+          });
+        } catch (err: any) {
+          // Race or cross-process create — re-check existence; ignore
+          // "already exists" errors from any dialect.
+          const stillMissing = !(await this.knex.schema.hasTable(SEQUENCES_TABLE));
+          if (stillMissing) throw err;
+        }
+      }
+      this.sequencesTableReady = true;
+    })();
+    try {
+      await this.sequencesTableEnsurePromise;
+    } finally {
+      this.sequencesTableEnsurePromise = null;
+    }
+  }
+
+  /**
+   * Bootstrap helper: scan the data table for the highest numeric suffix
+   * matching `prefix` (optionally scoped to a tenant). Used the first time
+   * a sequence row is created so legacy/seeded data continues monotonically.
+   */
+  protected async scanMaxNumericTail(
+    queryRunner: Knex | Knex.Transaction,
+    tableName: string,
+    field: string,
+    prefix: string,
+    tenantField: string | null,
+    tenantId: string | null,
+  ): Promise<number> {
+    const escapedPrefix = prefix.replace(/([\\%_])/g, '\\$1');
+    let builder = queryRunner(tableName).select(field).where(field, 'like', `${escapedPrefix}%`).whereNotNull(field);
+    if (tenantField && tenantId !== null) {
+      builder = builder.where(tenantField, tenantId);
+    }
+    const rows = await builder;
+    let maxN = 0;
+    for (const r of rows as any[]) {
+      const v: string = (r as any)[field];
+      if (typeof v !== 'string') continue;
+      const tail = v.slice(prefix.length);
+      const n = parseInt(tail.replace(/[^0-9]/g, ''), 10);
+      if (Number.isFinite(n) && n > maxN) maxN = n;
+    }
+    return maxN;
+  }
+
+  /**
+   * Atomically reserve and return the next sequence value for
+   * `(object, tenantId, field)`. Bootstraps from the data-table MAX on
+   * first call so existing seeded records continue monotonically.
    *
-   * Note: this is intentionally a per-call MAX-and-increment rather than a
-   * persistent sequence row. The SELECT/INSERT pair is not atomic across
-   * concurrent writers, so under heavy concurrent create load two requests
-   * can race to the same number. Adequate for app demo seeds; production
-   * deployments should layer a dedicated sequence table or a DB sequence.
+   * Concurrency:
+   *   - SQLite: a write transaction (`BEGIN IMMEDIATE` via knex) serializes
+   *     all writers; safe in-process. Cross-process SQLite is out of scope.
+   *   - Postgres/MySQL: `SELECT … FOR UPDATE` row lock ensures only one
+   *     transaction reads-modifies-writes at a time. A PK-violation race on
+   *     first insert is retried as an UPDATE.
+   *
+   * Gaps are tolerated by design — a rolled-back insert "burns" a number,
+   * matching standard sequence semantics.
+   */
+  protected async getNextSequenceValue(
+    object: string,
+    tableName: string,
+    field: string,
+    prefix: string,
+    tenantField: string | null,
+    tenantId: string | null,
+    parentTrx?: Knex.Transaction,
+  ): Promise<number> {
+    await this.ensureSequencesTable();
+    const resolvedTenantId = tenantField && tenantId ? String(tenantId) : GLOBAL_TENANT;
+    const key = { object: tableName, tenant_id: resolvedTenantId, field };
+
+    const runner: Knex | Knex.Transaction = parentTrx ?? this.knex;
+
+    return runner.transaction(async (trx) => {
+      // Lock the row (no-op on SQLite, real lock on Postgres/MySQL).
+      let existing: any;
+      try {
+        existing = await trx(SEQUENCES_TABLE).where(key).forUpdate().first();
+      } catch {
+        // Some dialects/versions reject .forUpdate() on a missing row in
+        // weird ways; fall back to plain SELECT then rely on transaction
+        // isolation. Postgres/MySQL behave normally here.
+        existing = await trx(SEQUENCES_TABLE).where(key).first();
+      }
+
+      if (!existing) {
+        const seedMax = await this.scanMaxNumericTail(
+          trx,
+          tableName,
+          field,
+          prefix,
+          tenantField,
+          resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
+        );
+        const initial = seedMax + 1;
+        try {
+          await trx(SEQUENCES_TABLE).insert({ ...key, last_value: initial });
+          return initial;
+        } catch (err) {
+          // Another writer raced us to the first INSERT. Fall through to
+          // the UPDATE path with the now-present row.
+          existing = await trx(SEQUENCES_TABLE).where(key).forUpdate().first();
+          if (!existing) throw err;
+        }
+      }
+
+      const next = Number(existing.last_value) + 1;
+      await trx(SEQUENCES_TABLE).where(key).update({ last_value: next, updated_at: this.knex.fn.now() });
+      return next;
+    });
+  }
+
+  /**
+   * For each `auto_number` field on the object that the caller did not
+   * provide a value for, reserve the next sequence value scoped to the
+   * record's tenant (or globally if the object has no tenant field) and
+   * render `prefix + zero-padded(value)`.
    */
   protected async fillAutoNumberFields(
     object: string,
@@ -384,26 +543,27 @@ export class SqlDriver implements IDataDriver {
     const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
     const cfgs = this.autoNumberFields[tableName] || this.autoNumberFields[object];
     if (!cfgs || cfgs.length === 0) return;
+    const parentTrx = options?.transaction as Knex.Transaction | undefined;
     for (const cfg of cfgs) {
       if (row[cfg.name] !== undefined && row[cfg.name] !== null && row[cfg.name] !== '') continue;
-      const builder = this.getBuilder(object, options);
-      // LIKE 'CTR-%' (escape underscores/percents — autonumber prefixes
-      // are typically uppercase letters + a separator, so this is safe in
-      // practice; keep it conservative).
-      const escapedPrefix = cfg.prefix.replace(/([\\%_])/g, '\\$1');
-      const rows = await builder
-        .select(cfg.name)
-        .where(cfg.name, 'like', `${escapedPrefix}%`)
-        .whereNotNull(cfg.name);
-      let maxN = 0;
-      for (const r of rows as any[]) {
-        const v: string = (r as any)[cfg.name];
-        if (typeof v !== 'string') continue;
-        const tail = v.slice(cfg.prefix.length);
-        const n = parseInt(tail.replace(/[^0-9]/g, ''), 10);
-        if (Number.isFinite(n) && n > maxN) maxN = n;
-      }
-      const next = maxN + 1;
+      // Resolve tenant for this row: explicit field on the record wins,
+      // then driver options, else null → global sequence.
+      const rowTenant = cfg.tenantField ? row[cfg.tenantField] : undefined;
+      const optTenant = (options as any)?.tenantId;
+      const tenantId = rowTenant != null && rowTenant !== ''
+        ? String(rowTenant)
+        : optTenant != null && optTenant !== ''
+          ? String(optTenant)
+          : null;
+      const next = await this.getNextSequenceValue(
+        object,
+        tableName,
+        cfg.name,
+        cfg.prefix,
+        cfg.tenantField,
+        tenantId,
+        parentTrx,
+      );
       row[cfg.name] = `${cfg.prefix}${String(next).padStart(cfg.padWidth, '0')}`;
     }
   }
@@ -760,7 +920,12 @@ export class SqlDriver implements IDataDriver {
 
       const jsonCols: string[] = [];
       const booleanCols: string[] = [];
-      const autoNumberCols: Array<{ name: string; format: string; prefix: string; padWidth: number }> = [];
+      const autoNumberCols: Array<{ name: string; format: string; prefix: string; padWidth: number; tenantField: string | null }> = [];
+      // Auto-detect tenant field. Convention: the field named
+      // `organization_id` (matching tenantPolicy default) scopes the
+      // record to a tenant. Objects without it get a global sequence.
+      const hasOrgField = !!(obj.fields && Object.prototype.hasOwnProperty.call(obj.fields, 'organization_id'));
+      const tenantField: string | null = hasOrgField ? 'organization_id' : null;
       if (obj.fields) {
         for (const [name, field] of Object.entries<any>(obj.fields)) {
           const type = field.type || 'string';
@@ -777,7 +942,7 @@ export class SqlDriver implements IDataDriver {
             const m = fmt.match(/\{(0+)\}/);
             const padWidth = m ? m[1].length : 4;
             const prefix = m ? fmt.slice(0, m.index ?? 0) : fmt;
-            autoNumberCols.push({ name, format: fmt, prefix, padWidth });
+            autoNumberCols.push({ name, format: fmt, prefix, padWidth, tenantField });
           }
         }
       }
