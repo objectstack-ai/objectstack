@@ -581,6 +581,86 @@ export default class Serve extends Command {
         }
       }
 
+      // Unknown-environment hostname guard.
+      //
+      // In multi-tenant cloud deployments (e.g. *.objectos.app), every
+      // public hostname is expected to map to a `sys_environment` row
+      // whose `hostname` column matches the request `Host`. Without this
+      // guard, an unknown subdomain like `demo-xxx.objectos.app` happily
+      // renders the control-plane Console SPA (served statically by
+      // createConsoleStaticPlugin), making the deployment look like an
+      // empty env rather than a missing one. We respond with a clear
+      // 404 instead.
+      //
+      // Activation: only when OS_ROOT_DOMAIN is set (e.g. "objectos.app").
+      // Reserved subdomains (cloud/www/api/docs/admin/app and the apex)
+      // bypass the check so platform surfaces keep working. Non-root
+      // hostnames (custom domains, localhost, *.workers.dev) pass through
+      // unchanged. Infra paths under /_admin or /.well-known are always
+      // allowed so health checks / cert flows aren't broken.
+      //
+      // Registered BEFORE config plugins so it intercepts before any
+      // route handler (including the Console static plugin) claims the
+      // request.
+      const __rootDomain = (process.env.OS_ROOT_DOMAIN || '').trim().toLowerCase();
+      if (__rootDomain) {
+        try {
+          const httpServer: any = kernel.getService?.('http.server') ?? kernel.getService?.('http-server');
+          const rawApp = httpServer?.getRawApp?.();
+          if (rawApp && typeof rawApp.use === 'function') {
+            const RESERVED = new Set(['', 'cloud', 'www', 'api', 'docs', 'admin', 'app']);
+            let envRegistryRef: any;
+            const getEnvRegistry = async () => {
+              if (envRegistryRef !== undefined) return envRegistryRef;
+              try {
+                envRegistryRef = (await (kernel as any).getServiceAsync?.('env-registry'))
+                  ?? (kernel as any).getService?.('env-registry')
+                  ?? null;
+              } catch {
+                envRegistryRef = null;
+              }
+              return envRegistryRef;
+            };
+            rawApp.use('*', async (c: any, next: any) => {
+              const rawHost = c.req.header('host') || '';
+              const host = rawHost.split(':')[0].toLowerCase();
+              if (!host) return next();
+              const isPlatformHost = host === __rootDomain || host.endsWith('.' + __rootDomain);
+              if (!isPlatformHost) return next();
+              const sub = host === __rootDomain ? '' : host.slice(0, -(__rootDomain.length + 1));
+              const head = sub.split('.').pop() || '';
+              if (RESERVED.has(sub) || RESERVED.has(head)) return next();
+              const p = c.req.path;
+              if (p.startsWith('/_admin/') || p === '/_admin' || p.startsWith('/.well-known/')) {
+                return next();
+              }
+              const registry = await getEnvRegistry();
+              if (!registry || typeof registry.resolveByHostname !== 'function') {
+                return next();
+              }
+              try {
+                const hit = await registry.resolveByHostname(host);
+                if (hit) return next();
+              } catch {
+                return next();
+              }
+              return c.json(
+                {
+                  error: 'environment_not_found',
+                  message: `No environment is bound to hostname '${host}'.`,
+                  hostname: host,
+                },
+                404,
+              );
+            });
+            trackPlugin('UnknownHostnameGuard');
+          }
+        } catch {
+          // Best-effort: if http.server isn't registered or rawApp missing,
+          // skip the guard. Falls back to legacy behaviour.
+        }
+      }
+
       // 5. Auto-register Studio single-project signal in dev mode.
       //
       // `objectstack dev` runs a vanilla user stack (e.g. examples/app-crm)
