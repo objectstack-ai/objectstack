@@ -46,14 +46,14 @@ export const CLOUD_CONTROL_APP: App = {
   // the navigation to keep the App focused on real user tasks.
   navigation: [
     {
-      id: 'group_projects',
+      id: 'group_environments',
       type: 'group',
-      label: 'Projects',
-      icon: 'layers',
+      label: 'Environments',
+      icon: 'globe',
       children: [
-        { id: 'nav_projects', type: 'object', label: 'Projects', objectName: 'sys_project', icon: 'layers' },
-        { id: 'nav_project_branches', type: 'object', label: 'Branches', objectName: 'sys_project_branch', icon: 'git-branch' },
-        { id: 'nav_project_members', type: 'object', label: 'Project Members', objectName: 'sys_project_member', icon: 'user-cog' },
+        { id: 'nav_environments', type: 'object', label: 'Environments', objectName: 'sys_project', icon: 'globe' },
+        { id: 'nav_env_branches', type: 'object', label: 'Branches', objectName: 'sys_project_branch', icon: 'git-branch' },
+        { id: 'nav_env_members', type: 'object', label: 'Members', objectName: 'sys_project_member', icon: 'user-cog' },
       ],
     },
     {

@@ -2730,7 +2730,13 @@ export class RestServer {
                     const context = await this.resolveExecCtx(projectId, req);
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(projectId);
-                    if (!svc) return respond501(res);
+                    if (!svc) {
+                        // No approvals plugin loaded — return empty list rather than 501
+                        // so Console badge polls don't spam the error log on deployments
+                        // that don't run an approvals workflow.
+                        res.json({ data: [] });
+                        return;
+                    }
                     const q = req.query ?? {};
                     const rows = await svc.listRequests({
                         object: q.object,

@@ -40,12 +40,15 @@ const ROOT_DOMAIN_HINT = getRootDomainForUiHints();
  */
 export const SysProject = ObjectSchema.create({
   name: 'sys_project',
-  label: 'Project',
-  pluralLabel: 'Projects',
-  icon: 'layers',
+  label: 'Environment',
+  pluralLabel: 'Environments',
+  icon: 'globe',
   isSystem: true,
   managedBy: 'config',
-  description: 'Control-plane registry of tenant projects (prod/test/dev/sandbox).',
+  description: 'Control-plane registry of runtime environments (prod/test/dev/sandbox). ' +
+    'Each row owns a hostname, a dedicated database, and a plan/quota envelope. ' +
+    'Note: the underlying table is still named `sys_project` for backwards compatibility; ' +
+    'the conceptual rename to "Environment" matches ADR-0006 (3-layer tenancy).',
   titleFormat: '{display_name}',
   compactLayout: ['display_name', 'plan', 'status', 'hostname', 'is_default'],
 
@@ -115,13 +118,17 @@ export const SysProject = ObjectSchema.create({
 
   actions: [
     // ────────────────────────────────────────────────────────────────────
-    // Project creation wizard — replaces the disabled default CRUD `create`
-    // form. Wraps ProjectProvisioningService.provisionProject so a real
-    // database is allocated atomically.
+    // Environment provisioning wizard — replaces the disabled default
+    // CRUD `create` form. Wraps ProjectProvisioningService.provisionProject
+    // so a real database is allocated atomically.
+    //
+    // Conceptually this creates an Environment (see ADR-0006). The backend
+    // route is still `/cloud/projects` for backwards compatibility with
+    // existing SDK clients; the conceptual rename is UI-visible only.
     // ────────────────────────────────────────────────────────────────────
     {
       name: 'create_project',
-      label: 'Create Project',
+      label: 'Create Environment',
       icon: 'plus',
       variant: 'primary',
       type: 'api',
@@ -130,9 +137,9 @@ export const SysProject = ObjectSchema.create({
       method: 'POST',
       mode: 'create',
       refreshAfter: true,
-      successMessage: 'Project provisioned.',
+      successMessage: 'Environment provisioned.',
       params: [
-        { name: 'displayName', label: 'Display Name', type: 'text', required: true, placeholder: 'My new project' },
+        { name: 'displayName', label: 'Display Name', type: 'text', required: true, placeholder: 'My new environment' },
         {
           name: 'driver',
           label: 'Database Driver',
@@ -159,11 +166,20 @@ export const SysProject = ObjectSchema.create({
           ],
         },
         {
+          // Storage limit as a select avoids the spinbutton-with-implicit-zero-min/max
+          // rendering bug and matches the discrete tier model the backend actually
+          // honours via the `plan` column.
           name: 'storageLimitMb',
-          label: 'Storage Limit (MB)',
-          type: 'number',
+          label: 'Storage Limit',
+          type: 'select',
           required: false,
-          defaultValue: 1024,
+          defaultValue: '1024',
+          options: [
+            { label: '1 GB',  value: '1024' },
+            { label: '4 GB',  value: '4096' },
+            { label: '16 GB', value: '16384' },
+            { label: '64 GB', value: '65536' },
+          ],
         },
         {
           name: 'visibility',
@@ -189,8 +205,8 @@ export const SysProject = ObjectSchema.create({
       variant: 'secondary',
       type: 'script',
       locations: ['list_item', 'record_header'],
-      confirmText: 'Suspend this project? All runtime traffic to it will be blocked until you resume.',
-      successMessage: 'Project suspended.',
+      confirmText: 'Suspend this environment? All runtime traffic to it will be blocked until you resume.',
+      successMessage: 'Environment suspended.',
       refreshAfter: true,
     },
     {
@@ -200,7 +216,7 @@ export const SysProject = ObjectSchema.create({
       variant: 'secondary',
       type: 'script',
       locations: ['list_item', 'record_header'],
-      successMessage: 'Project resumed.',
+      successMessage: 'Environment resumed.',
       refreshAfter: true,
     },
     {
@@ -210,8 +226,8 @@ export const SysProject = ObjectSchema.create({
       variant: 'danger',
       type: 'script',
       locations: ['list_item', 'record_header'],
-      confirmText: 'Archive this project? It will be removed from active views. Data is retained for 30 days before deletion.',
-      successMessage: 'Project archived.',
+      confirmText: 'Archive this environment? It will be removed from active views. Data is retained for 30 days before deletion.',
+      successMessage: 'Environment archived.',
       refreshAfter: true,
       params: [
         { name: 'reason', label: 'Reason (optional)', type: 'text', required: false },
@@ -224,7 +240,7 @@ export const SysProject = ObjectSchema.create({
       variant: 'secondary',
       type: 'script',
       locations: ['list_item', 'record_header'],
-      successMessage: 'Default project updated.',
+      successMessage: 'Default environment updated.',
       refreshAfter: true,
     },
     {

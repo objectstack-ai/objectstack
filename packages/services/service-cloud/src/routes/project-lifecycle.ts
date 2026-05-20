@@ -174,7 +174,9 @@ export function registerProjectLifecycleRoutes(server: IHttpServer, deps: RouteD
                 displayName,
                 driver: body.driver,
                 plan: body.plan,
-                storageLimitMb: body.storageLimitMb,
+                storageLimitMb: body.storageLimitMb != null && body.storageLimitMb !== ''
+                    ? Number(body.storageLimitMb)
+                    : undefined,
                 isDefault: Boolean(body.isDefault),
                 createdBy,
                 hostname: body.hostname || undefined,
