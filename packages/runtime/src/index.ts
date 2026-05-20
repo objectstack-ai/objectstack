@@ -47,6 +47,29 @@ export {
     type RateLimitStore,
 } from './security/index.js';
 
+// ── Observability primitives ──────────────────────────────────────────
+// Request-id propagation (X-Request-Id + W3C traceparent), pluggable
+// MetricsRegistry, and pluggable ErrorReporter. The dispatcher plugin
+// wraps every route with instrumentation when these are configured;
+// see `docs/guide/observability.md`.
+export {
+    extractRequestId,
+    generateRequestId,
+    resolveRequestId,
+    parseTraceparent,
+    formatTraceparent,
+    type TraceContext,
+    NoopMetricsRegistry,
+    InMemoryMetricsRegistry,
+    RUNTIME_METRICS,
+    type MetricsRegistry,
+    type MetricSample,
+    NoopErrorReporter,
+    InMemoryErrorReporter,
+    type ErrorReporter,
+    type CapturedError,
+} from './observability/index.js';
+
 // Export Artifact Loader
 export { loadArtifactBundle, mergeRuntimeModule, isHttpUrl, readArtifactSource } from './load-artifact-bundle.js';
 export type { LoadArtifactBundleOptions } from './load-artifact-bundle.js';

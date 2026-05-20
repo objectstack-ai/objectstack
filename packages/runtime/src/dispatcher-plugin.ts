@@ -6,6 +6,13 @@ import {
     buildSecurityHeaders,
     type SecurityHeadersOptions,
 } from './security/index.js';
+import {
+    NoopMetricsRegistry,
+    NoopErrorReporter,
+    instrumentRouteHandler,
+    type MetricsRegistry,
+    type ErrorReporter,
+} from './observability/index.js';
 
 export interface DispatcherPluginConfig {
     /**
@@ -54,6 +61,34 @@ export interface DispatcherPluginConfig {
      * @default true
      */
     securityHeaders?: boolean | SecurityHeadersOptions;
+
+    /**
+     * Observability wiring. All fields optional; defaults are noop
+     * (zero overhead, no behavior change).
+     *
+     *   - `metrics`: registry receiving `http_requests_total`,
+     *     `http_request_duration_ms`, `http_request_errors_total` for
+     *     every route this plugin mounts. Plug in `prom-client` /
+     *     `@opentelemetry/api-metrics` / your own adapter.
+     *
+     *   - `errorReporter`: invoked on 5xx responses with the thrown
+     *     error and `{ requestId, method, route }`. Plug in Sentry /
+     *     Datadog / Rollbar.
+     *
+     *   - `generateRequestId`: customize the format of minted request
+     *     ids (default: `req_<uuid>` via `crypto.randomUUID`). The
+     *     incoming `X-Request-Id` header is honored when present and
+     *     well-formed, regardless of this setting.
+     *
+     *   - `requestIdHeader`: response header name to echo the id back
+     *     on. Defaults to `X-Request-Id`.
+     */
+    observability?: {
+        metrics?: MetricsRegistry;
+        errorReporter?: ErrorReporter;
+        generateRequestId?: () => string;
+        requestIdHeader?: string;
+    };
 }
 
 /**
@@ -218,6 +253,17 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
             res.header(k, v);
         }
     }
+    // Side-channel: remember the original error so the observability
+    // wrapper can hand it to errorReporter on 5xx. Handlers catch the
+    // error and call us here instead of re-throwing, so this is the
+    // only place we still have it.
+    if (code >= 500) {
+        try {
+            (res as any).__obsRecordedError = err;
+        } catch {
+            // res is a frozen / proxy object — skip
+        }
+    }
     res.json({
         success: false,
         error: { message: err.message || 'Internal Server Error', code },
@@ -295,6 +341,46 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 sendResultBase(result, res, securityHeaders);
             const errorResponse = (err: any, res: any) =>
                 errorResponseBase(err, res, securityHeaders);
+
+            // ── Observability ──────────────────────────────────────────
+            // Noop defaults; production hosts inject real adapters.
+            const metrics: MetricsRegistry =
+                config.observability?.metrics ?? new NoopMetricsRegistry();
+            const errorReporter: ErrorReporter =
+                config.observability?.errorReporter ?? new NoopErrorReporter();
+            const generateRequestId = config.observability?.generateRequestId;
+            const requestIdHeader =
+                config.observability?.requestIdHeader ?? 'X-Request-Id';
+
+            /**
+             * Wrap the IHttpServer so every route registration is
+             * automatically instrumented. We only override the three
+             * verb methods the dispatcher uses; everything else passes
+             * through unchanged.
+             */
+            const rawServer = server;
+            server = new Proxy(rawServer, {
+                get(target, prop, receiver) {
+                    if (prop === 'get' || prop === 'post' || prop === 'delete') {
+                        const method = String(prop).toUpperCase();
+                        const original = (target as any)[prop];
+                        if (typeof original !== 'function') return original;
+                        return (route: string, handler: any) => {
+                            return original.call(
+                                target,
+                                route,
+                                instrumentRouteHandler(method, route, handler, {
+                                    metrics,
+                                    errorReporter,
+                                    generateRequestId,
+                                    requestIdHeader,
+                                }),
+                            );
+                        };
+                    }
+                    return Reflect.get(target, prop, receiver);
+                },
+            }) as IHttpServer;
 
             // ── Discovery (.well-known) ─────────────────────────────────
             server.get('/.well-known/objectstack', async (_req: any, res: any) => {
