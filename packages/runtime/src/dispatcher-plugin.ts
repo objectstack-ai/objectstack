@@ -71,7 +71,12 @@ interface RouteDefinition {
  * Register a single RouteDefinition on the HTTP server.
  * Returns true if the route was successfully registered.
  */
-function mountRouteOnServer(route: RouteDefinition, server: IHttpServer, routePath: string): boolean {
+function mountRouteOnServer(
+    route: RouteDefinition,
+    server: IHttpServer,
+    routePath: string,
+    securityHeaders?: Record<string, string>,
+): boolean {
     const handler = async (req: any, res: any) => {
         try {
             const result = await route.handler({
@@ -83,6 +88,12 @@ function mountRouteOnServer(route: RouteDefinition, server: IHttpServer, routePa
             if (result.stream && result.events) {
                 // SSE streaming response
                 res.status(result.status);
+
+                if (securityHeaders) {
+                    for (const [k, v] of Object.entries(securityHeaders)) {
+                        res.header(k, v);
+                    }
+                }
 
                 // Apply headers from the route result if available
                 if (result.headers) {
@@ -111,6 +122,11 @@ function mountRouteOnServer(route: RouteDefinition, server: IHttpServer, routePa
                 }
             } else {
                 res.status(result.status);
+                if (securityHeaders) {
+                    for (const [k, v] of Object.entries(securityHeaders)) {
+                        res.header(k, v);
+                    }
+                }
                 if (result.body !== undefined) {
                     res.json(result.body);
                 } else {
@@ -118,7 +134,7 @@ function mountRouteOnServer(route: RouteDefinition, server: IHttpServer, routePa
                 }
             }
         } catch (err: any) {
-            errorResponseBase(err, res);
+            errorResponseBase(err, res, securityHeaders);
         }
     };
 
@@ -334,6 +350,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             server.post(`${prefix}/graphql`, async (req: any, res: any) => {
                 try {
                     const result = await dispatcher.handleGraphQL(req.body, { request: req });
+                    if (securityHeaders) {
+                        for (const [k, v] of Object.entries(securityHeaders)) {
+                            res.header(k, v);
+                        }
+                    }
                     res.json(result);
                 } catch (err: any) {
                     errorResponse(err, res);
@@ -944,11 +965,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 let count = 0;
                 if (enableProjectScoping && projectResolution === 'required') {
-                    if (mountRouteOnServer(route, server, toScopedPath(routePath))) count++;
+                    if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders)) count++;
                 } else {
-                    if (mountRouteOnServer(route, server, routePath)) count++;
+                    if (mountRouteOnServer(route, server, routePath, securityHeaders)) count++;
                     if (enableProjectScoping) {
-                        if (mountRouteOnServer(route, server, toScopedPath(routePath))) count++;
+                        if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders)) count++;
                     }
                 }
                 return count;
