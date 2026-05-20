@@ -183,6 +183,51 @@ export function registerProjectLifecycleRoutes(server: IHttpServer, deps: RouteD
                 visibility: body.visibility,
                 metadata: body.metadata,
             });
+            // ── Platform SSO: seed a `sys_oauth_application` row so the
+            // per-env runtime can immediately exchange auth codes with
+            // this control plane. Best-effort — failures are logged but do
+            // NOT abort the env-create flow.
+            try {
+                const baseSecret = (process.env.OS_AUTH_SECRET ?? process.env.AUTH_SECRET ?? '').trim();
+                const newProjectId = (result.project as AnyRow)?.id;
+                const newHostname = (result.project as AnyRow)?.hostname;
+                if (baseSecret && newProjectId) {
+                    const driver = await getDriver();
+                    if (driver) {
+                        const qlAdapter = {
+                            find: async (object: string, q: any, _opts?: any) => {
+                                return await (driver.find as any)(object, q);
+                            },
+                            insert: async (object: string, data: any, _opts?: any) => {
+                                return await (driver.create as any)(object, data);
+                            },
+                            update: async (object: string, data: any, where: any, _opts?: any) => {
+                                const id = where?.id;
+                                if (id) {
+                                    return await (driver.update as any)(object, id, data);
+                                }
+                                const rows = await (driver.find as any)(object, { where, limit: 1 });
+                                const list = Array.isArray(rows) ? rows : Array.isArray((rows as any)?.records) ? (rows as any).records : [];
+                                const row = list[0];
+                                if (row?.id) {
+                                    return await (driver.update as any)(object, row.id, data);
+                                }
+                            },
+                        };
+                        const { seedPlatformSsoClient } = await import('@objectstack/runtime');
+                        await seedPlatformSsoClient({
+                            ql: qlAdapter as any,
+                            projectId: String(newProjectId),
+                            hostname: newHostname ? String(newHostname) : undefined,
+                            baseSecret,
+                            logger: console,
+                        });
+                    }
+                }
+            } catch (ssoErr: any) {
+                console.warn('[ProjectLifecycle] platform SSO seed failed (non-fatal):', ssoErr?.message ?? ssoErr);
+            }
+
             return res.status(201).json(ok({
                 project: result.project,
                 warnings: result.warnings,

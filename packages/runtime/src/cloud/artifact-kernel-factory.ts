@@ -156,7 +156,18 @@ export class ArtifactKernelFactory implements ProjectKernelFactory {
                 const { AuthPlugin } = await import('@objectstack/plugin-auth');
                 const projectSecret = deriveProjectAuthSecret(this.authBaseSecret, projectId);
                 const baseUrl = project.hostname
-                    ? (project.hostname.startsWith('http') ? project.hostname : `https://${project.hostname}`)
+                    ? (project.hostname.startsWith('http')
+                        ? project.hostname
+                        : (/(\.|^)localhost(:\d+)?$/i.test(project.hostname)
+                            ? (() => {
+                                const runtimePort = (process.env.OS_RUNTIME_PORT ?? '').trim();
+                                const hasPort = /:\d+$/.test(project.hostname);
+                                const hostWithPort = hasPort || !runtimePort
+                                    ? project.hostname
+                                    : `${project.hostname}:${runtimePort}`;
+                                return `http://${hostWithPort}`;
+                            })()
+                            : `https://${project.hostname}`))
                     : undefined;
 
                 // Build the list of trusted origins for CSRF.

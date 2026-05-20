@@ -137,6 +137,32 @@ export class AuthProxyPlugin implements Plugin {
                         }
                         // bootstrap-status
                         try {
+                            // When platform SSO is wired (cloud's
+                            // objectstack-cloud OIDC provider is advertised),
+                            // identity is delegated to the cloud control
+                            // plane. The local sys_user table is empty by
+                            // design — it gets JIT-populated on first
+                            // successful SSO callback. We must NEVER force
+                            // the tenant /setup wizard in that case: it
+                            // would create a local owner whose credentials
+                            // are unreachable (no /login form will be shown
+                            // since SSO auto-redirect kicks in next visit).
+                            try {
+                                const pubCfg = typeof authSvc?.getPublicConfig === 'function'
+                                    ? authSvc.getPublicConfig()
+                                    : null;
+                                const ssoProviders: Array<{ id?: string; enabled?: boolean }> = Array.isArray(pubCfg?.socialProviders)
+                                    ? pubCfg.socialProviders
+                                    : [];
+                                const ssoWired = ssoProviders.some(
+                                    (p) => p?.enabled !== false && p?.id === 'objectstack-cloud',
+                                );
+                                if (ssoWired) {
+                                    return c.json({ hasOwner: true });
+                                }
+                            } catch {
+                                // fall through to local count
+                            }
                             const dataEngine = typeof authSvc?.getDataEngine === 'function'
                                 ? authSvc.getDataEngine()
                                 : null;

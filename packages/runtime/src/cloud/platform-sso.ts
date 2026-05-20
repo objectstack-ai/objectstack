@@ -95,9 +95,23 @@ export function hashPlatformSsoClientSecret(plaintext: string): string {
  * the callback with `invalid_request`.
  */
 export function buildPlatformSsoRedirectUri(hostname: string, basePath: string = '/api/v1/auth'): string {
-    const host = hostname.startsWith('http://') || hostname.startsWith('https://')
-        ? hostname
-        : `https://${hostname}`;
+    let host: string;
+    if (hostname.startsWith('http://') || hostname.startsWith('https://')) {
+        host = hostname;
+    } else if (/(\.|^)localhost(:\d+)?$/i.test(hostname)) {
+        // Local dev: localhost subdomains run on plain http with a custom
+        // port. When the caller passes only a hostname (no scheme/port),
+        // append the configured runtime port so the OAuth redirect_uri
+        // matches what the browser can actually reach. We read
+        // OS_RUNTIME_PORT (NOT PORT) because both the cloud control plane
+        // and the runtime container call this function — only the runtime
+        // port is meaningful for the callback.
+        const port = (process.env.OS_RUNTIME_PORT ?? '').trim();
+        const hostWithPort = /:\d+$/.test(hostname) || !port ? hostname : `${hostname}:${port}`;
+        host = `http://${hostWithPort}`;
+    } else {
+        host = `https://${hostname}`;
+    }
     const trimmed = host.replace(/\/+$/, '');
     const path = basePath.replace(/\/+$/, '');
     return `${trimmed}${path}/oauth2/callback/${PLATFORM_SSO_PROVIDER_ID}`;
