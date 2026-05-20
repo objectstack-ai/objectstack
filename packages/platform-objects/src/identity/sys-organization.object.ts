@@ -74,6 +74,40 @@ export const SysOrganization = ObjectSchema.create({
       successMessage: 'Organization deleted',
       refreshAfter: true,
     },
+    {
+      // Switch the caller's active organization context. Standard
+      // better-auth endpoint; no extra params needed (org id ships as
+      // the row id). Used from the Setup list and the record header so
+      // admins can context-switch without leaving the page.
+      name: 'set_active_organization',
+      label: 'Set Active',
+      icon: 'check-circle-2',
+      variant: 'secondary',
+      mode: 'custom',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/organization/set-active',
+      recordIdParam: 'organizationId',
+      successMessage: 'Active organization switched',
+      refreshAfter: true,
+    },
+    {
+      // Current user leaves the org. Distinct from `delete_organization`
+      // (admin-only, destroys the org) — `leave` only removes the caller's
+      // own membership. Better-auth: `organization/leave { organizationId }`.
+      name: 'leave_organization',
+      label: 'Leave Organization',
+      icon: 'log-out',
+      variant: 'danger',
+      mode: 'custom',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/organization/leave',
+      recordIdParam: 'organizationId',
+      confirmText: 'Leave this organization? You will lose access to all of its resources.',
+      successMessage: 'You have left the organization',
+      refreshAfter: true,
+    },
   ],
 
   listViews: {

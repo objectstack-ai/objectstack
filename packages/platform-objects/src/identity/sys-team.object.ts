@@ -22,6 +22,64 @@ export const SysTeam = ObjectSchema.create({
   titleFormat: '{name}',
   compactLayout: ['name', 'organization_id'],
 
+  // Custom actions calling better-auth's team endpoints. Generic CRUD is
+  // suppressed (managedBy: 'better-auth'), so these are the canonical
+  // entry points for create/update/delete.
+  actions: [
+    {
+      // Better-auth: `organization/create-team { name, organizationId? }`.
+      // organizationId defaults to the caller's active org when omitted.
+      name: 'create_team',
+      label: 'Create Team',
+      icon: 'plus',
+      variant: 'primary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/auth/organization/create-team',
+      successMessage: 'Team created',
+      refreshAfter: true,
+      params: [
+        { field: 'name', required: true },
+        { name: 'organizationId', field: 'organization_id' },
+      ],
+    },
+    {
+      // Better-auth: `organization/update-team { teamId, data: { name } }`.
+      // teamId stays flat (top-level); the user-editable params nest under
+      // `data` via bodyShape.
+      name: 'update_team',
+      label: 'Edit Team',
+      icon: 'pencil',
+      mode: 'edit',
+      locations: ['list_item'],
+      type: 'api',
+      target: '/api/v1/auth/organization/update-team',
+      recordIdParam: 'teamId',
+      bodyShape: { wrap: 'data' },
+      successMessage: 'Team updated',
+      refreshAfter: true,
+      params: [
+        { field: 'name', required: true, defaultFromRow: true },
+      ],
+    },
+    {
+      // Better-auth: `organization/remove-team { teamId, organizationId? }`.
+      // organizationId defaults to the caller's active org when omitted.
+      name: 'remove_team',
+      label: 'Delete Team',
+      icon: 'trash-2',
+      variant: 'danger',
+      mode: 'delete',
+      locations: ['list_item'],
+      type: 'api',
+      target: '/api/v1/auth/organization/remove-team',
+      recordIdParam: 'teamId',
+      confirmText: 'Delete this team? Members will lose any team-scoped access. This cannot be undone.',
+      successMessage: 'Team deleted',
+      refreshAfter: true,
+    },
+  ],
+
   listViews: {
     by_org: {
       type: 'grid',

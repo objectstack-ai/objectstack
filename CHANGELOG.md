@@ -54,6 +54,33 @@ registry" workflows.
 - `packages/cli/src/utils/auth-flows.ts` — shared `loginWithBrowser` /
   `loginWithPassword` flows so runtime and cloud login paths can stay
   in sync without duplicating the RFC 8628 polling loop.
+### Added — `objectstack package publish` CLI (ADR-0006 v4 Phase B)
+
+New CLI command for uploading a compiled artifact as a versioned package
+into the caller's organization on ObjectStack Cloud. Pairs with the
+`POST /cloud/packages` + `POST /cloud/packages/:id/versions` routes
+that landed in commit `9f87aa8f`.
+
+- `packages/cli/src/commands/package/publish.ts` — new oclif command
+  `os package publish [artifact]`. Flow:
+  1. Reads `dist/objectstack.json` (or path arg).
+  2. Derives `manifest_id` (default `local.<slug>` if artifact lacks
+     a reverse-domain id) and version (default `artifact.manifest.version`
+     or a timestamped `0.0.0-dev.<ts>`).
+  3. POSTs to `/api/v1/cloud/packages` for idempotent package upsert.
+  4. POSTs to `/api/v1/cloud/packages/:id/versions` to publish the bundle
+     as a new `sys_package_version` snapshot.
+  5. Optionally auto-installs into a target env via `--env <id> --install`.
+- Flags cover the full publish surface — `--manifest-id`, `--version`,
+  `--display-name`, `--description`, `--category`, `--visibility`,
+  `--org`, `--note`, `--pre-release`, `--seed-sample-data`, `--timeout`.
+- Re-exported from `packages/cli/src/index.ts` as `PackagePublishCommand`.
+
+Closes the user-facing half of the ADR-0006 v4 unified Package path: a
+local code base can now land in the org Marketplace (or stay private)
+without manual SQL or Console clicks. The legacy `objectstack publish`
+command (writes `sys_environment_revision`) remains in place for
+backward compatibility until the loader fully migrates.
 
 ### Changed — ADR-0006 v4: drop dev-workspace Project, unify deploy on Package
 

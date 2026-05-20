@@ -20,7 +20,50 @@ export const SysTeamMember = ObjectSchema.create({
   description: 'Team membership records linking users to teams',
   titleFormat: '{user_id} in {team_id}',
   compactLayout: ['user_id', 'team_id', 'created_at'],
-  
+
+  // Custom actions calling better-auth's team-member endpoints. Generic
+  // CRUD is suppressed (managedBy: 'better-auth') so these are the
+  // canonical add/remove entry points.
+  actions: [
+    {
+      // Better-auth: `organization/add-team-member { teamId, userId }`.
+      name: 'add_team_member',
+      label: 'Add Member',
+      icon: 'user-plus',
+      variant: 'primary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/auth/organization/add-team-member',
+      successMessage: 'Team member added',
+      refreshAfter: true,
+      params: [
+        { name: 'teamId', field: 'team_id', required: true },
+        { name: 'userId', field: 'user_id', required: true },
+      ],
+    },
+    {
+      // Better-auth: `organization/remove-team-member { teamId, userId }`.
+      // The endpoint identifies the membership by the (teamId, userId)
+      // pair rather than the join-row id, so we pull both from the row
+      // via `defaultFromRow` instead of using `recordIdParam`.
+      name: 'remove_team_member',
+      label: 'Remove from Team',
+      icon: 'user-minus',
+      variant: 'danger',
+      mode: 'delete',
+      locations: ['list_item'],
+      type: 'api',
+      target: '/api/v1/auth/organization/remove-team-member',
+      confirmText: 'Remove this user from the team? They will lose any team-scoped access.',
+      successMessage: 'Team member removed',
+      refreshAfter: true,
+      params: [
+        { name: 'teamId', field: 'team_id', required: true, defaultFromRow: true },
+        { name: 'userId', field: 'user_id', required: true, defaultFromRow: true },
+      ],
+    },
+  ],
+
   fields: {
     id: Field.text({
       label: 'Team Member ID',

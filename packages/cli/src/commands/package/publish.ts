@@ -78,6 +78,7 @@ export default class PackagePublish extends Command {
     '$ os package publish --manifest-id com.acme.crm --version 1.2.0',
     '$ os package publish --env env_abc123 --install',
     '$ os package publish dist/objectstack.json --visibility org --note "first cut"',
+    '$ OS_CLOUD_URL=http://localhost:4000 os package publish    # local dev (apps/cloud)',
   ];
 
   static override args = {

@@ -599,65 +599,81 @@ export default class Serve extends Command {
       // unchanged. Infra paths under /_admin or /.well-known are always
       // allowed so health checks / cert flows aren't broken.
       //
-      // Registered BEFORE config plugins so it intercepts before any
-      // route handler (including the Console static plugin) claims the
-      // request.
+      // Implemented as a Plugin so the middleware is wired during init
+      // (when http.server is available) and BEFORE start() runs on the
+      // Console static plugin / route-registering plugins. Hono's
+      // `app.use('*')` is order-independent for matching, so as long as
+      // the middleware is added before kernel:listening fires, it
+      // intercepts every request regardless of which plugin registered
+      // its handler.
       const __rootDomain = (process.env.OS_ROOT_DOMAIN || '').trim().toLowerCase();
       if (__rootDomain) {
+        const RESERVED = new Set(['', 'cloud', 'www', 'api', 'docs', 'admin', 'app']);
+        const guardPlugin: any = {
+          name: 'com.objectstack.cli.unknown-hostname-guard',
+          version: '1.0.0',
+          init: async (ctx: any) => {
+            try {
+              const httpServer: any = ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
+              const rawApp = httpServer?.getRawApp?.();
+              if (!rawApp || typeof rawApp.use !== 'function') {
+                ctx.logger?.warn?.('[unknown-hostname-guard] http.server unavailable; guard not installed');
+                return;
+              }
+              const getEnvRegistry = () => {
+                try {
+                  return ctx.getService?.('env-registry') ?? null;
+                } catch {
+                  return null;
+                }
+              };
+              rawApp.use('*', async (c: any, next: any) => {
+                const rawHost = c.req.header('host') || '';
+                const host = rawHost.split(':')[0].toLowerCase();
+                if (!host) return next();
+                const isPlatformHost = host === __rootDomain || host.endsWith('.' + __rootDomain);
+                if (!isPlatformHost) return next();
+                const sub = host === __rootDomain ? '' : host.slice(0, -(__rootDomain.length + 1));
+                const head = sub.split('.').pop() || '';
+                if (RESERVED.has(sub) || RESERVED.has(head)) return next();
+                const p = c.req.path;
+                if (p.startsWith('/_admin/') || p === '/_admin' || p.startsWith('/.well-known/')) {
+                  return next();
+                }
+                // Resolve env-registry lazily on each request — it may
+                // not be registered yet at init() time (registered by
+                // ObjectOSProjectPlugin's init which runs in plugin
+                // dependency order; we don't want to rely on ordering).
+                const registry: any = getEnvRegistry();
+                if (!registry || typeof registry.resolveByHostname !== 'function') {
+                  return next();
+                }
+                try {
+                  const hit = await registry.resolveByHostname(host);
+                  if (hit) return next();
+                } catch {
+                  return next();
+                }
+                return c.json(
+                  {
+                    error: 'environment_not_found',
+                    message: `No environment is bound to hostname '${host}'.`,
+                    hostname: host,
+                  },
+                  404,
+                );
+              });
+              ctx.logger?.info?.('[unknown-hostname-guard] installed', { rootDomain: __rootDomain });
+            } catch (err: any) {
+              ctx.logger?.warn?.('[unknown-hostname-guard] install failed', { error: err?.message ?? err });
+            }
+          },
+        };
         try {
-          const httpServer: any = kernel.getService?.('http.server') ?? kernel.getService?.('http-server');
-          const rawApp = httpServer?.getRawApp?.();
-          if (rawApp && typeof rawApp.use === 'function') {
-            const RESERVED = new Set(['', 'cloud', 'www', 'api', 'docs', 'admin', 'app']);
-            let envRegistryRef: any;
-            const getEnvRegistry = async () => {
-              if (envRegistryRef !== undefined) return envRegistryRef;
-              try {
-                envRegistryRef = (await (kernel as any).getServiceAsync?.('env-registry'))
-                  ?? (kernel as any).getService?.('env-registry')
-                  ?? null;
-              } catch {
-                envRegistryRef = null;
-              }
-              return envRegistryRef;
-            };
-            rawApp.use('*', async (c: any, next: any) => {
-              const rawHost = c.req.header('host') || '';
-              const host = rawHost.split(':')[0].toLowerCase();
-              if (!host) return next();
-              const isPlatformHost = host === __rootDomain || host.endsWith('.' + __rootDomain);
-              if (!isPlatformHost) return next();
-              const sub = host === __rootDomain ? '' : host.slice(0, -(__rootDomain.length + 1));
-              const head = sub.split('.').pop() || '';
-              if (RESERVED.has(sub) || RESERVED.has(head)) return next();
-              const p = c.req.path;
-              if (p.startsWith('/_admin/') || p === '/_admin' || p.startsWith('/.well-known/')) {
-                return next();
-              }
-              const registry = await getEnvRegistry();
-              if (!registry || typeof registry.resolveByHostname !== 'function') {
-                return next();
-              }
-              try {
-                const hit = await registry.resolveByHostname(host);
-                if (hit) return next();
-              } catch {
-                return next();
-              }
-              return c.json(
-                {
-                  error: 'environment_not_found',
-                  message: `No environment is bound to hostname '${host}'.`,
-                  hostname: host,
-                },
-                404,
-              );
-            });
-            trackPlugin('UnknownHostnameGuard');
-          }
+          await kernel.use(guardPlugin);
+          trackPlugin('UnknownHostnameGuard');
         } catch {
-          // Best-effort: if http.server isn't registered or rawApp missing,
-          // skip the guard. Falls back to legacy behaviour.
+          // Best-effort.
         }
       }
 

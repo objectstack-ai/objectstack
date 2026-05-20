@@ -24,7 +24,30 @@ export const SysMember = ObjectSchema.create({
   // Row-level actions: better-auth `organization/update-member-role` and
   // `organization/remove-member`. Generic CRUD is suppressed on better-auth
   // managed tables, so these are the canonical edit/delete entry points.
+  // The `add_member` toolbar action covers the admin "attach an existing
+  // user directly without sending an invitation" flow.
   actions: [
+    {
+      // Admin-only: directly attach an existing user to the active org,
+      // bypassing the invite-accept flow. Better-auth:
+      // `organization/add-member { userId, role, organizationId?, teamId? }`.
+      // organizationId/teamId default to the caller's active org/team when
+      // omitted, so we leave them as optional params.
+      name: 'add_member',
+      label: 'Add Member',
+      icon: 'user-plus',
+      variant: 'primary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/auth/organization/add-member',
+      successMessage: 'Member added',
+      refreshAfter: true,
+      params: [
+        { name: 'userId', field: 'user_id', required: true },
+        { field: 'role', required: true },
+        { name: 'organizationId', field: 'organization_id' },
+      ],
+    },
     {
       name: 'update_member_role',
       label: 'Change Role',
