@@ -1,14 +1,16 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Page } from '@objectstack/spec/ui';
-import { P } from '@objectstack/spec';
+import { CloneOpportunityAction } from '../actions/opportunity.actions';
 
 /**
  * Opportunity Detail Record Page
  *
  * Salesforce Lightning-style record page for the `opportunity` object.
- * Demonstrates the Page-as-root model:
- *   PageSchema(type='record') → regions[] → page:* containers → record:* leaves.
+ * Mirrors the lead_detail blueprint: single-column full-width layout with
+ * a Lightning-style header chip, primary action, key highlights strip and
+ * status path, then a tab strip below. No sidebar — secondary widgets such
+ * as the AI assistant live in the floating console chat instead.
  */
 export const OpportunityDetailPage: Page = {
   name: 'opportunity_detail_page',
@@ -18,7 +20,7 @@ export const OpportunityDetailPage: Page = {
   type: 'record',
   object: 'opportunity',
 
-  template: 'header-sidebar-main',
+  template: 'full-width',
 
   variables: [
     { name: 'activeTab', type: 'string', defaultValue: 'details' },
@@ -38,7 +40,23 @@ export const OpportunityDetailPage: Page = {
             subtitle: '{account}',
             icon: 'briefcase',
             breadcrumb: true,
-            actions: ['edit', 'delete', 'clone', 'share'],
+          },
+        },
+        {
+          type: 'record:quick_actions',
+          id: 'opp_header_actions',
+          properties: {
+            actions: [CloneOpportunityAction],
+            location: 'record_header',
+            align: 'end',
+          },
+        },
+        {
+          type: 'record:highlights',
+          id: 'opp_highlights',
+          label: 'Key Information',
+          properties: {
+            fields: ['amount', 'close_date', 'probability', 'expected_revenue', 'owner', 'account'],
           },
         },
         {
@@ -73,34 +91,28 @@ export const OpportunityDetailPage: Page = {
               {
                 key: 'details',
                 label: 'Details',
-                components: [
+                children: [
                   {
                     type: 'record:details',
                     id: 'opp_details',
                     label: 'Opportunity Details',
                     properties: {
+                      columns: 2,
+                      layout: 'auto',
                       sections: [
                         {
                           label: 'Opportunity Information',
-                          columns: 2,
-                          fields: [
-                            { field: 'name', required: true, colSpan: 2 },
-                            { field: 'account', required: true },
-                            { field: 'owner' },
-                            { field: 'stage', required: true },
-                            { field: 'probability' },
-                            { field: 'amount' },
-                            { field: 'close_date', required: true },
-                          ],
+                          fields: ['name', 'account', 'owner', 'type', 'lead_source', 'campaign'],
+                        },
+                        {
+                          label: 'Stage & Forecast',
+                          fields: ['stage', 'probability', 'amount', 'expected_revenue', 'close_date', 'forecast_category'],
                         },
                         {
                           label: 'Description',
                           columns: 1,
                           collapsible: true,
-                          fields: [
-                            { field: 'description', colSpan: 1 },
-                            { field: 'next_step', colSpan: 1 },
-                          ],
+                          fields: ['description', 'next_step'],
                         },
                       ],
                     },
@@ -110,7 +122,7 @@ export const OpportunityDetailPage: Page = {
               {
                 key: 'related',
                 label: 'Related',
-                components: [
+                children: [
                   {
                     type: 'page:accordion',
                     id: 'opp_related_accordion',
@@ -119,7 +131,7 @@ export const OpportunityDetailPage: Page = {
                         {
                           key: 'quotes',
                           label: 'Quotes',
-                          components: [
+                          children: [
                             {
                               type: 'record:related_list',
                               id: 'opp_quotes',
@@ -135,7 +147,7 @@ export const OpportunityDetailPage: Page = {
                         {
                           key: 'contacts',
                           label: 'Contacts',
-                          components: [
+                          children: [
                             {
                               type: 'record:related_list',
                               id: 'opp_contacts',
@@ -151,7 +163,7 @@ export const OpportunityDetailPage: Page = {
                         {
                           key: 'tasks',
                           label: 'Open Tasks',
-                          components: [
+                          children: [
                             {
                               type: 'record:related_list',
                               id: 'opp_tasks',
@@ -173,7 +185,7 @@ export const OpportunityDetailPage: Page = {
               {
                 key: 'activity',
                 label: 'Activity',
-                components: [
+                children: [
                   {
                     type: 'record:activity',
                     id: 'opp_activity',
@@ -186,42 +198,6 @@ export const OpportunityDetailPage: Page = {
               },
             ],
           },
-        },
-      ],
-    },
-    {
-      name: 'sidebar',
-      width: 'medium',
-      components: [
-        {
-          type: 'record:highlights',
-          id: 'opp_highlights',
-          label: 'Key Information',
-          properties: {
-            fields: ['amount', 'close_date', 'probability', 'expected_revenue', 'owner', 'account'],
-            layout: 'vertical',
-          },
-        },
-        {
-          type: 'page:card',
-          id: 'opp_quick_actions',
-          label: 'Quick Actions',
-          properties: {
-            title: 'Quick Actions',
-            bordered: true,
-            actions: ['log_call', 'create_task', 'schedule_meeting', 'send_email'],
-          },
-        },
-        {
-          type: 'ai:chat_window',
-          id: 'opp_ai_assistant',
-          label: 'AI Assistant',
-          properties: {
-            mode: 'sidebar',
-            agentId: 'sales_assistant',
-            context: { recordType: 'opportunity', recordId: '{record.id}' },
-          },
-          visibility: P`record.stage == "negotiation" || record.stage == "proposal"`,
         },
       ],
     },
