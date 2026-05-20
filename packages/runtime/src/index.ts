@@ -30,6 +30,23 @@ export { HttpDispatcher } from './http-dispatcher.js';
 export type { HttpProtocolContext, HttpDispatcherResult } from './http-dispatcher.js';
 export { MiddlewareManager } from './middleware.js';
 
+// ── Security primitives ───────────────────────────────────────────────
+// Adapter-agnostic helpers for response hardening (CSP/HSTS/XCTO/…)
+// and per-IP token-bucket rate limiting. The dispatcher plugin wires
+// security headers automatically; rate limiting is exposed as a
+// primitive so adapters can mount it at the appropriate layer (see
+// `docs/guide/hardening.md`).
+export {
+    buildSecurityHeaders,
+    type SecurityHeadersOptions,
+    RateLimiter,
+    DEFAULT_RATE_LIMITS,
+    type RateLimitBucketConfig,
+    type RateLimitDecision,
+    type RateLimitDefaults,
+    type RateLimitStore,
+} from './security/index.js';
+
 // Export Artifact Loader
 export { loadArtifactBundle, mergeRuntimeModule, isHttpUrl, readArtifactSource } from './load-artifact-bundle.js';
 export type { LoadArtifactBundleOptions } from './load-artifact-bundle.js';

@@ -170,6 +170,45 @@ export function registerCloudRoutes(server: IHttpServer, deps: RouteDeps): void 
             }
         }
 
+        // --- Marketplace installs: append every enabled sys_package_installation
+        //     row's manifest_json bundle so the runtime kernel registers them
+        //     as additional packages. Without this, packages installed via
+        //     `POST /cloud/packages/:id/install` would write a row but never
+        //     reach the env runtime.
+        try {
+            const installs: any[] = await (async () => {
+                const r: any = await (driver.find as any)('sys_package_installation', {
+                    where: { environment_id: projectId },
+                    limit: 1000,
+                });
+                if (Array.isArray(r)) return r;
+                if (Array.isArray(r?.records)) return r.records;
+                if (Array.isArray(r?.value)) return r.value;
+                return [];
+            })();
+            for (const inst of installs) {
+                if (!inst) continue;
+                if (inst.enabled === false || inst.enabled === 0) continue;
+                if (!inst.package_version_id) continue;
+                const ver: any = await (driver.findOne as any)('sys_package_version', { where: { id: inst.package_version_id } });
+                if (!ver?.manifest_json) continue;
+                let manifest: any = null;
+                try {
+                    manifest = typeof ver.manifest_json === 'string'
+                        ? JSON.parse(ver.manifest_json)
+                        : ver.manifest_json;
+                } catch {
+                    continue;
+                }
+                if (!manifest || typeof manifest !== 'object') continue;
+                // Wrap as a bundle-shaped object so mergeArtifactMetadata
+                // ingests its arrays (`objects`, `apps`, `views`, etc.).
+                bundles.push({ metadata: manifest, manifest });
+            }
+        } catch (err: any) {
+            console.warn('[CloudArtifactAPI] installed-bundle merge failed:', err?.message ?? err);
+        }
+
         const cred = await readProjectCredentials(driver, project.id);
         const runtime = buildRuntimeBlock(project, cred);
 

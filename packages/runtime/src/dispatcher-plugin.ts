@@ -2,6 +2,10 @@
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
+import {
+    buildSecurityHeaders,
+    type SecurityHeadersOptions,
+} from './security/index.js';
 
 export interface DispatcherPluginConfig {
     /**
@@ -36,6 +40,20 @@ export interface DispatcherPluginConfig {
      * where membership has not been seeded.
      */
     enforceProjectMembership?: boolean;
+
+    /**
+     * Security response headers. When provided, every response routed
+     * through this plugin gets the headers merged in (route-specific
+     * headers still win on conflict).
+     *
+     * Pass `false` to disable. Pass `true` (or omit) to enable with
+     * conservative API-server defaults (CSP=deny-all, XCTO=nosniff,
+     * X-Frame-Options=DENY, etc.). Pass an object to customize — see
+     * {@link SecurityHeadersOptions}.
+     *
+     * @default true
+     */
+    securityHeaders?: boolean | SecurityHeadersOptions;
 }
 
 /**
@@ -100,7 +118,7 @@ function mountRouteOnServer(route: RouteDefinition, server: IHttpServer, routePa
                 }
             }
         } catch (err: any) {
-            errorResponse(err, res);
+            errorResponseBase(err, res);
         }
     };
 
@@ -121,11 +139,31 @@ function mountRouteOnServer(route: RouteDefinition, server: IHttpServer, routePa
 /**
  * Send an HttpDispatcherResult through IHttpResponse.
  * Differentiates between handled, unhandled (404), and special results.
+ *
+ * @param securityHeaders headers to merge into every response (under
+ * the route-specific headers so the dispatcher can override on a
+ * per-route basis when truly needed).
  */
-function sendResult(result: HttpDispatcherResult, res: any): void {
+function sendResultBase(
+    result: HttpDispatcherResult,
+    res: any,
+    securityHeaders?: Record<string, string>,
+): void {
+    const applySecurityHeaders = () => {
+        if (!securityHeaders) return;
+        for (const [k, v] of Object.entries(securityHeaders)) {
+            // Don't clobber route-set headers — `res.header` semantics
+            // vary by adapter, so we set unconditionally and rely on the
+            // call ordering (security headers first, route headers
+            // overwrite below).
+            res.header(k, v);
+        }
+    };
+
     if (result.handled) {
         if (result.response) {
             res.status(result.response.status);
+            applySecurityHeaders();
             if (result.response.headers) {
                 for (const [k, v] of Object.entries(result.response.headers)) {
                     res.header(k, v);
@@ -136,12 +174,16 @@ function sendResult(result: HttpDispatcherResult, res: any): void {
         }
         if (result.result) {
             // Special results (redirect, stream) — pass through as JSON for now
-            res.status(200).json(result.result);
+            res.status(200);
+            applySecurityHeaders();
+            res.json(result.result);
             return;
         }
     }
     // Semantic 404: no route matched — include diagnostic info
-    res.status(404).json({
+    res.status(404);
+    applySecurityHeaders();
+    res.json({
         success: false,
         error: {
             message: 'Not Found',
@@ -152,9 +194,15 @@ function sendResult(result: HttpDispatcherResult, res: any): void {
     });
 }
 
-function errorResponse(err: any, res: any): void {
+function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, string>): void {
     const code = err.statusCode || 500;
-    res.status(code).json({
+    res.status(code);
+    if (securityHeaders) {
+        for (const [k, v] of Object.entries(securityHeaders)) {
+            res.header(k, v);
+        }
+    }
+    res.json({
         success: false,
         error: { message: err.message || 'Internal Server Error', code },
     });
@@ -209,13 +257,46 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             });
             const prefix = config.prefix || '/api/v1';
 
+            // ── Security: resolve once at startup; applied on every response.
+            // Defaults to ON because every production API server should be
+            // sending these headers. Opt out with `securityHeaders: false`
+            // (only sensible for tests or when an upstream reverse proxy is
+            // already setting them).
+            const securityHeaders: Record<string, string> | undefined =
+                config.securityHeaders === false
+                    ? undefined
+                    : buildSecurityHeaders(
+                          typeof config.securityHeaders === 'object'
+                              ? config.securityHeaders
+                              : {},
+                      );
+
+            // Locally-shadowed wrappers — every `sendResult(...)` /
+            // `errorResponse(...)` call below picks these up via lexical
+            // scope, so the 50+ route handlers don't need to thread the
+            // security headers through manually.
+            const sendResult = (result: HttpDispatcherResult, res: any) =>
+                sendResultBase(result, res, securityHeaders);
+            const errorResponse = (err: any, res: any) =>
+                errorResponseBase(err, res, securityHeaders);
+
             // ── Discovery (.well-known) ─────────────────────────────────
             server.get('/.well-known/objectstack', async (_req: any, res: any) => {
+                if (securityHeaders) {
+                    for (const [k, v] of Object.entries(securityHeaders)) {
+                        res.header(k, v);
+                    }
+                }
                 res.json({ data: await dispatcher.getDiscoveryInfo(prefix) });
             });
 
             // ── Discovery (versioned API path) ──────────────────────────
             server.get(`${prefix}/discovery`, async (_req: any, res: any) => {
+                if (securityHeaders) {
+                    for (const [k, v] of Object.entries(securityHeaders)) {
+                        res.header(k, v);
+                    }
+                }
                 res.json({ data: await dispatcher.getDiscoveryInfo(prefix) });
             });
 
