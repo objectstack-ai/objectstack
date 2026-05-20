@@ -10,6 +10,12 @@ export const zhCN: TranslationData = {
     mail: {
       title: '邮件投递',
       description: 'SMTP 与事务性邮件服务商配置。',
+      groups: {
+        provider: { title: '服务商', description: '选择此工作区如何发送邮件。' },
+        smtp: { title: 'SMTP' },
+        api_key: { title: 'API 密钥' },
+        from_address: { title: '发件地址' },
+      },
       keys: {
         provider: {
           label: '服务商',
@@ -37,6 +43,10 @@ export const zhCN: TranslationData = {
     branding: {
       title: '品牌',
       description: '工作区名称、Logo 与主题色。',
+      groups: {
+        identity: { title: '身份' },
+        appearance: { title: '外观' },
+      },
       keys: {
         workspace_name: { label: '工作区名称' },
         support_email: { label: '客服邮箱', help: '示例:support@example.com' },
@@ -52,6 +62,10 @@ export const zhCN: TranslationData = {
     feature_flags: {
       title: '功能开关',
       description: '为当前工作区开启实验性与测试功能。',
+      groups: {
+        productivity: { title: '生产力' },
+        collaboration: { title: '协作' },
+      },
       keys: {
         ai_enabled: {
           label: 'AI 助手',

@@ -10,6 +10,12 @@ export const jaJP: TranslationData = {
     mail: {
       title: 'メール配信',
       description: 'SMTP およびトランザクションメールプロバイダー設定。',
+      groups: {
+        provider: { title: 'プロバイダー', description: 'このワークスペースの送信方法を選択します。' },
+        smtp: { title: 'SMTP' },
+        api_key: { title: 'API キー' },
+        from_address: { title: '差出人アドレス' },
+      },
       keys: {
         provider: {
           label: 'プロバイダー',
@@ -37,6 +43,10 @@ export const jaJP: TranslationData = {
     branding: {
       title: 'ブランディング',
       description: 'ワークスペース名・ロゴ・アクセントカラー。',
+      groups: {
+        identity: { title: 'アイデンティティ' },
+        appearance: { title: '外観' },
+      },
       keys: {
         workspace_name: { label: 'ワークスペース名' },
         support_email: { label: 'サポートメール', help: '例: support@example.com' },
@@ -52,6 +62,10 @@ export const jaJP: TranslationData = {
     feature_flags: {
       title: '機能フラグ',
       description: 'このワークスペースで実験的・ベータ機能を切替えます。',
+      groups: {
+        productivity: { title: '生産性' },
+        collaboration: { title: 'コラボレーション' },
+      },
       keys: {
         ai_enabled: {
           label: 'AI アシスタント',

@@ -15,13 +15,13 @@ export const brandingSettingsManifest: SettingsManifest = {
   category: 'Workspace',
   order: 5,
   specifiers: [
-    { type: 'group', label: 'Identity', required: false },
+    { type: 'group', id: 'identity', label: 'Identity', required: false },
     { type: 'text', key: 'workspace_name', label: 'Workspace name', required: true,
       default: 'ObjectStack', minLength: 1, maxLength: 60 },
     { type: 'email', key: 'support_email', label: 'Support email', required: false,
       description: 'Example: support@example.com' },
 
-    { type: 'group', label: 'Appearance', required: false },
+    { type: 'group', id: 'appearance', label: 'Appearance', required: false },
     { type: 'select', key: 'theme_mode', label: 'Default theme', required: false, default: 'system',
       options: [
         { value: 'light', label: 'Light' },

@@ -136,6 +136,15 @@ export const SpecifierSchema = lazySchema(() => z.object({
   type: SpecifierType.describe('Specifier variant'),
 
   /**
+   * Stable identifier (snake_case) used for i18n translation lookup,
+   * action routing, and test selectors. Orthogonal to `key` (which is
+   * the storage path). Recommended for `group` and `action_button`
+   * specifiers so their labels can be translated and so action
+   * handlers have stable hook keys. Must be unique within a manifest.
+   */
+  id: SnakeCaseIdentifierSchema.optional().describe('Stable identifier (snake_case)'),
+
+  /**
    * Storage key (snake_case). Required for all value-bearing specifiers;
    * MUST be omitted for layout-only specifiers (`group`, `info_banner`,
    * `child_pane`, `title_value`, `action_button`).
@@ -362,17 +371,33 @@ export const SettingsManifestSchema = lazySchema(() => z.object({
   beta: z.boolean().optional().describe('Show a Beta chip on the page'),
 }).superRefine((manifest, ctx) => {
   // Specifier keys within a manifest must be unique.
-  const seen = new Set<string>();
+  const seenKey = new Set<string>();
   manifest.specifiers.forEach((spec, idx) => {
     if (!spec.key) return;
-    if (seen.has(spec.key)) {
+    if (seenKey.has(spec.key)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['specifiers', idx, 'key'],
         message: `Duplicate specifier key '${spec.key}' in manifest '${manifest.namespace}'.`,
       });
     } else {
-      seen.add(spec.key);
+      seenKey.add(spec.key);
+    }
+  });
+
+  // Specifier ids within a manifest must be unique (used for i18n /
+  // action routing).
+  const seenId = new Set<string>();
+  manifest.specifiers.forEach((spec, idx) => {
+    if (!spec.id) return;
+    if (seenId.has(spec.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['specifiers', idx, 'id'],
+        message: `Duplicate specifier id '${spec.id}' in manifest '${manifest.namespace}'.`,
+      });
+    } else {
+      seenId.add(spec.id);
     }
   });
 

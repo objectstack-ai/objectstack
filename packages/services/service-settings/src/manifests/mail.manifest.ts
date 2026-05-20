@@ -20,7 +20,7 @@ const manifest = {
   category: 'Communication',
   order: 10,
   specifiers: [
-    { type: 'group', label: 'Provider', required: false,
+    { type: 'group', id: 'provider', label: 'Provider', required: false,
       description: 'Choose how this workspace sends outbound email.' },
 
     { type: 'select', key: 'provider', label: 'Provider', required: true, default: 'smtp',
@@ -32,7 +32,7 @@ const manifest = {
       ],
     },
 
-    { type: 'group', label: 'SMTP', required: false, visible: "${data.provider === 'smtp'}" },
+    { type: 'group', id: 'smtp', label: 'SMTP', required: false, visible: "${data.provider === 'smtp'}" },
     { type: 'text', key: 'smtp_host', label: 'Host', required: true,
       description: 'Example: smtp.example.com', visible: "${data.provider === 'smtp'}" },
     { type: 'number', key: 'smtp_port', label: 'Port', required: false, default: 587,
@@ -44,16 +44,16 @@ const manifest = {
     { type: 'password', key: 'smtp_password', label: 'Password', required: false,
       visible: "${data.provider === 'smtp'}" },
 
-    { type: 'group', label: 'API key', required: false, visible: "${data.provider !== 'smtp'}" },
+    { type: 'group', id: 'api_key', label: 'API key', required: false, visible: "${data.provider !== 'smtp'}" },
     { type: 'password', key: 'api_key', label: 'API key', required: true, encrypted: true,
       visible: "${data.provider !== 'smtp'}" },
 
-    { type: 'group', label: 'From address', required: false },
+    { type: 'group', id: 'from_address', label: 'From address', required: false },
     { type: 'email', key: 'from_email', label: 'From email', required: true,
       description: 'Example: no-reply@example.com' },
     { type: 'text', key: 'from_name', label: 'From name', required: false, default: 'ObjectStack' },
 
-    { type: 'action_button', label: 'Send test email', required: false, icon: 'Send',
+    { type: 'action_button', id: 'test', label: 'Send test email', required: false, icon: 'Send',
       handler: { kind: 'http', method: 'POST', url: '/api/settings/mail/test' } },
   ],
 };

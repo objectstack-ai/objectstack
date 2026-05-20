@@ -14,6 +14,12 @@ export const en: TranslationData = {
     mail: {
       title: 'Mail Delivery',
       description: 'SMTP and transactional email provider configuration.',
+      groups: {
+        provider: { title: 'Provider', description: 'Choose how this workspace sends outbound email.' },
+        smtp: { title: 'SMTP' },
+        api_key: { title: 'API key' },
+        from_address: { title: 'From address' },
+      },
       keys: {
         provider: {
           label: 'Provider',
@@ -41,6 +47,10 @@ export const en: TranslationData = {
     branding: {
       title: 'Branding',
       description: 'Workspace name, logo, and accent colour.',
+      groups: {
+        identity: { title: 'Identity' },
+        appearance: { title: 'Appearance' },
+      },
       keys: {
         workspace_name: { label: 'Workspace name' },
         support_email: { label: 'Support email', help: 'Example: support@example.com' },
@@ -56,6 +66,10 @@ export const en: TranslationData = {
     feature_flags: {
       title: 'Feature Flags',
       description: 'Toggle experimental and beta features for this workspace.',
+      groups: {
+        productivity: { title: 'Productivity' },
+        collaboration: { title: 'Collaboration' },
+      },
       keys: {
         ai_enabled: {
           label: 'AI Assistant',
