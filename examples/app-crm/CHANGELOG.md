@@ -1,5 +1,34 @@
 # @objectstack/example-crm
 
+## 4.0.6
+
+### Patch Changes
+
+- fcc54fd: chore(example-crm): cull duplicate/low-value reports
+
+  Remove three reports from the CRM example that didn't pass the
+  "Report vs. Dashboard" value test:
+
+  - `LeadsBySourceReport` (single-dim count by `lead_source`) — fully
+    redundant with the sales dashboard's "Lead Source" pie tile.
+  - `ContactsByAccountReport` — really a Contact List View grouped by
+    account, not a report.
+  - `TasksByOwnerReport` — single-dim count, not navigated anywhere.
+
+  Remaining 10 reports keep full shape coverage: summary (2), matrix (4),
+  joined (2), multi-pane (1) plus a chartful summary.
+
+- Updated dependencies [2108c30]
+- Updated dependencies [96fb108]
+- Updated dependencies [23db640]
+- Updated dependencies [70db902]
+- Updated dependencies [70db902]
+  - @objectstack/spec@4.1.0
+  - @objectstack/runtime@4.1.0
+  - @objectstack/driver-mongodb@4.1.0
+  - @objectstack/service-analytics@4.1.0
+  - @objectstack/service-automation@4.1.0
+
 ## 4.0.5
 
 ### Patch Changes

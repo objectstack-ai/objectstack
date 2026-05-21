@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-tenant",
-  "version": "4.0.5",
+  "version": "4.1.0",
   "description": "ObjectStack Multi-Tenant Service - Tenant context management and routing",
   "type": "module",
   "main": "./dist/index.js",

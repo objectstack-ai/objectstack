@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/account",
-  "version": "4.0.5",
+  "version": "4.0.6",
   "description": "ObjectStack Account - End-user account & organization self-service portal",
   "license": "Apache-2.0",
   "private": true,

@@ -1,5 +1,70 @@
 # @objectstack/runtime
 
+## 4.1.0
+
+### Minor Changes
+
+- 96fb108: Artifact-first boot: `objectstack start` (and `objectstack serve`) now boot directly from a compiled `dist/objectstack.json` when no `objectstack.config.ts` is present.
+
+  - `@objectstack/runtime` exports `createDefaultHostConfig()` and `resolveDefaultArtifactPath()` — a standalone-only default host that wraps `createStandaloneStack()` and surfaces the artifact's `requires` / `objects` / `manifest`. No dependency on `@objectstack/service-cloud`.
+  - `objectstack start` accepts `OS_ARTIFACT_PATH` as a file path **or** an `http(s)://` URL. New flags `--artifact`, `--database`, `--database-driver`, `--database-auth-token`, `--auth-secret`, `--project-id`, `--port` let you specify all runtime conditions on the command line (each overrides the matching env var).
+  - `objectstack dev` accepts the same runtime-override flags. When `--artifact` is supplied, the auto-compile step is skipped and the dev server boots the supplied artifact directly — no `objectstack.config.ts` required in cwd.
+  - `objectstack start` no longer mounts Studio / Account / Console by default — those are dev/admin surfaces. Pass `--ui` to opt back in.
+  - `objectstack serve` falls back to the default host config when the config file is missing but an artifact is resolvable.
+  - `apps/objectos` (cloud / multi-project) is unchanged.
+
+- 70db902: Add production observability primitives. `createDispatcherPlugin` now
+  exposes an `observability` config that auto-instruments every mounted
+  route with:
+
+  - Request-id propagation: `X-Request-Id` echo + `req.requestId` (honors
+    incoming header when well-formed, mints `req_<uuid>` otherwise).
+  - `http_requests_total{method,route,status}` counter.
+  - `http_request_duration_ms{method,route}` histogram.
+  - `http_request_errors_total{method,route}` counter.
+  - Error reporter call for 5xx (4xx are intentionally tracked via
+    metrics only, not reported, to keep APM signal:noise high).
+
+  All defaults are no-op (zero overhead). Hosts plug their own
+  `MetricsRegistry` (Prometheus / OTel) and `ErrorReporter` (Sentry /
+  Datadog) — see `docs/OBSERVABILITY.md` for adapter recipes and the
+  go-live checklist.
+
+  Standalone primitives also exported for adapter-layer use:
+  `extractRequestId`, `resolveRequestId`, `parseTraceparent`,
+  `formatTraceparent`, `InMemoryMetricsRegistry`,
+  `InMemoryErrorReporter`, `instrumentRouteHandler`.
+
+- 70db902: Add production HTTP hardening primitives. `createDispatcherPlugin` now
+  sends conservative security response headers by default
+  (CSP / X-Content-Type-Options / X-Frame-Options / Referrer-Policy /
+  Permissions-Policy / Cross-Origin-Resource-Policy). HSTS is opt-in.
+
+  Caller can disable with `securityHeaders: false` (e.g., when an upstream
+  reverse proxy already injects them) or customize per-header via
+  `SecurityHeadersOptions`.
+
+  Also exports a standalone token-bucket `RateLimiter` with a pluggable
+  `RateLimitStore` interface (in-memory default; trivially backed by
+  Redis) and curated `DEFAULT_RATE_LIMITS` for auth / write / read buckets.
+  The limiter is NOT auto-wired into the dispatcher — adapter-layer
+  wire-up (Fastify / Hono / Express) is recommended for proper IP/key
+  extraction; see `docs/HARDENING.md` for recipes.
+
+### Patch Changes
+
+- Updated dependencies [2108c30]
+- Updated dependencies [23db640]
+- Updated dependencies [d3b455f]
+  - @objectstack/spec@4.1.0
+  - @objectstack/plugin-security@4.1.0
+  - @objectstack/core@4.1.0
+  - @objectstack/formula@4.1.0
+  - @objectstack/plugin-auth@4.1.0
+  - @objectstack/rest@4.1.0
+  - @objectstack/service-i18n@4.1.0
+  - @objectstack/types@4.1.0
+
 ## 4.0.5
 
 ### Patch Changes
