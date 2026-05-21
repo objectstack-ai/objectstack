@@ -206,7 +206,6 @@ Cloud, package registry, and project management subcommands (`os projects`, `os 
 | [`@objectstack/service-analytics`](packages/services/service-analytics) | Analytics — aggregations, time series, funnels, dashboards |
 | [`@objectstack/service-automation`](packages/services/service-automation) | Automation engine — flows, triggers, DAG-based workflows |
 | [`@objectstack/service-cache`](packages/services/service-cache) | Cache — in-memory, Redis, multi-tier |
-| [`@objectstack/service-cloud`](packages/services/service-cloud) | Cloud orchestration — multi-project, control-plane, deployment |
 | [`@objectstack/service-feed`](packages/services/service-feed) | Activity feed / chatter |
 | [`@objectstack/service-i18n`](packages/services/service-i18n) | Internationalization service |
 | [`@objectstack/service-job`](packages/services/service-job) | Cron & interval job scheduler |
@@ -237,7 +236,6 @@ Cloud, package registry, and project management subcommands (`os projects`, `os 
 | [`create-objectstack`](packages/create-objectstack) | Project scaffolder (`npx create-objectstack`) |
 | [`objectstack-vscode`](packages/vscode-objectstack) | VS Code extension — autocomplete, validation, diagnostics |
 | [`@objectstack/objectos`](apps/objectos) | Reference host — local and self-contained ObjectOS runtime |
-| [`@objectstack/cloud`](apps/cloud) | Cloud host — multi-project, control-plane connected, deployable to Vercel / Workers |
 | [`@objectstack/studio`](apps/studio) | Studio IDE — metadata explorer, schema inspector, AI assistant |
 | [`@objectstack/console`](apps/console) | Cloud console — org / project / branch management UI |
 | [`@objectstack/account`](apps/account) | Account & identity portal — sign in, organizations, connected apps |
