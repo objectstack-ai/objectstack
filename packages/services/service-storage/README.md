@@ -139,3 +139,35 @@ The plugin registers two system objects via the manifest service:
 ## License
 
 Apache-2.0
+
+## UI-driven configuration
+
+`StorageServicePlugin` registers a `storage` Settings namespace (mail-style)
+so administrators can switch adapter, configure S3 credentials, and tune
+TTL / max-upload limits from the Settings hub instead of restarting the
+process.
+
+- Service key in the kernel: `file-storage` — registered as a
+  `SwappableStorageService` proxy at `init` time. The inner adapter
+  (local FS or S3) is rebuilt and swapped in on every `settings:changed`
+  event for `namespace=storage`.
+- The S3 secret key is stored encrypted in `sys_secret` via the
+  CryptoAdapter / KMS chain set up by `service-settings`.
+- A `storage/test` action handler uploads → downloads → deletes a small
+  probe blob to validate the configuration end-to-end. The handler is
+  registered on `kernel:ready`; the `service-settings` package ships a
+  validation-only fallback for kernels that mount Settings but not
+  Storage.
+
+### ⚠ Switching adapters does not migrate files
+
+Files uploaded under the previous adapter remain on that backend and
+become unreachable through the new one. The plugin logs a warning on
+every swap. Migrate data out-of-band (e.g. `aws s3 sync` from the local
+root to the new bucket) before flipping the toggle in production.
+
+### Disabling the live-wire
+
+Pass `bindToSettings: false` to keep the constructor-supplied adapter
+frozen — useful in tests and in deployments where storage config must
+come from env vars only.

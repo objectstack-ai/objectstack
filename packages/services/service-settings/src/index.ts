@@ -46,6 +46,8 @@ export {
   featureFlagsSettingsManifest,
   mailSettingsManifest,
   mailTestActionHandler,
+  storageSettingsManifest,
+  storageTestActionHandler,
 } from './manifests/index.js';
 
 // Re-export the spec types for convenience so plugin authors only need

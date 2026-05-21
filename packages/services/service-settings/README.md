@@ -52,5 +52,11 @@ per-project kernel on hosted objectos. Apps no longer need to declare
 no runtime cost (the registry is empty, no routes fire).
 
 The Settings hub in `apps/console` therefore appears in every app, and
-the **Mail Settings** card is the first manifest registered (by
-`EmailServicePlugin`, also always-on).
+the following built-in manifests are pre-registered out of the box:
+
+| Namespace      | Owner plugin                | Highlights                                  |
+|----------------|-----------------------------|---------------------------------------------|
+| `mail`         | `EmailServicePlugin`        | SMTP / Resend / Postmark + `mail/test`      |
+| `storage`      | `StorageServicePlugin`      | Local FS / S3 + encrypted secret + `storage/test` |
+| `branding`     | (built-in fallback)         | Workspace name, logo, accent colour         |
+| `feature_flags`| (built-in fallback)         | Opt-in experimental features                |

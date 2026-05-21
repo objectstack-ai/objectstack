@@ -85,5 +85,42 @@ export const jaJP: TranslationData = {
         inline_comments: { label: 'インラインコメント' },
       },
     },
+
+    storage: {
+      title: 'ファイルストレージ',
+      description:
+        '添付ファイル・エクスポート・ユーザーアップロードに使用するバックエンド。' +
+        '⚠ アダプターを切替えても既存ファイルは移行されません。以前のアダプターでアップロードされたファイルは新しいアダプターからアクセスできなくなります。',
+      groups: {
+        adapter: { title: 'バックエンド', description: 'アップロードファイルの保存先を選択します。' },
+        local: { title: 'ローカル' },
+        s3: { title: 'S3' },
+        limits: { title: '制限' },
+      },
+      keys: {
+        adapter: {
+          label: 'アダプター',
+          options: { local: 'ローカルファイルシステム', s3: 'S3 / S3 互換' },
+        },
+        local_root: { label: 'ルートディレクトリ',
+          help: 'ファイルを保存するファイルシステムパス。相対パスはサーバーの CWD から解決されます。' },
+        s3_bucket: { label: 'バケット',
+          help: '共有ホストバケット。プロジェクト毎のファイルは projects/<projectId>/ プレフィックスで分離されます。' },
+        s3_region: { label: 'リージョン', help: '例: us-east-1' },
+        s3_endpoint: { label: 'エンドポイント',
+          help: 'S3 互換プロバイダ (R2, MinIO, Wasabi) のカスタムエンドポイント。AWS S3 の場合は空欄。' },
+        s3_access_key_id: { label: 'アクセスキー ID' },
+        s3_secret_access_key: { label: 'シークレットアクセスキー' },
+        s3_force_path_style: { label: 'パススタイル URL を強制',
+          help: 'MinIO や多くの S3 互換プロバイダで有効化。AWS S3 では無効化。' },
+        presigned_ttl: { label: '署名付き URL の有効期間 (秒)' },
+        session_ttl: { label: 'アップロードセッション TTL (秒)',
+          help: 'チャンクアップロードの再開可能期間。' },
+        max_upload_mb: { label: '最大アップロードサイズ (MB)' },
+      },
+      actions: {
+        test: { label: '接続テスト' },
+      },
+    },
   },
 };

@@ -441,16 +441,26 @@ plugins (in this order) via `mountDefaultProjectPlugins()`:
    tenants are fully isolated
 5. `EmailServicePlugin` — each tenant configures its own provider /
    api_key via Settings; api_key is stored encrypted in `sys_secret`
-6. `StorageServicePlugin` — see below
+6. `StorageServicePlugin` — see below. Adapter + credentials are
+   live-configurable per tenant via the `storage` Settings namespace;
+   the plugin swaps the inner adapter on every change.
 
 ### Storage adapter selection
 
 - `OS_STORAGE_ADAPTER=s3` + `OS_S3_*` env → shared S3 bucket with
   `pathStylePrefix: projects/<projectId>` so tenant prefixes never
-  collide
+  collide. Per-project Settings can still override the bucket /
+  credentials at runtime.
 - otherwise → local driver under
   `<dataRoot>/projects/<projectId>/uploads/`; a single boot warning
-  fires in non-dev mode
+  fires in non-dev mode.
+
+Tenant admins can switch adapter from the Settings hub
+(`namespace=storage`) — the `SwappableStorageService` proxy rebuilds
+the inner adapter without restarting the kernel. ⚠ Existing files are
+**not** migrated; a warning is logged on every swap. The
+`storage/test` action uploads → reads → deletes a probe blob to
+validate the new configuration before users start uploading.
 
 ### Ops overrides
 

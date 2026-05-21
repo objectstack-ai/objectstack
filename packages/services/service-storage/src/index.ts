@@ -2,6 +2,7 @@
 
 export { StorageServicePlugin } from './storage-service-plugin.js';
 export type { StorageServicePluginOptions } from './storage-service-plugin.js';
+export { SwappableStorageService } from './swappable-storage-service.js';
 export { LocalStorageAdapter } from './local-storage-adapter.js';
 export type { LocalStorageAdapterOptions } from './local-storage-adapter.js';
 export { S3StorageAdapter } from './s3-storage-adapter.js';
