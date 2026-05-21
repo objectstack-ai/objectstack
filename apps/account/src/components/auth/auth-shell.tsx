@@ -86,7 +86,7 @@ export function AuthShell({
           <h2 className="text-balance text-3xl font-semibold leading-tight tracking-tight md:text-4xl">
             {headline ??
               t('auth.login.brandHeadline', {
-                defaultValue: 'The post-SaaS operating system for your team.',
+                defaultValue: 'The AI-native backend for business software.',
               })}
           </h2>
           <p className="text-balance text-base/relaxed text-white/80">
