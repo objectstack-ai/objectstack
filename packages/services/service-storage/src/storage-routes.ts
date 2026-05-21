@@ -396,6 +396,42 @@ export function registerStorageRoutes(
   });
 
   // ---------------------------------------------------------------------------
+  // GET /storage/files/:fileId — stable redirect to the actual bytes.
+  //
+  // Frontend widgets (`ImageField`, `<img src>`, user avatars, org logos)
+  // need a URL that:
+  //   - is stable (won't expire — records may live for years)
+  //   - serves the bytes directly when followed
+  // The `/url` endpoint above returns JSON. This sibling endpoint resolves
+  // to the same short-lived signed URL and 302-redirects so it can be used
+  // verbatim in any browser context.
+  // ---------------------------------------------------------------------------
+  httpServer.get(`${basePath}/files/:fileId`, async (req: IHttpRequest, res: IHttpResponse) => {
+    try {
+      const { fileId } = req.params;
+      const file = await store.getFile(fileId);
+      if (!file || file.status !== 'committed') {
+        res.status(404).json({ error: 'File not found or not committed' });
+        return;
+      }
+
+      let url: string;
+      if (storage.getPresignedDownload) {
+        const desc = await storage.getPresignedDownload(file.key, presignedTtl);
+        url = desc.downloadUrl;
+      } else if (storage.getSignedUrl) {
+        url = await storage.getSignedUrl(file.key, presignedTtl);
+      } else {
+        url = `${basePath}/_local/file/${encodeURIComponent(file.key)}`;
+      }
+
+      res.status(302).header('Location', url).send('');
+    } catch (err: any) {
+      res.status(500).json({ error: err.message ?? 'Internal error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // PUT /storage/_local/raw/:token — presigned raw upload (LocalStorageAdapter)
   // ---------------------------------------------------------------------------
   httpServer.put(`${basePath}/_local/raw/:token`, async (req: IHttpRequest, res: IHttpResponse) => {

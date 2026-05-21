@@ -11,6 +11,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { AuthProvider, AuthGuard } from '@object-ui/auth';
 import { Toaster } from 'sonner';
+import { UploadProvider, type UploadAdapter } from '@object-ui/providers';
 import {
   ConsoleShell,
   ConnectedShell,
@@ -30,10 +31,86 @@ import {
   gotoAccountRegister,
   gotoAccountForgotPassword,
 } from './lib/auth-redirect';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 
 const AUTH_URL = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
+const STORAGE_BASE_URL = import.meta.env.VITE_SERVER_URL || '';
+const STORAGE_PATH = '/api/v1/storage';
 const BASENAME = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '/';
+
+/**
+ * Inline ObjectStack presigned-upload adapter.
+ *
+ * Mirrors `@object-ui/providers/createObjectStackUploadAdapter` (introduced
+ * post-4.8.0). Kept local so this console can ship against the published
+ * 4.8.x runtime without bumping every workspace.
+ */
+function createStorageUploadAdapter(): UploadAdapter {
+  const base = STORAGE_BASE_URL.replace(/\/$/, '');
+  const apiUrl = (segment: string) =>
+    /^https?:/i.test(segment) ? segment : `${base}${segment}`;
+  return {
+    name: 'objectstack-presigned',
+    async upload(file: Blob, options: { signal?: AbortSignal } = {}) {
+      const f = file as File;
+      const name = ('name' in f && f.name) || 'upload';
+      const mimeType = file.type || 'application/octet-stream';
+      const presignRes = await fetch(apiUrl(`${STORAGE_PATH}/upload/presigned`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        signal: options.signal,
+        body: JSON.stringify({ filename: name, mimeType, size: file.size }),
+      });
+      if (!presignRes.ok) {
+        throw new Error(
+          `Presigned upload failed (${presignRes.status}): ${await presignRes.text().catch(() => '')}`,
+        );
+      }
+      const presignBody = await presignRes.json();
+      const descriptor = presignBody?.data ?? presignBody;
+      const { uploadUrl, fileId, headers: putHeaders } = descriptor as {
+        uploadUrl: string;
+        fileId: string;
+        headers?: Record<string, string>;
+      };
+      if (!uploadUrl || !fileId) {
+        throw new Error('Presigned upload response missing uploadUrl/fileId');
+      }
+      const putRes = await fetch(apiUrl(uploadUrl), {
+        method: 'PUT',
+        signal: options.signal,
+        headers: { 'Content-Type': mimeType, ...(putHeaders ?? {}) },
+        body: file,
+      });
+      if (!putRes.ok) {
+        throw new Error(
+          `Raw PUT failed (${putRes.status}): ${await putRes.text().catch(() => '')}`,
+        );
+      }
+      const completeRes = await fetch(apiUrl(`${STORAGE_PATH}/upload/complete`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        signal: options.signal,
+        body: JSON.stringify({ fileId }),
+      });
+      if (!completeRes.ok) {
+        throw new Error(
+          `Upload completion failed (${completeRes.status}): ${await completeRes.text().catch(() => '')}`,
+        );
+      }
+      const stableUrl = apiUrl(`${STORAGE_PATH}/files/${encodeURIComponent(fileId)}`);
+      return {
+        url: stableUrl,
+        name,
+        size: file.size,
+        mimeType,
+        meta: { fileId },
+      };
+    },
+  };
+}
 
 /**
  * ProtectedRoute — replaces app-shell's AuthenticatedRoute. Same composition
@@ -81,9 +158,11 @@ function ForgotPasswordRedirect() {
 }
 
 export function App() {
+  const uploadAdapter = useMemo(() => createStorageUploadAdapter(), []);
   return (
     <AuthProvider authUrl={AUTH_URL}>
-      <Toaster position="bottom-right" />
+      <UploadProvider adapter={uploadAdapter}>
+        <Toaster position="bottom-right" />
       <BrowserRouter basename={BASENAME}>
         <ConsoleShell>
           <Routes>
@@ -111,6 +190,7 @@ export function App() {
           </Routes>
         </ConsoleShell>
       </BrowserRouter>
+      </UploadProvider>
     </AuthProvider>
   );
 }

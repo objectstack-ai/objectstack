@@ -41,6 +41,7 @@
     "@object-ui/plugin-report": "^4.8.0",
     "@object-ui/plugin-timeline": "^4.8.0",
     "@object-ui/plugin-view": "^4.8.0",
+    "@object-ui/providers": "^4.8.0",
     "@object-ui/react": "^4.8.0",
     "@object-ui/types": "^4.8.0",
     "clsx": "^2.1.1",

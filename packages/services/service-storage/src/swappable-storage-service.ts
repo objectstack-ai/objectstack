@@ -132,4 +132,23 @@ export class SwappableStorageService implements IStorageService {
     }
     return this.inner.abortChunkedUpload(uploadId);
   }
+
+  /**
+   * Verify a presigned HMAC token (LocalStorageAdapter-specific).
+   *
+   * `IStorageService` does not declare this method, but `storage-routes`
+   * type-narrows the active storage to `LocalStorageAdapter` to handle the
+   * `/_local/raw/:token` PUT and GET endpoints. Without a passthrough on
+   * the swappable wrapper, the route sees `verifyToken === undefined` and
+   * returns 501 even though the underlying local adapter supports it.
+   */
+  verifyToken(token: string, expectedOp?: 'put' | 'get'): { k: string; ct?: string; op: string; exp: number } {
+    const inner = this.inner as unknown as {
+      verifyToken?: (token: string, expectedOp?: 'put' | 'get') => { k: string; ct?: string; op: string; exp: number };
+    };
+    if (typeof inner.verifyToken !== 'function') {
+      throw new Error('Active storage adapter does not support verifyToken()');
+    }
+    return inner.verifyToken(token, expectedOp);
+  }
 }
