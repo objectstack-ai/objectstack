@@ -62,7 +62,6 @@
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
     "@objectstack/service-cache": "workspace:*",
-    "@objectstack/service-cloud": "workspace:*",
     "@objectstack/service-feed": "workspace:*",
     "@objectstack/service-job": "workspace:*",
     "@objectstack/service-package": "workspace:*",
