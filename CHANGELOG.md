@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — Cloud control plane moved to private `objectstack-ai/cloud` repo
+
+The framework repository (`objectstack-ai/framework`) is now open-core only.
+The hosted Cloud control plane — `apps/cloud` and
+`@objectstack/service-cloud` — has been extracted to a separate, private
+repository (`objectstack-ai/cloud`). Production traffic on
+`cloud.objectos.app` is now served from that repo as a Cloudflare Container
+Worker.
+
+What this means for framework consumers:
+
+- **`packages/services/service-cloud`** — deleted from this repo. ~10k LOC,
+  56 files. Lives in `objectstack-ai/cloud` going forward.
+- **`apps/cloud`** — deleted from this repo. The reference cloud host now
+  lives in `objectstack-ai/cloud/apps/cloud`.
+- **`@objectstack/cli`** — no longer hard-depends on
+  `@objectstack/service-cloud`. The `serve --mode=cloud` boot path keeps
+  the existing optional dynamic `import('@objectstack/service-cloud')`
+  with a try/catch that surfaces a clear "install / use cloud-aware
+  distribution" hint when the package is absent. The ambient TypeScript
+  stub (`packages/cli/src/types/service-cloud.d.ts`) is retained so the
+  optional path still typechecks.
+- **`apps/objectos`** — unchanged. The reference *tenant* runtime stays
+  in this repo and reaches the control plane over HTTP via
+  `OS_CLOUD_URL`. Defaults: `OS_CLOUD_URL=https://cloud.objectos.app`
+  in production, or `local` to disable cloud routing.
+- **Structural couplings remain `any`-typed.** `packages/runtime/`,
+  `packages/rest/`, and `packages/adapters/hono/` previously documented
+  service-cloud as the source of `KernelManager` / `EnvironmentDriverRegistry`
+  but never imported it. Doc comments are retained; behaviour is unchanged.
+- **Tag `pre-cloud-split`** marks the last commit before this extraction
+  and can be used as a rollback anchor.
+
 ### Added — Cloud identity split: `os cloud login` separates from `os login`
 
 Introduced a second credential store at `~/.objectstack/cloud.json` to model
