@@ -32,7 +32,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full microkernel and layer arch
 
 ## Key Features
 
-- **~100× less code to write and maintain** — Business objects, permissions, flows, APIs, and UI are declared as typed metadata, not hand-written. A typical enterprise module collapses from tens of thousands of lines of CRUD/glue code into hundreds of lines of declarative schema — small enough for an AI agent to load end-to-end and safely refactor.
+- **Built for AI, not retrofitted** — Business objects, permissions, flows, APIs, and UI are declared as typed metadata, not hand-written. A typical enterprise module collapses from tens of thousands of lines of CRUD/glue into a few hundred lines of declarative schema — **roughly two orders of magnitude less code**, small enough for an AI agent to load end-to-end and safely refactor across data, API, UI, and permissions in a single change.
 - **Agent-ready metadata** — Business objects, actions, and permissions are explicit enough for AI agents to inspect and use.
 - **Automatic tool surface** — Metadata can power REST APIs, client SDKs, UI views, and MCP tools without redefining each action by hand.
 - **Protocol-first schemas** — All schemas are defined with Zod; TypeScript types are derived via `z.infer<>`.
@@ -50,11 +50,13 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full microkernel and layer arch
 
 ## Why AI-native?
 
-Most internal-tool and low-code platforms were designed for humans clicking screens. AI support is usually added later as a chat box that can call a few predefined queries.
+**Built for AI, not retrofitted.**
 
-ObjectStack starts from a different assumption: **AI agents need a structured, bounded, and auditable business backend before they can safely perform real work** — and the entire business system needs to be small enough to fit in an agent's context window.
+Most internal-tool and low-code platforms were designed for humans clicking screens. AI support is usually added later as a chat box that can call a few predefined queries. ObjectStack starts from a different assumption: **AI agents need a structured, bounded, and auditable business backend before they can safely perform real work** — and the entire business system has to be small enough to fit in an agent's context window.
 
-A typical enterprise application is tens of thousands of lines of CRUD, forms, queries, permissions, and API glue spread across dozens of files. ObjectStack collapses the same surface into a few hundred lines of typed metadata — roughly **two orders of magnitude less code for a developer (or an AI agent) to read, write, and maintain.** That's what turns AI from an autocomplete tool into a real co-maintainer of production business software.
+A typical enterprise application is tens of thousands of lines of CRUD, forms, queries, permissions, and API glue spread across dozens of files. ObjectStack collapses the same surface into a few hundred lines of typed metadata — **roughly two orders of magnitude less code for a developer (or an AI agent) to read, write, and maintain.**
+
+The point isn't lines of code. The point is **fit in an agent's context window.** When the entire business system is small, typed, and declarative, an AI agent can load it end-to-end, reason about every dependency, and safely refactor across data, API, UI, and permissions in a single change. That turns AI from an autocomplete tool into a real co-maintainer of production business software.
 
 | Dimension | Retool / Appsmith-style tools | ObjectStack |
 | :--- | :--- | :--- |

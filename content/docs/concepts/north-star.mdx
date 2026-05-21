@@ -34,7 +34,7 @@ Phase 1 is deliberately **code-first**:
 Six non-negotiable tenets:
 
 - **Agent-Ready Business Metadata** - objects, fields, functions, views, flows, permissions, and tools are all explicit metadata artifacts
-- **Compact by Construction** - because the whole business system is declarative metadata, a typical enterprise app fits in roughly **1% of the code** of a hand-written equivalent. Small enough for an AI agent to load end-to-end, reason about every dependency, and safely refactor across data, API, UI, and permissions in a single change - this is the real moat, not "low-code UI"
+- **Compact by Construction** - because the whole business system is declarative metadata, a typical enterprise app needs **roughly two orders of magnitude less code** (~100× fewer lines to write and maintain) than a hand-written equivalent. Small enough for an AI agent to load end-to-end, reason about every dependency, and safely refactor across data, API, UI, and permissions in a single change - this is the real moat, not "low-code UI"
 - **Versioned Artifacts, Stateless Runtime** - every publish creates an immutable Project Version; ObjectOS runtimes pull the current Version artifact and serve it
 - **TS-Authored, JSON-Stored** - TypeScript is the authoring form (type safety, IDE intelligence, AI-assisted editing); JSON is the wire and storage form (Project Version artifact payload, Artifact API response body, local artifact cache). Zod schemas are the only bridge between the two.
 - **Local-First (development)** - every project can run against local drivers (memory, SQLite, embedded Turso replica); cloud is an enhancement, not a dependency. This refers to the *developer/runtime* mode, not to data sovereignty on end-user devices.
