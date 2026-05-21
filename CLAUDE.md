@@ -24,9 +24,6 @@ pnpm build                    # turbo run build --filter=!@objectstack/docs
 # Run all tests
 pnpm test                     # turbo run test
 
-# Dev server
-pnpm dev                      # runs @objectstack/objectos in dev mode
-
 # Studio UI dev
 pnpm studio:dev               # runs @objectstack/studio in dev mode
 
@@ -93,8 +90,7 @@ objectstack-ai/framework/
 │
 ├── apps/
 │   ├── studio/            # 🎨 Studio UI (React + Hono, web-based)
-│   ├── docs/              # 📖 Documentation site (Fumadocs + Next.js)
-│   └── objectos/          # 🚀 ObjectOS Runtime (multi-app orchestration)
+│   └── docs/              # 📖 Documentation site (Fumadocs + Next.js)
 │
 ├── examples/              # 📚 Reference implementations
 ├── skills/                # 🤖 AI skill definitions (for Claude Code, Copilot, Cursor)

@@ -112,12 +112,9 @@ pnpm docs:dev
 | Script | Description |
 | :--- | :--- |
 | `pnpm build` | Build all packages (excludes docs) |
-| `pnpm dev` | Run the reference `@objectstack/objectos` host in dev mode |
-| `pnpm dev:cloud` | Run `@objectstack/cloud` (multi-project, control-plane mode) |
 | `pnpm dev:crm` | Run the CRM example end-to-end (`@example/app-crm`) |
 | `pnpm studio:start` | Start the prebuilt Studio IDE |
 | `pnpm test` | Run all tests (Turborepo) |
-| `pnpm doctor` | Check environment health |
 | `pnpm setup` | Install dependencies and build the spec package |
 | `pnpm docs:dev` | Start the documentation site locally |
 | `pnpm docs:build` | Build documentation for production |
@@ -235,7 +232,6 @@ Cloud, package registry, and project management subcommands (`os projects`, `os 
 | [`@objectstack/cli`](packages/cli) | CLI binary (`os` / `objectstack`) — `init`, `dev`, `serve`, `studio`, `compile`, `validate`, `generate`, `lint`, `doctor` |
 | [`create-objectstack`](packages/create-objectstack) | Project scaffolder (`npx create-objectstack`) |
 | [`objectstack-vscode`](packages/vscode-objectstack) | VS Code extension — autocomplete, validation, diagnostics |
-| [`@objectstack/objectos`](apps/objectos) | Reference host — local and self-contained ObjectOS runtime |
 | [`@objectstack/studio`](apps/studio) | Studio IDE — metadata explorer, schema inspector, AI assistant |
 | [`@objectstack/console`](apps/console) | Cloud console — org / project / branch management UI |
 | [`@objectstack/account`](apps/account) | Account & identity portal — sign in, organizations, connected apps |

@@ -22,6 +22,12 @@ What this means for framework consumers:
   56 files. Lives in `objectstack-ai/cloud` going forward.
 - **`apps/cloud`** — deleted from this repo. The reference cloud host now
   lives in `objectstack-ai/cloud/apps/cloud`.
+- **`apps/objectos`** — deleted from this repo. The tenant runtime
+  (serving `*.objectos.app`) now lives in `objectstack-ai/cloud/apps/objectos`.
+  Production traffic continues uninterrupted on the same Cloudflare Worker
+  (atomic flip by overwriting the worker named `objectos` from the cloud
+  repo, which uses the same CF account). The framework `deploy.yml`
+  GitHub Actions workflow has been deleted along with it.
 - **`@objectstack/cli`** — no longer hard-depends on
   `@objectstack/service-cloud`. The `serve --mode=cloud` boot path keeps
   the existing optional dynamic `import('@objectstack/service-cloud')`
@@ -29,10 +35,11 @@ What this means for framework consumers:
   distribution" hint when the package is absent. The ambient TypeScript
   stub (`packages/cli/src/types/service-cloud.d.ts`) is retained so the
   optional path still typechecks.
-- **`apps/objectos`** — unchanged. The reference *tenant* runtime stays
-  in this repo and reaches the control plane over HTTP via
-  `OS_CLOUD_URL`. Defaults: `OS_CLOUD_URL=https://cloud.objectos.app`
-  in production, or `local` to disable cloud routing.
+- **Root `pnpm dev` / `pnpm start` / `pnpm doctor` scripts removed** —
+  these were thin aliases for `pnpm --filter @objectstack/objectos …`
+  which no longer exists in this repo. Use the cloud repo for objectos
+  development, or `pnpm --filter @example/app-crm dev` for a local
+  reference runtime.
 - **Structural couplings remain `any`-typed.** `packages/runtime/`,
   `packages/rest/`, and `packages/adapters/hono/` previously documented
   service-cloud as the source of `KernelManager` / `EnvironmentDriverRegistry`
