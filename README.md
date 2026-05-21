@@ -1,37 +1,68 @@
-# ObjectStack Framework
+# ObjectStack
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 ![Version](https://img.shields.io/badge/version-v4.0.1-green.svg)
 ![Tests](https://img.shields.io/badge/tests-6%2C507%20passing-brightgreen.svg)
 
-> A metadata-driven developer framework with microkernel runtime, CLI toolchain, official plugins, framework adapters, and Studio IDE — orchestrating ObjectQL, ObjectOS, and ObjectUI into a unified development experience.
+> The AI-native business backend: define business objects, permissions, workflows, APIs, UI metadata, and agent tools once as structured Zod metadata.
 
 ## What is ObjectStack?
 
-ObjectStack is a metadata-driven platform built on a **microkernel architecture** and three protocol layers:
+ObjectStack is a metadata-driven backend for building business applications that AI agents can understand, operate, and audit safely.
 
-- **ObjectQL** (Data Layer) — Define objects, fields, queries, and relations as metadata
-- **ObjectOS** (Control Layer) — Runtime, permissions, automation, and plugin lifecycle
-- **ObjectUI** (View Layer) — Presentation metadata: apps, views, dashboards, and actions
+Instead of hiding business logic inside ad-hoc SQL queries, UI state, or JavaScript strings, ObjectStack makes the business system explicit:
 
-All business logic is expressed as **Zod schemas** (1,600+ exported schemas across 200 schema files). The microkernel loads plugins and services at startup, enabling a fully composable and extensible stack with zero vendor lock-in.
+- **Business objects** are Zod schemas with typed fields, relations, validation, and permissions.
+- **Business actions** are generated from metadata as REST APIs, SDK calls, and MCP tools.
+- **Business logic** is represented as analyzable metadata: flows, conditions, policies, and artifacts.
+- **Business runtime** is a microkernel that loads plugins, drivers, services, and compiled project artifacts.
+
+The goal is not to be another low-code UI builder. ObjectStack is the structured execution layer for AI-native business software: agent-ready, permission-aware, versioned, and auditable.
+
+ObjectStack is built around three protocol layers:
+
+- **ObjectQL** (Data Layer) — Objects, fields, queries, relations, validation, and data access.
+- **ObjectOS** (Control Layer) — Runtime, permissions, automation, plugins, tenants, and artifact loading.
+- **ObjectUI** (View Layer) — Apps, views, dashboards, actions, and presentation metadata.
+
+All core definitions start with **Zod schemas** (1,600+ exported schemas across 200 schema files). TypeScript types, JSON Schemas, REST routes, UI metadata, and agent tools are derived from the same source of truth.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full microkernel and layer architecture documentation.
 
 ## Key Features
 
-- **Protocol-first** — All schemas defined with Zod; TypeScript types are derived via `z.infer<>`
-- **Microkernel plugin system** — DI container, EventBus, and lifecycle hooks (init → start → destroy)
-- **Multi-database support** — In-memory, PostgreSQL, MySQL, SQLite, and Turso/libSQL drivers
-- **7 framework adapters** — Express, Fastify, Hono, NestJS, Next.js, Nuxt, SvelteKit
-- **Client SDK + React hooks** — `useQuery`, `useMutation`, `usePagination` out of the box
-- **Built-in authentication** — [better-auth](https://www.better-auth.com/) via `plugin-auth`
-- **RBAC / RLS / FLS security** — Role-based, row-level, and field-level access control
-- **Automation engine** — DAG-based flows, triggers, and workflow management
-- **AI service** — Agent, Tool, and Skill protocol built on the Vercel AI SDK
-- **Studio IDE** — Web-based metadata explorer, schema inspector, and AI assistant
-- **CLI toolchain** — `os init`, `os dev`, `os studio`, `os serve`, `os validate`, and more
+- **Agent-ready metadata** — Business objects, actions, and permissions are explicit enough for AI agents to inspect and use.
+- **Automatic tool surface** — Metadata can power REST APIs, client SDKs, UI views, and MCP tools without redefining each action by hand.
+- **Protocol-first schemas** — All schemas are defined with Zod; TypeScript types are derived via `z.infer<>`.
+- **Versioned JSON artifacts** — TypeScript-authored metadata compiles into deployable, self-describing JSON artifacts.
+- **Microkernel plugin system** — DI container, EventBus, and lifecycle hooks (init -> start -> destroy).
+- **Multi-database support** — In-memory, PostgreSQL, MySQL, SQLite, and Turso/libSQL drivers.
+- **7 framework adapters** — Express, Fastify, Hono, NestJS, Next.js, Nuxt, SvelteKit.
+- **Client SDK + React hooks** — `useQuery`, `useMutation`, `usePagination` out of the box.
+- **Built-in authentication** — [better-auth](https://www.better-auth.com/) via `plugin-auth`.
+- **RBAC / RLS / FLS security** — Role-based, row-level, and field-level access control.
+- **Automation engine** — DAG-based flows, triggers, and workflow management.
+- **AI service** — Agent, Tool, and Skill protocol built on the Vercel AI SDK.
+- **Studio IDE** — Web-based metadata explorer, schema inspector, API console, and AI assistant.
+- **CLI toolchain** — `os init`, `os dev`, `os studio`, `os serve`, `os validate`, and more.
+
+## Why AI-native?
+
+Most internal-tool and low-code platforms were designed for humans clicking screens. AI support is usually added later as a chat box that can call a few predefined queries.
+
+ObjectStack starts from a different assumption: AI agents need a structured, bounded, and auditable business backend before they can safely perform real work.
+
+| Dimension | Retool / Appsmith-style tools | ObjectStack |
+| :--- | :--- | :--- |
+| Business model | Implicit in pages, queries, and scripts | Explicit Zod `ObjectSchema` metadata |
+| Business logic | JavaScript snippets and query glue | Flows, policies, conditions, and typed metadata |
+| External contract | App-specific UI state | Self-describing JSON Project Artifact |
+| Agent tools | Manually defined one by one | Generated from metadata and permissions |
+| Agent reasoning | Calls predefined queries | Reads schema, composes safe actions, respects boundaries |
+| Governance | App-level conventions | Auth, RBAC, RLS, FLS, audit, and versioned artifacts |
+
+This makes ObjectStack a backend substrate for AI-native business applications: CRM agents, support agents, operations agents, workflow agents, and internal tools that must act on real business data without bypassing permissions or audit trails.
 
 ## Quick Start
 
