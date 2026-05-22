@@ -32,6 +32,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Copy, ExternalLink, FormInput, RefreshCw, Code2, Link2, Settings2, Plus } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { useMetadataHmr } from '@/hooks/useMetadataHmr';
 
 /** Shape of a `view` metadata row, narrowed for the Public Forms lens. */
 interface PublicFormRow {
@@ -62,6 +63,7 @@ function slugFromLink(link?: string): string | null {
 function PublicFormsList() {
   const client = useClient();
   const packageId = Route.useParams().package;
+  const { version: hmrVersion } = useMetadataHmr();
   const [rows, setRows] = useState<PublicFormRow[]>([]);
   const [publishable, setPublishable] = useState<PublishableFormRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -134,7 +136,7 @@ function PublicFormsList() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hmrVersion]);
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
 

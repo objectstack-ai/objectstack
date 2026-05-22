@@ -75,6 +75,51 @@ function simpleHash(str: string): string {
 }
 
 /**
+ * Thrown by `updateData` / `deleteData` when the caller supplies an
+ * `expectedVersion` that does not match the current record's `updated_at`.
+ *
+ * The HTTP layer maps this to `409 Conflict` with code `CONCURRENT_UPDATE`,
+ * and includes both the current server-side version and the current record
+ * payload so the client can render an informed conflict-resolution UI
+ * ("Reload latest" vs. "Overwrite anyway").
+ *
+ * NOTE: This is an *application-level* compare-and-set — not an atomic
+ * storage-layer CAS. There is a small TOCTOU window between the version
+ * check and the subsequent write. For the conflict frequency this targets
+ * (different users seconds-to-minutes apart in B2B record editing) this
+ * is more than adequate; a future revision can push the check into the
+ * driver's UPDATE statement (`WHERE id=? AND updated_at=?`) for true
+ * atomicity.
+ */
+export class ConcurrentUpdateError extends Error {
+    readonly code = 'CONCURRENT_UPDATE';
+    readonly status = 409;
+    readonly currentVersion: string | null;
+    readonly currentRecord: unknown;
+    constructor(opts: { currentVersion: string | null; currentRecord: unknown; message?: string }) {
+        super(opts.message ?? 'Record was modified by another user');
+        this.name = 'ConcurrentUpdateError';
+        this.currentVersion = opts.currentVersion;
+        this.currentRecord = opts.currentRecord;
+    }
+}
+
+/**
+ * Normalises a version token for comparison. Strips RFC-7232-style quotes
+ * (`"…"`) that an HTTP `If-Match` header may carry, trims whitespace, and
+ * returns null for empty / nullish input.
+ */
+function normaliseVersionToken(v: unknown): string | null {
+    if (v === null || v === undefined) return null;
+    const s = String(v).trim();
+    if (!s) return null;
+    if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+        return s.slice(1, -1);
+    }
+    return s;
+}
+
+/**
  * Service Configuration for Discovery
  * Maps service names to their routes and plugin providers
  */
@@ -882,7 +927,8 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         };
     }
 
-    async updateData(request: { object: string, id: string, data: any, context?: any }) {
+    async updateData(request: { object: string, id: string, data: any, expectedVersion?: string, context?: any }) {
+        await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
         const result = await this.engine.update(request.object, request.data, opts);
@@ -893,7 +939,8 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         };
     }
 
-    async deleteData(request: { object: string, id: string, context?: any }) {
+    async deleteData(request: { object: string, id: string, expectedVersion?: string, context?: any }) {
+        await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
         await this.engine.delete(request.object, opts);
@@ -902,6 +949,48 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             id: request.id,
             success: true
         };
+    }
+
+    /**
+     * Optimistic Concurrency Control gate shared by updateData/deleteData.
+     *
+     * When the caller passes a non-empty `expectedVersion` token (typically
+     * the `updated_at` value they read), this fetches the current record
+     * and compares its `updated_at` against the token. Mismatch → throw
+     * `ConcurrentUpdateError` which the REST layer maps to 409.
+     *
+     * Behaviour:
+     *  - Empty/missing token → no check (opt-in semantics; existing callers
+     *    that haven't yet adopted OCC are unaffected).
+     *  - Record not found → no check; downstream `engine.update` will
+     *    surface the usual `RECORD_NOT_FOUND` 404. We intentionally do not
+     *    treat "missing record" as a concurrency conflict.
+     *  - Record has no `updated_at` field (timestamps disabled) → no check.
+     *    Logging would be noisy here; OCC is opt-in and the absence of a
+     *    version column is an explicit "this object doesn't support OCC"
+     *    signal.
+     */
+    private async assertVersionMatch(
+        object: string,
+        id: string,
+        expectedVersion: string | undefined,
+        context: any
+    ): Promise<void> {
+        const expected = normaliseVersionToken(expectedVersion);
+        if (!expected) return;
+        const findOpts: any = { where: { id } };
+        if (context !== undefined) findOpts.context = context;
+        const current = await this.engine.findOne(object, findOpts);
+        if (!current) return;
+        const currentVersion = normaliseVersionToken((current as any).updated_at);
+        if (!currentVersion) return;
+        if (currentVersion !== expected) {
+            throw new ConcurrentUpdateError({
+                currentVersion,
+                currentRecord: current,
+                message: `Record ${object}/${id} was modified by another user (current version ${currentVersion}, expected ${expected})`,
+            });
+        }
     }
 
     // ==========================================

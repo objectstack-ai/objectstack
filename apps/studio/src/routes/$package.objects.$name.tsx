@@ -25,6 +25,7 @@ import { MetadataPreview } from '@/components/MetadataPreview';
 import { ResourceActionsMenu } from '@/components/ResourceActionsMenu';
 import { useSetInspectorTarget } from '@/hooks/useInspector';
 import { usePackages } from '@/hooks/usePackages';
+import { useMetadataHmr } from '@/hooks/useMetadataHmr';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -67,6 +68,7 @@ function ObjectHubComponent() {
   // Resolve URL slug → full package id ("crm" → "com.example.crm"); fall back
   // to the raw slug if package list hasn't loaded yet.
   const resolvedPackageId = selectedPackage?.manifest?.id ?? packageId;
+  const { version: hmrVersion } = useMetadataHmr();
   const [tab, setTab] = useState<string>('designer');
 
   // Surface this object to the Inspector drawer.
@@ -133,7 +135,7 @@ function ObjectHubComponent() {
       }
     }
     load();
-  }, [client, name, packageId, resolvedPackageId]);
+  }, [client, name, packageId, resolvedPackageId, hmrVersion]);
 
   const objectLabel = useMemo(() => resolveLabel(object?.label) || name, [object, name]);
   const fieldCount = useMemo(() => (object?.fields ? Object.keys(object.fields).length : 0), [object]);

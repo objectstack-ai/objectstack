@@ -8,7 +8,12 @@
 
 import { RouterProvider } from '@tanstack/react-router';
 import { router } from './router';
+import { MetadataHmrProvider } from './hooks/useMetadataHmr';
 
 export default function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <MetadataHmrProvider>
+      <RouterProvider router={router} />
+    </MetadataHmrProvider>
+  );
 }

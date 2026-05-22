@@ -29,6 +29,7 @@ import { Boxes, Search } from 'lucide-react';
 
 import { PackageSwitcher } from '@/components/package-switcher';
 import { UserMenu } from '@/components/user-menu';
+import { HmrStatusBadge } from '@/components/HmrStatusBadge';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { usePackages } from '@/hooks/usePackages';
 import { CommandPalette } from '@/components/CommandPalette';
@@ -237,6 +238,7 @@ export function TopBar({ rightSlot }: { rightSlot?: React.ReactNode } = {}) {
             {apiBadge}
           </Badge>
         )}
+        <HmrStatusBadge />
         <div className="hidden sm:block">
           <ThemeToggle />
         </div>

@@ -131,7 +131,7 @@ export default class Dev extends Command {
 
       const port = flags.port ?? process.env.PORT;
       const binPath = process.argv[1];
-      spawn(
+      const serveChild = spawn(
         process.execPath,
         [
           binPath,
@@ -144,6 +144,30 @@ export default class Dev extends Command {
         ],
         { stdio: 'inherit', env: localEnv },
       );
+
+      // ── Watch-recompile loop ────────────────────────────────────────
+      // When the agent edits an objectstack source file (config or
+      // src/**), debounce-rebuild dist/objectstack.json then POST the
+      // dev HMR endpoint so Studio previews refresh without F5.
+      //
+      // Skipped when:
+      //   - --watch=false (user opted out)
+      //   - --artifact was passed (no source to watch)
+      //   - the project has no objectstack.config.ts
+      if (flags.watch !== false && !flags.artifact && configExists) {
+        this.startWatchRecompile({
+          cwd: process.cwd(),
+          configPath,
+          artifactPath,
+          binPath,
+          port: port ?? '3000',
+          verbose: flags.verbose,
+        });
+      }
+
+      serveChild.on('exit', (code) => {
+        process.exit(code ?? 0);
+      });
       return;
     }
 
@@ -172,6 +196,106 @@ export default class Dev extends Command {
       printError(`Development mode failed: ${error.message || error}`);
       process.exit(1);
     }
+  }
+
+  /**
+   * Watch objectstack source files (config + src/**) and on change:
+   *   1. Debounce 250ms
+   *   2. Run `os compile` to rebuild `dist/objectstack.json`
+   *   3. POST /api/v1/dev/metadata-events on the running server so
+   *      MetadataPlugin reloads the artifact and Studio previews refresh.
+   *
+   * The watcher runs in this parent process; the serve child stays untouched.
+   */
+  private startWatchRecompile(opts: {
+    cwd: string;
+    configPath: string;
+    artifactPath: string;
+    binPath: string;
+    port: string;
+    verbose?: boolean;
+  }): void {
+    void (async () => {
+      const chokidar = (await import('chokidar')).default;
+      const srcDir = path.resolve(opts.cwd, 'src');
+      const watchPaths: string[] = [opts.configPath];
+      if (fs.existsSync(srcDir)) watchPaths.push(srcDir);
+
+      const watcher = chokidar.watch(watchPaths, {
+        ignored: [
+          /node_modules/,
+          /\.git/,
+          /\.objectstack\//,
+          /\bdist\b/,
+          /\.test\.[jt]sx?$/,
+        ],
+        ignoreInitial: true,
+        persistent: true,
+      });
+
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let pending = new Set<string>();
+      let inFlight = false;
+      let queued = false;
+
+      const compileAndPing = async () => {
+        if (inFlight) { queued = true; return; }
+        inFlight = true;
+        const changed = Array.from(pending);
+        pending = new Set();
+        const label = changed.length === 1
+          ? path.relative(opts.cwd, changed[0])
+          : `${changed.length} files`;
+        console.log(chalk.dim(`\n  ↻ recompiling (${label})...`));
+        const t0 = Date.now();
+        const r = spawnSync(
+          process.execPath,
+          [opts.binPath, 'compile', '--output', opts.artifactPath],
+          { stdio: opts.verbose ? 'inherit' : ['ignore', 'ignore', 'pipe'], env: process.env },
+        );
+        const dt = Date.now() - t0;
+        if (r.status !== 0) {
+          const stderr = r.stderr?.toString().trim();
+          console.log(chalk.red(`  ✗ compile failed (${dt}ms)${stderr ? '\n' + stderr : ''}`));
+        } else {
+          console.log(chalk.green(`  ✓ recompiled in ${dt}ms — notifying server`));
+          try {
+            const res = await fetch(`http://localhost:${opts.port}/api/v1/dev/metadata-events`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ reason: 'source-change', changed: changed.map((p) => path.relative(opts.cwd, p)) }),
+            });
+            if (!res.ok) console.log(chalk.yellow(`  ⚠ HMR ping returned ${res.status}`));
+          } catch (e: any) {
+            console.log(chalk.yellow(`  ⚠ HMR ping failed: ${e?.message ?? e}`));
+          }
+        }
+        inFlight = false;
+        if (queued) { queued = false; setTimeout(compileAndPing, 50); }
+      };
+
+      const schedule = (filePath: string) => {
+        pending.add(filePath);
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(compileAndPing, 250);
+      };
+
+      watcher.on('change', schedule);
+      watcher.on('add', schedule);
+      watcher.on('unlink', schedule);
+      watcher.on('ready', () => {
+        console.log(chalk.dim(`  👁  watching ${watchPaths.map(p => path.relative(opts.cwd, p) || '.').join(', ')} for changes`));
+      });
+
+      // Clean up on process exit
+      const stop = async () => {
+        try { await watcher.close(); } catch { /* noop */ }
+      };
+      process.on('SIGINT', () => { void stop(); });
+      process.on('SIGTERM', () => { void stop(); });
+    })().catch((e) => {
+      console.error(chalk.yellow(`  ⚠ watch-recompile failed to start: ${e?.message ?? e}`));
+    });
   }
 }
 

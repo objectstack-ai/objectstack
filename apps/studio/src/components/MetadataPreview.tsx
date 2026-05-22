@@ -27,6 +27,7 @@ import { ObjectGrid } from '@object-ui/plugin-grid';
 import { ObjectKanban } from '@object-ui/plugin-kanban';
 import { DetailView } from '@object-ui/plugin-detail';
 import { useObjectUiDataSource } from '@/hooks/useObjectUiDataSource';
+import { useMetadataHmr } from '@/hooks/useMetadataHmr';
 import { LiveFormPreview } from './LiveFormPreview';
 import { LivePreviewStatusBar } from './LivePreviewStatusBar';
 import { AlertCircle, Eye, LayoutGrid, KanbanSquare, Calendar as CalendarIcon, FileText, ListChecks } from 'lucide-react';
@@ -87,6 +88,7 @@ export function MetadataPreview({
   className,
 }: MetadataPreviewProps) {
   const dataSource = useObjectUiDataSource();
+  const { version: hmrVersion } = useMetadataHmr();
 
   // Detect a multi-view document (e.g. { list, kanban, calendar, form }).
   const subViews = useMemo(() => {
@@ -237,7 +239,7 @@ export function MetadataPreview({
         )}
       </div>
       <div className={isFormSub ? 'min-h-0 flex-1 overflow-hidden' : 'min-h-0 flex-1 overflow-auto p-4'}>
-        {rendered}
+        <div key={`hmr-${hmrVersion}`} className="h-full">{rendered}</div>
       </div>
       {!isFormSub && <LivePreviewStatusBar objectName={resolvedObjectName} />}
     </div>

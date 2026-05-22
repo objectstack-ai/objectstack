@@ -12,6 +12,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 import { useClient } from '@objectstack/client-react';
+import { useMetadataHmr } from '@/hooks/useMetadataHmr';
 import { ApiConsolePage } from '@/components/ApiConsolePage';
 import { LiveFormPreview } from '@/components/LiveFormPreview';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -143,6 +144,7 @@ interface FormRow {
 /** Renders a list of FormViews + an interactive preview pane. */
 function FormPreviewTab() {
   const client = useClient();
+  const { version: hmrVersion } = useMetadataHmr();
   const [forms, setForms] = useState<FormRow[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -189,7 +191,7 @@ function FormPreviewTab() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client]);
+  }, [client, hmrVersion]);
 
   const current = useMemo(() => forms.find((f) => f.name === selected), [forms, selected]);
 

@@ -403,6 +403,11 @@ export const UpdateDataRequestSchema = lazySchema(() => z.object({
   object: z.string().describe('The object name.'),
   id: z.string().describe('The ID of the record to update.'),
   data: z.record(z.string(), z.unknown()).describe('The fields to update (partial update).'),
+  expectedVersion: z.string().optional().describe(
+    'Optimistic concurrency token (typically the `updated_at` value the client read). ' +
+    'When provided, the server compares it against the current record version and ' +
+    'returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check.'
+  ),
 }));
 
 /**
@@ -420,6 +425,11 @@ export const UpdateDataResponseSchema = lazySchema(() => z.object({
 export const DeleteDataRequestSchema = lazySchema(() => z.object({
   object: z.string().describe('Object name'),
   id: z.string().describe('Record ID to delete'),
+  expectedVersion: z.string().optional().describe(
+    'Optimistic concurrency token (typically the `updated_at` value the client read). ' +
+    'When provided, the server compares it against the current record version and ' +
+    'returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check.'
+  ),
 }));
 
 /**

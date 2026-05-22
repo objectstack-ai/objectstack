@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useObjectUiDataSource } from '@/hooks/useObjectUiDataSource';
+import { useMetadataHmr } from '@/hooks/useMetadataHmr';
 import { LivePreviewStatusBar } from './LivePreviewStatusBar';
 import { toast } from '@/hooks/use-toast';
 
@@ -58,6 +59,7 @@ export function LiveFormPreview({
   className,
 }: LiveFormPreviewProps) {
   const dataSource = useObjectUiDataSource();
+  const { version: hmrVersion } = useMetadataHmr();
   const [mode, setMode] = useState<Mode>(initialMode);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
@@ -103,7 +105,7 @@ export function LiveFormPreview({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, objectName, dataSource, nonce]);
+  }, [mode, objectName, dataSource, nonce, hmrVersion]);
 
   const recordId = mode === 'create' ? undefined : selectedId || undefined;
 
@@ -212,7 +214,7 @@ export function LiveFormPreview({
         {/* Re-mount ObjectForm when nonce or recordId changes so it
             re-fetches data and resets dirty state cleanly. */}
         <ObjectForm
-          key={`${mode}:${recordId ?? 'new'}:${nonce}`}
+          key={`${mode}:${recordId ?? 'new'}:${nonce}:hmr-${hmrVersion}`}
           schema={{ ...schema, onSuccess, onError } as any}
           dataSource={dataSource}
         />

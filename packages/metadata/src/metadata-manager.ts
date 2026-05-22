@@ -977,6 +977,22 @@ export class MetadataManager implements IMetadataService {
     };
   }
 
+  /**
+   * Subscribe to raw metadata watch events for a given type.
+   *
+   * Unlike `watchService` (which maps to the IMetadataService contract and
+   * drops fields like `path`/`timestamp`), this returns the raw
+   * `MetadataWatchEvent` produced by the underlying watcher — useful for
+   * developer-facing tooling such as the HMR SSE endpoint that wants the
+   * source file path and original timestamp.
+   *
+   * @returns An unsubscribe function.
+   */
+  subscribe(type: string, callback: WatchCallback): () => void {
+    this.addWatchCallback(type, callback);
+    return () => this.removeWatchCallback(type, callback);
+  }
+
   // ==========================================
   // Import / Export
   // ==========================================

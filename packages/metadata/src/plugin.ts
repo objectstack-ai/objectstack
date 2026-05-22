@@ -221,6 +221,51 @@ export class MetadataPlugin implements Plugin {
                 error: e.message,
             });
         }
+
+        // Register the HMR SSE endpoint when an HTTP server is available
+        // that exposes a raw Hono app. The endpoint is registered regardless
+        // of the `watch` option:
+        //  - In `watch: true` mode the FS watcher feeds events into the hub.
+        //  - In `watch: false` mode (e.g. artifact-mode `os dev`), an
+        //    external watch-recompile pipeline POSTs to the same endpoint
+        //    after rebuilding the artifact, and we reload it here before
+        //    broadcasting.
+        // Production deployments simply won't have a CLI POSTing to this
+        // endpoint and won't surface the route to clients.
+        try {
+            const httpServer = ctx.getService<any>('http-server')
+                ?? ctx.getService<any>('http.server');
+            if (httpServer && typeof httpServer.getRawApp === 'function') {
+                const { registerMetadataHmrRoutes } = await import('./routes/hmr-routes.js');
+                const hub = registerMetadataHmrRoutes(httpServer.getRawApp(), this.manager);
+                // Wire POST → re-load the artifact from disk (when in
+                // local-file artifact mode) so subsequent reads see fresh
+                // metadata. The broadcast happens after the handler returns.
+                hub.setOnPostReload(async (body: { reason?: string; changed?: string[] } = {}) => {
+                    const src = this.options.artifactSource;
+                    if (src?.mode === 'local-file') {
+                        try {
+                            await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs);
+                            ctx.logger.info('[MetadataPlugin] artifact reloaded via HMR POST', {
+                                path: src.path,
+                                reason: body?.reason,
+                            });
+                        } catch (e: any) {
+                            ctx.logger.warn('[MetadataPlugin] artifact reload failed', { error: e?.message });
+                            throw e;
+                        }
+                    }
+                });
+                // eslint-disable-next-line no-console
+                console.log('[MetadataPlugin] HMR endpoint registered at /api/v1/dev/metadata-events');
+            } else {
+                // eslint-disable-next-line no-console
+                console.log('[MetadataPlugin] HTTP server with getRawApp() not available — skipping HMR endpoint');
+            }
+        } catch (e: any) {
+            // eslint-disable-next-line no-console
+            console.warn('[MetadataPlugin] Failed to register HMR endpoint', e?.message);
+        }
     }
 
     /**

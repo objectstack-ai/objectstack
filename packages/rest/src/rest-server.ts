@@ -23,6 +23,22 @@ const logError = (...args: unknown[]) => (globalThis as any).console?.error(...a
  * returns a misleading 404.
  */
 function mapDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
+    // Optimistic-Concurrency-Control mismatch → 409 with current state.
+    // Surfaced FIRST so the structured fields (`currentVersion`,
+    // `currentRecord`) are preserved instead of being squashed into the
+    // generic SQL-leak / catch-all paths below.
+    if (error?.code === 'CONCURRENT_UPDATE' || error?.name === 'ConcurrentUpdateError') {
+        return {
+            status: 409,
+            body: {
+                error: error?.message ?? 'Record was modified by another user',
+                code: 'CONCURRENT_UPDATE',
+                ...(error?.currentVersion ? { currentVersion: error.currentVersion } : {}),
+                ...(error?.currentRecord ? { currentRecord: error.currentRecord } : {}),
+                ...(object ? { object } : {}),
+            },
+        };
+    }
     // Validation failures → 400 with per-field envelope. Handled FIRST
     // because the validator throws a typed error before any SQL ever
     // runs, and we want callers to differentiate "your payload was
@@ -1581,10 +1597,29 @@ export class RestServer {
                         const p = await this.resolveProtocol(projectId, req);
                         const context = await this.resolveExecCtx(projectId, req);
                         if (this.enforceAuth(req, res, context)) return;
+                        // OCC: clients opt in by sending either the standard
+                        // `If-Match` header or an `expectedVersion` field in
+                        // the JSON body. Body wins when both are present
+                        // (lets callers override per-request without
+                        // touching headers). See ConcurrentUpdateError in
+                        // packages/objectql/src/protocol.ts.
+                        const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
+                        const bodyVersion = (req.body && typeof req.body === 'object')
+                            ? (req.body as any).expectedVersion
+                            : undefined;
+                        const expectedVersion = bodyVersion ?? ifMatchHeader;
+                        // Strip the meta field out of the data payload so it
+                        // doesn't get written as a column.
+                        let data = req.body;
+                        if (data && typeof data === 'object' && 'expectedVersion' in (data as any)) {
+                            const { expectedVersion: _drop, ...rest } = data as any;
+                            data = rest;
+                        }
                         const result = await p.updateData({
                             object: req.params.object,
                             id: req.params.id,
-                            data: req.body,
+                            data,
+                            ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(projectId ? { projectId } : {}),
                             ...(context ? { context } : {}),
                         } as any);
@@ -1613,9 +1648,19 @@ export class RestServer {
                         const p = await this.resolveProtocol(projectId, req);
                         const context = await this.resolveExecCtx(projectId, req);
                         if (this.enforceAuth(req, res, context)) return;
+                        // OCC: same opt-in protocol as PATCH (`If-Match`
+                        // header or `expectedVersion` query string). DELETE
+                        // has no JSON body, so we only accept the header
+                        // and a query parameter.
+                        const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
+                        const queryVersion = (req.query && typeof req.query === 'object')
+                            ? (req.query as any).expectedVersion
+                            : undefined;
+                        const expectedVersion = queryVersion ?? ifMatchHeader;
                         const result = await p.deleteData({
                             object: req.params.object,
                             id: req.params.id,
+                            ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(projectId ? { projectId } : {}),
                             ...(context ? { context } : {}),
                         } as any);
