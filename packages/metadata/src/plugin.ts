@@ -25,6 +25,11 @@ const queryableMetadataObjects = [
     SysMetadataHistoryObject,
 ];
 
+// Subdirectory under `rootDir` reserved for the ADR-0008 repository's
+// canonical JSON storage + JSONL change log. Kept separate from user
+// source code (which the legacy FilesystemLoader still scans).
+const REPO_SUBDIR = '.objectstack/metadata';
+
 // Map from ObjectStackDefinition field name to MetadataType name
 const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     objects: 'object',
@@ -90,6 +95,7 @@ export class MetadataPlugin implements Plugin {
 
     private manager: NodeMetadataManager;
     private options: MetadataPluginOptions;
+    private repository?: import('@objectstack/metadata-core').MetadataRepository;
 
     constructor(options: MetadataPluginOptions = {}) {
         this.options = {
@@ -209,6 +215,38 @@ export class MetadataPlugin implements Plugin {
             }
         }
 
+        // ── ADR-0008 PR-6: attach FileSystemRepository as a supplementary
+        //    event source so PR-7 (ObjectQL SchemaRegistry), PR-9 (Studio
+        //    SSE hook) and future cloud consumers can subscribe to the
+        //    same canonical event stream. No write mirroring yet.
+        const bootstrapMode = this.options.config?.bootstrap ?? 'eager';
+        if (bootstrapMode !== 'artifact-only') {
+            try {
+                const path = await import('node:path');
+                const { FileSystemRepository } = await import('@objectstack/metadata-fs');
+                const rootDir = this.options.rootDir || process.cwd();
+                const repoRoot = path.join(rootDir, REPO_SUBDIR);
+                const repo = new FileSystemRepository({
+                    root: repoRoot,
+                    org: this.options.organizationId ?? 'system',
+                    project: this.options.projectId ?? 'proj_local',
+                    branch: 'main',
+                    disableWatch: this.options.watch === false,
+                });
+                await repo.start();
+                this.repository = repo;
+                this.manager.setRepository(repo);
+                ctx.logger.info('[MetadataPlugin] FileSystemRepository attached', {
+                    repoRoot,
+                    watch: this.options.watch !== false,
+                });
+            } catch (e: any) {
+                ctx.logger.warn('[MetadataPlugin] Failed to attach FileSystemRepository', {
+                    error: e?.message,
+                });
+            }
+        }
+
         // Bridge realtime service from kernel service registry to MetadataManager.
         try {
             const realtimeService = ctx.getService('realtime');
@@ -266,6 +304,19 @@ export class MetadataPlugin implements Plugin {
             // eslint-disable-next-line no-console
             console.warn('[MetadataPlugin] Failed to register HMR endpoint', e?.message);
         }
+    }
+
+    stop = async (ctx: PluginContext) => {
+        try {
+            await this.manager.dispose();
+        } catch (e: any) {
+            ctx.logger.warn('[MetadataPlugin] manager.dispose() failed', { error: e?.message });
+        }
+        const repo = this.repository as any;
+        if (repo && typeof repo.close === 'function') {
+            try { await repo.close(); } catch { /* noop */ }
+        }
+        this.repository = undefined;
     }
 
     /**

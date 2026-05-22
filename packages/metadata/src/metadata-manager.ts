@@ -49,6 +49,11 @@ import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import type { MetadataLoader } from './loaders/loader-interface.js';
 import { DatabaseLoader } from './loaders/database-loader.js';
 import { generateSimpleDiff, generateDiffSummary } from './utils/metadata-history-utils.js';
+import type {
+  MetadataRepository,
+  MetadataEvent,
+  MetaRef,
+} from '@objectstack/metadata-core';
 
 /**
  * Watch callback function (legacy)
@@ -101,6 +106,15 @@ export class MetadataManager implements IMetadataService {
 
   // Realtime service for event publishing
   private realtimeService?: IRealtimeService;
+
+  // ── ADR-0008 PR-6: optional Repository for event-source integration ──
+  // When set, the manager streams `repo.watch()` events into the watch
+  // callback hub AND invalidates the in-memory registry/listCache so
+  // subsequent reads fall through to the source of truth. No write
+  // mirroring yet (deferred to PR-10 / overlay migration).
+  protected repository?: MetadataRepository;
+  private repoWatchIter?: AsyncIterator<MetadataEvent>;
+  private repoWatchClosed = false;
 
   constructor(config: MetadataManagerOptions) {
     this.config = config;
@@ -1351,6 +1365,123 @@ export class MetadataManager implements IMetadataService {
    */
   async stopWatching(): Promise<void> {
     // Override in subclass
+  }
+
+  // ─── ADR-0008 PR-6: Repository wiring ───────────────────────────────
+
+  /**
+   * Attach a {@link MetadataRepository} as a supplementary event source.
+   *
+   * The manager subscribes to `repo.watch({ branch })` and re-emits each
+   * event through {@link notifyWatchers} as a legacy `MetadataWatchEvent`.
+   * Each event also invalidates the in-memory registry entry and the
+   * `list()` cache for the affected type so subsequent reads see fresh
+   * data.
+   *
+   * No write-through. `register()` / `unregister()` / `save()` are
+   * untouched in this PR (deferred to ADR-0008 M0 PR-10).
+   *
+   * Call {@link dispose} (or {@link stopRepositoryWatch}) to detach.
+   */
+  setRepository(repo: MetadataRepository, opts: { branch?: string } = {}): void {
+    if (this.repository === repo) return;
+    if (this.repository) {
+      void this.stopRepositoryWatch();
+    }
+    this.repository = repo;
+    this.repoWatchClosed = false;
+    void this.startRepositoryWatch(opts.branch ?? 'main');
+  }
+
+  /** Return the attached repository, if any. */
+  getRepository(): MetadataRepository | undefined {
+    return this.repository;
+  }
+
+  /** Stop the active repo.watch() loop (best-effort). */
+  async stopRepositoryWatch(): Promise<void> {
+    this.repoWatchClosed = true;
+    const iter = this.repoWatchIter;
+    this.repoWatchIter = undefined;
+    if (iter && typeof iter.return === 'function') {
+      try { await iter.return(undefined); } catch { /* noop */ }
+    }
+  }
+
+  /**
+   * Best-effort cleanup. Stops the FS watcher (if any), drains the
+   * repository watch loop, and clears registry caches. Safe to call
+   * multiple times.
+   */
+  async dispose(): Promise<void> {
+    await this.stopWatching().catch(() => undefined);
+    await this.stopRepositoryWatch().catch(() => undefined);
+    this.listCache.clear();
+  }
+
+  private async startRepositoryWatch(branch: string): Promise<void> {
+    const repo = this.repository;
+    if (!repo) return;
+    const iterable = repo.watch({ branch });
+    const iter = (iterable as AsyncIterable<MetadataEvent>)[Symbol.asyncIterator]();
+    this.repoWatchIter = iter;
+    try {
+      while (!this.repoWatchClosed) {
+        const { value, done } = await iter.next();
+        if (done) break;
+        try {
+          this.applyRepoEvent(value);
+        } catch (err) {
+          this.logger.warn('[MetadataManager] repo event handler failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    } catch (err) {
+      if (!this.repoWatchClosed) {
+        this.logger.warn('[MetadataManager] repository watch loop exited unexpectedly', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } finally {
+      if (this.repoWatchIter === iter) this.repoWatchIter = undefined;
+    }
+  }
+
+  /** Translate a repo event to the legacy MetadataWatchEvent + invalidate caches. */
+  private applyRepoEvent(evt: MetadataEvent): void {
+    const ref: MetaRef = evt.ref;
+    const type = ref.type;
+    const name = ref.name;
+
+    // Invalidate in-memory registry so manager.get() falls through to
+    // loaders / repository on next read. We do NOT pre-fill the registry
+    // here — that would race with the repo head and require us to
+    // re-canonicalise. Lazy invalidation is the safer default.
+    const typeStore = this.registry.get(type);
+    if (typeStore) {
+      typeStore.delete(name);
+      if (typeStore.size === 0) this.registry.delete(type);
+    }
+    this.listCache.delete(type);
+
+    const legacyType: 'added' | 'changed' | 'deleted' =
+      evt.op === 'create' ? 'added'
+      : evt.op === 'delete' ? 'deleted'
+      : 'changed';
+
+    const legacyEvent: MetadataWatchEvent = {
+      type: legacyType,
+      metadataType: type,
+      name,
+      path: '',
+      // Repo events carry the hash only; the body is fetched on demand
+      // via manager.get(type, name). HMR consumers don't read `data` so
+      // this is fine for M0. (See ADR-0008 §12 open question 1.)
+      data: undefined,
+      timestamp: evt.ts,
+    };
+    this.notifyWatchers(type, legacyEvent);
   }
 
   protected notifyWatchers(type: string, event: MetadataWatchEvent) {

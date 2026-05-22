@@ -44,6 +44,8 @@
   ],
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/metadata-core": "workspace:*",
+    "@objectstack/metadata-fs": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",

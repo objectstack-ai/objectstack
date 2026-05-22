@@ -78,3 +78,15 @@ export type {
   MetadataBulkResult,
   MetadataDependency,
 } from '@objectstack/spec/kernel';
+
+// Re-export the new Repository contract (ADR-0008) so downstream consumers
+// (ObjectQL schema registry, Studio, CLI) can import from one place.
+export type {
+  MetadataRepository,
+  MetadataEvent,
+  MetadataItem,
+  MetadataItemHeader,
+  MetaRef,
+  WatchFilter,
+  HistoryOptions,
+} from '@objectstack/metadata-core';
