@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useClient } from '@objectstack/client-react';
 import { useParams } from '@tanstack/react-router';
 import { useScopedClient } from '@/hooks/useObjectStackClient';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Search, Copy, Check, Key, Hash, Type, ToggleLeft,
-  List, Link, Calculator, Calendar, FileText, CircleDot, Code2, Database
+  List, Link, Calculator, Calendar, FileText, CircleDot, Code2
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -133,13 +133,8 @@ export function ObjectSchemaInspector({ objectApiName }: ObjectSchemaInspectorPr
     sortOrder: f.sortOrder,
   }));
 
-  // Parse FQN: namespace__shortName
+  // Parse FQN: namespace__shortName (used elsewhere; namespace/shortName intentionally derived even if unused)
   const objectName = def.name || objectApiName;
-  const hasFQN = objectName.includes('__');
-  const [namespace, shortName] = hasFQN ? objectName.split('__') : [null, objectName];
-  
-  // Package info from _packageId tag
-  const ownerPackageId = def._packageId;
 
   const filtered = searchQuery
     ? fieldEntries.filter(f =>
@@ -150,49 +145,7 @@ export function ObjectSchemaInspector({ objectApiName }: ObjectSchemaInspectorPr
     : fieldEntries;
 
   return (
-    <div className="space-y-4">
-      {/* Object meta card */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-xl">{def.label}</CardTitle>
-                {namespace && (
-                  <Badge variant="secondary" className="font-mono text-xs">{namespace}</Badge>
-                )}
-              </div>
-              <CardDescription className="flex items-center gap-3 flex-wrap">
-                <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-                  {objectName}
-                </code>
-                <span>·</span>
-                <span>{fieldEntries.length} fields</span>
-                {ownerPackageId && (
-                  <>
-                    <span>·</span>
-                    <span className="text-xs">owned by <code className="font-mono">{ownerPackageId}</code></span>
-                  </>
-                )}
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        {/* Namespace info banner for FQN objects */}
-        {namespace && (
-          <CardContent className="pt-0 pb-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
-              <Database className="h-3.5 w-3.5" />
-              <span>
-                Namespace: <strong>{namespace}</strong> · 
-                Short name: <strong>{shortName}</strong> · 
-                Table: <code className="font-mono bg-muted px-1 rounded">{objectName}</code>
-              </span>
-            </div>
-          </CardContent>
-        )}
-      </Card>
-
+    <div className="space-y-4 p-4">
       {/* Field search + table */}
       <Card>
         <CardHeader className="pb-3">

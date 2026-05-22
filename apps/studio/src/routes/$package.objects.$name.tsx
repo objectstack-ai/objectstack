@@ -138,30 +138,22 @@ function ObjectHubComponent() {
   }, [client, name, packageId, resolvedPackageId, hmrVersion]);
 
   const objectLabel = useMemo(() => resolveLabel(object?.label) || name, [object, name]);
-  const fieldCount = useMemo(() => (object?.fields ? Object.keys(object.fields).length : 0), [object]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="border-b px-6 pt-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-xs uppercase tracking-wider text-muted-foreground">Object</div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <Database className="h-5 w-5 text-muted-foreground" />
+            <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
+              <Database className="h-4 w-4 text-muted-foreground" />
               {objectLabel}
-              <code className="ml-2 rounded bg-muted px-2 py-0.5 font-mono text-sm text-muted-foreground">
+              <code className="ml-1 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                 {name}
               </code>
             </h1>
             {object?.description && (
               <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{object.description}</p>
             )}
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant="secondary">{fieldCount} fields</Badge>
-              <Badge variant="secondary">{views.length} views</Badge>
-              <Badge variant="secondary">{forms.length} forms</Badge>
-              <Badge variant="secondary">{hooks.length} hooks</Badge>
-            </div>
           </div>
           <div className="flex items-center gap-2">
             <Button asChild variant="outline" size="sm">

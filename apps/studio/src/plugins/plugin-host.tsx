@@ -32,6 +32,12 @@ import {
 
 // ─── Mode Icons ──────────────────────────────────────────────────────
 
+/**
+ * Default labels & icons for each view mode. Plugins may override the
+ * label per metadata type via {@link MODE_LABEL_OVERRIDES} so that the
+ * same mode reads naturally in context — e.g. `data` is "Records" for
+ * an `object` but "Data" for a `dashboard`.
+ */
 const MODE_CONFIG: Record<ViewMode, { icon: LucideIcon; label: string }> = {
   preview: { icon: Eye as LucideIcon, label: 'Preview' },
   design: { icon: PenTool as LucideIcon, label: 'Design' },
@@ -39,6 +45,40 @@ const MODE_CONFIG: Record<ViewMode, { icon: LucideIcon; label: string }> = {
   data: { icon: Table2 as LucideIcon, label: 'Data' },
   history: { icon: History as LucideIcon, label: 'History' },
 };
+
+/**
+ * Per-metadata-type label overrides. The first key is the metadata
+ * type, the second is the {@link ViewMode}. Returning `undefined` falls
+ * back to {@link MODE_CONFIG}'s default label.
+ */
+const MODE_LABEL_OVERRIDES: Record<string, Partial<Record<ViewMode, string>>> = {
+  object: {
+    data: 'Records',
+    design: 'Fields',
+    code: 'API',
+  },
+};
+
+/** Type-aware default mode (overrides the generic 'preview' default). */
+const DEFAULT_MODE_BY_TYPE: Record<string, ViewMode> = {
+  object: 'data',
+};
+
+/**
+ * Per-type mode allow-list. When set, only these modes are shown in the
+ * mode strip even if other (fallback) plugins also register for the
+ * type. This keeps specialised pages — like the Airtable-style object
+ * page — focused on the modes that have purpose-built viewers, while
+ * still letting generic types fall back to the default-plugin's
+ * `preview` + `code` JSON inspectors.
+ */
+const MODE_ALLOWLIST_BY_TYPE: Record<string, ReadonlyArray<ViewMode>> = {
+  object: ['data', 'design', 'code', 'history'],
+};
+
+function getModeLabel(type: string, mode: ViewMode): string {
+  return MODE_LABEL_OVERRIDES[type]?.[mode] ?? MODE_CONFIG[mode].label;
+}
 
 // ─── Props ───────────────────────────────────────────────────────────
 
@@ -56,10 +96,19 @@ interface PluginHostProps {
 // ─── Component ───────────────────────────────────────────────────────
 
 export function PluginHost({ metadataType, metadataName, data, packageId }: PluginHostProps) {
-  const [activeMode, setActiveMode] = useState<ViewMode>('preview');
+  const [activeMode, setActiveMode] = useState<ViewMode>(
+    DEFAULT_MODE_BY_TYPE[metadataType] ?? 'preview',
+  );
 
   // Get available modes and viewers for this metadata type
-  const availableModes = useAvailableModes(metadataType);
+  const rawAvailableModes = useAvailableModes(metadataType);
+  // Optional per-type filter: keep declared order, drop modes not in the allow-list.
+  const availableModes = useMemo(() => {
+    const allow = MODE_ALLOWLIST_BY_TYPE[metadataType];
+    if (!allow) return rawAvailableModes;
+    // Order by the allow-list so the buttons appear in the curated sequence.
+    return allow.filter(m => rawAvailableModes.includes(m));
+  }, [rawAvailableModes, metadataType]);
   const allViewers = useMetadataViewers(metadataType);
   const bestViewer = useMetadataViewer(metadataType, activeMode);
   const toolbarActions = useMetadataActions(metadataType, 'toolbar');
@@ -101,6 +150,7 @@ export function PluginHost({ metadataType, metadataName, data, packageId }: Plug
             const config = MODE_CONFIG[mode];
             const ModeIcon = config.icon as React.ComponentType<{ className?: string }>;
             const isActive = mode === effectiveMode;
+            const label = getModeLabel(metadataType, mode);
             return (
               <button
                 key={mode}
@@ -114,7 +164,7 @@ export function PluginHost({ metadataType, metadataName, data, packageId }: Plug
                 `}
               >
                 <ModeIcon className="h-3.5 w-3.5" />
-                {config.label}
+                {label}
               </button>
             );
           })}

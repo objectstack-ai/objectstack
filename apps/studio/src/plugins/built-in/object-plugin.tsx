@@ -16,8 +16,8 @@ import {
 
 // ─── Viewer Component (adapts ObjectExplorer to plugin interface) ────
 
-function ObjectViewerComponent({ metadataName }: MetadataViewerProps) {
-  return <ObjectExplorer objectApiName={metadataName} />;
+function ObjectViewerComponent({ metadataName, mode }: MetadataViewerProps) {
+  return <ObjectExplorer objectApiName={metadataName} mode={mode} />;
 }
 
 // ─── Plugin Definition ───────────────────────────────────────────────
@@ -35,7 +35,7 @@ export const objectDesignerPlugin: StudioPlugin = {
           metadataTypes: ['object'],
           label: 'Object Explorer',
           priority: 100,
-          modes: ['preview', 'data', 'code'],
+          modes: ['data', 'design', 'code'],
         },
       ],
       sidebarGroups: [
