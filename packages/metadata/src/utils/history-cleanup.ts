@@ -97,26 +97,29 @@ export class HistoryCleanupManager {
       // Count-based cleanup per metadata item
       if (this.policy.maxVersions) {
         try {
-          // Get all unique metadata IDs
+          // Get all unique metadata items keyed by (type, name)
           const baseWhere: Record<string, unknown> = {};
           if (organizationId) baseWhere.organization_id = organizationId;
 
-          const metadataIds = await driver.find(historyTableName, {
+          const metaItems = await driver.find(historyTableName, {
             object: historyTableName,
             where: baseWhere,
-            fields: ['metadata_id'],
+            fields: ['type', 'name'],
           });
 
-          const uniqueIds = new Set<string>();
-          for (const record of metadataIds) {
-            if (record.metadata_id) {
-              uniqueIds.add(record.metadata_id as string);
+          const uniqueKeys = new Set<string>();
+          for (const record of metaItems) {
+            const t = record.type as string | undefined;
+            const n = record.name as string | undefined;
+            if (t && n) {
+              uniqueKeys.add(`${t}\x1f${n}`);
             }
           }
 
           // For each metadata item, keep only the latest N versions
-          for (const metadataId of uniqueIds) {
-            const filter: Record<string, unknown> = { metadata_id: metadataId, ...baseWhere };
+          for (const key of uniqueKeys) {
+            const [type, name] = key.split('\x1f');
+            const filter: Record<string, unknown> = { type, name, ...baseWhere };
 
             try {
               // Fetch only the IDs of records beyond the retention limit (oldest first)
@@ -242,21 +245,24 @@ export class HistoryCleanupManager {
 
       // Count records that would be deleted by version limit
       if (this.policy.maxVersions) {
-        const metadataIds = await driver.find(historyTableName, {
+        const metaItems = await driver.find(historyTableName, {
           object: historyTableName,
           where: baseWhere,
-          fields: ['metadata_id'],
+          fields: ['type', 'name'],
         });
 
-        const uniqueIds = new Set<string>();
-        for (const record of metadataIds) {
-          if (record.metadata_id) {
-            uniqueIds.add(record.metadata_id as string);
+        const uniqueKeys = new Set<string>();
+        for (const record of metaItems) {
+          const t = record.type as string | undefined;
+          const n = record.name as string | undefined;
+          if (t && n) {
+            uniqueKeys.add(`${t}\x1f${n}`);
           }
         }
 
-        for (const metadataId of uniqueIds) {
-          const filter: Record<string, unknown> = { metadata_id: metadataId, ...baseWhere };
+        for (const key of uniqueKeys) {
+          const [type, name] = key.split('\x1f');
+          const filter: Record<string, unknown> = { type, name, ...baseWhere };
 
           const count = await driver.count(historyTableName, {
             object: historyTableName,

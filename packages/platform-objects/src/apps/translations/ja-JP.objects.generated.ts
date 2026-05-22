@@ -2669,9 +2669,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
-      metadata_id: {
-        label: "メタデータ"
-      },
       name: {
         label: "名前"
       },

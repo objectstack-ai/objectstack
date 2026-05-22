@@ -28,7 +28,6 @@ interface Row {
 interface HistoryRow {
     id: string;
     event_seq: number;
-    metadata_id: string | null;
     name: string;
     type: string;
     version: number;

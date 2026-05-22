@@ -2669,9 +2669,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
-      metadata_id: {
-        label: "Metadatos"
-      },
       name: {
         label: "Nombre"
       },

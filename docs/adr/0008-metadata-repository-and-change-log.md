@@ -660,7 +660,7 @@ The Repository / Change Log / Cache / Registry separation is now the canonical m
 
 ## 14. Amendments
 
-### 2026-05 — `sys_metadata_history.metadata_id` deprecated (M1 follow-up)
+### 2026-05 — `sys_metadata_history.metadata_id` removed (M1 follow-up)
 
 The `metadata_id` column on `sys_metadata_history` was originally
 introduced as a `Field.lookup` foreign key into `sys_metadata.id`, then
@@ -678,10 +678,13 @@ business value:
   identity over time.
 - No code reader was ever added.
 
-**Decision**: deprecate the column in this release cycle (TSDoc +
-schema description), keep populating it for back-compat across the
-current major, and drop it in the next major version's schema migration.
-Joins MUST go through `(organization_id, type, name, version)`.
+**Decision**: remove the column outright in this release. Producers
+(`SysMetadataRepository`, legacy `DatabaseLoader`) and readers
+(`getHistoryRecord`, `queryHistory`, `MetadataHistoryCleanup`) have
+been updated to filter by `(organization_id, type, name, version)`
+directly. A SQL migration to drop the column from existing tables is
+required as a follow-up; existing rows remain queryable through the
+composite key.
 
 This amendment supersedes §0's wording about `metadata_id` being
 "plain text for forensic auditing" — that justification no longer

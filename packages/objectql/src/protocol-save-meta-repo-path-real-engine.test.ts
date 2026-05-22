@@ -208,7 +208,6 @@ describe('deleteMetaItem — repository write path against real ObjectQL (PR-10d
         fields: {
             id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
             event_seq: { name: 'event_seq', label: 'Seq', type: 'number' as const, required: true },
-            metadata_id: { name: 'metadata_id', label: 'Metadata ID', type: 'text' as const },
             type: { name: 'type', label: 'Type', type: 'text' as const, required: true },
             name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
             version: { name: 'version', label: 'Version', type: 'number' as const, required: true },

@@ -2669,9 +2669,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
-      metadata_id: {
-        label: "Metadata"
-      },
       name: {
         label: "Name"
       },

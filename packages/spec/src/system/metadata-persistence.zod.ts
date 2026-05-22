@@ -352,9 +352,6 @@ export const MetadataHistoryRecordSchema = lazySchema(() => z.object({
   /** Primary Key (UUID) */
   id: z.string(),
 
-  /** Reference to the parent metadata record ID */
-  metadataId: z.string().describe('Foreign key to sys_metadata.id'),
-
   /**
    * Machine Name
    * Denormalized from parent for easier querying.

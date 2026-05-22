@@ -15,7 +15,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *  Key design points (ADR-0008 §0 amendment + M1):
  *
  *  • Keyed by `(organization_id, type, name)` only — `project_id` was
- *    removed in the branch/project-removal amendment.
+ *    removed in the branch/project-removal amendment. The original
+ *    `metadata_id` column (a downgraded plain-text version of the old
+ *    `sys_metadata.id` FK) was removed in the M1 follow-up — joins go
+ *    through `(organization_id, type, name, version)` exclusively.
  *
  *  • `event_seq` is the per-org monotonic event-log cursor. Producers
  *    compute `MAX(event_seq) + 1 WHERE organization_id = X` inside the
@@ -25,15 +28,6 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *    compute `MAX(version) + 1 WHERE organization_id = X AND type = T
  *    AND name = N` so delete + recreate continues incrementing instead
  *    of restarting at 1.
- *
- *  • `metadata_id` — **DEPRECATED**, scheduled for removal in the next
- *    major. The column was originally a `Field.lookup` foreign key into
- *    `sys_metadata.id` and was downgraded to plain `text` in M1 so that
- *    DELETE tombstones could hold an orphaned ref. Real-world auditing
- *    only ever joins via `(organization_id, type, name, version)` — the
- *    physical row id is a database-internal detail with no business
- *    meaning. We keep writing it for back-compat across this release
- *    cycle; do not add new readers.
  *
  *  • `metadata` / `checksum` are nullable — DELETE rows have no body or
  *    hash. Readers must tolerate null on both columns.
@@ -69,22 +63,6 @@ export const SysMetadataHistoryObject = ObjectSchema.create({
       required: true,
       readonly: true,
       description: 'Per-organization monotonic event log cursor.',
-    }),
-
-    /**
-     * Parent `sys_metadata.id` at insertion time (plain text, no FK).
-     *
-     * @deprecated Scheduled for removal in the next major release. Joins
-     * should always go through `(organization_id, type, name, version)`;
-     * the raw row id has no business meaning. Producers still populate
-     * this column for back-compat — do not add new readers.
-     */
-    metadata_id: Field.text({
-      label: 'Metadata ID',
-      required: false,
-      readonly: true,
-      maxLength: 64,
-      description: 'DEPRECATED — to be dropped in next major. Use (org, type, name, version) instead.',
     }),
 
     /** Machine name (denormalized for easier querying) */

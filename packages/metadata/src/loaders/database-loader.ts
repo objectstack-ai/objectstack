@@ -375,7 +375,6 @@ export class DatabaseLoader implements MetadataLoader {
   /**
    * Create a history record for a metadata change.
    *
-   * @param metadataId - The metadata record ID
    * @param type - Metadata type
    * @param name - Metadata name
    * @param version - Version number
@@ -386,7 +385,6 @@ export class DatabaseLoader implements MetadataLoader {
    * @param recordedBy - Optional user who made the change
    */
   private async createHistoryRecord(
-    metadataId: string,
     type: string,
     name: string,
     version: number,
@@ -419,7 +417,6 @@ export class DatabaseLoader implements MetadataLoader {
 
     const historyRecord: Partial<MetadataHistoryRecord> = {
       id: historyId,
-      metadataId,
       name,
       type,
       version,
@@ -437,7 +434,6 @@ export class DatabaseLoader implements MetadataLoader {
       await this._create(this.historyTableName, {
         id: historyRecord.id,
         event_seq: eventSeq,
-        metadata_id: historyRecord.metadataId,
         name: historyRecord.name,
         type: historyRecord.type,
         version: historyRecord.version,
@@ -685,14 +681,9 @@ export class DatabaseLoader implements MetadataLoader {
 
     await this.ensureHistorySchema();
 
-    // Resolve the parent metadata record ID
-    const metadataRow = await this._findOne(this.tableName, {
-      where: this.baseFilter(type, name),
-    });
-    if (!metadataRow) return null;
-
     const filter: Record<string, unknown> = {
-      metadata_id: metadataRow.id,
+      type,
+      name,
       version,
     };
     if (this.organizationId) {
@@ -706,7 +697,6 @@ export class DatabaseLoader implements MetadataLoader {
 
     return {
       id: row.id as string,
-      metadataId: row.metadata_id as string,
       name: row.name as string,
       type: row.type as string,
       version: row.version as number,
@@ -745,18 +735,11 @@ export class DatabaseLoader implements MetadataLoader {
     await this.ensureSchema();
     await this.ensureHistorySchema();
 
-    // Find the metadata record
-    const filter: Record<string, unknown> = { type, name };
-    if (this.organizationId) filter.organization_id = this.organizationId;
-
-    const metadataRecord = await this._findOne(this.tableName, { where: filter });
-    if (!metadataRecord) {
-      return { records: [], total: 0, hasMore: false };
-    }
-
-    // Build history query
+    // Build history query directly against (type, name); no parent
+    // lookup needed since the history table is keyed by these fields.
     const historyFilter: Record<string, unknown> = {
-      metadata_id: metadataRecord.id,
+      type,
+      name,
     };
     if (this.organizationId) historyFilter.organization_id = this.organizationId;
     if (options?.operationType) historyFilter.operation_type = options.operationType;
@@ -795,7 +778,6 @@ export class DatabaseLoader implements MetadataLoader {
 
       return {
         id: row.id as string,
-        metadataId: row.metadata_id as string,
         name: row.name as string,
         type: row.type as string,
         version: row.version as number,
@@ -857,7 +839,6 @@ export class DatabaseLoader implements MetadataLoader {
 
     // Write exactly one 'revert' history entry (not an 'update' entry)
     await this.createHistoryRecord(
-      existing.id as string,
       type,
       name,
       newVersion,
@@ -919,7 +900,6 @@ export class DatabaseLoader implements MetadataLoader {
 
         // Create history record for update
         await this.createHistoryRecord(
-          existing.id as string,
           type,
           name,
           version,
@@ -958,7 +938,6 @@ export class DatabaseLoader implements MetadataLoader {
 
         // Create history record for creation
         await this.createHistoryRecord(
-          id,
           type,
           name,
           1,

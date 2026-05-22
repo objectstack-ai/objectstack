@@ -220,7 +220,6 @@ export class SysMetadataRepository implements MetadataRepository {
         version,
         updated_at: now,
       };
-      let parentId: string;
       if (existing) {
         const existingId = (existing as { id?: string }).id;
         if (existingId === undefined) {
@@ -228,15 +227,13 @@ export class SysMetadataRepository implements MetadataRepository {
             `SysMetadataRepository.put: existing row for ${ref.type}/${ref.name} has no id column`,
           );
         }
-        parentId = existingId;
         await this.engine.update('sys_metadata', parentRowData, {
           where: { id: existingId },
           context: ctx,
         });
       } else {
         parentRowData.created_at = now;
-        const inserted = await this.engine.insert('sys_metadata', parentRowData, { context: ctx });
-        parentId = inserted.id;
+        await this.engine.insert('sys_metadata', parentRowData, { context: ctx });
       }
 
       // Durable history append — same transaction, so the parent write
@@ -246,7 +243,6 @@ export class SysMetadataRepository implements MetadataRepository {
         {
           id: this.uuid(),
           event_seq: eventSeq,
-          metadata_id: parentId,
           type: ref.type,
           name: ref.name,
           version,
@@ -343,15 +339,14 @@ export class SysMetadataRepository implements MetadataRepository {
         context: ctx,
       });
 
-      // Tombstone row — metadata/checksum are intentionally null. The
-      // metadata_id column is plain text (no FK) so this orphaned ref
-      // survives the parent's hard delete for forensic auditing.
+      // Tombstone row — metadata/checksum are intentionally null.
+      // Identity is preserved via (organization_id, type, name, version);
+      // the parent row's id is not retained.
       await this.engine.insert(
         this.historyTable,
         {
           id: this.uuid(),
           event_seq: eventSeq,
-          metadata_id: existingId,
           type: ref.type,
           name: ref.name,
           version,

@@ -2673,9 +2673,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
-      metadata_id: {
-        label: "元数据"
-      },
       name: {
         label: "名称"
       },
