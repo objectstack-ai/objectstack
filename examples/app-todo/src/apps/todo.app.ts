@@ -8,7 +8,6 @@ export const TodoApp = App.create({
   icon: 'check-square',
   branding: {
     primaryColor: '#10B981',
-    secondaryColor: '#3B82F6',
     logo: '/assets/todo-logo.png',
     favicon: '/assets/todo-favicon.ico',
   },

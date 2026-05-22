@@ -10,10 +10,19 @@
  */
 
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useClient } from '@objectstack/client-react';
 import { ApiConsolePage } from '@/components/ApiConsolePage';
+import { FormPreview } from '@/components/FormPreview';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { FlaskConical, Terminal, Search, FunctionSquare, Bot, Wrench, FormInput } from 'lucide-react';
 
 function ComingSoon({ title, hint }: { title: string; hint: string }) {
@@ -111,23 +120,7 @@ function PlaygroundPage() {
               />
             </TabsContent>
             <TabsContent value="form" className="mt-0">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Form preview</CardTitle>
-                  <CardDescription>
-                    Pick a FormView from{' '}
-                    <Link
-                      to="/$package/forms"
-                      params={{ package: packageId }}
-                      className="underline underline-offset-2"
-                    >
-                      Forms
-                    </Link>{' '}
-                    to publish or preview. Internal forms render at
-                    <code className="ml-1 text-xs">/forms/:name</code> in console.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
+              <FormPreviewTab />
             </TabsContent>
           </div>
         </Tabs>
@@ -139,3 +132,132 @@ function PlaygroundPage() {
 export const Route = createFileRoute('/$package/playground/')({
   component: PlaygroundPage,
 });
+
+interface FormRow {
+  name: string;
+  label?: string;
+  object?: string;
+  spec: any;
+}
+
+/** Renders a list of FormViews + an interactive preview pane. */
+function FormPreviewTab() {
+  const client = useClient();
+  const [forms, setForms] = useState<FormRow[]>([]);
+  const [selected, setSelected] = useState<string>('');
+  const [objSchema, setObjSchema] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const items = await (client as any).meta.getItems('view');
+        const rows: FormRow[] = (items ?? [])
+          .map((it: any) => ({
+            name: it.name,
+            label: it.label ?? it.spec?.label,
+            object: it.spec?.object,
+            spec: it.spec ?? it,
+          }))
+          .filter((r: FormRow) => {
+            const s = r.spec ?? {};
+            return (
+              s.viewType === 'form' ||
+              !!s.sections ||
+              !!s.groups ||
+              ['simple', 'tabbed', 'wizard'].includes(s.type)
+            );
+          });
+        if (!cancelled) {
+          setForms(rows);
+          if (rows[0] && !selected) setSelected(rows[0].name);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client]);
+
+  const current = useMemo(() => forms.find((f) => f.name === selected), [forms, selected]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setObjSchema(null);
+    const obj = current?.object;
+    if (!obj) return;
+    (async () => {
+      try {
+        const o = await (client as any).meta.getItem('object', obj);
+        if (!cancelled) setObjSchema(o?.spec ?? o);
+      } catch {
+        /* preview can render without an object schema */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, current?.object]);
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+        Loading forms…
+      </div>
+    );
+  }
+
+  if (!forms.length) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">No forms yet</CardTitle>
+          <CardDescription>
+            Create a view with <code className="text-xs">viewType: 'form'</code> (or
+            with <code className="text-xs">sections</code> / <code className="text-xs">groups</code>)
+            to preview it here.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="space-y-2">
+          <CardTitle className="text-base">Form preview</CardTitle>
+          <CardDescription>
+            Read-only render of any FormView spec. Pick a form and see exactly
+            what the user would see — without leaving Studio.
+          </CardDescription>
+          <div className="pt-2">
+            <Select value={selected} onValueChange={setSelected}>
+              <SelectTrigger className="max-w-md">
+                <SelectValue placeholder="Pick a form…" />
+              </SelectTrigger>
+              <SelectContent>
+                {forms.map((f) => (
+                  <SelectItem key={f.name} value={f.name}>
+                    {f.label ?? f.name}
+                    {f.object && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        → {f.object}
+                      </span>
+                    )}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+      </Card>
+      {current && <FormPreview spec={current.spec} objectSchema={objSchema} />}
+    </div>
+  );
+}

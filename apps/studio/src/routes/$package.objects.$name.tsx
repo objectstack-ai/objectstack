@@ -21,10 +21,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useClient } from '@objectstack/client-react';
 import { PluginHost } from '../plugins';
+import { FormPreview } from '@/components/FormPreview';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import {
   Database,
   Eye,
@@ -59,6 +67,7 @@ function ObjectHubComponent() {
   const [forms, setForms] = useState<FilteredItem[]>([]);
   const [hooks, setHooks] = useState<FilteredItem[]>([]);
   const [object, setObject] = useState<any>(null);
+  const [previewForm, setPreviewForm] = useState<FilteredItem | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -191,19 +200,34 @@ function ObjectHubComponent() {
               onOpen={(n) => navigate({ to: `/${packageId}/metadata/view/${n}` })}
               extraActions={(it) => {
                 const slug = it.spec?.sharing?.publicLink?.replace(/^\/+forms\//, '');
-                if (!slug || !it.spec?.sharing?.allowAnonymous) return null;
-                const url = `${window.location.origin}/console/f/${slug}`;
+                const isPublic = !!(slug && it.spec?.sharing?.allowAnonymous);
+                const url = isPublic ? `${window.location.origin}/console/f/${slug}` : null;
                 return (
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {url}
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1 px-2 text-xs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPreviewForm(it);
+                      }}
+                    >
+                      <Eye className="h-3 w-3" /> Preview
+                    </Button>
+                    {url && (
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {url}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
                 );
               }}
             />
@@ -232,6 +256,26 @@ function ObjectHubComponent() {
           </TabsContent>
         </Tabs>
       </div>
+
+      <Dialog open={!!previewForm} onOpenChange={(o) => !o && setPreviewForm(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{previewForm?.label ?? previewForm?.name}</DialogTitle>
+            <DialogDescription>
+              Read-only preview rendered from the FormView spec.
+            </DialogDescription>
+          </DialogHeader>
+          {previewForm && (
+            <div className="max-h-[70vh] overflow-y-auto">
+              <FormPreview
+                spec={previewForm.spec}
+                objectSchema={object}
+                showBadge={false}
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
