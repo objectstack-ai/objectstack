@@ -1,5 +1,19 @@
 # @objectstack/runtime
 
+## 4.2.0
+
+### Patch Changes
+
+- Updated dependencies [2869891]
+  - @objectstack/spec@4.2.0
+  - @objectstack/rest@4.2.0
+  - @objectstack/core@4.2.0
+  - @objectstack/formula@4.2.0
+  - @objectstack/plugin-auth@4.2.0
+  - @objectstack/plugin-security@4.2.0
+  - @objectstack/service-i18n@4.2.0
+  - @objectstack/types@4.2.0
+
 ## 4.1.1
 
 ### Patch Changes

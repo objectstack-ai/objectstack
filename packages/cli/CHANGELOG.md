@@ -1,5 +1,51 @@
 # @objectstack/cli
 
+## 4.2.0
+
+### Patch Changes
+
+- 3a99239: Metadata HMR via SSE — close the agent-edits → preview-refresh loop.
+
+  - `@objectstack/metadata`: register `/api/v1/dev/metadata-events` SSE endpoint unconditionally;
+    add `POST` trigger that reloads the artifact and broadcasts a `reload` event to all listeners.
+  - `@objectstack/cli` (`os dev`): chokidar-based watch on `objectstack.config.ts` and `src/`;
+    debounced recompile + `POST` to the HMR endpoint so the server reloads without restart.
+  - `@objectstack/studio`: `useMetadataHmr` provider opens an `EventSource`, exposes a version
+    counter; previews include it in their query deps, and a top-bar badge surfaces connection
+    state and event counts for diagnostics.
+
+- Updated dependencies [2869891]
+  - @objectstack/spec@4.2.0
+  - @objectstack/objectql@4.2.0
+  - @objectstack/rest@4.2.0
+  - @objectstack/client@4.2.0
+  - @objectstack/runtime@4.2.0
+  - @objectstack/core@4.2.0
+  - @objectstack/driver-memory@4.2.0
+  - @objectstack/driver-mongodb@4.2.0
+  - @objectstack/driver-sql@4.2.0
+  - @objectstack/driver-turso@4.2.0
+  - @objectstack/plugin-approvals@4.2.0
+  - @objectstack/plugin-audit@4.2.0
+  - @objectstack/plugin-auth@4.2.0
+  - @objectstack/plugin-email@4.2.0
+  - @objectstack/plugin-hono-server@4.2.0
+  - @objectstack/plugin-mcp-server@4.2.0
+  - @objectstack/plugin-reports@4.2.0
+  - @objectstack/plugin-security@4.2.0
+  - @objectstack/plugin-sharing@4.2.0
+  - @objectstack/service-ai@4.2.0
+  - @objectstack/service-analytics@4.2.0
+  - @objectstack/service-automation@4.2.0
+  - @objectstack/service-cache@4.2.0
+  - @objectstack/service-feed@4.2.0
+  - @objectstack/service-job@4.2.0
+  - @objectstack/service-package@4.2.0
+  - @objectstack/service-queue@4.2.0
+  - @objectstack/service-realtime@4.2.0
+  - @objectstack/service-settings@4.2.0
+  - @objectstack/service-storage@4.2.0
+
 ## 4.1.1
 
 ### Patch Changes

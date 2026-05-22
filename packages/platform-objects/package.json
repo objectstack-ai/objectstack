@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/platform-objects",
-  "version": "4.1.1",
+  "version": "4.2.0",
   "license": "Apache-2.0",
   "description": "Core platform object schemas for ObjectStack — identity, security, audit, tenant, and metadata objects",
   "main": "dist/index.js",

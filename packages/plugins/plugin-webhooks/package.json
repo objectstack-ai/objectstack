@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-webhooks",
-  "version": "4.1.1",
+  "version": "4.2.0",
   "license": "Apache-2.0",
   "description": "Outbound webhook delivery plugin for ObjectStack — fan-out data.record.* events to external HTTP(S) sinks with HMAC signing and retry.",
   "main": "dist/index.js",

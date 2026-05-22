@@ -1,5 +1,7 @@
 # @objectstack/express
 
+## 4.2.0
+
 ## 4.1.1
 
 ## 4.1.0

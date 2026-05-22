@@ -1,5 +1,14 @@
 # @objectstack/account
 
+## 4.2.0
+
+### Patch Changes
+
+- Updated dependencies [2869891]
+  - @objectstack/spec@4.2.0
+  - @objectstack/client@4.2.0
+  - @objectstack/client-react@4.2.0
+
 ## 4.1.1
 
 ### Patch Changes

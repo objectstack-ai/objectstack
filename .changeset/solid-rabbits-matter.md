@@ -1,5 +1,0 @@
----
-"@objectstack/studio": patch
----
-
-fix

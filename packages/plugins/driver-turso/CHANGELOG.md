@@ -1,5 +1,14 @@
 # @objectstack/driver-turso
 
+## 4.2.0
+
+### Patch Changes
+
+- Updated dependencies [2869891]
+  - @objectstack/spec@4.2.0
+  - @objectstack/core@4.2.0
+  - @objectstack/driver-sql@4.2.0
+
 ## 4.1.1
 
 ### Patch Changes

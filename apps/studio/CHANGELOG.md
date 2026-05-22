@@ -1,5 +1,77 @@
 # @objectstack/studio
 
+## 4.2.0
+
+### Patch Changes
+
+- 3a99239: Metadata HMR via SSE — close the agent-edits → preview-refresh loop.
+
+  - `@objectstack/metadata`: register `/api/v1/dev/metadata-events` SSE endpoint unconditionally;
+    add `POST` trigger that reloads the artifact and broadcasts a `reload` event to all listeners.
+  - `@objectstack/cli` (`os dev`): chokidar-based watch on `objectstack.config.ts` and `src/`;
+    debounced recompile + `POST` to the HMR endpoint so the server reloads without restart.
+  - `@objectstack/studio`: `useMetadataHmr` provider opens an `EventSource`, exposes a version
+    counter; previews include it in their query deps, and a top-bar badge surfaces connection
+    state and event counts for diagnostics.
+
+- bab9bb8: fix
+- 14f5cde: Studio: wire form previews to the **real running backend** instead of the
+  hand-rolled disabled-input mockup.
+
+  - New `LiveFormPreview` component renders `<ObjectForm>` from `@object-ui/plugin-form`
+    against the live `DataSource`, with a Create / Edit / Read-only mode toggle and a
+    record picker (top 10 most-recent records via `dataSource.find`) for Edit mode.
+  - New `LivePreviewStatusBar` footer surfaces a pulsing **LIVE** indicator with
+    the backend base URL and bound object so it is obvious previews are real, not
+    mocked.
+  - Playground "Form preview" tab now uses `LiveFormPreview` and correctly unwraps
+    the `{ type, items }` envelope returned by `client.meta.getItems('view')`
+    (previously the `.map` call silently threw, leaving the tab showing
+    "No forms yet" even when ten forms existed).
+  - `MetadataPreview` routes both single-spec form views and multi-view docs
+    through `LiveFormPreview`; non-form previews now show the LIVE status bar.
+  - Object detail page Forms/Views tabs now also detect multi-view documents
+    (where `object` is nested under `list.data.object` / `form.data.object`).
+  - Removed legacy mock `FormPreview` component.
+
+- f289927: Studio: fix Object Hub Views / Forms / Hooks tabs all showing `(0)`.
+
+  The `$package.objects.$name` route was passing the **URL slug** (e.g. `crm`)
+  as `packageId` to `client.meta.getItems('view', { packageId })`, but the
+  metadata server filter requires the **full package id** (e.g.
+  `com.example.crm`). The server-side filter never matched, so the tabs
+  silently fell back to empty arrays.
+
+  Aligned the route with `$package.metadata.$type.$name`: resolve the slug via
+  `usePackages(packageId)` and pass `selectedPackage.manifest.id` to the API
+  (falling back to the raw slug until the package list loads).
+
+- cefcf64: Live preview for view/page/dashboard/report metadata.
+
+  Adds a built-in `objectstack.view-preview` plugin that registers a
+  `Live Preview` viewer (priority 50, beating the default JSON inspector)
+  for `view`, `page`, `report`, and `dashboard` types. Opening any of
+  these from the Views & Apps list now renders a real `@object-ui`
+  preview (grid / kanban / calendar / form / detail) instead of a JSON
+  tree. HMR is wired — source edits re-fetch the spec and remount the
+  preview without a full page reload.
+
+- Updated dependencies [3a99239]
+- Updated dependencies [2869891]
+  - @objectstack/metadata@4.2.0
+  - @objectstack/spec@4.2.0
+  - @objectstack/objectql@4.2.0
+  - @objectstack/client@4.2.0
+  - @objectstack/runtime@4.2.0
+  - @objectstack/client-react@4.2.0
+  - @objectstack/platform-objects@4.2.0
+  - @objectstack/driver-memory@4.2.0
+  - @objectstack/plugin-msw@4.2.0
+  - @objectstack/service-ai@4.2.0
+  - @objectstack/service-analytics@4.2.0
+  - @objectstack/service-automation@4.2.0
+  - @objectstack/service-feed@4.2.0
+
 ## 4.1.1
 
 ### Patch Changes
