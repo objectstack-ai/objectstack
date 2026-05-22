@@ -147,8 +147,10 @@ export default class Dev extends Command {
 
       // ── Watch-recompile loop ────────────────────────────────────────
       // When the agent edits an objectstack source file (config or
-      // src/**), debounce-rebuild dist/objectstack.json then POST the
-      // dev HMR endpoint so Studio previews refresh without F5.
+      // src/**), debounce-rebuild dist/objectstack.json. The server
+      // (MetadataPlugin) watches the artifact path directly and
+      // broadcasts the HMR event to Studio (ADR-0008 PR-8); no POST
+      // ping required.
       //
       // Skipped when:
       //   - --watch=false (user opted out)
@@ -202,8 +204,12 @@ export default class Dev extends Command {
    * Watch objectstack source files (config + src/**) and on change:
    *   1. Debounce 250ms
    *   2. Run `os compile` to rebuild `dist/objectstack.json`
-   *   3. POST /api/v1/dev/metadata-events on the running server so
-   *      MetadataPlugin reloads the artifact and Studio previews refresh.
+   *
+   * The server (MetadataPlugin) watches `dist/objectstack.json`
+   * directly and broadcasts the HMR event to Studio (ADR-0008 PR-8);
+   * the CLI no longer POSTs `/api/v1/dev/metadata-events`. That POST
+   * endpoint remains available for external trigger sources (cloud
+   * webhooks, git hooks, ad-hoc curl) but is not used here.
    *
    * The watcher runs in this parent process; the serve child stays untouched.
    */
@@ -258,17 +264,13 @@ export default class Dev extends Command {
           const stderr = r.stderr?.toString().trim();
           console.log(chalk.red(`  ✗ compile failed (${dt}ms)${stderr ? '\n' + stderr : ''}`));
         } else {
-          console.log(chalk.green(`  ✓ recompiled in ${dt}ms — notifying server`));
-          try {
-            const res = await fetch(`http://localhost:${opts.port}/api/v1/dev/metadata-events`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ reason: 'source-change', changed: changed.map((p) => path.relative(opts.cwd, p)) }),
-            });
-            if (!res.ok) console.log(chalk.yellow(`  ⚠ HMR ping returned ${res.status}`));
-          } catch (e: any) {
-            console.log(chalk.yellow(`  ⚠ HMR ping failed: ${e?.message ?? e}`));
-          }
+          // ADR-0008 PR-8: the server now watches the artifact file
+          // directly via MetadataPlugin and reloads + broadcasts
+          // HMR events autonomously. The CLI no longer needs to POST
+          // /api/v1/dev/metadata-events. The endpoint remains
+          // available for external trigger sources (cloud webhooks,
+          // git hooks, ad-hoc curl).
+          console.log(chalk.green(`  ✓ recompiled in ${dt}ms — server will auto-reload`));
         }
         inFlight = false;
         if (queued) { queued = false; setTimeout(compileAndPing, 50); }

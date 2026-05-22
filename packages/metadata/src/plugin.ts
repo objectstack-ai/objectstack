@@ -96,6 +96,8 @@ export class MetadataPlugin implements Plugin {
     private manager: NodeMetadataManager;
     private options: MetadataPluginOptions;
     private repository?: import('@objectstack/metadata-core').MetadataRepository;
+    /** Chokidar watcher on the artifact file (local-file mode) — ADR-0008 PR-8. */
+    private artifactWatcher?: { close: () => Promise<void> };
 
     constructor(options: MetadataPluginOptions = {}) {
         this.options = {
@@ -294,6 +296,50 @@ export class MetadataPlugin implements Plugin {
                         }
                     }
                 });
+
+                // ── ADR-0008 PR-8: server-side artifact-file watcher ────
+                //
+                // When running in local-file artifact mode (e.g. `os dev`
+                // serving from `dist/objectstack.json`), watch the
+                // artifact path directly so the server reloads on
+                // recompile WITHOUT requiring the CLI to ping the HMR
+                // POST endpoint. The POST route stays available for
+                // external trigger sources (cloud webhook, git hook,
+                // ad-hoc curl) but is no longer the only signal.
+                const src = this.options.artifactSource;
+                if (src?.mode === 'local-file' && this.options.watch !== false && !/^https?:\/\//i.test(src.path)) {
+                    try {
+                        const { watch: chokidarWatch } = await import('chokidar');
+                        const w = chokidarWatch(src.path, {
+                            ignoreInitial: true,
+                            awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 20 },
+                            persistent: true,
+                        });
+                        let pending = false;
+                        const reload = async () => {
+                            if (pending) return;
+                            pending = true;
+                            try {
+                                await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs);
+                                hub.broadcastReload('artifact-file-changed', [src.path]);
+                                ctx.logger.info('[MetadataPlugin] artifact auto-reloaded (file watcher)', {
+                                    path: src.path,
+                                });
+                            } catch (e: any) {
+                                ctx.logger.warn('[MetadataPlugin] artifact auto-reload failed', { error: e?.message });
+                            } finally {
+                                pending = false;
+                            }
+                        };
+                        w.on('change', () => { void reload(); });
+                        w.on('add', () => { void reload(); });
+                        this.artifactWatcher = { close: () => w.close() };
+                        // eslint-disable-next-line no-console
+                        console.log('[MetadataPlugin] artifact file watcher attached', src.path);
+                    } catch (e: any) {
+                        ctx.logger.warn('[MetadataPlugin] artifact watcher failed to start', { error: e?.message });
+                    }
+                }
                 // eslint-disable-next-line no-console
                 console.log('[MetadataPlugin] HMR endpoint registered at /api/v1/dev/metadata-events');
             } else {
@@ -307,6 +353,10 @@ export class MetadataPlugin implements Plugin {
     }
 
     stop = async (ctx: PluginContext) => {
+        if (this.artifactWatcher) {
+            try { await this.artifactWatcher.close(); } catch { /* noop */ }
+            this.artifactWatcher = undefined;
+        }
         try {
             await this.manager.dispose();
         } catch (e: any) {
