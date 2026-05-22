@@ -119,3 +119,51 @@ export const STUDIO_NAV: readonly StudioNavItem[] = [
 export function navItemForType(type: string): StudioNavItem | null {
   return STUDIO_NAV.find((item) => item.types.includes(type)) ?? null;
 }
+
+/**
+ * Display labels for individual metadata types (singular, Title-Cased).
+ *
+ * Used by the metadata list pages' filter chips, the breadcrumb, and the
+ * inspector header. Distinct from {@link STUDIO_NAV} entries, which are
+ * *nav categories* that group multiple types ("Views & Apps" = view + app
+ * + page + dashboard + report).
+ */
+export const METADATA_TYPE_LABELS: Record<string, string> = {
+  object: 'Object',
+  view: 'View',
+  app: 'App',
+  page: 'Page',
+  dashboard: 'Dashboard',
+  report: 'Report',
+  flow: 'Flow',
+  workflow: 'Workflow',
+  approval: 'Approval',
+  hook: 'Hook',
+  trigger: 'Trigger',
+  function: 'Function',
+  agent: 'Agent',
+  tool: 'Tool',
+  skill: 'Skill',
+  role: 'Role',
+  profile: 'Profile',
+  permission: 'Permission',
+  policy: 'Policy',
+  action: 'Action',
+  api: 'API',
+  webhook: 'Webhook',
+  connector: 'Connector',
+  mapping: 'Mapping',
+  theme: 'Theme',
+  ragPipeline: 'RAG Pipeline',
+  sharingRule: 'Sharing Rule',
+  analyticsCube: 'Analytics Cube',
+  data: 'Seed Data',
+};
+
+/**
+ * Get a friendly singular display label for a metadata type, e.g.
+ * `'app' → 'App'`. Falls back to a capitalised version of the raw key.
+ */
+export function typeLabel(type: string): string {
+  return METADATA_TYPE_LABELS[type] ?? type.charAt(0).toUpperCase() + type.slice(1);
+}

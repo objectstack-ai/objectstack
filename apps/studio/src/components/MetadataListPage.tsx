@@ -33,7 +33,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { MetadataPreview } from './MetadataPreview';
-import { navItemForType } from './studio-nav';
+import { navItemForType, typeLabel } from './studio-nav';
 import type { LucideIcon } from 'lucide-react';
 
 /** Metadata types we can render a live preview for via @object-ui. */
@@ -188,7 +188,7 @@ export function MetadataListPage({
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${title.toLowerCase()}…`}
+              placeholder={`Search ${title}…`}
               className="pl-9"
               autoFocus
             />
@@ -199,8 +199,7 @@ export function MetadataListPage({
                 const count = typeCounts[t] ?? 0;
                 if (count === 0) return null;
                 const active = activeTypes.has(t);
-                const navItem = navItemForType(t);
-                const label = navItem?.label ?? t;
+                const label = typeLabel(t);
                 return (
                   <Button
                     key={t}
@@ -228,8 +227,8 @@ export function MetadataListPage({
             <p className="text-sm font-medium">
               {rows.length === 0
                 ? packageId && packageId !== 'all'
-                  ? `No ${title.toLowerCase()} in this package yet.`
-                  : `No ${title.toLowerCase()} found.`
+                  ? `Nothing in ${title} for this package yet.`
+                  : `Nothing in ${title} yet.`
                 : 'No matches.'}
             </p>
             {rows.length === 0 && (
