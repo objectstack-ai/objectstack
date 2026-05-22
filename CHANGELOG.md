@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Bumped `@object-ui/*` to `5.0.1`
+
+All `@object-ui/*` dependencies in `apps/console` and `apps/account` were
+upgraded from `^4.8.0` to `^5.0.1` (`pnpm up -r --latest "@object-ui/*"`).
+Console typecheck and build pass cleanly on the new major. One non-blocking
+peer warning remains: `@object-ui/plugin-report@5.0.1` still declares
+`react@^18` while the workspace runs `react@19` — safe to ignore until
+the next upstream release relaxes the peer.
+
 ### Added — Public Forms (anonymous Web-to-Lead / Web-to-Case)
 
 The framework now auto-registers a pair of anonymous REST endpoints for any
