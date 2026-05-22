@@ -2045,6 +2045,43 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     }
 
     /**
+     * Yield the durable change-log for a single metadata item — every
+     * put/delete recorded in `sys_metadata_history` for `(org, type, name)`,
+     * in event_seq order. Powers the Studio "History" tab and any
+     * client-side audit timeline.
+     *
+     * Returns `[]` for non-overlay-allowed types (the legacy raw-engine
+     * path doesn't record history) instead of throwing — callers can treat
+     * "no history" uniformly.
+     */
+    async historyMetaItem(request: {
+        type: string;
+        name: string;
+        organizationId?: string;
+        sinceSeq?: number;
+        limit?: number;
+    }): Promise<{ events: import('@objectstack/metadata-core').MetadataEvent[] }> {
+        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)) {
+            return { events: [] };
+        }
+        const orgId = request.organizationId ?? null;
+        const repo = this.getOverlayRepo(orgId);
+        const ref = {
+            type: singularType,
+            name: request.name,
+            org: orgId ?? 'env',
+        } as Parameters<typeof repo.history>[0];
+
+        const events: import('@objectstack/metadata-core').MetadataEvent[] = [];
+        const opts: { sinceSeq?: number; limit?: number } = {};
+        if (request.sinceSeq !== undefined) opts.sinceSeq = request.sinceSeq;
+        if (request.limit !== undefined) opts.limit = request.limit;
+        for await (const ev of repo.history(ref, opts)) events.push(ev);
+        return { events };
+    }
+
+    /**
      * Remove a customization overlay row for the given metadata item, so the
      * next read falls through to the artifact-loaded default. Implements the
      * "Reset to factory default" semantic from ADR-0005. Whitelist is shared

@@ -1369,6 +1369,50 @@ export class RestServer {
             },
         });
 
+        // GET /meta/:type/:name/history — durable change-log for one item.
+        // Returns the sys_metadata_history events that the Studio "History"
+        // tab renders as an audit timeline. Overlay-only metadata types
+        // (view/dashboard/report/email_template) return real events;
+        // non-overlay types return `{ events: [] }` (the legacy raw-engine
+        // path does not record history).
+        this.routeManager.register({
+            method: 'GET',
+            path: `${metaPath}/:type/:name/history`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const projectId = isScoped ? req.params?.projectId : undefined;
+                    const p = await this.resolveProtocol(projectId, req);
+                    if (!(p as any).historyMetaItem) {
+                        res.status(501).json({
+                            error: 'History query not supported by protocol implementation',
+                        });
+                        return;
+                    }
+                    const sinceSeq = req.query?.sinceSeq !== undefined
+                        ? Number(req.query.sinceSeq)
+                        : undefined;
+                    const limit = req.query?.limit !== undefined
+                        ? Number(req.query.limit)
+                        : undefined;
+                    const result = await (p as any).historyMetaItem({
+                        type: req.params.type,
+                        name: req.params.name,
+                        ...(projectId ? { projectId } : {}),
+                        ...(sinceSeq !== undefined && Number.isFinite(sinceSeq) ? { sinceSeq } : {}),
+                        ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+                    });
+                    res.json(result);
+                } catch (error: any) {
+                    logError("[REST] Unhandled error:", error);
+                    sendError(res, error);
+                }
+            },
+            metadata: {
+                summary: 'List durable history events for a metadata item',
+                tags: ['metadata'],
+            },
+        });
+
         // GET /meta/:type/:section/:name - Get specific item with compound name
         // Compound names express sub-resources of a type (e.g. a view of an
         // object, a flow under an automation). The protocol layer treats
