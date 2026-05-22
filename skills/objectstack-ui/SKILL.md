@@ -427,6 +427,7 @@ Use this CRM-style structure as the canonical UI assembly reference:
 | UI Surface | Typical Location | Pattern to Follow |
 |:--|:--|:--|
 | Multi-view object UI | `src/views/*.view.ts` | Define default `list` + `form`, then named `listViews` / `formViews` for scenarios |
+| **Public / anonymous form** | `src/views/*.view.ts` (formView with `sharing.allowAnonymous: true`) | Web-to-Lead / Web-to-Case. Auto-exposed at `GET/POST /api/v1/forms/:slug`. See `guides/public-forms.mdx` |
 | App navigation | `src/apps/*.app.ts` | Use grouped nav trees, `viewName` shortcuts, and `requiresObject` for capability-aware visibility |
 | Dashboards | `src/dashboards/*.dashboard.ts` | Combine KPI + chart + table widgets with shared `dateRange` and `globalFilters` |
 | Reports | `src/reports/*.report.ts` | Prefer `groupingsDown` + `groupingsAcross` + `dateGranularity` for matrix/summary analytics |

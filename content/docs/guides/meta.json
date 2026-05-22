@@ -14,6 +14,7 @@
     "plugin-development",
     "business-logic",
     "hook-bodies",
+    "public-forms",
     "authentication",
     "auth-sso",
     "security",

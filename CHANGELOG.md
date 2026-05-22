@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Public Forms (anonymous Web-to-Lead / Web-to-Case)
+
+The framework now auto-registers a pair of anonymous REST endpoints for any
+`FormView` declared with `sharing.allowAnonymous: true` and a `publicLink`
+slug. No new metadata type — the existing `FormView` schema is the source
+of truth.
+
+- `GET  /api/v1/forms/:slug` — returns the form spec plus an `objectSchema`
+  restricted to the form's whitelisted fields, so an anonymous front-end can
+  render labels / types / select options without an auth-protected meta
+  call.
+- `POST /api/v1/forms/:slug/submit` — accepts only fields listed in the
+  form's `sections[].fields[]` whitelist, attaches a
+  `permissions: ['guest_portal']` execution context, then calls
+  `protocol.createData()`. Bypasses `enforceAuth`, so it works even when
+  the project requires auth.
+
+Authors stamp server-controlled defaults (`status`, `lead_source`,
+`origin`, …) and strip privileged fields (`owner`, `internal_notes`, …)
+in a `beforeInsert` hook keyed on `!ctx.previous && !ctx.user?.id`. The
+`guest_portal` profile must exist and be INSERT-only on the target
+object.
+
+See `content/docs/guides/public-forms.mdx` for the full contract,
+security checklist, and CRM Web-to-Lead / Web-to-Case examples.
+
+### Fixed — Hook sandbox now distinguishes insert from update
+
+`packages/runtime/src/sandbox/body-runner.ts` :: `unwrapProxyToPlain()`
+used to return `{}` (truthy empty object) whenever the source value was
+`undefined`. As a result, every hook running in the QuickJS sandbox
+observed `ctx.previous = {}` on `beforeInsert`, so the canonical
+"guest insert" check `!ctx.previous && !ctx.user?.id` always evaluated
+to `false` and guest-default hooks silently no-op'd.
+
+`unwrapProxyToPlain` now returns `undefined` for nullish input, so
+`ctx.previous` is honestly `undefined` on insert and truthy only on
+update / delete. This restores the documented hook contract and is
+required for the new Public Forms endpoints to apply guest defaults.
+
 ### Removed — Cloud control plane moved to private `objectstack-ai/cloud` repo
 
 The framework repository (`objectstack-ai/framework`) is now open-core only.

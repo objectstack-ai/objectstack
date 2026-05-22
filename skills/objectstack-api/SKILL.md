@@ -54,6 +54,25 @@ GET    /api/v1/{object}/aggregate # Aggregation queries
 > **Key rule:** If your object defines `apiMethods`, only those operations are
 > exposed. For example, `apiMethods: ['get', 'list']` creates a read-only API.
 
+### Public (anonymous) Form Endpoints
+
+Any `FormView` declared with `sharing.allowAnonymous: true` and a
+`publicLink` slug is auto-mounted at:
+
+```
+GET  /api/v1/forms/:slug         # returns form spec + restricted objectSchema
+POST /api/v1/forms/:slug/submit  # whitelist-filtered INSERT, no auth header
+```
+
+These bypass `enforceAuth`, run under a synthetic
+`{ permissions: ['guest_portal'], anonymous: true }` execution context, and
+are intended for Web-to-Lead / Web-to-Case style flows. The framework
+strips fields outside the form's `sections[].fields[]` list; a
+`beforeInsert` hook on the target object should stamp safe defaults
+(`status='new'`, `lead_source='web'`, …) and `delete` privileged keys
+(`owner`, `internal_notes`, …). See `content/docs/guides/public-forms.mdx`
+for the full contract.
+
 ### Custom Endpoints
 
 For business logic beyond CRUD, define custom endpoints via the REST API

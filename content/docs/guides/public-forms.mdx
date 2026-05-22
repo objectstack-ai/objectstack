@@ -1,0 +1,237 @@
+---
+title: Public Forms (Web-to-Lead / Web-to-Case)
+description: Collect submissions from unauthenticated visitors using a FormView with sharing.allowAnonymous, served by the canonical GET/POST /api/v1/forms/:slug endpoints.
+---
+
+# Public Forms
+
+A **public form** is an embeddable Airtable / Salesforce *Web-to-Lead* style form that lets unauthenticated visitors create records on a single object. The shape is 100% metadata — you declare a `FormView` with `sharing.allowAnonymous: true`, give it a `publicLink`, and the framework wires up the anonymous REST endpoints automatically.
+
+## Architecture at a glance
+
+```
+Visitor                        Framework                       Driver
+───────                        ─────────                       ──────
+GET  /api/v1/forms/:slug   →   rest-server scans views     →
+                               match sharing.publicLink    →   (no DB read)
+                           ←   { form, objectSchema }
+
+POST /api/v1/forms/:slug/  →   field whitelist (form)
+     submit                →   inject permissions:
+                               ['guest_portal']            →
+                               protocol.createData()       →   INSERT
+                           ←   { object, id, record }
+```
+
+Only the spec'd whitelist of form fields is accepted; everything else (status, owner, internal_notes, …) is stripped server-side. Lifecycle hooks then stamp server-controlled defaults.
+
+## 1. Declare the form view
+
+```ts
+// examples/app-crm/src/views/lead.view.ts
+import { defineView } from '@objectstack/spec';
+
+export default defineView({
+  name: 'lead_views',
+  object: 'lead',
+  /* ... internal listViews etc. ... */
+  formViews: {
+    web_to_lead: {
+      type: 'simple',
+      data: { provider: 'object', object: 'lead' },
+      sections: [
+        {
+          label: 'Tell us about yourself',
+          columns: 2,
+          fields: [
+            { field: 'first_name', required: true },
+            { field: 'last_name',  required: true },
+            { field: 'email',      required: true },
+            { field: 'phone' },
+            { field: 'company',    required: true },
+            { field: 'title' },
+            { field: 'industry' },
+            { field: 'website' },
+            { field: 'annual_revenue' },
+            { field: 'no_of_employees' },
+            { field: 'description' },
+          ],
+        },
+      ],
+      sharing: {
+        enabled: true,
+        allowAnonymous: true,         // ← required
+        publicLink: '/forms/contact-us', // ← the slug ":contact-us" wires this view to the public route
+      },
+    },
+  },
+});
+```
+
+> Rules:
+> - The slug in `publicLink` (`contact-us`) becomes the `:slug` segment in the REST URL.
+> - Anything not in the `sections[].fields[]` whitelist is silently stripped at submit time. Treat the whitelist as the form's authoritative "what the public is allowed to set" list.
+> - Multiple form views per object are fine — only the one(s) with `sharing.allowAnonymous === true` are exposed.
+
+## 2. Create the `guest_portal` profile
+
+The submit handler attaches `permissions: ['guest_portal']` to the anonymous execution context, so you must define a profile by that name (or rename and adjust the handler logic). Restrict it to INSERT-only on the target object.
+
+```ts
+// examples/app-crm/src/profiles/guest-portal.profile.ts
+import { defineProfile } from '@objectstack/spec/security';
+
+export default defineProfile({
+  name: 'guest_portal',
+  label: 'Public Form Submitters',
+  description: 'INSERT-only on Web-to-Lead / Web-to-Case targets.',
+  objectPermissions: {
+    lead: { allowCreate: true },  // no read/edit/delete
+    case: { allowCreate: true },
+  },
+});
+```
+
+## 3. Stamp server-controlled defaults in a hook
+
+Anonymous submitters cannot be trusted to set `lead_source`, `status`, `owner`, etc. A `beforeInsert` hook keyed off **the absence of `ctx.user.id`** is the canonical place to:
+
+- Apply safe defaults (`status='new'`, `lead_source='web'`, …)
+- Strip any internal fields that slipped past the whitelist
+
+```ts
+// examples/app-crm/src/objects/lead.hook.ts
+import type { Hook, HookContext } from '@objectstack/spec/data';
+
+const leadGuestDefaults: Hook = {
+  name: 'lead_guest_defaults',
+  object: 'lead',
+  events: ['beforeInsert'],
+  priority: 200,
+  handler: async (ctx: HookContext) => {
+    const isGuest = !ctx.previous && !ctx.user?.id;
+    if (!isGuest) return;
+    const { input } = ctx;
+    if (!input.lead_source) input.lead_source = 'web';
+    if (!input.status)      input.status      = 'new';
+    delete (input as Record<string, unknown>).owner;
+    delete (input as Record<string, unknown>).is_converted;
+    delete (input as Record<string, unknown>).converted_account;
+    delete (input as Record<string, unknown>).converted_contact;
+    delete (input as Record<string, unknown>).converted_opportunity;
+    delete (input as Record<string, unknown>).converted_date;
+  },
+};
+
+export default leadGuestDefaults;
+```
+
+> **Why both `!ctx.previous` and `!ctx.user?.id`?**
+> `ctx.previous` is set on update/delete but undefined on insert, so the combined check protects the "new record by an anonymous caller" path specifically. Backend users (or automated jobs) bypass the guest branch.
+
+## 4. The REST contract
+
+Both routes are mounted under the active project's API base. For the
+default standalone project that is `/api/v1`; for multi-project deployments
+it is `/api/v1/p/:projectId`.
+
+### `GET /api/v1/forms/:slug`
+
+Returns the form spec + a restricted object schema for the whitelisted fields:
+
+```json
+{
+  "slug": "contact-us",
+  "object": "lead",
+  "label": "Tell us about yourself",
+  "form": { "type": "simple", "sections": [/* … */], "sharing": {/* … */} },
+  "objectSchema": {
+    "name": "lead",
+    "label": "Lead",
+    "fields": { "first_name": {/* … */}, "email": {/* … */}, "company": {/* … */} }
+  }
+}
+```
+
+`objectSchema.fields` contains **only** the fields referenced by the form, so a public client can render labels, types, and select options without an auth-protected meta lookup.
+
+### `POST /api/v1/forms/:slug/submit`
+
+```bash
+curl -X POST http://localhost:3000/api/v1/forms/contact-us/submit \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "first_name": "Ada",
+    "last_name":  "Lovelace",
+    "company":    "Analytical Engines Ltd",
+    "email":      "ada@example.com",
+    "status":     "qualified",        // ← stripped (not in whitelist)
+    "owner":      "00000000-0000-0000-0000-000000000001"  // ← stripped
+  }'
+```
+
+Response on success:
+
+```json
+{ "object": "lead", "id": "r7p8cUZoBJbFWudt", "record": {
+    "id": "r7p8cUZoBJbFWudt",
+    "first_name": "Ada", "last_name": "Lovelace",
+    "status": "new",         // ← hook default
+    "lead_source": "web",    // ← hook default
+    "owner": null            // ← whitelist stripped, hook deleted
+} }
+```
+
+Errors:
+
+| Status | Code | When |
+|---|---|---|
+| `400 INVALID_REQUEST` | empty body / missing slug |
+| `400 VALIDATION_FAILED` | object schema validators fail (`required`, `format`, `length`, …) |
+| `404 FORM_NOT_FOUND` | slug not registered on any `sharing.allowAnonymous: true` view |
+| `5xx FORM_SUBMIT_FAILED` | driver / hook threw |
+
+### Auth model
+
+- Neither route calls `enforceAuth`, so they work even when the project is configured with `requireAuth: true`.
+- The execution context handed to ObjectQL is `{ permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin resolves the profile and enforces its allow-list.
+- No CSRF or auth header is needed; embed the form on any domain.
+
+## 5. Embedding from a front-end
+
+```tsx
+// minimal client — frontend frameworks/SDKs ship their own <PublicForm />
+async function loadForm(slug: string) {
+  const r = await fetch(`/api/v1/forms/${slug}`);
+  if (!r.ok) throw new Error(`form ${slug} not found`);
+  return r.json(); // { form, objectSchema }
+}
+
+async function submit(slug: string, payload: Record<string, unknown>) {
+  const r = await fetch(`/api/v1/forms/${slug}/submit`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(payload),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+```
+
+The ObjectUI console ships a ready-made `PublicFormPage` at `/console/f/:slug` that does exactly this.
+
+## 6. Security checklist
+
+- [x] **Whitelist enforced server-side** — clients cannot widen the field set by hand-crafting JSON.
+- [x] **Hook strips server-controlled fields** — `owner`, `status`, `internal_notes`, `is_*` flags, conversion fields are removed even if they survive the whitelist.
+- [x] **Profile is INSERT-only** — anonymous callers cannot read, edit, or delete via the form path.
+- [x] **No tenancy leakage** — submissions land on the project resolved from hostname/path, not from a client-supplied tenant id.
+- [ ] **Rate limiting / captcha** — not built in. Add a reverse-proxy rate limit (e.g. nginx, Cloudflare) or fronting plugin if the form sits on the public internet.
+- [ ] **Schema disclosure** — `GET /forms/:slug` returns labels and select options for whitelisted fields. If any of those are commercially sensitive, do not include them in the form.
+
+## See also
+
+- [`skills/objectstack-ui/SKILL.md`](https://github.com/objectstack-ai/framework/tree/main/skills/objectstack-ui) — full FormView schema reference.
+- [`skills/objectstack-schema/SKILL.md`](https://github.com/objectstack-ai/framework/tree/main/skills/objectstack-schema) — hook + profile authoring patterns.
+- [Hook & Action Bodies](./hook-bodies) — what runs in the sandbox vs. the host.
+- [Security](./security) — RBAC, profiles, and the `anonymous` execution context.
