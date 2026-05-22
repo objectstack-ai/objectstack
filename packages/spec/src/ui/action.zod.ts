@@ -74,7 +74,7 @@ export const ActionParamSchema = lazySchema(() => z.object({
 /**
  * Action type enum values.
  */
-export const ActionType = z.enum(['script', 'url', 'modal', 'flow', 'api']);
+export const ActionType = z.enum(['script', 'url', 'modal', 'flow', 'api', 'form']);
 
 /**
  * Action types that require a `target` field.
@@ -99,6 +99,7 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * - `type: 'flow'`   — `target` is **required** (the flow name to invoke).
  * - `type: 'modal'`  — `target` is **required** (the modal/page name to open).
  * - `type: 'api'`    — `target` is **required** (the API endpoint to call).
+ * - `type: 'form'`   — `target` is **required** (the FormView name to open, routed to `/console/forms/:name`).
  * 
  * The `execute` field is **deprecated** and will be removed in a future version.
  * If `execute` is provided without `target`, it is automatically migrated to `target`.
@@ -261,7 +262,7 @@ export const ActionSchema = lazySchema(() => z.object({
   }
   return true;
 }, {
-  message: "Action 'target' is required when type is 'url', 'flow', 'modal', or 'api'.",
+  message: "Action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form'.",
   path: ['target'],
 }));
 

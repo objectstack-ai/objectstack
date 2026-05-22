@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `type: 'form'` action variant
+
+`ActionType` now includes `'form'` for actions that open a FormView.
+`target` is the FormView name; the runtime navigates to
+`/console/forms/:name`. This lets apps wire "New lead" / "New ticket"
+buttons declaratively without resorting to free-form URLs.
+
 ### Added — Unified FormPage: public `/f/:slug` + internal `/forms/:name`
 
 The console now ships a single `FormPage` renderer that powers both the
