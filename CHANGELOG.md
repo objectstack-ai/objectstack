@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Studio FormView publishing UI
+
+The `/$package/public-forms` preset now ships with two dialogs:
+- **Publish form…** — pick any existing FormView and publish it as a
+  public form in one click; sets `sharing.allowAnonymous`,
+  `sharing.enabled`, and `sharing.publicLink: /forms/<slug>` via
+  `client.meta.saveItem('view', name, …)`.
+- **Edit sharing & post-submit** (per-row gear icon) — change the
+  public slug and pick a `submitBehavior` variant (thank-you with
+  title/message, redirect, continue, next-record).
+
+This closes the loop on customer-self-service: operators no longer
+have to hand-edit metadata files to expose or reconfigure a form.
+
 ### Docs — Forms guide expanded for public + internal modes
 
 `content/docs/guides/public-forms.mdx` (kept slug for backwards links)

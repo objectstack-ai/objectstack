@@ -20,7 +20,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Copy, ExternalLink, FormInput, RefreshCw, Code2, Link2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Copy, ExternalLink, FormInput, RefreshCw, Code2, Link2, Settings2, Plus } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
 /** Shape of a `view` metadata row, narrowed for the Public Forms lens. */
@@ -31,6 +41,15 @@ interface PublicFormRow {
   slug: string;
   publicLink: string;
   updatedAt?: string;
+  spec: any;
+}
+
+/** Non-public FormView candidate for the "Publish form" picker. */
+interface PublishableFormRow {
+  name: string;
+  label?: string;
+  object?: string;
+  spec: any;
 }
 
 /** Extract a slug from a `publicLink` like '/forms/contact-us' → 'contact-us'. */
@@ -44,8 +63,25 @@ function PublicFormsList() {
   const client = useClient();
   const packageId = Route.useParams().package;
   const [rows, setRows] = useState<PublicFormRow[]>([]);
+  const [publishable, setPublishable] = useState<PublishableFormRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Publish dialog state
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishView, setPublishView] = useState<string>('');
+  const [publishSlug, setPublishSlug] = useState('');
+  const [publishing, setPublishing] = useState(false);
+
+  // Sharing/submitBehavior editor state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editRow, setEditRow] = useState<PublicFormRow | null>(null);
+  const [editSlug, setEditSlug] = useState('');
+  const [editBehavior, setEditBehavior] = useState<'thank-you' | 'redirect' | 'continue' | 'next-record'>('thank-you');
+  const [editBehaviorTitle, setEditBehaviorTitle] = useState('');
+  const [editBehaviorMessage, setEditBehaviorMessage] = useState('');
+  const [editBehaviorUrl, setEditBehaviorUrl] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -57,24 +93,37 @@ function PublicFormsList() {
         : Array.isArray((result as any)?.items)
           ? (result as any).items
           : [];
-      const forms: PublicFormRow[] = items
-        .map((it): PublicFormRow | null => {
-          const spec = it?.spec ?? it;
-          const sharing = spec?.sharing;
-          const link: string | undefined = sharing?.publicLink;
-          const slug = slugFromLink(link);
-          if (!sharing?.allowAnonymous || !slug || !link) return null;
-          return {
+      const forms: PublicFormRow[] = [];
+      const candidates: PublishableFormRow[] = [];
+      for (const it of items) {
+        const spec = it?.spec ?? it;
+        // Only proper FormViews are publishable (skip list / kanban / etc.)
+        const isForm = !!(spec?.sections || spec?.groups || spec?.type === 'simple' || spec?.type === 'tabbed' || spec?.type === 'wizard');
+        if (!isForm) continue;
+        const sharing = spec?.sharing;
+        const link: string | undefined = sharing?.publicLink;
+        const slug = slugFromLink(link);
+        if (sharing?.allowAnonymous && slug && link) {
+          forms.push({
             name: spec?.name ?? it?.name,
             label: spec?.label,
             object: spec?.object,
             slug,
             publicLink: link,
             updatedAt: it?.updatedAt ?? it?.updated_at,
-          };
-        })
-        .filter((x): x is PublicFormRow => x !== null);
+            spec,
+          });
+        } else {
+          candidates.push({
+            name: spec?.name ?? it?.name,
+            label: spec?.label,
+            object: spec?.object,
+            spec,
+          });
+        }
+      }
       setRows(forms);
+      setPublishable(candidates);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -104,6 +153,108 @@ function PublicFormsList() {
     }
   };
 
+  /** Sanitize a free-text slug into a URL-safe lowercase token. */
+  const sanitizeSlug = (s: string) =>
+    s.trim().toLowerCase().replace(/[^a-z0-9-_]+/g, '-').replace(/^-+|-+$/g, '');
+
+  /** Publish a non-public FormView by injecting sharing.allowAnonymous + publicLink. */
+  const publish = async () => {
+    if (!publishView || !publishSlug) return;
+    const cand = publishable.find((p) => p.name === publishView);
+    if (!cand) return;
+    const slug = sanitizeSlug(publishSlug);
+    if (!slug) {
+      toast({ title: 'Invalid slug', variant: 'destructive' as any });
+      return;
+    }
+    const next = {
+      ...cand.spec,
+      sharing: {
+        ...(cand.spec.sharing ?? {}),
+        enabled: true,
+        allowAnonymous: true,
+        publicLink: `/forms/${slug}`,
+      },
+    };
+    setPublishing(true);
+    try {
+      await client.meta.saveItem('view', cand.name, next);
+      toast({ title: `Published ${cand.name}` });
+      setPublishOpen(false);
+      setPublishView('');
+      setPublishSlug('');
+      await load();
+    } catch (e: any) {
+      toast({ title: `Publish failed: ${e?.message ?? e}`, variant: 'destructive' as any });
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  /** Open the sharing/submitBehavior editor for an existing public form. */
+  const openEditor = (row: PublicFormRow) => {
+    setEditRow(row);
+    setEditSlug(row.slug);
+    const sb = row.spec?.submitBehavior;
+    const kind = (sb?.kind as any) ?? 'thank-you';
+    setEditBehavior(kind);
+    setEditBehaviorTitle(sb?.title ?? '');
+    setEditBehaviorMessage(sb?.message ?? '');
+    setEditBehaviorUrl(sb?.url ?? '');
+    setEditOpen(true);
+  };
+
+  /** Persist sharing slug + submitBehavior edits. */
+  const saveEdit = async () => {
+    if (!editRow) return;
+    const slug = sanitizeSlug(editSlug);
+    if (!slug) {
+      toast({ title: 'Invalid slug', variant: 'destructive' as any });
+      return;
+    }
+    let submitBehavior: any;
+    switch (editBehavior) {
+      case 'thank-you':
+        submitBehavior = { kind: 'thank-you' };
+        if (editBehaviorTitle) submitBehavior.title = editBehaviorTitle;
+        if (editBehaviorMessage) submitBehavior.message = editBehaviorMessage;
+        break;
+      case 'redirect':
+        if (!editBehaviorUrl) {
+          toast({ title: 'Redirect URL is required', variant: 'destructive' as any });
+          return;
+        }
+        submitBehavior = { kind: 'redirect', url: editBehaviorUrl };
+        break;
+      case 'continue':
+      case 'next-record':
+        submitBehavior = { kind: editBehavior };
+        break;
+    }
+    const next = {
+      ...editRow.spec,
+      sharing: {
+        ...(editRow.spec.sharing ?? {}),
+        enabled: true,
+        allowAnonymous: true,
+        publicLink: `/forms/${slug}`,
+      },
+      submitBehavior,
+    };
+    setSaving(true);
+    try {
+      await client.meta.saveItem('view', editRow.name, next);
+      toast({ title: `Saved ${editRow.name}` });
+      setEditOpen(false);
+      setEditRow(null);
+      await load();
+    } catch (e: any) {
+      toast({ title: `Save failed: ${e?.message ?? e}`, variant: 'destructive' as any });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const hasRows = rows.length > 0;
 
   return (
@@ -130,10 +281,22 @@ function PublicFormsList() {
               </a>
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span className="ml-1.5">Refresh</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => setPublishOpen(true)}
+              disabled={publishable.length === 0}
+              title={publishable.length === 0 ? 'No non-public FormViews available' : 'Publish a FormView'}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span className="ml-1.5">Publish form…</span>
+            </Button>
+            <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span className="ml-1.5">Refresh</span>
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {error && (
@@ -220,6 +383,14 @@ function PublicFormsList() {
                           >
                             <Copy className="h-3.5 w-3.5" />
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Edit sharing & post-submit behavior"
+                            onClick={() => openEditor(row)}
+                          >
+                            <Settings2 className="h-3.5 w-3.5" />
+                          </Button>
                           <Button asChild variant="ghost" size="sm" title="Open metadata">
                             <Link
                               to="/$package/metadata/$type/$name"
@@ -238,6 +409,144 @@ function PublicFormsList() {
           )}
         </CardContent>
       </Card>
+
+      {/* Publish FormView dialog */}
+      <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Publish a FormView</DialogTitle>
+            <DialogDescription>
+              Picks an existing FormView and turns it into a public form by
+              enabling <code className="text-xs">sharing.allowAnonymous</code>{' '}
+              and setting <code className="text-xs">publicLink</code>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="publish-view">FormView</Label>
+              <select
+                id="publish-view"
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                value={publishView}
+                onChange={(e) => setPublishView(e.target.value)}
+              >
+                <option value="">— Select a FormView —</option>
+                {publishable.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.label ?? p.name} ({p.name}) {p.object ? `· ${p.object}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="publish-slug">URL slug</Label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground whitespace-nowrap">/console/f/</span>
+                <Input
+                  id="publish-slug"
+                  placeholder="contact-us"
+                  value={publishSlug}
+                  onChange={(e) => setPublishSlug(e.target.value)}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Lowercase letters, digits, dashes and underscores only.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPublishOpen(false)} disabled={publishing}>
+              Cancel
+            </Button>
+            <Button onClick={publish} disabled={publishing || !publishView || !publishSlug}>
+              {publishing ? 'Publishing…' : 'Publish'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sharing / submitBehavior editor dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {editRow ? `Edit ${editRow.label ?? editRow.name}` : 'Edit form'}
+            </DialogTitle>
+            <DialogDescription>
+              Configure the public URL and what happens after submit.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-slug">URL slug</Label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground whitespace-nowrap">/console/f/</span>
+                <Input
+                  id="edit-slug"
+                  value={editSlug}
+                  onChange={(e) => setEditSlug(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-behavior">After submit</Label>
+              <select
+                id="edit-behavior"
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                value={editBehavior}
+                onChange={(e) => setEditBehavior(e.target.value as any)}
+              >
+                <option value="thank-you">Show a thank-you panel</option>
+                <option value="redirect">Redirect to a URL</option>
+                <option value="continue">Reset for another response</option>
+                <option value="next-record">Advance to next record (internal queues)</option>
+              </select>
+            </div>
+            {editBehavior === 'thank-you' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-tytitle">Title</Label>
+                  <Input
+                    id="edit-tytitle"
+                    placeholder="Thanks!"
+                    value={editBehaviorTitle}
+                    onChange={(e) => setEditBehaviorTitle(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-tymsg">Message</Label>
+                  <Input
+                    id="edit-tymsg"
+                    placeholder="Your submission has been received."
+                    value={editBehaviorMessage}
+                    onChange={(e) => setEditBehaviorMessage(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+            {editBehavior === 'redirect' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-url">Redirect URL</Label>
+                <Input
+                  id="edit-url"
+                  type="url"
+                  placeholder="https://example.com/thanks"
+                  value={editBehaviorUrl}
+                  onChange={(e) => setEditBehaviorUrl(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEditOpen(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button onClick={saveEdit} disabled={saving || !editSlug}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
