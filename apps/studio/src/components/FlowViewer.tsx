@@ -88,11 +88,13 @@ export function FlowViewer({ metadataName, data, packageId }: MetadataViewerProp
     return (
       <div className="p-4">
         <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            {error
-              ? <span className="text-red-500 font-mono text-sm break-all">{error}</span>
-              : <>Flow definition not found: <code className="font-mono">{metadataName}</code></>
-            }
+          <CardContent className="py-12 text-center text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Flow not found</p>
+            <p className="mt-1">
+              We couldn't load{' '}
+              <code className="font-mono text-xs">{metadataName}</code>. It may have been
+              deleted or moved to another package.
+            </p>
           </CardContent>
         </Card>
       </div>

@@ -80,17 +80,17 @@ function LivePreviewViewer({ metadataType, metadataName, data, packageId }: Meta
   if (loading) {
     return <div className="p-6 text-sm text-muted-foreground">Loading preview…</div>;
   }
-  if (error) {
+  if (error || !spec) {
     return (
-      <div className="p-6 text-sm text-destructive">
-        Failed to load {metadataType}/{metadataName}: {error}
-      </div>
-    );
-  }
-  if (!spec) {
-    return (
-      <div className="p-6 text-sm text-muted-foreground">
-        Not found: <code className="font-mono">{metadataName}</code>
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="max-w-md rounded-md border border-dashed bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">Nothing to preview</p>
+          <p className="mt-1">
+            We couldn't find a definition for{' '}
+            <code className="font-mono text-xs">{metadataName}</code>. It may have been
+            deleted or never existed in this package.
+          </p>
+        </div>
       </div>
     );
   }

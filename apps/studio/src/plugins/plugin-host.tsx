@@ -189,9 +189,6 @@ export function PluginHost({ metadataType, metadataName, data, packageId }: Plug
                     className={idx === selectedViewerIndex ? 'bg-accent' : ''}
                   >
                     <span className="text-xs">{viewer.label}</span>
-                    <Badge variant="outline" className="ml-2 text-[10px]">
-                      {viewer.pluginId}
-                    </Badge>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -214,11 +211,6 @@ export function PluginHost({ metadataType, metadataName, data, packageId }: Plug
             {action.label}
           </Button>
         ))}
-
-        {/* Plugin badge */}
-        <Badge variant="secondary" className="text-[10px] font-mono">
-          {activeViewer.pluginId}
-        </Badge>
       </div>
 
       {/* ── Viewer Content ── */}

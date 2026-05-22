@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { useScopedClient } from '@/hooks/useObjectStackClient';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,14 +15,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-
-/** Resolve a label value that may be a plain string or an i18n object {key, defaultValue} */
-function resolveLabel(val: unknown): string {
-  if (typeof val === 'string') return val;
-  if (val && typeof val === 'object' && 'defaultValue' in val) return String((val as any).defaultValue);
-  if (val && typeof val === 'object' && 'key' in val) return String((val as any).key);
-  return '';
-}
 
 interface MetadataInspectorProps {
   metaType: string;
@@ -200,6 +192,9 @@ export function MetadataInspector({ metaType, metaName, packageId }: MetadataIns
 
   const TypeIcon = TYPE_ICONS[metaType] || FileText;
   const typeLabel = TYPE_LABELS[metaType] || metaType.charAt(0).toUpperCase() + metaType.slice(1);
+  // TypeIcon is currently unused since the route header owns the icon; keep the
+  // lookup for forward-compatibility with future inline contexts.
+  void TypeIcon;
 
   useEffect(() => {
     if (!client) return;
@@ -242,20 +237,18 @@ export function MetadataInspector({ metaType, metaName, packageId }: MetadataIns
     return (
       <div className="p-4">
         <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            {typeLabel} definition not found: <code className="font-mono">{metaName}</code>
+          <CardContent className="py-12 text-center text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">{typeLabel} not found</p>
+            <p className="mt-1">
+              We couldn't load{' '}
+              <code className="font-mono text-xs">{metaName}</code>. It may have been
+              deleted or moved to another package.
+            </p>
           </CardContent>
         </Card>
       </div>
     );
   }
-
-  // Extract common meta fields
-  const label = resolveLabel(item.label) || item.name || metaName;
-  const name = item.name || metaName;
-  const description = resolveLabel(item.description);
-  const hasFQN = name.includes('__');
-  const [namespace] = hasFQN ? name.split('__') : [null];
 
   // Build a filtered view of all properties
   const allKeys = Object.keys(item);
@@ -267,35 +260,7 @@ export function MetadataInspector({ metaType, metaName, packageId }: MetadataIns
     : allKeys;
 
   return (
-    <div className="space-y-4">
-      {/* Header card */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <TypeIcon className="h-5 w-5 text-muted-foreground" />
-                <CardTitle className="text-xl">{label}</CardTitle>
-                {namespace && (
-                  <Badge variant="secondary" className="font-mono text-xs">{namespace}</Badge>
-                )}
-                <Badge variant="outline" className="text-xs">{typeLabel}</Badge>
-              </div>
-              <CardDescription className="flex items-center gap-3 flex-wrap">
-                <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{name}</code>
-                <CopyButton text={name} />
-                {description && (
-                  <>
-                    <span>·</span>
-                    <span className="text-xs">{description}</span>
-                  </>
-                )}
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
-
+    <div className="space-y-4 p-4">
       {/* Property inspector */}
       <Card>
         <CardHeader className="pb-3">
