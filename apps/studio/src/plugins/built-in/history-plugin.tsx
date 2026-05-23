@@ -275,7 +275,7 @@ function HistoryViewerComponent({ metadataType, metadataName }: MetadataViewerPr
             <div className="rounded border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
               <p>No history events recorded for this item.</p>
               <p className="mt-1 text-xs">
-                Non-overlay metadata types may not produce history (see ADR-0008 §5).
+                Edits to this metadata appear here. Some built-in types (e.g. objects) keep their history in source control instead.
               </p>
             </div>
           )}

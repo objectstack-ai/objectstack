@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import type { InstalledPackage } from '@objectstack/spec/kernel';
 import { WelcomeOnboarding } from '@/components/WelcomeOnboarding';
-import { iconForMetadataType, typeLabel } from '@/components/studio-nav';
+import { iconForMetadataType, typeLabel, navItemForType } from '@/components/studio-nav';
 
 /**
  * The metadata backend currently exposes both the canonical camelCase
@@ -262,10 +262,21 @@ export function DeveloperOverview({ packages, selectedPackage, onNavigate = () =
                     const Icon = iconForMetadataType(type) ?? Code2;
                     const label = typeLabel(type);
                     const showRawKey = label.toLowerCase() !== type.toLowerCase();
+                    const nav = navItemForType(type);
+                    const clickable = !!nav;
                     return (
-                      <div
+                      <button
+                        type="button"
                         key={type}
-                        className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50 transition-colors cursor-default"
+                        disabled={!clickable}
+                        onClick={clickable ? () => onNavigate(nav!.key) : undefined}
+                        className={
+                          'flex w-full items-center justify-between py-2 px-3 rounded-md text-left transition-colors ' +
+                          (clickable
+                            ? 'hover:bg-muted/50 cursor-pointer'
+                            : 'cursor-default opacity-90')
+                        }
+                        title={clickable ? `Open ${nav!.label}` : undefined}
                       >
                         <div className="flex items-center gap-2">
                           <Icon className="h-3.5 w-3.5 text-muted-foreground" />
@@ -277,7 +288,7 @@ export function DeveloperOverview({ packages, selectedPackage, onNavigate = () =
                         <Badge variant="secondary" className="text-xs font-mono">
                           {count}
                         </Badge>
-                      </div>
+                      </button>
                     );
                   })
               )}
