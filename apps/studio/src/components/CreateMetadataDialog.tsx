@@ -44,6 +44,14 @@ interface CreateMetadataDialogProps {
   types: string[];
   /** Package id — embedded in the generated file path. */
   packageId?: string | null;
+  /**
+   * When set, snippets that reference an object (view, form, hook,
+   * report, approval, flow widget, app tab…) substitute this name in
+   * place of the generic `account` placeholder, and the dialog title
+   * advertises the affiliation. Used from `ObjectRelatedPanel` to
+   * scaffold metadata that already references the current object.
+   */
+  prefillObjectName?: string;
 }
 
 interface TypeTemplate {
@@ -55,8 +63,8 @@ interface TypeTemplate {
   dir: string;
   /** Source-file suffix, e.g. ".view.ts" */
   suffix: string;
-  /** Generate the file body. `name` is snake_case, `label` is human. */
-  snippet: (name: string, label: string) => string;
+  /** Generate the file body. `name` is snake_case, `label` is human. `object` is an optional prefilled object name. */
+  snippet: (name: string, label: string, object?: string) => string;
 }
 
 const TEMPLATES: TypeTemplate[] = [
@@ -79,12 +87,12 @@ export default defineObject({
     type: 'view', label: 'Grid view', icon: Table,
     description: 'A data table over an existing object.',
     dir: 'views', suffix: '.view.ts',
-    snippet: (n, l) => `import { defineView } from '@objectstack/spec';
+    snippet: (n, l, o) => `import { defineView } from '@objectstack/spec';
 
 export default defineView({
   name: '${n}',
   label: '${l}',
-  objectName: 'account', // ⚠ replace with your object
+  objectName: '${o ?? 'account'}',${o ? '' : ' // ⚠ replace with your object'}
   viewType: 'grid',
   columns: ['name'],
 });
@@ -94,13 +102,13 @@ export default defineView({
     type: 'app', label: 'App', icon: Layers,
     description: 'Top-level navigation container with tabs.',
     dir: 'apps', suffix: '.app.ts',
-    snippet: (n, l) => `import { defineApp } from '@objectstack/spec';
+    snippet: (n, l, o) => `import { defineApp } from '@objectstack/spec';
 
 export default defineApp({
   name: '${n}',
   label: '${l}',
   tabs: [
-    { type: 'object', objectName: 'account' },
+    { type: 'object', objectName: '${o ?? 'account'}' },
   ],
 });
 `,
@@ -138,12 +146,12 @@ export default defineDashboard({
     type: 'report', label: 'Report', icon: BarChart3,
     description: 'A saved query with columns, filters, sorts, and grouping.',
     dir: 'reports', suffix: '.report.ts',
-    snippet: (n, l) => `import { defineReport } from '@objectstack/spec';
+    snippet: (n, l, o) => `import { defineReport } from '@objectstack/spec';
 
 export default defineReport({
   name: '${n}',
   label: '${l}',
-  objectName: 'account', // ⚠ replace with your object
+  objectName: '${o ?? 'account'}',${o ? '' : ' // ⚠ replace with your object'}
   columns: ['name'],
 });
 `,
@@ -166,12 +174,12 @@ export default defineFlow({
     type: 'hook', label: 'Hook', icon: Webhook,
     description: 'A side-effect that fires on object lifecycle events.',
     dir: 'hooks', suffix: '.hook.ts',
-    snippet: (n, l) => `import { defineHook } from '@objectstack/spec';
+    snippet: (n, l, o) => `import { defineHook } from '@objectstack/spec';
 
 export default defineHook({
   name: '${n}',
   label: '${l}',
-  objectName: 'account', // ⚠ replace with your object
+  objectName: '${o ?? 'account'}',${o ? '' : ' // ⚠ replace with your object'}
   on: 'after-create',
   run: async (ctx) => {
     // your side-effect here
@@ -183,12 +191,12 @@ export default defineHook({
     type: 'approval', label: 'Approval', icon: Stamp,
     description: 'A multi-step approval chain on an object.',
     dir: 'approvals', suffix: '.approval.ts',
-    snippet: (n, l) => `import { defineApproval } from '@objectstack/spec';
+    snippet: (n, l, o) => `import { defineApproval } from '@objectstack/spec';
 
 export default defineApproval({
   name: '${n}',
   label: '${l}',
-  objectName: 'account', // ⚠ replace with your object
+  objectName: '${o ?? 'account'}',${o ? '' : ' // ⚠ replace with your object'}
   entryCriteria: { all: [] },
   steps: [],
 });
@@ -293,7 +301,7 @@ function toSnakeCase(s: string) {
 }
 
 export function CreateMetadataDialog({
-  open, onOpenChange, types, packageId,
+  open, onOpenChange, types, packageId, prefillObjectName,
 }: CreateMetadataDialogProps) {
   // Pre-select the first allowed type when the dialog opens.
   const allowed = useMemo(
@@ -360,8 +368,8 @@ export function CreateMetadataDialog({
   const finalLabel = label || 'New Item';
 
   const snippet = useMemo(
-    () => template?.snippet(finalName, finalLabel) ?? '',
-    [template, finalName, finalLabel],
+    () => template?.snippet(finalName, finalLabel, prefillObjectName) ?? '',
+    [template, finalName, finalLabel, prefillObjectName],
   );
 
   const filePath = useMemo(() => {
@@ -454,11 +462,23 @@ export function CreateMetadataDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Create new metadata</DialogTitle>
+          <DialogTitle>
+            {prefillObjectName ? `Create related metadata for ${prefillObjectName}` : 'Create new metadata'}
+          </DialogTitle>
           <DialogDescription>
-            ObjectStack treats metadata as code. Fill in a name &amp; label below to
-            generate a runnable snippet — paste it into the suggested file path
-            and HMR will pick up your change immediately.
+            {prefillObjectName ? (
+              <>
+                Scaffold a new view, dashboard, hook, approval or flow that already
+                references <code className="rounded bg-muted px-1 font-mono text-[11px]">{prefillObjectName}</code>.
+                Fill in a name &amp; label, click <strong>Create file</strong> and HMR picks it up.
+              </>
+            ) : (
+              <>
+                ObjectStack treats metadata as code. Fill in a name &amp; label below to
+                generate a runnable snippet — paste it into the suggested file path
+                and HMR will pick up your change immediately.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
 

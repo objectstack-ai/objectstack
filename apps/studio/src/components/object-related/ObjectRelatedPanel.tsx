@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useClient } from '@objectstack/client-react';
 import { MetadataPreview } from '@/components/MetadataPreview';
+import { CreateMetadataDialog } from '@/components/CreateMetadataDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +23,7 @@ import { useMetadataHmr } from '@/hooks/useMetadataHmr';
 import {
   Eye, FormInput, Workflow, Bell, BarChart3, FileText, Bot, Wrench, Mail,
   Shield, Zap, ListChecks, GitBranch, ExternalLink, Search, Code2, Copy, Check,
+  Plus,
 } from 'lucide-react';
 import { RELATED_TYPES, itemReferencesObject, isFormView, type RelatedDomain } from './detector';
 
@@ -64,6 +66,15 @@ export function ObjectRelatedPanel({ packageId, objectName }: ObjectRelatedPanel
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+
+  // Metadata types that meaningfully reference an object — used to
+  // filter the Create dialog's type picker. Anything beyond this set
+  // doesn't have a notion of objectName.
+  const CREATABLE_TYPES = useMemo(
+    () => ['view', 'dashboard', 'report', 'hook', 'approval', 'flow', 'app'],
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -141,9 +152,26 @@ export function ObjectRelatedPanel({ packageId, objectName }: ObjectRelatedPanel
   const bucketIcon = (bucket: string) => ICONS[bucket] ?? FileText;
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <>
+      <div className="flex h-full overflow-hidden">
       <aside className="flex w-72 flex-shrink-0 flex-col border-r bg-muted/20">
         <div className="border-b p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Related
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setCreateOpen(true)}
+              className="h-6 gap-1 px-2 text-[11px]"
+              title={`Create new metadata that references ${objectName}`}
+            >
+              <Plus className="h-3 w-3" />
+              New
+            </Button>
+          </div>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -211,7 +239,17 @@ export function ObjectRelatedPanel({ packageId, objectName }: ObjectRelatedPanel
             })}
             {!loading && items.length === 0 && (
               <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-                Nothing references <code>{objectName}</code> yet.
+                <p>Nothing references <code>{objectName}</code> yet.</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCreateOpen(true)}
+                  className="mt-3 h-7 gap-1 text-[11px]"
+                >
+                  <Plus className="h-3 w-3" />
+                  Create the first one
+                </Button>
               </div>
             )}
           </div>
@@ -228,6 +266,14 @@ export function ObjectRelatedPanel({ packageId, objectName }: ObjectRelatedPanel
         )}
       </main>
     </div>
+    <CreateMetadataDialog
+      open={createOpen}
+      onOpenChange={setCreateOpen}
+      types={CREATABLE_TYPES}
+      packageId={packageId}
+      prefillObjectName={objectName}
+    />
+    </>
   );
 }
 
@@ -252,14 +298,14 @@ function RelatedDetail({ packageId, objectName, item }: RelatedDetailProps) {
           </div>
           <code className="text-[11px] text-muted-foreground">{item.name}</code>
         </div>
-        <Button asChild variant="outline" size="sm">
+        <Button asChild size="sm" className="gap-1.5">
           <Link
             to="/$package/metadata/$type/$name"
             params={{ package: packageId, type: item.type, name: item.name }}
           >
             <Code2 className="h-3.5 w-3.5" />
-            <span className="ml-1.5">Open</span>
-            <ExternalLink className="ml-1 h-3 w-3" />
+            Open editor
+            <ExternalLink className="ml-0.5 h-3 w-3" />
           </Link>
         </Button>
       </header>
