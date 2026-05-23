@@ -21,7 +21,8 @@ import { usePackages } from '@/hooks/usePackages';
 import { useMetadataHmr } from '@/hooks/useMetadataHmr';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Database, Layers, Code2 } from 'lucide-react';
+import { Database, Layers, Code2, Columns3, Hash } from 'lucide-react';
+import { RELATED_TYPES, itemReferencesObject } from '@/components/object-related/detector';
 
 function resolveLabel(val: unknown): string {
   if (typeof val === 'string') return val;
@@ -37,6 +38,9 @@ function ObjectHubComponent() {
   const { version: hmrVersion } = useMetadataHmr();
   const [tab, setTab] = useState<string>('designer');
   const [object, setObject] = useState<any>(null);
+  const [relatedCount, setRelatedCount] = useState<number | null>(null);
+  const [recordCount, setRecordCount] = useState<number | null>(null);
+  const [recordCountIsLowerBound, setRecordCountIsLowerBound] = useState(false);
 
   useSetInspectorTarget({ type: 'object', name, packageId: resolvedPackageId });
 
@@ -49,7 +53,53 @@ function ObjectHubComponent() {
     return () => { cancelled = true; };
   }, [client, name, hmrVersion]);
 
+  // Background: tally related-metadata items + live record count for the header chips.
+  useEffect(() => {
+    let cancelled = false;
+    setRelatedCount(null);
+    setRecordCount(null);
+    setRecordCountIsLowerBound(false);
+    async function loadStats() {
+      let related = 0;
+      await Promise.all(
+        RELATED_TYPES.map(async ({ type }) => {
+          try {
+            const r: any = await client.meta.getItems(type, { packageId: resolvedPackageId });
+            const arr = r?.items || (Array.isArray(r) ? r : []);
+            for (const raw of arr) {
+              if (itemReferencesObject(type, raw, name)) related += 1;
+            }
+          } catch { /* type not enabled — skip */ }
+        }),
+      );
+      if (!cancelled) setRelatedCount(related);
+      try {
+        // Best-effort record count for the header chip. We ask for a generous
+        // page (no top hint) and use server-reported `total` when available,
+        // otherwise fall back to `records.length` with a "+" hint when the
+        // response indicates more records exist.
+        const r: any = await (client as any).data.find(name, {});
+        if (!cancelled) {
+          if (typeof r?.total === 'number') {
+            setRecordCount(r.total);
+          } else if (Array.isArray(r?.records)) {
+            setRecordCount(r.records.length);
+            if (r.hasMore) setRecordCountIsLowerBound(true);
+          }
+        }
+      } catch { /* count is best-effort */ }
+    }
+    loadStats();
+    return () => { cancelled = true; };
+  }, [client, name, resolvedPackageId, hmrVersion]);
+
   const objectLabel = useMemo(() => resolveLabel(object?.label) || name, [object, name]);
+  const fieldCount = useMemo(() => {
+    const f = object?.fields;
+    if (Array.isArray(f)) return f.length;
+    if (f && typeof f === 'object') return Object.keys(f).length;
+    return null;
+  }, [object]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -67,6 +117,35 @@ function ObjectHubComponent() {
               {object?.description && (
                 <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{object.description}</p>
               )}
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                {fieldCount !== null && (
+                  <span className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5">
+                    <Columns3 className="h-3 w-3" />
+                    <span className="font-medium tabular-nums text-foreground">{fieldCount}</span>
+                    <span>field{fieldCount === 1 ? '' : 's'}</span>
+                  </span>
+                )}
+                {relatedCount !== null && relatedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setTab('related')}
+                    className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 transition hover:border-primary/40 hover:text-foreground"
+                  >
+                    <Layers className="h-3 w-3" />
+                    <span className="font-medium tabular-nums text-foreground">{relatedCount}</span>
+                    <span>related</span>
+                  </button>
+                )}
+                {recordCount !== null && (
+                  <span className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5">
+                    <Hash className="h-3 w-3" />
+                    <span className="font-medium tabular-nums text-foreground">
+                      {recordCount.toLocaleString()}{recordCountIsLowerBound ? '+' : ''}
+                    </span>
+                    <span>record{recordCount === 1 ? '' : 's'}</span>
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <Button asChild variant="outline" size="sm">
@@ -87,6 +166,11 @@ function ObjectHubComponent() {
             </TabsTrigger>
             <TabsTrigger value="related" className="gap-1.5">
               <Layers className="h-3.5 w-3.5" /> Related
+              {relatedCount !== null && relatedCount > 0 && (
+                <span className="ml-1 rounded-sm bg-muted px-1 text-[10px] font-medium tabular-nums text-muted-foreground">
+                  {relatedCount}
+                </span>
+              )}
             </TabsTrigger>
           </TabsList>
         </div>
