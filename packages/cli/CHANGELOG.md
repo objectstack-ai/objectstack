@@ -1,5 +1,45 @@
 # @objectstack/cli
 
+## 5.2.0
+
+### Patch Changes
+
+- Updated dependencies [bab2b20]
+- Updated dependencies [fa011d8]
+- Updated dependencies [b806f58]
+  - @objectstack/plugin-approvals@5.2.0
+  - @objectstack/spec@5.2.0
+  - @objectstack/runtime@5.2.0
+  - @objectstack/plugin-security@5.2.0
+  - @objectstack/plugin-hono-server@5.2.0
+  - @objectstack/rest@5.2.0
+  - @objectstack/plugin-audit@5.2.0
+  - @objectstack/plugin-auth@5.2.0
+  - @objectstack/plugin-email@5.2.0
+  - @objectstack/plugin-reports@5.2.0
+  - @objectstack/plugin-sharing@5.2.0
+  - @objectstack/plugin-webhooks@5.2.0
+  - @objectstack/service-ai@5.2.0
+  - @objectstack/service-job@5.2.0
+  - @objectstack/service-queue@5.2.0
+  - @objectstack/service-realtime@5.2.0
+  - @objectstack/service-settings@5.2.0
+  - @objectstack/client@5.2.0
+  - @objectstack/core@5.2.0
+  - @objectstack/objectql@5.2.0
+  - @objectstack/observability@5.2.0
+  - @objectstack/driver-memory@5.2.0
+  - @objectstack/driver-mongodb@5.2.0
+  - @objectstack/driver-sql@5.2.0
+  - @objectstack/driver-turso@5.2.0
+  - @objectstack/plugin-mcp-server@5.2.0
+  - @objectstack/service-analytics@5.2.0
+  - @objectstack/service-automation@5.2.0
+  - @objectstack/service-cache@5.2.0
+  - @objectstack/service-feed@5.2.0
+  - @objectstack/service-package@5.2.0
+  - @objectstack/service-storage@5.2.0
+
 ## 5.1.0
 
 ### Patch Changes

@@ -1,5 +1,19 @@
 # @objectstack/example-crm
 
+## 4.0.11
+
+### Patch Changes
+
+- Updated dependencies [bab2b20]
+- Updated dependencies [fa011d8]
+- Updated dependencies [b806f58]
+  - @objectstack/spec@5.2.0
+  - @objectstack/runtime@5.2.0
+  - @objectstack/plugin-webhooks@5.2.0
+  - @objectstack/driver-mongodb@5.2.0
+  - @objectstack/service-analytics@5.2.0
+  - @objectstack/service-automation@5.2.0
+
 ## 4.0.10
 
 ### Patch Changes
