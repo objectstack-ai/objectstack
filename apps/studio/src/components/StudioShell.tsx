@@ -20,13 +20,15 @@ import { HotkeysHelpDialog } from '@/components/HotkeysHelpDialog';
 import { InspectorProvider, useInspector } from '@/hooks/useInspector';
 import { ProblemsProvider, useProblems } from '@/hooks/useProblems';
 import { useStudioHotkeys } from '@/hooks/useStudioHotkeys';
+import { useAiChatPanel } from '@/hooks/use-ai-chat-panel';
 import { Button } from '@/components/ui/button';
-import { PanelRight, HelpCircle } from 'lucide-react';
+import { PanelRight, HelpCircle, Sparkles } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 function ShellBody({ children }: { children: React.ReactNode }) {
   const { toggle: toggleInspector } = useInspector();
   const { toggle: toggleProblems } = useProblems();
+  const { toggle: toggleAiChat, isOpen: aiChatOpen } = useAiChatPanel();
   const [helpOpen, setHelpOpen] = useState(false);
   useStudioHotkeys({
     toggleInspector,
@@ -40,6 +42,22 @@ function ShellBody({ children }: { children: React.ReactNode }) {
         <TopBar
           rightSlot={
             <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`h-8 w-8 p-0 ${aiChatOpen ? 'text-primary' : ''}`}
+                    onClick={toggleAiChat}
+                    aria-label="Toggle AI Chat"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  AI Chat <kbd className="ml-1 px-1 rounded bg-muted text-[10px]">⌘⇧I</kbd>
+                </TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

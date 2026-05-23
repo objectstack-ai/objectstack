@@ -547,33 +547,10 @@ export function AiChatPanel() {
     setShowPalette(value.startsWith('/'));
   };
 
-  // ── Collapsed state: edge button ──
+  // ── Collapsed: no floating button. Toggle lives in the topbar
+  //    (see StudioShell rightSlot). Keeps the canvas free of overlays.
   if (!isOpen) {
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={toggle}
-              data-testid="ai-chat-toggle"
-              className={cn(
-                'fixed right-0 top-1/2 -translate-y-1/2 z-50',
-                'flex items-center justify-center',
-                'h-10 rounded-l-md border border-r-0 border-border',
-                'bg-background text-foreground shadow-md',
-                'hover:bg-accent transition-colors',
-              )}
-              style={{ width: COLLAPSED_WIDTH }}
-            >
-              <Sparkles className="h-5 w-5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="left">
-            <p>AI Chat <kbd className="ml-1 text-[10px] opacity-60">⌘⇧I</kbd></p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
+    return null;
   }
 
   // ── Expanded panel ──
