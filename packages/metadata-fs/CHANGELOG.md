@@ -1,5 +1,12 @@
 # @objectstack/metadata-fs
 
+## 5.2.0
+
+### Patch Changes
+
+- Updated dependencies [bab2b20]
+  - @objectstack/metadata-core@5.2.0
+
 ## 5.1.0
 
 ### Patch Changes

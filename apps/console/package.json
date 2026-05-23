@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/console",
-  "version": "5.1.0",
+  "version": "5.2.0",
   "description": "ObjectStack Console - opinionated, fork-ready runtime console built on @object-ui/app-shell with the full plugin set wired up.",
   "license": "Apache-2.0",
   "type": "module",

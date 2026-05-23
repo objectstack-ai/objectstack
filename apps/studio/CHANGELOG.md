@@ -1,5 +1,161 @@
 # @objectstack/studio
 
+## 5.2.0
+
+### Minor Changes
+
+- fa011d8: feat(studio): metadata history timeline viewer
+
+  Adds a new `history` view mode that surfaces the audit timeline produced by `sys_metadata_history` (ADR-0008 §5) inside Studio. Available for every metadata type as a wildcard built-in plugin.
+
+  - `@objectstack/spec`: extend `ViewModeSchema` with `'history'`.
+  - `@objectstack/studio`: new `historyViewerPlugin` rendering an event timeline (create/update/delete/rename) with op icons, short hash, actor, source, expandable detail panel. ADR-0009 `executionPinned` types (`flow`, `workflow`, `approval`) show a "Pinned" badge explaining that historical versions are retained for in-flight executions.
+
+  Reads from the existing `GET /meta/:type/:name/history` REST endpoint via `client.meta.getHistory()`; no new server surface.
+
+### Patch Changes
+
+- 7bc57ad: Studio: redesign the object page Airtable-style.
+
+  The object detail page (`/objects/:name`) previously stacked four
+  overlapping navigation strips on top of each other: sidebar, outer
+  route tabs (Designer/Views/Forms/...), the PluginHost mode strip
+  (Preview/Code/Data/History), and ObjectExplorer's own internal
+  tabs (Schema/Data/API) — plus a duplicated object header card.
+
+  This change collapses the redundancy:
+
+  - `ObjectExplorer` becomes a controlled component driven by the
+    `mode` prop from PluginHost. Its internal tab strip is removed
+    so the page only ever shows a single row of mode buttons.
+  - The duplicate "object meta" card inside `ObjectSchemaInspector`
+    is removed; the route-level header is now the single source of
+    identity (label + machine name + description).
+  - The route header itself is slimmed: the "Object" eyebrow and
+    the redundant stat-badge row (fields / views / forms / hooks)
+    are gone since the related-metadata tabs already convey the
+    same counts.
+  - `object-plugin` declares modes as `['data', 'design', 'code']`
+    and `PluginHost` lands on `data` by default for objects so the
+    records grid is the first thing the user sees — matching
+    Airtable's "data first" philosophy.
+  - Mode buttons get per-type labels via `MODE_LABEL_OVERRIDES`:
+    for `object`, `data` reads "Records", `design` reads "Fields",
+    `code` reads "API".
+  - A per-type `MODE_ALLOWLIST_BY_TYPE` filters out the generic
+    `preview` fallback for objects so the strip is the curated
+    `Records / Fields / API / History` and nothing more.
+
+- ec26370: Studio: cross-page polish — calmer cards, plain-English copy, deduped registry.
+
+  Following the Airtable-style object-page redesign, this pass cleans
+  up the rest of the surface so every page reads the same way.
+
+  **List cards** (`MetadataListPage`):
+
+  - Suppress the per-card type badge on single-type pages (Objects,
+    Forms). The page title already conveys the type; the badge was
+    noise. Multi-type pages (Views & Apps, Automations, AI, Security)
+    keep the badge for disambiguation.
+  - Show the metadata's own `description` when present, instead of
+    the now-redundant snake_case `name` (which was a duplicate of the
+    `<code>` element below). The machine name still appears as a
+    subtle code line.
+  - Switch the "Preview" verbose button to an icon-only ghost button
+    that reveals on hover, freeing the row for the actual label.
+  - Add `title` attributes everywhere so truncated labels (e.g.
+    "Campaign Me…") are readable on hover.
+
+  **Home / `DeveloperOverview`**:
+
+  - Replace the "Developer Console" terminal-icon header with the
+    package name and a one-line summary — feels like a product home,
+    not a dev tool.
+  - Dedupe the Metadata Registry list: the backend currently exposes
+    both `sharingRule` and `sharing_rule` (and `ragPipeline` /
+    `rag_pipeline`, `analyticsCube` / `analytics_cube`) as separate
+    entries even though they map to the same type. A new
+    `dedupeRegistryEntries` collapses each alias pair, sums the
+    counts, and keeps the canonical camelCase name for display.
+  - Drop the "+ N empty types" footnote — pure dev jargon.
+  - Replace the opaque `/api/v1   REST · data · meta · packages`
+    stat card with a clearer "REST API — Live" card that links to
+    the APIs page.
+
+  **Forms**:
+
+  - Rewrite the page description from a wall of
+    `FormView` / `sharing.allowAnonymous` / `GET /api/v1/forms/:slug`
+    jargon to plain English: "Forms anyone can fill out — no login
+    required. Publish a form to get a shareable link; submissions
+    land directly in the bound object."
+  - Empty state now points users at the visible action button
+    instead of telling them to "Declare a FormView with
+    `sharing.allowAnonymous: true`".
+
+  **Logs**:
+
+  - Empty states no longer leak the internal endpoint paths
+    (`Awaiting /api/v1/_debug/requests.`) — they just say
+    "Coming soon. Requests will stream here in real time."
+
+- b626e11: Studio: redesign generic metadata-detail pages.
+
+  Every detail page routed through `/$package/metadata/$type/$name`
+  (views, dashboards, apps, flows, agents, permissions, …) used to
+  have **no visible page header** — only a breadcrumb — plus a
+  wasted top band hosting a floating 3-dot menu, a dev-jargon
+  `objectstack.view-preview` plugin-id badge, and an unnecessary
+  viewer-picker dropdown. Errors were rendered as red prose leaking
+  the raw `[ObjectStack] Metadata item X not found` backend string.
+
+  This pass aligns generic detail pages with the Object-page pattern:
+
+  - The route now loads the item, renders a real header card
+    (icon · label · machine name · type chip · description), and
+    parks the `ResourceActionsMenu` on the right of the header
+    instead of in its own floating top bar.
+  - `PluginHost` drops the always-visible plugin-id badge from the
+    toolbar (`objectstack.view-preview` etc. — pure dev jargon)
+    and the same id badge from inside the viewer-picker dropdown
+    items.
+  - `MetadataInspector` (the default JSON-tree Preview viewer) no
+    longer renders its own "Header card" — that's the route's job
+    now, so users don't see "Sales Representative" twice on the
+    Permission page.
+  - Friendly "not found" empty states replace the red error prose
+    in `view-preview-plugin`, `FlowViewer`, and `MetadataInspector`.
+    Internal error strings like
+    `[ObjectStack] Metadata item flow/X not found` no longer leak
+    to the UI; users see "Flow not found · We couldn't load X. It
+    may have been deleted or moved to another package."
+
+- d060e84: fix(studio): clearer metadata list filter chips, empty states & no-flash theme boot
+
+  Surveyed Studio's core pages via the browser and shipped three targeted polish fixes:
+
+  - **Filter chips on multi-type list pages** (Views & Apps, Automations, …) were displaying the nav-category label for every chip — e.g. _"Views & Apps 1"_ / _"Views & Apps 2"_ instead of _"App 1"_ / _"Dashboard 2"_. Added a singular `METADATA_TYPE_LABELS` registry and a `typeLabel()` helper in `studio-nav.ts`, and switched the chip + search placeholder + empty-state copy to per-type labels.
+  - **Empty-state grammar**: _"No ai in this package yet."_ now reads _"Nothing in AI for this package yet."_ — works for any title casing (AI, Views & Apps, …) without lowercasing.
+  - **First-paint theme flash**: stored theme was only applied in a `useEffect`, causing a brief white flash before React mounted (especially noticeable on slow loads). Added an inline `<script>` in `index.html` that mirrors `theme-toggle.tsx` and applies the `.dark` class and the matching `<html>` background-color synchronously, plus a `<meta name="color-scheme" content="dark light">` so native UI (scrollbars, form controls) inherits the correct scheme too.
+
+- Updated dependencies [bab2b20]
+- Updated dependencies [fa011d8]
+- Updated dependencies [f0f7c27]
+- Updated dependencies [b806f58]
+  - @objectstack/platform-objects@5.2.0
+  - @objectstack/spec@5.2.0
+  - @objectstack/runtime@5.2.0
+  - @objectstack/metadata@5.2.0
+  - @objectstack/service-ai@5.2.0
+  - @objectstack/client@5.2.0
+  - @objectstack/client-react@5.2.0
+  - @objectstack/objectql@5.2.0
+  - @objectstack/driver-memory@5.2.0
+  - @objectstack/plugin-msw@5.2.0
+  - @objectstack/service-analytics@5.2.0
+  - @objectstack/service-automation@5.2.0
+  - @objectstack/service-feed@5.2.0
+
 ## 5.1.0
 
 ### Patch Changes

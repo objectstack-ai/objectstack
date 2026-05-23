@@ -1,5 +1,16 @@
 # @objectstack/driver-turso
 
+## 5.2.0
+
+### Patch Changes
+
+- Updated dependencies [bab2b20]
+- Updated dependencies [fa011d8]
+- Updated dependencies [b806f58]
+  - @objectstack/spec@5.2.0
+  - @objectstack/core@5.2.0
+  - @objectstack/driver-sql@5.2.0
+
 ## 5.1.0
 
 ### Patch Changes

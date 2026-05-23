@@ -1,5 +1,12 @@
 # @objectstack/hono
 
+## 5.2.0
+
+### Patch Changes
+
+- Updated dependencies [b806f58]
+  - @objectstack/plugin-hono-server@5.2.0
+
 ## 5.1.0
 
 ### Patch Changes

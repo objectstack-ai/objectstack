@@ -1,5 +1,83 @@
 # @objectstack/platform-objects
 
+## 5.2.0
+
+### Minor Changes
+
+- bab2b20: feat(approvals): execution-pinned approval processes (ADR-0009)
+
+  When an approval request is submitted, the engine now records a `process_hash`
+  on `sys_approval_request` — the sha256 of the approval process body resolved
+  through `MetadataRepository`. While the request is in flight, `approve` /
+  `reject` / `recall` resolve the pinned process body via
+  `MetadataRepository.getByHash`. Upgrading the approval process definition
+  mid-flight therefore no longer affects requests that already started against
+  the previous version.
+
+  Behavior:
+
+  - `sys_approval_request` gains a `process_hash` column (text, nullable,
+    read-only). Existing rows keep working — the engine falls back to the
+    current `sys_approval_process` projection when the column is empty.
+  - `ApprovalServiceOptions` accepts an optional `metadataRepo`. When omitted
+    (e.g. defining processes purely through the runtime API or in unit tests),
+    pinning is silently disabled and the service behaves as before.
+  - `ApprovalsServicePlugin` looks up the metadata service from the kernel
+    and wires its repository automatically.
+  - The metadata-core local `MetadataTypeSchema` enum was realigned with the
+    canonical `@objectstack/spec/kernel` enum (drift fix: `approval`, `field`,
+    `function`, `service`, …).
+
+  This is the first user-visible consumer of the `executionPinned` capability
+  introduced in ADR-0009.
+
+### Patch Changes
+
+- f0f7c27: Add `mark_read` / `mark_unread` row actions to `sys_notification` and polish
+  listView columns + grouping.
+
+  - Row-level `mark_read` / `mark_unread` actions guarded by CEL `visible`
+    expressions so each only renders on rows in the appropriate state. Both
+    use the generic PATCH `/api/v1/data/sys_notification/{id}` endpoint with
+    `bodyExtra` to flip `is_read` (and clear `read_at` on unmark).
+  - Reordered listView columns to lead with `title` + `actor_name` (the "who
+    did what" users actually scan) and demote `type` to a chip column.
+  - `mine` view now groups by `type` so mention/assignment storms don't bury
+    system or task_due rows.
+
+  `mark_all_read` is intentionally not added server-side — there's no bulk
+  PATCH primitive on the REST surface yet, and the popover already handles
+  multi-row mark-all client-side via N single-row PATCHes
+  (`InboxPopover.tsx` → `AppHeader.markAllRead`).
+
+- b806f58: Scope `sys_user` visibility to fellow organization members.
+
+  The default RLS policy on `sys_user` was `id = current_user.id`, which meant
+  @-mention pickers, owner/assignee lookups, reviewer selectors and the user
+  roster all returned just the current user. The RLS compiler doesn't support
+  subqueries, so a `id IN (SELECT user_id FROM sys_member ...)` policy isn't
+  expressible.
+
+  This change:
+
+  1. Pre-resolves `org_user_ids` (the IDs of all users in the active org) into
+     `ExecutionContext` in **all three** REST entry-point resolvers
+     (`@objectstack/rest`, `@objectstack/runtime`, `@objectstack/plugin-hono-server`).
+  2. Adds the field to `ExecutionContextSchema` so it survives Zod parsing.
+  3. Adds an `org_user_ids` field to the RLS compiler's user context.
+  4. Adds a new `sys_user_org_members` policy (`id IN (current_user.org_user_ids)`)
+     to both `member_default` and `viewer_readonly` permission sets, alongside
+     the existing `sys_user_self` policy. The RLS compiler OR-combines them, so
+     users see themselves AND their org collaborators.
+
+  Capped at 1000 members per request. Large enterprises should plug in a
+  directory cache or split per workspace.
+
+- Updated dependencies [bab2b20]
+- Updated dependencies [fa011d8]
+- Updated dependencies [b806f58]
+  - @objectstack/spec@5.2.0
+
 ## 5.1.0
 
 ### Minor Changes
