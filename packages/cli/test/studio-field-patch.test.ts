@@ -180,11 +180,36 @@ describe('reorderObjectFields', () => {
 });
 
 describe('patchObjectFieldFile', () => {
-  it('updates label on a Field.X(...) call', async () => {
+  it('updates label on a Field.X(...) call (preserves single-quote style)', async () => {
     write(TWO_SPACE_SAMPLE);
     const r = await patchObjectFieldFile(file, 'title', { label: 'Renamed' });
     expect(r).toEqual({ ok: true });
-    expect(read()).toContain("label: \"Renamed\"");
+    const out = read();
+    // Source uses single quotes — patch should match.
+    expect(out).toContain("label: 'Renamed'");
+    expect(out).not.toContain('label: "Renamed"');
+  });
+
+  it('uses double quotes when the surrounding field already uses them', async () => {
+    write(`import { defineObject, Field } from '@objectstack/spec';
+export const t = defineObject({
+  name: 't',
+  fields: {
+    title: Field.text({ label: "Original" }),
+  },
+});
+`);
+    const r = await patchObjectFieldFile(file, 'title', { label: 'Renamed' });
+    expect(r).toEqual({ ok: true });
+    expect(read()).toContain('label: "Renamed"');
+  });
+
+  it('escapes single quotes when value contains one', async () => {
+    write(TWO_SPACE_SAMPLE);
+    const r = await patchObjectFieldFile(file, 'title', { label: "It's fine" });
+    expect(r).toEqual({ ok: true });
+    // Falls back to double-quoted since value contains apostrophe.
+    expect(read()).toContain('label: "It\'s fine"');
   });
 
   it('removes label when value is empty string', async () => {

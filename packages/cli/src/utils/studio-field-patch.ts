@@ -308,12 +308,38 @@ function applyStringProp(obj: ObjectLiteralExpression, key: string, value: strin
     if (existing) existing.remove();
     return;
   }
-  const literal = JSON.stringify(value); // safe quoting + escape
+  const literal = renderStringLiteral(obj, value);
   if (existing && existing.isKind(SyntaxKind.PropertyAssignment)) {
     (existing as PropertyAssignment).setInitializer(literal);
   } else {
     obj.addPropertyAssignment({ name: key, initializer: literal });
   }
+}
+
+/**
+ * Render `value` as a TS string literal, preferring whichever quote
+ * style (single vs double) the surrounding object already uses for
+ * existing string props. Falls back to single quotes — the dominant
+ * convention across the codebase — when there's no signal.
+ */
+function renderStringLiteral(obj: ObjectLiteralExpression, value: string): string {
+  let single = 0;
+  let double = 0;
+  for (const p of obj.getProperties()) {
+    if (!p.isKind(SyntaxKind.PropertyAssignment)) continue;
+    const init = (p as PropertyAssignment).getInitializer();
+    if (!init || !init.isKind(SyntaxKind.StringLiteral)) continue;
+    const raw = init.getText();
+    if (raw.startsWith("'")) single++;
+    else if (raw.startsWith('"')) double++;
+  }
+  const useDouble = double > single;
+  if (useDouble || value.includes("'")) {
+    // JSON.stringify gives us proper escaping for `"` and control chars.
+    return JSON.stringify(value);
+  }
+  // Single-quoted: escape only single quotes and backslashes.
+  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 }
 
 function applyBooleanProp(obj: ObjectLiteralExpression, key: string, value: boolean | null | undefined) {
