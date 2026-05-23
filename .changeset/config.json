@@ -56,7 +56,6 @@
       "@objectstack/service-settings",
       "@objectstack/service-storage",
       "@objectstack/account",
-      "@objectstack/console",
       "create-objectstack",
       "objectstack-vscode"
     ]

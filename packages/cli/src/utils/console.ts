@@ -4,16 +4,19 @@
  * Console UI Integration Utilities
  *
  * Mirrors `studio.ts` / `account.ts` but for the opinionated, fork-ready
- * runtime console (`@objectstack/console`). The Console SPA is mounted at
+ * runtime console — published as `@object-ui/console` from the
+ * objectstack-ai/objectui monorepo. The Console SPA is mounted at
  * `/_console/` by every deployment that opts in (CLI dev server,
  * self-host, Vercel) — exactly the same convention as `_studio` and
  * `_account`. The Console is built with `base: '/_console/'`, so its
  * pre-built `dist/` is served verbatim.
  *
- * Note: this module was previously named `dashboard.ts` (and the SPA was
- * `apps/dashboard`). It was renamed to disambiguate from the spec-level
- * `Dashboard` metadata type — the Console *renders* dashboards, it is not
- * itself a dashboard.
+ * History:
+ *   - Was previously consumed as a workspace package (`@objectstack/console`
+ *     at `apps/console`) in this monorepo.
+ *   - Was renamed and moved upstream to `@object-ui/console` (see
+ *     https://github.com/objectstack-ai/objectui/tree/main/apps/console).
+ *   - We now resolve it from `node_modules` like any other npm dep.
  */
 import path from 'path';
 import fs from 'fs';
@@ -25,54 +28,82 @@ import { pathToFileURL } from 'url';
 /** URL mount path for the Console portal inside the ObjectStack server */
 export const CONSOLE_PATH = '/_console';
 
+/** npm package name for the upstream Console SPA. */
+const CONSOLE_PACKAGE = '@object-ui/console';
+
 // ─── Path Resolution ────────────────────────────────────────────────
 
 /**
- * Resolve the filesystem path to the @objectstack/console package.
- * Searches workspace locations first, then falls back to node_modules.
+ * Resolve the filesystem path to the @object-ui/console package.
+ *
+ * Resolution order:
+ *   1. `require.resolve` from the consumer cwd (typical app install).
+ *   2. `require.resolve` from this CLI's own location (pnpm workspace).
+ *   3. Direct `<cwd>/node_modules/@object-ui/console` filesystem check.
+ *   4. Sibling-repo dev fallback — `../objectui/apps/console` — so the
+ *      framework monorepo can be developed against an in-tree checkout
+ *      of objectui without publishing every change. Matched by checking
+ *      `package.json.name === "@object-ui/console"`.
  */
 export function resolveConsolePath(): string | null {
   const cwd = process.cwd();
 
-  // Workspace candidates (monorepo layouts)
-  const candidates = [
-    path.resolve(cwd, 'apps/console'),
-    path.resolve(cwd, '../../apps/console'),
-    path.resolve(cwd, '../apps/console'),
-  ];
-
-  for (const candidate of candidates) {
-    const pkgPath = path.join(candidate, 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      try {
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-        if (pkg.name === '@objectstack/console') return candidate;
-      } catch {
-        // Skip invalid package.json
-      }
-    }
-  }
-
-  // Fallback: resolve from node_modules via createRequire.
+  // 1 + 2: node module resolution from cwd and from the CLI itself.
   const resolutionBases = [
-    pathToFileURL(path.join(cwd, 'package.json')).href,  // consumer workspace
-    import.meta.url,                                       // CLI package itself
+    pathToFileURL(path.join(cwd, 'package.json')).href, // consumer workspace
+    import.meta.url,                                      // CLI package itself
   ];
 
   for (const base of resolutionBases) {
     try {
       const req = createRequire(base);
-      const resolved = req.resolve('@objectstack/console/package.json');
-      return path.dirname(resolved);
+      // Resolve the bare package (uses `main`/`exports`) and walk up
+      // to find the package root. Avoids `./package.json` subpath which
+      // is gated by the `exports` field in newer packages.
+      const resolved = req.resolve(CONSOLE_PACKAGE);
+      let dir = path.dirname(resolved);
+      // Walk up until we find a package.json whose `name` matches.
+      for (let i = 0; i < 8; i++) {
+        const pkgPath = path.join(dir, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+          try {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+            if (pkg.name === CONSOLE_PACKAGE) return dir;
+          } catch {
+            // ignore parse errors and keep walking
+          }
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
     } catch {
-      // Not resolvable from this base — try next
+      // Not resolvable from this base — try next.
     }
   }
 
-  // Last resort: direct filesystem check in cwd/node_modules
-  const directPath = path.join(cwd, 'node_modules', '@objectstack', 'console');
+  // 3: direct filesystem check in cwd/node_modules.
+  const directPath = path.join(cwd, 'node_modules', '@object-ui', 'console');
   if (fs.existsSync(path.join(directPath, 'package.json'))) {
     return directPath;
+  }
+
+  // 4: sibling-repo dev fallback. Useful when iterating on the Console
+  // source inside `objectui` while running the framework CLI here.
+  const siblingCandidates = [
+    path.resolve(cwd, '../objectui/apps/console'),
+    path.resolve(cwd, '../../objectui/apps/console'),
+  ];
+  for (const candidate of siblingCandidates) {
+    const pkgPath = path.join(candidate, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        if (pkg.name === CONSOLE_PACKAGE) return candidate;
+      } catch {
+        // Skip invalid package.json
+      }
+    }
   }
 
   return null;

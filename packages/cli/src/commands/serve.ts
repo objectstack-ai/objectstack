@@ -1446,18 +1446,19 @@ export default class Serve extends Command {
         }
 
         // ── Console portal ──────────────────────────────────────────
-        // The opinionated, fork-ready runtime console (`@objectstack/console`)
-        // mounts under `/_console/` exactly like Studio/Account. When
-        // present, it owns root `/` redirect (preferred default UI). It
-        // is optional — we only mount it when the package resolves and
-        // a pre-built `dist/` is present.
+        // The opinionated, fork-ready runtime console (`@object-ui/console`,
+        // published from the objectstack-ai/objectui monorepo) mounts under
+        // `/_console/` exactly like Studio/Account. When present, it owns
+        // root `/` redirect (preferred default UI). It is optional — we
+        // only mount it when the package resolves and a pre-built `dist/`
+        // is present.
         if (consolePath) {
           if (consoleWillMount) {
             const consoleDistPath = path.join(consolePath, 'dist');
             await kernel.use(createConsoleStaticPlugin(consoleDistPath, { isDev }));
             trackPlugin('ConsoleUI');
           } else {
-            console.warn(chalk.yellow(`  ⚠ Console dist not found — run "pnpm --filter @objectstack/console build" first`));
+            console.warn(chalk.yellow(`  ⚠ Console dist not found — install \`@object-ui/console\` (already built) or run \`pnpm --filter @object-ui/console build\` in the objectui workspace`));
           }
         }
       }
