@@ -24,6 +24,11 @@ export { MemoryLock, type MemoryLockOptions } from './memory/lock.js';
 export { MemoryKV, VersionMismatchError } from './memory/kv.js';
 export { MemoryCounter } from './memory/counter.js';
 
+export {
+    ClusterServicePlugin,
+    type ClusterServicePluginOptions,
+} from './cluster-service-plugin.js';
+
 // Re-export contracts for convenience.
 export type {
     IClusterService,

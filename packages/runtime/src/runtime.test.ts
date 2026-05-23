@@ -24,10 +24,17 @@ describe('Runtime', () => {
         expect(runtime.getKernel()).toBeDefined();
     });
 
-    it('should not auto-register any plugins', () => {
+    it('auto-registers the cluster service plugin', () => {
         const runtime = new Runtime();
         const kernel = runtime.getKernel();
-        // Runtime is a clean slate — no plugins auto-registered
+        expect(kernel.use).toHaveBeenCalledTimes(1);
+        const plugin = (kernel.use as any).mock.calls[0][0];
+        expect(plugin.name).toBe('com.objectstack.service.cluster');
+    });
+
+    it('skips cluster auto-registration when cluster:false', () => {
+        const runtime = new Runtime({ cluster: false });
+        const kernel = runtime.getKernel();
         expect(kernel.use).not.toHaveBeenCalled();
     });
 

@@ -23,6 +23,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@objectstack/core": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {

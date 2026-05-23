@@ -1,6 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectKernel, Plugin, IHttpServer, ObjectKernelConfig } from '@objectstack/core';
+import {
+    ClusterServicePlugin,
+    type ClusterServicePluginOptions,
+} from '@objectstack/service-cluster';
+import type { ClusterCapabilityConfigInput } from '@objectstack/spec/kernel';
 
 export interface RuntimeConfig {
     /**
@@ -14,6 +19,19 @@ export interface RuntimeConfig {
      * Kernel Configuration
      */
     kernel?: ObjectKernelConfig;
+
+    /**
+     * Cluster service configuration.
+     *
+     * - Omit (default): a single-node `memory` cluster is auto-registered.
+     * - `false`: skip auto-registration entirely. Register your own
+     *   `ClusterServicePlugin` if you need it later.
+     * - `ClusterCapabilityConfigInput`: forwarded to `defineCluster()`.
+     * - `{ cluster: IClusterService }`: bring your own instance.
+     *
+     * See `content/docs/concepts/cluster-semantics.mdx` for driver options.
+     */
+    cluster?: false | ClusterCapabilityConfigInput | ClusterServicePluginOptions;
 }
 
 /**
@@ -40,6 +58,31 @@ export class Runtime {
         if (config.server) {
              this.kernel.registerService('http.server', config.server);
         }
+
+        // Auto-register cluster service (memory driver by default) unless
+        // explicitly opted out. Plugins resolve it via
+        // `ctx.getService<IClusterService>('cluster')`.
+        if (config.cluster !== false) {
+            const opts = this.normalizeClusterOptions(config.cluster);
+            this.kernel.use(new ClusterServicePlugin(opts));
+        }
+    }
+
+    private normalizeClusterOptions(
+        raw: RuntimeConfig['cluster'],
+    ): ClusterServicePluginOptions {
+        if (!raw) return {};
+        // Discriminate by shape: presence of `cluster` (instance) or
+        // explicit `config` key means it's already an options bag.
+        if (
+            typeof raw === 'object' &&
+            ('cluster' in raw || 'config' in raw) &&
+            !('driver' in raw)
+        ) {
+            return raw as ClusterServicePluginOptions;
+        }
+        // Otherwise treat as `ClusterCapabilityConfigInput`.
+        return { config: raw as ClusterCapabilityConfigInput };
     }
     
     /**
