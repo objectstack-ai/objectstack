@@ -1,0 +1,37 @@
+{
+  "name": "@objectstack/plugin-webhook-outbox",
+  "version": "5.1.0",
+  "license": "Apache-2.0",
+  "description": "Persistent, cluster-aware webhook outbox + dispatcher. Implements the durable delivery pipeline described in content/docs/concepts/webhook-delivery.mdx.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/spec": "workspace:*",
+    "@objectstack/service-cluster": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  },
+  "keywords": ["objectstack", "plugin", "webhook", "outbox", "cluster"],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/framework.git",
+    "directory": "packages/plugins/plugin-webhook-outbox"
+  }
+}
