@@ -47,13 +47,11 @@ export const QuoteLineItem = ObjectSchema.create({
     }),
 
     list_price: Field.currency({
-      currencyConfig: { defaultCurrency: 'USD' },
       label: 'List Price',
       readonly: true,
     }),
 
     unit_price: Field.currency({
-      currencyConfig: { defaultCurrency: 'USD' },
       label: 'Sales Price',
       required: true,
     }),

@@ -203,7 +203,6 @@ export const Lead = ObjectSchema.create({
 
     // Additional Info
     annual_revenue: Field.currency({
-      currencyConfig: { defaultCurrency: 'USD' },
       label: 'Annual Revenue',
       scale: 2,
       group: 'additional',

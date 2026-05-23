@@ -91,8 +91,7 @@ export const Quote = ObjectSchema.create({
     }),
     
     // Pricing
-    subtotal: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    subtotal: Field.currency({
       label: 'Subtotal',
       scale: 2,
       readonly: true,
@@ -105,27 +104,23 @@ export const Quote = ObjectSchema.create({
       max: 100,
     }),
     
-    discount_amount: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    discount_amount: Field.currency({
       label: 'Discount Amount',
       scale: 2,
       readonly: true,
     }),
     
-    tax: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    tax: Field.currency({
       label: 'Tax',
       scale: 2,
     }),
     
-    shipping_handling: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    shipping_handling: Field.currency({
       label: 'Shipping & Handling',
       scale: 2,
     }),
     
-    total_price: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    total_price: Field.currency({
       label: 'Total Price',
       scale: 2,
       readonly: true,

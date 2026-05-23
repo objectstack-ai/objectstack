@@ -71,16 +71,14 @@ export const Product = ObjectSchema.create({
     }),
     
     // Pricing
-    list_price: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    list_price: Field.currency({
       label: 'List Price',
       scale: 2,
       min: 0,
       required: true,
     }),
     
-    cost: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    cost: Field.currency({
       label: 'Cost',
       scale: 2,
       min: 0,

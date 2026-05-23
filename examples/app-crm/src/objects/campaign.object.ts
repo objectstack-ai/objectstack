@@ -85,29 +85,25 @@ export const Campaign = ObjectSchema.create({
     }),
     
     // Budget & ROI
-    budgeted_cost: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    budgeted_cost: Field.currency({
       label: 'Budgeted Cost',
       scale: 2,
       min: 0,
     }),
     
-    actual_cost: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    actual_cost: Field.currency({
       label: 'Actual Cost',
       scale: 2,
       min: 0,
     }),
     
-    expected_revenue: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    expected_revenue: Field.currency({
       label: 'Expected Revenue',
       scale: 2,
       min: 0,
     }),
     
-    actual_revenue: Field.currency({ 
-      currencyConfig: { defaultCurrency: 'USD' },
+    actual_revenue: Field.currency({
       label: 'Actual Revenue',
       scale: 2,
       min: 0,
