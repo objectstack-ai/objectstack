@@ -2,21 +2,12 @@
   "title": "AI Protocol",
   "pages": [
     "agent",
-    "agent-action",
     "conversation",
-    "cost",
-    "devops-agent",
-    "feedback-loop",
+    "embedding",
     "mcp",
-    "metadata-persistence",
     "model-registry",
-    "nlq",
-    "orchestration",
-    "plugin-development",
-    "predictive",
-    "rag-pipeline",
-    "runtime-ops",
     "skill",
-    "tool"
+    "tool",
+    "usage"
   ]
 }

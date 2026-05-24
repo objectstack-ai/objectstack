@@ -5,33 +5,33 @@ description: Mcp protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
 
-Model Context Protocol (MCP)
+Model Context Protocol (MCP) — Reference & Binding Primitives
 
-Defines the protocol for connecting AI assistants to external tools, data sources,
+MCP itself is an external protocol defined by Anthropic
 
-and resources. MCP enables AI models to access contextual information, invoke
+(https://modelcontextprotocol.io). The platform does NOT re-define
 
-functions, and interact with external systems in a standardized way.
+MCP's wire format, transport, or message shapes — that is the job
 
-Architecture Alignment:
+of the `@modelcontextprotocol/sdk` consumed by `plugin-mcp-server`.
 
-- Anthropic Model Context Protocol (MCP)
+This file defines only the two things the *platform* needs:
 
-- OpenAI Function Calling / Tools
+1. **MCPServerRef** — how a project references an external MCP
 
-- LangChain Tool Interface
+server (so an agent can mount its tools).
 
-- Microsoft Semantic Kernel Plugins
+2. **MCPToolBinding** — how an MCP tool from a referenced server
 
-Use Cases:
+is exposed as an ObjectStack [AIToolDefinition](AIToolDefinition) (alias,
 
-- Connect AI agents to ObjectStack data (Objects, Views, Reports)
+visibility, approval policy).
 
-- Expose business logic as callable tools (Workflows, Flows, Actions)
+Everything else (transport details, capability negotiation,
 
-- Provide dynamic context to AI models (User profile, Recent activity)
+resource/prompt shapes, streaming, sampling) is handled by the SDK
 
-- Enable AI to read and modify data through standardized interfaces
+at runtime and does not need a metadata representation.
 
 <Callout type="info">
 **Source:** `packages/spec/src/ai/mcp.zod.ts`
@@ -40,363 +40,63 @@ Use Cases:
 ## TypeScript Usage
 
 ```typescript
-import { MCPCapability, MCPPrompt, MCPPromptArgument, MCPPromptMessage, MCPPromptRequest, MCPPromptResponse, MCPResource, MCPResourceRequest, MCPResourceResponse, MCPResourceTemplate, MCPResourceType, MCPRootEntry, MCPRootsConfig, MCPServerInfo, MCPStreamingConfig, MCPTool, MCPToolApproval, MCPToolCallRequest, MCPToolCallResponse, MCPToolParameter, MCPTransportConfig, MCPTransportType } from '@objectstack/spec/ai';
-import type { MCPCapability, MCPPrompt, MCPPromptArgument, MCPPromptMessage, MCPPromptRequest, MCPPromptResponse, MCPResource, MCPResourceRequest, MCPResourceResponse, MCPResourceTemplate, MCPResourceType, MCPRootEntry, MCPRootsConfig, MCPServerInfo, MCPStreamingConfig, MCPTool, MCPToolApproval, MCPToolCallRequest, MCPToolCallResponse, MCPToolParameter, MCPTransportConfig, MCPTransportType } from '@objectstack/spec/ai';
+import { MCPApprovalPolicy, MCPServerRef, MCPToolBinding, MCPTransport } from '@objectstack/spec/ai';
+import type { MCPApprovalPolicy, MCPServerRef, MCPToolBinding, MCPTransport } from '@objectstack/spec/ai';
 
 // Validate data
-const result = MCPCapability.parse(data);
+const result = MCPApprovalPolicy.parse(data);
 ```
 
 ---
 
-## MCPCapability
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **resources** | `boolean` | ✅ | Supports resource listing and retrieval |
-| **resourceTemplates** | `boolean` | ✅ | Supports dynamic resource templates |
-| **tools** | `boolean` | ✅ | Supports tool/function calling |
-| **prompts** | `boolean` | ✅ | Supports prompt templates |
-| **sampling** | `boolean` | ✅ | Supports sampling from LLMs |
-| **logging** | `boolean` | ✅ | Supports logging and debugging |
-
-
----
-
-## MCPPrompt
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Prompt template name (snake_case) |
-| **description** | `string` | optional | Prompt description |
-| **messages** | `Object[]` | ✅ | Prompt message sequence |
-| **arguments** | `Object[]` | optional | Dynamic arguments for the prompt |
-| **category** | `string` | optional |  |
-| **tags** | `string[]` | optional |  |
-| **version** | `string` | ✅ |  |
-
-
----
-
-## MCPPromptArgument
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Argument name |
-| **description** | `string` | optional |  |
-| **type** | `Enum<'string' \| 'number' \| 'boolean'>` | ✅ |  |
-| **required** | `boolean` | ✅ |  |
-| **default** | `any` | optional |  |
-
-
----
-
-## MCPPromptMessage
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **role** | `Enum<'system' \| 'user' \| 'assistant'>` | ✅ | Message role |
-| **content** | `string` | ✅ | Message content (can include `{{variable}`} placeholders) |
-
-
----
-
-## MCPPromptRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **promptName** | `string` | ✅ | Prompt template to use |
-| **arguments** | `Record<string, any>` | optional | Prompt arguments |
-
-
----
-
-## MCPPromptResponse
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **promptName** | `string` | ✅ |  |
-| **messages** | `Object[]` | ✅ | Rendered prompt messages |
-
-
----
-
-## MCPResource
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **uri** | `string` | ✅ | Unique resource identifier (e.g., "objectstack://objects/account/ABC123") |
-| **name** | `string` | ✅ | Human-readable resource name |
-| **description** | `string` | optional | Resource description for AI consumption |
-| **mimeType** | `string` | optional | MIME type (e.g., "application/json", "text/plain") |
-| **resourceType** | `Enum<'text' \| 'json' \| 'binary' \| 'stream'>` | ✅ |  |
-| **content** | `any` | optional | Resource content (for static resources) |
-| **contentUrl** | `string` | optional | URL to fetch content dynamically |
-| **size** | `integer` | optional | Resource size in bytes |
-| **lastModified** | `string` | optional | Last modification timestamp (ISO 8601) |
-| **tags** | `string[]` | optional | Tags for resource categorization |
-| **permissions** | `Object` | optional |  |
-| **cacheable** | `boolean` | ✅ | Whether this resource can be cached |
-| **cacheMaxAge** | `integer` | optional | Cache max age in seconds |
-
-
----
-
-## MCPResourceRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **uri** | `string` | ✅ | Resource URI to fetch |
-| **parameters** | `Record<string, any>` | optional | URI template parameters |
-
-
----
-
-## MCPResourceResponse
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **resource** | `Object` | ✅ |  |
-| **content** | `any` | ✅ | Resource content |
-
-
----
-
-## MCPResourceTemplate
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **uriPattern** | `string` | ✅ | URI pattern with variables (e.g., "objectstack://objects/`{objectName}`/`{recordId}`") |
-| **name** | `string` | ✅ | Template name |
-| **description** | `string` | optional |  |
-| **parameters** | `Object[]` | ✅ | URI parameters |
-| **handler** | `string` | optional | Handler function name for dynamic generation |
-| **mimeType** | `string` | optional |  |
-| **resourceType** | `Enum<'text' \| 'json' \| 'binary' \| 'stream'>` | ✅ |  |
-
-
----
-
-## MCPResourceType
+## MCPApprovalPolicy
 
 ### Allowed Values
 
-* `text`
-* `json`
-* `binary`
-* `stream`
+* `always`
+* `never`
+* `first_call`
 
 
 ---
 
-## MCPRootEntry
-
-A single root directory or resource
+## MCPServerRef
 
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **uri** | `string` | ✅ | Root URI (e.g., file:///path/to/project) |
-| **name** | `string` | optional | Human-readable root name |
-| **readOnly** | `boolean` | optional | Whether the root is read-only |
+| **name** | `string` | ✅ | Machine name (snake_case) |
+| **label** | `string` | ✅ | Display label |
+| **transport** | `Enum<'stdio' \| 'http' \| 'websocket'>` | ✅ |  |
+| **endpoint** | `string` | ✅ | Command (stdio) or URL (http/websocket) |
+| **secretRef** | `string` | optional |  |
+| **active** | `boolean` | ✅ |  |
 
 
 ---
 
-## MCPRootsConfig
-
-Roots configuration for MCP client
+## MCPToolBinding
 
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **roots** | `Object[]` | ✅ | Root directories or resources available to the client |
-| **watchForChanges** | `boolean` | ✅ | Watch root directories for filesystem changes |
-| **notifyOnChange** | `boolean` | ✅ | Notify server when root contents change |
-
-
----
-
-## MCPServerInfo
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Server name |
-| **version** | `string` | ✅ | Server version (semver) |
-| **description** | `string` | optional |  |
-| **capabilities** | `Object` | ✅ |  |
-| **protocolVersion** | `string` | ✅ | MCP protocol version |
-| **vendor** | `string` | optional | Server vendor/provider |
-| **homepage** | `string` | optional | Server homepage URL |
-| **documentation** | `string` | optional | Documentation URL |
-
-
----
-
-## MCPStreamingConfig
-
-Streaming configuration for MCP communication
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable streaming for MCP communication |
-| **chunkSize** | `integer` | optional | Size of each streamed chunk in bytes |
-| **heartbeatIntervalMs** | `integer` | ✅ | Heartbeat interval in milliseconds |
-| **backpressure** | `Enum<'drop' \| 'buffer' \| 'block'>` | optional | Backpressure handling strategy |
-
-
----
-
-## MCPTool
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Tool function name (snake_case) |
-| **description** | `string` | ✅ | Tool description for AI consumption (be detailed and specific) |
-| **parameters** | `[__schema0](./__schema0)[]` | ✅ | Tool parameters |
-| **returns** | `Object` | optional |  |
-| **handler** | `string` | ✅ | Handler function or endpoint reference |
-| **async** | `boolean` | ✅ | Whether the tool executes asynchronously |
-| **timeout** | `integer` | optional | Execution timeout in milliseconds |
-| **sideEffects** | `Enum<'none' \| 'read' \| 'write' \| 'delete'>` | ✅ | Tool side effects |
-| **requiresConfirmation** | `boolean` | ✅ | Require user confirmation before execution |
-| **confirmationMessage** | `string` | optional |  |
-| **examples** | `Object[]` | optional | Usage examples for AI learning |
-| **category** | `string` | optional | Tool category (e.g., "data", "workflow", "analytics") |
-| **tags** | `string[]` | optional |  |
-| **deprecated** | `boolean` | ✅ |  |
-| **version** | `string` | ✅ |  |
-
-
----
-
-## MCPToolApproval
-
-Tool approval configuration for MCP
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **requireApproval** | `boolean` | ✅ | Require approval before tool execution |
-| **approvalStrategy** | `Enum<'human_in_loop' \| 'auto_approve' \| 'policy_based'>` | ✅ | Approval strategy for tool execution |
-| **dangerousToolPatterns** | `string[]` | optional | Regex patterns for tools needing approval |
-| **autoApproveTimeout** | `integer` | optional | Auto-approve timeout in seconds |
-
-
----
-
-## MCPToolCallRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **toolName** | `string` | ✅ | Tool to invoke |
-| **parameters** | `Record<string, any>` | ✅ | Tool parameters |
-| **timeout** | `integer` | optional |  |
-| **confirmationProvided** | `boolean` | optional | User confirmation for tools that require it |
-| **context** | `Object` | optional |  |
-
-
----
-
-## MCPToolCallResponse
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
+| **server** | `string` | ✅ |  |
 | **toolName** | `string` | ✅ |  |
-| **status** | `Enum<'success' \| 'error' \| 'timeout' \| 'cancelled'>` | ✅ |  |
-| **result** | `any` | optional | Tool execution result |
-| **error** | `Object` | optional |  |
-| **executionTime** | `number` | optional | Execution time in milliseconds |
-| **timestamp** | `string` | optional |  |
+| **aliasAs** | `string` | optional |  |
+| **approval** | `Enum<'always' \| 'never' \| 'first_call'>` | ✅ |  |
 
 
 ---
 
-## MCPToolParameter
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Parameter name |
-| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>` | ✅ |  |
-| **description** | `string` | ✅ | Parameter description for AI consumption |
-| **required** | `boolean` | ✅ |  |
-| **default** | `any` | optional |  |
-| **enum** | `any[]` | optional | Allowed values |
-| **pattern** | `string` | optional | Regex validation pattern (for strings) |
-| **minimum** | `number` | optional | Minimum value (for numbers) |
-| **maximum** | `number` | optional | Maximum value (for numbers) |
-| **minLength** | `integer` | optional | Minimum length (for strings/arrays) |
-| **maxLength** | `integer` | optional | Maximum length (for strings/arrays) |
-| **properties** | `Record<string, [#](./#)>` | optional | Properties for object types |
-| **items** | `[#](./#)` | optional | Item schema for array types |
-
-
----
-
-## MCPTransportConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `Enum<'stdio' \| 'http' \| 'websocket' \| 'grpc'>` | ✅ |  |
-| **url** | `string` | optional | Server URL (for HTTP/WebSocket/gRPC) |
-| **headers** | `Record<string, string>` | optional | Custom headers for requests |
-| **auth** | `Object` | optional |  |
-| **timeout** | `integer` | ✅ | Request timeout in milliseconds |
-| **retryAttempts** | `integer` | ✅ |  |
-| **retryDelay** | `integer` | ✅ | Delay between retries in milliseconds |
-| **command** | `string` | optional | Command to execute (for stdio transport) |
-| **args** | `string[]` | optional | Command arguments |
-| **env** | `Record<string, string>` | optional | Environment variables |
-| **workingDirectory** | `string` | optional | Working directory for the process |
-
-
----
-
-## MCPTransportType
+## MCPTransport
 
 ### Allowed Values
 
 * `stdio`
 * `http`
 * `websocket`
-* `grpc`
 
 
 ---

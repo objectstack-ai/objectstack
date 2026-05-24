@@ -60,7 +60,7 @@ const result = Manifest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
-| **namespace** | `string` | optional | Short namespace identifier for metadata scoping (e.g. "crm", "todo") |
+| **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | ✅ | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
 | **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| 'module' \| 'gateway' \| 'adapter'>` | ✅ | Type of package |

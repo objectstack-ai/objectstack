@@ -1,0 +1,97 @@
+---
+title: Embedding
+description: Embedding protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
+
+Embedding & Vector Store Primitives
+
+Platform contract for configuring embedding models and vector stores.
+
+Scope (intentionally minimal):
+
+- How to reference an embedding model (provider + model name + secret).
+
+- How to reference a vector store (provider + connection).
+
+NOT in scope (these belong to application code, not the platform):
+
+- Chunking strategies (fixed/semantic/recursive/markdown).
+
+- Retrieval pipelines (rerankers, multi-stage retrieval, filters).
+
+- Document loaders / ingestion DSLs.
+
+- End-to-end RAG pipeline orchestration.
+
+These were removed in v1 because they describe one specific way to
+
+build a RAG application; the platform's job is to expose the embed +
+
+vector primitives so any RAG strategy can be built on top.
+
+<Callout type="info">
+**Source:** `packages/spec/src/ai/embedding.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { EmbeddingModel, VectorStore, VectorStoreProvider } from '@objectstack/spec/ai';
+import type { EmbeddingModel, VectorStore, VectorStoreProvider } from '@objectstack/spec/ai';
+
+// Validate data
+const result = EmbeddingModel.parse(data);
+```
+
+---
+
+## EmbeddingModel
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'openai' \| 'cohere' \| 'azure_openai' \| 'huggingface' \| 'local' \| 'custom'>` | ✅ |  |
+| **model** | `string` | ✅ | Provider-specific model identifier |
+| **dimensions** | `integer` | ✅ | Embedding vector dimensions |
+| **endpoint** | `string` | optional | Custom endpoint URL |
+| **secretRef** | `string` | optional | Reference to stored API key secret |
+
+
+---
+
+## VectorStore
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'pgvector' \| 'chroma' \| 'qdrant' \| 'pinecone' \| 'weaviate' \| 'milvus' \| 'redis' \| 'opensearch' \| 'elasticsearch' \| 'custom'>` | ✅ |  |
+| **collection** | `string` | ✅ | Collection / index / namespace name |
+| **endpoint** | `string` | optional | Connection string or endpoint URL |
+| **secretRef** | `string` | optional | Reference to stored credential secret |
+| **dimensions** | `integer` | optional |  |
+
+
+---
+
+## VectorStoreProvider
+
+### Allowed Values
+
+* `pgvector`
+* `chroma`
+* `qdrant`
+* `pinecone`
+* `weaviate`
+* `milvus`
+* `redis`
+* `opensearch`
+* `elasticsearch`
+* `custom`
+
+
+---
+

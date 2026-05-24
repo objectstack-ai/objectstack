@@ -1,0 +1,77 @@
+---
+title: Usage
+description: Usage protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
+
+AI Usage Primitives
+
+Platform contract for measuring AI consumption.
+
+Scope (intentionally minimal):
+
+- Token usage per call.
+
+- Per-call cost (computed from a model's unit price).
+
+- Model unit pricing.
+
+NOT in scope (deferred to FinOps / product layer):
+
+- Budget definitions, enforcement, alerts.
+
+- Cost allocation / chargeback / reports.
+
+- Optimization recommendations.
+
+Rationale: the platform must record *what was used*; deciding what
+
+to do about it (block calls, send alerts, allocate to cost centers)
+
+is product policy that varies wildly between tenants.
+
+<Callout type="info">
+**Source:** `packages/spec/src/ai/usage.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { AIUsageRecord, TokenUsage } from '@objectstack/spec/ai';
+import type { AIUsageRecord, TokenUsage } from '@objectstack/spec/ai';
+
+// Validate data
+const result = AIUsageRecord.parse(data);
+```
+
+---
+
+## AIUsageRecord
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **model** | `string` | ✅ |  |
+| **usage** | `Object` | ✅ |  |
+| **costUsd** | `number` | ✅ | Computed cost in USD |
+| **latencyMs** | `number` | optional |  |
+| **timestamp** | `string` | optional |  |
+
+
+---
+
+## TokenUsage
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **promptTokens** | `integer` | ✅ | Tokens consumed by the prompt |
+| **completionTokens** | `integer` | ✅ | Tokens generated in the completion |
+| **totalTokens** | `integer` | ✅ | Total tokens (prompt + completion) |
+
+
+---
+
