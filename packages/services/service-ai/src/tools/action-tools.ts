@@ -24,6 +24,7 @@
 
 import type {
   AIToolDefinition,
+  IAutomationService,
   IDataEngine,
   IMetadataService,
 } from '@objectstack/spec/contracts';
@@ -56,6 +57,16 @@ interface ObjectDef {
  * subject record when a `recordIdParam` is configured and (b) dispatch
  * to the registered handler via `executeAction`.
  *
+ * `automation` enables `type:'flow'` actions to dispatch into the
+ * automation service's flow runner. When omitted, flow actions are
+ * skipped at registration time with a clear reason.
+ *
+ * `apiClient` (or `apiBaseUrl`) enables `type:'api'` actions to perform
+ * an HTTP call to the action's `target` URL. The default client uses
+ * the global `fetch` and prepends `apiBaseUrl` to relative `target`s.
+ * Supply a custom client when you need bespoke auth, in-process
+ * routing, or stubbing in tests.
+ *
  * `principal` lets callers attribute AI-initiated mutations to a known
  * user id; it defaults to a synthetic `'ai_agent'` user so traces /
  * audit always have *some* actor.
@@ -63,10 +74,34 @@ interface ObjectDef {
 export interface ActionToolsContext {
   metadata: IMetadataService;
   dataEngine: IDataEngine;
+  /** Automation service for `type:'flow'` action dispatch. Optional. */
+  automation?: IAutomationService;
+  /** Custom API client for `type:'api'` actions. Defaults to a fetch-based client. */
+  apiClient?: ApiActionClient;
+  /** Base URL prepended to relative `target` paths for `type:'api'` actions. */
+  apiBaseUrl?: string;
+  /** Extra HTTP headers (e.g. auth bearer) applied to every `type:'api'` call. */
+  apiHeaders?: Record<string, string>;
   /** Synthetic user attribution for AI-initiated calls. */
   principal?: { id: string; name?: string };
   /** Tool-name prefix (default: `action_`). Keeps namespace separate from data tools. */
   toolPrefix?: string;
+}
+
+/**
+ * Minimal HTTP client shape used by `type:'api'` action dispatch.
+ *
+ * Implementations are expected to return a JSON-deserialised body (or
+ * `null` for empty responses) on 2xx, and throw on non-2xx so the tool
+ * surfaces the failure to the LLM as a tool error.
+ */
+export interface ApiActionClient {
+  request(input: {
+    url: string;
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    body?: Record<string, unknown>;
+    headers?: Record<string, string>;
+  }): Promise<unknown>;
 }
 
 /** Result returned to the LLM after invoking an action. */
@@ -87,16 +122,40 @@ interface ActionInvocationResult {
  *
  * Returns `null` when exposed, or a string reason when skipped.
  * Exported for tests and Studio "AI exposure" diagnostics.
+ *
+ * Supported types as of Phase 2: `script`, `api`, `flow`. Studio-only
+ * UI types (`url`, `modal`, `form`) remain skipped — they have no
+ * headless invocation path.
  */
-export function actionSkipReason(action: Action): string | null {
+export function actionSkipReason(
+  action: Action,
+  ctx?: { automation?: IAutomationService; apiClient?: ApiActionClient; apiBaseUrl?: string },
+): string | null {
   if (action.aiExposed === false) {
     return 'opted-out via aiExposed:false';
   }
-  // Phase 1 only handles script actions — Studio-only types (url/modal/form)
-  // do not have a headless invocation path, and `api`/`flow` require extra
-  // wiring (HTTP dispatcher / FlowService) we layer in Phase 2.
-  if (action.type !== 'script') return `type='${action.type}' not yet supported`;
-  if (!action.target && !action.body) return 'no target or body';
+  // Skip Studio-only types (no headless invocation surface).
+  if (action.type === 'url' || action.type === 'modal' || action.type === 'form') {
+    return `type='${action.type}' is UI-only`;
+  }
+  if (action.type !== 'script' && action.type !== 'api' && action.type !== 'flow') {
+    return `type='${action.type}' not supported`;
+  }
+  if (action.type === 'script' && !action.target && !action.body) {
+    return 'no target or body';
+  }
+  if ((action.type === 'api' || action.type === 'flow') && !action.target) {
+    return `type='${action.type}' requires a target`;
+  }
+  // Wiring availability checks — only meaningful when ctx is supplied.
+  if (ctx) {
+    if (action.type === 'flow' && !ctx.automation) {
+      return 'no automation service available';
+    }
+    if (action.type === 'api' && !ctx.apiClient && !ctx.apiBaseUrl) {
+      return 'no apiClient or apiBaseUrl configured';
+    }
+  }
   // Safety: dangerous actions require explicit human approval.
   if (action.confirmText) return 'requires confirmation (confirmText set)';
   if (action.mode === 'delete') return "mode='delete' — destructive";
