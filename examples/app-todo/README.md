@@ -108,6 +108,28 @@ pnpm --filter @example/app-todo build
 ### Explore the Config
 Open `objectstack.config.ts` to see how all pieces connect via `defineStack()`.
 
+## 🤖 AI Demo (NEW in v5)
+
+This example also showcases the v1 AI capabilities. Run the end-to-end demo:
+
+```bash
+pnpm --filter @example/app-todo test:ai
+```
+
+What it does — **no API key required**:
+
+1. Boots the Todo stack with `@objectstack/service-ai` and the in-memory `MemoryLLMAdapter`
+2. Registers a `memory` model in the runtime `ModelRegistry` for cost attribution
+3. Calls the built-in `query_data` tool with a natural-language request (`"list my todo_task records"`)
+4. The tool:
+   - Retrieves the matching object schema (`SchemaRetriever`)
+   - Generates an ObjectQL plan via `ai.generateObject()` (heuristic in memory mode)
+   - Executes the plan against the data engine
+   - Returns the records
+5. Verifies the call was auto-recorded as a row in the `ai_traces` object with `operation='generate_object'`, latency, status, and model
+
+To switch to a real LLM, replace `MemoryLLMAdapter` with the auto-detected `VercelLLMAdapter` and set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` — everything else stays the same.
+
 ## 📖 Learning Path
 
 1. **Start Here** — Simple task management with full protocol coverage

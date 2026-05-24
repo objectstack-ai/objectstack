@@ -15,17 +15,21 @@
     "start": "objectstack start",
     "build": "objectstack build",
     "typecheck": "tsc --noEmit",
-    "test": "objectstack test"
+    "test": "objectstack test",
+    "test:ai": "tsx test/ai.test.ts"
   },
   "dependencies": {
     "@objectstack/client": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:^",
+    "@objectstack/metadata": "workspace:*",
     "@objectstack/objectql": "workspace:^",
     "@objectstack/runtime": "workspace:^",
+    "@objectstack/service-ai": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
     "@objectstack/cli": "workspace:*",
+    "tsx": "^4.19.2",
     "typescript": "^6.0.3"
   }
 }

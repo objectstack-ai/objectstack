@@ -141,7 +141,9 @@ export interface FieldShape {
 
 /** Lower-case alphanumeric tokens of length ≥ 2 (English stop-words excluded). */
 function tokenise(query: string): string[] {
-  const raw = query.toLowerCase().match(/[a-z0-9_]+/g) ?? [];
+  // Split on any non-alphanumeric (including underscores) so `todo_task`
+  // tokenises to ['todo', 'task'] and matches snake_case object names.
+  const raw = query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
   return raw.filter(t => t.length >= 2 && !STOPWORDS.has(t));
 }
 

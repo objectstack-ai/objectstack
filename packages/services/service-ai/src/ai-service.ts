@@ -183,7 +183,7 @@ export class AIService implements IAIService {
         `Use VercelLLMAdapter with a structured-output-capable model.`,
       );
     }
-    return this.instrument('generateObject', options, () =>
+    return this.instrument('generate_object', options, () =>
       this.adapter.generateObject!(messages, schema, options),
     );
   }

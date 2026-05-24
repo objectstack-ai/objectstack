@@ -13,9 +13,9 @@ const TRACE_OBJECT = 'ai_traces';
 export type TraceOperation =
   | 'chat'
   | 'complete'
-  | 'streamChat'
-  | 'chatWithTools'
-  | 'generateObject'
+  | 'stream_chat'
+  | 'chat_with_tools'
+  | 'generate_object'
   | 'embed';
 
 /**

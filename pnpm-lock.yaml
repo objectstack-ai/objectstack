@@ -254,12 +254,18 @@ importers:
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:^
         version: link:../../packages/plugins/driver-sqlite-wasm
+      '@objectstack/metadata':
+        specifier: workspace:*
+        version: link:../../packages/metadata
       '@objectstack/objectql':
         specifier: workspace:^
         version: link:../../packages/objectql
       '@objectstack/runtime':
         specifier: workspace:^
         version: link:../../packages/runtime
+      '@objectstack/service-ai':
+        specifier: workspace:*
+        version: link:../../packages/services/service-ai
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../packages/spec
@@ -267,6 +273,9 @@ importers:
       '@objectstack/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.3
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

@@ -1,9 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { z } from 'zod';
 import type {
   ModelMessage,
   AIRequestOptions,
   AIResult,
+  AIObjectResult,
+  GenerateObjectOptions,
   TextStreamPart,
   ToolSet,
 } from '@objectstack/spec/contracts';
@@ -68,5 +71,78 @@ export class MemoryLLMAdapter implements LLMAdapter {
 
   async listModels(): Promise<string[]> {
     return ['memory'];
+  }
+
+  /**
+   * Heuristic structured-output for testing & demos — NOT a real LLM.
+   *
+   * Strategy:
+   * 1. Extract candidate object names from the system messages by matching
+   *    schema-context headers (`### name — Label`) emitted by
+   *    {@link SchemaRetriever.renderSnippet}.
+   * 2. Pick the candidate whose tokens overlap most with the last user
+   *    message (falls back to the first candidate).
+   * 3. Try `schema.safeParse({ objectName, limit: 20 })` — this satisfies the
+   *    `QueryPlanSchema` used by the built-in `query_data` tool.
+   * 4. If that fails, fall back to `schema.safeParse({})` for schemas that
+   *    accept defaults.
+   * 5. Otherwise throw with a clear message — the demo needs a real provider.
+   */
+  async generateObject<T = unknown>(
+    messages: ModelMessage[],
+    schema: z.ZodType<T>,
+    options?: GenerateObjectOptions,
+  ): Promise<AIObjectResult<T>> {
+    const sys = messages
+      .filter(m => m.role === 'system')
+      .map(m => (typeof m.content === 'string' ? m.content : ''))
+      .join('\n');
+    const headerRe = /^###\s+([a-z0-9_]+)\b/gim;
+    const candidates: string[] = [];
+    for (const match of sys.matchAll(headerRe)) {
+      if (match[1]) candidates.push(match[1]);
+    }
+
+    const lastUser = [...messages].reverse().find(m => m.role === 'user');
+    const userText = typeof lastUser?.content === 'string'
+      ? lastUser.content.toLowerCase()
+      : '';
+    const userTokens = new Set(
+      userText.split(/[^a-z0-9_]+/).filter(t => t.length > 1),
+    );
+
+    let chosen = candidates[0];
+    let bestScore = -1;
+    for (const name of candidates) {
+      const score = name
+        .split(/[^a-z0-9]+/)
+        .reduce((acc, tok) => acc + (tok && userTokens.has(tok) ? 1 : 0), 0);
+      if (score > bestScore) {
+        bestScore = score;
+        chosen = name;
+      }
+    }
+
+    const attempts: Array<Record<string, unknown>> = [];
+    if (chosen) attempts.push({ objectName: chosen, limit: 20 });
+    attempts.push({});
+
+    for (const attempt of attempts) {
+      const result = schema.safeParse(attempt);
+      if (result.success) {
+        return {
+          object: result.data,
+          model: options?.model ?? 'memory',
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        };
+      }
+    }
+
+    throw new Error(
+      'MemoryLLMAdapter.generateObject: unable to synthesise a value for the ' +
+      'requested schema. The memory adapter only handles QueryPlan-shaped ' +
+      'schemas — wire a real LLM adapter (OpenAI / Anthropic / Google) for ' +
+      'arbitrary structured output.',
+    );
   }
 }

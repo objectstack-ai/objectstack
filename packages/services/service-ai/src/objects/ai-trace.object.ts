@@ -48,9 +48,9 @@ export const AiTraceObject = ObjectSchema.create({
       options: [
         { label: 'Chat', value: 'chat' },
         { label: 'Complete', value: 'complete' },
-        { label: 'Stream Chat', value: 'streamChat' },
-        { label: 'Chat With Tools', value: 'chatWithTools' },
-        { label: 'Generate Object', value: 'generateObject' },
+        { label: 'Stream Chat', value: 'stream_chat' },
+        { label: 'Chat With Tools', value: 'chat_with_tools' },
+        { label: 'Generate Object', value: 'generate_object' },
         { label: 'Embed', value: 'embed' },
       ],
     }),
