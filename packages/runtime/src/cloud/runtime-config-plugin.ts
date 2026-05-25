@@ -82,21 +82,64 @@ export class RuntimeConfigPlugin implements Plugin {
                 return;
             }
             const rawApp = httpServer.getRawApp();
-            const payload = {
-                cloudUrl: this.cloudUrl,
-                singleEnvironment: this.singleEnvironment,
-                features: {
-                    installLocal: this.installLocal,
-                    marketplace: true,
-                },
+
+            // The tenant runtime is multi-tenant: one process serves many
+            // subdomains, each mapped to one sys_environment row. Telling the
+            // SPA *which* environment it is attached to (per-request) lets
+            // the App Marketplace skip the env-picker dialog and install
+            // directly into "this" env — the operator's domain already
+            // identifies it.
+            //
+            // Hostname → env is resolved by the same registry the per-env
+            // kernel router uses (env-registry). Falls back to the static
+            // payload when the host doesn't map to any env (e.g. a
+            // marketing root, a CLI-served single-env runtime, or
+            // cloud.objectos.app which mounts its own static handler).
+            const features = {
+                installLocal: this.installLocal,
+                marketplace: true,
             };
-            const handler = (c: any) => c.json(payload);
+            let envRegistry: any = null;
+            try { envRegistry = ctx.getService('env-registry'); } catch { /* not mounted (file/CLI mode) */ }
+
+            const handler = async (c: any) => {
+                const rawHost = c.req.header('host') ?? '';
+                const host = rawHost.split(':')[0].toLowerCase().trim();
+                let defaultEnvironmentId: string | undefined;
+                let defaultOrgId: string | undefined;
+                let resolvedSingleEnv = this.singleEnvironment;
+                if (envRegistry && host && typeof envRegistry.resolveHostname === 'function') {
+                    try {
+                        const resolved = await envRegistry.resolveHostname(host);
+                        if (resolved?.environmentId) {
+                            defaultEnvironmentId = resolved.environmentId;
+                            if (resolved.organizationId) defaultOrgId = String(resolved.organizationId);
+                            // Each subdomain is one environment from the
+                            // operator's POV: surface as single-environment
+                            // so the SPA hides multi-env affordances.
+                            resolvedSingleEnv = true;
+                        }
+                    } catch {
+                        // Resolver failures are non-fatal — fall through
+                        // to the static payload so /runtime/config never
+                        // 500s. Worst case the SPA shows its env picker.
+                    }
+                }
+                return c.json({
+                    cloudUrl: this.cloudUrl,
+                    singleEnvironment: resolvedSingleEnv,
+                    defaultOrgId,
+                    defaultEnvironmentId,
+                    features,
+                });
+            };
             rawApp.get('/api/v1/runtime/config', handler);
             // Legacy alias for older Studio bundles.
             rawApp.get('/api/v1/studio/runtime-config', handler);
             ctx.logger?.info?.('[RuntimeConfigPlugin] mounted /api/v1/runtime/config', {
                 cloudUrl: this.cloudUrl || '(empty)',
                 installLocal: this.installLocal,
+                perHostEnvResolution: !!envRegistry,
             });
         });
     };
