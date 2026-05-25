@@ -1,5 +1,44 @@
 # @objectstack/cli
 
+## 6.5.1
+
+### Patch Changes
+
+- Updated dependencies [de239ef]
+  - @objectstack/plugin-auth@6.5.1
+  - @objectstack/runtime@6.5.1
+  - @objectstack/client@6.5.1
+  - @objectstack/spec@6.5.1
+  - @objectstack/core@6.5.1
+  - @objectstack/objectql@6.5.1
+  - @objectstack/observability@6.5.1
+  - @objectstack/rest@6.5.1
+  - @objectstack/driver-memory@6.5.1
+  - @objectstack/driver-sql@6.5.1
+  - @objectstack/driver-turso@6.5.1
+  - @objectstack/driver-mongodb@6.5.1
+  - @objectstack/driver-sqlite-wasm@6.5.1
+  - @objectstack/plugin-approvals@6.5.1
+  - @objectstack/plugin-audit@6.5.1
+  - @objectstack/plugin-email@6.5.1
+  - @objectstack/plugin-hono-server@6.5.1
+  - @objectstack/plugin-mcp-server@6.5.1
+  - @objectstack/plugin-reports@6.5.1
+  - @objectstack/plugin-security@6.5.1
+  - @objectstack/plugin-sharing@6.5.1
+  - @objectstack/plugin-webhooks@6.5.1
+  - @objectstack/service-ai@6.5.1
+  - @objectstack/service-analytics@6.5.1
+  - @objectstack/service-automation@6.5.1
+  - @objectstack/service-cache@6.5.1
+  - @objectstack/service-feed@6.5.1
+  - @objectstack/service-job@6.5.1
+  - @objectstack/service-package@6.5.1
+  - @objectstack/service-queue@6.5.1
+  - @objectstack/service-realtime@6.5.1
+  - @objectstack/service-settings@6.5.1
+  - @objectstack/service-storage@6.5.1
+
 ## 6.5.0
 
 ### Minor Changes
