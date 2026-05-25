@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@better-auth/oauth-provider": "^1.6.11",
-    "@better-auth/utils": "^0.4.0",
+    "@noble/hashes": "^2.0.1",
     "@objectstack/core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",

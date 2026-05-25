@@ -367,13 +367,19 @@ export class AuthManager {
    *
    * better-auth defaults to `@better-auth/utils/password.node`, which calls
    * `node:crypto.scrypt`. WebContainer polyfills that API incompletely and
-   * signup throws `TypeError: y.run is not a function`. The pure-JS variant
-   * at `@better-auth/utils/password` uses `@noble/hashes/scrypt` with
-   * identical params (N=16384, r=16, p=1, dkLen=64) and emits the same
-   * `{salt}:{keyHex}` format, so existing hashes remain verifiable.
+   * signup throws `TypeError: y.run is not a function`.
+   *
+   * We can't dynamic-import `@better-auth/utils/password` because that
+   * package's `exports` map gates the pure-JS build behind a non-`"node"`
+   * condition — Node-the-runtime (which WebContainer reports itself as)
+   * always resolves to `password.node.mjs`. So we reimplement the same hash
+   * here using `@noble/hashes/scrypt` directly, with byte-identical params
+   * (N=16384, r=16, p=1, dkLen=64) and the same `{saltHex}:{keyHex}` storage
+   * format. Hashes produced by either implementation verify against the
+   * other — no migration needed.
    *
    * Returns `undefined` outside WebContainer so production deployments keep
-   * the native (fast) hasher and never load the JS fallback.
+   * the native (fast) hasher and never load `@noble/hashes`.
    */
   private async resolvePasswordHasher(): Promise<
     { hash: (password: string) => Promise<string>; verify: (args: { hash: string; password: string }) => Promise<boolean> } | undefined
@@ -385,14 +391,32 @@ export class AuthManager {
         Boolean((globalThis as any).process?.env?.STACKBLITZ));
     if (!isWebContainer) return undefined;
     try {
-      const mod = await import('@better-auth/utils/password');
+      const { scryptAsync } = await import('@noble/hashes/scrypt.js');
+      const PARAMS = { N: 16384, r: 16, p: 1, dkLen: 64, maxmem: 128 * 16384 * 16 * 2 } as const;
+      const toHex = (b: Uint8Array): string => {
+        let s = '';
+        for (let i = 0; i < b.length; i++) s += b[i]!.toString(16).padStart(2, '0');
+        return s;
+      };
+      const generateKey = (password: string, saltHex: string): Promise<Uint8Array> =>
+        scryptAsync(password.normalize('NFKC'), saltHex, PARAMS);
       return {
-        hash: (password: string) => mod.hashPassword(password),
-        verify: ({ hash, password }) => mod.verifyPassword(hash, password),
+        hash: async (password: string) => {
+          const saltBytes = (globalThis as any).crypto.getRandomValues(new Uint8Array(16));
+          const saltHex = toHex(saltBytes);
+          const key = await generateKey(password, saltHex);
+          return `${saltHex}:${toHex(key)}`;
+        },
+        verify: async ({ hash, password }) => {
+          const [saltHex, keyHex] = hash.split(':');
+          if (!saltHex || !keyHex) throw new Error('Invalid password hash');
+          const target = await generateKey(password, saltHex);
+          return toHex(target) === keyHex;
+        },
       };
     } catch (err: any) {
       console.warn(
-        `[AuthManager] WebContainer detected but pure-JS password hasher unavailable: ${err?.message ?? err}. Falling back to default.`,
+        `[AuthManager] WebContainer detected but pure-JS scrypt unavailable: ${err?.message ?? err}. Falling back to default.`,
       );
       return undefined;
     }
