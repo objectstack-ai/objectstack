@@ -9,6 +9,9 @@ export type { DataToolContext } from './data-tools.js';
 export { registerMetadataTools, METADATA_TOOL_DEFINITIONS } from './metadata-tools.js';
 export type { MetadataToolContext } from './metadata-tools.js';
 
+export { registerKnowledgeTools, SEARCH_KNOWLEDGE_TOOL } from './knowledge-tools.js';
+export type { KnowledgeToolContext } from './knowledge-tools.js';
+
 // Individual tool metadata exports
 export { createObjectTool } from './create-object.tool.js';
 export { addFieldTool } from './add-field.tool.js';

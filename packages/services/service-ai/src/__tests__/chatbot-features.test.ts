@@ -436,6 +436,7 @@ describe('Data Tools', () => {
         orderBy: undefined,
         limit: 10,
         offset: undefined,
+        context: { roles: [], permissions: [], isSystem: true },
       });
 
       const parsed = JSON.parse((result.output as any).value);
@@ -487,6 +488,7 @@ describe('Data Tools', () => {
       expect(dataEngine.findOne).toHaveBeenCalledWith('account', {
         where: { id: 'rec_123' },
         fields: undefined,
+        context: { roles: [], permissions: [], isSystem: true },
       });
 
       const parsed = JSON.parse((result.output as any).value);
@@ -524,6 +526,7 @@ describe('Data Tools', () => {
         where: { status: 'active' },
         groupBy: undefined,
         aggregations: [{ function: 'sum', field: 'revenue', alias: 'total_revenue' }],
+        context: { roles: [], permissions: [], isSystem: true },
       });
 
       const parsed = JSON.parse((result.output as any).value);

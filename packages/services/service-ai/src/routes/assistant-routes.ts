@@ -217,6 +217,24 @@ export function buildAssistantRoutes(
           const chatWithToolsOptions = {
             ...mergedOptions,
             maxIterations: agent.planning?.maxIterations,
+            // Forward the authenticated actor into every tool the loop
+            // invokes — built-in data tools promote this into the
+            // ObjectQL execution context so row-level security scopes
+            // the LLM to whatever the human user can already see/do.
+            toolExecutionContext: req.user
+              ? {
+                  actor: {
+                    id: req.user.userId,
+                    name: req.user.displayName,
+                    roles: req.user.roles,
+                    permissions: req.user.permissions,
+                  },
+                  conversationId:
+                    typeof body.conversationId === 'string' ? body.conversationId : undefined,
+                  environmentId:
+                    typeof context.environmentId === 'string' ? context.environmentId : undefined,
+                }
+              : undefined,
           };
 
           const wantStream = body.stream !== false;

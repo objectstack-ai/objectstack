@@ -1,0 +1,329 @@
+---
+title: Knowledge Protocol
+description: Pluggable RAG / knowledge retrieval for ObjectStack agents — protocol + adapter model.
+---
+
+# Knowledge Protocol
+
+ObjectStack does not ship its own RAG engine. The market has many mature
+options (RAGFlow, LlamaIndex, Dify, Vectara, pgvector + custom pipelines)
+and competing with them on chunking, embeddings, hybrid retrieval, and
+rerankers is not where the framework can add value.
+
+Instead, the framework defines a thin **Knowledge Protocol** — a
+spec-level contract for knowledge sources, documents, hits, and the
+service that orchestrates them — and ships individual adapters as
+**plugins**. This mirrors the same pattern already proven by
+`IDataEngine` / driver plugins (`driver-sql`, `driver-turso`,
+`driver-memory`) and `IStorageService` / S3 + local FS adapters.
+
+This document describes the **why**, the **contract**, the **plugin
+model**, and the **MVP scope** that ships in Phase 1.
+
+---
+
+## 1. Why a protocol, not a built-in engine
+
+Building our own RAG engine would force us to compete on three fronts
+where dedicated projects already win:
+
+- **Document understanding** — PDF/scan/table extraction (DeepDoc,
+  LlamaParse).
+- **Retrieval quality** — hybrid vector + BM25, MMR, rerankers.
+- **Operations** — knowledge base UI, embedding cost tracking, batch
+  reindex jobs.
+
+We have nothing distinctive to add to those layers. We **do** have
+distinctive value to add **around** them:
+
+1. **Metadata-native sources.** ObjectQL objects are first-class
+   knowledge sources. Records become documents automatically, with no
+   ETL.
+2. **Permission-aware retrieval.** Every search is scoped to the
+   caller's `ExecutionContext` so RLS naturally applies — the same
+   policy that protects REST and ObjectQL queries also protects what
+   the LLM can read.
+3. **Realtime sync.** ObjectQL `record.*` events drive incremental
+   reindex without manual cron jobs.
+4. **Unified audit + observability.** Knowledge searches participate in
+   the same trace / audit pipeline as REST, ObjectQL, and tool calls.
+
+The protocol scopes the framework's responsibility to (1)–(4) and
+delegates the rest to plugins.
+
+---
+
+## 2. Architectural overview
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                          @objectstack/spec                           │
+│                                                                      │
+│  KnowledgeSourceSchema   KnowledgeDocumentSchema   KnowledgeHitSchema│
+│  IKnowledgeService        IKnowledgeAdapter                          │
+└──────────────────────────────────────────────────────────────────────┘
+              ▲                                              ▲
+              │ depends on                       implements  │
+              │                                              │
+┌─────────────┴────────────────────────┐    ┌────────────────┴─────────────┐
+│  @objectstack/service-knowledge      │    │  Adapter plugins (one per    │
+│                                      │    │  backend, npm-published)     │
+│  • Source registry (metadata)        │    │                              │
+│  • Ingest router → adapter.upsert    │    │  • plugin-knowledge-memory   │
+│  • Search router  → adapter.search   │    │      (dev/test only)         │
+│  • Permission wrapper (RLS filter)   │    │  • plugin-knowledge-ragflow  │
+│  • Event sync (record.* → upsert)    │    │      (reference impl, REST)  │
+│  • Audit + metrics                   │    │  • plugin-knowledge-llama…   │
+│                                      │    │  • plugin-knowledge-dify     │
+│  Registers `knowledge` service       │    │  • plugin-knowledge-pgvector │
+└──────────────────────────────────────┘    └──────────────────────────────┘
+              ▲
+              │ consumes
+              │
+┌─────────────┴────────────────────────┐
+│  @objectstack/service-ai             │
+│                                      │
+│  • search_knowledge tool             │
+│  • Threads ToolExecutionContext      │
+│  • Wires into AI conversation loop   │
+└──────────────────────────────────────┘
+```
+
+Every box above is independently versioned. **Adding a new backend is
+one plugin package — zero changes to `spec`, `service-knowledge`, or
+`service-ai`.**
+
+---
+
+## 3. Protocol surface
+
+### 3.1 `KnowledgeSource` (declarative metadata)
+
+A `KnowledgeSource` describes *what* to index and *which adapter* to
+use. It is stored as metadata (versioned, environment-scoped) just
+like a view or a flow.
+
+Three source kinds:
+
+| Kind     | Origin                                              | Example use case                |
+|----------|-----------------------------------------------------|---------------------------------|
+| `object` | An ObjectQL object — each record becomes a document | Customer notes, KB articles     |
+| `file`   | A folder in `IStorageService`                       | Onboarded PDFs, uploads         |
+| `http`   | A list of remote URLs                               | External docs, RSS, sitemaps    |
+
+Every source binds to a named **adapter id** (e.g. `'ragflow'`,
+`'memory'`). The adapter id is resolved at runtime by the plugin that
+registers itself with that name. Adapter config (endpoint, dataset id,
+…) is passed through opaquely.
+
+### 3.2 `KnowledgeDocument`, `KnowledgeChunk`, `KnowledgeHit`
+
+Canonical shapes shared by every adapter:
+
+- `KnowledgeDocument` — one logical document (`id`, `sourceId`,
+  `sourceRecordId?`, `content`, `metadata`, `permissions?`).
+- `KnowledgeChunk` — adapter-produced chunk of a document. The framework
+  does **not** chunk; adapters do.
+- `KnowledgeHit` — a search result (`chunkId`, `documentId`, `score`,
+  `snippet`, `sourceRecordId?`, `metadata`).
+
+The `sourceRecordId` field is the linchpin of permission-aware
+retrieval: when a hit references an ObjectQL record, the
+`KnowledgeService` re-checks it through `dataEngine.find` with the
+caller's `ExecutionContext` and drops hits the user is not allowed to
+read. **A hit that the user could not have queried directly is never
+returned.**
+
+### 3.3 `IKnowledgeService` (consumed by `service-ai`, REST, Studio)
+
+```ts
+interface IKnowledgeService {
+  search(query: string, opts: KnowledgeSearchOptions): Promise<KnowledgeHit[]>;
+  indexDocument(sourceId: string, doc: KnowledgeDocument): Promise<void>;
+  deleteDocument(sourceId: string, documentId: string): Promise<void>;
+  reindexSource(sourceId: string, opts?: { dryRun?: boolean }): Promise<{ indexed: number }>;
+  registerAdapter(id: string, adapter: IKnowledgeAdapter): void;
+  listSources(): KnowledgeSource[];
+}
+```
+
+`KnowledgeSearchOptions` includes `sourceIds`, `topK`, `filter`, and
+the all-important `executionContext` (from the freshly-shipped
+permission-aware tool execution work — see `ai-capabilities.mdx`).
+
+### 3.4 `IKnowledgeAdapter` (implemented by plugins)
+
+```ts
+interface IKnowledgeAdapter {
+  readonly id: string;
+  upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void>;
+  search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]>;
+  delete(documentIds: string[], ctx: AdapterContext): Promise<void>;
+  healthCheck?(): Promise<{ ok: boolean; message?: string }>;
+}
+```
+
+The adapter surface is **deliberately minimal**: no embedding
+management, no chunk strategy, no rerank toggles. Those are the
+adapter's private concerns. Adapters that need extra knobs expose them
+in their plugin options.
+
+---
+
+## 4. Plugin model
+
+Adapters ship as standalone npm packages, registered via the standard
+`defineStack({ plugins: [...] })` flow:
+
+```ts
+import { knowledgeServicePlugin } from '@objectstack/service-knowledge';
+import { knowledgeMemoryPlugin } from '@objectstack/plugin-knowledge-memory';
+import { knowledgeRagflowPlugin } from '@objectstack/plugin-knowledge-ragflow';
+
+defineStack({
+  plugins: [
+    knowledgeServicePlugin(),
+    knowledgeMemoryPlugin(),                           // dev / test
+    knowledgeRagflowPlugin({                           // production
+      baseUrl: process.env.RAGFLOW_URL!,
+      apiKey: process.env.RAGFLOW_KEY!,
+    }),
+  ],
+});
+```
+
+Each plugin:
+
+1. Implements `IKnowledgeAdapter`.
+2. In `start()`, looks up `ctx.getService('knowledge')` and calls
+   `registerAdapter(id, this)`.
+3. Owns its own dependencies (SDK, fetch client, embedder).
+4. Owns its own lifecycle / health checks.
+
+Multiple adapters can co-exist; sources pick which one to use via the
+`adapter` field.
+
+---
+
+## 5. Permission-aware retrieval (the unique value-add)
+
+```
+caller (user U)
+   │
+   ▼
+search_knowledge tool
+   │  ToolExecutionContext { actor: U, … }
+   ▼
+IKnowledgeService.search(q, { executionContext, sourceIds })
+   │
+   ├─► adapter.search(q, …)  ──► returns raw hits with sourceRecordId
+   │
+   ├─► group hits by underlying object
+   │
+   ├─► for each group: dataEngine.find(object, { where: { id IN [...] },
+   │                                              context: U.ctx })
+   │       ── RLS engages, returns only the rows U can see
+   │
+   ├─► drop hits whose sourceRecordId was filtered out
+   │
+   └─► return surviving hits to the caller
+```
+
+This is the same pattern as the existing permission-aware data tools
+(see `ai-capabilities.mdx#permission-aware-execution-rls-for-agents`).
+No matter how aggressive an adapter's retrieval is, the user never
+sees a chunk extracted from a record they can't read.
+
+For `file` and `http` sources (no underlying ObjectQL record), the
+adapter is responsible for honouring an opaque `permissions` field on
+each document. Sources that need fine-grained ACLs should be declared
+with a `permissions` mapping function at index time.
+
+---
+
+## 6. Sync model
+
+For `object` sources, `KnowledgeService` subscribes to ObjectQL
+`record.created`, `record.updated`, and `record.deleted` events. Each
+event triggers a single `adapter.upsert` / `adapter.delete` call.
+
+- **MVP (Phase 1):** synchronous, inline with the originating mutation.
+  Fast for low-volume dev / demo. Indexing failures are logged but do
+  not block the originating write.
+- **Phase 2:** async via `service-queue` for batching, retries, and
+  back-pressure.
+
+`file` / `http` sources rely on explicit `reindexSource` calls
+(typically triggered by a cron job, a Studio button, or a webhook).
+
+---
+
+## 7. MVP (Phase 1) scope
+
+Phase 1 ships the protocol, the orchestrator, two adapters, and the AI
+tool wiring. It is **not** production-grade — it is "production-shaped":
+the surface is stable, the unique value-add (permission-aware
+retrieval) works end-to-end, and a real adapter (`ragflow`) is wired
+up.
+
+| Component | In Phase 1 | Notes |
+|-----------|-----------:|-------|
+| `KnowledgeSourceSchema` | ✅ | object / file / http kinds |
+| `KnowledgeDocument` / `Chunk` / `Hit` | ✅ | Canonical shapes |
+| `IKnowledgeService` contract | ✅ | search / index / delete / reindex |
+| `IKnowledgeAdapter` contract | ✅ | upsert / search / delete / healthCheck |
+| `service-knowledge` orchestrator | ✅ | Adapter routing, RLS wrapper, sync |
+| `plugin-knowledge-memory` | ✅ | In-process; deterministic fake embedder |
+| `plugin-knowledge-ragflow` | ✅ | Minimal REST adapter (datasets + chunks + retrieval) |
+| `search_knowledge` AI tool | ✅ | Threads `ToolExecutionContext` |
+| Event-driven sync for `object` sources | ✅ (sync) | MVP synchronous; queue in Phase 2 |
+| Studio source-management UI | ⏳ Phase 2 |  |
+| Async indexer (queue) | ⏳ Phase 2 |  |
+| Audit + metrics | ⏳ Phase 2 |  |
+| `plugin-knowledge-llamaindex` | ⏳ Phase 2 |  |
+| `plugin-knowledge-dify` | ⏳ Phase 3 / community |  |
+| `plugin-knowledge-pgvector` | ⏳ Phase 3 |  |
+
+### 7.1 Non-goals for Phase 1
+
+- Reranker hooks, hybrid retrieval toggles, MMR — adapter-private.
+- Field-level masking — Phase 1 enforces row-level only.
+- Cost / quota enforcement — Phase 2.
+- Multi-tenant index isolation — defer to adapter capability matrix.
+
+---
+
+## 8. Compatibility with existing `Embedding` primitives
+
+`packages/spec/src/ai/embedding.zod.ts` already defines
+`EmbeddingModelSchema` and `VectorStoreSchema`. Those primitives
+describe *configuration*; the Knowledge Protocol describes *behaviour*.
+
+Adapters may consume `EmbeddingModel` / `VectorStore` references from a
+`KnowledgeSource.embedding` field (when supplied), but they are free to
+ignore them when the underlying backend manages embeddings
+internally (RAGFlow, Dify, Vectara).
+
+---
+
+## 9. Open questions
+
+- **Where does chunk-level ACL live?** Currently the framework checks
+  row-level ACLs by re-querying via `dataEngine.find`. Field-level
+  masking would require either (a) re-running `select` projections or
+  (b) standardising a `redact` step. Deferred.
+- **Multiple adapters per source.** Useful for mirroring (e.g. write
+  to RAGFlow and pgvector simultaneously) but adds significant
+  complexity. Not in Phase 1.
+- **Embedding cost attribution.** Belongs in `service-analytics`. The
+  Knowledge Protocol simply emits typed events.
+
+---
+
+## 10. Related documents
+
+- `ai-capabilities.mdx#permission-aware-execution-rls-for-agents` —
+  the `ExecutionContext` threading the Knowledge Protocol reuses.
+- `architecture.mdx` — overall service / plugin layering.
+- `packages/spec/src/ai/embedding.zod.ts` — pre-existing embedding /
+  vector store primitives the protocol composes with.

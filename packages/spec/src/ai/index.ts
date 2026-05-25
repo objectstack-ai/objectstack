@@ -29,3 +29,5 @@ export * from './model-registry.zod';
 export * from './embedding.zod';
 export * from './usage.zod';
 export * from './mcp.zod';
+export * from './knowledge-source.zod';
+export * from './knowledge-document.zod';

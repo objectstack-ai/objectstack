@@ -1,7 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { AIToolDefinition, IDataEngine } from '@objectstack/spec/contracts';
-import type { ToolHandler } from './tool-registry.js';
+import type {
+  AIToolDefinition,
+  IDataEngine,
+} from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { ToolHandler, ToolExecutionContext } from './tool-registry.js';
 import type { ToolRegistry } from './tool-registry.js';
 
 // ---------------------------------------------------------------------------
@@ -17,6 +21,34 @@ import type { ToolRegistry } from './tool-registry.js';
 export interface DataToolContext {
   /** ObjectQL data engine for record-level operations. */
   dataEngine: IDataEngine;
+}
+
+/**
+ * Translate a {@link ToolExecutionContext} into the ObjectQL
+ * {@link ExecutionContext} that data-engine calls expect.
+ *
+ * When the AI tool call carries an authenticated `actor`, we forward
+ * the user/roles/permissions and explicitly set `isSystem: false` so
+ * row-level security and field masking kick in just like they would
+ * for a normal REST request.
+ *
+ * When no actor is supplied (legacy callers, cron jobs, plugin-level
+ * bootstraps) we send `isSystem: true` to preserve today's
+ * unrestricted behaviour — closing the agent-permission gap is
+ * opt-in at the call site that knows the user.
+ */
+function buildEngineContext(ctx?: ToolExecutionContext): ExecutionContext {
+  if (ctx?.actor) {
+    return {
+      userId: ctx.actor.id,
+      roles: ctx.actor.roles ?? [],
+      permissions: ctx.actor.permissions ?? [],
+      isSystem: false,
+      ...(ctx.environmentId ? { tenantId: ctx.environmentId } : {}),
+      ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+    };
+  }
+  return { roles: [], permissions: [], isSystem: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +199,7 @@ export const DATA_TOOL_DEFINITIONS: AIToolDefinition[] = [
 // ---------------------------------------------------------------------------
 
 function createQueryRecordsHandler(ctx: DataToolContext): ToolHandler {
-  return async (args) => {
+  return async (args, execCtx) => {
     const {
       objectName,
       where,
@@ -201,6 +233,7 @@ function createQueryRecordsHandler(ctx: DataToolContext): ToolHandler {
       orderBy,
       limit: safeLimit,
       offset: safeOffset,
+      context: buildEngineContext(execCtx),
     });
 
     return JSON.stringify({ count: records.length, records });
@@ -208,7 +241,7 @@ function createQueryRecordsHandler(ctx: DataToolContext): ToolHandler {
 }
 
 function createGetRecordHandler(ctx: DataToolContext): ToolHandler {
-  return async (args) => {
+  return async (args, execCtx) => {
     const { objectName, recordId, fields } = args as {
       objectName: string;
       recordId: string;
@@ -218,6 +251,7 @@ function createGetRecordHandler(ctx: DataToolContext): ToolHandler {
     const record = await ctx.dataEngine.findOne(objectName, {
       where: { id: recordId },
       fields,
+      context: buildEngineContext(execCtx),
     });
 
     if (!record) {
@@ -237,7 +271,7 @@ const VALID_AGG_FUNCTIONS = new Set<string>([
 ]);
 
 function createAggregateDataHandler(ctx: DataToolContext): ToolHandler {
-  return async (args) => {
+  return async (args, execCtx) => {
     const { objectName, aggregations, groupBy, where } = args as {
       objectName: string;
       aggregations: Array<{ function: string; field?: string; alias: string }>;
@@ -263,6 +297,7 @@ function createAggregateDataHandler(ctx: DataToolContext): ToolHandler {
         field: a.field,
         alias: a.alias,
       })),
+      context: buildEngineContext(execCtx),
     });
 
     return JSON.stringify(result);

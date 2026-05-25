@@ -474,6 +474,108 @@ const outcome = await ai.approvePendingAction(envelope.pendingActionId, 'alice@e
 // → { status: 'executed', result: <handler return> }
 ```
 
+### Permission-aware execution (RLS for agents)
+
+Every AI tool call now runs with the **end-user's** `ExecutionContext`,
+so the same row-level-security rules that protect the REST API
+automatically scope what an agent can see and do. There is no separate
+"agent permission" surface to maintain — if a user can't read account
+`acc_42` through ObjectQL, neither can the LLM acting on their behalf.
+
+**How it works:**
+
+1. The REST routes for `/api/v1/ai/assistant/chat` and
+   `/api/v1/ai/agents/:id/chat` pull the authenticated principal out of
+   `req.user` and forward it to `aiService.chatWithTools(...)` as
+   `toolExecutionContext: { actor, conversationId, environmentId }`.
+2. The tool registry threads that context into every handler invocation.
+3. Built-in data tools (`query_records`, `get_record`,
+   `aggregate_data`) and auto-generated `action_*` tools convert the
+   actor into a `{ userId, roles, permissions, isSystem: false }`
+   engine context on each `IDataEngine` call. RLS engages exactly as
+   it would for a hand-rolled API endpoint.
+4. Action audit logs attribute the dispatch to the real user instead of
+   a generic "AI Assistant" principal.
+
+When you invoke `chatWithTools` from a custom server route, opt in by
+passing the actor explicitly:
+
+```typescript
+await aiService.chatWithTools(messages, tools, {
+  toolExecutionContext: {
+    actor: {
+      id: currentUser.id,
+      name: currentUser.displayName,
+      roles: currentUser.roles,
+      permissions: currentUser.permissions,
+    },
+    conversationId,
+    environmentId,
+  },
+});
+```
+
+Omit `toolExecutionContext` to keep the previous system-level behaviour
+(used by cron jobs, internal callers, and the existing test suite).
+
+---
+
+## Knowledge Protocol (RAG via adapter plugins)
+
+ObjectStack ships a Knowledge Protocol that lets agents call `search_knowledge(query, sourceIds?, topK?)` against pluggable backends (RAGFlow, LlamaIndex, Dify, custom pgvector, …). The framework defines the contract and runs permission-aware filtering; the adapter plugin does the actual retrieval. See [the protocol design](../protocol/knowledge.mdx) for the rationale.
+
+### Wiring
+
+```ts
+import { ObjectKernel } from '@objectstack/core';
+import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
+import { KnowledgeMemoryPlugin } from '@objectstack/plugin-knowledge-memory';
+// or, for prod:
+// import { KnowledgeRagflowPlugin } from '@objectstack/plugin-knowledge-ragflow';
+
+const kernel = new ObjectKernel();
+kernel.use(new KnowledgeServicePlugin({
+  sources: [
+    {
+      id: 'task_notes',
+      label: 'Task notes',
+      adapter: 'memory',
+      source: { kind: 'object', object: 'task', contentFields: ['title', 'notes'] },
+    },
+    {
+      id: 'product_docs',
+      label: 'Product docs',
+      adapter: 'ragflow',
+      source: { kind: 'http', urls: ['https://docs.example.com/sitemap.xml'] },
+      options: { datasetId: 'rgf_doc_dataset' },
+    },
+  ],
+}));
+kernel.use(new KnowledgeMemoryPlugin());
+// kernel.use(new KnowledgeRagflowPlugin({ endpoint, apiKey }));
+```
+
+Then register the AI tool so agents can call it:
+
+```ts
+import { registerKnowledgeTools } from '@objectstack/service-ai';
+
+ctx.hook('ai:ready', async (ai) => {
+  const knowledge = ctx.getService('knowledge');
+  registerKnowledgeTools(ai.toolRegistry, { knowledgeService: knowledge });
+});
+```
+
+### What you get for free
+
+- **Permission-aware retrieval.** Every hit with a `sourceRecordId` is re-checked against the caller's `ExecutionContext` via `IDataEngine` — the same RLS that gates plain ObjectQL queries. A salesperson asking "find proposals about ACME" only sees the proposals they could already read directly. File / HTTP hits pass through (ACL is the adapter's problem).
+- **Inline event sync.** When records on indexed objects change, the kernel's `IRealtimeService` events drive `KnowledgeService.handleRecordUpsert/Delete` automatically. No cron, no queue (yet — Phase 2).
+- **Adapter swap, zero LLM changes.** Move from `memory` to `ragflow` to a custom adapter without touching the `search_knowledge` tool or any agent prompt.
+
+### Why we did not build a vector DB
+
+Mature OSS (RAGFlow, LlamaIndex, Dify) already nail chunking, embedding, hybrid retrieval, rerank, and OCR. ObjectStack's value is **the metadata-native source declaration + the permission-aware filter on top of those engines** — not yet-another-RAG-stack. Customers pick the retrieval engine that matches their data; we make sure it talks to ObjectStack the same way every time.
+
 ---
 
 ## RAG Pipelines

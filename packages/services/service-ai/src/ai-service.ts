@@ -279,7 +279,12 @@ export class AIService implements IAIService {
     options?: ChatWithToolsOptions,
   ): Promise<AIResult> {
     // Destructure loop-specific options so they are never forwarded to the adapter
-    const { maxIterations: maxIter, onToolError, ...restOptions } = options ?? {};
+    const {
+      maxIterations: maxIter,
+      onToolError,
+      toolExecutionContext,
+      ...restOptions
+    } = options ?? {};
     const maxIterations = maxIter ?? AIService.DEFAULT_MAX_ITERATIONS;
     const registeredTools = this.toolRegistry.getAll();
 
@@ -333,13 +338,19 @@ export class AIService implements IAIService {
         content: assistantContent,
       } as ModelMessage);
 
-      // Execute all tool calls in parallel
-      const toolResults: ToolExecutionResult[] = await this.toolRegistry.executeAll(result.toolCalls);
+      // Execute all tool calls in parallel, threading the per-request
+      // execution context so handlers can attribute work to the actor
+      // and enforce row-level security.
+      const toolResults: ToolExecutionResult[] = await this.toolRegistry.executeAll(
+        result.toolCalls,
+        toolExecutionContext,
+      );
 
-      // Process results: track errors and honour onToolError callback
+      // Process results: track errors, honour onToolError callback, and
+      // append each tool result as a `role: 'tool'` message so the
+      // model can react in the next loop iteration.
       for (const tr of toolResults) {
         if (tr.isError) {
-          // Match tool call by toolCallId for robust attribution
           const matchedCall = result.toolCalls!.find(tc => tc.toolCallId === tr.toolCallId);
           const toolName = matchedCall?.toolName ?? 'unknown';
           const errorText = AIService.extractOutputText(tr);
@@ -396,7 +407,12 @@ export class AIService implements IAIService {
     messages: ModelMessage[],
     options?: ChatWithToolsOptions,
   ): AsyncIterable<TextStreamPart<ToolSet>> {
-    const { maxIterations: maxIter, onToolError, ...restOptions } = options ?? {};
+    const {
+      maxIterations: maxIter,
+      onToolError,
+      toolExecutionContext,
+      ...restOptions
+    } = options ?? {};
     const maxIterations = maxIter ?? AIService.DEFAULT_MAX_ITERATIONS;
     const registeredTools = this.toolRegistry.getAll();
 
@@ -438,7 +454,10 @@ export class AIService implements IAIService {
         content: assistantContent,
       } as ModelMessage);
 
-      const toolResults: ToolExecutionResult[] = await this.toolRegistry.executeAll(result.toolCalls);
+      const toolResults: ToolExecutionResult[] = await this.toolRegistry.executeAll(
+        result.toolCalls,
+        toolExecutionContext,
+      );
 
       for (const tr of toolResults) {
         if (tr.isError && onToolError) {

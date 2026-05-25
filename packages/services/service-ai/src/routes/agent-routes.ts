@@ -152,6 +152,24 @@ export function buildAgentRoutes(
           const chatWithToolsOptions = {
             ...mergedOptions,
             maxIterations: agent.planning?.maxIterations,
+            // Forward authenticated actor → built-in data tools enforce
+            // ObjectQL RLS, action tools attribute audit to the user.
+            toolExecutionContext: req.user
+              ? {
+                  actor: {
+                    id: req.user.userId,
+                    name: req.user.displayName,
+                    roles: req.user.roles,
+                    permissions: req.user.permissions,
+                  },
+                  conversationId:
+                    typeof body.conversationId === 'string' ? body.conversationId : undefined,
+                  environmentId:
+                    typeof chatContext?.environmentId === 'string'
+                      ? chatContext.environmentId
+                      : undefined,
+                }
+              : undefined,
           };
 
           // ── Choose response mode ─────────────────────────────

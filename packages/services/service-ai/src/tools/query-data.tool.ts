@@ -8,8 +8,25 @@ import type {
   IMetadataService,
   ModelMessage,
 } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SchemaRetriever } from '../schema-retriever.js';
-import type { ToolHandler, ToolRegistry } from './tool-registry.js';
+import type { ToolHandler, ToolRegistry, ToolExecutionContext } from './tool-registry.js';
+
+/** See `data-tools.ts#buildEngineContext` — duplicated here to keep
+ *  this single-tool module dependency-free from the data-tools file. */
+function buildAiEngineContext(ctx?: ToolExecutionContext): ExecutionContext {
+  if (ctx?.actor) {
+    return {
+      userId: ctx.actor.id,
+      roles: ctx.actor.roles ?? [],
+      permissions: ctx.actor.permissions ?? [],
+      isSystem: false,
+      ...(ctx.environmentId ? { tenantId: ctx.environmentId } : {}),
+      ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+    };
+  }
+  return { roles: [], permissions: [], isSystem: true };
+}
 
 /**
  * Context for the `query_data` tool.
@@ -125,7 +142,7 @@ export function createQueryDataHandler(ctx: QueryDataToolContext): ToolHandler {
   const retriever = new SchemaRetriever(ctx.metadata);
   const maxLimit = ctx.maxLimit ?? 100;
 
-  return async (args) => {
+  return async (args, execCtx) => {
     const { request } = args as { request: string };
 
     if (!request || typeof request !== 'string') {
@@ -224,6 +241,7 @@ export function createQueryDataHandler(ctx: QueryDataToolContext): ToolHandler {
         fields: plan.fields ?? undefined,
         orderBy: plan.orderBy ?? undefined,
         limit,
+        context: buildAiEngineContext(execCtx),
       });
       return JSON.stringify({
         plan: { ...plan, where },

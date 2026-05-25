@@ -40,6 +40,8 @@ export * from './sharing-service.js';
 export * from './report-service.js';
 export * from './approval-service.js';
 export * from './package-service.js';
+export * from './knowledge-service.js';
+export * from './knowledge-adapter.js';
 
 // Provisioning & Deployment
 export * from './turso-platform.js';

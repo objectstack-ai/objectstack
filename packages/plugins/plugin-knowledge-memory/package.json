@@ -1,0 +1,31 @@
+{
+  "name": "@objectstack/plugin-knowledge-memory",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "In-memory knowledge adapter for ObjectStack (dev / test reference implementation).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../../tsup.config.ts",
+    "dev": "tsc -w",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/service-knowledge": "workspace:*",
+    "@objectstack/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  },
+  "keywords": ["objectstack", "knowledge", "rag", "memory", "in-memory"]
+}

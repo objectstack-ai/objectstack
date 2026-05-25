@@ -1,0 +1,31 @@
+{
+  "name": "@objectstack/plugin-knowledge-ragflow",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "RAGFlow knowledge adapter for ObjectStack — production-grade RAG via the Apache 2.0 RAGFlow REST API.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../../tsup.config.ts",
+    "dev": "tsc -w",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/service-knowledge": "workspace:*",
+    "@objectstack/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  },
+  "keywords": ["objectstack", "knowledge", "rag", "ragflow"]
+}

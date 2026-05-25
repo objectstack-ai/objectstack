@@ -28,8 +28,9 @@ import type {
   IDataEngine,
   IMetadataService,
 } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Action, ActionParam } from '@objectstack/spec/ui';
-import type { ToolHandler, ToolRegistry } from './tool-registry.js';
+import type { ToolHandler, ToolRegistry, ToolExecutionContext } from './tool-registry.js';
 
 /** Minimal field shape we care about when resolving param types. */
 interface FieldDef {
@@ -445,14 +446,22 @@ function createActionToolHandler(
   action: Action,
   ctx: ActionToolsContext,
 ): ToolHandler {
-  const principal = ctx.principal ?? { id: 'ai_agent', name: 'AI Assistant' };
+  const fallbackPrincipal = ctx.principal ?? { id: 'ai_agent', name: 'AI Assistant' };
   const requiresRecord =
     Array.isArray(action.locations) &&
     action.locations.some(
       l => l === 'list_item' || l === 'record_header' || l === 'record_more' || l === 'record_related',
     );
 
-  return async (args) => {
+  return async (args, execCtx) => {
+    // Per-request execution context wins over the static principal so
+    // every audit/dispatch entry attributes the work to the real user
+    // when one is known. Falls back to the registration-time principal
+    // (or the synthetic `ai_agent`) for unauthenticated callers.
+    const principal = execCtx?.actor
+      ? { id: execCtx.actor.id, name: execCtx.actor.name }
+      : fallbackPrincipal;
+    const engineCtx = buildActionEngineContext(execCtx);
     const objectName = action.objectName;
     const target = action.target;
     const result: ActionInvocationResult = {
@@ -484,9 +493,12 @@ function createActionToolHandler(
         return JSON.stringify(result);
       }
       try {
+        // RLS engages here too — if the actor can't see the record,
+        // the agent gets a "not found" error instead of leaking data.
         const found = await ctx.dataEngine.find(objectName, {
           where: { id: recordId },
           limit: 1,
+          context: engineCtx,
         });
         record = (found as Array<Record<string, unknown>>)[0];
         if (!record) {
@@ -522,6 +534,8 @@ function createActionToolHandler(
           actionName: action.name,
           toolName,
           toolInput: args as Record<string, unknown>,
+          conversationId: execCtx?.conversationId,
+          messageId: execCtx?.messageId,
           proposedBy: principal.id,
         });
         const pending: ActionInvocationResult & {
@@ -568,6 +582,26 @@ function createActionToolHandler(
       return JSON.stringify(result);
     }
   };
+}
+
+/**
+ * Translate the AI-side {@link ToolExecutionContext} into an ObjectQL
+ * {@link ExecutionContext} for record lookups inside action handlers.
+ * Mirrors `data-tools.ts#buildEngineContext` — kept local so this file
+ * has no inter-tool dependency.
+ */
+function buildActionEngineContext(ctx?: ToolExecutionContext): ExecutionContext {
+  if (ctx?.actor) {
+    return {
+      userId: ctx.actor.id,
+      roles: ctx.actor.roles ?? [],
+      permissions: ctx.actor.permissions ?? [],
+      isSystem: false,
+      ...(ctx.environmentId ? { tenantId: ctx.environmentId } : {}),
+      ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+    };
+  }
+  return { roles: [], permissions: [], isSystem: true };
 }
 
 async function dispatchScriptAction(

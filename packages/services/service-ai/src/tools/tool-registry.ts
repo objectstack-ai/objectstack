@@ -1,13 +1,35 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { AIToolDefinition, ToolCallPart, ToolResultPart } from '@objectstack/spec/contracts';
+import type {
+  AIToolDefinition,
+  ToolCallPart,
+  ToolResultPart,
+  ToolExecutionContext,
+} from '@objectstack/spec/contracts';
+
+/**
+ * Re-exported {@link ToolExecutionContext} from `@objectstack/spec` so
+ * tool implementations in this package can import a single canonical
+ * symbol without depending on spec internals.
+ *
+ * The spec hosts the authoritative shape because `ChatWithToolsOptions`
+ * exposes the same type to external callers (HTTP routes, custom
+ * agents).
+ */
+export type { ToolExecutionContext };
 
 /**
  * Handler function for a registered tool.
  *
- * Receives parsed arguments and returns the tool output as a string.
+ * Receives parsed arguments and an optional per-call execution context.
+ * Returns the tool output as a string (typically JSON). Tools that
+ * require permission enforcement should use `ctx.actor` and propagate
+ * it into the underlying engine call.
  */
-export type ToolHandler = (args: Record<string, unknown>) => Promise<string> | string;
+export type ToolHandler = (
+  args: Record<string, unknown>,
+  ctx?: ToolExecutionContext,
+) => Promise<string> | string;
 
 /**
  * Extended ToolResultPart that carries an `isError` flag for internal
@@ -79,8 +101,18 @@ export class ToolRegistry {
 
   /**
    * Execute a tool call and return the result.
+   *
+   * @param toolCall The decoded tool-call part from the model response.
+   * @param ctx      Optional per-call execution context (actor, conversation,
+   *                 environment). Handlers may use this to enforce RLS,
+   *                 attribute audit entries, or correlate traces. When
+   *                 omitted, handlers should fall back to system-level
+   *                 behaviour for backward compatibility.
    */
-  async execute(toolCall: ToolCallPart): Promise<ToolExecutionResult> {
+  async execute(
+    toolCall: ToolCallPart,
+    ctx?: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> {
     const handler = this.handlers.get(toolCall.toolName);
     if (!handler) {
       return {
@@ -96,7 +128,7 @@ export class ToolRegistry {
       const args = typeof toolCall.input === 'string'
         ? JSON.parse(toolCall.input)
         : (toolCall.input as Record<string, unknown>) ?? {};
-      const content = await handler(args);
+      const content = await handler(args, ctx);
       return {
         type: 'tool-result',
         toolCallId: toolCall.toolCallId,
@@ -116,10 +148,14 @@ export class ToolRegistry {
   }
 
   /**
-   * Execute multiple tool calls in parallel.
+   * Execute multiple tool calls in parallel, threading the same
+   * execution context to each handler.
    */
-  async executeAll(toolCalls: ToolCallPart[]): Promise<ToolExecutionResult[]> {
-    return Promise.all(toolCalls.map(tc => this.execute(tc)));
+  async executeAll(
+    toolCalls: ToolCallPart[],
+    ctx?: ToolExecutionContext,
+  ): Promise<ToolExecutionResult[]> {
+    return Promise.all(toolCalls.map(tc => this.execute(tc, ctx)));
   }
 
   /**

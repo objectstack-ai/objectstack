@@ -329,6 +329,46 @@ export interface ChatWithToolsOptions extends AIRequestOptions {
      * or `'abort'` to immediately stop the tool call loop.
      */
     onToolError?: (toolCall: ToolCallPart, error: string) => 'continue' | 'abort';
+    /**
+     * Per-call execution context threaded into every tool handler the
+     * loop dispatches. The HTTP route should populate this from
+     * `req.user` (and any conversation/environment headers) so that
+     * built-in data tools forward the actor into ObjectQL's
+     * `ExecutionContext` and row-level security automatically scopes
+     * what the LLM can see or change.
+     *
+     * Optional for backward compatibility — when omitted, tools fall
+     * back to system-level behaviour.
+     */
+    toolExecutionContext?: ToolExecutionContext;
+}
+
+/**
+ * Per-call execution context threaded into every tool handler invoked
+ * by {@link ChatWithToolsOptions}. Mirrors {@link ExecutionContext}
+ * but is tailored to the AI tool boundary (no transaction handle, no
+ * raw access token — those live on the engine call site).
+ */
+export interface ToolExecutionContext {
+    /**
+     * Authenticated end user on whose behalf the LLM is acting.
+     * Built-in tools promote this into the ObjectQL `ExecutionContext`
+     * so RLS engages. Omit for internal/system invocations.
+     */
+    actor?: {
+        id: string;
+        name?: string;
+        roles?: string[];
+        permissions?: string[];
+    };
+    /** Conversation id for trace/HITL correlation. */
+    conversationId?: string;
+    /** Assistant message id that produced the tool call. */
+    messageId?: string;
+    /** Active environment (multi-tenant project) id, if known. */
+    environmentId?: string;
+    /** Distributed-trace id for cross-service correlation. */
+    traceId?: string;
 }
 
 /**
