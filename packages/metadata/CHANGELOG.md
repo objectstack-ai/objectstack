@@ -1,5 +1,19 @@
 # @objectstack/metadata
 
+## 6.4.0
+
+### Patch Changes
+
+- Updated dependencies [f8651cc]
+- Updated dependencies [f8651cc]
+- Updated dependencies [0bf6f9a]
+  - @objectstack/spec@6.4.0
+  - @objectstack/core@6.4.0
+  - @objectstack/platform-objects@6.4.0
+  - @objectstack/types@6.4.0
+  - @objectstack/metadata-core@6.4.0
+  - @objectstack/metadata-fs@6.4.0
+
 ## 6.3.0
 
 ### Patch Changes

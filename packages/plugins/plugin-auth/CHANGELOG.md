@@ -1,5 +1,22 @@
 # Changelog
 
+## 6.4.0
+
+### Patch Changes
+
+- 0bf6f9a: Add explicit `@better-auth/core` dependency.
+
+  `plugin-auth` already pulled `@better-auth/core` transitively via `@better-auth/oauth-provider`, but several call sites in `auth-manager.ts` import from it directly. Promote it to a first-class dependency so the resolved version is stable across the workspace and `pnpm install` doesn't surface "module not found" against the transitive copy under stricter peer resolution.
+
+  No behaviour change.
+
+- Updated dependencies [f8651cc]
+- Updated dependencies [f8651cc]
+- Updated dependencies [0bf6f9a]
+  - @objectstack/spec@6.4.0
+  - @objectstack/core@6.4.0
+  - @objectstack/platform-objects@6.4.0
+
 ## 6.3.0
 
 ### Patch Changes

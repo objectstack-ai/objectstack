@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/knowledge-memory",
-  "version": "0.1.0",
+  "version": "6.4.0",
   "license": "Apache-2.0",
   "description": "In-memory knowledge adapter for ObjectStack (dev / test reference implementation).",
   "main": "dist/index.js",
@@ -27,5 +27,11 @@
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"
   },
-  "keywords": ["objectstack", "knowledge", "rag", "memory", "in-memory"]
+  "keywords": [
+    "objectstack",
+    "knowledge",
+    "rag",
+    "memory",
+    "in-memory"
+  ]
 }

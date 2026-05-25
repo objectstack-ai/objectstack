@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/knowledge-turso",
-  "version": "0.1.0",
+  "version": "6.4.0",
   "license": "Apache-2.0",
   "description": "Turso/libSQL native-vector knowledge adapter for ObjectStack — F32_BLOB + DiskANN.",
   "main": "dist/index.js",
@@ -28,5 +28,13 @@
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"
   },
-  "keywords": ["objectstack", "knowledge", "rag", "turso", "libsql", "vector", "diskann"]
+  "keywords": [
+    "objectstack",
+    "knowledge",
+    "rag",
+    "turso",
+    "libsql",
+    "vector",
+    "diskann"
+  ]
 }
