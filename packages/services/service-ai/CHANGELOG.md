@@ -1,5 +1,66 @@
 # @objectstack/service-ai
 
+## 6.4.0
+
+### Minor Changes
+
+- f8651cc: Knowledge Protocol MVP — protocol-first RAG via adapter plugins.
+
+  **What's new:**
+
+  - `@objectstack/spec` — new `KnowledgeSource` / `KnowledgeDocument` / `KnowledgeChunk` / `KnowledgeHit` schemas (under `@objectstack/spec/ai`) and `IKnowledgeService` / `IKnowledgeAdapter` contracts (under `@objectstack/spec/contracts`).
+  - `@objectstack/service-knowledge` — `KnowledgeService` orchestrator + `KnowledgeServicePlugin`. Routes search/index calls to the appropriate adapter, runs **permission-aware retrieval** by re-checking every hit's `sourceRecordId` against the caller's `ExecutionContext` via `IDataEngine` (same RLS that gates plain ObjectQL), and subscribes to `IRealtimeService` for inline record→adapter sync.
+  - `@objectstack/knowledge-memory` — deterministic, dependency-free in-memory adapter for dev/tests/reference. Hash-token embedder + brute-force cosine + paragraph chunking.
+  - `@objectstack/knowledge-ragflow` — production-grade adapter against the Apache-2.0 [RAGFlow](https://github.com/infiniflow/ragflow) REST API. Plug in your dataset id; ObjectStack handles permission filtering after retrieval.
+  - `@objectstack/service-ai` — new `search_knowledge` tool wired through the registry. Threads the LLM caller's actor into `KnowledgeService.search` so retrieval honours RLS automatically.
+
+  **Why this design:** ObjectStack does NOT own chunking / embedding / vector storage / rerank — those are commodity capabilities best handled by mature OSS (RAGFlow, LlamaIndex, Dify, …). What ObjectStack uniquely owns is the protocol + permission-aware orchestration on top.
+
+  See `content/docs/protocol/knowledge.mdx` for the full design.
+
+- f8651cc: AI tools now execute with the end-user's `ExecutionContext`, so the
+  existing ObjectQL row-level-security rules automatically scope what an
+  agent can read and mutate.
+
+  **What changed**
+
+  - New `ToolExecutionContext` (on `@objectstack/spec/contracts`'s
+    `ChatWithToolsOptions`) carries the authenticated actor, conversation
+    id, and environment id through to tool handlers.
+  - The built-in data tools (`query_records`, `get_record`,
+    `aggregate_data`, legacy `query_data`) and the auto-generated
+    `action_*` tools now pass `options.context` to `IDataEngine` calls,
+    mapping the actor to `{ userId, roles, permissions, isSystem: false }`.
+  - Assistant + agent REST routes forward `req.user` into the new
+    context automatically — no caller changes required.
+  - When no actor is provided (cron jobs, internal callers, existing tests)
+    the helpers fall back to `{ isSystem: true }`, preserving today's
+    behaviour. **Fully backward compatible.**
+
+  **Why this matters**
+
+  Before this change, an AI tool call ran with system privileges and saw
+  every row in the tenant. Now the agent sees exactly what the human
+  operator would see — same RLS, same field-level masking, same audit
+  trail. This is the foundation for trustworthy autonomous agents.
+
+  **For custom call sites**
+
+  If you invoke `aiService.chatWithTools(...)` from your own route, pass
+  `toolExecutionContext: { actor: { id, roles, permissions } }` to inherit
+  the user's permissions. Omit it to keep the legacy system-level
+  behaviour.
+
+### Patch Changes
+
+- a981d57: Auto-persist chat messages when `conversationId` is supplied. `AIService.chatWithTools` and `streamChatWithTools` now write the inbound user turn, every intermediate assistant/tool round, and the final assistant turn to `ai_messages` via the configured conversation service. Persistence is best-effort: failures are logged at `warn` level and never fail the chat request.
+- b486666: Add `GET /api/v1/ai/conversations/:id` route to fetch a single conversation with its full message history. Enforces ownership via the authenticated user: returns `404` when the conversation does not exist and `403` when it belongs to another user. Enables clients to hydrate chat UIs from server-persisted history instead of relying on local storage.
+- Updated dependencies [f8651cc]
+- Updated dependencies [f8651cc]
+- Updated dependencies [0bf6f9a]
+  - @objectstack/spec@6.4.0
+  - @objectstack/core@6.4.0
+
 ## 6.3.0
 
 ### Patch Changes

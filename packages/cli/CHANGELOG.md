@@ -1,5 +1,60 @@
 # @objectstack/cli
 
+## 6.4.0
+
+### Minor Changes
+
+- 15fc484: Upgrade `@object-ui/*` packages to **v6.0**.
+
+  - `@objectstack/cli`: `@object-ui/console` and `@object-ui/studio` from `^5.4.2` → `^6.0.0` — bundled Studio + Console assets now ship the v6 UI shell (new design language, refreshed sidebar, redesigned record header).
+  - `@objectstack/account`: `@object-ui/i18n` from `^5.4.2` → `^6.0.0` — i18n runtime now matches the v6 console/studio API.
+  - Root devDependency `@object-ui/console` from `^5.4.2` → `^6.0.0` so workspace scripts and the docs build pick up v6.
+  - `create-objectstack`: `tar` from `^7.4.3` → `^7.5.15` (security + perf fixes when unpacking remote templates).
+
+  **Heads-up for consumers:** `@object-ui/*` v6 is a major release of the bundled UI; pages rendered through the CLI's `studio` / `console` mounts may look different from v5. The protocol surface is unchanged.
+
+### Patch Changes
+
+- Updated dependencies [a981d57]
+- Updated dependencies [b486666]
+- Updated dependencies [f8651cc]
+- Updated dependencies [f8651cc]
+- Updated dependencies [0bf6f9a]
+- Updated dependencies [0bf6f9a]
+  - @objectstack/service-ai@6.4.0
+  - @objectstack/spec@6.4.0
+  - @objectstack/plugin-auth@6.4.0
+  - @objectstack/client@6.4.0
+  - @objectstack/core@6.4.0
+  - @objectstack/objectql@6.4.0
+  - @objectstack/observability@6.4.0
+  - @objectstack/driver-memory@6.4.0
+  - @objectstack/driver-mongodb@6.4.0
+  - @objectstack/driver-sql@6.4.0
+  - @objectstack/driver-sqlite-wasm@6.4.0
+  - @objectstack/driver-turso@6.4.0
+  - @objectstack/plugin-approvals@6.4.0
+  - @objectstack/plugin-audit@6.4.0
+  - @objectstack/plugin-email@6.4.0
+  - @objectstack/plugin-hono-server@6.4.0
+  - @objectstack/plugin-mcp-server@6.4.0
+  - @objectstack/plugin-reports@6.4.0
+  - @objectstack/plugin-security@6.4.0
+  - @objectstack/plugin-sharing@6.4.0
+  - @objectstack/plugin-webhooks@6.4.0
+  - @objectstack/rest@6.4.0
+  - @objectstack/runtime@6.4.0
+  - @objectstack/service-analytics@6.4.0
+  - @objectstack/service-automation@6.4.0
+  - @objectstack/service-cache@6.4.0
+  - @objectstack/service-feed@6.4.0
+  - @objectstack/service-job@6.4.0
+  - @objectstack/service-package@6.4.0
+  - @objectstack/service-queue@6.4.0
+  - @objectstack/service-realtime@6.4.0
+  - @objectstack/service-settings@6.4.0
+  - @objectstack/service-storage@6.4.0
+
 ## 6.3.0
 
 ### Patch Changes
