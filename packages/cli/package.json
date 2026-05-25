@@ -91,7 +91,7 @@
   },
   "devDependencies": {
     "@oclif/plugin-help": "^6.2.49",
-    "@oclif/plugin-plugins": "^5.4.68",
+    "@oclif/plugin-plugins": "^5.4.69",
     "@types/node": "^25.9.1",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
