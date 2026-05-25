@@ -3,7 +3,7 @@
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Note = ObjectSchema.create({
-  name: 'note',
+  name: 'blank_note',
   label: 'Note',
   pluralLabel: 'Notes',
   icon: 'sticky-note',

@@ -37,13 +37,37 @@ function pkgVersion(): string {
   return `^${getCliVersion()}`;
 }
 
+/**
+ * Convert an npm package name into a valid ObjectStack namespace identifier.
+ *
+ * Namespace rules (from `ManifestSchema` in `@objectstack/spec`):
+ *   - 2-20 chars, `^[a-z][a-z0-9_]{1,19}$`
+ *   - Reserved: `base`, `system`, `sys`
+ *
+ * npm names allow hyphens/dots/scopes (e.g. `@acme/my-app`); identifiers don't.
+ * We strip the scope, replace separators with `_`, lowercase, prefix a leading
+ * digit, truncate to 20, and pad short names so the result always satisfies
+ * the regex. Reserved names get a `_app` suffix.
+ */
+export function sanitizeNamespace(name: string): string {
+  let s = name.replace(/^@[^/]+\//, '');           // drop npm scope
+  s = s.toLowerCase().replace(/[^a-z0-9]+/g, '_'); // separators → _
+  s = s.replace(/^_+|_+$/g, '');                   // trim underscores
+  if (!s) s = 'app';
+  if (/^[0-9]/.test(s)) s = 'a' + s;               // must start with a letter
+  if (s.length < 2) s = (s + '_app').slice(0, 20);
+  if (s.length > 20) s = s.slice(0, 20).replace(/_+$/, '');
+  if (['base', 'system', 'sys'].includes(s)) s = (s + '_app').slice(0, 20);
+  return s;
+}
+
 export const TEMPLATES: Record<string, {
   description: string;
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
   scripts: Record<string, string>;
-  configContent: (name: string) => string;
-  srcFiles: Record<string, (name: string) => string>;
+  configContent: (name: string, namespace: string) => string;
+  srcFiles: Record<string, (name: string, namespace: string) => string>;
 }> = {
   app: {
     description: 'Full application with objects, views, and actions',
@@ -69,13 +93,13 @@ export const TEMPLATES: Record<string, {
       validate: 'objectstack validate',
       typecheck: 'tsc --noEmit',
     },
-    configContent: (name: string) => `import { defineStack } from '@objectstack/spec';
+    configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
 import * as objects from './src/objects';
 
 export default defineStack({
   manifest: {
-    id: 'com.example.${name}',
-    namespace: '${name}',
+    id: 'com.example.${namespace}',
+    namespace: '${namespace}',
     version: '0.1.0',
     type: 'app',
     name: '${toTitleCase(name)}',
@@ -86,13 +110,13 @@ export default defineStack({
 });
 `,
     srcFiles: {
-      'src/objects/index.ts': (name) => `export { default as ${toCamelCase(name)} } from './${name}';
+      'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item';
 `,
-      'src/objects/__name__.ts': (name) => `import * as Data from '@objectstack/spec/data';
+      'src/objects/__name___item.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';
 
-const ${toCamelCase(name)}: Data.Object = {
-  name: '${name}',
-  label: '${toTitleCase(name)}',
+const ${toCamelCase(namespace)}Item: Data.Object = {
+  name: '${namespace}_item',
+  label: '${toTitleCase(namespace)} Item',
   ownership: 'own',
   fields: {
     name: {
@@ -117,7 +141,7 @@ const ${toCamelCase(name)}: Data.Object = {
   },
 };
 
-export default ${toCamelCase(name)};
+export default ${toCamelCase(namespace)}Item;
 `,
     },
   },
@@ -142,13 +166,13 @@ export default ${toCamelCase(name)};
       test: 'vitest run',
       typecheck: 'tsc --noEmit',
     },
-    configContent: (name: string) => `import { defineStack } from '@objectstack/spec';
+    configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
 import * as objects from './src/objects';
 
 export default defineStack({
   manifest: {
     id: 'com.objectstack.plugin-${name}',
-    namespace: 'plugin_${name}',
+    namespace: '${namespace}',
     version: '0.1.0',
     type: 'plugin',
     name: '${toTitleCase(name)} Plugin',
@@ -159,13 +183,13 @@ export default defineStack({
 });
 `,
     srcFiles: {
-      'src/objects/index.ts': (name) => `export { default as ${toCamelCase(name)} } from './${name}';
+      'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item';
 `,
-      'src/objects/__name__.ts': (name) => `import * as Data from '@objectstack/spec/data';
+      'src/objects/__name___item.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';
 
-const ${toCamelCase(name)}: Data.Object = {
-  name: '${name}',
-  label: '${toTitleCase(name)}',
+const ${toCamelCase(namespace)}Item: Data.Object = {
+  name: '${namespace}_item',
+  label: '${toTitleCase(namespace)} Item',
   ownership: 'own',
   fields: {
     name: {
@@ -176,7 +200,7 @@ const ${toCamelCase(name)}: Data.Object = {
   },
 };
 
-export default ${toCamelCase(name)};
+export default ${toCamelCase(namespace)}Item;
 `,
     },
   },
@@ -199,12 +223,12 @@ export default ${toCamelCase(name)};
       validate: 'objectstack validate',
       typecheck: 'tsc --noEmit',
     },
-    configContent: (name: string) => `import { defineStack } from '@objectstack/spec';
+    configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
 
 export default defineStack({
   manifest: {
-    id: 'com.example.${name}',
-    namespace: '${name}',
+    id: 'com.example.${namespace}',
+    namespace: '${namespace}',
     version: '0.1.0',
     type: 'app',
     name: '${toTitleCase(name)}',
@@ -343,7 +367,14 @@ export default class Init extends Command {
       this.error('objectstack.config.ts already exists');
     }
 
+    // Convert the npm-name (which allows hyphens, dots, scopes) into a
+    // valid ObjectStack namespace identifier. Threaded into every template
+    // function so object names use `${namespace}_${shortName}` form and
+    // satisfy `defineStack()` validation.
+    const namespace = sanitizeNamespace(projectName);
+
     printKV('Project', projectName);
+    printKV('Namespace', namespace);
     printKV('Template', `${flags.template} — ${template.description}`);
     printKV('Directory', targetDir);
     console.log('');
@@ -374,7 +405,7 @@ export default class Init extends Command {
       }
 
       // 2. Create objectstack.config.ts
-      const configContent = template.configContent(projectName);
+      const configContent = template.configContent(projectName, namespace);
       fs.writeFileSync(path.join(targetDir, 'objectstack.config.ts'), configContent);
       createdFiles.push('objectstack.config.ts');
 
@@ -400,9 +431,12 @@ export default class Init extends Command {
         createdFiles.push('tsconfig.json');
       }
 
-      // 4. Create src files
+      // 4. Create src files. File paths use `__name__` as a placeholder for
+      // the namespace (NOT the npm name) so generated identifiers stay snake
+      // _case even when the project name contains hyphens (e.g. `my-app` →
+      // namespace `my_app` → `src/objects/my_app_item.ts`).
       for (const [filePath, contentFn] of Object.entries(template.srcFiles)) {
-        const resolvedPath = filePath.replace('__name__', projectName);
+        const resolvedPath = filePath.replace(/__name__/g, namespace);
         const fullPath = path.join(targetDir, resolvedPath);
         const dir = path.dirname(fullPath);
 
@@ -410,7 +444,7 @@ export default class Init extends Command {
           fs.mkdirSync(dir, { recursive: true });
         }
 
-        fs.writeFileSync(fullPath, contentFn(projectName));
+        fs.writeFileSync(fullPath, contentFn(projectName, namespace));
         createdFiles.push(resolvedPath);
       }
 
@@ -439,6 +473,30 @@ export default class Init extends Command {
           installSucceeded = true;
         } catch {
           printWarning(`Dependency installation with ${chosenPm} failed. Run \`${chosenPm} install\` manually in ${targetDir}.`);
+        }
+      }
+
+      // Self-test the scaffold so we catch template regressions (e.g. an
+      // invalid namespace or object name) before the user discovers them by
+      // running `objectstack dev`. Only runs when deps are present —
+      // `defineStack()` validation lives in `@objectstack/spec`.
+      if (installSucceeded) {
+        printStep('Validating scaffold...');
+        try {
+          const { bundleRequire } = await import('bundle-require');
+          const { mod } = await bundleRequire({
+            filepath: path.join(targetDir, 'objectstack.config.ts'),
+            cwd: targetDir,
+          });
+          const stack = mod.default ?? mod;
+          if (!stack?.manifest?.namespace) {
+            throw new Error('Rendered config has no manifest.namespace');
+          }
+          printSuccess(`Scaffold validated (namespace: ${stack.manifest.namespace})`);
+        } catch (err: any) {
+          printError(`Scaffold validation failed: ${err.message || err}`);
+          console.log(chalk.dim('  This is a CLI bug — please report it at https://github.com/objectstack-ai/framework/issues'));
+          this.error('Scaffold validation failed');
         }
       }
 

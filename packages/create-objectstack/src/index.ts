@@ -93,6 +93,33 @@ function toTitleCase(str: string): string {
   return str.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/**
+ * Convert an npm package name into a valid ObjectStack namespace identifier
+ * (regex `^[a-z][a-z0-9_]{1,19}$`, reserved: base/system/sys). Mirrors the
+ * implementation in `@objectstack/cli` so both scaffolders agree.
+ */
+export function sanitizeNamespace(name: string): string {
+  let s = name.replace(/^@[^/]+\//, '');
+  s = s.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  s = s.replace(/^_+|_+$/g, '');
+  if (!s) s = 'app';
+  if (/^[0-9]/.test(s)) s = 'a' + s;
+  if (s.length < 2) s = (s + '_app').slice(0, 20);
+  if (s.length > 20) s = s.slice(0, 20).replace(/_+$/, '');
+  if (['base', 'system', 'sys'].includes(s)) s = (s + '_app').slice(0, 20);
+  return s;
+}
+
+function readCliVersion(): string {
+  try {
+    const pkgPath = path.resolve(__dirname, '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    return String(pkg.version || '0.0.0');
+  } catch {
+    return '0.0.0';
+  }
+}
+
 function printHeader(title: string) {
   console.log(chalk.bold(`\n◆ ${title}`));
   console.log(chalk.dim('─'.repeat(40)));
@@ -209,8 +236,45 @@ async function loadRemote(pkgName: string, targetDir: string): Promise<string[]>
 
 // ─── Field-aware rewrites ───────────────────────────────────────────
 
-function rewriteProjectIdentity(targetDir: string, projectName: string) {
+/**
+ * Walk every `*.ts` file under `dir` and apply `fn` to its contents.
+ * Used to swap the bundled template's literal `blank_` object-name prefix
+ * for the user-supplied namespace so the rendered objects satisfy the
+ * `${namespace}_${shortName}` rule enforced by `objectstack validate`.
+ */
+function walkAndRewriteTs(dir: string, fn: (src: string) => string) {
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkAndRewriteTs(full, fn);
+    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
+      const before = fs.readFileSync(full, 'utf8');
+      const after = fn(before);
+      if (after !== before) fs.writeFileSync(full, after);
+    }
+  }
+}
+
+function rewriteProjectIdentity(
+  targetDir: string,
+  projectName: string,
+  namespace: string,
+) {
   const title = toTitleCase(projectName);
+
+  // Read the template's *original* namespace from the manifest before we
+  // overwrite it — we use this as the prefix to swap in src/**/*.ts files.
+  let templateNamespace: string | undefined;
+  const manifestPathPre = path.join(targetDir, 'objectstack.manifest.json');
+  if (fs.existsSync(manifestPathPre)) {
+    try {
+      const m = JSON.parse(fs.readFileSync(manifestPathPre, 'utf8'));
+      if (typeof m.namespace === 'string') templateNamespace = m.namespace;
+    } catch {
+      // ignore
+    }
+  }
 
   // package.json — set .name
   const pkgPath = path.join(targetDir, 'package.json');
@@ -224,27 +288,44 @@ function rewriteProjectIdentity(targetDir: string, projectName: string) {
     }
   }
 
-  // objectstack.manifest.json — set .name and .displayName
+  // objectstack.manifest.json — set .name, .displayName, .namespace
   const manifestPath = path.join(targetDir, 'objectstack.manifest.json');
   if (fs.existsSync(manifestPath)) {
     try {
       const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
       m.name = projectName;
       m.displayName = title;
+      if ('namespace' in m) m.namespace = namespace;
       fs.writeFileSync(manifestPath, JSON.stringify(m, null, 2) + '\n');
     } catch {
       // ignore
     }
   }
 
-  // objectstack.config.ts — rewrite manifest.id and manifest.name string
-  // literals. Conservative: only touches the first occurrence of each key.
+  // objectstack.config.ts — rewrite manifest.id, manifest.name, manifest.namespace
+  // string literals. Conservative: only touches the first occurrence of each key.
   const configPath = path.join(targetDir, 'objectstack.config.ts');
   if (fs.existsSync(configPath)) {
     let cfg = fs.readFileSync(configPath, 'utf8');
     cfg = cfg.replace(/(\bid:\s*)(['"`])[^'"`]*\2/, `$1$2${projectName}$2`);
+    cfg = cfg.replace(/(\bnamespace:\s*)(['"`])[^'"`]*\2/, `$1$2${namespace}$2`);
     cfg = cfg.replace(/(\bname:\s*)(['"`])[^'"`]*\2/, `$1$2${title}$2`);
     fs.writeFileSync(configPath, cfg);
+  }
+
+  // src/**/*.ts — swap the bundled template's `${templateNamespace}_` object-name
+  // prefix for the user's sanitized namespace so rendered objects satisfy
+  // the `${namespace}_${shortName}` rule. No-op if namespace already matches.
+  if (namespace !== templateNamespace && templateNamespace) {
+    const prefixRe = new RegExp(
+      `(\\bname:\\s*)(['"\`])${templateNamespace}_([a-z0-9_]+)\\2`,
+      'g',
+    );
+    walkAndRewriteTs(path.join(targetDir, 'src'), (src) =>
+      src.replace(prefixRe, (_m, prefix: string, q: string, rest: string) =>
+        `${prefix}${q}${namespace}_${rest}${q}`,
+      ),
+    );
   }
 
   // README.md — rewrite first H1
@@ -261,7 +342,7 @@ function rewriteProjectIdentity(targetDir: string, projectName: string) {
 const program = new Command()
   .name('create-objectstack')
   .description('Create a new ObjectStack environment')
-  .version('6.2.0')
+  .version(readCliVersion())
   .argument('[name]', 'Environment name (defaults to current directory name)')
   .option(
     '-t, --template <template>',
@@ -290,10 +371,12 @@ const program = new Command()
 
     const cwd = process.cwd();
     const projectName = name || path.basename(cwd);
+    const namespace = sanitizeNamespace(projectName);
     const targetDir = name ? path.resolve(cwd, name) : cwd;
     const isCurrentDir = targetDir === cwd;
 
     printKV('Environment', projectName);
+    printKV('Namespace', namespace);
     printKV('Template', `${options.template} — ${template.description}`);
     printKV('Directory', targetDir);
     console.log('');
@@ -316,7 +399,7 @@ const program = new Command()
         createdFiles = await loadRemote(template.source.pkg, targetDir);
       }
 
-      rewriteProjectIdentity(targetDir, projectName);
+      rewriteProjectIdentity(targetDir, projectName, namespace);
 
       console.log(chalk.bold('  Created files:'));
       for (const f of createdFiles.slice(0, 20)) {

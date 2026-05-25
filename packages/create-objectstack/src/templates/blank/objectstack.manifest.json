@@ -1,6 +1,7 @@
 {
   "$schema": "https://schemas.objectstack.dev/template-manifest.json",
   "name": "blank",
+  "namespace": "blank",
   "specVersion": "^6.0.0",
   "displayName": "Blank Starter",
   "description": "Minimal ObjectStack environment with a single object — a clean slate for building.",
