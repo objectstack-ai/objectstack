@@ -639,6 +639,23 @@ export class AuthManager {
         // never seed `sys_environment`) keep working: any lookup error
         // is treated as "no envs to protect".
         organizationHooks: {
+          // Gate fresh organization creation behind `OS_MULTI_ORG_ENABLED`.
+          // The plugin itself is always installed (so list/update/invite endpoints
+          // keep responding); only the `create` operation is denied when the
+          // deployment is provisioned in single-org mode. Default is enabled
+          // to preserve historical behaviour.
+          beforeCreateOrganization: async () => {
+            const flag = String(
+              (globalThis as any)?.process?.env?.OS_MULTI_ORG_ENABLED ?? 'true',
+            ).toLowerCase();
+            if (flag === 'false') {
+              const { APIError } = await import('better-auth/api');
+              throw new APIError('FORBIDDEN', {
+                message:
+                  'Creating additional organizations is disabled on this deployment.',
+              });
+            }
+          },
           beforeUpdateOrganization: async ({ organization, member }: any) => {
             const newSlug = organization?.slug;
             const orgId = member?.organizationId;

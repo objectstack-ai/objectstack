@@ -191,22 +191,42 @@ export async function ensureUserHasOrganization(
   // Best-effort: clone the platform-first org's user-defined data into
   // the new personal workspace so demo apps (CRM, etc.) stay populated
   // for every signup. No-op when this IS the first org, when the donor
-  // has no data, or when this op fails — never blocks signup.
+  // has no data, or when this op fails.
+  //
+  // ── Fire-and-forget ───────────────────────────────────────────────
+  // The clone walks every user-defined object with `organization_id`
+  // and re-inserts up to 10k rows per object. On hosted databases with
+  // round-trip latency (Turso edge replicas, hosted Postgres), demo
+  // tenants with multiple apps (CRM + Compliance + ContentOps + …)
+  // routinely take 30s–minutes to clone. better-auth awaits the
+  // `user.create.after` hook before returning the sign-up response, so
+  // awaiting the clone here meant the HTTP response sat past upstream
+  // proxy timeouts (Fly/Cloudflare ~30–60s) — the user was created
+  // server-side but the browser saw an SSL connection drop and showed
+  // a hung spinner.
+  //
+  // The org row + owner-member row above are already committed, so the
+  // user has a functional workspace the moment the response returns.
+  // Seed data trickles in shortly after; UI may briefly show empty
+  // lists until the clone finishes.
   if (cloneSeedData) {
-    try {
-      const summary = await cloneSeedData(ql, finalOrgId, { logger });
-      if (summary.length > 0) {
-        const total = summary.reduce((s, c) => s + c.count, 0);
-        logger?.info?.(
-          `[security] cloned ${total} seed row(s) into personal organization ${finalOrgId}`,
-          { breakdown: summary },
-        );
-      }
-    } catch (e) {
-      logger?.warn?.('[security] cloneTenantSeedData failed', {
-        error: (e as Error).message,
-      });
-    }
+    void cloneSeedData(ql, finalOrgId, { logger }).then(
+      (summary) => {
+        if (summary.length > 0) {
+          const total = summary.reduce((s, c) => s + c.count, 0);
+          logger?.info?.(
+            `[security] cloned ${total} seed row(s) into personal organization ${finalOrgId}`,
+            { breakdown: summary },
+          );
+        }
+      },
+      (e) => {
+        logger?.warn?.('[security] cloneTenantSeedData failed', {
+          organizationId: finalOrgId,
+          error: (e as Error).message,
+        });
+      },
+    );
   }
 
   return { created: true, organizationId: finalOrgId };
