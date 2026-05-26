@@ -32,8 +32,8 @@ See `docs/adr/0003-package-as-first-class-citizen.md` for the full rationale.
 ## TypeScript Usage
 
 ```typescript
-import { CreatePackageRequest, Package, PackageCategory, PackagePublisher, PackageVisibility, UpdatePackageRequest } from '@objectstack/spec/cloud';
-import type { CreatePackageRequest, Package, PackageCategory, PackagePublisher, PackageVisibility, UpdatePackageRequest } from '@objectstack/spec/cloud';
+import { CreatePackageRequest, Package, PackageCategory, PackageLocale, PackagePublisher, PackageTranslation, PackageTranslations, PackageVisibility, UpdatePackageRequest } from '@objectstack/spec/cloud';
+import type { CreatePackageRequest, Package, PackageCategory, PackageLocale, PackagePublisher, PackageTranslation, PackageTranslations, PackageVisibility, UpdatePackageRequest } from '@objectstack/spec/cloud';
 
 // Validate data
 const result = CreatePackageRequest.parse(data);
@@ -61,6 +61,7 @@ Register a new package in the Control Plane
 | **license** | `string` | optional |  |
 | **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | optional | Package publisher provenance tier |
 | **isStarter** | `boolean` | optional |  |
+| **translations** | `Record<string, Object>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
 | **createdBy** | `string` | ✅ | User ID creating the package |
 
 
@@ -86,9 +87,13 @@ Register a new package in the Control Plane
 | **license** | `string` | optional | SPDX license identifier (e.g. MIT, Apache-2.0) |
 | **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | ✅ | Package publisher provenance tier |
 | **isStarter** | `boolean` | ✅ | If true, surfaces in the Create Project blueprint picker as a starter template |
+| **translations** | `Record<string, Object>` | optional | Locale-keyed overrides for display_name / description / readme |
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |
 | **updatedAt** | `string` | ✅ | Last update timestamp (ISO-8601) |
 | **createdBy** | `string` | ✅ | User ID that created the package |
+
+
+---
 
 
 ---
@@ -106,6 +111,26 @@ Package publisher provenance tier
 * `partner`
 * `community`
 * `private`
+
+
+---
+
+## PackageTranslation
+
+Per-locale overrides for a package listing
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **displayName** | `string` | optional | Localized display name |
+| **description** | `string` | optional | Localized short description |
+| **readme** | `string` | optional | Localized long-form readme (markdown) |
+| **tagline** | `string` | optional | Localized short tagline (marketplace listing only) |
+| **screenshotCaptions** | `Record<string, string>` | optional | Per-index screenshot caption overrides |
+
+
+---
 
 
 ---
@@ -142,6 +167,7 @@ Update mutable package metadata
 | **license** | `string` | optional |  |
 | **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | optional | Package publisher provenance tier |
 | **isStarter** | `boolean` | optional |  |
+| **translations** | `Record<string, Object>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
 
 
 ---

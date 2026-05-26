@@ -47,6 +47,38 @@ export const SETUP_APP: App = {
       ],
     },
     {
+      // App Marketplace — browse + install packages contributed by
+      // `@objectstack/service-tenant` (control plane). Gated on
+      // `requiresObject: 'sys_package'` so single-environment runtimes
+      // without the tenant service don't show an empty marketplace
+      // (the React pages live in objectui's app-shell and are
+      // unconditionally mounted at `/apps/setup/system/marketplace`,
+      // but the nav group only appears when the catalog backend exists).
+      id: 'group_apps',
+      type: 'group',
+      label: 'Apps',
+      icon: 'package',
+      requiresObject: 'sys_package',
+      children: [
+        {
+          id: 'nav_marketplace_browse',
+          type: 'url',
+          label: 'Browse Marketplace',
+          url: '/apps/setup/system/marketplace',
+          icon: 'store',
+          requiresObject: 'sys_package',
+        },
+        {
+          id: 'nav_marketplace_installed',
+          type: 'url',
+          label: 'Installed Apps',
+          url: '/apps/setup/system/marketplace/installed',
+          icon: 'package-check',
+          requiresObject: 'sys_package_installation',
+        },
+      ],
+    },
+    {
       id: 'group_people_org',
       type: 'group',
       label: 'People & Organization',
@@ -175,10 +207,11 @@ export const SETUP_APP: App = {
         //    from sys_user / org members.
         //  - Demoted "All Metadata" from the (now-deleted) Platform group
         //    to this Advanced/debug bucket.
-        //  - The marketplace-only `sys_app` / `sys_package` /
-        //    `sys_package_installation` menus have been removed entirely;
-        //    they are contributed by `@objectstack/service-tenant`
-        //    (control-plane) and are not present in single-environment runtimes.
+        //  - The raw `sys_app` / `sys_package` / `sys_package_installation`
+        //    object-list menus stay removed (they are control-plane admin
+        //    surfaces and live in `cloud-control.app.ts`). End-user
+        //    marketplace access lives in the top-level `Apps` group above,
+        //    pointing at the React browse/installed pages.
         { id: 'nav_oauth_apps', type: 'object', label: 'OAuth Applications', objectName: 'sys_oauth_application', icon: 'app-window' },
         { id: 'nav_jwks', type: 'object', label: 'Signing Keys (JWKS)', objectName: 'sys_jwks', icon: 'key-round' },
         { id: 'nav_verifications', type: 'object', label: 'Verifications', objectName: 'sys_verification', icon: 'mail-check' },

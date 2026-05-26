@@ -969,6 +969,9 @@ describe('AuthManager', () => {
         organization: true,
         oidcProvider: false,
         deviceAuthorization: false,
+        multiOrgEnabled: true,
+        privacyUrl: 'https://objectstack.ai/privacy',
+        termsUrl: 'https://objectstack.ai/terms',
       });
     });
 
