@@ -90,7 +90,13 @@ export function resolvePackageL10nField(
 export function resolvePackageL10n(
   row: { translations?: PackageTranslations | null } & Record<string, unknown>,
   opts: ResolvePackageL10nOptions,
-): { [K in PackageL10nField]?: string } & { screenshotCaptions?: Record<string, string> } {
+): {
+  displayName?: string;
+  description?: string;
+  readme?: string;
+  tagline?: string;
+  screenshotCaptions?: Record<string, string>;
+} {
   return {
     displayName: resolvePackageL10nField(row, 'displayName', opts),
     description: resolvePackageL10nField(row, 'description', opts),
