@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { IAIService, IAIConversationService, IAutomationService, IDataEngine, IMetadataService, LLMAdapter } from '@objectstack/spec/contracts';
+import type { IAIService, IAIConversationService, IAutomationService, IDataEngine, IEmbedder, IMetadataService, LLMAdapter } from '@objectstack/spec/contracts';
+import { EMBEDDER_SERVICE } from '@objectstack/spec/contracts';
 import type * as AI from '@objectstack/spec/ai';
 import { AIService } from './ai-service.js';
 import type { AIServiceConfig } from './ai-service.js';
@@ -201,6 +202,79 @@ export class AIServicePlugin implements Plugin {
     } catch (err) {
       ctx.logger.warn(
         `[AI] Failed to load ${spec.pkg} for provider=${provider}`,
+        err instanceof Error ? { error: err.message } : undefined,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Build an `IEmbedder` instance from embedder settings values
+   * (`embedder_provider`, `embedder_api_key`, …) by dynamically
+   * importing `@objectstack/embedder-openai`. Returns `null` for
+   * `none` (embedder disabled) or when required credentials are
+   * missing / the package isn't installed.
+   *
+   * The OpenAI-compatible plugin covers OpenAI, Azure, 阿里通义,
+   * 智谱, 硅基流动, 火山 Doubao, MiniMax, Ollama, and any custom
+   * OpenAI-shape endpoint via `embedder_base_url`.
+   */
+  private async buildEmbedderFromValues(
+    ctx: PluginContext,
+    values: Record<string, unknown>,
+  ): Promise<{ embedder: IEmbedder; description: string } | null> {
+    const provider = String(values.embedder_provider ?? 'none').trim();
+    if (!provider || provider === 'none') return null;
+
+    const apiKey = String(values.embedder_api_key ?? '').trim();
+    const model = String(values.embedder_model ?? '').trim() || undefined;
+    const baseUrlOverride = String(values.embedder_base_url ?? '').trim() || undefined;
+    const dimensions =
+      values.embedder_dimensions != null && values.embedder_dimensions !== ''
+        ? Number(values.embedder_dimensions)
+        : undefined;
+
+    // ollama and custom typically run unauthenticated. Other providers
+    // require an api key.
+    if (!apiKey && provider !== 'ollama') {
+      ctx.logger.warn(
+        `[AI] Embedder provider=${provider} requires embedder_api_key — embedder unchanged.`,
+      );
+      return null;
+    }
+    if ((provider === 'custom' || provider === 'azure') && !baseUrlOverride) {
+      ctx.logger.warn(
+        `[AI] Embedder provider=${provider} requires embedder_base_url — embedder unchanged.`,
+      );
+      return null;
+    }
+
+    try {
+      const pkg = '@objectstack/embedder-openai';
+      const mod = await import(/* webpackIgnore: true */ pkg);
+      const create = mod.createOpenAIEmbedder ?? mod.default?.createOpenAIEmbedder;
+      if (typeof create !== 'function') {
+        ctx.logger.warn(
+          `[AI] ${pkg} did not export createOpenAIEmbedder — embedder unchanged.`,
+        );
+        return null;
+      }
+      const embedder = create({
+        preset: provider === 'custom' ? undefined : provider,
+        baseUrl: baseUrlOverride,
+        apiKey: apiKey || 'ollama',
+        model,
+        dimensions: Number.isFinite(dimensions) ? dimensions : undefined,
+        id: provider,
+      }) as IEmbedder;
+      const dimsLabel = embedder.dimensions ? `dims=${embedder.dimensions}` : 'dims=?';
+      return {
+        embedder,
+        description: `OpenAI-compatible embedder (provider=${provider}${model ? `, model=${model}` : ''}, ${dimsLabel})`,
+      };
+    } catch (err) {
+      ctx.logger.warn(
+        `[AI] Failed to load @objectstack/embedder-openai for embedder provider=${provider}`,
         err instanceof Error ? { error: err.message } : undefined,
       );
       return null;
@@ -821,6 +895,95 @@ export class AIServicePlugin implements Plugin {
     if (typeof settings.subscribe === 'function') {
       settings.subscribe('ai', () => { void applySettings(); });
       ctx.logger.info('[AI] Bound to settings:changed for namespace=ai');
+    }
+
+    // ── Embedder binding ────────────────────────────────────────
+    // Build an IEmbedder from `embedder_*` settings and register it
+    // as the kernel-level `EMBEDDER_SERVICE`. Knowledge adapters
+    // (`@objectstack/knowledge-turso`, …) resolve this service when
+    // their `embedding` constructor option is omitted, so operators
+    // only need to configure the embedder once in Setup.
+    let currentEmbedderId: string | null = null;
+    const applyEmbedder = async (): Promise<void> => {
+      try {
+        const payload = await settings.getNamespace('ai');
+        const values: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(payload.values as Record<string, any>)) {
+          values[k] = v?.value;
+        }
+        const built = await this.buildEmbedderFromValues(ctx, values);
+        if (!built) {
+          if (currentEmbedderId !== null) {
+            ctx.logger.info('[AI] Embedder disabled by settings; kernel embedder service unset.');
+            currentEmbedderId = null;
+          }
+          return;
+        }
+        // Register or replace under the well-known DI token.
+        const replace = (ctx as any).replaceService ?? ctx.registerService;
+        replace.call(ctx, EMBEDDER_SERVICE, built.embedder);
+        currentEmbedderId = built.embedder.id;
+        ctx.logger.info(`[AI] Embedder registered from settings: ${built.description}`);
+      } catch (err: any) {
+        ctx.logger.warn('[AI] Failed to apply embedder settings: ' + (err?.message ?? err));
+      }
+    };
+
+    await applyEmbedder();
+    if (typeof settings.subscribe === 'function') {
+      settings.subscribe('ai', () => { void applyEmbedder(); });
+    }
+
+    // Live `ai/test_embedder` action — overrides the manifest's
+    // fallback stub with a real one-shot embed of "ping" against
+    // the form's (possibly unsaved) values.
+    if (typeof settings.registerAction === 'function') {
+      settings.registerAction('ai', 'test_embedder', async ({ values, payload }: any) => {
+        const overrides =
+          payload && typeof payload === 'object' && payload !== null && 'values' in payload
+            ? (payload as { values?: Record<string, unknown> }).values ?? {}
+            : {};
+        const merged: Record<string, unknown> = { ...(values ?? {}), ...overrides };
+        const provider = String(merged.embedder_provider ?? 'none');
+        if (provider === 'none') {
+          return {
+            ok: false,
+            severity: 'warning',
+            message: 'Embedder disabled (provider=none). Select a provider to enable knowledge search.',
+          };
+        }
+        let built;
+        try {
+          built = await this.buildEmbedderFromValues(ctx, merged);
+        } catch (err: any) {
+          return { ok: false, severity: 'error', message: err?.message ?? String(err) };
+        }
+        if (!built) {
+          return {
+            ok: false,
+            severity: 'error',
+            message: `Could not build embedder for provider=${provider}. Check api key, base URL, and that @objectstack/embedder-openai is installed.`,
+          };
+        }
+        const started = Date.now();
+        try {
+          const vectors = await built.embedder.embed(['ping']);
+          const latency = Date.now() - started;
+          const dim = vectors[0]?.length ?? 0;
+          return {
+            ok: true,
+            severity: 'info',
+            message: `${built.description} responded in ${latency}ms (vector dims=${dim}).`,
+          };
+        } catch (err: any) {
+          return {
+            ok: false,
+            severity: 'error',
+            message: `${built.description} request failed: ${err?.message ?? String(err)}`,
+          };
+        }
+      });
+      ctx.logger.info('[AI] Registered live settings action ai/test_embedder');
     }
 
     // Override the manifest's fallback test handler with a live

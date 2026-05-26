@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
-import { aiSettingsManifest, aiTestActionHandler } from './ai.manifest';
+import { aiSettingsManifest, aiTestActionHandler, aiTestEmbedderActionHandler } from './ai.manifest';
 
 describe('aiSettingsManifest', () => {
   it('parses against SettingsManifestSchema', () => {
@@ -77,5 +77,41 @@ describe('aiTestActionHandler', () => {
       values: { provider: 'anthropic', anthropic_api_key: 'sk-ant-test' },
     } as any);
     expect(r.ok).toBe(true);
+  });
+});
+
+describe('aiSettingsManifest — embedder section', () => {
+  it('exposes embedder_provider select with 10 options incl. none + 5 Chinese providers', () => {
+    const f = (aiSettingsManifest.specifiers as any[]).find(
+      (s) => s.key === 'embedder_provider' && s.type === 'select',
+    );
+    expect(f).toBeDefined();
+    expect(f.default).toBe('none');
+    const values = f.options.map((o: any) => o.value);
+    for (const expected of [
+      'none', 'openai', 'azure', 'dashscope', 'zhipu',
+      'siliconflow', 'doubao', 'minimax', 'ollama', 'custom',
+    ]) {
+      expect(values, `missing: ${expected}`).toContain(expected);
+    }
+  });
+
+  it('marks embedder_api_key as encrypted password', () => {
+    const f = (aiSettingsManifest.specifiers as any[]).find((s) => s.key === 'embedder_api_key');
+    expect(f).toBeDefined();
+    expect(f.type).toBe('password');
+    expect(f.encrypted).toBe(true);
+  });
+
+  it('exposes embedder test action wired to /api/settings/ai/test_embedder', () => {
+    const f = (aiSettingsManifest.specifiers as any[]).find(
+      (s) => s.type === 'action_button' && s.id === 'test_embedder',
+    );
+    expect(f).toBeDefined();
+    expect(f.handler).toEqual({
+      kind: 'http',
+      method: 'POST',
+      url: '/api/settings/ai/test_embedder',
+    });
   });
 });

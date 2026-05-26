@@ -11,7 +11,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { IKnowledgeService, IEmbedder } from '@objectstack/spec/contracts';
-import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import { KNOWLEDGE_SERVICE, EMBEDDER_SERVICE } from '@objectstack/spec/contracts';
 import { createClient, type Client } from '@libsql/client';
 
 import { TursoKnowledgeAdapter, type TursoAdapterOptions } from './turso-adapter';
@@ -39,13 +39,21 @@ export interface KnowledgeTursoPluginOptions {
   /**
    * Embedder used for both upsert and search.
    *
-   * For real models, install a dedicated plugin and pass its instance:
+   * When omitted, the plugin resolves the kernel-registered
+   * `EMBEDDER_SERVICE` at `start()` time — typically the embedder
+   * configured by `@objectstack/service-ai` from the `ai` settings
+   * namespace. This is the recommended path: operators configure the
+   * embedder once in `Settings → AI & Embedder` and every knowledge
+   * adapter picks it up.
+   *
+   * For explicit wiring (tests, smoke runs, multi-embedder setups),
+   * pass an instance directly. Compatible plugins:
    *   - `@objectstack/embedder-openai` (OpenAI / 阿里通义 / 智谱 /
    *     硅基流动 / 火山 Doubao / Ollama / 任何 OpenAI-shape 兼容端点)
    *
    * For tests / smoke runs, use the bundled `HashEmbedder`.
    */
-  embedding: IEmbedder;
+  embedding?: IEmbedder;
   /** Forwarded to the adapter. */
   chunkTarget?: TursoAdapterOptions['chunkTarget'];
   /** Forwarded to the adapter. */
@@ -62,14 +70,15 @@ export class KnowledgeTursoPlugin implements Plugin {
   version = '0.1.0';
   type = 'standard' as const;
 
-  private readonly adapter: TursoKnowledgeAdapter;
+  private adapter?: TursoKnowledgeAdapter;
   private readonly ownsClient: boolean;
   private readonly client: Client;
+  private readonly providedEmbedder?: IEmbedder;
+  private readonly adapterId: string;
+  private readonly chunkTarget?: TursoAdapterOptions['chunkTarget'];
+  private readonly overFetch?: TursoAdapterOptions['overFetch'];
 
   constructor(opts: KnowledgeTursoPluginOptions) {
-    if (!opts.embedding) {
-      throw new Error('KnowledgeTursoPlugin: `embedding` provider is required.');
-    }
     if (opts.client) {
       this.client = opts.client;
       this.ownsClient = false;
@@ -80,13 +89,10 @@ export class KnowledgeTursoPlugin implements Plugin {
       this.client = createClient({ url: opts.url, authToken: opts.authToken });
       this.ownsClient = true;
     }
-    this.adapter = new TursoKnowledgeAdapter({
-      id: opts.id ?? 'turso',
-      client: this.client,
-      embedder: opts.embedding,
-      chunkTarget: opts.chunkTarget,
-      overFetch: opts.overFetch,
-    });
+    this.providedEmbedder = opts.embedding;
+    this.adapterId = opts.id ?? 'turso';
+    this.chunkTarget = opts.chunkTarget;
+    this.overFetch = opts.overFetch;
   }
 
   async init(_ctx: PluginContext): Promise<void> {
@@ -94,6 +100,30 @@ export class KnowledgeTursoPlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
+    // Resolve the embedder: prefer the constructor-supplied instance
+    // (explicit wiring), otherwise fall back to the kernel-registered
+    // EMBEDDER_SERVICE (settings-driven by service-ai).
+    let embedder: IEmbedder | undefined = this.providedEmbedder;
+    if (!embedder) {
+      try {
+        embedder = ctx.getService<IEmbedder>(EMBEDDER_SERVICE);
+      } catch {
+        ctx.logger.warn?.(
+          'KnowledgeTursoPlugin: no `embedding` option provided and no EMBEDDER_SERVICE registered. ' +
+            'Configure an embedder in Settings → AI & Embedder, or pass `embedding` in the plugin options.',
+        );
+        return;
+      }
+    }
+
+    this.adapter = new TursoKnowledgeAdapter({
+      id: this.adapterId,
+      client: this.client,
+      embedder,
+      chunkTarget: this.chunkTarget,
+      overFetch: this.overFetch,
+    });
+
     let svc: IKnowledgeService | undefined;
     try {
       svc = ctx.getService<IKnowledgeService>(KNOWLEDGE_SERVICE);
@@ -104,7 +134,10 @@ export class KnowledgeTursoPlugin implements Plugin {
       return;
     }
     svc.registerAdapter(this.adapter.id, this.adapter);
-    ctx.logger.info?.(`KnowledgeTursoPlugin: adapter '${this.adapter.id}' registered.`);
+    ctx.logger.info?.(
+      `KnowledgeTursoPlugin: adapter '${this.adapter.id}' registered ` +
+        `(embedder=${embedder.id}, dims=${embedder.dimensions}).`,
+    );
   }
 
   async stop(_ctx: PluginContext): Promise<void> {

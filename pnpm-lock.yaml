@@ -1533,6 +1533,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@objectstack/embedder-openai':
+        specifier: workspace:*
+        version: link:../../plugins/embedder-openai
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects

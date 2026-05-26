@@ -106,10 +106,17 @@ export const SETUP_APP: App = {
         // is used (not `object`) because settings are stored in a generic
         // K/V table (`sys_setting`) rather than per-namespace objects, and
         // the renderer is a dedicated <SettingsView> page in objectui.
+        //
+        // Order mirrors `builtinSettingsManifests` so left-nav order matches
+        // the All-Settings index. AI groups chat + embedder under one entry
+        // because operators reason about them together; Knowledge is its
+        // own entry because the adapter selection is independent.
         { id: 'nav_settings_hub', type: 'url', label: 'All Settings', url: '/apps/setup/system/settings', icon: 'settings-2' },
-        { id: 'nav_settings_mail', type: 'url', label: 'Email', url: '/apps/setup/system/settings/mail', icon: 'mail' },
         { id: 'nav_settings_branding', type: 'url', label: 'Branding', url: '/apps/setup/system/settings/branding', icon: 'palette' },
-        { id: 'nav_settings_ai', type: 'url', label: 'AI', url: '/apps/setup/system/settings/ai', icon: 'sparkles' },
+        { id: 'nav_settings_mail', type: 'url', label: 'Email', url: '/apps/setup/system/settings/mail', icon: 'mail' },
+        { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive' },
+        { id: 'nav_settings_ai', type: 'url', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles' },
+        { id: 'nav_settings_knowledge', type: 'url', label: 'Knowledge', url: '/apps/setup/system/settings/knowledge', icon: 'book-open' },
         { id: 'nav_settings_feature_flags', type: 'url', label: 'Feature Flags', url: '/apps/setup/system/settings/feature_flags', icon: 'flag' },
       ],
     },

@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Settings → runtime bridge for the embedder
+
+The `embedder_*` settings configured in **Setup → AI & Embedder** now
+build a real `IEmbedder` instance at runtime and register it as a
+kernel DI service.
+
+- New `EMBEDDER_SERVICE = 'embedder'` DI token in
+  `@objectstack/spec/contracts`.
+- `@objectstack/service-ai` extends its settings-binding loop to
+  dynamically construct an `OpenAIEmbedder` (via
+  `@objectstack/embedder-openai`'s `createOpenAIEmbedder`) and
+  register/replace it under `EMBEDDER_SERVICE`. Live swap on every
+  `settings:changed` event for namespace `ai`.
+- `AIServicePlugin` registers a live `ai/test_embedder` action that
+  performs a real `embed(['ping'])` round-trip against the form's
+  (possibly unsaved) values and reports vector dims + latency.
+- `@objectstack/knowledge-turso`'s `embedding` option is now optional;
+  the plugin auto-resolves `EMBEDDER_SERVICE` at `start()` when no
+  explicit embedder is passed. Logs `(embedder=<id>, dims=<n>)` on
+  registration. Warns + no-ops if neither path resolves.
+- 10 new tests (5 in service-ai, 5 in knowledge-turso). All green.
+
+End-to-end: operator picks 硅基流动 + paste API key + `BAAI/bge-m3` in
+the Setup app, hits Save → in the same process the embedder is live and
+every knowledge adapter started without an explicit embedder picks it
+up. No restart, no env vars.
+
+### Added — Setup App: complete Configuration settings pages
+
+The Setup App's **Configuration** left-nav now lists every built-in
+settings namespace (Storage was previously missing entirely, Knowledge
+had no entry, and AI lacked an Embedder section):
+
+- **AI manifest** gained a full Embedder section — provider select
+  with 10 options (`none` / `openai` / `azure` / `dashscope` (阿里通义)
+  / `zhipu` (智谱) / `siliconflow` (硅基流动) / `doubao` (火山引擎)
+  / `minimax` / `ollama` / `custom`), encrypted API key, model,
+  optional base URL (custom/azure only), Matryoshka dimensions
+  override, batch size, and a `Test embedder` button.
+- **New `knowledge` settings namespace** — adapter selection
+  (`memory` / `turso` / `ragflow`), Turso connection URL + encrypted
+  auth token (blank URL = reuse tenant's primary libSQL connection),
+  RAGFlow base URL + key + default dataset, indexing defaults
+  (`chunk_target`, `chunk_overlap`, `over_fetch`), and a security-
+  critical `enforce_rls` toggle that defaults to `true`.
+- **Setup App nav** — added File Storage + Knowledge entries; left-nav
+  order now matches `builtinSettingsManifests`.
+- **i18n** — full `ai` and `knowledge` blocks for `en` and `zh-CN`,
+  including all 10 embedder provider option labels and adapter help
+  text.
+
 ### Added — `IEmbedder` protocol + `@objectstack/embedder-openai` plugin
 
 Extracted text-→-vector providers into a dedicated, plugin-shaped layer:

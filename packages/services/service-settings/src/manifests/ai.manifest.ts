@@ -23,9 +23,10 @@ const manifest = {
   label: 'AI',
   icon: 'Sparkles',
   description:
-    'LLM provider, model, and credentials used by the platform AI service. ' +
-    'Provider SDK packages (e.g. @ai-sdk/openai) must be installed on the host ' +
-    'for the chosen provider to be loadable at runtime.',
+    'LLM provider, model, credentials, and embedder configuration used by ' +
+    'the platform AI and knowledge services. Provider SDK packages (e.g. ' +
+    '@ai-sdk/openai for chat, @objectstack/embedder-openai for embeddings) ' +
+    'must be installed on the host for the chosen provider to be loadable at runtime.',
   scope: 'global',
   readPermission: 'setup.access',
   writePermission: 'setup.write',
@@ -122,6 +123,66 @@ const manifest = {
     { type: 'action_button', id: 'test', label: 'Test connection',
       required: false, icon: 'Plug',
       handler: { kind: 'http', method: 'POST', url: '/api/settings/ai/test' } },
+
+    // ════════════════════════════════════════════════════════════════
+    // Embedder — text → vector provider used by knowledge / RAG.
+    // Decoupled from the chat provider above so an organisation can
+    // mix-and-match (e.g. OpenAI for chat + 阿里通义 for embeddings).
+    //
+    // The preset list mirrors @objectstack/embedder-openai's
+    // OPENAI_COMPATIBLE_PRESETS so a UI dropdown maps 1:1 to a
+    // runtime baseUrl. The "none" choice is the explicit opt-out
+    // for instances that disable knowledge / RAG entirely.
+    // ════════════════════════════════════════════════════════════════
+    { type: 'group', id: 'embedder', label: 'Embedder', required: false,
+      description:
+        'Text → vector provider used by knowledge sources and RAG. ' +
+        'Independent from the chat provider above — mix providers freely ' +
+        '(e.g. OpenAI for chat + 阿里通义 for embeddings).' },
+    { type: 'select', key: 'embedder_provider', label: 'Provider',
+      required: false, default: 'none',
+      options: [
+        { value: 'none', label: 'Disabled (no embeddings)' },
+        { value: 'openai', label: 'OpenAI' },
+        { value: 'azure', label: 'Azure OpenAI' },
+        { value: 'dashscope', label: '阿里通义 DashScope' },
+        { value: 'zhipu', label: '智谱 BigModel' },
+        { value: 'siliconflow', label: '硅基流动 SiliconFlow' },
+        { value: 'doubao', label: '火山引擎 Doubao' },
+        { value: 'minimax', label: 'MiniMax' },
+        { value: 'ollama', label: 'Ollama (local)' },
+        { value: 'custom', label: 'Custom (OpenAI-compatible)' },
+      ],
+    },
+    { type: 'password', key: 'embedder_api_key', label: 'Embedder API key',
+      required: false, encrypted: true,
+      description: 'Bearer token sent as Authorization header. For Ollama any non-empty value works.',
+      visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
+    { type: 'text', key: 'embedder_model', label: 'Model',
+      required: false,
+      description:
+        'Examples — OpenAI: text-embedding-3-small · 阿里通义: text-embedding-v3 · ' +
+        '智谱: embedding-3 · 硅基流动: BAAI/bge-m3 · Ollama: bge-m3',
+      visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
+    { type: 'text', key: 'embedder_base_url', label: 'Base URL',
+      required: false,
+      description:
+        'Endpoint root (without /embeddings). Auto-filled from preset; ' +
+        'override for proxies or self-hosted gateways.',
+      visible: "${data.embedder_provider === 'custom' || data.embedder_provider === 'azure'}" },
+    { type: 'number', key: 'embedder_dimensions', label: 'Dimensions',
+      required: false, min: 1, max: 8192,
+      description:
+        'Override output dimensionality (Matryoshka models only — OpenAI v3, 智谱 embedding-3, BGE-m3 dense). ' +
+        'Leave blank to use the model default.',
+      visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
+    { type: 'number', key: 'embedder_batch_size', label: 'Batch size',
+      required: false, default: 64, min: 1, max: 2048,
+      description: 'Chunks per embed() call. Reduce if hitting provider rate / size limits.',
+      visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
+    { type: 'action_button', id: 'test_embedder', label: 'Test embedder',
+      required: false, icon: 'Plug',
+      handler: { kind: 'http', method: 'POST', url: '/api/settings/ai/test_embedder' } },
   ],
 };
 
@@ -176,5 +237,56 @@ export const aiTestActionHandler: SettingsActionHandler = async ({ values, paylo
     ok: true,
     severity: 'info',
     message: `${provider} configured (model=${model}). Mount @objectstack/service-ai to exercise live calls.`,
+  };
+};
+
+/**
+ * Built-in fallback handler for `ai/test_embedder`. Real implementation
+ * with a live `embed()` round-trip lives in `@objectstack/service-ai` or
+ * `@objectstack/service-knowledge` and overrides this stub at runtime.
+ *
+ * This fallback validates form completeness only — no network call —
+ * so the button is useful even when no embedder plugin is mounted.
+ */
+export const aiTestEmbedderActionHandler: SettingsActionHandler = async ({ values, payload }) => {
+  const overrides =
+    payload && typeof payload === 'object' && payload !== null && 'values' in payload
+      ? ((payload as { values?: Record<string, unknown> }).values ?? {})
+      : {};
+  const merged: Record<string, unknown> = { ...values, ...overrides };
+  const provider = String(merged.embedder_provider ?? 'none');
+
+  if (provider === 'none') {
+    return {
+      ok: false,
+      severity: 'warning',
+      message: 'Embedder is disabled. Pick a provider to enable knowledge / RAG.',
+    };
+  }
+
+  // For Ollama, an API key is conventionally `ollama` but not enforced.
+  if (provider !== 'ollama' && !merged.embedder_api_key) {
+    return {
+      ok: false,
+      severity: 'error',
+      message: `${provider} embedder requires an API key.`,
+    };
+  }
+
+  if ((provider === 'custom' || provider === 'azure') && !merged.embedder_base_url) {
+    return {
+      ok: false,
+      severity: 'error',
+      message: `${provider} embedder requires a Base URL.`,
+    };
+  }
+
+  const model = merged.embedder_model ?? '(provider default)';
+  return {
+    ok: true,
+    severity: 'info',
+    message:
+      `${provider} embedder configured (model=${model}). ` +
+      'Mount @objectstack/embedder-openai + a knowledge adapter to exercise live calls.',
   };
 };

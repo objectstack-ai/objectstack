@@ -37,3 +37,19 @@ export interface IEmbedder {
    */
   embed(texts: string[]): Promise<number[][]>;
 }
+
+/**
+ * DI service token for the kernel-registered `IEmbedder` instance.
+ *
+ * Plugins that need an embedder (e.g. `@objectstack/knowledge-turso`,
+ * `@objectstack/knowledge-sqlite-vec`) SHOULD prefer resolving this
+ * service over taking the embedder as a constructor option, so
+ * operators can configure the embedder once (in `Settings → AI &
+ * Embedder`) and have every knowledge adapter pick it up.
+ *
+ * Registered by `@objectstack/service-ai` when the operator selects a
+ * non-`none` embedder provider in settings. If absent, knowledge
+ * adapters fall back to their constructor-supplied embedder (or refuse
+ * to start).
+ */
+export const EMBEDDER_SERVICE = 'embedder' as const;

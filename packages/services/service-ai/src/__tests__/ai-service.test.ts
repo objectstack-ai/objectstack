@@ -1196,4 +1196,164 @@ describe('AIServicePlugin', () => {
       expect(result.severity).toBe('error');
     });
   });
+
+  // ── embedder binding ────────────────────────────────────────────
+  describe('embedder binding', () => {
+    function createCtxWithSettings(settings: any) {
+      const services = new Map<string, unknown>();
+      services.set('manifest', { register: vi.fn() });
+      services.set('settings', settings);
+      return {
+        registerService: vi.fn((name: string, service: unknown) => services.set(name, service)),
+        replaceService: vi.fn((name: string, service: unknown) => services.set(name, service)),
+        getService: vi.fn(<T,>(name: string): T => {
+          if (!services.has(name)) throw new Error(`Service "${name}" not found`);
+          return services.get(name) as T;
+        }),
+        getServices: vi.fn(() => services),
+        hook: vi.fn(),
+        trigger: vi.fn(async () => {}),
+        logger: silentLogger,
+        getKernel: vi.fn(),
+      } as any;
+    }
+
+    it('registers ai/test_embedder live action alongside ai/test', async () => {
+      const settings: any = {
+        getNamespace: vi.fn(async () => ({ manifest: { namespace: 'ai' }, values: {} })),
+        subscribe: vi.fn(),
+        registerAction: vi.fn(),
+      };
+      const plugin = new AIServicePlugin();
+      const ctx = createCtxWithSettings(settings);
+      await plugin.init(ctx);
+      await plugin.start!(ctx);
+      const kernelReady = (ctx.hook as any).mock.calls.find(([n]: any[]) => n === 'kernel:ready');
+      await kernelReady[1]();
+      const actionIds = settings.registerAction.mock.calls.map((c: any[]) => `${c[0]}/${c[1]}`);
+      expect(actionIds).toContain('ai/test');
+      expect(actionIds).toContain('ai/test_embedder');
+    });
+
+    it('test_embedder action returns warning when provider=none', async () => {
+      const settings: any = {
+        getNamespace: vi.fn(async () => ({ manifest: { namespace: 'ai' }, values: {} })),
+        subscribe: vi.fn(),
+        registerAction: vi.fn(),
+      };
+      const plugin = new AIServicePlugin();
+      const ctx = createCtxWithSettings(settings);
+      await plugin.init(ctx);
+      await plugin.start!(ctx);
+      const kernelReady = (ctx.hook as any).mock.calls.find(([n]: any[]) => n === 'kernel:ready');
+      await kernelReady[1]();
+      const handler = settings.registerAction.mock.calls.find(
+        (c: any[]) => c[0] === 'ai' && c[1] === 'test_embedder',
+      )[2];
+      const result = await handler({ values: {}, payload: { values: { embedder_provider: 'none' } } });
+      expect(result.ok).toBe(false);
+      expect(result.severity).toBe('warning');
+    });
+
+    it('test_embedder action reports missing api key for siliconflow', async () => {
+      const settings: any = {
+        getNamespace: vi.fn(async () => ({ manifest: { namespace: 'ai' }, values: {} })),
+        subscribe: vi.fn(),
+        registerAction: vi.fn(),
+      };
+      const plugin = new AIServicePlugin();
+      const ctx = createCtxWithSettings(settings);
+      await plugin.init(ctx);
+      await plugin.start!(ctx);
+      const kernelReady = (ctx.hook as any).mock.calls.find(([n]: any[]) => n === 'kernel:ready');
+      await kernelReady[1]();
+      const handler = settings.registerAction.mock.calls.find(
+        (c: any[]) => c[0] === 'ai' && c[1] === 'test_embedder',
+      )[2];
+      const result = await handler({
+        values: {},
+        payload: { values: { embedder_provider: 'siliconflow' } },
+      });
+      expect(result.ok).toBe(false);
+      expect(result.severity).toBe('error');
+    });
+
+    it('test_embedder action rejects custom provider without base URL', async () => {
+      const settings: any = {
+        getNamespace: vi.fn(async () => ({ manifest: { namespace: 'ai' }, values: {} })),
+        subscribe: vi.fn(),
+        registerAction: vi.fn(),
+      };
+      const plugin = new AIServicePlugin();
+      const ctx = createCtxWithSettings(settings);
+      await plugin.init(ctx);
+      await plugin.start!(ctx);
+      const kernelReady = (ctx.hook as any).mock.calls.find(([n]: any[]) => n === 'kernel:ready');
+      await kernelReady[1]();
+      const handler = settings.registerAction.mock.calls.find(
+        (c: any[]) => c[0] === 'ai' && c[1] === 'test_embedder',
+      )[2];
+      const result = await handler({
+        values: {},
+        payload: { values: { embedder_provider: 'custom', embedder_api_key: 'k' } },
+      });
+      expect(result.ok).toBe(false);
+      expect(result.severity).toBe('error');
+    });
+
+    it('builds and registers embedder via EMBEDDER_SERVICE when provider is configured', async () => {
+      // Stub global fetch so OpenAIEmbedder.embed() succeeds.
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          data: [{ embedding: Array.from({ length: 1024 }, () => 0.01) }],
+        }),
+      })) as any;
+      try {
+        const settings: any = {
+          getNamespace: vi.fn(async () => ({
+            manifest: { namespace: 'ai' },
+            values: {
+              embedder_provider: { value: 'siliconflow' },
+              embedder_api_key: { value: 'sk-test' },
+              embedder_model: { value: 'BAAI/bge-m3' },
+            },
+          })),
+          subscribe: vi.fn(),
+          registerAction: vi.fn(),
+        };
+        const plugin = new AIServicePlugin();
+        const ctx = createCtxWithSettings(settings);
+        await plugin.init(ctx);
+        await plugin.start!(ctx);
+        const kernelReady = (ctx.hook as any).mock.calls.find(([n]: any[]) => n === 'kernel:ready');
+        await kernelReady[1]();
+        // EMBEDDER_SERVICE registered
+        const services = ctx.getServices();
+        const embedder = services.get('embedder') as any;
+        expect(embedder).toBeDefined();
+        expect(embedder.id).toBe('siliconflow');
+        expect(embedder.dimensions).toBe(1024);
+        // Live action round-trip
+        const handler = settings.registerAction.mock.calls.find(
+          (c: any[]) => c[0] === 'ai' && c[1] === 'test_embedder',
+        )[2];
+        const result = await handler({
+          values: {},
+          payload: {
+            values: {
+              embedder_provider: 'siliconflow',
+              embedder_api_key: 'sk-test',
+              embedder_model: 'BAAI/bge-m3',
+            },
+          },
+        });
+        expect(result.ok).toBe(true);
+        expect(result.message).toContain('vector dims=1024');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
 });
