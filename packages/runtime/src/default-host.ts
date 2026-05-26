@@ -26,8 +26,8 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
-import { existsSync } from 'node:fs';
-import { createStandaloneStack, type StandaloneStackConfig, type StandaloneStackResult } from './standalone-stack.js';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createStandaloneStack, resolveObjectStackHome, type StandaloneStackConfig, type StandaloneStackResult } from './standalone-stack.js';
 import { isHttpUrl } from './load-artifact-bundle.js';
 
 export interface DefaultHostConfigOptions extends StandaloneStackConfig {
@@ -82,7 +82,7 @@ export async function createDefaultHostConfig(
 ): Promise<DefaultHostConfigResult> {
     const { requireArtifact = true, ...standaloneOpts } = options;
 
-    const resolvedArtifact = resolveDefaultArtifactPath(standaloneOpts.artifactPath);
+    let resolvedArtifact = resolveDefaultArtifactPath(standaloneOpts.artifactPath);
     if (!resolvedArtifact && requireArtifact) {
         throw new Error(
             '[createDefaultHostConfig] No artifact source available. ' +
@@ -91,6 +91,40 @@ export async function createDefaultHostConfig(
             'or pass `{ artifactPath: ... }` explicitly. ' +
             'To boot an empty kernel anyway, pass `{ requireArtifact: false }`.',
         );
+    }
+
+    // Empty-boot path: synthesize a minimal artifact stub inside the
+    // ObjectStack home directory so MetadataPlugin has a real file to
+    // read (and to watch for marketplace installs that land later).
+    if (!resolvedArtifact && !requireArtifact) {
+        const home = resolveObjectStackHome();
+        const stubPath = resolvePath(home, 'dist/objectstack.json');
+        if (!existsSync(stubPath)) {
+            mkdirSync(resolvePath(stubPath, '..'), { recursive: true });
+            writeFileSync(
+                stubPath,
+                JSON.stringify(
+                    {
+                        manifest: {
+                            id: 'com.objectstack.empty',
+                            name: 'empty',
+                            version: '0.0.0',
+                            type: 'app',
+                            description: 'Empty starter kernel — install apps via the Studio marketplace.',
+                        },
+                        objects: [],
+                        views: [],
+                        apps: [],
+                        flows: [],
+                        requires: [],
+                    },
+                    null,
+                    2,
+                ),
+                'utf8',
+            );
+        }
+        resolvedArtifact = stubPath;
     }
 
     return createStandaloneStack({

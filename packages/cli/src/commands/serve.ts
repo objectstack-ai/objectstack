@@ -241,21 +241,33 @@ export default class Serve extends Command {
     // `dist/objectstack.json`.
     const configMissing = !fs.existsSync(absolutePath);
     let useArtifactFallback = false;
+    let useEmptyBoot = false;
     if (configMissing) {
       const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
       const artifactSource = resolveDefaultArtifactPath();
       if (!artifactSource) {
-        printError(`Configuration file not found: ${absolutePath}`);
-        console.log(chalk.dim('  Hint: Run `objectstack init` to create a new project,'));
-        console.log(chalk.dim('        or run `objectstack build` first, or set OS_ARTIFACT_PATH.'));
-        this.exit(1);
+        // Quick-start mode: `objectstack start` lets the user boot an
+        // empty kernel with no config and no artifact, then install apps
+        // from the marketplace via Studio. The CLI signals this by
+        // setting OS_BOOT_EMPTY=1 in the child env.
+        if (process.env.OS_BOOT_EMPTY === '1') {
+          useEmptyBoot = true;
+        } else {
+          printError(`Configuration file not found: ${absolutePath}`);
+          console.log(chalk.dim('  Hint: Run `objectstack init` to create a new project,'));
+          console.log(chalk.dim('        `objectstack start` to boot an empty kernel against your marketplace,'));
+          console.log(chalk.dim('        or run `objectstack build` first / set OS_ARTIFACT_PATH.'));
+          this.exit(1);
+        }
       }
       useArtifactFallback = true;
     }
 
     // Quiet loading — only show a single spinner line
     console.log('');
-    if (useArtifactFallback) {
+    if (useEmptyBoot) {
+      console.log(chalk.dim('  No objectstack.config.ts or artifact found — booting empty kernel...'));
+    } else if (useArtifactFallback) {
       console.log(chalk.dim('  No objectstack.config.ts found — booting from artifact (default host)...'));
     } else {
       console.log(chalk.dim(`  Loading ${relativeConfig}...`));
@@ -360,8 +372,13 @@ export default class Serve extends Command {
           // Artifact-only boot — no objectstack.config.ts authored.
           // Always use the default-host helper which is standalone-only
           // and never depends on @objectstack/service-cloud.
+          //
+          // When `useEmptyBoot` is set the user asked for a quick-start
+          // ("objectstack start" with nothing to load); skip the
+          // "missing artifact" error and assemble a bare kernel that
+          // can later install marketplace apps at runtime.
           const { createDefaultHostConfig } = await import('@objectstack/runtime');
-          const bootResult = await createDefaultHostConfig();
+          const bootResult = await createDefaultHostConfig({ requireArtifact: !useEmptyBoot });
           config = { ...originalConfig, ...bootResult } as any;
         } else if (resolvedMode === 'standalone') {
           const { createStandaloneStack } = await import('@objectstack/runtime');

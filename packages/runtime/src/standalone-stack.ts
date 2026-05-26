@@ -22,8 +22,31 @@
 
 import { resolve as resolvePath } from 'node:path';
 import { mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { z } from 'zod';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
+
+/**
+ * Resolve the ObjectStack home directory used to store cwd-independent
+ * runtime data (default sqlite database, downloaded marketplace apps,
+ * installed plugin cache).
+ *
+ * Resolution order:
+ *   1. `OS_HOME` env var (absolute path; `~` expanded)
+ *   2. `~/.objectstack` (cross-platform user-home default)
+ *
+ * The directory is created lazily by callers that actually write to it
+ * (e.g. the sqlite driver's `mkdirSync(...)`); this helper does not
+ * touch the filesystem.
+ */
+export function resolveObjectStackHome(): string {
+    const raw = process.env.OS_HOME?.trim();
+    if (raw && raw.length > 0) {
+        if (raw.startsWith('~')) return resolvePath(homedir(), raw.slice(1).replace(/^[/\\]/, ''));
+        return resolvePath(raw);
+    }
+    return resolvePath(homedir(), '.objectstack');
+}
 
 export const StandaloneStackConfigSchema = z.object({
     databaseUrl: z.string().optional(),
@@ -91,7 +114,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     const dbUrl = cfg.databaseUrl
         ?? process.env.OS_DATABASE_URL?.trim()
         ?? process.env.TURSO_DATABASE_URL?.trim()
-        ?? `file:${resolvePath(cwd, '.objectstack/data/standalone.db')}`;
+        ?? `file:${resolvePath(resolveObjectStackHome(), 'data/standalone.db')}`;
     const dbAuthToken = cfg.databaseAuthToken
         ?? process.env.OS_DATABASE_AUTH_TOKEN?.trim()
         ?? process.env.TURSO_AUTH_TOKEN?.trim();
