@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { FilterConditionSchema } from '../data/filter.zod';
+import { DateGranularity } from '../data/query.zod';
 import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -170,7 +171,22 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
 
   /** Category Field (X-Axis / Group By) */
   categoryField: z.string().optional().describe('Field for grouping (X-Axis)'),
-  
+
+  /**
+   * Date Bucketing Granularity for `categoryField`
+   *
+   * When set and `categoryField` references a date/datetime field, the engine
+   * buckets values into uniform `day` / `week` / `month` / `quarter` / `year`
+   * periods server-side (PostgreSQL `date_trunc`, MySQL `date_format`, SQLite
+   * `strftime`, MongoDB `$dateTrunc`; falls back to in-memory ISO-8601
+   * bucketing otherwise). Without this, raw timestamps are grouped verbatim
+   * which typically yields one bucket per row — making time-series charts
+   * appear flat.
+   *
+   * Mirrors the `dateGranularity` shape of {@link GroupByNodeSchema}.
+   */
+  categoryGranularity: DateGranularity.optional().describe('Bucket categoryField date values into day/week/month/quarter/year periods'),
+
   /** Value Field (Y-Axis) */
   valueField: z.string().optional().describe('Field for values (Y-Axis)'),
   

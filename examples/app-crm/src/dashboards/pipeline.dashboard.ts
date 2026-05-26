@@ -87,6 +87,7 @@ export const PipelineDashboard: Dashboard = {
       object: 'crm_opportunity',
       aggregate: 'count',
       categoryField: 'close_date',
+      categoryGranularity: 'day',
       filter: {
         close_date: { $gte: '{90_days_ago}', $lte: '{today}' },
       },

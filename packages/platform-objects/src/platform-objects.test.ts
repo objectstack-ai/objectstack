@@ -6,6 +6,7 @@ import {
   SysApiKey,
   SysInvitation,
   SysMember,
+  SysOauthApplication,
   SysOrganization,
   SysSession,
   SysTeam,
@@ -130,6 +131,48 @@ describe('@objectstack/platform-objects', () => {
       expect(wildcard.allowCreate).toBe(false);
       expect(wildcard.allowEdit).toBe(false);
       expect(wildcard.allowDelete).toBe(false);
+    });
+  });
+
+  describe('sysadmin row actions', () => {
+    // Setup-App admins must be able to drive the access-control lifecycle
+    // without dropping to SQL. These assertions lock in the high-traffic
+    // affordances (activate/deactivate/clone for RBAC objects; unlink
+    // for identity links) so they cannot silently regress.
+    it('SysRole exposes activate/deactivate/clone/set-default row actions', () => {
+      const names = (SysRole.actions ?? []).map((a) => a.name).sort();
+      expect(names).toEqual(['activate_role', 'clone_role', 'deactivate_role', 'set_default_role']);
+    });
+
+    it('SysPermissionSet exposes activate/deactivate/clone row actions', () => {
+      const names = (SysPermissionSet.actions ?? []).map((a) => a.name).sort();
+      expect(names).toEqual(['activate_permission_set', 'clone_permission_set', 'deactivate_permission_set']);
+    });
+
+    it('SysAccount exposes an unlink-account row action wired to better-auth', () => {
+      const unlink = (SysAccount.actions ?? []).find((a) => a.name === 'unlink_account');
+      expect(unlink).toBeDefined();
+      expect(unlink?.target).toBe('/api/v1/auth/unlink-account');
+      const paramNames = (unlink?.params ?? []).map((p) => p.name);
+      expect(paramNames).toEqual(['providerId', 'accountId']);
+    });
+
+    it('SysOauthApplication routes all mutations through better-auth, not the data layer', () => {
+      const actions = SysOauthApplication.actions ?? [];
+      const rotate = actions.find((a) => a.name === 'rotate_client_secret');
+      const del = actions.find((a) => a.name === 'delete_oauth_application');
+      expect(rotate?.target).toBe('/api/v1/auth/oauth2/client/rotate-secret');
+      expect(rotate?.method).toBe('POST');
+      expect((rotate?.params ?? []).map((p) => p.field)).toEqual(['client_id']);
+      expect(del?.target).toBe('/api/v1/auth/oauth2/delete-client');
+      expect(del?.method).toBe('POST');
+      expect(del?.mode).toBe('delete');
+      // Generic CRUD must NOT expose delete — that path is reserved for
+      // the better-auth-backed action above so OAuth-specific cleanup
+      // (token revocation, consent invalidation) always runs.
+      expect(SysOauthApplication.enable?.apiMethods).not.toContain('delete');
+      expect(SysOauthApplication.enable?.apiMethods).not.toContain('update');
+      expect(SysOauthApplication.enable?.apiMethods).not.toContain('create');
     });
   });
 

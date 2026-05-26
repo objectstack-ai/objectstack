@@ -23,6 +23,65 @@ export const SysPermissionSet = ObjectSchema.create({
   titleFormat: '{label}',
   compactLayout: ['label', 'name', 'active'],
 
+  // Custom actions — permission sets are templates assigned to roles or
+  // users (via sys_role_permission_set / sys_user_permission_set). The
+  // sysadmin operations that don't live on the parent-detail tabs are
+  // lifecycle (activate/deactivate without losing assignments) and
+  // clone (build a new permset by tweaking an existing one). Both hit
+  // the generic data CRUD endpoint — managedBy: 'config' permits it.
+  actions: [
+    {
+      name: 'activate_permission_set',
+      label: 'Activate',
+      icon: 'circle-check',
+      variant: 'secondary',
+      mode: 'custom',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'PATCH',
+      target: '/api/v1/data/sys_permission_set/{id}',
+      bodyExtra: { active: true },
+      successMessage: 'Permission set activated',
+      refreshAfter: true,
+    },
+    {
+      name: 'deactivate_permission_set',
+      label: 'Deactivate',
+      icon: 'circle-off',
+      variant: 'danger',
+      mode: 'custom',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'PATCH',
+      target: '/api/v1/data/sys_permission_set/{id}',
+      bodyExtra: { active: false },
+      confirmText: 'Deactivate this permission set? Existing assignments stay in place but stop granting access until re-activated.',
+      successMessage: 'Permission set deactivated',
+      refreshAfter: true,
+    },
+    {
+      name: 'clone_permission_set',
+      label: 'Clone',
+      icon: 'copy',
+      variant: 'secondary',
+      mode: 'custom',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/data/sys_permission_set',
+      bodyExtra: { active: true },
+      successMessage: 'Permission set cloned',
+      refreshAfter: true,
+      params: [
+        { name: 'label', label: 'New Display Name', type: 'text', required: true },
+        { name: 'name', label: 'New API Name', type: 'text', required: true, helpText: 'Unique snake_case machine name' },
+        { field: 'description', defaultFromRow: true },
+        { field: 'object_permissions', defaultFromRow: true },
+        { field: 'field_permissions', defaultFromRow: true },
+      ],
+    },
+  ],
+
   listViews: {
     active: {
       type: 'grid',

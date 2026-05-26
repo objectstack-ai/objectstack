@@ -21,6 +21,31 @@ export const SysAccount = ObjectSchema.create({
   titleFormat: '{provider_id} - {account_id}',
   compactLayout: ['provider_id', 'user_id', 'account_id'],
 
+  // Custom actions — sysadmins routinely need to revoke a user's OAuth
+  // link (e.g. when an SSO provider is decommissioned or the user
+  // requests it). Better-auth exposes `/unlink-account { providerId,
+  // accountId }` for this. The form is locked to the row's values so
+  // it acts as a one-click confirmation rather than a free-form edit.
+  actions: [
+    {
+      name: 'unlink_account',
+      label: 'Unlink Account',
+      icon: 'unlink',
+      variant: 'danger',
+      mode: 'delete',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/unlink-account',
+      confirmText: 'Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it from their account settings.',
+      successMessage: 'Identity link removed',
+      refreshAfter: true,
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+        { name: 'accountId', field: 'account_id', defaultFromRow: true, required: true },
+      ],
+    },
+  ],
+
   listViews: {
     mine: {
       type: 'grid',

@@ -29,6 +29,57 @@ export const SysOauthApplication = ObjectSchema.create({
   titleFormat: '{name}',
   compactLayout: ['name', 'client_id', 'type', 'disabled'],
 
+  // Custom actions — all OAuth-application mutations are routed through
+  // better-auth's `@better-auth/oauth-provider` endpoints rather than the
+  // generic data layer, so server-side validation, secret hashing, and
+  // audit hooks all run. The generic `delete` API method is intentionally
+  // dropped from `apiMethods` below (see `enable.apiMethods`) so the only
+  // delete path is the better-auth wrapper below.
+  //
+  // Upstream gap (better-auth 1.6.11): the `/admin/oauth2/update-client`
+  // endpoint does NOT accept the `disabled` flag in its `update` body
+  // schema, and no dedicated enable/disable endpoint exists. Until that
+  // ships upstream, sysadmins cannot toggle `sys_oauth_application.disabled`
+  // through the UI — `delete` is the only kill-switch. See
+  // https://github.com/better-auth/better-auth — track the
+  // `@better-auth/oauth-provider` plugin's adminUpdateOAuthClient schema.
+  actions: [
+    {
+      name: 'rotate_client_secret',
+      label: 'Rotate Client Secret',
+      icon: 'refresh-cw',
+      variant: 'secondary',
+      mode: 'custom',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/auth/oauth2/client/rotate-secret',
+      confirmText: 'Rotate this OAuth client\'s secret? The previous secret will stop working immediately and any integrations using it will break until they are updated with the new secret. The new secret is shown only once.',
+      successMessage: 'Client secret rotated — copy the new value from the response now.',
+      refreshAfter: true,
+      params: [
+        { name: 'client_id', field: 'client_id', defaultFromRow: true, required: true },
+      ],
+    },
+    {
+      name: 'delete_oauth_application',
+      label: 'Delete OAuth Application',
+      icon: 'trash-2',
+      variant: 'danger',
+      mode: 'delete',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/auth/oauth2/delete-client',
+      confirmText: 'Permanently delete this OAuth application? All issued tokens and consents will be invalidated and integrations using this client_id will stop working immediately. This cannot be undone.',
+      successMessage: 'OAuth application deleted',
+      refreshAfter: true,
+      params: [
+        { name: 'client_id', field: 'client_id', defaultFromRow: true, required: true },
+      ],
+    },
+  ],
+
   listViews: {
     active: {
       type: 'grid',
@@ -292,7 +343,12 @@ export const SysOauthApplication = ObjectSchema.create({
     trackHistory: true,
     searchable: true,
     apiEnabled: true,
-    apiMethods: ['get', 'list', 'delete'],
+    // All mutations (create/update/delete) must go through better-auth's
+    // oauth-provider endpoints under /api/v1/auth/{admin/,}oauth2/* — the
+    // generic data layer is read-only for this object so sysadmins cannot
+    // bypass server-side OAuth validation. The Delete row action above is
+    // wired to /api/v1/auth/oauth2/delete-client.
+    apiMethods: ['get', 'list'],
     trash: false,
     mru: false,
   },
