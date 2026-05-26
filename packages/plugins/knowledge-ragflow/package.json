@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/knowledge-ragflow",
-  "version": "6.6.0",
+  "version": "6.7.0",
   "license": "Apache-2.0",
   "description": "RAGFlow knowledge adapter for ObjectStack — production-grade RAG via the Apache 2.0 RAGFlow REST API.",
   "main": "dist/index.js",

@@ -1,5 +1,15 @@
 # @objectstack/rest
 
+## 6.7.0
+
+### Patch Changes
+
+- Updated dependencies [430067b]
+- Updated dependencies [4f9e9d4]
+  - @objectstack/spec@6.7.0
+  - @objectstack/core@6.7.0
+  - @objectstack/service-package@6.7.0
+
 ## 6.6.0
 
 ### Patch Changes

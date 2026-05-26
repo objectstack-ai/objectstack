@@ -1,5 +1,11 @@
 # @objectstack/hono
 
+## 6.7.0
+
+### Patch Changes
+
+- @objectstack/plugin-hono-server@6.7.0
+
 ## 6.6.0
 
 ### Patch Changes
