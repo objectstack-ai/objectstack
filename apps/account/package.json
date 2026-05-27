@@ -19,7 +19,7 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@object-ui/i18n": "^6.2.1",
+    "@object-ui/i18n": "^6.2.2",
     "@objectstack/client": "workspace:*",
     "@objectstack/client-react": "workspace:*",
     "@objectstack/spec": "workspace:*",

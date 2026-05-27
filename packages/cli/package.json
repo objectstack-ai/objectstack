@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.120",
-    "@object-ui/console": "^6.2.1",
+    "@object-ui/console": "^6.2.2",
     "@objectstack/account": "workspace:*",
     "@objectstack/client": "workspace:*",
     "@objectstack/core": "workspace:*",
