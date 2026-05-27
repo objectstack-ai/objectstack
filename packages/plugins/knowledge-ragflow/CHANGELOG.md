@@ -1,5 +1,13 @@
 # @objectstack/knowledge-ragflow
 
+## 6.8.1
+
+### Patch Changes
+
+- @objectstack/spec@6.8.1
+- @objectstack/core@6.8.1
+- @objectstack/service-knowledge@6.8.1
+
 ## 6.8.0
 
 ### Patch Changes

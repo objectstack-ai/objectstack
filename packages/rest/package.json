@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/rest",
-  "version": "6.8.0",
+  "version": "6.8.1",
   "license": "Apache-2.0",
   "description": "ObjectStack REST API Server - automatic REST endpoint generation from protocol",
   "type": "module",

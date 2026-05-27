@@ -1,5 +1,55 @@
 # @objectstack/cli
 
+## 6.8.1
+
+### Patch Changes
+
+- bca0ee5: `os dev` and `os start` now load `.env` files via dotenv-flow, matching
+  the existing `os serve` behavior. Previously only `serve` honored
+  `.env` / `.env.development` / `.env.production` / `.env.local`, which
+  made env-based configuration (e.g. `OS_DATABASE_URL`) silently inert
+  for the two most commonly used commands and surprised users who set up
+  the conventional `.env.*` layout.
+
+  Loading order (later wins): `.env`, `.env.${NODE_ENV}`, `.env.local`,
+  `.env.${NODE_ENV}.local`. `os dev` pins NODE_ENV to `development`; `os
+start` defaults to `production`. Process env still wins over file
+  values, so CLI flags and shell exports remain authoritative.
+
+  - @objectstack/spec@6.8.1
+  - @objectstack/core@6.8.1
+  - @objectstack/client@6.8.1
+  - @objectstack/objectql@6.8.1
+  - @objectstack/observability@6.8.1
+  - @objectstack/runtime@6.8.1
+  - @objectstack/rest@6.8.1
+  - @objectstack/driver-memory@6.8.1
+  - @objectstack/driver-sql@6.8.1
+  - @objectstack/driver-mongodb@6.8.1
+  - @objectstack/driver-sqlite-wasm@6.8.1
+  - @objectstack/plugin-approvals@6.8.1
+  - @objectstack/plugin-audit@6.8.1
+  - @objectstack/plugin-auth@6.8.1
+  - @objectstack/plugin-email@6.8.1
+  - @objectstack/plugin-hono-server@6.8.1
+  - @objectstack/plugin-mcp-server@6.8.1
+  - @objectstack/plugin-reports@6.8.1
+  - @objectstack/plugin-security@6.8.1
+  - @objectstack/plugin-sharing@6.8.1
+  - @objectstack/plugin-webhooks@6.8.1
+  - @objectstack/service-ai@6.8.1
+  - @objectstack/service-analytics@6.8.1
+  - @objectstack/service-automation@6.8.1
+  - @objectstack/service-cache@6.8.1
+  - @objectstack/service-feed@6.8.1
+  - @objectstack/service-job@6.8.1
+  - @objectstack/service-package@6.8.1
+  - @objectstack/service-queue@6.8.1
+  - @objectstack/service-realtime@6.8.1
+  - @objectstack/service-settings@6.8.1
+  - @objectstack/service-storage@6.8.1
+  - @objectstack/account@6.8.1
+
 ## 6.8.0
 
 ### Patch Changes

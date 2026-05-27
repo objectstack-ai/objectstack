@@ -1,5 +1,12 @@
 # @objectstack/plugin-dev
 
+## 6.8.1
+
+### Patch Changes
+
+- @objectstack/spec@6.8.1
+- @objectstack/core@6.8.1
+
 ## 6.8.0
 
 ### Patch Changes

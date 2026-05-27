@@ -1,5 +1,12 @@
 # @objectstack/example-crm
 
+## 4.0.24
+
+### Patch Changes
+
+- @objectstack/spec@6.8.1
+- @objectstack/runtime@6.8.1
+
 ## 4.0.23
 
 ### Patch Changes

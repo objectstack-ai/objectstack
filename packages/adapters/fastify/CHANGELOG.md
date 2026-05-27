@@ -1,5 +1,7 @@
 # @objectstack/fastify
 
+## 6.8.1
+
 ## 6.8.0
 
 ## 6.7.1

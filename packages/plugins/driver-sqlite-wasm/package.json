@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/driver-sqlite-wasm",
-  "version": "6.8.0",
+  "version": "6.8.1",
   "license": "Apache-2.0",
   "description": "WASM SQLite Driver for ObjectStack — runs in browser/WebContainer (StackBlitz) without native bindings",
   "keywords": [
