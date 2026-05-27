@@ -254,21 +254,21 @@ describe('SysMetadataRepository', () => {
 
     // ── whitelist enforcement (mirrors PR-10a, at the repo layer) ───
 
-    it('put refuses non-allowOrgOverride types (object)', async () => {
+    it('put refuses non-allowOrgOverride types (trigger)', async () => {
         await expect(
             repo.put(
-                { org: 'org_alpha', type: 'object', name: 'case' },
-                { name: 'case', label: 'Case', fields: {} },
+                { org: 'org_alpha', type: 'trigger', name: 'on_insert' },
+                { name: 'on_insert', object: 'case', event: 'beforeInsert' },
                 { parentVersion: null, actor: 'studio' },
             ),
         ).rejects.toMatchObject({ code: 'not_overridable', status: 403 });
     });
 
-    it('put refuses non-allowOrgOverride types (flow)', async () => {
+    it('put refuses non-allowOrgOverride types (datasource)', async () => {
         await expect(
             repo.put(
-                { org: 'org_alpha', type: 'flow', name: 'on_create' },
-                { name: 'on_create' },
+                { org: 'org_alpha', type: 'datasource', name: 'analytics' },
+                { name: 'analytics', driver: 'sql' },
                 { parentVersion: null, actor: 'studio' },
             ),
         ).rejects.toMatchObject({ code: 'not_overridable', status: 403 });

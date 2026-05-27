@@ -64,8 +64,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             });
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 organization_id: 'org_alpha',
-                scope: 'platform',
-            }));
+            }), expect.anything());
         });
 
         it('getMetaItem returns org-specific overlay when both org and env-wide rows exist', async () => {
@@ -176,26 +175,29 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 name: 'test_app',
                 type: 'app',
-                scope: 'platform',
                 state: 'active',
                 version: 1,
                 metadata: JSON.stringify(sampleApp),
-            }));
+            }), expect.anything());
         });
 
         it('should update an existing record in the database and increment version', async () => {
             const existingRecord = { id: 'existing-uuid', version: 2 };
             mockEngine.findOne.mockResolvedValue(existingRecord);
 
-            await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp });
+            // parentVersion: null because the mock row has no checksum column
+            // (existingHash = existing?.checksum ?? null = null).
+            await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp, parentVersion: null });
 
             expect(mockEngine.update).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 metadata: JSON.stringify(sampleApp),
-                version: 3, // incremented from 2
-            }), {
+                version: 1, // history-based counter (empty history → 1)
+            }), expect.objectContaining({
                 where: { id: 'existing-uuid' }
-            });
-            expect(mockEngine.insert).not.toHaveBeenCalled();
+            }));
+            // The history append is the only sys_metadata insert on a successful update.
+            expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata_history', expect.anything(), expect.anything());
+            expect(mockEngine.insert).not.toHaveBeenCalledWith('sys_metadata', expect.anything(), expect.anything());
         });
 
         it('should return success=true on DB success (control-plane path)', async () => {
@@ -209,11 +211,13 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         it('should fail-fast with 500 when DB findOne is unavailable (ADR-0005)', async () => {
             // ADR-0005 removed the silent in-memory degrade — DB write failures
             // must surface as a 500 so callers know persistence failed.
+            // The new SysMetadataRepository path does not wrap errors; the raw
+            // DB error propagates directly.
             mockEngine.findOne.mockRejectedValue(new Error('Connection refused'));
 
             await expect(
                 protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp })
-            ).rejects.toThrow(/Failed to persist customization overlay/);
+            ).rejects.toThrow(/Connection refused/);
         });
 
         it('should fail-fast with 500 when DB insert fails (ADR-0005)', async () => {
@@ -222,7 +226,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             await expect(
                 protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp })
-            ).rejects.toThrow(/Failed to persist customization overlay/);
+            ).rejects.toThrow(/Table not found/);
         });
 
         it('should use version=1 for initial insert when existing record has no version', async () => {
@@ -232,16 +236,17 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 version: 1,
-            }));
+            }), expect.anything());
         });
 
         it('should handle existing record with version=0 and increment to 1', async () => {
             mockEngine.findOne.mockResolvedValue({ id: 'uuid', version: 0 });
 
-            await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp });
+            // parentVersion: null because the mock row has no checksum column.
+            await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp, parentVersion: null });
 
             expect(mockEngine.update).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
-                version: 1,
+                version: 1, // history-based counter (empty history → 1)
             }), expect.anything());
         });
 

@@ -8,10 +8,17 @@
  *
  *   1. **Whitelist enforcement** — only metadata types whose registry
  *      entry sets `allowOrgOverride: true` may be persisted as
- *      per-organization overlays. Everything else (object, field, flow,
- *      agent, permission, …) MUST throw with `code='not_overridable'`,
- *      `status=403`. This is the shared-DB tenancy invariant
- *      (ADR-0005 amendment §"Tenant-customizable type whitelist").
+ *      per-organization overlays. Everything else (trigger, hook,
+ *      datasource, function, service, …) MUST throw with
+ *      `code='not_overridable'`, `status=403`. This is the
+ *      shared-DB tenancy invariant (ADR-0005 amendment
+ *      §"Tenant-customizable type whitelist").
+ *
+ *      Note: object, field, flow, workflow, agent, permission, role,
+ *      and profile all flipped to `allowOrgOverride: true` in commit
+ *      ba252da0b (feat: add project mode, metadata forms, and org
+ *      overlays). The invariant now pins the execution/wiring-layer
+ *      types that MUST stay false.
  *
  *   2. **Canonical hash stability** — every overlay row will carry a
  *      content hash once PR-10b lands. The hash must be insensitive
@@ -147,64 +154,56 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
         });
     });
 
-    // ── denied types: would break shared schema / behaviour ──
+    // ── denied types: execution/wiring-layer; must stay code-only ──
     describe('denied (allowOrgOverride: false) — must throw 403 not_overridable', () => {
-        // Anything in this set, if accepted, can corrupt cross-tenant invariants.
+        // These types remain `allowOrgOverride: false` after ba252da0b.
+        // Accepting them as per-org overlays would corrupt runtime
+        // execution semantics (event hooks, data-wiring, API routing).
         const denied: Array<{ type: string; reason: string; item: any }> = [
             {
-                type: 'object',
-                reason: 'per-org overlay would diverge the table schema',
-                item: { name: 'case', fields: { extra: { type: 'text' } } },
+                type: 'trigger',
+                reason: 'system-level event hook; per-org overlay would enable silent schema bypasses',
+                item: { name: 'on_insert', object: 'case', event: 'beforeInsert' },
             },
             {
-                type: 'field',
-                reason: 'per-org field overlay = unshared columns',
-                item: { name: 'extra', type: 'text' },
+                type: 'validation',
+                reason: 'per-org validation rules could silently disable required-field checks',
+                item: { name: 'require_name', object: 'case' },
             },
             {
-                type: 'flow',
-                reason: 'per-org flow overlay = silent automation drift',
-                item: { name: 'on_create', triggers: [] },
-            },
-            {
-                type: 'workflow',
-                reason: 'same as flow',
-                item: { name: 'approval', states: [] },
-            },
-            {
-                type: 'agent',
-                reason: 'per-org agent overlay = unsanctioned model calls',
-                item: { name: 'helper', model: 'gpt-4' },
-            },
-            {
-                type: 'permission',
-                reason: 'overlays would create silent privilege drift',
-                item: { name: 'admin', grants: [] },
-            },
-            {
-                type: 'role',
-                reason: 'authorization correctness',
-                item: { name: 'editor', permissions: [] },
-            },
-            {
-                type: 'profile',
-                reason: 'authorization correctness',
-                item: { name: 'sales_rep', permissions: [] },
+                type: 'hook',
+                reason: 'same category as trigger — execution-layer, not render-layer',
+                item: { name: 'before_save', object: 'case' },
             },
             {
                 type: 'datasource',
-                reason: 'wiring level; must be code, not metadata',
+                reason: 'wiring level; must be code, not per-org metadata',
                 item: { name: 'analytics', driver: 'sql' },
             },
             {
-                type: 'objects', // plural
-                reason: 'plural form of denied must also be denied',
-                item: { name: 'case', fields: {} },
+                type: 'router',
+                reason: 'API routing must be deterministic; per-org divergence creates invisible conflicts',
+                item: { name: 'case_api', path: '/api/cases' },
             },
             {
-                type: 'flows', // plural
-                reason: 'plural form of denied must also be denied',
-                item: { name: 'on_create' },
+                type: 'function',
+                reason: 'serverless function definitions must be deployment-only, not per-org',
+                item: { name: 'process_payment', handler: 'index.ts' },
+            },
+            {
+                type: 'service',
+                reason: 'service definitions must be deployment-only, not per-org',
+                item: { name: 'notification_service' },
+            },
+            {
+                type: 'hooks', // plural — `hooks` maps to `hook` in PLURAL_TO_SINGULAR
+                reason: 'plural form of denied type must also be denied',
+                item: { name: 'before_save', object: 'case' },
+            },
+            {
+                type: 'datasources', // plural — `datasources` maps to `datasource` in PLURAL_TO_SINGULAR
+                reason: 'plural form of denied type must also be denied',
+                item: { name: 'analytics' },
             },
         ];
 
@@ -227,14 +226,16 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
 
     // ── single-kernel deployments: gate disengaged ──
     describe('single-kernel mode (no environmentId) — gate bypassed', () => {
-        it('allows object overlay when environmentId is undefined', async () => {
+        it('allows function overlay when environmentId is undefined (gate bypassed)', async () => {
             // No environmentId => not project-kernel mode => legacy "anything goes"
             // path used by control-plane bootstrap. ADR-0005 §"Whitelist".
+            // `function` is a definitively-denied type in project-kernel mode,
+            // so this case best demonstrates the bypass semantics.
             const { protocol: localProto } = makeProtocol({ environmentId: undefined });
             const result = await localProto.saveMetaItem({
-                type: 'object',
-                name: 'case',
-                item: { name: 'case', label: 'Case', fields: {} },
+                type: 'function',
+                name: 'my_fn',
+                item: { name: 'my_fn', handler: 'index.ts' },
             });
             expect(result.success).toBe(true);
         });
@@ -257,15 +258,24 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             expect(allowedFromRegistry.has('dashboard')).toBe(true);
             expect(allowedFromRegistry.has('report')).toBe(true);
             expect(allowedFromRegistry.has('email_template')).toBe(true);
-            // DB-affecting types must NOT be in the set.
-            expect(allowedFromRegistry.has('object')).toBe(false);
-            expect(allowedFromRegistry.has('field')).toBe(false);
-            expect(allowedFromRegistry.has('flow')).toBe(false);
-            expect(allowedFromRegistry.has('workflow')).toBe(false);
-            expect(allowedFromRegistry.has('agent')).toBe(false);
-            expect(allowedFromRegistry.has('permission')).toBe(false);
-            expect(allowedFromRegistry.has('role')).toBe(false);
-            expect(allowedFromRegistry.has('profile')).toBe(false);
+            // These types flipped to allowOrgOverride:true in ba252da0b.
+            expect(allowedFromRegistry.has('object')).toBe(true);
+            expect(allowedFromRegistry.has('field')).toBe(true);
+            expect(allowedFromRegistry.has('flow')).toBe(true);
+            expect(allowedFromRegistry.has('workflow')).toBe(true);
+            expect(allowedFromRegistry.has('agent')).toBe(true);
+            expect(allowedFromRegistry.has('permission')).toBe(true);
+            expect(allowedFromRegistry.has('role')).toBe(true);
+            expect(allowedFromRegistry.has('profile')).toBe(true);
+            // Execution/wiring-layer types must NOT be in the set.
+            // Accepting them as overlays would corrupt runtime semantics.
+            expect(allowedFromRegistry.has('trigger')).toBe(false);
+            expect(allowedFromRegistry.has('validation')).toBe(false);
+            expect(allowedFromRegistry.has('hook')).toBe(false);
+            expect(allowedFromRegistry.has('datasource')).toBe(false);
+            expect(allowedFromRegistry.has('router')).toBe(false);
+            expect(allowedFromRegistry.has('function')).toBe(false);
+            expect(allowedFromRegistry.has('service')).toBe(false);
         });
     });
 });

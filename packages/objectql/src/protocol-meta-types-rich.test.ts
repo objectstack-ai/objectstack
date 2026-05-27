@@ -30,9 +30,13 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         registry.registerItem('object', { name: 'sys_user', label: 'User' }, 'name');
         registry.registerItem('view', { name: 'sys_user.grid', type: 'grid', object: 'sys_user' }, 'name');
         registry.registerItem('app', { name: 'crm', label: 'CRM' }, 'name');
-        // Flow is registry-default `allowOrgOverride: false` — used by the
-        // "honours OBJECTSTACK_METADATA_WRITABLE" test as a control.
+        // `function` is registry-default `allowOrgOverride: false` (system/wiring-layer)
+        // and is used by the "honours OBJECTSTACK_METADATA_WRITABLE" test as a control type.
         registry.registerItem('flow', { name: 'crm.onboard', steps: [] }, 'name');
+        // Register wiring-layer types so getMetaTypes() includes them in `entries`
+        // (getMetaTypes only returns types present in getRegisteredTypes()).
+        registry.registerItem('function', { name: 'process_payment' }, 'name');
+        registry.registerItem('trigger', { name: 'on_insert' }, 'name');
 
         mockEngine = {
             registry,
@@ -73,7 +77,8 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         expect(objectEntry).toBeDefined();
         expect(objectEntry.label).toBe('Object');
         expect(objectEntry.domain).toBe('data');
-        expect(objectEntry.allowOrgOverride).toBe(false);
+        // object flipped to allowOrgOverride:true in ba252da0b
+        expect(objectEntry.allowOrgOverride).toBe(true);
         expect(objectEntry.overrideSource).toBe('registry');
         expect(objectEntry.supportsOverlay).toBe(true);
 
@@ -84,20 +89,22 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
     });
 
     it('honours OBJECTSTACK_METADATA_WRITABLE to elevate allowOrgOverride', async () => {
-        process.env.OBJECTSTACK_METADATA_WRITABLE = 'object,field';
+        // Use `function` and `service` — both are registry-default
+        // `allowOrgOverride: false` (wiring-layer types that must stay code-only).
+        process.env.OBJECTSTACK_METADATA_WRITABLE = 'function,service';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
 
         const result: any = await protocol.getMetaTypes();
-        const objectEntry = result.entries.find((e: any) => e.type === 'object');
-        expect(objectEntry.allowOrgOverride).toBe(true);
-        expect(objectEntry.overrideSource).toBe('env');
+        const functionEntry = result.entries.find((e: any) => e.type === 'function');
+        expect(functionEntry.allowOrgOverride).toBe(true);
+        expect(functionEntry.overrideSource).toBe('env');
 
         // Types not listed AND not writable in the registry default retain
-        // `allowOrgOverride: false`. `flow` is one such type — it is intentionally
-        // execution-pinned and not org-overridable until ADR-0006 lands.
-        const flowEntry = result.entries.find((e: any) => e.type === 'flow');
-        expect(flowEntry.allowOrgOverride).toBe(false);
-        expect(flowEntry.overrideSource).toBe('registry');
+        // `allowOrgOverride: false`. `trigger` is one such type — it is
+        // execution-pinned and not org-overridable.
+        const triggerEntry = result.entries.find((e: any) => e.type === 'trigger');
+        expect(triggerEntry.allowOrgOverride).toBe(false);
+        expect(triggerEntry.overrideSource).toBe('registry');
     });
 
     it('saveMetaItem honours the env-elevated allow list', async () => {
@@ -105,22 +112,22 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         const scoped = new ObjectStackProtocolImplementation(mockEngine, undefined, undefined, 'env_alpha');
         mockEngine.findOne.mockResolvedValue(null);
 
-        // Without env var: object writes blocked.
+        // Without env var: `function` writes blocked (wiring-layer, always false in registry).
         delete process.env.OBJECTSTACK_METADATA_WRITABLE;
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
         await expect(
-            scoped.saveMetaItem({ type: 'object', name: 'sys_user', item: { name: 'sys_user' } })
+            scoped.saveMetaItem({ type: 'function', name: 'my_fn', item: { name: 'my_fn' } })
         ).rejects.toThrow(/not_overridable/);
 
-        // With env var: object writes allowed.
-        process.env.OBJECTSTACK_METADATA_WRITABLE = 'object';
+        // With env var: `function` writes allowed.
+        process.env.OBJECTSTACK_METADATA_WRITABLE = 'function';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
         // Should no longer throw "not_overridable". (May still hit unrelated
         // persistence errors from the mock engine — we only assert the gate.)
         try {
-            await scoped.saveMetaItem({ type: 'object', name: 'sys_user', item: { name: 'sys_user' } });
+            await scoped.saveMetaItem({ type: 'function', name: 'my_fn', item: { name: 'my_fn' } });
         } catch (err: any) {
             expect(err.code).not.toBe('not_overridable');
         }
