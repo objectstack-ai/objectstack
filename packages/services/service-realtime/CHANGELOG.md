@@ -1,5 +1,16 @@
 # @objectstack/service-realtime
 
+## 6.8.0
+
+### Patch Changes
+
+- Updated dependencies [6e88f77]
+- Updated dependencies [c8b9f57]
+- Updated dependencies [45d27c5]
+  - @objectstack/spec@6.8.0
+  - @objectstack/platform-objects@6.8.0
+  - @objectstack/core@6.8.0
+
 ## 6.7.1
 
 ### Patch Changes

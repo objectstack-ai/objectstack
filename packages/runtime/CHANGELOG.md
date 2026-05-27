@@ -1,5 +1,38 @@
 # @objectstack/runtime
 
+## 6.8.0
+
+### Patch Changes
+
+- 50ccd9c: Fix peer-dependency version range from `workspace:*` to `workspace:^` to avoid
+  forced major bumps in fixed-group releases. `workspace:*` expands to an exact
+  version on publish; any minor bump of the peer then falls out of range and
+  triggers a semver-major bump on the dependent. `workspace:^` expands to `^x.y.z`
+  which correctly accepts minor bumps.
+
+  Affects:
+
+  - `service-ai` peer on `@objectstack/embedder-openai`
+  - `runtime` peer on `@objectstack/driver-turso`
+
+- Updated dependencies [6e88f77]
+- Updated dependencies [c8b9f57]
+  - @objectstack/spec@6.8.0
+  - @objectstack/rest@6.8.0
+  - @objectstack/objectql@6.8.0
+  - @objectstack/core@6.8.0
+  - @objectstack/formula@6.8.0
+  - @objectstack/metadata@6.8.0
+  - @objectstack/observability@6.8.0
+  - @objectstack/driver-memory@6.8.0
+  - @objectstack/driver-sql@6.8.0
+  - @objectstack/driver-sqlite-wasm@6.8.0
+  - @objectstack/plugin-auth@6.8.0
+  - @objectstack/plugin-security@6.8.0
+  - @objectstack/service-cluster@6.8.0
+  - @objectstack/service-i18n@6.8.0
+  - @objectstack/types@6.8.0
+
 ## 6.7.1
 
 ### Patch Changes

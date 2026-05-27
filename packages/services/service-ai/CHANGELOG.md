@@ -1,5 +1,33 @@
 # @objectstack/service-ai
 
+## 6.8.0
+
+### Minor Changes
+
+- 6e88f77: Auto-persist chat history when a `conversationId` is supplied.
+
+  - `AIService.chatWithTools` and `streamChatWithTools` now write the inbound user turn, each intermediate assistant/tool round, and the final assistant turn to `ai_messages` whenever `toolExecutionContext.conversationId` is set. Persistence is best-effort: failures are warned and never break the chat response.
+  - Add `IAIConversationService.update(conversationId, { title?, metadata? })` and a matching `PATCH /api/v1/ai/conversations/:id` route so clients can rename conversations and edit metadata.
+  - `ObjectQLConversationService` and `InMemoryConversationService` both implement the new `update` method.
+
+### Patch Changes
+
+- 50ccd9c: Fix peer-dependency version range from `workspace:*` to `workspace:^` to avoid
+  forced major bumps in fixed-group releases. `workspace:*` expands to an exact
+  version on publish; any minor bump of the peer then falls out of range and
+  triggers a semver-major bump on the dependent. `workspace:^` expands to `^x.y.z`
+  which correctly accepts minor bumps.
+
+  Affects:
+
+  - `service-ai` peer on `@objectstack/embedder-openai`
+  - `runtime` peer on `@objectstack/driver-turso`
+
+- Updated dependencies [6e88f77]
+- Updated dependencies [c8b9f57]
+  - @objectstack/spec@6.8.0
+  - @objectstack/core@6.8.0
+
 ## 6.7.1
 
 ### Patch Changes

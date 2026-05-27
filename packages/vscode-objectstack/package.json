@@ -1,8 +1,8 @@
 {
   "name": "objectstack-vscode",
   "displayName": "ObjectStack",
-  "description": "ObjectStack Protocol \u2014 Autocomplete, validation, and inline diagnostics for .object.ts, .view.ts, and objectstack.config.ts files",
-  "version": "6.7.1",
+  "description": "ObjectStack Protocol — Autocomplete, validation, and inline diagnostics for .object.ts, .view.ts, and objectstack.config.ts files",
+  "version": "6.8.0",
   "publisher": "objectstack",
   "license": "Apache-2.0",
   "repository": {

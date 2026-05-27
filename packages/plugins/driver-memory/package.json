@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/driver-memory",
-  "version": "6.7.1",
+  "version": "6.8.0",
   "license": "BUSL-1.1",
   "description": "In-Memory Driver for ObjectStack (Reference Implementation)",
   "main": "dist/index.js",

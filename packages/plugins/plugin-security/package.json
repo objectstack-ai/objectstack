@@ -1,8 +1,8 @@
 {
   "name": "@objectstack/plugin-security",
-  "version": "6.7.1",
+  "version": "6.8.0",
   "license": "BUSL-1.1",
-  "description": "Security Plugin for ObjectStack \u2014 RBAC, RLS, and Field-Level Security Runtime",
+  "description": "Security Plugin for ObjectStack — RBAC, RLS, and Field-Level Security Runtime",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

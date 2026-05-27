@@ -1,5 +1,14 @@
 # @objectstack/account
 
+## 6.8.0
+
+### Patch Changes
+
+- 99866d8: Fix forgot-password page returning 404. better-auth's password reset
+  endpoint is `/api/v1/auth/request-password-reset` (not the legacy
+  `forget-password`); the account UI now calls the correct path so
+  the reset email actually dispatches.
+
 ## 6.7.1
 
 ### Patch Changes

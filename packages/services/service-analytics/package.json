@@ -1,8 +1,8 @@
 {
   "name": "@objectstack/service-analytics",
-  "version": "6.7.1",
+  "version": "6.8.0",
   "license": "BUSL-1.1",
-  "description": "Analytics Service for ObjectStack \u2014 implements IAnalyticsService with multi-driver strategy pattern (NativeSQL, ObjectQL, InMemory)",
+  "description": "Analytics Service for ObjectStack — implements IAnalyticsService with multi-driver strategy pattern (NativeSQL, ObjectQL, InMemory)",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

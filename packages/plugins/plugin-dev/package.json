@@ -1,8 +1,8 @@
 {
   "name": "@objectstack/plugin-dev",
-  "version": "6.7.1",
+  "version": "6.8.0",
   "license": "BUSL-1.1",
-  "description": "Development Mode Plugin for ObjectStack \u2014 auto-enables all services with in-memory implementations",
+  "description": "Development Mode Plugin for ObjectStack — auto-enables all services with in-memory implementations",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

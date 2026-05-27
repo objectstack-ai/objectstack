@@ -1,8 +1,8 @@
 {
   "name": "@objectstack/service-feed",
-  "version": "6.7.1",
+  "version": "6.8.0",
   "license": "BUSL-1.1",
-  "description": "Feed/Chatter Service for ObjectStack \u2014 implements IFeedService with in-memory adapter for comments, reactions, field changes, and record subscriptions",
+  "description": "Feed/Chatter Service for ObjectStack — implements IFeedService with in-memory adapter for comments, reactions, field changes, and record subscriptions",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

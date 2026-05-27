@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/nestjs",
-  "version": "6.7.1",
+  "version": "6.8.0",
   "license": "Apache-2.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -21,7 +21,7 @@
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"
   },
-  "description": "NestJS adapter for ObjectStack \u2014 integrates the generated REST API into a NestJS module.",
+  "description": "NestJS adapter for ObjectStack — integrates the generated REST API into a NestJS module.",
   "keywords": [
     "objectstack",
     "nestjs",

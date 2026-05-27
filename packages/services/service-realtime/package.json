@@ -1,8 +1,8 @@
 {
   "name": "@objectstack/service-realtime",
-  "version": "6.7.1",
+  "version": "6.8.0",
   "license": "BUSL-1.1",
-  "description": "Realtime Service for ObjectStack \u2014 implements IRealtimeService with WebSocket and in-memory pub/sub",
+  "description": "Realtime Service for ObjectStack — implements IRealtimeService with WebSocket and in-memory pub/sub",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

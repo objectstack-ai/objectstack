@@ -1,8 +1,8 @@
 {
   "name": "@objectstack/embedder-openai",
-  "version": "6.7.1",
+  "version": "6.8.0",
   "license": "BUSL-1.1",
-  "description": "OpenAI-compatible embedder for ObjectStack \u2014 works against OpenAI, \u963f\u91cc\u901a\u4e49 DashScope, \u667a\u8c31 BigModel, \u7845\u57fa\u6d41\u52a8 SiliconFlow, \u706b\u5c71\u5f15\u64ce Doubao, MiniMax, Ollama, and any drop-in OpenAI-shape endpoint.",
+  "description": "OpenAI-compatible embedder for ObjectStack — works against OpenAI, 阿里通义 DashScope, 智谱 BigModel, 硅基流动 SiliconFlow, 火山引擎 Doubao, MiniMax, Ollama, and any drop-in OpenAI-shape endpoint.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

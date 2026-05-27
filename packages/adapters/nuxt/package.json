@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/nuxt",
-  "version": "6.7.1",
+  "version": "6.8.0",
   "license": "Apache-2.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -26,7 +26,7 @@
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"
   },
-  "description": "Nuxt adapter for ObjectStack \u2014 Nitro server routes for the ObjectStack REST API.",
+  "description": "Nuxt adapter for ObjectStack — Nitro server routes for the ObjectStack REST API.",
   "keywords": [
     "objectstack",
     "nuxt",

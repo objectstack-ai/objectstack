@@ -1,8 +1,8 @@
 {
   "name": "@objectstack/service-job",
-  "version": "6.7.1",
+  "version": "6.8.0",
   "license": "BUSL-1.1",
-  "description": "Job Service for ObjectStack \u2014 implements IJobService with setInterval and cron scheduling",
+  "description": "Job Service for ObjectStack — implements IJobService with setInterval and cron scheduling",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
