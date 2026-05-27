@@ -74,6 +74,7 @@ export * from './stack.zod';
 export { defineView, defineForm } from './ui/view.zod';
 export { defineApp } from './ui/app.zod';
 export { defineFlow } from './automation/flow.zod';
+export { defineJob } from './system/job.zod';
 export { defineAgent } from './ai/agent.zod';
 export { defineTool } from './ai/tool.zod';
 export { defineSkill } from './ai/skill.zod';

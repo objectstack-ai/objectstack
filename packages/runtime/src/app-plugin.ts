@@ -281,6 +281,69 @@ export class AppPlugin implements Plugin {
             ctx.logger.error('[AppPlugin] Failed to schedule approval-process registration', err as Error, { appId });
         }
 
+        // ── Auto-register declarative Background Jobs ────────────────────
+        // Jobs declared via `defineStack({ jobs })` are scheduled against the
+        // running `IJobService` on `kernel:ready` (so the service plugin and
+        // ObjectQL engine have had a chance to register). Handler strings are
+        // resolved through `collectBundleFunctions(bundle)` — the same
+        // registry used by hooks/actions, keeping the surface uniform.
+        try {
+            const jobs: any[] = Array.isArray(this.bundle.jobs)
+                ? this.bundle.jobs
+                : Array.isArray((this.bundle.manifest || {}).jobs)
+                    ? (this.bundle.manifest as any).jobs
+                    : [];
+            if (jobs.length > 0) {
+                ctx.hook('kernel:ready', async () => {
+                    let svc: any;
+                    try { svc = ctx.getService('job'); } catch { /* not installed */ }
+                    if (!svc || typeof svc.schedule !== 'function') {
+                        ctx.logger.warn('[AppPlugin] job service not registered — skipping declarative jobs', {
+                            appId, jobCount: jobs.length,
+                        });
+                        return;
+                    }
+                    const fnMap = collectBundleFunctions(this.bundle);
+                    let ok = 0;
+                    for (const job of jobs) {
+                        const jobName: string = job?.name;
+                        if (!jobName) {
+                            ctx.logger.warn('[AppPlugin] skipping job without name', { appId, job });
+                            continue;
+                        }
+                        if (job.enabled === false) {
+                            ctx.logger.debug('[AppPlugin] job disabled — skipping', { appId, job: jobName });
+                            continue;
+                        }
+                        const handler = fnMap[job.handler];
+                        if (typeof handler !== 'function') {
+                            ctx.logger.warn('[AppPlugin] job handler not found in bundle.functions — skipping', {
+                                appId, job: jobName, handler: job.handler,
+                            });
+                            continue;
+                        }
+                        try {
+                            await svc.schedule(
+                                jobName,
+                                job.schedule,
+                                async (jobCtx: any) => {
+                                    await handler({ ...jobCtx, jobId: jobName, bundle: this.bundle });
+                                },
+                            );
+                            ok++;
+                        } catch (err: any) {
+                            ctx.logger.warn('[AppPlugin] Failed to schedule job', {
+                                appId, job: jobName, error: err?.message ?? String(err),
+                            });
+                        }
+                    }
+                    ctx.logger.info('[AppPlugin] Scheduled background jobs', { appId, count: ok });
+                });
+            }
+        } catch (err: any) {
+            ctx.logger.error('[AppPlugin] Failed to schedule background-job registration', err as Error, { appId });
+        }
+
         // ── Org-Scoped App Catalog Sync ──────────────────────────────────
         // Emit `app:registered` so AppCatalogService (running on the
         // control-plane kernel) can mirror this app into `sys_app`. Skipped

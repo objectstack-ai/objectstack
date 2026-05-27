@@ -30,6 +30,7 @@ export const MetadataTypeSchema = z.enum([
   'flow',
   'workflow',
   'approval',
+  'job',
   'agent',
   'tool',
   'skill',

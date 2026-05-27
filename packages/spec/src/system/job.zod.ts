@@ -81,16 +81,34 @@ export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
  * }
  */
 export const JobSchema = lazySchema(() => z.object({
-  id: z.string().describe('Unique job identifier'),
+  id: z.string().optional().describe('Unique job identifier (defaults to `name` when omitted)'),
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Job name (snake_case)'),
+  label: z.string().optional().describe('Human-readable label'),
+  description: z.string().optional().describe('Job description / purpose'),
   schedule: ScheduleSchema.describe('Job schedule configuration'),
-  handler: z.string().describe('Handler path (e.g. "path/to/file:functionName") or script ID'),
+  handler: z.string().describe('Handler function name (must match a key in `defineStack({ functions })`)'),
   retryPolicy: RetryPolicySchema.optional().describe('Retry policy configuration'),
   timeout: z.number().int().positive().optional().describe('Timeout in milliseconds'),
   enabled: z.boolean().default(true).describe('Whether the job is enabled'),
 }));
 
 export type Job = z.infer<typeof JobSchema>;
+
+/**
+ * Type-safe factory for declaring background jobs in metadata-as-code.
+ *
+ * @example
+ * ```ts
+ * export const nightlySync = defineJob({
+ *   name: 'sync_metadata_nightly',
+ *   schedule: { type: 'cron', expression: '0 0 * * *', timezone: 'UTC' },
+ *   handler: 'syncMetadata', // must be registered in defineStack({ functions: { syncMetadata: () => ... } })
+ * });
+ * ```
+ */
+export function defineJob(config: z.input<typeof JobSchema>): Job {
+  return JobSchema.parse(config);
+}
 
 /**
  * Job Execution Status Enum

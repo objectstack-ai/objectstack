@@ -770,6 +770,7 @@ export class ObjectQL implements IDataEngine {
         'actions', 'views', 'pages', 'dashboards', 'reports', 'themes',
         // Automation Protocol
         'flows', 'workflows', 'approvals', 'webhooks',
+        'jobs',
         // Security Protocol
         'roles', 'permissions', 'profiles', 'sharingRules', 'policies',
         // AI Protocol

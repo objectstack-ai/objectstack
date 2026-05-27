@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking — `@objectstack/plugin-security` no longer auto-creates personal workspaces
+
+**Removed**: the `sys_user` post-insert middleware that auto-created a
+"`<User>'s Workspace`" organisation + owner-member row for every new
+user in multi-tenant mode, and the exported `ensureUserHasOrganization`
+helper that backed it.
+
+**Why**: the helper was a B2C-shaped opinion ("every user gets a
+personal workspace") baked into framework defaults. It actively misfired
+in B2B / invitation-driven flows — a user invited into an existing org
+ended up owning a disjoint personal workspace alongside the org they
+were invited to, because `sys_user.create.after` fires before
+better-auth's `acceptInvitation` writes the `sys_member` row. There was
+no opt-out switch; products that wanted invitation-only semantics had no
+clean path. Removing the helper (no flag, no toggle) collapses the
+design to the canonical Slack / Linear / GitHub-Orgs model: users must
+either accept an invitation or explicitly create their first
+organisation. The `apps/account` `/register` route already routes
+users with zero memberships to `/organizations/new`, so the UX path
+exists today.
+
+**One legitimate auto-org case kept, moved**: the very first registered
+user (= the user the framework auto-promotes to platform admin via
+`bootstrapPlatformAdmin`) still needs an `activeOrganizationId` on
+their session for the default `tenant_isolation` RLS policy to resolve.
+`bootstrapPlatformAdmin` now accepts `multiTenant: boolean` and, when
+true and the freshly-promoted admin has zero memberships, creates a
+single `Default Organization` (slug `default`) and binds them as
+`owner`. Idempotent across cold-boots (re-uses any existing
+`slug='default'` row). Single-tenant deployments are unaffected — no
+orgs are created at all (verified empirically with `pnpm dev:crm`:
+2 signups → 2 users, 0 orgs, 0 members; first user has
+`admin_full_access`).
+
+**Migration**:
+- Existing deployments that relied on the personal-workspace auto-creation
+  for self-service signups should either (a) invite users explicitly,
+  or (b) direct new users to `/organizations/new` (which the account UI
+  already does when `organizations.length === 0`).
+- The cloud `ArtifactKernelFactory` per-project `AuthPlugin` no longer
+  installs the `databaseHooks.user.create.after` hook that called
+  `ensureUserHasOrganization`. Project owners are still bound to the
+  mirrored cloud-team org by `seedProjectOrganization` +
+  `seedProjectMember`, so cloud-deployed projects behave identically.
+- `@objectstack/plugin-security` no longer exports
+  `ensureUserHasOrganization`; consumers that imported it must remove
+  the call (the underlying problem the helper "solved" should be
+  handled by the account UI's "create your first organisation" flow).
+- `cloneTenantSeedData` is unchanged and still wired to the
+  `sys_organization` insert middleware, so any *explicitly* created
+  org (bootstrap default, cloud-team mirror, user-initiated
+  `createOrganization`) still receives a private copy of demo data.
+
 ### Fixed — `@objectstack/objectql` test suite re-aligned with current overlay policy
 
 The CI `Test Core` job had been failing on `@objectstack/objectql#test`

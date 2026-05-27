@@ -7,9 +7,9 @@
  * Multi-tenant deployments treat each `sys_organization` as a hard
  * isolation boundary. The platform-wide `claimOrphanTenantRows` hook
  * (see `claim-orphan-tenant-rows.ts`) only fires for the very first
- * org — every subsequent user that auto-creates a personal Workspace
- * via `ensureUserHasOrganization` ends up looking at an empty
- * dashboard. For demo / trial-org UX (Salesforce-style "you get a
+ * org — every subsequent org (created explicitly by a user via
+ * `createOrganization`, or by an admin from the console) starts
+ * empty. For demo / trial-org UX (Salesforce-style "you get a
  * fully populated sandbox on signup"), we want every freshly minted
  * org to receive a private clone of the platform-first org's
  * user-defined data.

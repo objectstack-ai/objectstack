@@ -1963,13 +1963,12 @@ export class HttpDispatcher {
 
                 // Also capture the OWNING cloud org so the per-project
                 // kernel can mirror it into the project's `sys_organization`
-                // table on first boot. Without this, SecurityPlugin's
-                // `ensureUserHasOrganization` middleware would auto-create a
-                // disjoint "Alice's Workspace" personal org for the owner,
-                // completely detached from the cloud team that actually
-                // owns the project at the platform level. Best-effort: a
-                // missing org row only means the project's primary
-                // workspace falls back to the personal-org pattern.
+                // table on first boot. Without this, the project's primary
+                // workspace would not exist locally and the owner's first
+                // sign-in would land on the empty "create your first
+                // organization" prompt instead of resolving an
+                // activeOrganizationId. Best-effort: a missing org row
+                // means the owner has to create their first org manually.
                 try {
                     const orgRow = await ql.find('sys_organization', { where: { id: req.organization_id } } as any);
                     const orgRows = Array.isArray(orgRow) ? orgRow : (orgRow?.value ?? []);
@@ -1984,8 +1983,8 @@ export class HttpDispatcher {
                     }
                 } catch {
                     // org lookup failed — skip the mirror. Owner seed
-                    // still works; the user will land in the auto-created
-                    // personal workspace as before.
+                    // still works; the user will land on the
+                    // "create your first organization" prompt instead.
                 }
                 await ql.insert(ENV, {
                     id: environmentId,

@@ -88,6 +88,7 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'flow',        // Visual logic flows (FlowSchema)
   'workflow',    // State machines (WorkflowSchema)
   'approval',    // Approval processes (ApprovalSchema)
+  'job',         // Background / scheduled jobs (JobSchema)
 
   // System Protocol
   'datasource',  // Data connections (DatasourceSchema)
@@ -569,6 +570,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   { type: 'flow', label: 'Flow', filePatterns: ['**/*.flow.ts', '**/*.flow.yml', '**/*.flow.json'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: true, loadOrder: 80, domain: 'automation' },
   { type: 'workflow', label: 'Workflow', filePatterns: ['**/*.workflow.ts', '**/*.workflow.yml'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: true, loadOrder: 80, domain: 'automation' },
   { type: 'approval', label: 'Approval Process', filePatterns: ['**/*.approval.ts', '**/*.approval.yml'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: true, loadOrder: 80, domain: 'automation' },
+  { type: 'job', label: 'Background Job', filePatterns: ['**/*.job.ts', '**/*.job.yml', '**/*.job.json'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 80, domain: 'automation' },
 
   // System Protocol
   { type: 'datasource', label: 'Datasource', filePatterns: ['**/*.datasource.ts', '**/*.datasource.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 5, domain: 'system' },

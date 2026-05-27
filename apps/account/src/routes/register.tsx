@@ -79,11 +79,11 @@ function RegisterPage() {
       }
     }
 
-    // If the freshly-signed-up user already has organizations (the auth
-    // plugin auto-provisions a personal workspace, or they accepted an
-    // invitation), make sure one is active before navigating away. Without
-    // this the redirect target's `RequireOrganization` guard would bounce
-    // the user to `/_console/organizations`.
+    // If the freshly-signed-up user already has organizations (e.g. they
+    // were the first user and got bound to the default org, or they
+    // accepted an invitation), make sure one is active before navigating
+    // away. Without this the redirect target's `RequireOrganization`
+    // guard would bounce the user to `/_console/organizations`.
     if (!session?.activeOrganizationId) {
       // Wait until the org list has been fetched at least once before
       // deciding — otherwise we'd race the post-signup org provisioning.

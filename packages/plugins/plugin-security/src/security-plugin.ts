@@ -9,7 +9,6 @@ import { PermissionDeniedError } from './errors.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
 import { claimOrphanTenantRows } from './claim-orphan-tenant-rows.js';
 import { cloneTenantSeedData } from './clone-tenant-seed-data.js';
-import { ensureUserHasOrganization } from './ensure-user-has-organization.js';
 import {
   securityObjects,
   securityDefaultPermissionSets,
@@ -460,6 +459,7 @@ export class SecurityPlugin implements Plugin {
       try {
         const report = await bootstrapPlatformAdmin(ql, this.bootstrapPermissionSets, {
           logger: ctx.logger,
+          multiTenant: this.multiTenant,
         });
         bootstrapRanOnce = true;
         ctx.logger.info('[security] platform bootstrap complete', report);
@@ -476,16 +476,18 @@ export class SecurityPlugin implements Plugin {
     }
 
     // Re-run bootstrap after a sys_user insert so the FIRST user that
-    // signs up after boot is auto-promoted to platform admin without
-    // requiring a server restart. The function itself is idempotent
-    // and bails out as soon as any platform admin exists.
+    // signs up after boot is auto-promoted to platform admin (and, in
+    // multi-tenant mode, bound to the seeded default organization)
+    // without requiring a server restart. The function itself is
+    // idempotent and bails out as soon as any platform admin exists.
     //
-    // Also, in multi-tenant mode, ensure every newly registered user
-    // has at least one organization — otherwise the default
-    // tenant_isolation RLS policy hides every record from them and
-    // the dashboard's RequireOrganization guard (which has a
-    // single-tenant carve-out for org-less users) lets them through
-    // to a UI showing "No data" everywhere.
+    // We deliberately do NOT auto-create a "personal workspace" for
+    // every subsequent self-service signup. In a B2B / invitation-
+    // driven product (the framework's primary target), users must
+    // either accept an invitation or explicitly create their first
+    // organization. The account UI's /register flow already routes
+    // users with zero memberships to /organizations/new for exactly
+    // this case.
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
       await next();
       if (
@@ -494,21 +496,6 @@ export class SecurityPlugin implements Plugin {
       ) {
         if (bootstrapRanOnce) {
           await runBootstrap();
-        }
-        if (this.multiTenant) {
-          const newUser = opCtx?.result ?? opCtx?.data;
-          if (newUser?.id) {
-            try {
-              await ensureUserHasOrganization(ql, newUser, {
-                logger: ctx.logger,
-                cloneSeedData: cloneTenantSeedData,
-              });
-            } catch (e) {
-              ctx.logger.warn('[security] ensure-user-has-organization failed', {
-                error: (e as Error).message,
-              });
-            }
-          }
         }
       }
     });
@@ -522,9 +509,9 @@ export class SecurityPlugin implements Plugin {
     //      both existing-record lookups and reference resolution to
     //      that org, so upsert mode produces an independent copy per
     //      tenant. This works for the FIRST org and EVERY subsequent
-    //      org, whether the org was auto-created by signup
-    //      (`ensureUserHasOrganization`) or manually via the
-    //      better-auth `createOrganization` API.
+    //      org created explicitly via the better-auth
+    //      `createOrganization` API, the bootstrap default-org seed,
+    //      or the cloud-team mirror.
     //
     //   2. FALLBACK A — when no `seed-datasets` service is registered
     //      (e.g. a plugin-shaped deployment with no AppPlugin), and

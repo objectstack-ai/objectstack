@@ -27,6 +27,7 @@ import { ThemeSchema } from './ui/theme.zod';
 import { ApprovalProcessSchema } from './automation/approval.zod';
 import { WorkflowRuleSchema } from './automation/workflow.zod';
 import { FlowSchema } from './automation/flow.zod';
+import { JobSchema } from './system/job.zod';
 
 // Security Protocol
 import { RoleSchema } from './identity/role.zod';
@@ -214,6 +215,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   workflows: z.array(WorkflowRuleSchema).optional().describe('Event-driven workflows'),
   approvals: z.array(ApprovalProcessSchema).optional().describe('Approval processes'),
   flows: z.array(FlowSchema).optional().describe('Screen Flows'),
+  jobs: z.array(JobSchema).optional().describe('Background / Scheduled Jobs (run by IJobService on cron/interval/once schedules)'),
 
   /**
    * ObjectGuard: Security Layer

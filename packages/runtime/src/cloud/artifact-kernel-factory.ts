@@ -253,38 +253,6 @@ export class ArtifactKernelFactory implements EnvironmentKernelFactory {
                     // so cookies stay isolated per project subdomain.
                     trustedOrigins: trustedOriginsList.length ? trustedOriginsList : undefined,
                     ...(oidcProviders ? { oidcProviders } : {}),
-                    // Auto-provision a personal organization for every new
-                    // user. SecurityPlugin's ObjectQL middleware does this
-                    // for direct `ql.insert` calls, but better-auth's
-                    // adapter writes through `dataEngine` directly,
-                    // bypassing that middleware — so JIT-created SSO users
-                    // would otherwise land on the empty "create
-                    // organization" screen on first login.
-                    databaseHooks: {
-                        user: {
-                            create: {
-                                after: async (user: { id: string; email?: string; name?: string }) => {
-                                    try {
-                                        const ql = kernel.getService<any>('objectql');
-                                        if (!ql) return;
-                                        const [{ ensureUserHasOrganization, cloneTenantSeedData }] = await Promise.all([
-                                            import('@objectstack/plugin-security'),
-                                        ]);
-                                        await ensureUserHasOrganization(ql, user, {
-                                            logger: this.logger as any,
-                                            cloneSeedData: cloneTenantSeedData,
-                                        });
-                                    } catch (e: any) {
-                                        this.logger.warn?.('[ArtifactKernelFactory] auto-org provisioning hook failed', {
-                                            environmentId,
-                                            userId: user?.id,
-                                            error: e?.message,
-                                        });
-                                    }
-                                },
-                            },
-                        },
-                    },
                 } as any));
                 if (oidcProviders) {
                     this.logger.info?.('[ArtifactKernelFactory] platform SSO wired', {
@@ -302,13 +270,13 @@ export class ArtifactKernelFactory implements EnvironmentKernelFactory {
             this.logger.warn?.('[ArtifactKernelFactory] OS_AUTH_SECRET not set — per-project AuthPlugin skipped (auth endpoints will return 404)', { environmentId });
         }
 
-        // Per-project SecurityPlugin — provides RBAC + tenant_isolation RLS
-        // AND, crucially, the `sys_user` insert middleware that auto-creates
-        // a personal organization for new self-service signups (without it,
-        // a freshly registered user lands on a UI showing "No data" because
-        // they have zero `sys_member` rows and the default RLS denies all).
-        // The CLI's `objectstack serve` does this for `pnpm dev`; we have
-        // to mirror that behaviour for cloud-deployed per-project kernels.
+        // Per-project SecurityPlugin — provides RBAC + tenant_isolation RLS.
+        // Note: this kernel does NOT auto-create personal organizations for
+        // self-service signups. Project owners are bound to the mirrored
+        // cloud-team org via `seedProjectOrganization` + `seedProjectMember`
+        // below; SSO-JIT-provisioned members get attached to the same team
+        // via the SSO callback path. The CLI's `objectstack serve` mirrors
+        // this behaviour for `pnpm dev`.
         try {
             const { SecurityPlugin } = await import('@objectstack/plugin-security');
             const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
@@ -404,11 +372,9 @@ export class ArtifactKernelFactory implements EnvironmentKernelFactory {
         //      owns the project at the platform level.
         //   2. Seed the owner's `sys_user` row.
         //   3. Seed a `sys_member(owner)` row binding the user to the
-        //      cloud org. This prevents SecurityPlugin's
-        //      `ensureUserHasOrganization` insert middleware from
-        //      auto-creating a disjoint "Alice's Workspace" personal
-        //      org (the middleware only fires when the user has zero
-        //      memberships).
+        //      cloud org so their first sign-in resolves an
+        //      activeOrganizationId without requiring an extra
+        //      "create your first organization" step.
         //
         // All three are idempotent — safe across cold-boots.
         try {

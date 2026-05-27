@@ -34,6 +34,22 @@ interface BootstrapOptions {
     info: (message: string, meta?: Record<string, any>) => void;
     warn: (message: string, meta?: Record<string, any>) => void;
   };
+  /**
+   * Multi-tenant deployments need at least one `sys_organization` row
+   * for the first admin's session to carry an `activeOrganizationId`
+   * — otherwise the default `tenant_isolation` RLS policy filters
+   * everything to zero rows. When `true` and the freshly-promoted
+   * admin has no membership, this helper creates a "Default
+   * Organization" (slug `default`) and binds them as `owner`.
+   *
+   * This is the ONLY framework-side auto-provisioning of an org.
+   * Subsequent users must either accept an invitation or explicitly
+   * create an org via the account UI — no "personal workspace" is
+   * created behind their back.
+   *
+   * @default false
+   */
+  multiTenant?: boolean;
 }
 
 const SYSTEM_CTX = { isSystem: true };
@@ -69,8 +85,15 @@ export async function bootstrapPlatformAdmin(
   ql: any,
   bootstrapPermissionSets: PermissionSet[],
   options: BootstrapOptions = {},
-): Promise<{ seeded: number; adminPromoted: boolean; reason?: string }> {
+): Promise<{
+  seeded: number;
+  adminPromoted: boolean;
+  defaultOrgCreated?: boolean;
+  defaultOrgId?: string;
+  reason?: string;
+}> {
   const logger = options.logger;
+  const multiTenant = options.multiTenant === true;
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
     return { seeded: 0, adminPromoted: false, reason: 'objectql_unavailable' };
   }
@@ -143,5 +166,57 @@ export async function bootstrapPlatformAdmin(
     return { seeded: seededCount, adminPromoted: false, reason: 'insert_failed' };
   }
   logger?.info?.(`[security] first user promoted to platform admin: ${target.email ?? target.id}`);
-  return { seeded: seededCount, adminPromoted: true };
+
+  // Multi-tenant bootstrap: ensure the freshly-promoted admin has at
+  // least one organization so their session has an active org and the
+  // tenant_isolation RLS policy resolves. We only do this when the
+  // admin currently has zero memberships — if they already created an
+  // org of their own (or were invited into one before sign-up), we
+  // respect that and do not create a "Default Organization" too.
+  let defaultOrgCreated = false;
+  let defaultOrgId: string | undefined;
+  if (multiTenant) {
+    const memberships = await tryFind(ql, 'sys_member', { user_id: target.id }, 1);
+    if (memberships.length === 0) {
+      // Re-use a pre-existing slug=`default` org if any; otherwise
+      // create one. Stable slug keeps human-readable URLs predictable
+      // across cold-boots.
+      const existingDefault = await tryFind(ql, 'sys_organization', { slug: 'default' }, 1);
+      if (existingDefault.length > 0 && existingDefault[0].id) {
+        defaultOrgId = String(existingDefault[0].id);
+      } else {
+        const newOrgId = genId('org');
+        const orgRow = await tryInsert(ql, 'sys_organization', {
+          id: newOrgId,
+          name: 'Default Organization',
+          slug: 'default',
+          logo: null,
+          metadata: null,
+        });
+        if (orgRow) {
+          defaultOrgId = orgRow?.id ?? newOrgId;
+          defaultOrgCreated = true;
+        } else {
+          logger?.warn?.('[security] failed to create default organization for platform admin');
+        }
+      }
+      if (defaultOrgId) {
+        const memRow = await tryInsert(ql, 'sys_member', {
+          id: genId('mem'),
+          organization_id: defaultOrgId,
+          user_id: target.id,
+          role: 'owner',
+        });
+        if (memRow) {
+          logger?.info?.(
+            `[security] bound platform admin to default organization (${defaultOrgId}): ${target.email ?? target.id}`,
+          );
+        } else {
+          logger?.warn?.('[security] failed to bind platform admin to default organization');
+        }
+      }
+    }
+  }
+
+  return { seeded: seededCount, adminPromoted: true, defaultOrgCreated, defaultOrgId };
 }
