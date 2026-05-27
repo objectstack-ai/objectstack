@@ -170,10 +170,11 @@ function LoginPage() {
       const errorMessage = (err as Error).message;
       
       // Check if the error is due to unverified email
+      const lowerMessage = errorMessage.toLowerCase();
       if (
-        errorMessage.includes('email') &&
-        (errorMessage.toLowerCase().includes('verif') ||
-         errorMessage.toLowerCase().includes('not verified'))
+        lowerMessage.includes('email') &&
+        (lowerMessage.includes('verif') ||
+         lowerMessage.includes('not verified'))
       ) {
         // Redirect to verification prompt page
         navigate({
