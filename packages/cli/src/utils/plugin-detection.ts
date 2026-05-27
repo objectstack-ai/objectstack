@@ -22,7 +22,7 @@ export function isHostConfig(config: any): boolean {
  *
  * **Default behaviour: enabled.** Project mode is the canonical OS dev
  * workflow — every bare `defineStack()` config gets the full stack
- * (ObjectQL + Auth + Studio + control plane) unless one of the
+ * (ObjectQL + Auth + Console + control plane) unless one of the
  * opt-out conditions below applies.
  *
  * Skips library boot when:

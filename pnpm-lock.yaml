@@ -420,9 +420,6 @@ importers:
       '@object-ui/console':
         specifier: ^6.2.0
         version: 6.2.0
-      '@object-ui/studio':
-        specifier: ^6.2.0
-        version: 6.2.0
       '@objectstack/account':
         specifier: workspace:*
         version: link:../../apps/account
@@ -3241,9 +3238,6 @@ packages:
     resolution: {integrity: sha512-HYWwKf/DIGVwoWcYv+sOwbBV4flN3YzZO9doJnPqbQgyXpJMmO+A84QLWzeCW8kg67EzkAWf2G36VWtQKKVR3g==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
-
-  '@object-ui/studio@6.2.0':
-    resolution: {integrity: sha512-QaxyKb854nVJrzrepMg9i+gR4PS0DY8AHr/uCr5ZFlfhcIxS1DyKYw/O9K4LyNgvFGk0OY2pAbe2OlE2Kq1A4g==}
 
   '@oclif/core@4.11.4':
     resolution: {integrity: sha512-URwiQ5ALx/sJ2iH4vzXEd+H4K6NAI7LRs6Jag3hrgKEpGmaE6alfRC8qjO4GIgb6A3ACaJumqP9twi/M9ywdHQ==}
@@ -10229,8 +10223,6 @@ snapshots:
       - react-dom
       - react-native
       - typescript
-
-  '@object-ui/studio@6.2.0': {}
 
   '@oclif/core@4.11.4':
     dependencies:

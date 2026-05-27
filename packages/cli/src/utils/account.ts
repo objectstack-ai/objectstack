@@ -83,7 +83,7 @@ export function hasAccountDist(accountPath: string): boolean {
  * Create a lightweight kernel plugin that serves the pre-built Account
  * portal static files at `/_account/*`.
  *
- * Identical SPA-fallback semantics to `createStudioStaticPlugin`:
+ * Identical SPA-fallback semantics to `createConsoleStaticPlugin`:
  *   - `index.html` is read fresh on every fallback hit (so a rebuild
  *     producing new hashed asset names doesn't leave the browser
  *     pointing at stale URLs).

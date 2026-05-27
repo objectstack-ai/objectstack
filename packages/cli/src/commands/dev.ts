@@ -17,7 +17,7 @@ export default class Dev extends Command {
 
   static override flags = {
     watch: Flags.boolean({ char: 'w', description: 'Enable watch mode (default)', default: true }),
-    ui: Flags.boolean({ description: 'Enable Studio UI at /_studio/' }),
+    ui: Flags.boolean({ description: 'Enable bundled UI portals (Account, Console) at /_account/ and /_console/' }),
     verbose: Flags.boolean({ char: 'v', description: 'Verbose output' }),
     port: Flags.string({ char: 'p', description: 'Server port (overrides $PORT)' }),
     preset: Flags.string({
@@ -155,7 +155,7 @@ export default class Dev extends Command {
       // When the agent edits an objectstack source file (config or
       // src/**), debounce-rebuild dist/objectstack.json. The server
       // (MetadataPlugin) watches the artifact path directly and
-      // broadcasts the HMR event to Studio (ADR-0008 PR-8); no POST
+      // broadcasts the HMR event to UI consumers (ADR-0008 PR-8); no POST
       // ping required.
       //
       // Skipped when:
@@ -212,7 +212,7 @@ export default class Dev extends Command {
    *   2. Run `os compile` to rebuild `dist/objectstack.json`
    *
    * The server (MetadataPlugin) watches `dist/objectstack.json`
-   * directly and broadcasts the HMR event to Studio (ADR-0008 PR-8);
+   * directly and broadcasts the HMR event to UI consumers (ADR-0008 PR-8);
    * the CLI no longer POSTs `/api/v1/dev/metadata-events`. That POST
    * endpoint remains available for external trigger sources (cloud
    * webhooks, git hooks, ad-hoc curl) but is not used here.

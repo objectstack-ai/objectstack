@@ -224,6 +224,39 @@ export const STUDIO_APP: App = {
       ],
     },
     {
+      // Developer — first-party developer tooling surfaces hosted by the
+      // console (API console, flow run inspector, public forms registry).
+      // Registered as built-in components in the console's
+      // ComponentRegistry under the `developer:*` namespace.
+      id: 'group_developer',
+      type: 'group',
+      label: 'Developer',
+      icon: 'terminal',
+      children: [
+        {
+          id: 'nav_api_console',
+          type: 'component',
+          label: 'API Console',
+          componentRef: 'developer:api-console',
+          icon: 'terminal',
+        },
+        {
+          id: 'nav_flow_runs',
+          type: 'component',
+          label: 'Flow Runs',
+          componentRef: 'developer:flow-runs',
+          icon: 'activity',
+        },
+        {
+          id: 'nav_public_forms',
+          type: 'component',
+          label: 'Public Forms',
+          componentRef: 'developer:public-forms',
+          icon: 'file-text',
+        },
+      ],
+    },
+    {
       // Integration — outbound shapes: datasources, email templates,
       // routes/functions/services live here too once they have CRUD
       // surfaces. Email templates are a developer artefact (templates

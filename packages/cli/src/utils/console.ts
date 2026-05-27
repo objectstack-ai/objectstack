@@ -7,7 +7,7 @@
  * runtime console — published as `@object-ui/console` from the
  * objectstack-ai/objectui monorepo. The Console SPA is mounted at
  * `/_console/` by every deployment that opts in (CLI dev server,
- * self-host, Vercel) — exactly the same convention as `_studio` and
+ * self-host, Vercel) — exactly the same convention as `_account` and
  * `_account`. The Console is built with `base: '/_console/'`, so its
  * pre-built `dist/` is served verbatim.
  *
@@ -122,7 +122,7 @@ export function hasConsoleDist(consolePath: string): boolean {
  * Create a lightweight kernel plugin that serves the pre-built Console
  * portal static files at `/_console/*`.
  *
- * Identical SPA-fallback semantics to `createStudioStaticPlugin` and
+ * Identical SPA-fallback semantics to `createAccountStaticPlugin` and
  * `createAccountStaticPlugin`:
  *   - `index.html` is read fresh on every fallback hit (so a rebuild
  *     producing new hashed asset names doesn't leave the browser
@@ -170,10 +170,10 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
 
       // The Console is the default end-user surface — root `/` redirects
       // here whenever the Console is mounted (`rootRedirect !== false`).
-      // Mirrors the studio plugin's `rootRedirect` option. The CLI's
-      // serve.ts gates whether the Console mounts at all via `--no-console`
-      // / `OS_DISABLE_CONSOLE=1`; once mounted, claiming `/` is the
-      // intended behaviour in both dev and production deployments.
+      // The CLI's serve.ts gates whether the Console mounts at all via
+      // `--no-console` / `OS_DISABLE_CONSOLE=1`; once mounted, claiming
+      // `/` is the intended behaviour in both dev and production
+      // deployments.
       if (options?.rootRedirect !== false) {
         app.get('/', (c: any) => c.redirect(`${CONSOLE_PATH}/`));
       }

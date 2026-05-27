@@ -16,9 +16,9 @@ import { printHeader, printKV, printStep, printError } from '../utils/format.js'
  * Four escalating modes, picked automatically:
  *
  *   1. **Empty boot** (no artifact, no config in cwd)
- *      Boots a bare kernel with Studio mounted at `/_studio/`. The user
- *      can then browse the marketplace and install apps into the home
- *      directory at runtime. Perfect for "I just want to try it".
+ *      Boots a bare kernel with the Console mounted at `/_console/`. The
+ *      user can then browse the marketplace and install apps into the
+ *      home directory at runtime. Perfect for "I just want to try it".
  *
  *   2. **Project boot** (`objectstack.config.ts` in cwd)
  *      Auto-compiles the project config to `./dist/objectstack.json`
@@ -40,7 +40,7 @@ import { printHeader, printKV, printStep, printError } from '../utils/format.js'
  *   - Always overridable with `--home` or `$OS_HOME`.
  */
 export default class Start extends Command {
-  static override description = 'Quick-start an ObjectStack server (auto-falls back to an empty kernel with Studio + marketplace when no artifact is present)';
+  static override description = 'Quick-start an ObjectStack server (auto-falls back to an empty kernel with the Console + marketplace when no artifact is present)';
 
   static override examples = [
     '<%= config.bin %> start',
@@ -57,7 +57,7 @@ export default class Start extends Command {
     // Server
     port: Flags.integer({ char: 'p', description: 'Port to listen on (overrides $PORT, default 3000)' }),
     ui: Flags.boolean({
-      description: 'Mount Studio / Account / Console portals at /_studio/, /_account/, /_console/ (default: true so you can install marketplace apps)',
+      description: 'Mount Account / Console portals at /_account/ and /_console/ (default: true so you can install marketplace apps)',
       default: true,
       allowNo: true,
     }),
@@ -187,8 +187,9 @@ export default class Start extends Command {
     //
     // Without this, `serve` runs in production mode and silently skips
     // AuthPlugin when no secret is set — which makes /api/v1/auth/*
-    // return 404 and breaks Studio's login flow. Quick-start should
-    // "just work" without the user having to export AUTH_SECRET.
+    // return 404 and breaks the Account portal's login flow.
+    // Quick-start should "just work" without the user having to
+    // export AUTH_SECRET.
     const authSecret = flags['auth-secret']
       ?? process.env.AUTH_SECRET
       ?? process.env.OS_AUTH_SECRET
@@ -202,11 +203,11 @@ export default class Start extends Command {
     if (artifactSource) {
       printKV('Artifact', artifactSource.display, '📦');
     } else {
-      printKV('Artifact', 'none (empty kernel — install apps via Studio marketplace)', '📦');
+      printKV('Artifact', 'none (empty kernel — install apps via the Console marketplace)', '📦');
     }
     printKV('Database', redactDbUrl(databaseUrl), '🗄️');
     printKV('Environment', environmentId, '🎯');
-    if (flags.ui) printKV('Studio', `http://localhost:${flags.port ?? 3000}/_studio/`, '🎨');
+    if (flags.ui) printKV('Console', `http://localhost:${flags.port ?? 3000}/_console/`, '🖥️');
 
     printStep('Starting server...');
 

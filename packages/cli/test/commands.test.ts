@@ -12,7 +12,6 @@ import Generate from '../src/commands/generate';
 import Lint from '../src/commands/lint';
 import Diff from '../src/commands/diff';
 import Explain from '../src/commands/explain';
-import Studio from '../src/commands/studio';
 
 describe('CLI Commands (oclif)', () => {
   it('should have compile command', () => {
@@ -66,9 +65,5 @@ describe('CLI Commands (oclif)', () => {
 
   it('should have explain command', () => {
     expect(Explain.description).toContain('explanation');
-  });
-
-  it('should have studio command', () => {
-    expect(Studio.description).toContain('Studio');
   });
 });

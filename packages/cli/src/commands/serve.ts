@@ -18,13 +18,6 @@ import {
   printServerReady,
 } from '../utils/format.js';
 import {
-  STUDIO_PATH,
-  resolveStudioPath,
-  hasStudioDist,
-  createStudioStaticPlugin,
-  createStudioWriteApiPlugin,
-} from '../utils/studio.js';
-import {
   ACCOUNT_PATH,
   resolveAccountPath,
   hasAccountDist,
@@ -156,9 +149,9 @@ export default class Serve extends Command {
   static override flags = {
     port: Flags.string({ char: 'p', description: 'Server port', default: process.env.PORT ?? '3000' }),
     dev: Flags.boolean({ description: 'Run in development mode (load devPlugins)' }),
-    ui: Flags.boolean({ description: 'Enable Studio UI at /_studio/ (default: true)', default: true, allowNo: true }),
+    ui: Flags.boolean({ description: 'Enable bundled UI portals (Account, Console) when the corresponding packages are installed (default: true)', default: true, allowNo: true }),
     console: Flags.boolean({
-      description: 'Mount the Console UI at /_console/ when the package is installed (default: true). When disabled, Studio claims the root redirect.',
+      description: 'Mount the Console UI at /_console/ when the package is installed (default: true).',
       default: true,
       allowNo: true,
     }),
@@ -189,7 +182,7 @@ export default class Serve extends Command {
   /**
    * Auto-registered plugin tiers. Plugins explicitly listed in
    * `config.plugins` are always loaded — tiers only gate the optional
-   * auto-registration blocks below (AIService, I18n, Studio UI, etc.).
+   * auto-registration blocks below (AIService, I18n, UI portals, etc.).
    */
   static readonly TIER_PRESETS: Record<string, string[]> = {
     minimal: ['core'],
@@ -248,7 +241,7 @@ export default class Serve extends Command {
       if (!artifactSource) {
         // Quick-start mode: `objectstack start` lets the user boot an
         // empty kernel with no config and no artifact, then install apps
-        // from the marketplace via Studio. The CLI signals this by
+        // from the marketplace via the Console. The CLI signals this by
         // setting OS_BOOT_EMPTY=1 in the child env.
         if (process.env.OS_BOOT_EMPTY === '1') {
           useEmptyBoot = true;
@@ -889,15 +882,15 @@ export default class Serve extends Command {
         }
       }
 
-      // 5. Studio single-environment signal.
+      // 5. Runtime-config signal.
       //
       // The built-in `RuntimeConfigPlugin` (auto-registered below at
-      // step 5b-ii) already responds to `GET /api/v1/studio/runtime-config`
-      // with `{ singleEnvironment, defaultOrgId, defaultEnvironmentId }`,
-      // so no extra plugin is needed here. Cloud / multi-environment
-      // hosts ship their own runtime-config plugin in a separate
-      // distribution; if the user config carries one already we skip
-      // injecting the default one further down.
+      // step 5b-ii) responds to `GET /api/v1/runtime/config` with
+      // `{ singleEnvironment, defaultOrgId, defaultEnvironmentId }` so
+      // external UI consumers can discover the runtime shape. Cloud /
+      // multi-environment hosts ship their own runtime-config plugin
+      // in a separate distribution; if the user config carries one
+      // already we skip injecting the default one further down.
 
       // 5b. Auto-register MarketplaceProxyPlugin so the runtime console's
       // marketplace browse UI works in `objectstack dev` without manually
@@ -940,11 +933,12 @@ export default class Serve extends Command {
         }
       }
 
-      // 5b-ii. Auto-register RuntimeConfigPlugin so the Console / Studio SPA
-      // can fetch `/api/v1/runtime/config` at boot. Without it the SPA
-      // 404s on the endpoint, falls back to defaults (installLocal:false),
-      // and the marketplace Install button prompts "install to cloud"
-      // instead of installing into the local `objectstack dev` runtime.
+      // 5b-ii. Auto-register RuntimeConfigPlugin so the Console SPA (and
+      // any external UI consumer) can fetch `/api/v1/runtime/config` at
+      // boot. Without it the SPA 404s on the endpoint, falls back to
+      // defaults (installLocal:false), and the marketplace Install
+      // button prompts "install to cloud" instead of installing into
+      // the local `objectstack dev` runtime.
       //
       // For a vanilla user stack (objectstack dev) this runtime IS the
       // install target: cloudUrl='' (stay on same origin so the SPA hits
@@ -952,8 +946,6 @@ export default class Serve extends Command {
       const hasRuntimeConfig = plugins.some(
         (p: any) => p?.name === 'com.objectstack.runtime.runtime-config'
           || p?.constructor?.name === 'RuntimeConfigPlugin'
-          || p?.name === 'com.objectstack.studio.runtime-config'
-          || p?.name === 'com.objectstack.studio.single-environment'
       );
       if (!hasRuntimeConfig) {
         try {
@@ -972,7 +964,7 @@ export default class Serve extends Command {
 
       // 5c. Auto-register AuthPlugin (and paired Security/Audit) when the
       // 'auth' tier is enabled and no auth plugin is already configured.
-      // The Studio + Account portals expect /api/v1/auth/* to be served by
+      // The Account portal expects /api/v1/auth/* to be served by
       // better-auth via @objectstack/plugin-auth. Without this block,
       // running `objectstack dev` on a vanilla user stack would 404 on
       // login/register flows.
@@ -1063,7 +1055,7 @@ export default class Serve extends Command {
               }
             }
             // Dev convenience: keep `http://localhost:*` so plain
-            // `localhost:<port>` still works for non-preview Studio/Console.
+            // `localhost:<port>` still works for non-preview Console.
             if (isDev && !trustedOrigins.includes('http://localhost:*')) {
               trustedOrigins.push('http://localhost:*');
             }
@@ -1518,52 +1510,25 @@ export default class Serve extends Command {
         }
       }
 
-      // ── Studio UI ─────────────────────────────────────────────────
-      // In dev mode, Studio UI is enabled by default (use --no-ui to disable).
-      // Always serves the pre-built dist/ — no Vite dev server, no extra port.
+      // ── UI portals ────────────────────────────────────────────────
+      // In dev mode, the bundled UI portals (Account, Console) are
+      // enabled by default (use --no-ui to disable). Always serve the
+      // pre-built `dist/` — no Vite dev server, no extra port.
       const enableUI = flags.ui && tierEnabled('ui');
 
       if (enableUI) {
-        // Pre-detect Console availability so we can demote Studio's root
-        // redirect when the Console is going to claim `/`.
-        // The `--no-console` flag (or OS_DISABLE_CONSOLE=1 env var) lets a
-        // host (e.g. apps/cloud) opt out of the Console entirely so Studio
-        // owns `/` — useful for control-plane deployments where the
-        // runtime Console is meaningless.
+        // Pre-detect Console availability. The `--no-console` flag (or
+        // OS_DISABLE_CONSOLE=1 env var) lets a host (e.g. apps/cloud)
+        // opt out of the Console entirely — useful for control-plane
+        // deployments where the runtime Console is meaningless.
         const consoleEnabled = flags.console && process.env.OS_DISABLE_CONSOLE !== '1';
         const consolePath = consoleEnabled ? resolveConsolePath() : null;
         const consoleWillMount = !!(consolePath && hasConsoleDist(consolePath));
 
-        // The `OS_DISABLE_STUDIO=1` env var lets a host (e.g. apps/cloud,
-        // which is a pure control plane) opt out of the Studio designer
-        // entirely while keeping Account/Console. Studio is meaningless
-        // when there are no per-project kernels in the same process.
-        const studioEnabled = process.env.OS_DISABLE_STUDIO !== '1';
-
-        if (studioEnabled) {
-          const studioPath = resolveStudioPath();
-          if (!studioPath) {
-            console.warn(chalk.yellow(`  ⚠ @object-ui/studio not found — skipping UI (run \`pnpm add @object-ui/studio\`)`));
-          } else if (hasStudioDist(studioPath)) {
-            const distPath = path.join(studioPath, 'dist');
-            // Write API must register BEFORE the static plugin so its POST
-            // routes win over `/_studio/*` GET fallback (Hono matches by
-            // method, but registering first keeps semantics obvious).
-            await kernel.use(createStudioWriteApiPlugin(process.cwd(), { isDev }));
-            await kernel.use(createStudioStaticPlugin(distPath, {
-              isDev,
-              rootRedirect: !consoleWillMount,
-            }));
-            trackPlugin('StudioUI');
-          } else {
-            console.warn(chalk.yellow(`  ⚠ Studio dist not found — install \`@object-ui/studio\` (already built) or run \`pnpm --filter @object-ui/studio build\` in the objectui workspace`));
-          }
-        }
-
         // ── Account portal ─────────────────────────────────────────
-        // The account portal sits next to Studio under `/_account/` and
-        // follows the same enable rules — it's a self-service surface
-        // for end-users (login, organizations, profile, sessions).
+        // The account portal mounts under `/_account/` and is a
+        // self-service surface for end-users (login, organizations,
+        // profile, sessions).
         const accountPath = resolveAccountPath();
         if (!accountPath) {
           console.warn(chalk.yellow(`  ⚠ @objectstack/account not found — skipping Account UI`));
@@ -1578,10 +1543,9 @@ export default class Serve extends Command {
         // ── Console portal ──────────────────────────────────────────
         // The opinionated, fork-ready runtime console (`@object-ui/console`,
         // published from the objectstack-ai/objectui monorepo) mounts under
-        // `/_console/` exactly like Studio/Account. When present, it owns
-        // root `/` redirect (preferred default UI). It is optional — we
-        // only mount it when the package resolves and a pre-built `dist/`
-        // is present.
+        // `/_console/`. When present, it owns the root `/` redirect
+        // (preferred default UI). It is optional — we only mount it when
+        // the package resolves and a pre-built `dist/` is present.
         if (consolePath) {
           if (consoleWillMount) {
             const consoleDistPath = path.join(consolePath, 'dist');
@@ -1644,7 +1608,6 @@ export default class Serve extends Command {
         pluginCount: loadedPlugins.length,
         pluginNames: loadedPlugins,
         uiEnabled: enableUI,
-        studioPath: STUDIO_PATH,
         accountPath: ACCOUNT_PATH,
         consolePath: loadedPlugins.includes('ConsoleUI') ? CONSOLE_PATH : undefined,
         driverLabel: resolvedDriverLabel,
