@@ -1,5 +1,45 @@
 # @objectstack/cli
 
+## 6.9.0
+
+### Patch Changes
+
+- Updated dependencies [bac7ae5]
+- Updated dependencies [e9bacda]
+  - @objectstack/runtime@6.9.0
+  - @objectstack/service-ai@6.9.0
+  - @objectstack/service-settings@6.9.0
+  - @objectstack/client@6.9.0
+  - @objectstack/spec@6.9.0
+  - @objectstack/core@6.9.0
+  - @objectstack/objectql@6.9.0
+  - @objectstack/observability@6.9.0
+  - @objectstack/rest@6.9.0
+  - @objectstack/driver-memory@6.9.0
+  - @objectstack/driver-sql@6.9.0
+  - @objectstack/driver-mongodb@6.9.0
+  - @objectstack/driver-sqlite-wasm@6.9.0
+  - @objectstack/plugin-approvals@6.9.0
+  - @objectstack/plugin-audit@6.9.0
+  - @objectstack/plugin-auth@6.9.0
+  - @objectstack/plugin-email@6.9.0
+  - @objectstack/plugin-hono-server@6.9.0
+  - @objectstack/plugin-mcp-server@6.9.0
+  - @objectstack/plugin-reports@6.9.0
+  - @objectstack/plugin-security@6.9.0
+  - @objectstack/plugin-sharing@6.9.0
+  - @objectstack/plugin-webhooks@6.9.0
+  - @objectstack/service-analytics@6.9.0
+  - @objectstack/service-automation@6.9.0
+  - @objectstack/service-cache@6.9.0
+  - @objectstack/service-feed@6.9.0
+  - @objectstack/service-job@6.9.0
+  - @objectstack/service-package@6.9.0
+  - @objectstack/service-queue@6.9.0
+  - @objectstack/service-realtime@6.9.0
+  - @objectstack/service-storage@6.9.0
+  - @objectstack/account@6.9.0
+
 ## 6.8.1
 
 ### Patch Changes

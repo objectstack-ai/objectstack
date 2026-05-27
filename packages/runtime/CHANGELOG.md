@@ -1,5 +1,54 @@
 # @objectstack/runtime
 
+## 6.9.0
+
+### Patch Changes
+
+- bac7ae5: Fix: AI HTTP routes now see the authenticated user
+
+  `HttpDispatcher.handleAI()` was invoking AI route handlers with only
+  `{ body, params, query }` — `req.user` was always `undefined`. This
+  silently broke every identity-aware feature that flows through
+  `/api/v1/ai/*`:
+
+  - LLM-titled conversations never fired (no actor → `autoCreateConversation`
+    early-returned → no message persistence → `summarizeConversation`
+    gated on `msgs.length >= 2` never tripped).
+  - Permission-aware tool execution fell back to system context (RLS bypass).
+  - HITL conversation linkage lost the operator's identity.
+
+  Two root causes were fixed:
+
+  1. `resolve-execution-context.ts` only checked `authService.api.getSession`.
+     Modern auth plugins expose the better-auth handle lazily via
+     `await authService.getApi()`. Now tries both.
+  2. `handleAI()` now threads the resolved `ExecutionContext` into
+     `req.user` (`{ userId, displayName, email, roles, permissions,
+organizationId }`) before invoking the route handler, mirroring
+     the shape the dispatcher-plugin already promises.
+
+  End-to-end browser verification: authenticated chat → message persisted
+  → `summarizeConversation` fires → fake-OpenAI receives the title
+  prompt → `ai_conversations.title` updated. No code changes required
+  in `@objectstack/service-ai`, `assistant-routes.ts`, or
+  `agent-routes.ts` — they already consumed `req.user` correctly.
+
+  - @objectstack/spec@6.9.0
+  - @objectstack/core@6.9.0
+  - @objectstack/types@6.9.0
+  - @objectstack/metadata@6.9.0
+  - @objectstack/objectql@6.9.0
+  - @objectstack/observability@6.9.0
+  - @objectstack/formula@6.9.0
+  - @objectstack/rest@6.9.0
+  - @objectstack/driver-memory@6.9.0
+  - @objectstack/driver-sql@6.9.0
+  - @objectstack/driver-sqlite-wasm@6.9.0
+  - @objectstack/plugin-auth@6.9.0
+  - @objectstack/plugin-security@6.9.0
+  - @objectstack/service-cluster@6.9.0
+  - @objectstack/service-i18n@6.9.0
+
 ## 6.8.1
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/client-react",
-  "version": "6.8.1",
+  "version": "6.9.0",
   "license": "Apache-2.0",
   "description": "React hooks for ObjectStack Client SDK",
   "main": "dist/index.js",

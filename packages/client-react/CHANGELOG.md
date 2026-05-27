@@ -1,5 +1,13 @@
 # @objectstack/client-react
 
+## 6.9.0
+
+### Patch Changes
+
+- @objectstack/client@6.9.0
+- @objectstack/spec@6.9.0
+- @objectstack/core@6.9.0
+
 ## 6.8.1
 
 ### Patch Changes

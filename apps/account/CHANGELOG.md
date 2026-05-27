@@ -1,5 +1,7 @@
 # @objectstack/account
 
+## 6.9.0
+
 ## 6.8.1
 
 ## 6.8.0

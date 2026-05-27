@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/knowledge-turso",
-  "version": "6.8.1",
+  "version": "6.9.0",
   "license": "Apache-2.0",
   "description": "Turso/libSQL native-vector knowledge adapter for ObjectStack — F32_BLOB + DiskANN.",
   "main": "dist/index.js",
