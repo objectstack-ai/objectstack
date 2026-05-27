@@ -250,14 +250,12 @@ export class AIService implements IAIService {
    * is purely cosmetic and must never break chat.
    */
   async summarizeConversation(conversationId: string): Promise<void> {
-    console.error(`[DEBUG] summarizeConversation called: cid=${conversationId} enabled=${this.titleGeneration.enabled} tried=${this.titledConversations.has(conversationId)}`);
     if (!this.titleGeneration.enabled) return;
     if (this.titledConversations.has(conversationId)) return;
     this.titledConversations.add(conversationId);
 
     try {
       const conv = await this.conversationService.get(conversationId);
-      console.error(`[DEBUG] summarize: cid=${conversationId} convExists=${!!conv} title="${conv?.title ?? ''}" msgs=${conv?.messages?.length ?? 0}`);
       if (!conv) return;
       if (conv.title && conv.title.trim().length > 0) return;
       if (!conv.messages || conv.messages.length < 2) return;
@@ -351,11 +349,8 @@ export class AIService implements IAIService {
    */
   private async persistMessage(conversationId: string, message: ModelMessage): Promise<void> {
     try {
-      console.error(`[DEBUG] persistMessage cid=${conversationId} role=${(message as any).role}`);
       await this.conversationService.addMessage(conversationId, message);
-      console.error(`[DEBUG] persistMessage OK cid=${conversationId}`);
     } catch (err) {
-      console.error(`[DEBUG] persistMessage FAIL cid=${conversationId} err=${err instanceof Error ? err.message : String(err)}`);
       this.logger.warn('[AI] persist message failed', {
         conversationId,
         role: (message as { role?: string }).role,
@@ -681,7 +676,6 @@ export class AIService implements IAIService {
     messages: ModelMessage[],
     options?: ChatWithToolsOptions,
   ): AsyncIterable<TextStreamPart<ToolSet>> {
-    console.error(`[DEBUG] streamChatWithTools ENTRY msgCount=${messages.length} cid=${options?.toolExecutionContext?.conversationId ?? 'none'} actor=${options?.toolExecutionContext?.actor?.id ?? 'none'}`);
     const {
       maxIterations: maxIter,
       onToolError,

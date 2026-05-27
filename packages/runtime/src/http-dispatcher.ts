@@ -3582,7 +3582,7 @@ export class HttpDispatcher {
      * Handle AI service routes (/ai/chat, /ai/models, /ai/conversations, etc.)
      * Resolves the AI service and its built-in route handlers, then dispatches.
      */
-    async handleAI(subPath: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
+    async handleAI(subPath: string, method: string, body: any, query: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
         let aiService: any;
         try {
             aiService = await this.resolveService('ai');
@@ -3640,7 +3640,32 @@ export class HttpDispatcher {
             const params = matchRoute(route.path, fullPath);
             if (params === null) continue;
 
-            const result = await route.handler({ body, params, query });
+            // Resolve `req.user` from the already-resolved ExecutionContext so
+            // AI route handlers can attribute the call to the authenticated
+            // actor (drives auto-titled conversations, permission-aware
+            // tools, HITL conversation linkage, …). Falls back to undefined
+            // for anonymous requests — the route's own `auth: true` guard
+            // is enforced by upstream middleware.
+            const ec: any = context.executionContext;
+            const user = ec?.userId
+                ? {
+                    userId: ec.userId,
+                    id: ec.userId,
+                    displayName: ec.userDisplayName ?? ec.userName ?? ec.userId,
+                    email: ec.userEmail,
+                    roles: Array.isArray(ec.roles) ? ec.roles : [],
+                    permissions: Array.isArray(ec.permissions) ? ec.permissions : [],
+                    organizationId: ec.tenantId,
+                }
+                : undefined;
+
+            const result = await route.handler({
+                body,
+                params,
+                query,
+                headers: context.request?.headers,
+                user,
+            });
 
             if (result.stream && result.events) {
                 // Return a streaming result for the adapter to handle

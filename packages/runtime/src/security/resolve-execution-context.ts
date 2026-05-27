@@ -150,11 +150,16 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   if (!userId) {
     try {
       const authService: any = await opts.getService('auth');
-      // better-auth's `getSession` expects a Web `Headers` instance
-      // (it calls `headers.get('cookie')`). The HTTP adapter hands us a
-      // plain `Record<string,string>`, so wrap it before forwarding.
+      // The auth service surfaces its better-auth API either as `.api`
+      // (legacy direct mount) or via `await getApi()` (lazy plugin).
+      // Try both so we don't silently degrade to anonymous when the
+      // shape differs across plugin versions.
+      let api: any = authService?.api;
+      if (!api && typeof authService?.getApi === 'function') {
+        api = await authService.getApi();
+      }
       const headersInstance = toHeaders(headers);
-      const sessionData = await authService?.api?.getSession?.({ headers: headersInstance });
+      const sessionData = await api?.getSession?.({ headers: headersInstance });
       userId = sessionData?.user?.id ?? sessionData?.session?.userId;
       tenantId = tenantId ?? sessionData?.session?.activeOrganizationId;
       ctx.accessToken = sessionData?.session?.token ?? ctx.accessToken;

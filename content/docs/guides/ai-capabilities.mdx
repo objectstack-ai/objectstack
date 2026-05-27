@@ -488,6 +488,10 @@ automatically scope what an agent can see and do. There is no separate
    `/api/v1/ai/agents/:id/chat` pull the authenticated principal out of
    `req.user` and forward it to `aiService.chatWithTools(...)` as
    `toolExecutionContext: { actor, conversationId, environmentId }`.
+   Both **cookie session** (`better-auth.session_token`) and **Bearer
+   token** auth are resolved automatically by the dispatcher — your
+   browser chats and your scripted API calls land in the same RLS
+   context as a plain ObjectQL request from the same user.
 2. The tool registry threads that context into every handler invocation.
 3. Built-in data tools (`query_records`, `get_record`,
    `aggregate_data`) and auto-generated `action_*` tools convert the
@@ -517,6 +521,29 @@ await aiService.chatWithTools(messages, tools, {
 
 Omit `toolExecutionContext` to keep the previous system-level behaviour
 (used by cron jobs, internal callers, and the existing test suite).
+
+### LLM-generated conversation titles
+
+Whenever the assistant has produced its **second** message in a
+conversation that still has no title, the AI service fires a short,
+out-of-band LLM call (`≤ 20 characters`, single-line, no quotes) to
+summarise what the user is asking about and writes the result back to
+`ai_conversations.title`. The summarise call:
+
+- Reuses the **active chat provider** (so it works with any
+  `provider/model` you configured via Console → Settings → AI), and
+  honours the same `${provider}_base_url` you wired for chat —
+  including custom OpenAI-compatible endpoints (SiliconFlow, DeepSeek,
+  a local OpenAI proxy, …).
+- Runs as a fire-and-forget task with a short timeout — if the title
+  call fails, the chat reply is unaffected and the conversation simply
+  keeps its placeholder name.
+- Skips re-titling once `title` is set, so manual edits via the
+  conversation API are never overwritten.
+
+The Console sidebar groups conversations by recency and displays the
+title; if you ever need to force a regenerate, clear the field via the
+`ai_conversations` REST API and send another message.
 
 ---
 
