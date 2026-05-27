@@ -19,6 +19,20 @@ export const AiConversationObject = ObjectSchema.create({
   isSystem: true,
   description: 'Persistent AI conversation metadata',
 
+  // Enable Notion / Figma-style "anyone with the link" sharing.
+  // The platform's plugin-sharing service exposes the share-link UI
+  // and REST surface as soon as this flag is set; no further wiring
+  // is needed in service-ai. `metadata` is redacted so internal
+  // tracking payloads (model token counts, source app context) do not
+  // leak into public shares.
+  publicSharing: {
+    enabled: true,
+    allowedAudiences: ['link_only', 'signed_in'],
+    allowedPermissions: ['view'],
+    maxExpiryDays: 90,
+    redactFields: ['metadata'],
+  },
+
   fields: {
     id: Field.text({
       label: 'Conversation ID',

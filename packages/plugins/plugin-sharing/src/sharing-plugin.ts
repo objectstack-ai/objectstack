@@ -2,10 +2,13 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
-import { SysRecordShare, SysSharingRule } from '@objectstack/platform-objects/security';
+import type { IHttpServer } from '@objectstack/spec/contracts';
+import { SysRecordShare, SysSharingRule, SysShareLink } from '@objectstack/platform-objects/security';
 import { SysDepartment, SysDepartmentMember } from '@objectstack/platform-objects/identity';
 import { SharingService, type SharingEngine } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
+import { ShareLinkService } from './share-link-service.js';
+import { registerShareLinkRoutes } from './share-link-routes.js';
 import { bindRuleHooks, unbindAllRuleHooks } from './rule-hooks.js';
 
 export interface SharingPluginOptions {
@@ -17,6 +20,17 @@ export interface SharingPluginOptions {
    * via env var without rebuilding.
    */
   enforce?: boolean;
+  /**
+   * Disable the public share-link REST routes. The `IShareLinkService`
+   * is always registered (other services may depend on it); only the
+   * HTTP surface is suppressed.
+   */
+  registerShareLinkRoutes?: boolean;
+  /**
+   * Base path for the share-link REST surface. Defaults to
+   * `/api/v1/share-links`.
+   */
+  shareLinkBasePath?: string;
 }
 
 /**
@@ -58,6 +72,7 @@ export class SharingServicePlugin implements Plugin {
   private readonly options: SharingPluginOptions;
   private service?: SharingService;
   private ruleService?: SharingRuleService;
+  private linkService?: ShareLinkService;
 
   constructor(options: SharingPluginOptions = {}) {
     this.options = options;
@@ -73,7 +88,7 @@ export class SharingServicePlugin implements Plugin {
       scope: 'system',
       defaultDatasource: 'cloud',
       namespace: 'sys',
-      objects: [SysRecordShare, SysSharingRule, SysDepartment, SysDepartmentMember],
+      objects: [SysRecordShare, SysSharingRule, SysDepartment, SysDepartmentMember, SysShareLink],
     });
     ctx.logger.info('SharingServicePlugin: schema registered');
   }
@@ -125,6 +140,43 @@ export class SharingServicePlugin implements Plugin {
         }
       } catch (err: any) {
         ctx.logger.warn('SharingServicePlugin: sharing-rule subsystem not started', { error: err?.message });
+      }
+
+      // ── Share-Link service (capability tokens) ────────────────
+      //
+      // Registered alongside the principal-based sharing service so
+      // both surfaces resolve through the same kernel. The HTTP
+      // endpoints are optional — services that just want programmatic
+      // access can set `registerShareLinkRoutes: false` and call the
+      // service via `ctx.getService('shareLinks')`.
+      try {
+        this.linkService = new ShareLinkService({ engine: engine as SharingEngine });
+        ctx.registerService('shareLinks', this.linkService);
+
+        if (this.options.registerShareLinkRoutes !== false) {
+          let http: IHttpServer | null = null;
+          try {
+            http = ctx.getService<IHttpServer>('http-server');
+          } catch {
+            // No HTTP server — service still reachable via getService.
+          }
+          if (http) {
+            registerShareLinkRoutes(http, this.linkService, engine as SharingEngine, {
+              basePath: this.options.shareLinkBasePath,
+            });
+            ctx.logger.info(
+              'SharingServicePlugin: share-link routes mounted at ' +
+                (this.options.shareLinkBasePath ?? '/api/v1/share-links'),
+            );
+          } else {
+            ctx.logger.warn(
+              'SharingServicePlugin: no HTTP server — share-link REST routes not registered. ' +
+                'ShareLinkService is still reachable via kernel.getService("shareLinks").',
+            );
+          }
+        }
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: share-link subsystem not started', { error: err?.message });
       }
     });
   }

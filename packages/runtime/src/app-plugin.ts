@@ -393,7 +393,7 @@ export class AppPlugin implements Plugin {
              // step. So we skip it. Single-tenant deployments keep the
              // legacy behaviour: seed immediately at boot so there's
              // always demo data without needing an org insert.
-             const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'true').toLowerCase() !== 'false';
+             const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
              if (multiTenant) {
                  ctx.logger.info('[Seeder] multi-tenant mode — skipping inline seed; per-org replay will run on sys_organization insert');
              } else {

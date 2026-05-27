@@ -163,7 +163,32 @@ export class ObjectQLPlugin implements Plugin {
     // structured "not implemented" payload so callers see something
     // useful instead of a 500.
     ctx.registerService('analytics', {
-      query: (body: any) => protocolShim.analyticsQuery(body),
+      // HttpDispatcher passes the raw POST body (AnalyticsQuery shape:
+      // `{ cube, measures, dimensions, where?, filters?, ... }`). The
+      // protocol shim's `analyticsQuery` expects the wrapped envelope
+      // `{ cube, query }` and destructures `request.query` for dims /
+      // measures. Reshape here so the destructure resolves to the
+      // analytics query instead of `undefined` (which caused
+      // "Cannot read properties of undefined (reading 'dimensions')").
+      //
+      // `analyticsQuery` also returns its own `{ success, data: { rows,
+      // fields } }` envelope. HttpDispatcher wraps service responses
+      // again with `success(result)`, so without unwrapping here the
+      // client sees `{success, data:{success, data:{rows, fields}}}` —
+      // KPI widgets read `data.rows` and silently get nothing. Unwrap
+      // to the inner `{ rows, fields }` payload so a single wrap from
+      // the dispatcher yields the canonical shape.
+      query: async (body: any) => {
+        const envelope = body && typeof body === 'object' && 'query' in body && 'cube' in body
+          ? body
+          : { cube: body?.cube, query: body };
+        const result = await protocolShim.analyticsQuery(envelope);
+        // Unwrap an inner `{ success, data }` envelope (one level only).
+        if (result && typeof result === 'object' && 'success' in result && 'data' in result) {
+          return (result as any).data;
+        }
+        return result;
+      },
       getMeta: async () => ({
         cubes: [],
         message: 'Analytics meta endpoint not implemented by ObjectQL adapter',

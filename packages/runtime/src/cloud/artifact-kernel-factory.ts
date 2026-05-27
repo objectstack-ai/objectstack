@@ -311,7 +311,7 @@ export class ArtifactKernelFactory implements EnvironmentKernelFactory {
         // to mirror that behaviour for cloud-deployed per-project kernels.
         try {
             const { SecurityPlugin } = await import('@objectstack/plugin-security');
-            const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'true').toLowerCase() !== 'false';
+            const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
             await kernel.use(new SecurityPlugin({ multiTenant }) as any);
         } catch (err: any) {
             this.logger.warn?.('[ArtifactKernelFactory] SecurityPlugin not registered', {

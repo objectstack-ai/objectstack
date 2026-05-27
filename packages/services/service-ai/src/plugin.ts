@@ -179,10 +179,10 @@ export class AIServicePlugin implements Plugin {
       }
     }
 
-    const providerSpecs: Record<string, { pkg: string; factory: string; defaultModel: string; displayName: string }> = {
-      openai: { pkg: '@ai-sdk/openai', factory: 'openai', defaultModel: 'gpt-4o', displayName: 'OpenAI' },
-      anthropic: { pkg: '@ai-sdk/anthropic', factory: 'anthropic', defaultModel: 'claude-sonnet-4-20250514', displayName: 'Anthropic' },
-      google: { pkg: '@ai-sdk/google', factory: 'google', defaultModel: 'gemini-2.0-flash', displayName: 'Google' },
+    const providerSpecs: Record<string, { pkg: string; factory: string; createFactory: string; defaultModel: string; displayName: string }> = {
+      openai: { pkg: '@ai-sdk/openai', factory: 'openai', createFactory: 'createOpenAI', defaultModel: 'gpt-4o', displayName: 'OpenAI' },
+      anthropic: { pkg: '@ai-sdk/anthropic', factory: 'anthropic', createFactory: 'createAnthropic', defaultModel: 'claude-sonnet-4-20250514', displayName: 'Anthropic' },
+      google: { pkg: '@ai-sdk/google', factory: 'google', createFactory: 'createGoogleGenerativeAI', defaultModel: 'gemini-2.0-flash', displayName: 'Google' },
     };
     const spec = providerSpecs[provider];
     if (!spec) return null;
@@ -211,18 +211,34 @@ export class AIServicePlugin implements Plugin {
       : 'GOOGLE_GENERATIVE_AI_API_KEY';
     process.env[envKey] = apiKey;
 
+    // Honour an optional `${provider}_base_url` override so operators can
+    // point the SDK at a self-hosted gateway, Azure proxy, or local mock.
+    // We pass it via the SDK's `createX({ baseURL })` factory rather than
+    // relying on env vars, since `@ai-sdk/openai`'s `OPENAI_BASE_URL` env
+    // pickup is version-dependent.
+    const baseUrl = String(values[`${provider}_base_url`] ?? '').trim() || undefined;
+
     try {
       const mod = await import(/* webpackIgnore: true */ spec.pkg);
-      const factory = mod[spec.factory] ?? mod.default;
+      let factory = mod[spec.factory] ?? mod.default;
+      if (baseUrl) {
+        const createFn = mod[spec.createFactory];
+        if (typeof createFn === 'function') {
+          factory = createFn({ apiKey, baseURL: baseUrl });
+        } else {
+          ctx.logger.warn(`[AI] ${spec.pkg} has no ${spec.createFactory}; baseURL override ignored.`);
+        }
+      }
       if (typeof factory !== 'function') return null;
       const modelId = String(values[`${provider}_model`] ?? '').trim() || spec.defaultModel;
       // For OpenAI, prefer the Chat Completions API. See note in detectAdapter().
       const useChatApi = provider === 'openai' && typeof (factory as any).chat === 'function';
       const model = useChatApi ? (factory as any).chat(modelId) : factory(modelId);
       const apiSuffix = useChatApi ? ' [chat-completions]' : '';
+      const baseSuffix = baseUrl ? ` @ ${baseUrl}` : '';
       return {
         adapter: new VercelLLMAdapter({ model }),
-        description: `${spec.displayName} (model: ${modelId})${apiSuffix}`,
+        description: `${spec.displayName} (model: ${modelId})${apiSuffix}${baseSuffix}`,
       };
     } catch (err) {
       ctx.logger.warn(

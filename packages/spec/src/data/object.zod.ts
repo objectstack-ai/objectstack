@@ -398,7 +398,8 @@ const ObjectSchemaBase = z.object({
    * declare them per-object (Salesforce-style). Currently injected:
    *
    *   - `organization_id` — `lookup → sys_organization`. Injected only when
-   *     the kernel runs in multi-tenant mode (`OS_MULTI_TENANT !== 'false'`).
+   *     the kernel runs in multi-tenant mode (`OS_MULTI_TENANT === 'true'`;
+   *     default is off — single-tenant).
    *     Required for the default `tenant_isolation` RLS policy and the
    *     SecurityPlugin's auto-fill on insert to take effect.
    *
@@ -556,6 +557,58 @@ const ObjectSchemaBase = z.object({
 
   /** Sharing Model */
   sharingModel: z.enum(['private', 'read', 'read_write', 'full']).optional().describe('Default sharing model'),
+
+  /**
+   * Public Share-Link Policy
+   *
+   * Opt-in declaration that records of this object MAY be published via
+   * an opaque capability token (Notion / Google Docs / Figma "anyone with
+   * the link" style). When omitted or `enabled:false`, the platform
+   * refuses to create share-link rows for this object — independent of
+   * any permission the caller holds.
+   *
+   * Distinct from {@link sharingModel}, which governs *principal-based*
+   * sharing (share with specific users / teams / roles). A single object
+   * can opt into both: principals get full edit, link recipients get
+   * read-only with redaction.
+   *
+   * Defaults are conservative: when `enabled:true` and no other field is
+   * provided, the plugin allows `link_only` audience + `view` permission
+   * (the safest combination — caller still needs the URL to access).
+   *
+   * @see packages/plugins/plugin-sharing/src/share-link-service.ts
+   */
+  publicSharing: z.object({
+    /** Master switch. When false (default), no share links can be issued for this object. */
+    enabled: z.boolean().default(false).describe('Allow records of this object to be published via share link'),
+    /**
+     * Audiences the platform will accept when issuing a link.
+     * - `public`       — search engines may index; no token check (rare)
+     * - `link_only`    — anyone holding the token (default)
+     * - `signed_in`    — token + an authenticated session of any tenant user
+     * - `email`        — token + recipient's email matches an allowlist
+     */
+    allowedAudiences: z.array(z.enum(['public', 'link_only', 'signed_in', 'email'])).optional().describe('Audiences callers may select when creating a link'),
+    /** Permission levels callers may grant via a link. Defaults to `['view']`. */
+    allowedPermissions: z.array(z.enum(['view', 'comment', 'edit'])).optional().describe('Permission levels selectable on the share dialog'),
+    /** Hard cap on requested expiry, in days. Links with `expires_at` further out are rejected. */
+    maxExpiryDays: z.number().int().positive().optional().describe('Reject links with expiry beyond this many days'),
+    /**
+     * Fields stripped from every response served via a share token,
+     * regardless of audience. Use for prompts, raw model output,
+     * internal metadata, PII, etc. The owner's normal API access is
+     * unaffected — redaction is applied only when the request principal
+     * is `kind:'share-link'`.
+     */
+    redactFields: z.array(z.string()).optional().describe('Field names removed from records served via a share token'),
+    /**
+     * Optional CEL/JSONLogic predicate evaluated against the candidate
+     * record when a link is created. When the predicate returns false,
+     * the create call fails with 422 (e.g. "draft records cannot be
+     * shared"). Evaluator is the same one used by sharing rules.
+     */
+    eligibility: z.string().optional().describe('CEL expression that must evaluate to true on the target record'),
+  }).optional().describe('Public share-link policy (Notion/Figma-style link sharing)'),
 
   /** Key Prefix */
   keyPrefix: z.string().max(5).optional().describe('Short prefix for record IDs (e.g., "001" for Account)'),

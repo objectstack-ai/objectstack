@@ -111,13 +111,30 @@ function mountRouteOnServer(
     server: IHttpServer,
     routePath: string,
     securityHeaders?: Record<string, string>,
+    resolveUser?: (headers: Record<string, any>) => Promise<any | undefined>,
 ): boolean {
     const handler = async (req: any, res: any) => {
         try {
+            console.error(`[DEBUG handler] ${req.method ?? '?'} ${req.path ?? routePath} headers.cookie=${!!(req.headers?.cookie || req.headers?.Cookie)}`);
+            // Resolve the authenticated user from request headers (cookie /
+            // bearer) so route handlers can attribute the request to an
+            // actor — wires up `req.user` for AI routes, action endpoints,
+            // anything that needs identity-aware execution.
+            let user: any;
+            if (resolveUser) {
+                try {
+                    user = await resolveUser(req.headers ?? {});
+                } catch {
+                    /* fall through anonymous — route's `auth: true` guard runs separately */
+                }
+            }
+
             const result = await route.handler({
                 body: req.body,
                 params: req.params,
                 query: req.query,
+                headers: req.headers,
+                user,
             });
 
             if (result.stream && result.events) {
@@ -1073,6 +1090,47 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             ctx.logger.info('Dispatcher bridge routes registered', { prefix, enableProjectScoping, projectResolution });
 
+            // Resolve the authenticated user from a request's headers by
+            // delegating to the AuthService's `getSession` API (better-auth
+            // compatible). Returns a slim user shape that route handlers
+            // can rely on without touching the underlying auth provider.
+            //
+            // Defensive: any failure → undefined (anonymous). The route's
+            // `auth: true` guard still runs separately so unauthenticated
+            // hits to protected routes are rejected upstream.
+            const resolveRequestUser = async (headers: Record<string, any>): Promise<any | undefined> => {
+                try {
+                    const authService: any = ctx.getService('auth');
+                    console.error(`[DEBUG resolveUser] authService=${!!authService} cookieHdr=${!!headers?.cookie || !!headers?.Cookie}`);
+                    if (!authService) return undefined;
+                    let api: any = authService.api;
+                    if (!api && typeof authService.getApi === 'function') {
+                        api = await authService.getApi();
+                    }
+                    console.error(`[DEBUG resolveUser] api=${!!api} getSession=${typeof api?.getSession}`);
+                    if (!api?.getSession) return undefined;
+                    const headersInstance = headers instanceof Headers
+                        ? headers
+                        : new Headers(headers as Record<string, string>);
+                    const sessionData = await api.getSession({ headers: headersInstance });
+                    console.error(`[DEBUG resolveUser] session=${JSON.stringify(sessionData?.user ? { id: sessionData.user.id, email: sessionData.user.email } : null)}`);
+                    const userId: string | undefined = sessionData?.user?.id ?? sessionData?.session?.userId;
+                    if (!userId) return undefined;
+                    return {
+                        userId,
+                        id: userId,
+                        displayName: sessionData?.user?.name ?? sessionData?.user?.email ?? userId,
+                        email: sessionData?.user?.email,
+                        roles: [],
+                        permissions: [],
+                        organizationId: sessionData?.session?.activeOrganizationId,
+                    };
+                } catch (err) {
+                    console.error(`[DEBUG resolveUser] EXCEPTION ${err instanceof Error ? err.message : String(err)}`);
+                    return undefined;
+                }
+            };
+
             // ── Dynamic service routes (AI, etc.) ───────────────────
             // Listen for route definitions emitted by service plugins.
             // The AIServicePlugin emits 'ai:routes' with RouteDefinition[].
@@ -1098,11 +1156,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 let count = 0;
                 if (enableProjectScoping && projectResolution === 'required') {
-                    if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders)) count++;
+                    if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser)) count++;
                 } else {
-                    if (mountRouteOnServer(route, server, routePath, securityHeaders)) count++;
+                    if (mountRouteOnServer(route, server, routePath, securityHeaders, resolveRequestUser)) count++;
                     if (enableProjectScoping) {
-                        if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders)) count++;
+                        if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser)) count++;
                     }
                 }
                 return count;

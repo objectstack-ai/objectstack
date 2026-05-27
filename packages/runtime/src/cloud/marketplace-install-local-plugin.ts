@@ -474,7 +474,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // writes tenant-scoped rows the same way AppPlugin's
         // single-tenant branch + SecurityPlugin's per-org replay do.
         if (opts.seedNow && datasets.length > 0) {
-            const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'true').toLowerCase() !== 'false';
+            const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
             try {
                 const ql: any = ctx.getService('objectql');
                 let metadata: any;

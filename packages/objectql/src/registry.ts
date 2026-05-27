@@ -123,15 +123,18 @@ export type RegistryLogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
  */
 export interface SchemaRegistryOptions {
   /**
-   * Whether the host kernel runs in multi-tenant mode. When `true` (default),
-   * the registry auto-injects `organization_id` (lookup → sys_organization)
+   * Whether the host kernel runs in multi-tenant mode. When `true`, the
+   * registry auto-injects `organization_id` (lookup → sys_organization)
    * into every registered user object that doesn't already declare it and
    * isn't `managedBy` an external subsystem or explicitly opted-out via
    * `systemFields: false`.
    *
    * Sourced from the `OS_MULTI_TENANT` env var when not explicitly set —
    * matches how the SecurityPlugin and CLI startup banner pick the mode.
-   * Pass an explicit boolean to override (useful in tests).
+   * Default is `false` (single-tenant) so local `dev`/`start` runs seed
+   * demo data inline at boot; set `OS_MULTI_TENANT=true` for cloud /
+   * production multi-org deployments. Pass an explicit boolean to override
+   * (useful in tests).
    */
   multiTenant?: boolean;
 }
@@ -278,9 +281,9 @@ export class SchemaRegistry {
     if (options.multiTenant !== undefined) {
       this.multiTenant = options.multiTenant;
     } else {
-      // Mirror the SecurityPlugin / CLI banner default (env-driven, on by default).
+      // Mirror the SecurityPlugin / CLI banner default (env-driven, off by default).
       this.multiTenant =
-        String(process.env.OS_MULTI_TENANT ?? 'true').toLowerCase() !== 'false';
+        String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
     }
   }
 

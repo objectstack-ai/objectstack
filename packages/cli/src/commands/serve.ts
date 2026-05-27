@@ -176,7 +176,7 @@ export default class Serve extends Command {
    * mirror this list on their per-project kernels.
    */
   static readonly ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze([
-    'queue', 'job', 'cache', 'settings', 'email', 'storage',
+    'queue', 'job', 'cache', 'settings', 'email', 'storage', 'sharing',
   ]);
 
   /**
@@ -1139,11 +1139,12 @@ export default class Serve extends Command {
             try {
               const securityPkg = '@objectstack/plugin-security';
               const { SecurityPlugin } = await import(/* webpackIgnore: true */ securityPkg);
-              // `OS_MULTI_TENANT=false` disables wildcard tenant_isolation
+              // `OS_MULTI_TENANT=true` enables wildcard tenant_isolation
               // RLS policies and the `organization_id` auto-injection on
-              // insert. Keep multi-tenant on by default — most ObjectStack
-              // deployments are multi-org.
-              const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'true').toLowerCase() !== 'false';
+              // insert. Default is off so local `dev`/`start` runs seed
+              // demo data inline at boot without requiring an org —
+              // enable explicitly for cloud / multi-org deployments.
+              const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
               await kernel.use(new SecurityPlugin({ multiTenant }));
               trackPlugin('Security');
             } catch {
@@ -1612,7 +1613,7 @@ export default class Serve extends Command {
         consolePath: loadedPlugins.includes('ConsoleUI') ? CONSOLE_PATH : undefined,
         driverLabel: resolvedDriverLabel,
         databaseUrl: redactDbUrl(resolvedDatabaseUrl),
-        multiTenant: String(process.env.OS_MULTI_TENANT ?? 'true').toLowerCase() !== 'false',
+        multiTenant: String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false',
       });
 
       // Kernel already registers SIGINT/SIGTERM handlers during bootstrap.
