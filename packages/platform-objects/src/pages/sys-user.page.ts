@@ -165,6 +165,132 @@ export const SysUserDetailPage: Page = {
               },
             ],
           },
+          // ── Security ──────────────────────────────────────────────
+          // Grouped self-service security controls. Each `record:quick_actions`
+          // pulls its actions by name from the sys_user object metadata
+          // (DRY — definitions stay on the object) and filters by
+          // `location: 'record_section'` so they only render here, not
+          // in the global header row.
+          {
+            label: 'Security',
+            icon: 'shield',
+            children: [
+              {
+                type: 'element:text',
+                properties: {
+                  variant: 'subheading',
+                  content: 'Password & Sign-in',
+                },
+              },
+              {
+                type: 'element:text',
+                properties: {
+                  variant: 'caption',
+                  content: 'Change your password or the email address associated with this account.',
+                },
+              },
+              {
+                type: 'record:quick_actions',
+                properties: {
+                  location: 'record_section',
+                  align: 'start',
+                  actionNames: ['change_my_password', 'change_my_email'],
+                },
+              },
+              { type: 'element:divider' },
+              {
+                type: 'element:text',
+                properties: {
+                  variant: 'subheading',
+                  content: 'Two-Factor Authentication',
+                },
+              },
+              {
+                type: 'element:text',
+                properties: {
+                  variant: 'caption',
+                  content: 'Add a second layer of security using a TOTP authenticator app. Backup codes let you sign in if you lose your device.',
+                },
+              },
+              {
+                type: 'record:quick_actions',
+                properties: {
+                  location: 'record_section',
+                  align: 'start',
+                  actionNames: ['enable_two_factor', 'disable_two_factor', 'generate_backup_codes'],
+                },
+              },
+              { type: 'element:divider' },
+              {
+                type: 'element:text',
+                properties: {
+                  variant: 'subheading',
+                  content: 'Email Verification',
+                },
+              },
+              {
+                type: 'element:text',
+                properties: {
+                  variant: 'caption',
+                  content: 'Verify your email so password resets and notifications reach you. The button appears only while verification is pending.',
+                },
+              },
+              {
+                type: 'record:quick_actions',
+                properties: {
+                  location: 'record_section',
+                  align: 'start',
+                  actionNames: ['resend_verification_email'],
+                },
+              },
+              { type: 'element:divider' },
+              {
+                type: 'element:text',
+                properties: {
+                  variant: 'subheading',
+                  content: 'Danger Zone',
+                },
+                className: 'text-destructive',
+              },
+              {
+                type: 'element:text',
+                properties: {
+                  variant: 'caption',
+                  content: 'Permanent. Once deleted, your account cannot be recovered.',
+                },
+              },
+              {
+                type: 'record:quick_actions',
+                properties: {
+                  location: 'record_section',
+                  align: 'start',
+                  actionNames: ['delete_my_account'],
+                },
+              },
+            ],
+          },
+          // ── API Keys ──────────────────────────────────────────────
+          // Programmatic credentials issued for this user. Filtered by
+          // user_id FK; the sys_api_key object's own list-item actions
+          // (revoke / restore) handle row operations.
+          {
+            label: 'API Keys',
+            icon: 'key-round',
+            children: [
+              {
+                type: 'record:related_list',
+                properties: {
+                  objectName: 'sys_api_key',
+                  relationshipField: 'user_id',
+                  columns: ['name', 'prefix', 'expires_at', 'revoked', 'created_at'],
+                  sort: [{ field: 'created_at', order: 'desc' }],
+                  limit: 25,
+                  showViewAll: true,
+                  title: 'API Keys',
+                },
+              },
+            ],
+          },
         ],
       },
     },

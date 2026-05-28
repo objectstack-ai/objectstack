@@ -158,7 +158,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Change Password',
       icon: 'key',
       variant: 'secondary',
-      locations: ['record_header', 'record_more'],
+      locations: ['record_header', 'record_more', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/change-password',
       visible: 'record.id == ctx.user.id',
@@ -175,7 +175,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Change Email',
       icon: 'mail',
       variant: 'secondary',
-      locations: ['record_header', 'record_more'],
+      locations: ['record_header', 'record_more', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/change-email',
       visible: 'record.id == ctx.user.id',
@@ -190,7 +190,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Resend Verification Email',
       icon: 'mail-check',
       variant: 'secondary',
-      locations: ['record_header', 'record_more'],
+      locations: ['record_header', 'record_more', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/send-verification-email',
       // Only render for the row owner AND when their email is still
@@ -206,12 +206,65 @@ export const SysUser = ObjectSchema.create({
       icon: 'user-x',
       variant: 'danger',
       mode: 'delete',
-      locations: ['record_more'],
+      locations: ['record_more', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/delete-user',
       visible: 'record.id == ctx.user.id',
       confirmText: 'Permanently delete your account? This cannot be undone — all your sessions will be terminated and all data you own will be removed per the configured retention policy.',
       successMessage: 'Account deleted',
+      refreshAfter: false,
+      params: [
+        { name: 'password', label: 'Current Password', type: 'text', required: true },
+      ],
+    },
+    // ── Two-factor authentication ─────────────────────────────────
+    // Enable flow returns { totpURI, backupCodes } — surfacing those
+    // safely needs a QR + verify UI that the generic action engine
+    // can't render yet. We still expose it so the API call works
+    // and the success toast displays the otpauth:// URI that users
+    // can manually add to an authenticator app as a fallback.
+    {
+      name: 'enable_two_factor',
+      label: 'Enable Two-Factor Auth',
+      icon: 'shield-plus',
+      variant: 'primary',
+      locations: ['record_section'],
+      type: 'api',
+      target: '/api/v1/auth/two-factor/enable',
+      visible: 'record.id == ctx.user.id && record.two_factor_enabled != true',
+      successMessage: 'Two-factor authentication enabled. Scan the QR code or paste the otpauth URI into your authenticator app, then verify a code to complete setup.',
+      refreshAfter: true,
+      params: [
+        { name: 'password', label: 'Current Password', type: 'text', required: true },
+      ],
+    },
+    {
+      name: 'disable_two_factor',
+      label: 'Disable Two-Factor Auth',
+      icon: 'shield-off',
+      variant: 'danger',
+      locations: ['record_section'],
+      type: 'api',
+      target: '/api/v1/auth/two-factor/disable',
+      visible: 'record.id == ctx.user.id && record.two_factor_enabled == true',
+      confirmText: 'Turn off two-factor authentication? Your account will be less secure.',
+      successMessage: 'Two-factor authentication disabled.',
+      refreshAfter: true,
+      params: [
+        { name: 'password', label: 'Current Password', type: 'text', required: true },
+      ],
+    },
+    {
+      name: 'generate_backup_codes',
+      label: 'Regenerate Backup Codes',
+      icon: 'list-restart',
+      variant: 'secondary',
+      locations: ['record_section'],
+      type: 'api',
+      target: '/api/v1/auth/two-factor/generate-backup-codes',
+      visible: 'record.id == ctx.user.id && record.two_factor_enabled == true',
+      confirmText: 'Generate a new set of backup codes? Any previously generated codes will stop working.',
+      successMessage: 'New backup codes generated — save them somewhere safe.',
       refreshAfter: false,
       params: [
         { name: 'password', label: 'Current Password', type: 'text', required: true },

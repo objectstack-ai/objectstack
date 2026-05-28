@@ -118,6 +118,37 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * Note: The action name is the configuration ID. JavaScript function names can use camelCase,
  * but the metadata ID must be lowercase snake_case.
  */
+/**
+ * Action Location — where an action is allowed to surface in the UI.
+ *
+ * Canonical list (single source of truth for the whole platform). Renderers,
+ * the ActionEngine, the Studio designer dropdowns, and `objectui` consumers
+ * MUST import from this constant rather than re-declaring their own enum —
+ * adding a new location should require touching this one file only.
+ *
+ * Semantics:
+ * - `list_toolbar`    — header/toolbar of a list view (bulk actions, "New", export).
+ * - `list_item`       — per-row action on a list/grid row (Salesforce row-level menu).
+ * - `record_header`   — primary actions in the record-detail title bar.
+ * - `record_more`     — overflow menu under the "More" / ⋯ button on a record.
+ * - `record_related`  — actions on a related list section inside a record.
+ * - `record_section`  — actions surfaced inside a body section/tab of a record
+ *                       (e.g. a Security tab grouping change-password, 2FA, etc.).
+ * - `global_nav`      — global navigation/command-palette level actions.
+ */
+export const ACTION_LOCATIONS = [
+  'list_toolbar',
+  'list_item',
+  'record_header',
+  'record_more',
+  'record_related',
+  'record_section',
+  'global_nav',
+] as const;
+
+export const ActionLocationSchema = z.enum(ACTION_LOCATIONS);
+export type ActionLocation = z.infer<typeof ActionLocationSchema>;
+
 export const ActionSchema = lazySchema(() => z.object({
   /** Machine name of the action */
   name: SnakeCaseIdentifierSchema.describe('Machine name (lowercase snake_case)'),
@@ -132,11 +163,7 @@ export const ActionSchema = lazySchema(() => z.object({
   icon: z.string().optional().describe('Icon name'),
 
   /** Where does this action appear? */
-  locations: z.array(z.enum([
-    'list_toolbar', 'list_item', 
-    'record_header', 'record_more', 'record_related',
-    'global_nav'
-  ])).optional().describe('Locations where this action is visible'),
+  locations: z.array(ActionLocationSchema).optional().describe('Locations where this action is visible'),
 
   /** 
    * Visual Component Type
