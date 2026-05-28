@@ -1,5 +1,14 @@
 # @objectstack/plugin-mcp-server
 
+## 7.0.0
+
+### Patch Changes
+
+- Updated dependencies [d29617e]
+- Updated dependencies [dc72172]
+  - @objectstack/spec@7.0.0
+  - @objectstack/core@7.0.0
+
 ## 6.9.0
 
 ### Patch Changes

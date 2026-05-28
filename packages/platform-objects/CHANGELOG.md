@@ -1,5 +1,79 @@
 # @objectstack/platform-objects
 
+## 7.0.0
+
+### Minor Changes
+
+- d29617e: Add `Action.resultDialog` for one-shot reveal of API responses
+
+  Some platform operations return values the user MUST copy now because they
+  cannot be retrieved later — TOTP enrollment URIs, OAuth client secrets,
+  backup recovery codes. Previously these were handled by bespoke account-app
+  pages because actions only surfaced a `successMessage` toast.
+
+  This change adds:
+
+  - **`Action.resultDialog`** — describes a post-success modal that renders
+    selected fields from `result.data`. Supports `qrcode`, `code-list`,
+    `secret`, `text`, and `json` field formats. When set, renderers SHOULD
+    suppress `successMessage` and require explicit acknowledgement.
+
+  - **`Action.target` interpolation contract** — formalised TSDoc spelling
+    out the `${param.X}` and `${ctx.X}` substitution rules (with mandatory
+    `encodeURIComponent` for URL query positions). Used by redirect-style
+    actions like `link_social`.
+
+  New / updated platform actions:
+
+  - `sys_two_factor`: `enable_two_factor` now reveals TOTP URI + backup codes;
+    added `regenerate_backup_codes`.
+  - `sys_oauth_application`: `rotate_client_secret` now reveals the new
+    secret; added `create_oauth_application` toolbar action.
+  - `sys_account`: added `link_social` toolbar action (type:`url`, templated
+    target) for self-service identity linking.
+
+  These let the Setup app cover OAuth-app registration, 2FA enrollment, and
+  social-account linking entirely through metadata, removing the last
+  must-have reasons to ship a separate `apps/account` SPA.
+
+  Renderer-side work (separate PR in `objectui`): consume `resultDialog`,
+  implement `${param}/${ctx}` interpolation, ship `ResultDialog` component.
+  See `c-tier-renderer-contract.md` design note.
+
+### Patch Changes
+
+- d29617e: Add self-service account & invitation actions on `sys_*` objects so the
+  Setup App can host the day-to-day "account settings" affordances the
+  standalone Account SPA used to own — no per-page React code needed.
+
+  **New actions:**
+
+  - `sys_user`
+    - `update_my_profile` — wraps `POST /api/v1/auth/update-user` (name + image)
+    - `change_my_password` — wraps `POST /api/v1/auth/change-password`
+      (current + new + optional revoke-other-sessions)
+    - `change_my_email` — wraps `POST /api/v1/auth/change-email`
+      (verification email is sent to the new address)
+    - `delete_my_account` — wraps `POST /api/v1/auth/delete-user`
+      (requires current password)
+  - `sys_invitation`
+    - `accept_invitation` — wraps `POST /api/v1/auth/organization/accept-invitation`
+    - `reject_invitation` — wraps `POST /api/v1/auth/organization/reject-invitation`
+  - `sys_member`
+    - `transfer_ownership` — wraps `POST /api/v1/auth/organization/update-member-role`
+      with `role: 'owner'` (better-auth auto-demotes the previous owner to admin)
+
+  All four `sys_user` self-service actions are gated by
+  `visible: 'record.id == ctx.user.id'` so they only render on the signed-in
+  user's own row — they never leak into the admin Users list. The two
+  `sys_invitation` recipient actions use
+  `record.email == ctx.user.email && record.status == 'pending'` so they
+  only appear on the user's incoming invitations.
+
+- Updated dependencies [d29617e]
+- Updated dependencies [dc72172]
+  - @objectstack/spec@7.0.0
+
 ## 6.9.0
 
 ### Patch Changes
