@@ -68,6 +68,10 @@ interface InstalledEntry {
     manifest: any;
     installedAt: string;
     installedBy: string | null;
+    /** Whether the bundled seed datasets have been loaded into the kernel
+     *  database. True after install (seedNow=true) or an explicit reseed;
+     *  false after a purge. Persisted so the UI can show "Add" vs "Re-seed". */
+    withSampleData?: boolean;
 }
 
 function safeFilename(manifestId: string): string {
@@ -115,9 +119,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const getHandler = async (c: any) => this.handleList(c);
             const deleteHandler = async (c: any) => this.handleUninstall(c, ctx);
 
+            const reseedHandler = async (c: any) => this.handleReseed(c, ctx);
+            const purgeHandler = async (c: any) => this.handlePurge(c, ctx);
+
             if (typeof rawApp.post === 'function') rawApp.post(ROUTE_BASE, postHandler);
             if (typeof rawApp.get === 'function') rawApp.get(ROUTE_BASE, getHandler);
             if (typeof rawApp.delete === 'function') rawApp.delete(`${ROUTE_BASE}/:manifestId`, deleteHandler);
+            if (typeof rawApp.post === 'function') {
+                rawApp.post(`${ROUTE_BASE}/:manifestId/reseed-sample-data`, reseedHandler);
+                rawApp.post(`${ROUTE_BASE}/:manifestId/purge-sample-data`, purgeHandler);
+            }
 
             ctx.logger?.info?.(`[MarketplaceInstallLocal] mounted at ${ROUTE_BASE} (storage: ${this.storageDir})`);
         });
@@ -231,6 +242,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             manifest,
             installedAt: new Date().toISOString(),
             installedBy: userId,
+            withSampleData: false,
         };
         try {
             mkdirSync(this.storageDir, { recursive: true });
@@ -272,6 +284,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //      • stash seed datasets on the kernel + run them now so the
         //        installed app has demo data on first paint.
         const seededSummary = await this.applySideEffects(ctx, manifest, { seedNow: true, c });
+        if (seededSummary.seeded.mode === 'inline' && (seededSummary.seeded.inserted ?? 0) + (seededSummary.seeded.updated ?? 0) > 0) {
+            entry.withSampleData = true;
+            try {
+                writeFileSync(join(this.storageDir, safeFilename(manifestId)), JSON.stringify(entry, null, 2), 'utf8');
+            } catch { /* non-fatal — entry already on disk */ }
+        }
 
         return c.json({
             success: true,
@@ -301,6 +319,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     version: e.version,
                     installedAt: e.installedAt,
                     installedBy: e.installedBy,
+                    withSampleData: e.withSampleData ?? false,
                 })),
                 total: entries.length,
                 storageDir: this.storageDir,
@@ -369,6 +388,152 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * dev / single-tenant runtimes. Stricter checks can be layered on
      * via a middleware in cloud-hosted multi-tenant deployments.
      */
+    /**
+     * POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data
+     *
+     * Re-runs SeedLoaderService against the cached manifest's `data` arrays.
+     * Idempotent (upsert by id). Useful when:
+     *   • The user installed an app and skipped sample data
+     *   • A purge was undone
+     *   • The user wants a clean baseline back after editing demo rows
+     *
+     * Multi-tenant: requires an active organization on the session (same
+     * rule as install seed path).
+     */
+    private handleReseed = async (c: any, ctx: PluginContext): Promise<Response> => {
+        const userId = await this.requireAuthenticatedUser(c, ctx);
+        if (!userId) {
+            return c.json({ success: false, error: { code: 'unauthorized', message: 'Authentication required.' } }, 401);
+        }
+        const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
+        if (!manifestId) {
+            return c.json({ success: false, error: { code: 'bad_request', message: 'manifestId path param required.' } }, 400);
+        }
+        const file = join(this.storageDir, safeFilename(manifestId));
+        if (!existsSync(file)) {
+            return c.json({ success: false, error: { code: 'not_found', message: `No marketplace install for ${manifestId}.` } }, 404);
+        }
+
+        let entry: InstalledEntry;
+        try {
+            entry = JSON.parse(readFileSync(file, 'utf8'));
+        } catch (err: any) {
+            return c.json({ success: false, error: { code: 'storage_failed', message: `Failed to read manifest cache: ${err?.message ?? err}` } }, 500);
+        }
+
+        const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c });
+        if (summary.seeded.mode === 'skipped') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'reseed_skipped',
+                    message: `Reseed did not run: ${summary.seeded.reason ?? 'unknown reason'}`,
+                },
+            }, 400);
+        }
+
+        // Persist flag flip
+        try {
+            entry.withSampleData = true;
+            writeFileSync(file, JSON.stringify(entry, null, 2), 'utf8');
+        } catch { /* non-fatal */ }
+
+        return c.json({
+            success: true,
+            data: {
+                manifestId,
+                inserted: summary.seeded.inserted ?? 0,
+                updated: summary.seeded.updated ?? 0,
+                errors: summary.seeded.errors ?? 0,
+                withSampleData: true,
+            },
+        }, 200);
+    };
+
+    /**
+     * POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data
+     *
+     * Deletes every record whose id is declared in the cached manifest's
+     * seed datasets. Uses the `driver` service directly to bypass ACL /
+     * lifecycle hooks (same pattern as cloud purge). User-created records
+     * are never touched — only ids declared in the package's bundled
+     * datasets are removed. Already-deleted rows count as `skipped`.
+     */
+    private handlePurge = async (c: any, ctx: PluginContext): Promise<Response> => {
+        const userId = await this.requireAuthenticatedUser(c, ctx);
+        if (!userId) {
+            return c.json({ success: false, error: { code: 'unauthorized', message: 'Authentication required.' } }, 401);
+        }
+        const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
+        if (!manifestId) {
+            return c.json({ success: false, error: { code: 'bad_request', message: 'manifestId path param required.' } }, 400);
+        }
+        const file = join(this.storageDir, safeFilename(manifestId));
+        if (!existsSync(file)) {
+            return c.json({ success: false, error: { code: 'not_found', message: `No marketplace install for ${manifestId}.` } }, 404);
+        }
+
+        let entry: InstalledEntry;
+        try {
+            entry = JSON.parse(readFileSync(file, 'utf8'));
+        } catch (err: any) {
+            return c.json({ success: false, error: { code: 'storage_failed', message: `Failed to read manifest cache: ${err?.message ?? err}` } }, 500);
+        }
+
+        const datasets = Array.isArray(entry.manifest?.data)
+            ? entry.manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
+            : [];
+
+        if (datasets.length === 0) {
+            return c.json({
+                success: false,
+                error: { code: 'nothing_to_purge', message: 'This package declares no seed datasets.' },
+            }, 400);
+        }
+
+        let driver: any;
+        try { driver = ctx.getService('driver'); } catch { /* none */ }
+        if (!driver || typeof driver.delete !== 'function') {
+            return c.json({
+                success: false,
+                error: { code: 'driver_missing', message: 'driver service unavailable — cannot purge.' },
+            }, 500);
+        }
+
+        let deleted = 0;
+        let skipped = 0;
+        let errors = 0;
+        for (const ds of datasets) {
+            const object = String(ds.object);
+            for (const rec of ds.records as any[]) {
+                const id = rec?.id;
+                if (id === undefined || id === null || id === '') { skipped++; continue; }
+                try {
+                    const r = await driver.delete(object, id);
+                    if (r === false || r === 0 || r?.deleted === 0) skipped++;
+                    else deleted++;
+                } catch (err: any) {
+                    // Treat "not found" as skipped; anything else as error.
+                    const msg = String(err?.message ?? err);
+                    if (/not.?found|no row/i.test(msg)) skipped++;
+                    else { errors++; ctx.logger?.warn?.(`[MarketplaceInstallLocal] purge ${object}#${id}: ${msg}`); }
+                }
+            }
+        }
+
+        // Flip flag so UI reflects the empty baseline
+        try {
+            entry.withSampleData = false;
+            writeFileSync(file, JSON.stringify(entry, null, 2), 'utf8');
+        } catch { /* non-fatal */ }
+
+        ctx.logger?.info?.(`[MarketplaceInstallLocal] purged ${manifestId}: deleted=${deleted} skipped=${skipped} errors=${errors}`);
+        return c.json({
+            success: true,
+            data: { manifestId, deleted, skipped, errors, withSampleData: false },
+        }, 200);
+    };
+
     /**
      * Replicate the start-time side-effects that AppPlugin runs for
      * statically-declared apps but the `manifest` service does NOT:
