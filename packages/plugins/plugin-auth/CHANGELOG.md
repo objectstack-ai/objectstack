@@ -1,5 +1,61 @@
 # Changelog
 
+## 7.0.0
+
+### Patch Changes
+
+- 74470ad: **New `account` App for self-service identity management + `App.hidden` shell hint**
+
+  Adds a dedicated **Account** App (`name: 'account'`, icon `user-circle`) that exposes the three end-user identity surfaces:
+
+  - **Two-Factor Authentication** — `sys_two_factor`
+  - **Linked Accounts** — `sys_account`
+  - **OAuth Applications** — `sys_oauth_application`
+
+  The app declares **no** `requiredPermissions`, so every authenticated user can reach it — unlike Setup, which requires `setup.access` and therefore excludes the default `member_default` permission set. Combined with the C-tier `resultDialog` actions already shipped on these objects (2FA QR + backup codes, OAuth `client_secret` reveal, `link_social` redirect), this replaces the legacy standalone `apps/account` SPA with a single console + metadata-driven surface.
+
+  **New `App.hidden: boolean` field** (`packages/spec/src/ui/app.zod.ts`) hides an app from the top-level App Switcher. Hidden apps stay fully routable and permission-checked; the shell is expected to surface them through the avatar / user dropdown instead. Mirrors the GitHub Settings / Google account chip / Salesforce Personal Settings pattern. The Account app is the first user.
+
+  Wiring: `plugin-auth` registers `ACCOUNT_APP` alongside `SETUP_APP` / `STUDIO_APP` (`packages/plugins/plugin-auth/src/auth-plugin.ts`). The legacy duplicate entries inside Setup's Advanced group are kept unchanged — they remain admin-only for tenant-wide inspection.
+
+  **Follow-up for objectui**: the shell's `AppSwitcher` and avatar `DropdownMenu` need updating to honour `app.hidden` (filter hidden apps out of the switcher; render them as dropdown menu entries). Tracked separately.
+
+- 257954d: **Organization detail page — Members / Invitations / Teams tabs (slotted Page)**
+
+  Adds a record-detail Page for `sys_organization` (`SysOrganizationDetailPage`) so admins can manage the entire membership graph from a single record view instead of switching between three separate Setup list views.
+
+  The page uses `kind: 'slotted'` and overrides only the `tabs` slot — header, actions, highlights, details and discussion fall through to the synthesized default, so the existing record-header actions (`Set Active`, `Edit`, `Delete`, `Leave Organization`) are preserved unchanged.
+
+  Three tabs, each a `record:related_list` scoped by `organization_id`:
+
+  - **Members** — `sys_member` (user, role, joined)
+  - **Invitations** — `sys_invitation` (email, role, status, expires, inviter)
+  - **Teams** — `sys_team` (name, created, updated)
+
+  Per-row actions defined on each child object (`invite_user`, `cancel_invitation`, `remove_member`, `transfer_ownership`, `create_team`, …) are inherited unchanged — no admin endpoint is re-declared here.
+
+  **Deliberately omitted:**
+
+  - **OAuth Apps** — `sys_oauth_application` is owned by `user_id`, not `organization_id`; it surfaces on the user's Account view instead.
+  - **SSO** — no `sys_sso*` object exists yet; will become a fourth tab when better-auth's SSO plugin lands.
+
+  **Package wiring:**
+
+  - `@objectstack/platform-objects` exposes a new `./pages` subpath export and re-exports `SysOrganizationDetailPage` from the root.
+  - `plugin-auth` registers it via the existing `manifest.register({ ..., pages: [SysOrganizationDetailPage] })` call alongside the platform apps and dashboards.
+
+  Verified end-to-end on the console-starter shell against `example-crm` — the three tabs render and the Members/Teams tables populate with the rows better-auth creates automatically when an org is provisioned.
+
+- Updated dependencies [74470ad]
+- Updated dependencies [d29617e]
+- Updated dependencies [dc72172]
+- Updated dependencies [d29617e]
+- Updated dependencies [010757b]
+- Updated dependencies [257954d]
+  - @objectstack/spec@7.0.0
+  - @objectstack/platform-objects@7.0.0
+  - @objectstack/core@7.0.0
+
 ## 6.9.0
 
 ### Patch Changes

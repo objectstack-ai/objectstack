@@ -1,5 +1,19 @@
 # @objectstack/service-realtime
 
+## 7.0.0
+
+### Patch Changes
+
+- Updated dependencies [74470ad]
+- Updated dependencies [d29617e]
+- Updated dependencies [dc72172]
+- Updated dependencies [d29617e]
+- Updated dependencies [010757b]
+- Updated dependencies [257954d]
+  - @objectstack/spec@7.0.0
+  - @objectstack/platform-objects@7.0.0
+  - @objectstack/core@7.0.0
+
 ## 6.9.0
 
 ### Patch Changes
