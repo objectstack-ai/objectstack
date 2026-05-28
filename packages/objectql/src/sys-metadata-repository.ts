@@ -132,6 +132,17 @@ const OVERLAY_ALLOWED_TYPES: ReadonlySet<string> = new Set(
  * `intent: 'runtime-only'` — a signal from the protocol layer that it
  * has already verified the absence of an artifact-shadowing collision.
  */
+/**
+ * Set of type names that have an *explicit* entry in the static registry.
+ * Anything outside this set is a runtime-registered type (e.g. plugin-
+ * provided `theme`, `api`, `connector`, …) — the listing endpoint
+ * (`getMetaTypes()` in protocol.ts) synthesises a descriptor with
+ * `allowRuntimeCreate: true` for those, so the write gate must agree.
+ */
+const STATIC_REGISTRY_TYPES: ReadonlySet<string> = new Set(
+  DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type),
+);
+
 const RUNTIME_CREATE_ALLOWED_TYPES: ReadonlySet<string> = new Set(
   DEFAULT_METADATA_TYPE_REGISTRY
     .filter((e) => e.allowRuntimeCreate)
@@ -639,9 +650,20 @@ export class SysMetadataRepository implements MetadataRepository {
 
     // Two-tier extension: runtime-only writes target a brand-new
     // (artifact-free) item, so they only need `allowRuntimeCreate`.
-    if (intent === 'runtime-only'
-        && (RUNTIME_CREATE_ALLOWED_TYPES.has(singular) || RUNTIME_CREATE_ALLOWED_TYPES.has(type))) {
-      return;
+    // Two cases qualify:
+    //   1. Type is statically registered with `allowRuntimeCreate: true`.
+    //   2. Type has NO static registry entry — it was added at runtime
+    //      by a plugin (e.g. `theme`, `api`, `connector`). The listing
+    //      endpoint synthesises `allowRuntimeCreate: true` for these,
+    //      so the write gate must accept them too. Otherwise the UI
+    //      would advertise a writable type that 403s on save.
+    if (intent === 'runtime-only') {
+      if (RUNTIME_CREATE_ALLOWED_TYPES.has(singular) || RUNTIME_CREATE_ALLOWED_TYPES.has(type)) {
+        return;
+      }
+      if (!STATIC_REGISTRY_TYPES.has(singular) && !STATIC_REGISTRY_TYPES.has(type)) {
+        return;
+      }
     }
 
     // Phase 3a-env-writable: env-var escape hatch.

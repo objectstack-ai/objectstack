@@ -2464,6 +2464,23 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
      * {@link isArtifactBacked} for how the protocol decides which gate
      * applies to a given save/delete.
      */
+    /**
+     * Set of type names that have a static entry in
+     * `DEFAULT_METADATA_TYPE_REGISTRY`. Anything outside this set is
+     * runtime-registered (plugin-provided types like `theme`, `api`,
+     * `connector`) — the listing endpoint at `getMetaTypes()` synthesises
+     * those with `allowRuntimeCreate: true`, so this gate must agree.
+     */
+    private static readonly STATIC_REGISTRY_TYPES: ReadonlySet<string> = (() => {
+        const out = new Set<string>();
+        for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+            out.add(entry.type);
+            const plural = SINGULAR_TO_PLURAL[entry.type];
+            if (plural) out.add(plural);
+        }
+        return out;
+    })();
+
     private static readonly RUNTIME_CREATE_ALLOWED_TYPES: ReadonlySet<string> = (() => {
         const out = new Set<string>();
         for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
@@ -2489,8 +2506,18 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     /** Does this type permit creating brand-new (artifact-free) items? */
     private static isRuntimeCreateAllowed(type: string): boolean {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        return this.RUNTIME_CREATE_ALLOWED_TYPES.has(singular)
-            || this.RUNTIME_CREATE_ALLOWED_TYPES.has(type);
+        if (this.RUNTIME_CREATE_ALLOWED_TYPES.has(singular)
+            || this.RUNTIME_CREATE_ALLOWED_TYPES.has(type)) {
+            return true;
+        }
+        // Runtime-registered types (no static registry entry) are
+        // synthesised by getMetaTypes() with allowRuntimeCreate=true;
+        // mirror that here so /api/v1/meta and PUT /api/v1/meta agree.
+        if (!this.STATIC_REGISTRY_TYPES.has(singular)
+            && !this.STATIC_REGISTRY_TYPES.has(type)) {
+            return true;
+        }
+        return false;
     }
 
     /**
