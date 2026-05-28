@@ -114,6 +114,30 @@ export const SysOrganization = ObjectSchema.create({
       successMessage: 'You have left the organization',
       refreshAfter: true,
     },
+    {
+      // Rename the organization slug (URL prefix). Backed by the cloud
+      // orchestrator at /api/v1/cloud/organizations/{id}/change-slug,
+      // which atomically updates sys_organization.slug, rewrites
+      // platform_subdomain sys_domain rows under the new slug, soft-
+      // retires the old rows with a redirect window, parks the old
+      // slug in sys_slug_reservation, and refreshes the registry
+      // mirror. See cloud `docs/design/sys-domain.md` §6.
+      name: 'change_slug',
+      label: 'Change Slug',
+      icon: 'edit-3',
+      variant: 'secondary',
+      mode: 'custom',
+      locations: ['record_header'],
+      type: 'api',
+      target: '/api/v1/cloud/organizations/{id}/change-slug',
+      method: 'POST',
+      confirmText: 'Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?',
+      successMessage: 'Organization slug changed',
+      refreshAfter: true,
+      params: [
+        { field: 'slug', required: true, defaultFromRow: true },
+      ],
+    },
   ],
 
   listViews: {
