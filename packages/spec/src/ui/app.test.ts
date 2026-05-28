@@ -59,6 +59,30 @@ describe('ObjectNavItemSchema', () => {
 
     expect(() => ObjectNavItemSchema.parse(navItem)).not.toThrow();
   });
+
+  it('should accept object nav item targeting a specific record', () => {
+    const navItem = {
+      id: 'nav_profile',
+      label: 'My Profile',
+      icon: 'user-circle',
+      type: 'object' as const,
+      objectName: 'sys_user',
+      recordId: '{current_user_id}',
+    };
+    expect(() => ObjectNavItemSchema.parse(navItem)).not.toThrow();
+  });
+
+  it('should accept recordMode for record-targeted nav items', () => {
+    const navItem = {
+      id: 'nav_profile_edit',
+      label: 'Edit Profile',
+      type: 'object' as const,
+      objectName: 'sys_user',
+      recordId: '{current_user_id}',
+      recordMode: 'edit' as const,
+    };
+    expect(() => ObjectNavItemSchema.parse(navItem)).not.toThrow();
+  });
 });
 
 describe('DashboardNavItemSchema', () => {

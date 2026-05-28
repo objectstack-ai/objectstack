@@ -77,12 +77,53 @@ const BaseNavItemSchema = z.object({
 
 /**
  * 1. Object Navigation Item
- * Navigates to an object's list view.
+ *
+ * Navigates to an object's list view by default. When `recordId` is set,
+ * navigates directly to that record's detail page instead — useful for
+ * "My Profile", "My Settings", or any other always-one-row entry where
+ * dropping the user on a list view first would be wrong UX.
+ *
+ * `recordId` supports a small set of template variables resolved at render
+ * time by the shell (see Console's `AppSidebar` / `AppContent`):
+ *   - `{current_user_id}` — the signed-in user's id
+ *   - `{current_org_id}`  — the active organization id
+ * These mirror the variables already understood by the view-layer
+ * filter resolver (see e.g. `sys_user.me` listView), so authors only
+ * have to learn one vocabulary.
+ *
+ * @example List view (existing behaviour)
+ * ```ts
+ * { id: 'nav_users', type: 'object', label: 'Users',
+ *   objectName: 'sys_user', viewName: 'all_users' }
+ * ```
+ *
+ * @example Direct-to-record (new)
+ * ```ts
+ * { id: 'nav_profile', type: 'object', label: 'My Profile',
+ *   objectName: 'sys_user', recordId: '{current_user_id}' }
+ * ```
  */
 export const ObjectNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
   type: z.literal('object'),
   objectName: z.string().describe('Target object name'),
-  viewName: z.string().optional().describe('Default list view to open. Defaults to "all"'),
+  viewName: z.string().optional().describe('Default list view to open. Defaults to "all". Ignored when `recordId` is set.'),
+  /**
+   * When set, navigate straight to the detail page of this specific
+   * record instead of the object's list view. Supports template
+   * variables `{current_user_id}` and `{current_org_id}` resolved by
+   * the shell at render time. Mutually exclusive with `viewName`
+   * (viewName is ignored if both are set).
+   */
+  recordId: z.string().optional().describe(
+    'Navigate directly to this record id instead of the list view. Supports template vars: {current_user_id}, {current_org_id}.',
+  ),
+  /**
+   * Open the record in view (default) or edit mode. Only meaningful
+   * when `recordId` is set.
+   */
+  recordMode: z.enum(['view', 'edit']).optional().describe(
+    'Open the record in view (default) or edit mode. Only meaningful when `recordId` is set.',
+  ),
 }));
 
 /**

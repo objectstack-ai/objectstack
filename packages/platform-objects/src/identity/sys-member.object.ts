@@ -101,6 +101,23 @@ export const SysMember = ObjectSchema.create({
     },
   ],
 
+  listViews: {
+    mine: {
+      type: 'grid',
+      name: 'mine',
+      label: 'My Memberships',
+      data: { provider: 'object', object: 'sys_member' },
+      columns: ['organization_id', 'role', 'created_at'],
+      filter: [{ field: 'user_id', operator: 'equals', value: '{current_user_id}' }],
+      sort: [{ field: 'created_at', order: 'desc' }],
+      pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No organizations yet',
+        message: 'You haven\'t joined any organizations.',
+      },
+    },
+  },
+
   fields: {
     id: Field.text({
       label: 'Member ID',

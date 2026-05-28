@@ -9,6 +9,25 @@ import { jaJPObjects } from './ja-JP.objects.generated.js';
 export const jaJP: TranslationData = {
   objects: jaJPObjects,
   apps: {
+    account: {
+      label: 'アカウント',
+      description: '個人のセキュリティとアイデンティティ設定',
+      navigation: {
+        grp_account_inbox: { label: '受信箱' },
+        grp_account_security: { label: 'セキュリティ' },
+        grp_account_developer: { label: '開発者' },
+        nav_account_profile: { label: 'プロフィール' },
+        nav_account_notifications: { label: '通知' },
+        nav_account_approvals: { label: '承認待ち' },
+        nav_account_memberships: { label: '所属組織' },
+        nav_account_two_factor: { label: '二要素認証' },
+        nav_account_linked: { label: '連携アカウント' },
+        nav_account_sessions: { label: 'アクティブセッション' },
+        nav_account_api_keys: { label: 'API キー' },
+        nav_account_oauth_apps: { label: 'OAuth アプリケーション' },
+        nav_account_preferences: { label: '環境設定' },
+      },
+    },
     setup: {
       label: 'セットアップ',
       description: 'プラットフォーム設定と管理',

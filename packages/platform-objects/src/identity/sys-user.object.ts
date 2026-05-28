@@ -186,6 +186,21 @@ export const SysUser = ObjectSchema.create({
       ],
     },
     {
+      name: 'resend_verification_email',
+      label: 'Resend Verification Email',
+      icon: 'mail-check',
+      variant: 'secondary',
+      locations: ['record_header', 'record_more'],
+      type: 'api',
+      target: '/api/v1/auth/send-verification-email',
+      // Only render for the row owner AND when their email is still
+      // unverified — there's nothing to resend once verified.
+      visible: 'record.id == ctx.user.id && record.email_verified == false',
+      successMessage: 'Verification email sent — check your inbox.',
+      refreshAfter: false,
+      params: [],
+    },
+    {
       name: 'delete_my_account',
       label: 'Delete My Account',
       icon: 'user-x',
@@ -205,6 +220,21 @@ export const SysUser = ObjectSchema.create({
   ],
 
   listViews: {
+    // Self-service profile entry — surfaced by the Account App so every
+    // authenticated user can view / edit their own basic profile (name,
+    // email, avatar). Filtered to a single row (the caller) via the
+    // `{current_user_id}` template variable; RLS additionally enforces
+    // that non-admins cannot read other users' rows.
+    me: {
+      type: 'grid',
+      name: 'me',
+      label: 'My Profile',
+      data: { provider: 'object', object: 'sys_user' },
+      columns: ['name', 'email', 'email_verified', 'two_factor_enabled', 'updated_at'],
+      filter: [{ field: 'id', operator: 'equals', value: '{current_user_id}' }],
+      sort: [{ field: 'name', order: 'asc' }],
+      pagination: { pageSize: 1 },
+    },
     all_users: {
       type: 'grid',
       name: 'all_users',

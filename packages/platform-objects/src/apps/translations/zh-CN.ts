@@ -9,6 +9,25 @@ import { zhCNObjects } from './zh-CN.objects.generated.js';
 export const zhCN: TranslationData = {
   objects: zhCNObjects,
   apps: {
+    account: {
+      label: '账户',
+      description: '个人安全与身份设置',
+      navigation: {
+        grp_account_inbox: { label: '收件箱' },
+        grp_account_security: { label: '安全' },
+        grp_account_developer: { label: '开发者' },
+        nav_account_profile: { label: '个人资料' },
+        nav_account_notifications: { label: '通知' },
+        nav_account_approvals: { label: '待我审批' },
+        nav_account_memberships: { label: '我的组织' },
+        nav_account_two_factor: { label: '双重认证' },
+        nav_account_linked: { label: '已关联账户' },
+        nav_account_sessions: { label: '活动会话' },
+        nav_account_api_keys: { label: 'API 密钥' },
+        nav_account_oauth_apps: { label: 'OAuth 应用' },
+        nav_account_preferences: { label: '偏好设置' },
+      },
+    },
     setup: {
       label: '系统设置',
       description: '平台设置与管理',

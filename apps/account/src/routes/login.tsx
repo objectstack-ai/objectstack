@@ -127,12 +127,34 @@ function LoginPage() {
         return;
       }
       if (organizations.length === 0) {
-        // Brand-new account with no org yet — send to the org creation flow
-        // instead of the org picker (which would be empty).
+        // - Single-tenant: the platform auto-binds users on register or the
+        //   deployment is misconfigured. Either way, sending the user to
+        //   `/organizations/new` (wizard is gated off) or `/organizations`
+        //   (empty list) is wrong — hand off to home / the original redirect
+        //   and let the platform decide what to show.
+        // - Multi-tenant: surface the create-org wizard.
+        if (features?.multiOrgEnabled === false) {
+          if (isSafeRedirect(redirect)) {
+            window.location.assign(resolveRedirect(redirect));
+          } else {
+            window.location.assign('/');
+          }
+          return;
+        }
         navigate({ to: '/organizations/new' });
         return;
       }
-      // Multiple orgs and no active selection — let the user choose.
+      // Multiple orgs and no active selection.
+      // - Single-tenant: shouldn't happen (one org per user) but if it does,
+      //   auto-select the first to avoid bouncing into the gated picker.
+      // - Multi-tenant: let the user choose.
+      if (features?.multiOrgEnabled === false) {
+        setAutoSelectingOrg(true);
+        setActiveOrganization(organizations[0].id)
+          .catch(() => undefined)
+          .finally(() => setAutoSelectingOrg(false));
+        return;
+      }
       navigate({ to: '/organizations' });
       return;
     }
@@ -156,6 +178,7 @@ function LoginPage() {
     organizationsFetched,
     autoSelectingOrg,
     setActiveOrganization,
+    features?.multiOrgEnabled,
   ]);
 
   const handleSubmit = async (e: React.FormEvent) => {

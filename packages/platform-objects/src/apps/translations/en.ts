@@ -22,6 +22,25 @@ import { enObjects } from './en.objects.generated.js';
 export const en: TranslationData = {
   objects: enObjects,
   apps: {
+    account: {
+      label: 'Account',
+      description: 'Personal security and identity settings',
+      navigation: {
+        grp_account_inbox: { label: 'Inbox' },
+        grp_account_security: { label: 'Security' },
+        grp_account_developer: { label: 'Developer' },
+        nav_account_profile: { label: 'Profile' },
+        nav_account_notifications: { label: 'Notifications' },
+        nav_account_approvals: { label: 'Approvals' },
+        nav_account_memberships: { label: 'My Organizations' },
+        nav_account_two_factor: { label: 'Two-Factor Authentication' },
+        nav_account_linked: { label: 'Linked Accounts' },
+        nav_account_sessions: { label: 'Active Sessions' },
+        nav_account_api_keys: { label: 'API Keys' },
+        nav_account_oauth_apps: { label: 'OAuth Applications' },
+        nav_account_preferences: { label: 'Preferences' },
+      },
+    },
     setup: {
       label: 'Setup',
       description: 'Platform settings and administration',

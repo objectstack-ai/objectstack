@@ -9,6 +9,25 @@ import { esESObjects } from './es-ES.objects.generated.js';
 export const esES: TranslationData = {
   objects: esESObjects,
   apps: {
+    account: {
+      label: 'Cuenta',
+      description: 'Configuración personal de seguridad e identidad',
+      navigation: {
+        grp_account_inbox: { label: 'Bandeja de entrada' },
+        grp_account_security: { label: 'Seguridad' },
+        grp_account_developer: { label: 'Desarrollador' },
+        nav_account_profile: { label: 'Perfil' },
+        nav_account_notifications: { label: 'Notificaciones' },
+        nav_account_approvals: { label: 'Aprobaciones pendientes' },
+        nav_account_memberships: { label: 'Mis organizaciones' },
+        nav_account_two_factor: { label: 'Autenticación de dos factores' },
+        nav_account_linked: { label: 'Cuentas vinculadas' },
+        nav_account_sessions: { label: 'Sesiones activas' },
+        nav_account_api_keys: { label: 'Claves API' },
+        nav_account_oauth_apps: { label: 'Aplicaciones OAuth' },
+        nav_account_preferences: { label: 'Preferencias' },
+      },
+    },
     setup: {
       label: 'Configuración',
       description: 'Configuración y administración de la plataforma',
