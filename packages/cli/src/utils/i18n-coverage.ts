@@ -16,6 +16,8 @@
  */
 
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
+import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 
 export type CoverageSeverity = 'error' | 'warning';
 
@@ -25,8 +27,8 @@ export interface CoverageIssue {
   locale: string;
   /** Dot-path of the missing key (e.g. `objects.account._views.all_accounts.label`). */
   key: string;
-  /** Source kind: object / field / option / view / action / globalAction. */
-  source: 'object' | 'field' | 'option' | 'view' | 'action' | 'globalAction';
+  /** Source kind: object / field / option / view / action / globalAction / metadataForm. */
+  source: 'object' | 'field' | 'option' | 'view' | 'action' | 'globalAction' | 'metadataForm';
   /** Human-readable explanation. */
   message: string;
 }
@@ -103,6 +105,20 @@ function mergeData(target: TranslationData | undefined, source: TranslationData)
   }
   if (source.apps) out.apps = { ...(out.apps ?? {}), ...source.apps };
   if (source.messages) out.messages = { ...(out.messages ?? {}), ...source.messages };
+  if ((source as any).metadataForms) {
+    const tgt: Record<string, any> = { ...((out as any).metadataForms ?? {}) };
+    for (const [type, data] of Object.entries((source as any).metadataForms)) {
+      const existing = tgt[type] ?? {};
+      const incoming = (data ?? {}) as any;
+      tgt[type] = {
+        ...existing,
+        ...incoming,
+        sections: { ...(existing.sections ?? {}), ...(incoming.sections ?? {}) },
+        fields: { ...(existing.fields ?? {}), ...(incoming.fields ?? {}) },
+      };
+    }
+    (out as any).metadataForms = tgt;
+  }
   return out;
 }
 
@@ -198,7 +214,74 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
     }
   }
 
+  collectMetadataFormKeys(keys);
   return keys;
+}
+
+/**
+ * Walks the canonical METADATA_FORM_REGISTRY + DEFAULT_METADATA_TYPE_REGISTRY
+ * and pushes every translation key the resolver may look up under
+ * `metadataForms.*`. Mirrors the extractor walker so coverage stays in lock-
+ * step with what `os i18n extract` generates.
+ */
+function collectMetadataFormKeys(out: ExpectedKey[]): void {
+  for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+    const type = entry.type;
+    pushKey(out, ['metadataForms', type, 'label'], 'metadataForm', `Metadata form "${type}" label`);
+    const desc = (entry as any).description;
+    if (typeof desc === 'string' && desc.length > 0) {
+      pushKey(out, ['metadataForms', type, 'description'], 'metadataForm', `Metadata form "${type}" description`);
+    }
+  }
+  for (const [type, form] of Object.entries(METADATA_FORM_REGISTRY)) {
+    const sections: any[] = [
+      ...(Array.isArray((form as any)?.sections) ? (form as any).sections : []),
+      ...(Array.isArray((form as any)?.groups) ? (form as any).groups : []),
+    ];
+    for (const section of sections) {
+      if (!section || typeof section !== 'object') continue;
+      const sectionName = normalizeMetadataSectionName(section);
+      if (sectionName && typeof section.label === 'string') {
+        pushKey(out, ['metadataForms', type, 'sections', sectionName, 'label'], 'metadataForm', `Metadata form ${type}.sections.${sectionName} label`);
+      }
+      if (sectionName && typeof section.description === 'string' && section.description.length > 0) {
+        pushKey(out, ['metadataForms', type, 'sections', sectionName, 'description'], 'metadataForm', `Metadata form ${type}.sections.${sectionName} description`);
+      }
+      if (Array.isArray(section.fields)) {
+        for (const child of section.fields) walkMetadataFormField(child, type, '', out);
+      }
+    }
+  }
+}
+
+function walkMetadataFormField(field: any, type: string, parentPath: string, out: ExpectedKey[]): void {
+  if (!field || typeof field !== 'object') return;
+  const name = typeof field.field === 'string' ? field.field : undefined;
+  const path = name ? (parentPath ? `${parentPath}.${name}` : name) : parentPath;
+  if (path) {
+    if (typeof field.label === 'string' && field.label.length > 0) {
+      pushKey(out, ['metadataForms', type, 'fields', path, 'label'], 'metadataForm', `Metadata form ${type}.fields.${path} label`);
+    }
+    if (typeof field.helpText === 'string' && field.helpText.length > 0) {
+      pushKey(out, ['metadataForms', type, 'fields', path, 'helpText'], 'metadataForm', `Metadata form ${type}.fields.${path} helpText`);
+    }
+    if (typeof field.placeholder === 'string' && field.placeholder.length > 0) {
+      pushKey(out, ['metadataForms', type, 'fields', path, 'placeholder'], 'metadataForm', `Metadata form ${type}.fields.${path} placeholder`);
+    }
+  }
+  if (Array.isArray(field.fields)) {
+    for (const child of field.fields) walkMetadataFormField(child, type, path, out);
+  }
+}
+
+function normalizeMetadataSectionName(section: any): string | undefined {
+  if (typeof section.name === 'string' && section.name.length > 0) return section.name;
+  if (typeof section.label !== 'string') return undefined;
+  return section.label
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 // ─── Lookup ────────────────────────────────────────────────────────────

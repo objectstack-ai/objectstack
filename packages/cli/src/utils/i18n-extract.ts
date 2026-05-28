@@ -29,12 +29,22 @@
  *   apps.<app>.navigation.<id>.label
  *   dashboards.<dash>.label / .description
  *   dashboards.<dash>.widgets.<w>.title / .description
+ *   metadataForms.<type>.label / .description
+ *   metadataForms.<type>.sections.<section>.label / .description
+ *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
+ *
+ * The `metadataForms.*` surface is registry-driven (sourced from
+ * `METADATA_FORM_REGISTRY` + `DEFAULT_METADATA_TYPE_REGISTRY` in
+ * `@objectstack/spec`) — it is included unconditionally, independent of
+ * the supplied stack config.
  *
  * Pure: no filesystem or network. Safe to call from the CLI, IDE tooling
  * and unit tests.
  */
 
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
+import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 
 // ─── Public types ──────────────────────────────────────────────────────
 
@@ -55,11 +65,16 @@ export interface ExpectedEntry {
     | 'app'
     | 'navigation'
     | 'dashboard'
-    | 'widget';
+    | 'widget'
+    | 'metadataType'
+    | 'metadataFormSection'
+    | 'metadataFormField';
   /** Object name when applicable (for `--filter` matching). */
   objectName?: string;
   /** App name when applicable (for `--filter` matching). */
   appName?: string;
+  /** Metadata type name when applicable (for `--filter` matching). */
+  metadataType?: string;
 }
 
 export type FillStrategy = 'empty' | 'default' | 'todo';
@@ -109,7 +124,7 @@ function pushEntry(
   path: string[],
   sourceValue: string | undefined,
   source: ExpectedEntry['source'],
-  extra?: Pick<ExpectedEntry, 'objectName' | 'appName'>,
+  extra?: Pick<ExpectedEntry, 'objectName' | 'appName' | 'metadataType'>,
 ): void {
   if (typeof sourceValue !== 'string') return;
   out.push({ path, sourceValue, source, ...extra });
@@ -267,7 +282,107 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
     }
   }
 
+  // ── Metadata configuration forms (Studio admin UI) ────────────────
+  // Registry-driven: always included, independent of stack config. These
+  // emit under `metadataForms.<type>.*` so the generic renderer can pick
+  // up localized labels for the admin editor that authors objects, agents,
+  // flows, etc.
+  walkMetadataForms(out);
+
   return out;
+}
+
+/**
+ * Iterate the canonical metadata form registry and emit translation entries
+ * for every metadata type's display label/description, plus the section and
+ * field labels of any registered {@link FormView} layout.
+ *
+ * Mirrors the lookup contract enforced by `resolveMetadataFormLabels` /
+ * `resolveMetadataTypeLabel` in `@objectstack/spec/system/i18n-resolver`:
+ *
+ *   metadataForms.<type>.label
+ *   metadataForms.<type>.description
+ *   metadataForms.<type>.sections.<sectionName>.label
+ *   metadataForms.<type>.sections.<sectionName>.description
+ *   metadataForms.<type>.fields.<dotPath>.label
+ *   metadataForms.<type>.fields.<dotPath>.helpText
+ *   metadataForms.<type>.fields.<dotPath>.placeholder
+ *
+ * Section names follow the same normalization rule the resolver uses when
+ * `section.name` is absent: `label.toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')`.
+ *
+ * Composite / repeater sub-fields are walked recursively with dot-path
+ * accumulation (`fields.items.label` etc.), matching the runtime
+ * `translateFormField` walker.
+ */
+function walkMetadataForms(out: ExpectedEntry[]): void {
+  // 1) Type-level labels (covers every registry entry, not just types
+  //    that have a form — the resolver translates `/meta` entry labels
+  //    even for form-less types like `datasource`, `job`, `translation`).
+  for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+    const type = entry.type;
+    pushEntry(out, ['metadataForms', type, 'label'], entry.label ?? type, 'metadataType', { metadataType: type });
+    const desc = (entry as any).description;
+    if (typeof desc === 'string' && desc.length > 0) {
+      pushEntry(out, ['metadataForms', type, 'description'], desc, 'metadataType', { metadataType: type });
+    }
+  }
+
+  // 2) Section + field labels for every registered form.
+  for (const [type, form] of Object.entries(METADATA_FORM_REGISTRY)) {
+    const sections: any[] = [
+      ...(Array.isArray(form?.sections) ? form.sections : []),
+      ...(Array.isArray((form as any)?.groups) ? (form as any).groups : []),
+    ];
+    for (const section of sections) {
+      if (!section || typeof section !== 'object') continue;
+      const sectionName = normalizeSectionName(section);
+      if (sectionName && typeof section.label === 'string') {
+        pushEntry(out, ['metadataForms', type, 'sections', sectionName, 'label'], section.label, 'metadataFormSection', { metadataType: type });
+      }
+      if (sectionName && typeof section.description === 'string' && section.description.length > 0) {
+        pushEntry(out, ['metadataForms', type, 'sections', sectionName, 'description'], section.description, 'metadataFormSection', { metadataType: type });
+      }
+      if (Array.isArray(section.fields)) {
+        for (const child of section.fields) walkFormField(child, type, '', out);
+      }
+    }
+  }
+}
+
+/** Recursive walker for FormField nodes, accumulating dot-path. */
+function walkFormField(field: any, type: string, parentPath: string, out: ExpectedEntry[]): void {
+  if (!field || typeof field !== 'object') return;
+  const name = typeof field.field === 'string' ? field.field : undefined;
+  const path = name ? (parentPath ? `${parentPath}.${name}` : name) : parentPath;
+  if (path) {
+    if (typeof field.label === 'string' && field.label.length > 0) {
+      pushEntry(out, ['metadataForms', type, 'fields', path, 'label'], field.label, 'metadataFormField', { metadataType: type });
+    }
+    if (typeof field.helpText === 'string' && field.helpText.length > 0) {
+      pushEntry(out, ['metadataForms', type, 'fields', path, 'helpText'], field.helpText, 'metadataFormField', { metadataType: type });
+    }
+    if (typeof field.placeholder === 'string' && field.placeholder.length > 0) {
+      pushEntry(out, ['metadataForms', type, 'fields', path, 'placeholder'], field.placeholder, 'metadataFormField', { metadataType: type });
+    }
+  }
+  if (Array.isArray(field.fields)) {
+    for (const child of field.fields) walkFormField(child, type, path, out);
+  }
+}
+
+/**
+ * Section-name derivation mirroring `resolveMetadataFormLabels` so the
+ * extractor emits keys at the exact same paths the resolver looks them up.
+ */
+function normalizeSectionName(section: any): string | undefined {
+  if (typeof section.name === 'string' && section.name.length > 0) return section.name;
+  if (typeof section.label !== 'string') return undefined;
+  return section.label
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 function walkNavigation(nav: any[], appName: string, out: ExpectedEntry[]): void {
@@ -288,6 +403,7 @@ function passesFilter(entry: ExpectedEntry, filter?: RegExp): boolean {
   if (!filter) return true;
   if (entry.objectName && filter.test(entry.objectName)) return true;
   if (entry.appName && filter.test(entry.appName)) return true;
+  if (entry.metadataType && filter.test(entry.metadataType)) return true;
   // Allow matching against the joined path so users can target e.g. ^dashboards\.system_
   return filter.test(entry.path.join('.'));
 }
@@ -387,27 +503,49 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
 /**
  * Render a TranslationData skeleton as a TypeScript module body.
  *
- * The module exports a single named const (`<exportName>`) typed as
- * `TranslationData['objects']` (or the full `TranslationData` shape when
- * the skeleton contains non-objects sections).
+ * The module exports a single named const (`<exportName>`) typed against
+ * the chosen sub-tree of `TranslationData`:
+ *
+ *   kind: 'objects'        → `NonNullable<TranslationData['objects']>`
+ *   kind: 'metadataForms'  → `NonNullable<TranslationData['metadataForms']>`
+ *   kind: 'full'           → `TranslationData`
+ *
+ * `objectsOnly: true` (default) is a legacy alias for `kind: 'objects'`.
  */
 export function renderTranslationModule(
   data: TranslationData,
   options: {
     locale: string;
     exportName?: string;
-    /** When true, emit only the `objects` sub-tree (typed accordingly). */
+    /** Legacy: when true, emit only the `objects` sub-tree (typed accordingly). */
     objectsOnly?: boolean;
+    /** Explicit sub-tree selector. Overrides `objectsOnly` when provided. */
+    kind?: 'objects' | 'metadataForms' | 'full';
     /** Header comment lines. */
     header?: string[];
   },
 ): string {
-  const exportName = options.exportName ?? `${camelize(options.locale)}Objects`;
-  const objectsOnly = options.objectsOnly ?? true;
-  const payload = objectsOnly ? (data.objects ?? {}) : data;
-  const typeSig = objectsOnly
-    ? "NonNullable<TranslationData['objects']>"
-    : 'TranslationData';
+  const kind: 'objects' | 'metadataForms' | 'full' =
+    options.kind ?? (options.objectsOnly === false ? 'full' : 'objects');
+  const defaultExport =
+    kind === 'metadataForms'
+      ? `${camelize(options.locale)}MetadataForms`
+      : kind === 'full'
+      ? `${camelize(options.locale)}Translations`
+      : `${camelize(options.locale)}Objects`;
+  const exportName = options.exportName ?? defaultExport;
+  const payload =
+    kind === 'metadataForms'
+      ? (data.metadataForms ?? {})
+      : kind === 'objects'
+      ? (data.objects ?? {})
+      : data;
+  const typeSig =
+    kind === 'metadataForms'
+      ? "NonNullable<TranslationData['metadataForms']>"
+      : kind === 'objects'
+      ? "NonNullable<TranslationData['objects']>"
+      : 'TranslationData';
   const header = options.header ?? [
     `Auto-generated by 'os i18n extract' for locale '${options.locale}'.`,
     'Edit translations in place; re-run extract (with --merge) to fill new gaps.',

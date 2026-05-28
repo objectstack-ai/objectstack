@@ -97,9 +97,14 @@ const baseConfig: any = {
 describe('computeI18nCoverage', () => {
   it('reports 100% coverage for the default locale when bundle is complete', () => {
     const report = computeI18nCoverage(baseConfig, { defaultLocale: 'en' });
-    const en = report.stats.find((s) => s.locale === 'en')!;
-    expect(en.coveragePercent).toBe(100);
-    expect(report.totals.errors).toBe(0);
+    // metadataForms.* keys come from the global METADATA_FORM_REGISTRY and
+    // are not provided by this minimal test bundle. Limit the assertion to
+    // object/view/action-source keys (what this fixture exercises).
+    const objectSources = new Set(['object', 'field', 'option', 'view', 'action', 'globalAction']);
+    const enObjectErrors = report.issues.filter(
+      (i) => i.locale === 'en' && objectSources.has(i.source) && i.severity === 'error',
+    );
+    expect(enObjectErrors).toEqual([]);
   });
 
   it('flags missing keys in zh-CN as warnings (default-locale only mode)', () => {
@@ -147,11 +152,13 @@ describe('computeI18nCoverage', () => {
     expect(ja.coveragePercent).toBe(0);
   });
 
-  it('returns 100% when there are no objects/views/actions to translate', () => {
+  it('returns only metadataForms baseline when there are no objects/views/actions', () => {
     const report = computeI18nCoverage({ objects: [], views: [], actions: [], translations: [] });
-    expect(report.totals.expectedKeys).toBe(0);
-    expect(report.stats[0].coveragePercent).toBe(100);
-    expect(report.totals.issues).toBe(0);
+    // No objects/views/actions = zero object-source keys. metadataForms.*
+    // keys still come from the global METADATA_FORM_REGISTRY baseline.
+    const objectSources = new Set(['object', 'field', 'option', 'view', 'action', 'globalAction']);
+    expect(report.issues.filter((i) => objectSources.has(i.source))).toEqual([]);
+    expect(report.totals.expectedKeys).toBeGreaterThan(0); // metadataForms baseline
   });
 
   it('treats data.object as fallback for view objectName', () => {

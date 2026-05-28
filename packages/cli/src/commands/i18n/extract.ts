@@ -18,6 +18,17 @@ import { extractTranslations, renderTranslationModule, type FillStrategy } from 
 
 const FILL_STRATEGIES: FillStrategy[] = ['empty', 'default', 'todo'];
 
+/** Count string-leaf entries under a nested object — used for reporting. */
+function countLeaves(obj: unknown): number {
+  if (!obj || typeof obj !== 'object') return 0;
+  let n = 0;
+  for (const v of Object.values(obj as Record<string, unknown>)) {
+    if (typeof v === 'string') n += 1;
+    else if (v && typeof v === 'object') n += countLeaves(v);
+  }
+  return n;
+}
+
 /**
  * `os i18n extract` — scaffold translation skeletons.
  *
@@ -106,10 +117,19 @@ export default class I18nExtract extends Command {
       const localesEmitted = Object.keys(result.bundles);
       const objectsOnly = flags['objects-only'];
 
+      // Count metadataForms keys per locale (computed separately so we
+      // can show users an honest summary even when --objects-only).
+      const metadataFormsCounts: Record<string, number> = {};
+      for (const locale of localesEmitted) {
+        metadataFormsCounts[locale] = countLeaves(result.bundles[locale]?.metadataForms);
+      }
+      const anyMetadataForms = Object.values(metadataFormsCounts).some((n) => n > 0);
+
       if (flags.json) {
         console.log(JSON.stringify({
           totalExpected: result.totalExpected,
           counts: result.counts,
+          metadataFormsCounts,
           bundles: objectsOnly
             ? Object.fromEntries(localesEmitted.map((l) => [l, result.bundles[l].objects ?? {}]))
             : result.bundles,
@@ -124,21 +144,30 @@ export default class I18nExtract extends Command {
       for (const locale of localesEmitted) {
         const n = result.counts[locale];
         const tone = n === 0 ? chalk.green : chalk.yellow;
+        const mfN = metadataFormsCounts[locale] ?? 0;
+        const mfTail = mfN > 0 ? chalk.dim(`  + ${mfN} metadataForms key(s)`) : '';
         console.log(
           `    ${locale.padEnd(nameWidth)} ${tone(String(n).padStart(5))} key(s)` +
-          chalk.dim(`  (of ${result.totalExpected} expected)`),
+          chalk.dim(`  (of ${result.totalExpected} expected)`) + mfTail,
         );
       }
       console.log('');
 
       if (flags['dry-run'] || !flags.out) {
         for (const locale of localesEmitted) {
-          if (result.counts[locale] === 0) continue;
-          console.log(chalk.dim(`── ${locale} ──`));
+          if (result.counts[locale] === 0 && metadataFormsCounts[locale] === 0) continue;
+          console.log(chalk.dim(`── ${locale} (objects) ──`));
           console.log(renderTranslationModule(result.bundles[locale], {
             locale,
             objectsOnly,
           }));
+          if (metadataFormsCounts[locale] > 0) {
+            console.log(chalk.dim(`── ${locale} (metadataForms) ──`));
+            console.log(renderTranslationModule(result.bundles[locale], {
+              locale,
+              kind: 'metadataForms',
+            }));
+          }
         }
         printInfo('Dry run — no files written (pass --out=<dir> to write).');
         return;
@@ -148,15 +177,29 @@ export default class I18nExtract extends Command {
       fs.mkdirSync(outDir, { recursive: true });
       let written = 0;
       for (const locale of localesEmitted) {
-        if (result.counts[locale] === 0) continue;
-        const file = path.join(outDir, `${locale}.objects.generated.ts`);
-        fs.writeFileSync(
-          file,
-          renderTranslationModule(result.bundles[locale], { locale, objectsOnly }),
-          'utf8',
-        );
-        written += 1;
-        printInfo(`Wrote ${chalk.white(path.relative(process.cwd(), file))} (${result.counts[locale]} keys)`);
+        if (result.counts[locale] > 0) {
+          const file = path.join(outDir, `${locale}.objects.generated.ts`);
+          fs.writeFileSync(
+            file,
+            renderTranslationModule(result.bundles[locale], { locale, objectsOnly }),
+            'utf8',
+          );
+          written += 1;
+          printInfo(`Wrote ${chalk.white(path.relative(process.cwd(), file))} (${result.counts[locale]} keys)`);
+        }
+        if (metadataFormsCounts[locale] > 0) {
+          const file = path.join(outDir, `${locale}.metadata-forms.generated.ts`);
+          fs.writeFileSync(
+            file,
+            renderTranslationModule(result.bundles[locale], { locale, kind: 'metadataForms' }),
+            'utf8',
+          );
+          written += 1;
+          printInfo(`Wrote ${chalk.white(path.relative(process.cwd(), file))} (${metadataFormsCounts[locale]} keys)`);
+        }
+      }
+      if (!anyMetadataForms) {
+        printInfo('(no metadataForms keys discovered for these locales)');
       }
       console.log('');
       printSuccess(`Generated ${written} file(s) ${chalk.dim(`(${timer.display()})`)}`);
