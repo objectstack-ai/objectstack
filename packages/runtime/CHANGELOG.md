@@ -1,5 +1,89 @@
 # @objectstack/runtime
 
+## 7.0.0
+
+### Major Changes
+
+- dc72172: **Breaking:** Removed `@objectstack/driver-turso` and `@objectstack/knowledge-turso` from the open-core framework.
+
+  The Turso/libSQL driver and its native-vector knowledge adapter now ship exclusively with the **ObjectStack Cloud** distribution (`objectstack-ai/cloud`). Rationale: Turso is used only for cloud/edge multi-tenant deployments — local development uses better-sqlite3 (faster), and the Turso integration is part of ObjectStack's commercial offering.
+
+  ### What moved out
+
+  - `@objectstack/driver-turso` → `objectstack-ai/cloud/packages/driver-turso`
+  - `@objectstack/knowledge-turso` → `objectstack-ai/cloud/packages/knowledge-turso`
+  - `ITursoPlatformService` contract (spec/contracts/turso-platform.ts) — removed entirely
+  - `TursoConfigSchema`, `TursoDriverSpec`, `TursoMultiTenantConfigSchema`, `TenantResolverStrategySchema`, etc. — moved into `@objectstack/driver-turso` (re-exported from cloud)
+
+  ### Framework-side changes
+
+  - `packages/runtime/src/standalone-stack.ts`: `databaseDriver` enum no longer accepts `'turso'`; `libsql://`/`https://` URL detection removed. Cloud builds register the Turso driver via their own stack composition.
+  - `packages/runtime/src/cloud/artifact-environment-registry.ts`: dropped `case 'libsql'/'turso'`. Cloud has its own `ArtifactEnvironmentRegistry` that handles Turso.
+  - `packages/cli/src/commands/serve.ts`: removed `driverType === 'turso' | 'libsql'` branch.
+  - `packages/runtime/package.json`, `packages/cli/package.json`: removed optional peerDep on `@objectstack/driver-turso`.
+  - `packages/runtime/tsup.config.ts`: removed `@objectstack/driver-turso` from `external`.
+  - `packages/spec/src/contracts/index.ts`: stopped re-exporting `turso-platform.js`.
+  - `packages/spec/src/data/index.ts`: stopped re-exporting `driver/turso-multi-tenant.zod`.
+
+  ### Migration for open-source users
+
+  If you used `libsql://` URLs or `@objectstack/driver-turso` directly, either:
+
+  1. Switch to `file:` URLs (better-sqlite3 via `@objectstack/driver-sql`) for local/self-hosted deployments, **or**
+  2. Use ObjectStack Cloud, which ships the Turso driver as part of the commercial distribution.
+
+### Patch Changes
+
+- 3a630b6: **Split organization-scoping from `@objectstack/plugin-security` into a new `@objectstack/plugin-org-scoping` package.**
+
+  Per ADR-0002, "tenant" in ObjectStack means _physical_ isolation (one Environment = one database, handled by `@objectstack/driver-turso`'s multi-tenant router). The row-level `organization_id` scoping that previously lived inside SecurityPlugin is a different concept — _logical_ scoping inside a single DB — and now ships as its own plugin.
+
+  ### Breaking changes — `@objectstack/plugin-security`
+
+  - Removed the `multiTenant` constructor option. SecurityPlugin no longer touches `organization_id` on insert and no longer registers the `sys_organization` post-create seed pipeline.
+  - Wildcard `current_user.organization_id` RLS policies in the default permission sets are now stripped UNLESS the new `org-scoping` service is registered (i.e. unless `OrgScopingPlugin` is also installed).
+  - Removed export `cloneTenantSeedData` (now exposed as `cloneOrgSeedData` from `@objectstack/plugin-org-scoping`).
+  - `bootstrapPlatformAdmin()` no longer accepts a `multiTenant` flag and no longer auto-creates a default organization — that behavior moved to `ensureDefaultOrganization()` in the new plugin.
+
+  ### Migration
+
+  Single-tenant deployments — no action required.
+
+  Multi-tenant deployments (previously `new SecurityPlugin({ multiTenant: true })`):
+
+  ```diff
+  + import { OrgScopingPlugin } from '@objectstack/plugin-org-scoping';
+    import { SecurityPlugin } from '@objectstack/plugin-security';
+
+  + await kernel.use(new OrgScopingPlugin());     // MUST be BEFORE SecurityPlugin
+  - await kernel.use(new SecurityPlugin({ multiTenant: true }));
+  + await kernel.use(new SecurityPlugin());
+  ```
+
+  The runtime's `OS_MULTI_TENANT` env switch — read by `@objectstack/runtime/cloud/ArtifactKernelFactory`, `@objectstack/plugin-dev`, and the `objectstack` CLI's `serve` / `dev` / `start` commands — automatically registers `OrgScopingPlugin` when set to `true`, so projects driven by the CLI need no code changes.
+
+- Updated dependencies [74470ad]
+- Updated dependencies [d29617e]
+- Updated dependencies [dc72172]
+- Updated dependencies [3a630b6]
+- Updated dependencies [257954d]
+  - @objectstack/spec@7.0.0
+  - @objectstack/plugin-auth@7.0.0
+  - @objectstack/plugin-security@7.0.0
+  - @objectstack/plugin-org-scoping@7.0.0
+  - @objectstack/core@7.0.0
+  - @objectstack/formula@7.0.0
+  - @objectstack/metadata@7.0.0
+  - @objectstack/objectql@7.0.0
+  - @objectstack/observability@7.0.0
+  - @objectstack/driver-memory@7.0.0
+  - @objectstack/driver-sql@7.0.0
+  - @objectstack/driver-sqlite-wasm@7.0.0
+  - @objectstack/rest@7.0.0
+  - @objectstack/service-cluster@7.0.0
+  - @objectstack/service-i18n@7.0.0
+  - @objectstack/types@7.0.0
+
 ## 6.9.0
 
 ### Patch Changes

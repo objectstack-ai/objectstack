@@ -1,5 +1,18 @@
 # @objectstack/objectql
 
+## 7.0.0
+
+### Patch Changes
+
+- Updated dependencies [74470ad]
+- Updated dependencies [d29617e]
+- Updated dependencies [dc72172]
+  - @objectstack/spec@7.0.0
+  - @objectstack/core@7.0.0
+  - @objectstack/formula@7.0.0
+  - @objectstack/types@7.0.0
+  - @objectstack/metadata-core@7.0.0
+
 ## 6.9.0
 
 ### Patch Changes

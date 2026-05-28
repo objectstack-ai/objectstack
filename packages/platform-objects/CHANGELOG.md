@@ -1,5 +1,127 @@
 # @objectstack/platform-objects
 
+## 7.0.0
+
+### Minor Changes
+
+- 74470ad: **New `account` App for self-service identity management + `App.hidden` shell hint**
+
+  Adds a dedicated **Account** App (`name: 'account'`, icon `user-circle`) that exposes the three end-user identity surfaces:
+
+  - **Two-Factor Authentication** — `sys_two_factor`
+  - **Linked Accounts** — `sys_account`
+  - **OAuth Applications** — `sys_oauth_application`
+
+  The app declares **no** `requiredPermissions`, so every authenticated user can reach it — unlike Setup, which requires `setup.access` and therefore excludes the default `member_default` permission set. Combined with the C-tier `resultDialog` actions already shipped on these objects (2FA QR + backup codes, OAuth `client_secret` reveal, `link_social` redirect), this replaces the legacy standalone `apps/account` SPA with a single console + metadata-driven surface.
+
+  **New `App.hidden: boolean` field** (`packages/spec/src/ui/app.zod.ts`) hides an app from the top-level App Switcher. Hidden apps stay fully routable and permission-checked; the shell is expected to surface them through the avatar / user dropdown instead. Mirrors the GitHub Settings / Google account chip / Salesforce Personal Settings pattern. The Account app is the first user.
+
+  Wiring: `plugin-auth` registers `ACCOUNT_APP` alongside `SETUP_APP` / `STUDIO_APP` (`packages/plugins/plugin-auth/src/auth-plugin.ts`). The legacy duplicate entries inside Setup's Advanced group are kept unchanged — they remain admin-only for tenant-wide inspection.
+
+  **Follow-up for objectui**: the shell's `AppSwitcher` and avatar `DropdownMenu` need updating to honour `app.hidden` (filter hidden apps out of the switcher; render them as dropdown menu entries). Tracked separately.
+
+- d29617e: Add `Action.resultDialog` for one-shot reveal of API responses
+
+  Some platform operations return values the user MUST copy now because they
+  cannot be retrieved later — TOTP enrollment URIs, OAuth client secrets,
+  backup recovery codes. Previously these were handled by bespoke account-app
+  pages because actions only surfaced a `successMessage` toast.
+
+  This change adds:
+
+  - **`Action.resultDialog`** — describes a post-success modal that renders
+    selected fields from `result.data`. Supports `qrcode`, `code-list`,
+    `secret`, `text`, and `json` field formats. When set, renderers SHOULD
+    suppress `successMessage` and require explicit acknowledgement.
+
+  - **`Action.target` interpolation contract** — formalised TSDoc spelling
+    out the `${param.X}` and `${ctx.X}` substitution rules (with mandatory
+    `encodeURIComponent` for URL query positions). Used by redirect-style
+    actions like `link_social`.
+
+  New / updated platform actions:
+
+  - `sys_two_factor`: `enable_two_factor` now reveals TOTP URI + backup codes;
+    added `regenerate_backup_codes`.
+  - `sys_oauth_application`: `rotate_client_secret` now reveals the new
+    secret; added `create_oauth_application` toolbar action.
+  - `sys_account`: added `link_social` toolbar action (type:`url`, templated
+    target) for self-service identity linking.
+
+  These let the Setup app cover OAuth-app registration, 2FA enrollment, and
+  social-account linking entirely through metadata, removing the last
+  must-have reasons to ship a separate `apps/account` SPA.
+
+  Renderer-side work (separate PR in `objectui`): consume `resultDialog`,
+  implement `${param}/${ctx}` interpolation, ship `ResultDialog` component.
+  See `c-tier-renderer-contract.md` design note.
+
+- 257954d: **Organization detail page — Members / Invitations / Teams tabs (slotted Page)**
+
+  Adds a record-detail Page for `sys_organization` (`SysOrganizationDetailPage`) so admins can manage the entire membership graph from a single record view instead of switching between three separate Setup list views.
+
+  The page uses `kind: 'slotted'` and overrides only the `tabs` slot — header, actions, highlights, details and discussion fall through to the synthesized default, so the existing record-header actions (`Set Active`, `Edit`, `Delete`, `Leave Organization`) are preserved unchanged.
+
+  Three tabs, each a `record:related_list` scoped by `organization_id`:
+
+  - **Members** — `sys_member` (user, role, joined)
+  - **Invitations** — `sys_invitation` (email, role, status, expires, inviter)
+  - **Teams** — `sys_team` (name, created, updated)
+
+  Per-row actions defined on each child object (`invite_user`, `cancel_invitation`, `remove_member`, `transfer_ownership`, `create_team`, …) are inherited unchanged — no admin endpoint is re-declared here.
+
+  **Deliberately omitted:**
+
+  - **OAuth Apps** — `sys_oauth_application` is owned by `user_id`, not `organization_id`; it surfaces on the user's Account view instead.
+  - **SSO** — no `sys_sso*` object exists yet; will become a fourth tab when better-auth's SSO plugin lands.
+
+  **Package wiring:**
+
+  - `@objectstack/platform-objects` exposes a new `./pages` subpath export and re-exports `SysOrganizationDetailPage` from the root.
+  - `plugin-auth` registers it via the existing `manifest.register({ ..., pages: [SysOrganizationDetailPage] })` call alongside the platform apps and dashboards.
+
+  Verified end-to-end on the console-starter shell against `example-crm` — the three tabs render and the Members/Teams tables populate with the rows better-auth creates automatically when an org is provisioned.
+
+### Patch Changes
+
+- d29617e: Add self-service account & invitation actions on `sys_*` objects so the
+  Setup App can host the day-to-day "account settings" affordances the
+  standalone Account SPA used to own — no per-page React code needed.
+
+  **New actions:**
+
+  - `sys_user`
+    - `update_my_profile` — wraps `POST /api/v1/auth/update-user` (name + image)
+    - `change_my_password` — wraps `POST /api/v1/auth/change-password`
+      (current + new + optional revoke-other-sessions)
+    - `change_my_email` — wraps `POST /api/v1/auth/change-email`
+      (verification email is sent to the new address)
+    - `delete_my_account` — wraps `POST /api/v1/auth/delete-user`
+      (requires current password)
+  - `sys_invitation`
+    - `accept_invitation` — wraps `POST /api/v1/auth/organization/accept-invitation`
+    - `reject_invitation` — wraps `POST /api/v1/auth/organization/reject-invitation`
+  - `sys_member`
+    - `transfer_ownership` — wraps `POST /api/v1/auth/organization/update-member-role`
+      with `role: 'owner'` (better-auth auto-demotes the previous owner to admin)
+
+  All four `sys_user` self-service actions are gated by
+  `visible: 'record.id == ctx.user.id'` so they only render on the signed-in
+  user's own row — they never leak into the admin Users list. The two
+  `sys_invitation` recipient actions use
+  `record.email == ctx.user.email && record.status == 'pending'` so they
+  only appear on the user's incoming invitations.
+
+- 010757b: Fix two self-service identity action bugs:
+
+  - `sys_two_factor` was missing the `verified` boolean column that better-auth's two-factor plugin writes during enrollment. Without it the `/2fa/enable` endpoint 500'd with `table sys_two_factor has no column named verified`. Added `Field.boolean({ defaultValue: true })` to match the better-auth schema.
+  - `sys_account.link_social` action's `callbackURL` still pointed at the pre-migration Setup path (`/apps/setup/system/sys_account`). Updated to `/apps/account/sys_account` so users land back on the linked-accounts view after the OAuth dance.
+
+- Updated dependencies [74470ad]
+- Updated dependencies [d29617e]
+- Updated dependencies [dc72172]
+  - @objectstack/spec@7.0.0
+
 ## 6.9.0
 
 ### Patch Changes

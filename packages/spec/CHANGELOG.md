@@ -1,5 +1,91 @@
 # @objectstack/spec
 
+## 7.0.0
+
+### Major Changes
+
+- dc72172: **Breaking:** Removed `@objectstack/driver-turso` and `@objectstack/knowledge-turso` from the open-core framework.
+
+  The Turso/libSQL driver and its native-vector knowledge adapter now ship exclusively with the **ObjectStack Cloud** distribution (`objectstack-ai/cloud`). Rationale: Turso is used only for cloud/edge multi-tenant deployments — local development uses better-sqlite3 (faster), and the Turso integration is part of ObjectStack's commercial offering.
+
+  ### What moved out
+
+  - `@objectstack/driver-turso` → `objectstack-ai/cloud/packages/driver-turso`
+  - `@objectstack/knowledge-turso` → `objectstack-ai/cloud/packages/knowledge-turso`
+  - `ITursoPlatformService` contract (spec/contracts/turso-platform.ts) — removed entirely
+  - `TursoConfigSchema`, `TursoDriverSpec`, `TursoMultiTenantConfigSchema`, `TenantResolverStrategySchema`, etc. — moved into `@objectstack/driver-turso` (re-exported from cloud)
+
+  ### Framework-side changes
+
+  - `packages/runtime/src/standalone-stack.ts`: `databaseDriver` enum no longer accepts `'turso'`; `libsql://`/`https://` URL detection removed. Cloud builds register the Turso driver via their own stack composition.
+  - `packages/runtime/src/cloud/artifact-environment-registry.ts`: dropped `case 'libsql'/'turso'`. Cloud has its own `ArtifactEnvironmentRegistry` that handles Turso.
+  - `packages/cli/src/commands/serve.ts`: removed `driverType === 'turso' | 'libsql'` branch.
+  - `packages/runtime/package.json`, `packages/cli/package.json`: removed optional peerDep on `@objectstack/driver-turso`.
+  - `packages/runtime/tsup.config.ts`: removed `@objectstack/driver-turso` from `external`.
+  - `packages/spec/src/contracts/index.ts`: stopped re-exporting `turso-platform.js`.
+  - `packages/spec/src/data/index.ts`: stopped re-exporting `driver/turso-multi-tenant.zod`.
+
+  ### Migration for open-source users
+
+  If you used `libsql://` URLs or `@objectstack/driver-turso` directly, either:
+
+  1. Switch to `file:` URLs (better-sqlite3 via `@objectstack/driver-sql`) for local/self-hosted deployments, **or**
+  2. Use ObjectStack Cloud, which ships the Turso driver as part of the commercial distribution.
+
+### Minor Changes
+
+- 74470ad: **New `account` App for self-service identity management + `App.hidden` shell hint**
+
+  Adds a dedicated **Account** App (`name: 'account'`, icon `user-circle`) that exposes the three end-user identity surfaces:
+
+  - **Two-Factor Authentication** — `sys_two_factor`
+  - **Linked Accounts** — `sys_account`
+  - **OAuth Applications** — `sys_oauth_application`
+
+  The app declares **no** `requiredPermissions`, so every authenticated user can reach it — unlike Setup, which requires `setup.access` and therefore excludes the default `member_default` permission set. Combined with the C-tier `resultDialog` actions already shipped on these objects (2FA QR + backup codes, OAuth `client_secret` reveal, `link_social` redirect), this replaces the legacy standalone `apps/account` SPA with a single console + metadata-driven surface.
+
+  **New `App.hidden: boolean` field** (`packages/spec/src/ui/app.zod.ts`) hides an app from the top-level App Switcher. Hidden apps stay fully routable and permission-checked; the shell is expected to surface them through the avatar / user dropdown instead. Mirrors the GitHub Settings / Google account chip / Salesforce Personal Settings pattern. The Account app is the first user.
+
+  Wiring: `plugin-auth` registers `ACCOUNT_APP` alongside `SETUP_APP` / `STUDIO_APP` (`packages/plugins/plugin-auth/src/auth-plugin.ts`). The legacy duplicate entries inside Setup's Advanced group are kept unchanged — they remain admin-only for tenant-wide inspection.
+
+  **Follow-up for objectui**: the shell's `AppSwitcher` and avatar `DropdownMenu` need updating to honour `app.hidden` (filter hidden apps out of the switcher; render them as dropdown menu entries). Tracked separately.
+
+- d29617e: Add `Action.resultDialog` for one-shot reveal of API responses
+
+  Some platform operations return values the user MUST copy now because they
+  cannot be retrieved later — TOTP enrollment URIs, OAuth client secrets,
+  backup recovery codes. Previously these were handled by bespoke account-app
+  pages because actions only surfaced a `successMessage` toast.
+
+  This change adds:
+
+  - **`Action.resultDialog`** — describes a post-success modal that renders
+    selected fields from `result.data`. Supports `qrcode`, `code-list`,
+    `secret`, `text`, and `json` field formats. When set, renderers SHOULD
+    suppress `successMessage` and require explicit acknowledgement.
+
+  - **`Action.target` interpolation contract** — formalised TSDoc spelling
+    out the `${param.X}` and `${ctx.X}` substitution rules (with mandatory
+    `encodeURIComponent` for URL query positions). Used by redirect-style
+    actions like `link_social`.
+
+  New / updated platform actions:
+
+  - `sys_two_factor`: `enable_two_factor` now reveals TOTP URI + backup codes;
+    added `regenerate_backup_codes`.
+  - `sys_oauth_application`: `rotate_client_secret` now reveals the new
+    secret; added `create_oauth_application` toolbar action.
+  - `sys_account`: added `link_social` toolbar action (type:`url`, templated
+    target) for self-service identity linking.
+
+  These let the Setup app cover OAuth-app registration, 2FA enrollment, and
+  social-account linking entirely through metadata, removing the last
+  must-have reasons to ship a separate `apps/account` SPA.
+
+  Renderer-side work (separate PR in `objectui`): consume `resultDialog`,
+  implement `${param}/${ctx}` interpolation, ship `ResultDialog` component.
+  See `c-tier-renderer-contract.md` design note.
+
 ## 6.9.0
 
 ## 6.8.1

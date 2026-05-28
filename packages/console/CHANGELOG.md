@@ -1,0 +1,21 @@
+# @objectstack/console
+
+## 7.0.0
+
+### Patch Changes
+
+- 9496b5b: Vendor `@object-ui/console` as `@objectstack/console`, a new dist-only
+  package shipped at the framework version. A single `pnpm add
+@objectstack/framework` now installs a version-matched Console SPA — no
+  second npm dep to keep in sync.
+
+  The Console source-of-truth remains [`@object-ui/console`](https://github.com/objectstack-ai/objectui).
+  The framework pins it by SHA in `.objectui-sha`; CI's release workflow
+  clones objectui at that SHA, builds the SPA, and publishes the dist as
+  `@objectstack/console`.
+
+  The CLI's `resolveConsolePath()` now prefers `@objectstack/console` and
+  falls back to `@object-ui/console`, so cloud's Docker overlay flow and
+  advanced users who pin `@object-ui/console` directly still take
+  precedence. `@object-ui/console` has been demoted from CLI runtime
+  dependency to dev fallback.
