@@ -1,0 +1,5 @@
+---
+"@objectstack/console": minor
+---
+
+fix
