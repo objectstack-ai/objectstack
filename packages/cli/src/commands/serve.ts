@@ -8,6 +8,7 @@ import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import {
   printHeader,
   printKV,
@@ -974,9 +975,8 @@ export default class Serve extends Command {
           const { AuthPlugin } = await import(/* webpackIgnore: true */ authPkg);
 
           // In dev, fall back to a stable local secret so users don't have
-          // to set AUTH_SECRET just to try the login/register flow.
-          const secret = process.env.AUTH_SECRET
-            ?? process.env.OS_AUTH_SECRET
+          // to set OS_AUTH_SECRET just to try the login/register flow.
+          const secret = readEnvWithDeprecation('OS_AUTH_SECRET', 'AUTH_SECRET')
             ?? (isDev ? 'dev-only-insecure-secret-change-me-in-production' : undefined);
 
           // Guard: in cloud-connected runtime mode (e.g. objectos worker)
@@ -1003,9 +1003,9 @@ export default class Serve extends Command {
               '    Auth is owned per-project by ArtifactKernelFactory in the cloud distribution.'
             ));
           } else if (!secret) {
-            console.warn(chalk.yellow('  ⚠ AuthPlugin skipped — set AUTH_SECRET to enable authentication in production'));
+            console.warn(chalk.yellow('  ⚠ AuthPlugin skipped — set OS_AUTH_SECRET to enable authentication in production'));
           } else {
-            const baseUrl = process.env.AUTH_BASE_URL
+            const baseUrl = readEnvWithDeprecation('OS_AUTH_BASE_URL', 'AUTH_BASE_URL')
               ?? process.env.OS_BASE_URL
               ?? `http://localhost:${port}`;
 
@@ -1061,7 +1061,7 @@ export default class Serve extends Command {
             // must be trusted by better-auth or sign-up/sign-in is
             // rejected with "Invalid origin". Mirrors the OS_COOKIE_DOMAIN
             // wildcard semantics — they are always set together.
-            const rootDomain = (process.env.OS_ROOT_DOMAIN ?? process.env.ROOT_DOMAIN)?.trim();
+            const rootDomain = readEnvWithDeprecation('OS_ROOT_DOMAIN', 'ROOT_DOMAIN')?.trim();
             if (rootDomain) {
               const wildcard = `https://*.${rootDomain}`;
               if (!trustedOrigins.includes(wildcard)) trustedOrigins.push(wildcard);
@@ -1138,7 +1138,7 @@ export default class Serve extends Command {
             // the `org-scoping` service at start() time and conditionally
             // strips the wildcard `tenant_isolation` RLS when this plugin
             // is absent — so registration order matters.
-            const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
+            const multiTenant = String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false';
             if (multiTenant) {
               try {
                 const orgScopingPkg = '@objectstack/plugin-org-scoping';
@@ -1606,7 +1606,7 @@ export default class Serve extends Command {
         consolePath: loadedPlugins.includes('ConsoleUI') ? CONSOLE_PATH : undefined,
         driverLabel: resolvedDriverLabel,
         databaseUrl: redactDbUrl(resolvedDatabaseUrl),
-        multiTenant: String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false',
+        multiTenant: String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false',
       });
 
       // Kernel already registers SIGINT/SIGTERM handlers during bootstrap.

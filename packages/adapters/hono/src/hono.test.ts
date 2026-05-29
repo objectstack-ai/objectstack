@@ -949,23 +949,23 @@ describe('createHonoApp', () => {
   });
 
   describe('CORS wildcard origin patterns', () => {
-    const ORIG_CORS_ORIGIN = process.env.CORS_ORIGIN;
-    const ORIG_CORS_CREDENTIALS = process.env.CORS_CREDENTIALS;
+    const ORIG_CORS_ORIGIN = process.env.OS_CORS_ORIGIN;
+    const ORIG_CORS_CREDENTIALS = process.env.OS_CORS_CREDENTIALS;
 
     beforeEach(() => {
-      delete process.env.CORS_ORIGIN;
-      delete process.env.CORS_CREDENTIALS;
+      delete process.env.OS_CORS_ORIGIN;
+      delete process.env.OS_CORS_CREDENTIALS;
     });
 
     afterAll(() => {
-      if (ORIG_CORS_ORIGIN === undefined) delete process.env.CORS_ORIGIN;
-      else process.env.CORS_ORIGIN = ORIG_CORS_ORIGIN;
-      if (ORIG_CORS_CREDENTIALS === undefined) delete process.env.CORS_CREDENTIALS;
-      else process.env.CORS_CREDENTIALS = ORIG_CORS_CREDENTIALS;
+      if (ORIG_CORS_ORIGIN === undefined) delete process.env.OS_CORS_ORIGIN;
+      else process.env.OS_CORS_ORIGIN = ORIG_CORS_ORIGIN;
+      if (ORIG_CORS_CREDENTIALS === undefined) delete process.env.OS_CORS_CREDENTIALS;
+      else process.env.OS_CORS_CREDENTIALS = ORIG_CORS_CREDENTIALS;
     });
 
     it('matches subdomain wildcard (https://*.example.com) for real subdomains', async () => {
-      process.env.CORS_ORIGIN = 'https://*.example.com';
+      process.env.OS_CORS_ORIGIN = 'https://*.example.com';
       const app = createHonoApp({ kernel: mockKernel, prefix: '/api/v1' });
 
       const res = await app.request('/api/v1/meta', {
@@ -976,7 +976,7 @@ describe('createHonoApp', () => {
     });
 
     it('matches port wildcard (http://localhost:*) for any localhost port', async () => {
-      process.env.CORS_ORIGIN = 'http://localhost:*';
+      process.env.OS_CORS_ORIGIN = 'http://localhost:*';
       const app = createHonoApp({ kernel: mockKernel, prefix: '/api/v1' });
 
       const res = await app.request('/api/v1/meta', {
@@ -987,7 +987,7 @@ describe('createHonoApp', () => {
     });
 
     it('matches the correct pattern from a comma-separated wildcard list', async () => {
-      process.env.CORS_ORIGIN =
+      process.env.OS_CORS_ORIGIN =
         'https://*.objectui.org,https://*.objectstack.ai,http://localhost:*';
       const app = createHonoApp({ kernel: mockKernel, prefix: '/api/v1' });
 
@@ -999,7 +999,7 @@ describe('createHonoApp', () => {
     });
 
     it('rejects origins that do not match any wildcard pattern', async () => {
-      process.env.CORS_ORIGIN = 'https://*.example.com';
+      process.env.OS_CORS_ORIGIN = 'https://*.example.com';
       const app = createHonoApp({ kernel: mockKernel, prefix: '/api/v1' });
 
       const res = await app.request('/api/v1/meta', {
@@ -1011,7 +1011,7 @@ describe('createHonoApp', () => {
     });
 
     it('responds to preflight OPTIONS with matched wildcard origin', async () => {
-      process.env.CORS_ORIGIN = 'https://*.objectui.org';
+      process.env.OS_CORS_ORIGIN = 'https://*.objectui.org';
       const app = createHonoApp({ kernel: mockKernel, prefix: '/api/v1' });
 
       const res = await app.request('/api/v1/meta', {
@@ -1031,15 +1031,15 @@ describe('createHonoApp', () => {
     // plugin can deliver rotated session tokens to cross-origin clients.
     // This mirrors plugin-hono-server's CORS wiring — all three Hono-based
     // CORS sites must stay in lockstep on this default.
-    const ORIG_CORS_ORIGIN = process.env.CORS_ORIGIN;
+    const ORIG_CORS_ORIGIN = process.env.OS_CORS_ORIGIN;
 
     beforeEach(() => {
-      delete process.env.CORS_ORIGIN;
+      delete process.env.OS_CORS_ORIGIN;
     });
 
     afterAll(() => {
-      if (ORIG_CORS_ORIGIN === undefined) delete process.env.CORS_ORIGIN;
-      else process.env.CORS_ORIGIN = ORIG_CORS_ORIGIN;
+      if (ORIG_CORS_ORIGIN === undefined) delete process.env.OS_CORS_ORIGIN;
+      else process.env.OS_CORS_ORIGIN = ORIG_CORS_ORIGIN;
     });
 
     it('always exposes set-auth-token by default', async () => {

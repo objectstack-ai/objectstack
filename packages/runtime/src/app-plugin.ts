@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext } from '@objectstack/core';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import { SeedLoaderService } from './seed-loader.js';
 import type { IMetadataService, II18nService } from '@objectstack/spec/contracts';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
@@ -526,7 +527,7 @@ export class AppPlugin implements Plugin {
              // step. So we skip it. Single-tenant deployments keep the
              // legacy behaviour: seed immediately at boot so there's
              // always demo data without needing an org insert.
-             const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
+             const multiTenant = String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false';
              if (multiTenant) {
                  ctx.logger.info('[Seeder] multi-tenant mode — skipping inline seed; per-org replay will run on sys_organization insert');
              } else {

@@ -84,14 +84,14 @@ const SEED: Array<{ subject: string; description: string; owner: string }> = [
   console.log('───────────────────────────────────────────────────');
 
   const apiKey = process.env.AI_GATEWAY_API_KEY ?? process.env.OPENAI_API_KEY;
-  const modelId = process.env.AI_MODEL ?? 'openai/gpt-4.1-mini';
+  const modelId = process.env.OS_AI_MODEL ?? 'openai/gpt-4.1-mini';
   if (apiKey) {
     console.log(`   LLM model:  ${modelId}`);
   } else {
     console.log('   LLM model:  (none — deterministic RLS demo only)');
   }
 
-  process.env.OS_MULTI_TENANT = 'false';
+  process.env.OS_MULTI_ORG_ENABLED = 'false';
 
   // ── Boot kernel ──────────────────────────────────────────────────
   const kernel = new ObjectKernel();

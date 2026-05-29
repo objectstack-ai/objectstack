@@ -13,6 +13,7 @@ import { ListViewSchema } from '../ui/view.zod';
 import { ExpressionInputSchema , TemplateExpressionInputSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { ProtectionSchema } from '../shared/protection.zod';
 export const ApiMethod = z.enum([
   'get', 'list',          // Read
   'create', 'update', 'delete', // Write
@@ -652,7 +653,18 @@ const ObjectSchemaBase = z.object({
    */
   actions: z.array(ActionSchema).optional().describe('Actions associated with this object (auto-populated from top-level actions via objectName)'),
 
-  // ADR-0010 — metadata protection envelope (optional).
+  /**
+   * ADR-0010 §3.7 — Package-level protection envelope. Package
+   * authors declare lock policy here; the loader translates it
+   * into the private `_lock` envelope at registration time and
+   * strips this block before persistence. See
+   * `shared/protection.zod.ts`.
+   */
+  protection: ProtectionSchema.optional().describe(
+    'Package author protection block — lock policy for this object.',
+  ),
+
+  // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 });
 

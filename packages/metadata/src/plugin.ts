@@ -7,6 +7,7 @@ import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
+import { applyProtection } from '@objectstack/spec/shared';
 import {
     SysMetadataObject,
     SysMetadataHistoryObject,
@@ -479,6 +480,8 @@ export class MetadataPlugin implements Plugin {
         const memLoader = new MemoryLoader();
         const manifestPackageId =
             (metadata as any)?.manifest?.id ?? (metadata as any)?.id ?? undefined;
+        const manifestVersion =
+            (metadata as any)?.manifest?.version ?? (metadata as any)?.version ?? undefined;
 
         let totalRegistered = 0;
         for (const [field, metaType] of Object.entries(ARTIFACT_FIELD_TO_TYPE)) {
@@ -506,9 +509,14 @@ export class MetadataPlugin implements Plugin {
                     }
                 }
                 if (!name) continue;
-                if (manifestPackageId && (item as any)._packageId === undefined) {
-                    (item as any)._packageId = manifestPackageId;
-                }
+                // ADR-0010 §3.7 — translate the author-facing
+                // `protection` block into the private `_lock` envelope
+                // and stamp package provenance in one call. Strips the
+                // public block so it never lands in sys_metadata.
+                applyProtection(item as any, {
+                    packageId: manifestPackageId,
+                    packageVersion: manifestVersion,
+                });
                 await memLoader.save(metaType, name, item);
                 await this.manager.register(metaType, name, item);
                 totalRegistered++;

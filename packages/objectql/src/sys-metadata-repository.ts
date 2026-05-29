@@ -50,6 +50,7 @@
  */
 
 import { hashSpec, ConflictError } from '@objectstack/metadata-core';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import type {
   MetadataRepository,
   MetaRef,
@@ -174,7 +175,7 @@ const RUNTIME_CREATE_ALLOWED_TYPES: ReadonlySet<string> = new Set(
 );
 
 /**
- * Phase 3a-env-writable: parse `OBJECTSTACK_METADATA_WRITABLE` (comma-
+ * Phase 3a-env-writable: parse `OS_METADATA_WRITABLE` (comma-
  * separated singular type names). Memoised; tests can reset via
  * {@link resetEnvWritableMetadataTypes}. Mirrors the same helper in
  * ObjectStackProtocolImplementation — both gates must consult the same
@@ -184,7 +185,7 @@ const RUNTIME_CREATE_ALLOWED_TYPES: ReadonlySet<string> = new Set(
 let _envWritableMetadataTypes: Set<string> | null = null;
 function envWritableMetadataTypes(): ReadonlySet<string> {
   if (_envWritableMetadataTypes !== null) return _envWritableMetadataTypes;
-  const raw = (typeof process !== 'undefined' && process?.env?.OBJECTSTACK_METADATA_WRITABLE) || '';
+  const raw = readEnvWithDeprecation('OS_METADATA_WRITABLE', 'OBJECTSTACK_METADATA_WRITABLE') || '';
   const set = new Set<string>();
   for (const tok of raw.split(',')) {
     const t = tok.trim();
@@ -804,7 +805,7 @@ export class SysMetadataRepository implements MetadataRepository {
    * at `(type, name)`. In that case we accept types with
    * `allowRuntimeCreate: true`, even when `allowOrgOverride` is false.
    *
-   * The env-var escape hatch (`OBJECTSTACK_METADATA_WRITABLE`) still
+   * The env-var escape hatch (`OS_METADATA_WRITABLE`) still
    * applies to BOTH intents, so operators can opt into artifact
    * overrides at runtime for emergency fixes.
    */
@@ -846,7 +847,7 @@ export class SysMetadataRepository implements MetadataRepository {
     const err: any = new Error(
       `[${code}] ${detail}` +
       `Overlay-allowed: ${Array.from(new Set(allowed)).join(', ') || '(none)'}. ` +
-      `Set OBJECTSTACK_METADATA_WRITABLE to enable additional types at runtime.`,
+      `Set OS_METADATA_WRITABLE to enable additional types at runtime.`,
     );
     err.code = code;
     err.status = 403;

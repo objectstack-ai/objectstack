@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectKernel, getEnv, resolveLocale } from '@objectstack/core';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import { CoreServiceName } from '@objectstack/spec/system';
 import { pluralToSingular } from '@objectstack/spec/shared';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -1746,7 +1747,7 @@ export class HttpDispatcher {
                 && parts[1] === 'platform-sso'
                 && parts[2] === 'backfill'
                 && m === 'POST') {
-                const baseSecret = (process.env.OS_AUTH_SECRET ?? process.env.AUTH_SECRET ?? '').trim();
+                const baseSecret = (readEnvWithDeprecation('OS_AUTH_SECRET', 'AUTH_SECRET') ?? '').trim();
                 if (!baseSecret) {
                     return { handled: true, response: this.error('OS_AUTH_SECRET not configured on this worker', 503) };
                 }
@@ -2017,7 +2018,7 @@ export class HttpDispatcher {
                 // email/password sign-in as the legacy fallback).
                 try {
                     const { seedPlatformSsoClient } = await import('./cloud/platform-sso.js');
-                    const baseSecret = (process.env.OS_AUTH_SECRET ?? process.env.AUTH_SECRET ?? '').trim();
+                    const baseSecret = (readEnvWithDeprecation('OS_AUTH_SECRET', 'AUTH_SECRET') ?? '').trim();
                     if (baseSecret) {
                         await seedPlatformSsoClient({
                             ql,

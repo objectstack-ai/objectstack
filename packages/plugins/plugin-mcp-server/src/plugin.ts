@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import type { IAIService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { MCPServerRuntimeConfig } from './mcp-server-runtime.js';
@@ -29,13 +30,14 @@ export interface MCPServerPluginOptions {
  * 1. **init** — Creates {@link MCPServerRuntime} and registers as `'mcp'` service.
  * 2. **start** — Bridges ToolRegistry, MetadataService, DataEngine, and Agents
  *    to the MCP server. Starts the transport if `autoStart` is enabled or
- *    the `MCP_SERVER_ENABLED` environment variable is set.
+ *    the `OS_MCP_SERVER_ENABLED` environment variable is set.
  * 3. **destroy** — Stops the MCP transport.
  *
  * Environment Variables:
- * - `MCP_SERVER_ENABLED=true` — Enable MCP server at startup
- * - `MCP_SERVER_NAME` — Override server name
- * - `MCP_SERVER_TRANSPORT` — Override transport ('stdio' | 'http')
+ * - `OS_MCP_SERVER_ENABLED=true` — Enable MCP server at startup
+ * - `OS_MCP_SERVER_NAME` — Override server name
+ * - `OS_MCP_SERVER_TRANSPORT` — Override transport ('stdio' | 'http')
+ *   (legacy `MCP_SERVER_*` names still honoured with a deprecation warning)
  *
  * @example
  * ```ts
@@ -62,9 +64,9 @@ export class MCPServerPlugin implements Plugin {
 
   async init(ctx: PluginContext): Promise<void> {
     const config: MCPServerRuntimeConfig = {
-      name: process.env.MCP_SERVER_NAME ?? this.options.name ?? 'objectstack',
+      name: readEnvWithDeprecation('OS_MCP_SERVER_NAME', 'MCP_SERVER_NAME') ?? this.options.name ?? 'objectstack',
       version: this.options.version ?? '1.0.0',
-      transport: (process.env.MCP_SERVER_TRANSPORT as 'stdio' | 'http') ?? this.options.transport ?? 'stdio',
+      transport: (readEnvWithDeprecation('OS_MCP_SERVER_TRANSPORT', 'MCP_SERVER_TRANSPORT') as 'stdio' | 'http') ?? this.options.transport ?? 'stdio',
       instructions: this.options.instructions,
       logger: ctx.logger,
     };
@@ -116,13 +118,13 @@ export class MCPServerPlugin implements Plugin {
     }
 
     // ── Auto-start if configured ──
-    const shouldStart = this.options.autoStart || process.env.MCP_SERVER_ENABLED === 'true';
+    const shouldStart = this.options.autoStart || readEnvWithDeprecation('OS_MCP_SERVER_ENABLED', 'MCP_SERVER_ENABLED') === 'true';
     if (shouldStart) {
       await this.runtime.start();
       ctx.logger.info('[MCP] Server started automatically');
     } else {
       ctx.logger.info(
-        '[MCP] Server ready but not started. Set MCP_SERVER_ENABLED=true or use autoStart option.',
+        '[MCP] Server ready but not started. Set OS_MCP_SERVER_ENABLED=true or use autoStart option.',
       );
     }
 

@@ -21,7 +21,8 @@
     "@noble/ciphers": "^2.2.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

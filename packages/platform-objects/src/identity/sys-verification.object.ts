@@ -17,6 +17,14 @@ export const SysVerification = ObjectSchema.create({
   icon: 'shield-check',
   isSystem: true,
   managedBy: 'better-auth',
+  // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,
+  // but may add overlay row-level config. Use `no-overlay` if you need to
+  // forbid sys_metadata overlays entirely.
+  protection: {
+    lock: 'full',
+    reason: 'Identity table managed by better-auth — see ADR-0010.',
+    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+  },
   description: 'Email and phone verification tokens',
   titleFormat: 'Verification for {identifier}',
   compactLayout: ['identifier', 'expires_at', 'created_at'],

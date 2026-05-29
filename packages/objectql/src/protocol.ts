@@ -2,6 +2,7 @@
 
 import { ObjectStackProtocol } from '@objectstack/spec/api';
 import { IDataEngine } from '@objectstack/core';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import type { ObjectQL } from './engine.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import { ConflictError } from '@objectstack/metadata-core';
@@ -311,6 +312,8 @@ function mergeArtifactProtection(item: unknown, artifactItem: unknown): unknown 
     const out: Record<string, unknown> = { ...(item as Record<string, unknown>) };
     if (a._lock !== undefined) out._lock = a._lock;
     if (a._lockReason !== undefined) out._lockReason = a._lockReason;
+    if (a._lockDocsUrl !== undefined) out._lockDocsUrl = a._lockDocsUrl;
+    if (a._lockSource !== undefined) out._lockSource = a._lockSource;
     if (a._packageId !== undefined) out._packageId = a._packageId;
     if (a._packageVersion !== undefined) out._packageVersion = a._packageVersion;
     if (a._provenance !== undefined) out._provenance = a._provenance;
@@ -924,7 +927,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         // expose write actions, etc. Existing clients keep working — the
         // `types: string[]` field is preserved alongside the new `entries`.
         //
-        // Phase 3a-env-writable: `OBJECTSTACK_METADATA_WRITABLE` env var (comma
+        // Phase 3a-env-writable: `OS_METADATA_WRITABLE` env var (comma
         // separated singular type names) flips `allowOrgOverride` on listed
         // types so admins can self-serve. The same env var is consulted by
         // `isOverlayAllowed()` at write time — they must stay in sync.
@@ -1374,6 +1377,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             lock: lockState.lock,
             ...(lockState.lockReason !== undefined ? { lockReason: lockState.lockReason } : {}),
             ...(lockState.lockSource !== undefined ? { lockSource: lockState.lockSource } : {}),
+            ...(lockState.lockDocsUrl !== undefined ? { lockDocsUrl: lockState.lockDocsUrl } : {}),
             ...(lockState.provenance !== undefined ? { provenance: lockState.provenance } : {}),
             ...(lockState.packageId !== undefined ? { packageId: lockState.packageId } : {}),
             ...(lockState.packageVersion !== undefined ? { packageVersion: lockState.packageVersion } : {}),
@@ -1422,6 +1426,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         lock: MetadataLock;
         lockReason?: string;
         lockSource?: 'artifact' | 'package' | 'env-forced' | 'overlay';
+        lockDocsUrl?: string;
         provenance?: MetadataProvenance;
         packageId?: string;
         packageVersion?: string;
@@ -1521,6 +1526,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             lock: lockState.lock,
             ...(lockState.lockReason !== undefined ? { lockReason: lockState.lockReason } : {}),
             ...(lockState.lockSource !== undefined ? { lockSource: lockState.lockSource } : {}),
+            ...(lockState.lockDocsUrl !== undefined ? { lockDocsUrl: lockState.lockDocsUrl } : {}),
             ...(lockState.provenance !== undefined ? { provenance: lockState.provenance } : {}),
             ...(lockState.packageId !== undefined ? { packageId: lockState.packageId } : {}),
             ...(lockState.packageVersion !== undefined ? { packageVersion: lockState.packageVersion } : {}),
@@ -2740,7 +2746,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     })();
 
     /**
-     * Phase 3a-env-writable: parse `OBJECTSTACK_METADATA_WRITABLE` once.
+     * Phase 3a-env-writable: parse `OS_METADATA_WRITABLE` once.
      * Comma-separated singular type names. When the env var is set, the
      * listed types get treated as `allowOrgOverride: true` regardless of
      * their static registry entry. This is the runtime escape hatch admins
@@ -2753,7 +2759,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     private static _envWritableTypes: Set<string> | null = null;
     private static envWritableTypes(): ReadonlySet<string> {
         if (this._envWritableTypes !== null) return this._envWritableTypes;
-        const raw = (typeof process !== 'undefined' && process?.env?.OBJECTSTACK_METADATA_WRITABLE) || '';
+        const raw = readEnvWithDeprecation('OS_METADATA_WRITABLE', 'OBJECTSTACK_METADATA_WRITABLE') || '';
         const set = new Set<string>();
         for (const tok of raw.split(',')) {
             const t = tok.trim();
@@ -3124,7 +3130,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                 const err = new Error(
                     `[not_overridable] Metadata item '${request.type}/${request.name}' is provided by a code package `
                     + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
-                    + `Edit the source artifact and redeploy, or set OBJECTSTACK_METADATA_WRITABLE to grant a runtime escape hatch. `
+                    + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. `
                     + `See docs/adr/0005-metadata-customization-overlay.md.`
                 );
                 (err as any).code = 'not_overridable';

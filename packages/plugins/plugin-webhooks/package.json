@@ -30,8 +30,9 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
+    "@objectstack/service-cluster": "workspace:*",
     "@objectstack/spec": "workspace:*",
-    "@objectstack/service-cluster": "workspace:*"
+    "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

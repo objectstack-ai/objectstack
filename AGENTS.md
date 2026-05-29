@@ -79,6 +79,7 @@ Related scripts: `pnpm objectui:bump` (pull only), `pnpm objectui:build` (rebuil
 6. **Object name = table name.** The object `name` is the canonical id everywhere (API, ObjectQL, REST, SDK, DB table). **Never** set `namespace` (deprecated) or `tableName` (always equals `name`). For module prefixes, embed in the name (`sys_user`, `ai_conversations`).
 7. **One Zod source per metadata type.** Each type (`view`, `flow`, `agent`, …) has exactly one schema in `packages/spec/src/{domain}/`. Org overlay opt-in lives only in `allowOrgOverride` on `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005.
 8. **North Star alignment.** Read `content/docs/concepts/north-star.mdx` before structural changes. If a change doesn't advance §7 Built, shrink Drift, or unlock Missing — it probably shouldn't ship.
+9. **`OS_` env-var prefix.** All ObjectStack-owned environment variables MUST start with `OS_`. When renaming a legacy var, use `readEnvWithDeprecation('OS_NEW_NAME', 'LEGACY_NAME')` from `@objectstack/types` so the legacy name still works for one release with a one-shot deprecation warning. Documented third-party exceptions (NOT renamed): `PORT`, `DATABASE_URL`, `NODE_ENV`, `OPENAI_API_KEY`, `TURSO_*`, `BETTER_AUTH_URL`, OAuth `*_CLIENT_ID` / `*_CLIENT_SECRET`, `RESEND_API_KEY`, `POSTMARK_TOKEN`, `AI_GATEWAY_*`. See issue #1382.
 
 ---
 

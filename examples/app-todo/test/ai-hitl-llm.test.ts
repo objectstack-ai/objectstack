@@ -47,10 +47,10 @@ import { registerTaskActionHandlers } from '../src/actions/register-handlers';
   console.log('🛡️🤖  ObjectStack HITL × Real-LLM Smoke Test');
   console.log('──────────────────────────────────────────────');
 
-  const modelId = process.env.AI_MODEL ?? 'openai/gpt-4.1-mini';
+  const modelId = process.env.OS_AI_MODEL ?? 'openai/gpt-4.1-mini';
   console.log(`   Model: ${modelId}`);
 
-  process.env.OS_MULTI_TENANT = 'false';
+  process.env.OS_MULTI_ORG_ENABLED = 'false';
 
   const gateway = createGateway({ apiKey });
   const model = gateway.languageModel(modelId);

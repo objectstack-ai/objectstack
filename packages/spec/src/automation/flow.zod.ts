@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ProtectionSchema } from '../shared/protection.zod';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 
 /**
@@ -219,6 +221,20 @@ export const FlowSchema = lazySchema(() => z.object({
     jitter: z.boolean().default(false).describe('Add random jitter to retry delay to avoid thundering herd'),
     fallbackNodeId: z.string().optional().describe('Node ID to jump to on unrecoverable error'),
   }).optional().describe('Flow-level error handling configuration'),
+  /**
+   * ADR-0010 §3.7 — Package-level protection envelope. Package
+   * authors declare lock policy here; the loader translates it
+   * into the private `_lock` envelope at registration time and
+   * strips this block before persistence. See
+   * `shared/protection.zod.ts`.
+   */
+  protection: ProtectionSchema.optional().describe(
+    'Package author protection block — lock policy for this flow.',
+  ),
+
+  // ADR-0010 — runtime protection envelope (internal — set by loader).
+  ...MetadataProtectionFields,
+
 }));
 
 /**

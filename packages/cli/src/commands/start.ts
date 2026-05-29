@@ -9,6 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
+import { readEnvWithDeprecation } from '@objectstack/types';
 
 /**
  * `objectstack start` — zero-config quick boot.
@@ -191,8 +192,7 @@ export default class Start extends Command {
     // Quick-start should "just work" without the user having to
     // export AUTH_SECRET.
     const authSecret = flags['auth-secret']
-      ?? process.env.AUTH_SECRET
-      ?? process.env.OS_AUTH_SECRET
+      ?? readEnvWithDeprecation('OS_AUTH_SECRET', 'AUTH_SECRET')
       ?? readOrCreateAuthSecret(homeDir);
 
     // ── Banner ──────────────────────────────────────────────────────

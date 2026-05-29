@@ -5,6 +5,7 @@ import type {
   CryptoHandle,
   ICryptoProvider,
 } from '@objectstack/spec/contracts';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -51,23 +52,27 @@ import { dirname, join } from 'node:path';
  * key the operator typed yesterday) become undecryptable on the next
  * `pnpm dev` — Node throws "Unsupported state or unable to authenticate
  * data". To make the dev loop ergonomic without changing the production
- * contract (still KMS-only), the provider honours `OBJECTSTACK_DEV_CRYPTO_KEY`
- * (base64 or hex, 32 bytes after decode) as a stable data key. When the
- * env var is unset we generate an ephemeral key AND log the base64 once
- * so operators can paste it back into their `.env` to survive restarts.
+ * contract (still KMS-only), the provider honours `OS_DEV_CRYPTO_KEY`
+ * (legacy `OBJECTSTACK_DEV_CRYPTO_KEY` still honoured with a deprecation
+ * warning) (base64 or hex, 32 bytes after decode) as a stable data key.
+ * When the env var is unset we generate an ephemeral key AND log the
+ * base64 once so operators can paste it back into their `.env` to
+ * survive restarts.
  */
-const DEV_KEY_ENV = 'OBJECTSTACK_DEV_CRYPTO_KEY';
+const DEV_KEY_ENV = 'OS_DEV_CRYPTO_KEY';
+const DEV_KEY_LEGACY_ENV = 'OBJECTSTACK_DEV_CRYPTO_KEY';
 
 /**
- * Per-user persistent fallback location. When `OBJECTSTACK_DEV_CRYPTO_KEY`
+ * Per-user persistent fallback location. When `OS_DEV_CRYPTO_KEY`
  * is unset, we lazily create + cache a key here so dev sessions survive
- * process restarts without operator action. Honours `OBJECTSTACK_HOME`
+ * process restarts without operator action. Honours `OS_HOME`
+ * (legacy `OBJECTSTACK_HOME` still honoured with a deprecation warning)
  * for projects that pin a non-default config dir.
  */
 const devKeyFallbackPath = (): string => {
   const proc = (globalThis as any)?.process;
   const home =
-    proc?.env?.OBJECTSTACK_HOME ||
+    readEnvWithDeprecation('OS_HOME', 'OBJECTSTACK_HOME') ||
     (proc?.env?.HOME ? join(proc.env.HOME, '.objectstack') : undefined) ||
     join(homedir(), '.objectstack');
   return join(home, 'dev-crypto-key');
@@ -96,7 +101,7 @@ const loadOrCreateDevKey = (): { key: Buffer; path: string; generated: boolean }
 };
 
 /**
- * Parse an `OBJECTSTACK_DEV_CRYPTO_KEY` value (hex or base64) into a
+ * Parse an `OS_DEV_CRYPTO_KEY` value (hex or base64) into a
  * 32-byte Buffer. Returns `undefined` (with a console warning) when the
  * value is present but unusable — the caller falls back to an ephemeral
  * key so the process still boots.
@@ -162,7 +167,7 @@ export class InMemoryCryptoProvider implements ICryptoProvider {
       this.key = opts.key;
     } else {
       const fromEnv = parseDevKey(
-        (globalThis as any)?.process?.env?.[DEV_KEY_ENV],
+        readEnvWithDeprecation(DEV_KEY_ENV, DEV_KEY_LEGACY_ENV),
       );
       if (fromEnv) {
         this.key = fromEnv;

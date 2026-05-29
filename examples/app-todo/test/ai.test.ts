@@ -25,7 +25,7 @@ import { Task } from '../src/objects/task.object';
   console.log('🤖 ObjectStack AI Demo — Todo Stack');
   console.log('────────────────────────────────────');
 
-  process.env.OS_MULTI_TENANT = 'false';
+  process.env.OS_MULTI_ORG_ENABLED = 'false';
 
   const kernel = new ObjectKernel();
 

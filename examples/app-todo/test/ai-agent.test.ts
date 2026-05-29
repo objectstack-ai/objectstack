@@ -26,7 +26,7 @@ import { Task } from '../src/objects/task.object';
   console.log('🤖 ObjectStack AI Agent Demo — data_chat over Todo data');
   console.log('────────────────────────────────────────────────────────');
 
-  process.env.OS_MULTI_TENANT = 'false';
+  process.env.OS_MULTI_ORG_ENABLED = 'false';
 
   const kernel = new ObjectKernel();
   await kernel.use(new ObjectQLPlugin());

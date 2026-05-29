@@ -26,6 +26,14 @@ export const SysDeviceCode = ObjectSchema.create({
   icon: 'key-round',
   isSystem: true,
   managedBy: 'better-auth',
+  // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,
+  // but may add overlay row-level config. Use `no-overlay` if you need to
+  // forbid sys_metadata overlays entirely.
+  protection: {
+    lock: 'full',
+    reason: 'Identity table managed by better-auth — see ADR-0010.',
+    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+  },
   description: 'OAuth 2.0 Device Authorization Grant (RFC 8628) pending requests',
   titleFormat: '{user_code}',
   compactLayout: ['user_code', 'status', 'client_id', 'expires_at'],

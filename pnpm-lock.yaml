@@ -326,6 +326,9 @@ importers:
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../../plugins/plugin-hono-server
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
     devDependencies:
       '@objectstack/runtime':
         specifier: workspace:*
@@ -522,6 +525,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../types
       '@oclif/core':
         specifier: ^4.11.4
         version: 4.11.4
@@ -1104,6 +1110,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
       better-auth:
         specifier: ^1.6.11
         version: 1.6.11(@cloudflare/workers-types@4.20260520.1)(@opentelemetry/api@1.9.1)(@sveltejs/kit@2.61.1(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.0.0(svelte@5.55.3)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))(svelte@5.55.3)(typescript@6.0.3)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))(better-sqlite3@12.10.0)(mongodb@7.2.0(socks@2.8.9))(mysql2@3.22.4(@types/node@25.9.1))(next@16.2.6(@opentelemetry/api@1.9.1)(@playwright/test@1.60.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(pg@8.21.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(svelte@5.55.3)(vitest@4.1.7)
@@ -1126,6 +1135,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
     devDependencies:
       '@objectstack/driver-memory':
         specifier: workspace:*
@@ -1197,6 +1209,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
       hono:
         specifier: ^4.12.23
         version: 4.12.23
@@ -1222,6 +1237,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1372,6 +1390,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
     devDependencies:
       '@types/node':
         specifier: ^25.9.1
@@ -1496,6 +1517,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
       ai:
         specifier: ^6.0.191
         version: 6.0.191(zod@4.4.3)
@@ -1785,6 +1809,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
     devDependencies:
       '@types/node':
         specifier: ^25.9.1

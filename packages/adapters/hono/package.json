@@ -17,7 +17,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@objectstack/plugin-hono-server": "workspace:*"
+    "@objectstack/plugin-hono-server": "workspace:*",
+    "@objectstack/types": "workspace:*"
   },
   "peerDependencies": {
     "@objectstack/runtime": "workspace:^",

@@ -16,3 +16,4 @@ export * from './error-map.zod';
 export * from './metadata-collection.zod';
 export * from './lazy-schema';
 export * from './expression.zod';
+export * from './protection.zod';

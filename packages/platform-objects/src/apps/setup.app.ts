@@ -32,9 +32,13 @@ export const SETUP_APP: App = {
   icon: 'settings',
   active: true,
   isDefault: false,
-  // ADR-0010 — core admin UI must not be overlay-edited or deleted.
-  _lock: 'full',
-  _lockReason: 'Core admin UI shipped by @objectstack/platform-objects — see ADR-0010.',
+  // ADR-0010 §3.7 — author-facing protection block. Loader translates
+  // this into the `_lock` envelope at registration time.
+  protection: {
+    lock: 'full',
+    reason: 'Core admin UI shipped by @objectstack/platform-objects — see ADR-0010.',
+    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+  },
   branding: {
     primaryColor: '#475569', // Slate-600 — neutral admin palette
   },

@@ -12,6 +12,7 @@ import type {
 } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
 import type { IEmailService } from '@objectstack/spec/contracts';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import { createObjectQLAdapterFactory } from './objectql-adapter.js';
 import {
   AUTH_USER_CONFIG,
@@ -485,11 +486,11 @@ export class AuthManager {
       },
 
       // Trusted origins for CSRF protection (supports wildcards like "https://*.example.com")
-      // Auto-includes origins from CORS_ORIGIN env var so CORS and CSRF stay in sync.
+      // Auto-includes origins from OS_CORS_ORIGIN env var so CORS and CSRF stay in sync.
       ...(() => {
         const origins: string[] = [...(this.config.trustedOrigins || [])];
-        // Sync with CORS_ORIGIN env var (comma-separated)
-        const corsOrigin = process.env.CORS_ORIGIN;
+        // Sync with OS_CORS_ORIGIN env var (comma-separated)
+        const corsOrigin = readEnvWithDeprecation('OS_CORS_ORIGIN', 'CORS_ORIGIN');
         if (corsOrigin && corsOrigin !== '*') {
           corsOrigin.split(',').map(s => s.trim()).filter(Boolean).forEach(o => {
             if (!origins.includes(o)) origins.push(o);
@@ -708,9 +709,10 @@ export class AuthManager {
           beforeCreateOrganization: async () => {
             const env = (globalThis as any)?.process?.env ?? {};
             const explicit = env.OS_MULTI_ORG_ENABLED;
-            const flag = String(
-              explicit ?? env.OS_MULTI_TENANT ?? 'false',
-            ).toLowerCase();
+            const legacy = explicit === undefined
+              ? readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT')
+              : explicit;
+            const flag = String(legacy ?? 'false').toLowerCase();
             if (flag === 'false') {
               const { APIError } = await import('better-auth/api');
               throw new APIError('FORBIDDEN', {
@@ -1039,7 +1041,7 @@ export class AuthManager {
    * Generate a secure secret if not provided
    */
   private generateSecret(): string {
-    const envSecret = process.env.AUTH_SECRET;
+    const envSecret = readEnvWithDeprecation('OS_AUTH_SECRET', 'AUTH_SECRET');
 
     if (!envSecret) {
       // In production, a secret MUST be provided
@@ -1047,10 +1049,10 @@ export class AuthManager {
       const fallbackSecret = 'dev-secret-' + Date.now();
 
       console.warn(
-        '⚠️  WARNING: No AUTH_SECRET environment variable set! ' +
+        '⚠️  WARNING: No OS_AUTH_SECRET environment variable set! ' +
         'Using a temporary development secret. ' +
         'This is NOT secure for production use. ' +
-        'Please set AUTH_SECRET in your environment variables.'
+        'Please set OS_AUTH_SECRET in your environment variables.'
       );
 
       return fallbackSecret;
@@ -1242,12 +1244,13 @@ export class AuthManager {
     const pluginConfig: Partial<AuthPluginConfig> = this.config.plugins ?? {};
     // Multi-org capability (UI org-switcher, "create org" action, etc.).
     // Resolution order: explicit `OS_MULTI_ORG_ENABLED` wins, else fall
-    // back to `OS_MULTI_TENANT` (multi-tenant deployments are always
+    // back to legacy `OS_MULTI_TENANT` (multi-tenant deployments are always
     // multi-org); default `'false'` → single-org / per-env runtime.
     const multiOrgEnv = (globalThis as any)?.process?.env ?? {};
-    const multiOrgEnabled = String(
-      multiOrgEnv.OS_MULTI_ORG_ENABLED ?? multiOrgEnv.OS_MULTI_TENANT ?? 'false',
-    ).toLowerCase() !== 'false';
+    const multiOrgRaw = multiOrgEnv.OS_MULTI_ORG_ENABLED !== undefined
+      ? multiOrgEnv.OS_MULTI_ORG_ENABLED
+      : (readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false');
+    const multiOrgEnabled = String(multiOrgRaw).toLowerCase() !== 'false';
 
     // Legal links shown beneath the login / register cards. Defaults to
     // the public ObjectStack pages so vanilla deployments don't link to

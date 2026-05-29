@@ -7,7 +7,7 @@ import TodoApp from '../objectstack.config';
 (async () => {
   console.log('🧪 Verifying Seeding...');
 
-  process.env.OS_MULTI_TENANT = 'false';
+  process.env.OS_MULTI_ORG_ENABLED = 'false';
 
   const kernel = new ObjectKernel();
 

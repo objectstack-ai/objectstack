@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import type {
     IClusterService,
     IDataEngine,
@@ -36,7 +37,8 @@ export interface WebhookOutboxPluginOptions
     outbox?: IWebhookOutbox | ((ctx: PluginContext) => IWebhookOutbox);
 
     /**
-     * Stable node id. If omitted, uses `process.env.OBJECTSTACK_NODE_ID`
+     * Stable node id. If omitted, uses `process.env.OS_NODE_ID`
+     * (legacy `OBJECTSTACK_NODE_ID` still honoured with deprecation warning)
      * or a random UUID generated at plugin init.
      */
     nodeId?: string;
@@ -145,7 +147,7 @@ export class WebhookOutboxPlugin implements Plugin {
         this.outboxInstance = outbox;
         const nodeId =
             this.options.nodeId ??
-            process.env.OBJECTSTACK_NODE_ID ??
+            readEnvWithDeprecation('OS_NODE_ID', 'OBJECTSTACK_NODE_ID') ??
             `node-${Math.random().toString(36).slice(2, 10)}`;
 
         const dispatcher = new WebhookDispatcher({

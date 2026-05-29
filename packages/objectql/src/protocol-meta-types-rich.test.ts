@@ -13,7 +13,7 @@ import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
  *     `types` array (back-compat preserved).
  *   • Registry metadata (label, domain, allowOrgOverride, …) flows through
  *     from DEFAULT_METADATA_TYPE_REGISTRY.
- *   • `OBJECTSTACK_METADATA_WRITABLE` env var elevates `allowOrgOverride`
+ *   • `OS_METADATA_WRITABLE` env var elevates `allowOrgOverride`
  *     at runtime, and tags the entry with `overrideSource: 'env'`.
  *   • The env-elevated set is also honoured by the saveMetaItem 403 gate.
  */
@@ -21,7 +21,7 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
     let protocol: ObjectStackProtocolImplementation;
     let mockEngine: any;
     let registry: SchemaRegistry;
-    const originalEnv = process.env.OBJECTSTACK_METADATA_WRITABLE;
+    const originalEnv = process.env.OS_METADATA_WRITABLE;
 
     beforeEach(() => {
         registry = new SchemaRegistry({ multiTenant: false });
@@ -31,7 +31,7 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         registry.registerItem('view', { name: 'sys_user.grid', type: 'grid', object: 'sys_user' }, 'name');
         registry.registerItem('app', { name: 'crm', label: 'CRM' }, 'name');
         // `function` is registry-default `allowOrgOverride: false` (system/wiring-layer)
-        // and is used by the "honours OBJECTSTACK_METADATA_WRITABLE" test as a control type.
+        // and is used by the "honours OS_METADATA_WRITABLE" test as a control type.
         registry.registerItem('flow', { name: 'crm.onboard', steps: [] }, 'name');
         // Register wiring-layer types so getMetaTypes() includes them in `entries`
         // (getMetaTypes only returns types present in getRegisteredTypes()).
@@ -55,9 +55,9 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
 
     afterEach(() => {
         if (originalEnv === undefined) {
-            delete process.env.OBJECTSTACK_METADATA_WRITABLE;
+            delete process.env.OS_METADATA_WRITABLE;
         } else {
-            process.env.OBJECTSTACK_METADATA_WRITABLE = originalEnv;
+            process.env.OS_METADATA_WRITABLE = originalEnv;
         }
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
@@ -90,10 +90,10 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         expect(viewEntry.domain).toBe('ui');
     });
 
-    it('honours OBJECTSTACK_METADATA_WRITABLE to elevate allowOrgOverride', async () => {
+    it('honours OS_METADATA_WRITABLE to elevate allowOrgOverride', async () => {
         // Use `function` and `service` — both are registry-default
         // `allowOrgOverride: false` (wiring-layer types that must stay code-only).
-        process.env.OBJECTSTACK_METADATA_WRITABLE = 'function,service';
+        process.env.OS_METADATA_WRITABLE = 'function,service';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
 
         const result: any = await protocol.getMetaTypes();
@@ -120,7 +120,7 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         // `not_creatable` (the precise reason); for artifact-backed names
         // the code would be `not_overridable`. Both indicate the gate
         // fired with the same 403 status.
-        delete process.env.OBJECTSTACK_METADATA_WRITABLE;
+        delete process.env.OS_METADATA_WRITABLE;
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
         await expect(
@@ -128,7 +128,7 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         ).rejects.toThrow(/not_(overridable|creatable)/);
 
         // With env var: `function` writes allowed.
-        process.env.OBJECTSTACK_METADATA_WRITABLE = 'function';
+        process.env.OS_METADATA_WRITABLE = 'function';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
         // Should no longer throw "not_overridable" / "not_creatable". (May still hit

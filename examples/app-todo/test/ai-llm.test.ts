@@ -38,10 +38,10 @@ import { registerTaskActionHandlers } from '../src/actions/register-handlers';
   // Default model — small + cheap, but still tool-call capable.
   // Vercel AI Gateway's OpenAI-compatible endpoint expects `provider/model`
   // ids (e.g. "openai/gpt-4.1-mini") in `OPENAI_BASE_URL` mode.
-  const modelId = process.env.AI_MODEL ?? 'openai/gpt-4.1-mini';
+  const modelId = process.env.OS_AI_MODEL ?? 'openai/gpt-4.1-mini';
   console.log(`   Model: ${modelId}`);
 
-  process.env.OS_MULTI_TENANT = 'false';
+  process.env.OS_MULTI_ORG_ENABLED = 'false';
 
   // Configure the OpenAI-compatible provider. `OPENAI_BASE_URL` lets you
   // point at any compatible endpoint (Vercel AI Gateway, Ollama, LM Studio,

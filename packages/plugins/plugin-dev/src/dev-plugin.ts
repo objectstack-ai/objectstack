@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, createMemoryCache, createMemoryQueue, createMemoryJob, createMemoryI18n } from '@objectstack/core';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import { SystemObjectName } from '@objectstack/spec/system';
 
 /**
@@ -555,7 +556,7 @@ export class DevPlugin implements Plugin {
     // because SecurityPlugin.start() probes the `org-scoping` service and
     // caches the result for the lifetime of the plugin.
     if (enabled('security')) {
-      const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
+      const multiTenant = String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false';
       if (multiTenant) {
         try {
           const { OrgScopingPlugin } = await import('@objectstack/plugin-org-scoping') as any;

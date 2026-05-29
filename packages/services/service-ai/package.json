@@ -21,6 +21,7 @@
     "@ai-sdk/provider": "^3.0.10",
     "@objectstack/core": "workspace:*",
     "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*",
     "ai": "^6.0.191",
     "zod": "^4.4.3"
   },

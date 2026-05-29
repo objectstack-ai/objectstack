@@ -39,7 +39,7 @@ import { registerTaskActionHandlers } from '../src/actions/register-handlers';
   console.log('🛡️  ObjectStack HITL Demo — approval queue for dangerous actions');
   console.log('────────────────────────────────────────────────────────────────');
 
-  process.env.OS_MULTI_TENANT = 'false';
+  process.env.OS_MULTI_ORG_ENABLED = 'false';
 
   const kernel = new ObjectKernel();
   await kernel.use(new ObjectQLPlugin());

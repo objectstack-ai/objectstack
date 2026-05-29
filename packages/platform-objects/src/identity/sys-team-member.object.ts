@@ -17,6 +17,14 @@ export const SysTeamMember = ObjectSchema.create({
   icon: 'user-plus',
   isSystem: true,
   managedBy: 'better-auth',
+  // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,
+  // but may add overlay row-level config. Use `no-overlay` if you need to
+  // forbid sys_metadata overlays entirely.
+  protection: {
+    lock: 'full',
+    reason: 'Identity table managed by better-auth — see ADR-0010.',
+    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+  },
   description: 'Team membership records linking users to teams',
   titleFormat: '{user_id} in {team_id}',
   compactLayout: ['user_id', 'team_id', 'created_at'],

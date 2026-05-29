@@ -88,9 +88,9 @@ describe('MCPServerPlugin', () => {
   beforeEach(() => {
     process.env = { ...originalEnv };
     // Ensure MCP_SERVER_ENABLED is NOT set unless explicitly done in a test
-    delete process.env.MCP_SERVER_ENABLED;
-    delete process.env.MCP_SERVER_NAME;
-    delete process.env.MCP_SERVER_TRANSPORT;
+    delete process.env.OS_MCP_SERVER_ENABLED;
+    delete process.env.OS_MCP_SERVER_NAME;
+    delete process.env.OS_MCP_SERVER_TRANSPORT;
   });
 
   describe('metadata', () => {
@@ -114,7 +114,7 @@ describe('MCPServerPlugin', () => {
     });
 
     it('should respect MCP_SERVER_NAME env var', async () => {
-      process.env.MCP_SERVER_NAME = 'custom-name';
+      process.env.OS_MCP_SERVER_NAME = 'custom-name';
       const plugin = new MCPServerPlugin();
       const ctx = createMockPluginContext();
 

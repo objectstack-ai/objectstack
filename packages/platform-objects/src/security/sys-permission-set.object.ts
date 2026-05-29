@@ -18,6 +18,13 @@ export const SysPermissionSet = ObjectSchema.create({
   icon: 'lock',
   isSystem: true,
   managedBy: 'config',
+  // ADR-0010 §3.7 — RBAC primitive; tenants may add custom rows
+  // (created via UI / API) but the schema itself is locked.
+  protection: {
+    lock: 'no-overlay',
+    reason: 'RBAC schema is platform-defined — see ADR-0010.',
+    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+  },
   description: 'Named permission groupings for fine-grained access control',
   displayNameField: 'label',
   titleFormat: '{label}',

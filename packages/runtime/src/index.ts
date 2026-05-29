@@ -151,6 +151,7 @@ export type {
 
 // Export Types
 export * from '@objectstack/core';
+export { readEnvWithDeprecation, _resetEnvDeprecationWarnings } from '@objectstack/types';
 
 
 

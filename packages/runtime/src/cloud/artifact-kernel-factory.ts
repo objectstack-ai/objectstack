@@ -32,6 +32,7 @@
 
 import { createHmac } from 'node:crypto';
 import { ObjectKernel } from '@objectstack/core';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import type * as Contracts from '@objectstack/spec/contracts';
 import { DriverPlugin } from '../driver-plugin.js';
 import { AppPlugin } from '../app-plugin.js';
@@ -88,8 +89,7 @@ export class ArtifactKernelFactory implements EnvironmentKernelFactory {
         this.kernelConfig = config.kernelConfig;
         this.authBaseSecret = (
             config.authBaseSecret
-            ?? process.env.OS_AUTH_SECRET
-            ?? process.env.AUTH_SECRET
+            ?? readEnvWithDeprecation('OS_AUTH_SECRET', 'AUTH_SECRET')
             ?? ''
         ).trim();
     }
@@ -278,7 +278,7 @@ export class ArtifactKernelFactory implements EnvironmentKernelFactory {
         // `tenant_isolation` RLS when the scoping plugin is absent —
         // so OrgScopingPlugin MUST be registered before SecurityPlugin.
         try {
-            const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
+            const multiTenant = String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false';
             if (multiTenant) {
                 try {
                     const { OrgScopingPlugin } = await import('@objectstack/plugin-org-scoping');

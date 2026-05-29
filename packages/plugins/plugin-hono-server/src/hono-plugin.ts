@@ -10,6 +10,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createOriginMatcher, hasWildcardPattern, isLocalhostOrigin } from './pattern-matcher';
+import { readEnvWithDeprecation } from '@objectstack/types';
 
 export interface StaticMount {
     root: string;
@@ -52,7 +53,8 @@ export interface HonoPluginOptions {
      * CORS configuration. Set to `false` to disable entirely.
      * Enabled by default with origin '*'.
      * Can also be controlled via environment variables:
-     *   CORS_ENABLED, CORS_ORIGIN, CORS_CREDENTIALS, CORS_MAX_AGE
+     *   OS_CORS_ENABLED, OS_CORS_ORIGIN, OS_CORS_CREDENTIALS, OS_CORS_MAX_AGE
+     *   (legacy CORS_* names still honoured with a deprecation warning).
      */
     cors?: HonoCorsOptions | false;
 }
@@ -110,24 +112,26 @@ export class HonoServerPlugin implements Plugin {
 
         // ─── CORS Middleware ──────────────────────────────────────────────────
         // Enabled by default. Controlled via options.cors or environment variables.
-        const corsDisabledByEnv = process.env.CORS_ENABLED === 'false';
+        const corsDisabledByEnv = readEnvWithDeprecation('OS_CORS_ENABLED', 'CORS_ENABLED') === 'false';
         if (this.options.cors !== false && !corsDisabledByEnv) {
             const corsOpts = typeof this.options.cors === 'object' ? this.options.cors : {};
             const enabled = corsOpts.enabled ?? true;
 
             if (enabled) {
                 let configuredOrigin: string | string[];
+                const corsOriginEnv = readEnvWithDeprecation('OS_CORS_ORIGIN', 'CORS_ORIGIN');
                 if (corsOpts.origins) {
                     configuredOrigin = corsOpts.origins;
-                } else if (process.env.CORS_ORIGIN) {
-                    const envOrigin = process.env.CORS_ORIGIN.trim();
+                } else if (corsOriginEnv) {
+                    const envOrigin = corsOriginEnv.trim();
                     configuredOrigin = envOrigin.includes(',') ? envOrigin.split(',').map(s => s.trim()) : envOrigin;
                 } else {
                     configuredOrigin = '*';
                 }
 
-                const credentials = corsOpts.credentials ?? (process.env.CORS_CREDENTIALS !== 'false');
-                const maxAge = corsOpts.maxAge ?? (process.env.CORS_MAX_AGE ? parseInt(process.env.CORS_MAX_AGE, 10) : 86400);
+                const credentials = corsOpts.credentials ?? (readEnvWithDeprecation('OS_CORS_CREDENTIALS', 'CORS_CREDENTIALS') !== 'false');
+                const maxAgeEnv = readEnvWithDeprecation('OS_CORS_MAX_AGE', 'CORS_MAX_AGE');
+                const maxAge = corsOpts.maxAge ?? (maxAgeEnv ? parseInt(maxAgeEnv, 10) : 86400);
 
                 // Determine origin handler based on configuration.
                 // Always use a function so that localhost origins are

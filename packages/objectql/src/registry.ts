@@ -1,8 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ServiceObject, ObjectSchema, ObjectOwnership } from '@objectstack/spec/data';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema } from '@objectstack/spec/kernel';
 import { AppSchema } from '@objectstack/spec/ui';
+import { applyProtection } from '@objectstack/spec/shared';
 
 /**
  * Reserved namespaces that do not get FQN prefix applied.
@@ -283,7 +285,7 @@ export class SchemaRegistry {
     } else {
       // Mirror the SecurityPlugin / CLI banner default (env-driven, off by default).
       this.multiTenant =
-        String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
+        String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false';
     }
   }
 
@@ -624,10 +626,11 @@ export class SchemaRegistry {
     const collection = this.metadata.get(type)!;
     const baseName = String(item[keyField]);
 
-    // Tag item with owning package for scoped queries
-    if (packageId) {
-      (item as any)._packageId = packageId;
-    }
+    // ADR-0010 §3.7 — translate the author-facing `protection` block
+    // into the private `_lock` envelope and stamp package provenance.
+    // Centralised with the artifact loader path in metadata/plugin.ts
+    // so both load paths produce identical lock state.
+    applyProtection(item as any, { packageId });
 
     // Validation Hook
     try {

@@ -21,6 +21,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import type { IAIService, IAIConversationService, IAutomationService, IDataEngine, IEmbedder, IMetadataService, LLMAdapter } from '@objectstack/spec/contracts';
 import { EMBEDDER_SERVICE } from '@objectstack/spec/contracts';
 import type * as AI from '@objectstack/spec/ai';
@@ -441,7 +442,7 @@ export class AIServicePlugin implements Plugin {
           const mod = await import(/* webpackIgnore: true */ pkg);
           const provider = mod[factory] ?? mod.default;
           if (typeof provider === 'function') {
-            const modelId = process.env.AI_MODEL ?? defaultModel;
+            const modelId = readEnvWithDeprecation('OS_AI_MODEL', 'AI_MODEL') ?? defaultModel;
             // For OpenAI, prefer the Chat Completions API (`openai.chat(...)`)
             // over the new Responses API. The Responses endpoint
             // (`/v1/responses`) is not supported by common reverse proxies

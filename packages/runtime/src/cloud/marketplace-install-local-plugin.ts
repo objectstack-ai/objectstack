@@ -44,6 +44,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { readEnvWithDeprecation } from '@objectstack/types';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 
@@ -677,7 +678,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // writes tenant-scoped rows the same way AppPlugin's
         // single-tenant branch + SecurityPlugin's per-org replay do.
         if (opts.seedNow && datasets.length > 0) {
-            const multiTenant = String(process.env.OS_MULTI_TENANT ?? 'false').toLowerCase() !== 'false';
+            const multiTenant = String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false';
             try {
                 const ql: any = ctx.getService('objectql');
                 let metadata: any;

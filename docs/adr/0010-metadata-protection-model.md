@@ -494,7 +494,7 @@ branching and a human-readable hint pointing at this ADR:
 
 The migration is staged so each phase is independently shippable.
 
-### Phase 1 — L3 + audit foundation (≈ 1 day)
+### Phase 1 — L3 + audit foundation (≈ 1 day) — ✅ **Implemented**
 
 1. Add `MetadataArtifactBase` to `packages/spec/src/kernel/`. Spread it
    into every metadata Zod schema.
@@ -539,7 +539,7 @@ The migration is staged so each phase is independently shippable.
 4. Deprecate `OBJECTSTACK_METADATA_WRITABLE` in production builds (warn
    on startup); keep in test / dev.
 
-### Phase 4 — Studio UI + diff UX (objectui side, ≈ 1 day)
+### Phase 4 — Studio UI + diff UX (objectui side, ≈ 1 day) — ✅ **Implemented**
 
 1. Read `editable` / `deletable` / `resettable` flags on the editor
    page; disable buttons + show tooltip with `lockReason`.
@@ -548,6 +548,33 @@ The migration is staged so each phase is independently shippable.
 4. Provenance badge ("Package" / "Custom") on the list and detail
    pages.
 5. Audit log tab on each item (calls the new audit endpoint).
+
+### Phase 4.3 — Package-level `protection` block (≈ ½ day) — ✅ **Implemented**
+
+Public author surface (`packages/spec/src/shared/protection.zod.ts`)
+that translates into the private `_lock` envelope at load time:
+
+```ts
+export const SETUP_APP: App = {
+  name: 'setup',
+  label: 'Setup',
+  protection: {
+    lock: 'full',
+    reason: 'Core admin UI shipped by @objectstack/platform-objects.',
+    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+  },
+  // ...
+};
+```
+
+Loader (`metadata/plugin.ts` + `objectql/registry.ts`) calls
+`applyProtection(item, { packageId })` to translate the block into the
+private `_lock`/`_lockReason`/`_lockDocsUrl`/`_lockSource`/
+`_provenance`/`_packageId` envelope and strips the public `protection`
+block so it never leaks into the overlay row. `_lockSource` defaults to
+`'package'` when a package id is supplied and `'artifact'` otherwise.
+The `lockDocsUrl` is surfaced on the GET response and rendered as a
+"View docs →" link in the Studio lock banner.
 
 ### Phase 5 — Optional: Solution stack (deferred)
 

@@ -21,6 +21,14 @@ export const SysOauthRefreshToken = ObjectSchema.create({
   icon: 'refresh-cw',
   isSystem: true,
   managedBy: 'better-auth',
+  // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,
+  // but may add overlay row-level config. Use `no-overlay` if you need to
+  // forbid sys_metadata overlays entirely.
+  protection: {
+    lock: 'full',
+    reason: 'Identity table managed by better-auth — see ADR-0010.',
+    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+  },
   description: 'Opaque OAuth refresh tokens (linked to a session)',
   compactLayout: ['client_id', 'user_id', 'expires_at'],
 

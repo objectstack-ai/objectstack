@@ -118,6 +118,15 @@ export const MetadataProtectionFields = {
 
   /** Owning package semver. */
   _packageVersion: z.string().optional().describe('Owning package version.'),
+
+  /**
+   * Optional URL the Studio lock banner links to for more context.
+   * Populated by the loader from the author-facing
+   * `protection.docsUrl` field — see `shared/protection.zod.ts`.
+   */
+  _lockDocsUrl: z.string().optional().describe(
+    'Optional documentation link surfaced next to _lockReason.',
+  ),
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────
@@ -133,6 +142,7 @@ export function extractProtection(item: unknown): {
   lock: MetadataLock;
   lockReason: string | undefined;
   lockSource: MetadataLockSource | undefined;
+  lockDocsUrl: string | undefined;
   provenance: MetadataProvenance | undefined;
   packageId: string | undefined;
   packageVersion: string | undefined;
@@ -141,6 +151,7 @@ export function extractProtection(item: unknown): {
     lock: 'none' as MetadataLock,
     lockReason: undefined,
     lockSource: undefined,
+    lockDocsUrl: undefined,
     provenance: undefined,
     packageId: undefined,
     packageVersion: undefined,
@@ -156,13 +167,14 @@ export function extractProtection(item: unknown): {
     && MetadataLockSourceSchema.options.includes(rec['_lockSource'] as MetadataLockSource)
     ? (rec['_lockSource'] as MetadataLockSource)
     : undefined;
+  const lockDocsUrl = typeof rec['_lockDocsUrl'] === 'string' ? (rec['_lockDocsUrl'] as string) : undefined;
   const provenance = typeof rec['_provenance'] === 'string'
     && MetadataProvenanceSchema.options.includes(rec['_provenance'] as MetadataProvenance)
     ? (rec['_provenance'] as MetadataProvenance)
     : undefined;
   const packageId = typeof rec['_packageId'] === 'string' ? (rec['_packageId'] as string) : undefined;
   const packageVersion = typeof rec['_packageVersion'] === 'string' ? (rec['_packageVersion'] as string) : undefined;
-  return { lock, lockReason, lockSource, provenance, packageId, packageVersion };
+  return { lock, lockReason, lockSource, lockDocsUrl, provenance, packageId, packageVersion };
 }
 
 /**
@@ -197,6 +209,7 @@ export function resolveLockState(item: unknown, artifactBacked: boolean): {
   lock: MetadataLock;
   lockReason: string | undefined;
   lockSource: MetadataLockSource | undefined;
+  lockDocsUrl: string | undefined;
   provenance: MetadataProvenance | undefined;
   packageId: string | undefined;
   packageVersion: string | undefined;

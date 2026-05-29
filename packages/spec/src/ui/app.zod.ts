@@ -24,6 +24,7 @@ import { SharingConfigSchema, EmbedConfigSchema } from './sharing.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { ProtectionSchema } from '../shared/protection.zod';
 const BaseNavItemSchema = z.object({
   /** Unique identifier for the item */
   id: SnakeCaseIdentifierSchema.describe('Unique identifier for this navigation item (lowercase snake_case)'),
@@ -577,7 +578,18 @@ export const AppSchema = lazySchema(() => z.object({
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes for the application'),
 
-  // ADR-0010 — metadata protection envelope (optional).
+  /**
+   * ADR-0010 §3.7 — Package-level protection envelope. Package
+   * authors declare lock policy here; the loader translates it
+   * into the private `_lock` envelope at registration time and
+   * strips this block before persistence. See
+   * `shared/protection.zod.ts`.
+   */
+  protection: ProtectionSchema.optional().describe(
+    'Package author protection block — lock policy for this app.',
+  ),
+
+  // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 }));
 

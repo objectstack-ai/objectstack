@@ -190,8 +190,8 @@ describe('HonoServerPlugin', () => {
         });
 
         it('should support CORS_ORIGIN environment variable with wildcards', async () => {
-            const originalEnv = process.env.CORS_ORIGIN;
-            process.env.CORS_ORIGIN = 'https://*.objectui.org,https://*.objectstack.ai';
+            const originalEnv = process.env.OS_CORS_ORIGIN;
+            process.env.OS_CORS_ORIGIN = 'https://*.objectui.org,https://*.objectstack.ai';
 
             const plugin = new HonoServerPlugin();
             await plugin.init(context as PluginContext);
@@ -203,9 +203,9 @@ describe('HonoServerPlugin', () => {
 
             // Restore environment
             if (originalEnv !== undefined) {
-                process.env.CORS_ORIGIN = originalEnv;
+                process.env.OS_CORS_ORIGIN = originalEnv;
             } else {
-                delete process.env.CORS_ORIGIN;
+                delete process.env.OS_CORS_ORIGIN;
             }
         });
 
@@ -224,8 +224,8 @@ describe('HonoServerPlugin', () => {
         });
 
         it('should disable CORS when CORS_ENABLED env is false', async () => {
-            const originalEnv = process.env.CORS_ENABLED;
-            process.env.CORS_ENABLED = 'false';
+            const originalEnv = process.env.OS_CORS_ENABLED;
+            process.env.OS_CORS_ENABLED = 'false';
 
             const plugin = new HonoServerPlugin();
             await plugin.init(context as PluginContext);
@@ -237,9 +237,9 @@ describe('HonoServerPlugin', () => {
 
             // Restore environment
             if (originalEnv !== undefined) {
-                process.env.CORS_ENABLED = originalEnv;
+                process.env.OS_CORS_ENABLED = originalEnv;
             } else {
-                delete process.env.CORS_ENABLED;
+                delete process.env.OS_CORS_ENABLED;
             }
         });
 

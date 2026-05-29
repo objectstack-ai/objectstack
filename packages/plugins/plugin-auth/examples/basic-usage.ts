@@ -25,7 +25,7 @@ async function main() {
     
     // Register auth plugin
     await kernel.use(new AuthPlugin({
-      secret: process.env.AUTH_SECRET || 'your-secret-key-at-least-32-chars',
+      secret: process.env.OS_AUTH_SECRET || 'your-secret-key-at-least-32-chars',
       baseUrl: process.env.BASE_URL || 'http://localhost:3000',
       databaseUrl: process.env.DATABASE_URL,
       

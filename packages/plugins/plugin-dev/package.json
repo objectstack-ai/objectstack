@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*"
   },
   "peerDependencies": {
     "@objectstack/driver-memory": "workspace:^",
