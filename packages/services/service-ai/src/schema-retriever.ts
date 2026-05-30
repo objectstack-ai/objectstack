@@ -159,6 +159,10 @@ export interface ObjectShape {
   pluralLabel?: string;
   description?: string;
   fields?: Record<string, FieldShape>;
+  /** Datasource the object is routed to (ADR-0015). */
+  datasource?: string;
+  /** External-federation binding, when this is a federated object (ADR-0015). */
+  external?: { writable?: boolean; remoteName?: string; remoteSchema?: string };
 }
 
 /** Minimal shape of a field definition. */
