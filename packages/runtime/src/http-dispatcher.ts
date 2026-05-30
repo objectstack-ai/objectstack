@@ -1698,9 +1698,12 @@ export class HttpDispatcher {
             // plugin — it exposes the *logical* storage backends the
             // control-plane can actually allocate a project against (memory /
             // sqlite / turso / ...). The raw ObjectQL `driver.*` services are
-            // a deeper layer (e.g. a single unified `sql` driver that covers
-            // better-sqlite3 + libsql + pg + mysql) and collapse the user's
-            // meaningful choices into one row, so they make a poor UI source.
+            // a deeper layer (e.g. the unified `sql` driver, whose knex
+            // backends are better-sqlite3 / pg / mysql2 — `libsql`/`turso`
+            // is NOT bundled in framework; it ships as the separate
+            // `@objectstack/driver-turso` package in the cloud repo) and
+            // collapse the user's meaningful choices into one row, so they
+            // make a poor UI source.
             // The canonical service key is `environment-provisioning-adapters`
             // (post project→environment rename — registered by the cloud tenant
             // plugin and the objectos host). The legacy `project-provisioning-
