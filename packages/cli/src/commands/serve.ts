@@ -1615,6 +1615,45 @@ export default class Serve extends Command {
       await new Promise(r => setTimeout(r, 100));
       restoreOutput();
 
+      // ── Secret-field CryptoProvider wiring (host composition root) ──
+      // objectql's `secret` field type encrypts on write to `sys_secret`
+      // and fails closed when no ICryptoProvider is registered. objectql
+      // must NOT depend on a crypto implementation (layering), so the
+      // host injects one here. Dev/self-host gets an independent
+      // InMemoryCryptoProvider; production hosts swap this for a
+      // KMS/Vault-backed provider (e.g. via an env-gated branch or a
+      // dedicated plugin) before secrets are written. We resolve the
+      // data engine by its registered service name and feature-detect
+      // `setCryptoProvider` so older engines / alternate data services
+      // degrade gracefully (writing a secret then fails closed, as
+      // designed, rather than silently storing cleartext).
+      try {
+        const dataEngine: any =
+          kernel.getService?.('data') ?? kernel.getService?.('objectql');
+        if (dataEngine && typeof dataEngine.setCryptoProvider === 'function') {
+          const { InMemoryCryptoProvider } = await import(
+            /* webpackIgnore: true */ '@objectstack/service-settings'
+          );
+          dataEngine.setCryptoProvider(new InMemoryCryptoProvider());
+          if (isDev) {
+            console.log(
+              chalk.dim(
+                '  ↪ secret fields: InMemoryCryptoProvider wired (dev) — swap for KMS/Vault in production',
+              ),
+            );
+          }
+        }
+      } catch (err: any) {
+        // Non-fatal: without a provider, secret writes fail closed by
+        // design. Surface a hint so operators know why a `secret` field
+        // write might reject.
+        console.warn(
+          chalk.yellow(
+            `  ⚠ secret fields: no CryptoProvider wired (${err?.message ?? err}); writing a secret field will fail closed`,
+          ),
+        );
+      }
+
       // ── Migrate-and-exit short-circuit ─────────────────────────────
       // Out-of-band migration mode: the caller (e.g.
       // `apps/cloud/scripts/migrate.ts`) just wants the kernel

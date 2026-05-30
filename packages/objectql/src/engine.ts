@@ -13,6 +13,14 @@ import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kern
 import { DriverInterface, IDataEngine, Logger, createLogger } from '@objectstack/core';
 import { CoreServiceName, StorageNameMapping } from '@objectstack/spec/system';
 import { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
+import type { ICryptoProvider, CryptoHandle } from '@objectstack/spec/contracts';
+import {
+  collectSecretFields,
+  makeSecretRef,
+  parseSecretRef,
+  isSecretRef,
+  SECRET_MASK,
+} from './secret-fields.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN } from './registry.js';
 import { ExpressionEngine } from '@objectstack/formula';
@@ -234,6 +242,11 @@ export class ObjectQL implements IDataEngine {
 
   // Realtime service for event publishing
   private realtimeService?: IRealtimeService;
+
+  // Crypto provider backing `secret`-typed fields. Optional: when absent,
+  // writing an object that declares a secret field fails closed (never
+  // persists cleartext). Injected by the host via setCryptoProvider().
+  private cryptoProvider?: ICryptoProvider;
 
   // Per-engine SchemaRegistry instance.
   //
@@ -1040,6 +1053,162 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
+   * Register the crypto provider that backs `secret`-typed fields.
+   *
+   * When set, the engine encrypts secret fields on write (storing ciphertext in
+   * `sys_secret` and only an opaque ref on the business row) and masks them on
+   * read. When NOT set, writing to an object that declares a secret field is
+   * **fail-closed** — the write throws rather than persist cleartext.
+   *
+   * Mirrors the Settings subsystem's ICryptoProvider wiring; the host (e.g.
+   * `serve`) injects `InMemoryCryptoProvider` in dev and a KMS/Vault-backed
+   * provider in production.
+   */
+  setCryptoProvider(provider: ICryptoProvider): void {
+    this.cryptoProvider = provider;
+    this.logger.info('CryptoProvider configured for secret fields');
+  }
+
+  /**
+   * Encrypt any `secret`-typed fields on `row` in place before it reaches the
+   * driver. Each plaintext is wrapped by the ICryptoProvider, persisted as a
+   * `sys_secret` row, and replaced on `row` by an opaque ref. Cleartext never
+   * reaches the business table.
+   *
+   * Rules:
+   *  - No secret fields on the object ⇒ no-op (fast path, no crypto cost).
+   *  - `null`/`undefined` value ⇒ left as-is (clears the secret).
+   *  - Value already a ref (re-save of an unchanged ref) ⇒ left as-is.
+   *  - Value equal to the read mask ⇒ dropped, so a form round-trip that
+   *    echoes the mask does not overwrite the stored secret.
+   *  - **Fail-closed:** any other value with no CryptoProvider registered, or
+   *    no reachable `sys_secret` store, THROWS — never persists cleartext.
+   */
+  private async encryptSecretFields(
+    object: string,
+    row: Record<string, unknown>,
+    context: ExecutionContext | undefined,
+    driverOptions: unknown,
+  ): Promise<void> {
+    if (!row || typeof row !== 'object') return;
+    const schema = this._registry.getObject(object);
+    const secretFields = collectSecretFields(schema);
+    if (secretFields.length === 0) return;
+
+    for (const field of secretFields) {
+      if (!(field in row)) continue;
+      const value = row[field];
+
+      if (value === null || typeof value === 'undefined') continue; // clear
+      if (isSecretRef(value)) continue; // already encrypted ref
+      if (value === SECRET_MASK) {
+        // The read path masks secrets to SECRET_MASK; a form that echoes it
+        // back means "unchanged". Drop the key so the stored secret survives.
+        delete row[field];
+        continue;
+      }
+
+      if (!this.cryptoProvider) {
+        throw new Error(
+          `Cannot persist secret field "${object}.${field}": no CryptoProvider is registered. `
+            + 'Wire one via engine.setCryptoProvider(...) (e.g. InMemoryCryptoProvider in dev, '
+            + 'a KMS/Vault provider in production). Refusing to store cleartext (fail-closed).',
+        );
+      }
+
+      const plain = typeof value === 'string' ? value : JSON.stringify(value);
+      const handle: CryptoHandle = await this.cryptoProvider.encrypt(plain, {
+        namespace: object,
+        key: field,
+        tenantId: context?.tenantId,
+      });
+
+      let secretDriver;
+      try {
+        secretDriver = this.getDriver('sys_secret');
+      } catch {
+        throw new Error(
+          `Cannot persist secret field "${object}.${field}": the sys_secret store is not available. `
+            + 'Ensure the platform-objects (sys_secret) are registered before writing secret fields (fail-closed).',
+        );
+      }
+
+      await secretDriver.create(
+        'sys_secret',
+        {
+          id: handle.id,
+          namespace: object,
+          key: field,
+          kms_key_id: handle.kmsKeyId,
+          alg: handle.alg,
+          version: handle.version,
+          ciphertext: handle.ciphertext,
+          created_at: new Date().toISOString(),
+        },
+        driverOptions as any,
+      );
+
+      row[field] = makeSecretRef(handle.id);
+    }
+  }
+
+  /**
+   * Mask `secret`-typed fields on read so plaintext never leaves the engine
+   * through the normal query path. A set secret becomes {@link SECRET_MASK};
+   * an unset one stays `null`. Privileged callers that genuinely need the
+   * plaintext use {@link resolveSecret} against the stored ref.
+   */
+  private maskSecretFields(object: string, rows: any): void {
+    if (!rows) return;
+    const schema = this._registry.getObject(object);
+    const secretFields = collectSecretFields(schema);
+    if (secretFields.length === 0) return;
+    const list = Array.isArray(rows) ? rows : [rows];
+    for (const row of list) {
+      if (!row || typeof row !== 'object') continue;
+      for (const field of secretFields) {
+        if (!(field in row)) continue;
+        row[field] = row[field] == null ? null : SECRET_MASK;
+      }
+    }
+  }
+
+  /**
+   * Dereference a stored secret ref back to its plaintext. Intended for
+   * privileged, server-side consumers (e.g. a datasource connection-pool
+   * binder) — NOT exposed through the generic read path, which only ever
+   * returns the mask.
+   *
+   * Fail-closed: throws when no CryptoProvider is registered or the
+   * `sys_secret` row is missing. Returns `null` when `ref` is not a secret ref.
+   */
+  async resolveSecret(ref: unknown, opts?: { tenantId?: string }): Promise<string | null> {
+    const id = parseSecretRef(ref);
+    if (!id) return null;
+    if (!this.cryptoProvider) {
+      throw new Error('Cannot resolve secret: no CryptoProvider is registered (fail-closed).');
+    }
+    const secretDriver = this.getDriver('sys_secret');
+    const found = await secretDriver.find('sys_secret', { object: 'sys_secret', where: { id } } as QueryAST);
+    const secret: any = Array.isArray(found) ? found[0] : found;
+    if (!secret) {
+      throw new Error(`Cannot resolve secret: sys_secret row "${id}" not found (fail-closed).`);
+    }
+    const handle: CryptoHandle = {
+      id: secret.id,
+      kmsKeyId: secret.kms_key_id,
+      alg: secret.alg,
+      version: secret.version,
+      ciphertext: secret.ciphertext,
+    };
+    return this.cryptoProvider.decrypt(handle, {
+      namespace: secret.namespace,
+      key: secret.key,
+      tenantId: opts?.tenantId,
+    });
+  }
+
+  /**
    * Helper to get object definition
    */
   getSchema(objectName: string): ServiceObject | undefined {
@@ -1455,7 +1624,12 @@ export class ObjectQL implements IDataEngine {
           hookContext.event = 'afterFind';
           hookContext.result = result;
           await this.triggerHooks('afterFind', hookContext);
-          
+
+          // Never let secret-field plaintext (or its ref) leave through the
+          // generic read path — mask after hooks run. Privileged consumers use
+          // resolveSecret() against the stored ref instead.
+          this.maskSecretFields(object, hookContext.result);
+
           return hookContext.result;
       } catch (e) {
           this.logger.error('Find operation failed', e as Error, { object });
@@ -1514,6 +1688,9 @@ export class ObjectQL implements IDataEngine {
         result = expanded[0];
       }
 
+      // Mask secret fields — plaintext never leaves through the read path.
+      this.maskSecretFields(objectName, result);
+
       return result;
     });
 
@@ -1561,6 +1738,9 @@ export class ObjectQL implements IDataEngine {
           const rows = (hookContext.input.data as any[]).map((row) =>
             this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap),
           );
+          for (const r of rows) {
+            await this.encryptSecretFields(object, r, opCtx.context, hookContext.input.options);
+          }
           for (const r of rows) validateRecord(schemaForValidation, r, 'insert');
           if (driver.bulkCreate) {
                result = await driver.bulkCreate(object, rows, hookContext.input.options as any);
@@ -1575,6 +1755,7 @@ export class ObjectQL implements IDataEngine {
             opCtx.context,
             nowSnap,
           );
+          await this.encryptSecretFields(object, row, opCtx.context, hookContext.input.options);
           validateRecord(schemaForValidation, row, 'insert');
           result = await driver.create(object, row, hookContext.input.options as any);
         }
@@ -1665,9 +1846,11 @@ export class ObjectQL implements IDataEngine {
        try {
            let result;
            if (hookContext.input.id) {
+               await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                validateRecord(this._registry.getObject(object), hookContext.input.data as Record<string, unknown>, 'update');
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
+               await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                validateRecord(this._registry.getObject(object), hookContext.input.data as Record<string, unknown>, 'update');
                const ast: QueryAST = { object, where: options.where };
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);

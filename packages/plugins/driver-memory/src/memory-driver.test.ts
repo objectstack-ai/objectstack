@@ -719,4 +719,34 @@ describe('InMemoryDriver', () => {
       expect(results.map((r: any) => r.name)).toContain('Frank');
     });
   });
+
+  describe('Read isolation (no live references into the backing table)', () => {
+    // Callers (notably the ObjectQL engine's read-time mutations — secret-field
+    // masking, expand, afterFind hooks) mutate returned rows in place. find /
+    // findOne must therefore hand back COPIES, never live references into the
+    // stored table — otherwise a read would corrupt the persisted record (e.g.
+    // overwrite a `secret:` ref with the read mask, permanently losing the
+    // secret). `create()` already honors this; these guard find / findOne.
+    beforeEach(async () => {
+      await driver.create(testTable, { id: '1', name: 'original', secret_ref: 'secret:abc123' });
+    });
+
+    it('find() returns copies — mutating a result does not change the store', async () => {
+      const first = await driver.find(testTable, { object: testTable, where: { id: '1' } });
+      (first[0] as any).secret_ref = '••••••••'; // simulate engine masking the row in place
+
+      const second = await driver.find(testTable, { object: testTable, where: { id: '1' } });
+      expect((second[0] as any).secret_ref).toBe('secret:abc123'); // store intact
+      expect(second[0]).not.toBe(first[0]); // distinct object identity
+    });
+
+    it('findOne() returns a copy — mutating it does not change the store', async () => {
+      const first = await driver.findOne(testTable, { object: testTable, where: { id: '1' } });
+      (first as any).secret_ref = '••••••••';
+
+      const second = await driver.findOne(testTable, { object: testTable, where: { id: '1' } });
+      expect((second as any).secret_ref).toBe('secret:abc123');
+      expect(second).not.toBe(first);
+    });
+  });
 });

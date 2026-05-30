@@ -295,6 +295,15 @@ export class InMemoryDriver implements IDataDriver {
     // 5. Field Projection
     if (query.fields && Array.isArray(query.fields) && query.fields.length > 0) {
       results = results.map(record => this.projectFields(record, query.fields as string[]));
+    } else {
+      // Return shallow copies, never live references into the backing table.
+      // `create()` already honors this contract (`return { ...newRecord }`),
+      // and callers (notably the engine's read-time mutations — secret-field
+      // masking, expand, afterFind hooks) mutate returned rows in place. Handing
+      // back live references would corrupt the stored record on read — e.g. a
+      // masked `secret:` ref overwritten with the mask, permanently losing the
+      // secret. The projection branch above already produces fresh objects.
+      results = results.map(record => ({ ...record }));
     }
 
     this.logger.debug('Find completed', { object, resultCount: results.length });

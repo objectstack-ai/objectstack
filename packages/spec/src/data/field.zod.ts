@@ -13,6 +13,13 @@ import { lazySchema } from '../shared/lazy-schema';
 export const FieldType = z.enum([
   // Core Text
   'text', 'textarea', 'email', 'url', 'phone', 'password',
+  // Secret — reversible, encrypted-at-rest value (DB password, API key, token).
+  // UNLIKE 'password' (a one-way hash owned by the auth subsystem), a 'secret'
+  // is round-tripped: the engine encrypts it on write via the registered
+  // ICryptoProvider, stores the ciphertext handle in `sys_secret`, persists only
+  // an opaque ref on the row, and masks it on read. Fail-closed: no provider ⇒
+  // writes throw rather than persist cleartext. See ADR (secret field channel).
+  'secret',
   // Rich Content
   'markdown', 'html', 'richtext',
   // Numbers
@@ -532,6 +539,13 @@ export const Field = {
   markdown: (config: FieldInput = {}) => ({ type: 'markdown', ...config } as const),
   html: (config: FieldInput = {}) => ({ type: 'html', ...config } as const),
   password: (config: FieldInput = {}) => ({ type: 'password', ...config } as const),
+  /**
+   * Secret field — reversible encrypted-at-rest value (DB password, API key,
+   * token). Encrypted on write to `sys_secret` via the registered
+   * ICryptoProvider; only an opaque ref is persisted on the row; masked on
+   * read. Distinct from `password` (one-way hash, owned by the auth subsystem).
+   */
+  secret: (config: FieldInput = {}) => ({ type: 'secret', ...config } as const),
   
   /**
    * Select field helper with backward-compatible API

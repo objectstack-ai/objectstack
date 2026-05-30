@@ -57,6 +57,16 @@ export { ObjectQLPlugin } from './plugin.js';
 export { createObjectQLKernel } from './kernel-factory.js';
 export type { ObjectQLKernelOptions } from './kernel-factory.js';
 
+// Export secret-field channel helpers (for hosts / privileged consumers)
+export {
+  SECRET_REF_PREFIX,
+  SECRET_MASK,
+  makeSecretRef,
+  isSecretRef,
+  parseSecretRef,
+  collectSecretFields,
+} from './secret-fields.js';
+
 // Export Utilities
 export {
   toTitleCase,
