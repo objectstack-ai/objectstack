@@ -38,7 +38,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full microkernel and layer arch
 - **Protocol-first schemas** — All schemas are defined with Zod; TypeScript types are derived via `z.infer<>`.
 - **Versioned JSON artifacts** — TypeScript-authored metadata compiles into deployable, self-describing JSON artifacts.
 - **Microkernel plugin system** — DI container, EventBus, and lifecycle hooks (init -> start -> destroy).
-- **Multi-database support** — In-memory, PostgreSQL, MySQL, SQLite, and Turso/libSQL drivers.
+- **Multi-database support** — In-memory, PostgreSQL, MySQL, SQLite (via the unified SQL driver), and MongoDB. Turso/libSQL is not bundled here — it ships as the separate `@objectstack/driver-turso` package in the cloud repo.
 - **7 framework adapters** — Express, Fastify, Hono, NestJS, Next.js, Nuxt, SvelteKit.
 - **Client SDK + React hooks** — `useQuery`, `useMutation`, `usePagination` out of the box.
 - **Built-in authentication** — [better-auth](https://www.better-auth.com/) via `plugin-auth`.
@@ -254,7 +254,7 @@ Cloud, package registry, and project management subcommands (`os projects`, `os 
 | Source packages | 51 |
 | Apps | 6 (objectos, cloud, studio, console, account, docs) |
 | Framework adapters | 7 (Express, Fastify, Hono, NestJS, Next.js, Nuxt, SvelteKit) |
-| Database drivers | 4 (Memory, SQL, Turso/libSQL, MongoDB) |
+| Database drivers | 4 (Memory, SQL, SQLite-WASM, MongoDB) |
 | Zod schema files | 200 |
 | Exported schemas | 1,600+ |
 | `.describe()` annotations | 8,750+ |
