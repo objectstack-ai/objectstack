@@ -483,6 +483,13 @@ export class AppPlugin implements Plugin {
                      object: d.object,
                  }));
 
+             // Resolve the seed identity (os.user / os.org) BEFORE any seed
+             // runs. Deterministically ensures a non-loginable system user
+             // exists so identity-derived seed values (e.g.
+             // `owner_id: cel`os.user.id``) resolve at boot — before the
+             // first human sign-up. See ensureSeedIdentity().
+             const seedIdentity = await this.ensureSeedIdentity(ql, ctx.logger);
+
              // Stash datasets on a kernel service so SecurityPlugin's
              // sys_organization insert hook can replay them per-tenant
              // (Salesforce-sandbox style: every new org gets its own
@@ -530,6 +537,11 @@ export class AppPlugin implements Plugin {
                              defaultMode: 'upsert',
                              multiPass: true,
                              organizationId,
+                             // Bind os.user (system identity) and os.org (this
+                             // tenant) so identity-derived seed values resolve
+                             // per-org. org.id falls back to organizationId
+                             // inside the loader when identity.org is absent.
+                             identity: seedIdentity,
                          },
                      });
                      const result = await seedLoader.load(request);
@@ -572,14 +584,38 @@ export class AppPlugin implements Plugin {
                       const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                       const request = SeedLoaderRequestSchema.parse({
                           datasets: normalizedDatasets,
-                          config: { defaultMode: 'upsert', multiPass: true },
+                          config: { defaultMode: 'upsert', multiPass: true, identity: seedIdentity },
                       });
                       const result = await seedLoader.load(request);
-                      ctx.logger.info('[Seeder] Seed loading complete', {
-                          inserted: result.summary.totalInserted,
-                          updated: result.summary.totalUpdated,
-                          errors: result.errors.length,
-                      });
+                      const { totalInserted, totalUpdated, totalSkipped, totalErrored } = result.summary;
+                      if (result.success) {
+                          ctx.logger.info('[Seeder] Seed loading complete', {
+                              inserted: totalInserted,
+                              updated: totalUpdated,
+                              skipped: totalSkipped,
+                              errored: totalErrored,
+                          });
+                      } else {
+                          // LOUD FAILURE: dropped records were previously
+                          // invisible (the summary only logged errors.length and
+                          // omitted totalErrored). Report the count AND each
+                          // actionable reason so broken seeds can't pass silently.
+                          ctx.logger.warn(
+                              `[Seeder] Seed loading completed with ${totalErrored} dropped record(s) and ${result.errors.length} error(s) for ${appId}`,
+                              {
+                                  inserted: totalInserted,
+                                  updated: totalUpdated,
+                                  skipped: totalSkipped,
+                                  errored: totalErrored,
+                              },
+                          );
+                          for (const e of result.errors.slice(0, 20)) {
+                              ctx.logger.warn(`[Seeder]   ✗ ${e.message}`);
+                          }
+                          if (result.errors.length > 20) {
+                              ctx.logger.warn(`[Seeder]   …and ${result.errors.length - 20} more error(s)`);
+                          }
+                      }
                   } else {
                       // Fallback: basic insert when metadata service is not available
                       ctx.logger.debug('[Seeder] No metadata service; using basic insert fallback');
@@ -632,6 +668,72 @@ export class AppPlugin implements Plugin {
     stop = async (ctx: PluginContext) => {
         const sys = this.bundle.manifest || this.bundle;
         this.emitCatalogEvent(ctx, 'app:unregistered', sys);
+    }
+
+    /**
+     * Resolve the identity bound to `os.user` / `os.org` for seed CEL values.
+     *
+     * On a fresh boot there are zero users until the first human sign-up
+     * (which the SeedLoader runs *before*), so identity-derived seeds like
+     * `owner_id: cel`os.user.id`` had nothing to resolve against and were
+     * dropped silently. To make seeds deterministic and self-sufficient we
+     * upsert a single non-loginable **system user** (`usr_system`) and bind
+     * it as `os.user`.
+     *
+     * Why a dedicated system user rather than the login admin:
+     *  - `sys_user` is better-auth-managed and schema-locked (ADR-0010); the
+     *    password lives in `sys_account`, so a *loginable* admin can only be
+     *    minted through better-auth (the CLI does this via HTTP sign-up after
+     *    boot). A raw insert here would bypass those invariants.
+     *  - `usr_system` is an owner identity only (no credential row), analogous
+     *    to Salesforce's "Automated Process" user. The human admin is created
+     *    independently and need not be the seed owner.
+     *
+     * Idempotent: matches by the stable id, inserts once, reuses thereafter.
+     * Failures are non-fatal (logged) — records that actually need `os.user`
+     * then fail loudly in the loader with an actionable message.
+     */
+    private async ensureSeedIdentity(
+        ql: any,
+        logger: PluginContext['logger'],
+    ): Promise<{ user: { id: string; role: string; email: string } }> {
+        // Deterministic, non-loginable service identity that owns seeded data.
+        const SYSTEM_USER_ID = SystemUserId.SYSTEM;
+        const SYSTEM_USER_EMAIL = 'system@objectstack.local';
+        const identity = { user: { id: SYSTEM_USER_ID, role: 'system', email: SYSTEM_USER_EMAIL } };
+        const opts = { context: { isSystem: true } } as any;
+
+        try {
+            const existing = await (ql as any).find(
+                'sys_user',
+                { where: { id: SYSTEM_USER_ID }, limit: 1 },
+                opts,
+            );
+            if (Array.isArray(existing) && existing.length > 0) {
+                return identity;
+            }
+            await (ql as any).insert(
+                'sys_user',
+                {
+                    id: SYSTEM_USER_ID,
+                    name: 'System',
+                    email: SYSTEM_USER_EMAIL,
+                    email_verified: true,
+                    role: 'system',
+                },
+                opts,
+            );
+            logger.info(
+                `[Seeder] Provisioned deterministic system user (${SYSTEM_USER_ID}) as seed owner — binds os.user for identity-derived seed values`,
+            );
+        } catch (err: any) {
+            // Non-fatal: identity-dependent records will fail loudly in the
+            // loader; identity-free records still seed normally.
+            logger.warn('[Seeder] Failed to ensure system seed user; os.user-dependent seeds may be dropped', {
+                error: err?.message ?? String(err),
+            });
+        }
+        return identity;
     }
 
     /**

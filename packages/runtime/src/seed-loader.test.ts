@@ -1015,6 +1015,138 @@ describe('SeedLoaderService', () => {
   // load — edge cases
   // ========================================================================
 
+  describe('load — seed identity (os.user / os.org)', () => {
+    // CEL Expression envelope helper — same shape the spec persists.
+    const cel = (source: string) => ({ dialect: 'cel', source });
+
+    const baseConfig = (extra: Record<string, any> = {}): SeedLoaderConfig => ({
+      dryRun: false,
+      haltOnError: false,
+      multiPass: false,
+      defaultMode: 'upsert',
+      batchSize: 1000,
+      transaction: false,
+      ...extra,
+    } as SeedLoaderConfig);
+
+    it('resolves cel`os.user.id` from config.identity', async () => {
+      const metadata = createMockMetadata({
+        note: { name: 'note', fields: { name: { type: 'text' }, author: { type: 'text' } } },
+      });
+      const engine = createMockEngine();
+      const loader = new SeedLoaderService(engine, metadata, logger);
+
+      const result = await loader.load({
+        datasets: [
+          {
+            object: 'note',
+            externalId: 'name',
+            mode: 'insert',
+            env: ['prod', 'dev', 'test'],
+            records: [{ name: 'N1', author: cel('os.user.id') }],
+          },
+        ],
+        config: baseConfig({
+          identity: { user: { id: 'usr_system', role: 'system', email: 'system@objectstack.local' } },
+        }),
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.summary.totalErrored).toBe(0);
+      expect(engine.insert).toHaveBeenCalledWith(
+        'note',
+        expect.objectContaining({ name: 'N1', author: 'usr_system' }),
+        expect.anything(),
+      );
+    });
+
+    it('fails loudly (no raw envelope written) when os.user is unbound', async () => {
+      const metadata = createMockMetadata({
+        note: { name: 'note', fields: { name: { type: 'text' }, author: { type: 'text' } } },
+      });
+      const engine = createMockEngine();
+      const loader = new SeedLoaderService(engine, metadata, logger);
+
+      const result = await loader.load({
+        datasets: [
+          {
+            object: 'note',
+            externalId: 'name',
+            mode: 'insert',
+            env: ['prod', 'dev', 'test'],
+            records: [{ name: 'N1', author: cel('os.user.id') }],
+          },
+        ],
+        // No identity → os.user unbound → record must be dropped, not written.
+        config: baseConfig(),
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.summary.totalErrored).toBe(1);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].message).toContain('os.user');
+      // Critically: the unresolved Expression envelope is NEVER persisted.
+      expect(engine.insert).not.toHaveBeenCalled();
+    });
+
+    it('falls back os.org.id to organizationId during per-tenant replay', async () => {
+      const metadata = createMockMetadata({
+        note: { name: 'note', fields: { name: { type: 'text' }, org_label: { type: 'text' } } },
+      });
+      const engine = createMockEngine();
+      const loader = new SeedLoaderService(engine, metadata, logger);
+
+      const result = await loader.load({
+        datasets: [
+          {
+            object: 'note',
+            externalId: 'name',
+            mode: 'insert',
+            env: ['prod', 'dev', 'test'],
+            records: [{ name: 'N1', org_label: cel('os.org.id') }],
+          },
+        ],
+        config: baseConfig({ organizationId: 'org_123' }),
+      });
+
+      expect(result.success).toBe(true);
+      expect(engine.insert).toHaveBeenCalledWith(
+        'note',
+        expect.objectContaining({ org_label: 'org_123' }),
+        expect.anything(),
+      );
+    });
+
+    it('surfaces write failures in result.errors (loud, not just counted)', async () => {
+      const metadata = createMockMetadata({
+        account: { name: 'account', fields: { name: { type: 'text' } } },
+      });
+      const engine = createMockEngine();
+      engine.insert = vi.fn(async () => {
+        throw new Error('boom');
+      });
+      const loader = new SeedLoaderService(engine, metadata, logger);
+
+      const result = await loader.load({
+        datasets: [
+          {
+            object: 'account',
+            externalId: 'name',
+            mode: 'insert',
+            env: ['prod', 'dev', 'test'],
+            records: [{ name: 'Acme' }],
+          },
+        ],
+        config: baseConfig({ defaultMode: 'insert' }),
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.summary.totalErrored).toBe(1);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].message).toContain('Failed to write');
+    });
+  });
+
   describe('load — edge cases', () => {
     it('should handle records with no matching externalId field', async () => {
       const metadata = createMockMetadata({

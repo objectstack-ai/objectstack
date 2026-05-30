@@ -150,6 +150,46 @@ export const ReferenceResolutionErrorSchema = lazySchema(() => z.object({
 export type ReferenceResolutionError = z.infer<typeof ReferenceResolutionErrorSchema>;
 
 // ==========================================================================
+// 4b. Seed Identity (os.user / os.org binding)
+// ==========================================================================
+
+/**
+ * Identity bound to `os.user` / `os.org` when the loader evaluates CEL
+ * expressions embedded in seed records (e.g. `owner_id: cel\`os.user.id\``).
+ *
+ * The seed loader populates the formula evaluation context from this, so
+ * identity-derived seed values resolve to the installer/system identity
+ * instead of failing. The canonical producer is the runtime's deterministic
+ * system user (`usr_system`), ensured before seeding so this always resolves
+ * — even on a fresh boot before the first human sign-up.
+ *
+ * Defined eagerly (only primitive fields, no circular refs) so it can be
+ * referenced from the lazily-built config schema below.
+ */
+export const SeedIdentitySchema = z.object({
+  /**
+   * Subject bound to `os.user` in seed CEL. Typically the deterministic
+   * system user (`usr_system`) or the promoted platform admin.
+   */
+  user: z.object({
+    id: z.string().min(1),
+    role: z.string().optional(),
+    email: z.string().optional(),
+  }).optional().describe('Subject bound to os.user in seed CEL expressions'),
+
+  /**
+   * Organization bound to `os.org` in seed CEL. During per-tenant replay
+   * the loader defaults this to `organizationId` when omitted.
+   */
+  org: z.object({
+    id: z.string().min(1),
+    tier: z.string().optional(),
+  }).optional().describe('Organization bound to os.org in seed CEL expressions'),
+}).describe('Identity context for resolving os.user / os.org in seed CEL values');
+
+export type SeedIdentity = z.infer<typeof SeedIdentitySchema>;
+
+// ==========================================================================
 // 5. Seed Loader Configuration
 // ==========================================================================
 
@@ -231,6 +271,20 @@ export const SeedLoaderConfigSchema = lazySchema(() => z.object({
    */
   organizationId: z.string().min(1).optional()
     .describe('Target organization id for per-tenant seed replay'),
+
+  /**
+   * Identity bound to `os.user` / `os.org` when evaluating CEL expressions
+   * embedded in seed records (e.g. `owner_id: cel\`os.user.id\``,
+   * `organization_id: cel\`os.org.id\``).
+   *
+   * When omitted, `os.user` / `os.org` are simply unbound — and any record
+   * that references them fails loudly (the record is dropped with an
+   * actionable error rather than persisting the raw Expression envelope into
+   * the column). The runtime supplies a deterministic system user here so
+   * identity-derived seeds resolve even before the first human sign-up.
+   */
+  identity: SeedIdentitySchema.optional()
+    .describe('Identity bound to os.user / os.org when resolving CEL seed values'),
 }).describe('Seed data loader configuration'));
 
 export type SeedLoaderConfig = z.infer<typeof SeedLoaderConfigSchema>;

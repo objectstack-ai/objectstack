@@ -72,6 +72,29 @@ export const SystemObjectName = {
 export type SystemObjectName = typeof SystemObjectName[keyof typeof SystemObjectName];
 
 /**
+ * Well-known `sys_user` ids — deterministic identities the platform relies on.
+ *
+ * The actual rows are provisioned by the runtime at boot; these constants are
+ * the canonical references for code that needs to bind to them (e.g. the seed
+ * loader binding `os.user` to the system identity).
+ */
+export const SystemUserId = {
+  /**
+   * Deterministic, non-loginable service identity that owns seeded data.
+   *
+   * Provisioned before seed loading so identity-derived seed values
+   * (`owner_id: cel`os.user.id``) resolve even on a fresh boot — before the
+   * first human sign-up. Has no `sys_account` credential, so it cannot sign
+   * in; analogous to Salesforce's "Automated Process" user. The human login
+   * admin is minted separately through better-auth.
+   */
+  SYSTEM: 'usr_system',
+} as const;
+
+/** Union type of all well-known system user ids */
+export type SystemUserId = typeof SystemUserId[keyof typeof SystemUserId];
+
+/**
  * System Field Names — Protocol Layer Constants
  *
  * These constants define the canonical, protocol-level names for common system fields.

@@ -207,21 +207,53 @@ export class SeedLoaderService implements ISeedLoaderService {
     // loads see one logical clock — the M9 determinism guarantee for seeds.
     const seedNow = new Date();
 
+    // Identity/context bound to seed CEL expressions. `os.user` / `os.org`
+    // resolve from here, so `owner_id: cel\`os.user.id\`` works. When no
+    // identity is supplied, `os.user` / `os.org` are simply unbound and any
+    // record that references them fails loudly below (rather than silently
+    // writing a raw Expression envelope into the column).
+    const seedIdentity = config.identity;
+    const baseEvalCtx = {
+      now: seedNow,
+      user: seedIdentity?.user,
+      // Fall back to the per-tenant organizationId so `os.org.id` resolves
+      // during per-org replay even without an explicit identity.org.
+      org: seedIdentity?.org ?? (config.organizationId ? { id: config.organizationId } : undefined),
+      env: config.env,
+    };
+
     for (let i = 0; i < dataset.records.length; i++) {
-      // Resolve any embedded Expression envelopes (e.g. `cel\`daysFromNow(30)\``)
-      // BEFORE reference resolution so downstream lookups see resolved values.
+      // Resolve any embedded Expression envelopes (e.g. `cel\`daysFromNow(30)\``,
+      // `cel\`os.user.id\``) BEFORE reference resolution so downstream lookups
+      // see resolved values.
       const seedResult = resolveSeedRecord(
         dataset.records[i] as Record<string, never>,
-        { now: seedNow },
+        baseEvalCtx,
       );
-      const record = seedResult.ok
-        ? { ...(seedResult.value as Record<string, unknown>) }
-        : { ...dataset.records[i] };
       if (!seedResult.ok) {
-        this.logger.warn(
-          `[SeedLoader] Failed to resolve dynamic values for ${objectName} record #${i}: ${seedResult.error.message}`,
-        );
+        // LOUD FAILURE: a record whose dynamic values cannot be resolved is
+        // dropped — but never silently. Record an actionable error (so it
+        // surfaces in result.errors and flips success=false) instead of
+        // writing the unresolved Expression envelope into the database.
+        errored++;
+        const error: ReferenceResolutionError = {
+          sourceObject: objectName,
+          field: '(expression)',
+          targetObject: objectName,
+          targetField: '(expression)',
+          attemptedValue: dataset.records[i],
+          recordIndex: i,
+          message:
+            `Cannot resolve dynamic seed values for ${objectName} record #${i}: ${seedResult.error.message}. ` +
+            'Records using cel`os.user.id` / cel`os.org.id` require a seed identity — ' +
+            'ensure a system/admin user exists before seeding (see SeedLoaderConfig.identity).',
+        };
+        errors.push(error);
+        allErrors.push(error);
+        this.logger.warn(`[SeedLoader] ${error.message}`);
+        continue;
       }
+      const record = { ...(seedResult.value as Record<string, unknown>) };
 
       // Per-tenant tagging: when a target org is set, stamp every
       // seeded row with it (unless the record itself already supplies
@@ -317,11 +349,23 @@ export class SeedLoaderService implements ISeedLoaderService {
             insertedRecords.get(objectName)!.set(externalIdValue, String(internalId));
           }
         } catch (err: any) {
+          // LOUD FAILURE: write errors were previously only counted +
+          // warn-logged, so dropped rows were invisible in result.errors and
+          // the boot summary. Surface them as actionable errors too, so the
+          // overall load is marked unsuccessful and the reason is reported.
           errored++;
-          this.logger.warn(`[SeedLoader] Failed to write ${objectName} record`, {
-            error: err.message,
+          const error: ReferenceResolutionError = {
+            sourceObject: objectName,
+            field: '(write)',
+            targetObject: objectName,
+            targetField: externalId,
+            attemptedValue: record[externalId] ?? null,
             recordIndex: i,
-          });
+            message: `Failed to write ${objectName} record #${i} (${externalId}=${String(record[externalId] ?? '')}): ${err.message}`,
+          };
+          errors.push(error);
+          allErrors.push(error);
+          this.logger.warn(`[SeedLoader] ${error.message}`, { recordIndex: i });
         }
       } else {
         // Dry-run: simulate insert tracking

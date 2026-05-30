@@ -203,6 +203,84 @@ export const SeedData = [accountsSeed, contactsSeed];
 
 ---
 
+## Dynamic Values (CEL)
+
+Any field value may be a **CEL expression** evaluated at install time against a
+single per-load pinned `now`. This is the only correct way to author time-based
+or identity-derived seed values — a literal `new Date()` would ship the package
+author's clock to every customer and break build determinism.
+
+```typescript
+import { defineDataset, cel } from '@objectstack/spec';
+
+defineDataset(Opportunity, {
+  records: [{
+    name:            'Acme Q3 Renewal',
+    close_date:      cel`daysFromNow(45)`,
+    created_at:      cel`now()`,
+    owner_id:        cel`os.user.id`,   // the seed identity
+    organization_id: cel`os.org.id`,
+  }],
+});
+```
+
+Available in the seed CEL context:
+
+- **Functions:** `now()`, `today()`, `daysFromNow(n)`, `daysAgo(n)`,
+  `isBlank(v)`, `coalesce(v, fallback)`
+- **Scope:** `os.user`, `os.org`, `os.env`
+
+### Binding records to a user (`os.user`)
+
+Many objects have a **required** owner lookup — `owner_id`, `created_by`,
+`assigned_to`. To seed such a record, bind it to a user with `cel\`os.user.id\``.
+This is the single canonical convention; there is no `currentUser()`, `@admin`,
+or similar special syntax.
+
+```typescript
+defineDataset(Project, {
+  externalId: 'code',
+  records: [{
+    code:     'bootstrap',
+    name:     'Bootstrap Project',
+    owner_id: cel`os.user.id`,   // ← bound to the seed identity
+  }],
+});
+```
+
+**Where does `os.user` come from?** On a fresh boot there are no human users yet
+— seeding runs *before* the first sign-up. So the runtime provisions a
+deterministic, non-loginable **system user** (`usr_system`, role `system`)
+*before* any seed runs and binds it to `os.user`. It owns seeded data the way
+Salesforce's "Automated Process" user does — it has no credential and **cannot
+sign in**.
+
+- The **human login admin** is created separately (CLI sign-up / first-signup
+  promotion) through better-auth and need **not** be the seed owner.
+- `os.org.id` resolves to the current organization; during a per-tenant replay
+  it is that tenant's id, falling back to the load's `organizationId`.
+
+This ordering guarantee means `cel\`os.user.id\`` / `cel\`os.org.id\`` always
+resolve at boot — you never have to sequence seeds around user creation.
+
+### Failure is loud, not silent
+
+If a record uses a CEL value that cannot be resolved — e.g. `cel\`os.user.id\``
+when the system identity could not be provisioned — the record is **not silently
+dropped**. The loader counts it as an error, marks the load unsuccessful, and
+logs an actionable message:
+
+```
+[SeedLoader] Cannot resolve dynamic seed values for project record #0:
+  ... Records using cel`os.user.id` / cel`os.org.id` require a seed identity —
+  ensure a system/admin user exists before seeding.
+```
+
+Write failures (e.g. a required field still missing after resolution) are
+surfaced the same way. Tooling should check `result.success` / `result.errors`.
+
+---
+
 ## Organising Multiple Datasets
 
 For applications with several objects, co-locate seed files under `src/data/` and
