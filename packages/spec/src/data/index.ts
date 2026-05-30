@@ -33,6 +33,7 @@ export * from './datasource.zod';
 
 // External Datasource Federation — SQL↔field type compatibility (ADR-0015)
 export * from './type-compat';
+export * from './external-catalog.zod';
 
 // Analytics Protocol (Semantic Layer)
 export * from './analytics.zod';

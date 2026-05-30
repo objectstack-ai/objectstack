@@ -92,6 +92,7 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
 
   // System Protocol
   'datasource',  // Data connections (DatasourceSchema)
+  'external_catalog', // Cached remote schema snapshot for federated datasources (ADR-0015)
   'translation', // i18n resources (TranslationSchema)
   'router',      // API routes
   'function',    // Serverless functions
@@ -587,6 +588,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
 
   // System Protocol
   { type: 'datasource', label: 'Datasource', filePatterns: ['**/*.datasource.ts', '**/*.datasource.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 5, domain: 'system' },
+  { type: 'external_catalog', label: 'External Catalog', filePatterns: ['**/*.external-catalog.ts', '**/*.external-catalog.yml', '**/*.external-catalog.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 6, domain: 'system' },
   { type: 'translation', label: 'Translation', filePatterns: ['**/*.translation.ts', '**/*.translation.yml', '**/*.translation.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 90, domain: 'system' },
   { type: 'router', label: 'Router', filePatterns: ['**/*.router.ts'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 40, domain: 'system' },
   { type: 'function', label: 'Function', filePatterns: ['**/*.function.ts'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 40, domain: 'system' },
