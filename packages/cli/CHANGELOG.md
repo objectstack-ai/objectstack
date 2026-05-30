@@ -1,5 +1,65 @@
 # @objectstack/cli
 
+## 7.3.0
+
+### Patch Changes
+
+- 45259d6: **`os start` no longer silently shifts ports on a conflict.**
+
+  Port resolution is unchanged (`--port` › `$OS_PORT` › `$PORT` › `3000`), but the
+  conflict behaviour is now mode-dependent:
+
+  - **Dev** (`os dev`, or `NODE_ENV=development`): still auto-hops to the next free
+    port (up to +100) so multiple example apps can run side-by-side. The startup
+    banner shows the actual bound port.
+  - **Production** (`os start`): if the resolved port is busy, the CLI now fails
+    loudly and exits `1` instead of binding a different port. A silently drifted
+    port breaks reverse-proxy upstreams, better-auth callback URLs (`OS_AUTH_URL`),
+    and CORS trusted-origins (`OS_TRUSTED_ORIGINS`) as opaque 403/502s.
+
+  Also fixed: the `os start` startup banner now prints the real Console URL when
+  the port comes from `$PORT`/`$OS_PORT` (previously it always showed the
+  `--port`/`3000` value, which could be wrong).
+
+- Updated dependencies [5e7c554]
+  - @objectstack/spec@7.3.0
+  - @objectstack/core@7.3.0
+  - @objectstack/account@7.3.0
+  - @objectstack/client@7.3.0
+  - @objectstack/objectql@7.3.0
+  - @objectstack/observability@7.3.0
+  - @objectstack/platform-objects@7.3.0
+  - @objectstack/driver-memory@7.3.0
+  - @objectstack/driver-mongodb@7.3.0
+  - @objectstack/driver-sql@7.3.0
+  - @objectstack/driver-sqlite-wasm@7.3.0
+  - @objectstack/plugin-approvals@7.3.0
+  - @objectstack/plugin-audit@7.3.0
+  - @objectstack/plugin-auth@7.3.0
+  - @objectstack/plugin-email@7.3.0
+  - @objectstack/plugin-hono-server@7.3.0
+  - @objectstack/plugin-mcp-server@7.3.0
+  - @objectstack/plugin-org-scoping@7.3.0
+  - @objectstack/plugin-reports@7.3.0
+  - @objectstack/plugin-security@7.3.0
+  - @objectstack/plugin-sharing@7.3.0
+  - @objectstack/plugin-webhooks@7.3.0
+  - @objectstack/rest@7.3.0
+  - @objectstack/runtime@7.3.0
+  - @objectstack/service-ai@7.3.0
+  - @objectstack/service-analytics@7.3.0
+  - @objectstack/service-automation@7.3.0
+  - @objectstack/service-cache@7.3.0
+  - @objectstack/service-feed@7.3.0
+  - @objectstack/service-job@7.3.0
+  - @objectstack/service-package@7.3.0
+  - @objectstack/service-queue@7.3.0
+  - @objectstack/service-realtime@7.3.0
+  - @objectstack/service-settings@7.3.0
+  - @objectstack/service-storage@7.3.0
+  - @objectstack/types@7.3.0
+  - @objectstack/console@7.3.0
+
 ## 7.2.1
 
 ### Patch Changes

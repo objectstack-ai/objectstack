@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-i18n",
-  "version": "7.2.1",
+  "version": "7.3.0",
   "license": "Apache-2.0",
   "description": "I18n Service for ObjectStack — implements II18nService with file-based locale loading",
   "type": "module",
