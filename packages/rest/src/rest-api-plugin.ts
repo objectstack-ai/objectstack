@@ -4,6 +4,7 @@ import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { RestServer, RestKernelManager } from './rest-server.js';
 import { ObjectStackProtocol, RestServerConfig } from '@objectstack/spec/api';
 import { registerPackageRoutes } from './package-routes.js';
+import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
 import type { PackageService } from '@objectstack/service-package';
 
 export interface RestApiPluginConfig {
@@ -192,6 +193,9 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                         });
                     } else {
                         registerPackageRoutes(server, packageService, versionedBase, { protocol });
+                        // External Datasource Federation routes (ADR-0015) —
+                        // degrade gracefully when the service is not registered.
+                        registerExternalDatasourceRoutes(server, ctx, versionedBase);
                         if (enableProjectScoping) {
                             registerPackageRoutes(server, packageService, `${versionedBase}/environments/:environmentId`, {
                                 protocol,
