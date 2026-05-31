@@ -1,0 +1,31 @@
+{
+  "name": "@objectstack/example-showcase",
+  "version": "0.1.0",
+  "description": "Kitchen-sink showcase workspace — exercises every metadata type, every view type, every chart type, and the major end-to-end capability chains (security, automation, AI). Built for demonstration, debugging, and coverage-driven verification.",
+  "license": "Apache-2.0",
+  "private": true,
+  "main": "./objectstack.config.ts",
+  "types": "./objectstack.config.ts",
+  "exports": {
+    ".": "./objectstack.config.ts",
+    "./objectstack.config": "./objectstack.config.ts",
+    "./coverage": "./src/coverage.ts"
+  },
+  "scripts": {
+    "dev": "objectstack dev",
+    "start": "objectstack start",
+    "build": "objectstack build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "verify": "pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "@objectstack/runtime": "workspace:*",
+    "@objectstack/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@objectstack/cli": "workspace:*",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

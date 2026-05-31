@@ -12,6 +12,7 @@ Welcome to the ObjectStack examples catalog! This directory contains carefully c
 |-------|----------|-------------|
 | 🟢 **Beginner** | [App Todo](#app-todo), [Plugin BI](#plugin-bi) | Start here - simple, focused examples |
 | 🟡 **Intermediate** | [HotCRM](https://github.com/objectstack-ai/hotcrm) | Real-world enterprise application (separate repo) |
+| 🟣 **Reference** | [App Showcase](./app-showcase/) | Kitchen-sink — **every** metadata type, view type, and chart type, plus a coverage test |
 | 🔴 **Advanced** | [Server](../apps/objectos/) | Server hosting & plugin orchestration |
 
 ### By Protocol Category
@@ -74,6 +75,33 @@ app-todo/
 cd examples/app-todo
 pnpm install
 pnpm typecheck
+```
+
+---
+
+### App Showcase
+**Path:** [`examples/app-showcase/`](./app-showcase/)
+**Level:** 🟣 Reference
+**Protocols:** Data, UI, System, Automation, AI, Auth
+
+A **kitchen-sink** workspace built for demonstration, debugging, and
+coverage-driven verification. It pairs a realistic project-delivery domain
+with synthetic "gallery" objects that exhaust protocol variants, and ties them
+together with a coverage manifest that the test suite checks against the
+protocol's own Zod enums.
+
+**What's included:**
+- **All 49 field types** (`src/objects/field-zoo.object.ts`) + every relationship kind (lookup, master-detail, self-referencing tree, many-to-many junction)
+- **All 8 list-view types** on one object (grid, kanban, gallery, calendar, timeline, gantt, map, chart) + all 5 form types
+- **All 38 chart types** in one dashboard + all 4 report types (tabular/summary/matrix/joined)
+- The action **type × location** matrix and a component-gallery page
+- Capability chains: security (RBAC + FLS + RLS + sharing + policy), automation (flow → approval → webhook → job → email), and AI (agent + tool + skill)
+- A **coverage test** that introspects the spec enums and fails when a new variant is left uncovered
+
+```bash
+cd examples/app-showcase
+pnpm verify    # typecheck + coverage test
+pnpm dev       # → http://localhost:3000/_studio
 ```
 
 ---
