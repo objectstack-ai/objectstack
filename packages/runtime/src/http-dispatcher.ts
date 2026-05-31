@@ -1647,6 +1647,7 @@ export class HttpDispatcher {
      *
      * Routes:
      *   GET    /                     → listFlows
+     *   GET    /actions              → getActionDescriptors (ADR-0018; ?paradigm/?source/?category filters)
      *   GET    /:name                → getFlow
      *   POST   /                     → createFlow (registerFlow)
      *   PUT    /:name                → updateFlow
@@ -1691,6 +1692,31 @@ export class HttpDispatcher {
                 automationService.registerFlow(body?.name, body);
                 return { handled: true, response: this.success(body) };
             }
+        }
+
+        // GET /actions → list registered action descriptors (ADR-0018).
+        // MUST precede the `/:name → getFlow` catch-all below, otherwise a
+        // flow lookup for a flow literally named "actions" would shadow it.
+        // Backs the designer palette + flow validation; the registry is open
+        // and marketplace-extensible (built-in + plugin-contributed actions).
+        if (parts[0] === 'actions' && parts.length === 1 && m === 'GET') {
+            if (typeof automationService.getActionDescriptors === 'function') {
+                let actions = automationService.getActionDescriptors() ?? [];
+                // Optional filters mirror descriptor fields.
+                if (query?.paradigm) {
+                    actions = actions.filter((a: any) => Array.isArray(a?.paradigms) && a.paradigms.includes(query.paradigm));
+                }
+                if (query?.source) {
+                    actions = actions.filter((a: any) => a?.source === query.source);
+                }
+                if (query?.category) {
+                    actions = actions.filter((a: any) => a?.category === query.category);
+                }
+                return { handled: true, response: this.success({ actions, total: actions.length }) };
+            }
+            // Service present but does not implement the optional method:
+            // report an empty (but valid) registry rather than a 404.
+            return { handled: true, response: this.success({ actions: [], total: 0 }) };
         }
 
         // Routes with :name

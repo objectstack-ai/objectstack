@@ -1,25 +1,27 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Plugin, PluginContext } from '@objectstack/core';
+import type { PluginContext } from '@objectstack/core';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
 
 /**
- * Logic Node Plugin — Provides decision / assignment / loop nodes
+ * Logic built-in nodes — decision / assignment / loop.
  *
- * Dependencies: service-automation (engine)
+ * Part of the automation engine's foundational vocabulary, so the core
+ * {@link AutomationServicePlugin} seeds them directly (ADR-0018). These are NOT
+ * shipped as a separately installable plugin — "plugins are plugins; the
+ * platform's foundational capabilities are built in." Third-party node types
+ * are still registered via `engine.registerNodeExecutor()`.
  */
-export class LogicNodesPlugin implements Plugin {
-    name = 'com.objectstack.automation.logic-nodes';
-    version = '1.0.0';
-    type = 'standard' as const;
-    dependencies = ['com.objectstack.service-automation'];
-
-    async init(ctx: PluginContext): Promise<void> {
-        const engine = ctx.getService<AutomationEngine>('automation');
-
+export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext): void {
         // decision node — conditional branching
         engine.registerNodeExecutor({
             type: 'decision',
+            descriptor: defineActionDescriptor({
+                type: 'decision', version: '1.0.0', name: 'Decision',
+                description: 'Branch execution based on conditions.',
+                icon: 'git-branch', category: 'logic', source: 'builtin',
+            }),
             async execute(node, variables, _context) {
                 const config = node.config as Record<string, unknown> | undefined;
                 const conditions = (config?.conditions ?? []) as Array<{ label: string; expression: string }>;
@@ -36,6 +38,11 @@ export class LogicNodesPlugin implements Plugin {
         // assignment node — set variables
         engine.registerNodeExecutor({
             type: 'assignment',
+            descriptor: defineActionDescriptor({
+                type: 'assignment', version: '1.0.0', name: 'Assignment',
+                description: 'Set flow variables.',
+                icon: 'variable', category: 'logic', source: 'builtin',
+            }),
             async execute(node, variables, _context) {
                 const config = (node.config ?? {}) as Record<string, unknown>;
                 for (const [key, value] of Object.entries(config)) {
@@ -48,6 +55,11 @@ export class LogicNodesPlugin implements Plugin {
         // loop node — iterate over a collection
         engine.registerNodeExecutor({
             type: 'loop',
+            descriptor: defineActionDescriptor({
+                type: 'loop', version: '1.0.0', name: 'Loop',
+                description: 'Iterate over a collection.',
+                icon: 'repeat', category: 'logic', source: 'builtin',
+            }),
             async execute(node, variables, _context) {
                 const config = node.config as Record<string, unknown> | undefined;
                 const collectionName = config?.collection as string | undefined;
@@ -62,6 +74,5 @@ export class LogicNodesPlugin implements Plugin {
             },
         });
 
-        ctx.logger.info('[Logic Nodes] 3 node executors registered');
-    }
+        ctx.logger.info('[Logic Nodes] 3 built-in node executors registered');
 }

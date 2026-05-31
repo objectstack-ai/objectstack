@@ -608,9 +608,15 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_AUTOMATION_ROUTES.service).toBe('automation');
       expect(DEFAULT_AUTOMATION_ROUTES.category).toBe('automation');
       expect(DEFAULT_AUTOMATION_ROUTES.methods).toContain('triggerAutomation');
-      expect(DEFAULT_AUTOMATION_ROUTES.endpoints).toHaveLength(1);
+      // POST /trigger + GET /actions (ADR-0018 action descriptor registry)
+      expect(DEFAULT_AUTOMATION_ROUTES.endpoints).toHaveLength(2);
       // Automation trigger should have extended timeout
       expect(DEFAULT_AUTOMATION_ROUTES.endpoints?.[0].timeout).toBe(120000);
+      // The actions endpoint exposes the live registry and is cacheable.
+      const actionsEndpoint = DEFAULT_AUTOMATION_ROUTES.endpoints?.find(e => e.path === '/actions');
+      expect(actionsEndpoint?.method).toBe('GET');
+      expect(actionsEndpoint?.handler).toBe('getActionDescriptors');
+      expect(actionsEndpoint?.responseSchema).toBe('AutomationActionsResponseSchema');
     });
 
     it('should return all 13 default registrations', () => {

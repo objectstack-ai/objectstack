@@ -1,13 +1,16 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Plugin, PluginContext } from '@objectstack/core';
+import type { PluginContext } from '@objectstack/core';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
 
 /**
- * CRUD Node Plugin — wires `get_record` / `create_record` / `update_record` /
- * `delete_record` flow nodes to the runtime data layer (ObjectQL / IDataEngine).
+ * CRUD built-in nodes — `get_record` / `create_record` / `update_record` /
+ * `delete_record`, wired to the runtime data layer (ObjectQL / IDataEngine).
+ * Part of the platform baseline, so the core {@link AutomationServicePlugin}
+ * seeds them directly (ADR-0018) rather than shipping a separate plugin.
  *
  * Each executor:
  *  1. Interpolates `{var}` / `{var.path}` / `{$User.*}` / `{NOW()}` tokens in
@@ -20,14 +23,7 @@ import { interpolate } from './template.js';
  * If no data engine is registered, executors degrade to a no-op success so
  * test environments without ObjectQL still complete the flow without errors.
  */
-export class CrudNodesPlugin implements Plugin {
-    name = 'com.objectstack.automation.crud-nodes';
-    version = '1.0.0';
-    type = 'standard' as const;
-    dependencies = ['com.objectstack.service-automation'];
-
-    async init(ctx: PluginContext): Promise<void> {
-        const engine = ctx.getService<AutomationEngine>('automation');
+export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext): void {
         const getData = (): IDataEngine | undefined => {
             try {
                 return ctx.getService<IDataEngine>('data') ?? ctx.getService<IDataEngine>('objectql');
@@ -39,6 +35,11 @@ export class CrudNodesPlugin implements Plugin {
         // ── get_record ────────────────────────────────────────
         engine.registerNodeExecutor({
             type: 'get_record',
+            descriptor: defineActionDescriptor({
+                type: 'get_record', version: '1.0.0', name: 'Get Records',
+                description: 'Query records from an object.',
+                icon: 'search', category: 'data', source: 'builtin',
+            }),
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 const objectName = String(cfg.objectName ?? cfg.object ?? '');
@@ -73,6 +74,11 @@ export class CrudNodesPlugin implements Plugin {
         // ── create_record ─────────────────────────────────────
         engine.registerNodeExecutor({
             type: 'create_record',
+            descriptor: defineActionDescriptor({
+                type: 'create_record', version: '1.0.0', name: 'Create Record',
+                description: 'Insert a new record into an object.',
+                icon: 'plus-circle', category: 'data', source: 'builtin',
+            }),
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 const objectName = String(cfg.objectName ?? cfg.object ?? '');
@@ -102,6 +108,11 @@ export class CrudNodesPlugin implements Plugin {
         // ── update_record ─────────────────────────────────────
         engine.registerNodeExecutor({
             type: 'update_record',
+            descriptor: defineActionDescriptor({
+                type: 'update_record', version: '1.0.0', name: 'Update Records',
+                description: 'Update records matching a filter.',
+                icon: 'edit', category: 'data', source: 'builtin',
+            }),
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 const objectName = String(cfg.objectName ?? cfg.object ?? '');
@@ -128,6 +139,11 @@ export class CrudNodesPlugin implements Plugin {
         // ── delete_record ─────────────────────────────────────
         engine.registerNodeExecutor({
             type: 'delete_record',
+            descriptor: defineActionDescriptor({
+                type: 'delete_record', version: '1.0.0', name: 'Delete Records',
+                description: 'Delete records matching a filter.',
+                icon: 'trash', category: 'data', source: 'builtin',
+            }),
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 const objectName = String(cfg.objectName ?? cfg.object ?? '');
@@ -147,6 +163,5 @@ export class CrudNodesPlugin implements Plugin {
             },
         });
 
-        ctx.logger.info('[CRUD Nodes] 4 node executors registered (data-backed)');
-    }
+        ctx.logger.info('[CRUD Nodes] 4 built-in node executors registered (data-backed)');
 }

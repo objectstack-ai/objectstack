@@ -6,7 +6,17 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 
 /**
- * Flow Node Types
+ * Flow Node Types — **built-in seed set** (ADR-0018).
+ *
+ * Historically this `z.enum` *gated* `FlowNodeSchema.type`, which made the
+ * closed protocol reject any plugin-registered node type — defeating the open
+ * runtime registry (`registerNodeExecutor(type: string)`). Per ADR-0018 the
+ * gate is removed: `FlowNodeSchema.type` is now a validated `string`, checked
+ * against the live action registry at `registerFlow()` time, not frozen here.
+ *
+ * `FlowNodeAction` is **retained** as the canonical list of built-in type ids
+ * (documentation + the seed descriptor set the engine registers at boot). It
+ * no longer constrains authored flows — plugins extend the vocabulary.
  */
 import { lazySchema } from '../shared/lazy-schema';
 export const FlowNodeAction = z.enum([
@@ -29,6 +39,20 @@ export const FlowNodeAction = z.enum([
   'join_gateway',       // BPMN Join Gateway — AND-join (waits for all incoming branches to complete)
   'boundary_event',     // BPMN Boundary Event — attached to a host node for timer/error/signal interrupts
 ]);
+
+/**
+ * The built-in node type ids as a plain string array — the seed set the
+ * runtime registers descriptors for at boot. Consumers that need to know
+ * "which types ship in the box" (vs plugin-contributed) read this.
+ */
+export const FLOW_BUILTIN_NODE_TYPES: readonly string[] = FlowNodeAction.options;
+
+/**
+ * Structural node types the engine handles without a registered executor
+ * (the start sentinel and the end terminator). These are always legal
+ * regardless of what executors are registered.
+ */
+export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
 
 /**
  * Flow Variable Schema
@@ -61,7 +85,10 @@ export const FlowVariableSchema = lazySchema(() => z.object({
  */
 export const FlowNodeSchema = lazySchema(() => z.object({
   id: z.string().describe('Node unique ID'),
-  type: FlowNodeAction.describe('Action type'),
+  type: z.string().min(1).describe(
+    'Action type — a built-in FlowNodeAction id or a plugin-registered node type. ' +
+    'Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum.',
+  ),
   label: z.string().describe('Node label'),
   
   /** Node Configuration Options (Specific to type) */

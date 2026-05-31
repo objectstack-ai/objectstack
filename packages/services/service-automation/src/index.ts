@@ -4,12 +4,18 @@
 export { AutomationEngine } from './engine.js';
 export type { NodeExecutor, NodeExecutionResult, FlowTrigger } from './engine.js';
 
-// Kernel plugin
+// Kernel plugin — seeds all built-in nodes; this is the only plugin needed for
+// a fully-functional automation capability.
 export { AutomationServicePlugin } from './plugin.js';
 export type { AutomationServicePluginOptions } from './plugin.js';
 
-// Node plugins
-export { CrudNodesPlugin } from './plugins/crud-nodes-plugin.js';
-export { LogicNodesPlugin } from './plugins/logic-nodes-plugin.js';
-export { HttpConnectorPlugin } from './plugins/http-connector-plugin.js';
-export { ScreenNodesPlugin } from './plugins/screen-nodes-plugin.js';
+// Built-in node executors (ADR-0018). These are seeded by AutomationServicePlugin
+// and exported for advanced hosts that build a custom engine. They are functions,
+// not plugins — the platform's foundational nodes are built in, not installed.
+export {
+    installBuiltinNodes,
+    registerLogicNodes,
+    registerCrudNodes,
+    registerScreenNodes,
+    registerHttpNodes,
+} from './builtin/index.js';

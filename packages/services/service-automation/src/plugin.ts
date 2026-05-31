@@ -2,6 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { AutomationEngine } from './engine.js';
+import { installBuiltinNodes } from './builtin/index.js';
 
 /**
  * Configuration options for the AutomationServicePlugin.
@@ -15,14 +16,17 @@ export interface AutomationServicePluginOptions {
  * AutomationServicePlugin — Core engine plugin
  *
  * Responsibilities:
- * 1. init phase: Create engine instance, register as 'automation' service
- * 2. start phase: Trigger 'automation:ready' hook for node plugin registration,
- *    then pull flow definitions from the ObjectQL schema registry and register
- *    them with the engine.
+ * 1. init phase: Create engine instance, register as 'automation' service, and
+ *    seed the platform's built-in node executors (logic / CRUD / screen-script /
+ *    http_request) via {@link installBuiltinNodes}. Per ADR-0018, foundational
+ *    capabilities are built into the core, not packaged as optional plugins.
+ * 2. start phase: Trigger 'automation:ready' hook so third-party plugins can
+ *    register additional node types, then pull flow definitions from the
+ *    ObjectQL schema registry and register them with the engine.
  * 3. destroy phase: Clean up resources
  *
- * Does NOT implement any specific nodes — nodes are registered by other plugins
- * via the engine's extension API.
+ * The engine's `registerNodeExecutor()` stays open so plugins extend the
+ * node/action vocabulary at runtime — the marketplace-extensibility contract.
  *
  * @example
  * ```ts
@@ -57,6 +61,11 @@ export class AutomationServicePlugin implements Plugin {
 
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);
+
+        // Seed the platform's built-in node executors. A bare
+        // `new AutomationServicePlugin()` is thus a self-contained automation
+        // capability — no companion node-pack plugins required (ADR-0018).
+        installBuiltinNodes(this.engine, ctx);
 
         if (this.options.debug) {
             ctx.hook('automation:beforeExecute', async (flowName: string) => {

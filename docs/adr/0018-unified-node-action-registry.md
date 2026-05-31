@@ -1,6 +1,6 @@
 # ADR-0018: Unified Node/Action Registry across Flow, Workflow-Rule & Approval
 
-**Status**: Draft (2026-05-31)
+**Status**: Accepted (2026-05-31) — M1 + M2 implemented (built-in nodes folded into the core plugin; descriptor API + `GET /automation/actions` shipped). M3 (outbox-backed `http`/`notify`) next.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type), [ADR-0012](./0012-notification-platform.md) (generalized outbox in `service-messaging`)
 **Consumers**: `@objectstack/spec` (`automation/`), `@objectstack/services/service-automation`, `@objectstack/plugins/plugin-approvals`, `@objectstack/plugins/plugin-webhooks` → `service-messaging`, every plugin that registers a node executor, `../objectui` (`plugin-workflow` designer)
@@ -41,7 +41,7 @@ The same "send something outbound" concept has **five names**: `http_request`, `
 
 2. **The designer paints what the engine can't run.** `TOOLBAR_NODE_TYPES` in `plugin-workflow/src/FlowDesigner.tsx` is hardcoded, and its `FlowNodeType` vocabulary (BPMN-flavored: `task` / `service_task` / `notification` / `webhook`) matches *neither* `flow.zod.ts` *nor* the runtime executors (`decision`, `http_request`, `create_record`, …). A `notification` node dragged onto the canvas has **no executor** behind it. A plugin-registered node type **never appears in the palette**.
 
-3. **The reliability machinery is built once and reused nowhere.** `plugin-webhooks` has the durable outbox / exponential retry / cluster-lock / dead-letter (per ADR-0012 §"What plugin-webhooks already provides"). Yet Flow's `http_request` executor is a bare `fetch()` with no retry, no idempotency, no outbox (`service-automation/src/plugins/http-connector-plugin.ts`). Workflow Rules' `http_call` has no runtime at all. Approval's `webhook` action is a third implementation. Four would-be HTTP callers, zero sharing the one reliable substrate.
+3. **The reliability machinery is built once and reused nowhere.** `plugin-webhooks` has the durable outbox / exponential retry / cluster-lock / dead-letter (per ADR-0012 §"What plugin-webhooks already provides"). Yet Flow's `http_request` executor is a bare `fetch()` with no retry, no idempotency, no outbox (`service-automation/src/builtin/http-nodes.ts`). Workflow Rules' `http_call` has no runtime at all. Approval's `webhook` action is a third implementation. Four would-be HTTP callers, zero sharing the one reliable substrate.
 
 ### The answer already half-exists and is unused
 
@@ -166,8 +166,8 @@ No fourth engine. Workflow Rules stays a **simplified authoring view** for busin
 
 | Step | Change | Compatibility |
 |:---|:---|:---|
-| M1 | Extend `NodeExecutorDescriptor` → `ActionDescriptor`; `FlowNodeSchema.type` → validated `string`; `registerFlow()` validates against registry | Existing flows: all current `FlowNodeAction` values are seed-registered, so they keep validating. |
-| M2 | Built-in executors publish descriptors; add `getActionDescriptors()` + `GET /api/v1/automation/actions` | Additive. |
+| M1 ✅ | Add canonical `ActionDescriptorSchema` (+ `defineActionDescriptor`) alongside the legacy `NodeExecutorDescriptor`; `FlowNodeSchema.type` → validated `string` (with `FlowNodeAction`/`FLOW_BUILTIN_NODE_TYPES` retained as the seed set); `registerFlow()` soft-validates node types against the live registry (warn, don't hard-fail). | **Shipped.** Existing flows keep validating (built-in types seed-registered); plugin-registered node types are now legal flow nodes. |
+| M2 (partial ✅) | Built-in nodes (logic/crud/http/screen) publish descriptors and are **folded into the core `AutomationServicePlugin`** (seeded via `installBuiltinNodes()`), so `automation` is a self-contained capability — no companion node-pack plugins, no `extras` in the capability loader. `connector_action` dropped from the baseline (an integration concern needing a connector registry the platform doesn't ship; left to the integration layer / marketplace plugins via the still-open `registerNodeExecutor()`). Descriptors tagged `source: 'builtin'` vs `'plugin'`. `AutomationEngine.getActionDescriptors()`/`getActionDescriptor()` + optional `IAutomationService.getActionDescriptors()`. `GET /api/v1/automation/actions` shipped via `HttpDispatcher.handleAutomation` (`?paradigm`/`?source`/`?category` filters; `AutomationActionsResponseSchema` in spec; declarative entry in `DEFAULT_AUTOMATION_ROUTES`). | Additive; built-in flows keep working from the core plugin alone. Hosts that hand-assembled the four `*NodesPlugin` classes drop them (the classes are gone). |
 | M3 | Introduce `http` + `notify` executors backed by `service-messaging`; register `http_request`/`http_call`/`webhook` as deprecated aliases | Old node types keep running via alias. |
 | M4 | Designer palette + config forms driven by the registry; remove hardcoded `FlowNodeType` | Designer-only; old saved graphs still load. |
 | M5 | Workflow-Rule → Flow compiler; `plugin-approvals` action executor delegates to the shared `http`/`notify` executors | Approval/Workflow-Rule definitions unchanged; execution path converges. |

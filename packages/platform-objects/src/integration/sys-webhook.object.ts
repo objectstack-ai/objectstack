@@ -10,8 +10,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Studio UI without code changes. The canonical Zod schema for the
  * `definition_json` envelope lives at `@objectstack/spec/automation/webhook`.
  *
- * One row per `name`. The HTTP connector plugin
- * (`@objectstack/service-automation/plugins/http-connector-plugin`) loads
+ * One row per `name`. The automation runtime
+ * (`@objectstack/service-automation`, built-in `http_request` node) loads
  * active rows on boot + on `sys_webhook:changed` events, registers
  * `afterInsert` / `afterUpdate` / `afterDelete` listeners for the
  * targeted object, and dispatches outbound HTTP calls when matching

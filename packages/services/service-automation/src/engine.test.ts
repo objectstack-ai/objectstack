@@ -4,9 +4,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { AutomationEngine } from './engine.js';
 import { AutomationServicePlugin } from './plugin.js';
-import { CrudNodesPlugin } from './plugins/crud-nodes-plugin.js';
-import { LogicNodesPlugin } from './plugins/logic-nodes-plugin.js';
-import { HttpConnectorPlugin } from './plugins/http-connector-plugin.js';
 import type { NodeExecutor } from './engine.js';
 import type { IAutomationService } from '@objectstack/spec/contracts';
 
@@ -372,12 +369,11 @@ describe('AutomationServicePlugin (Kernel Integration)', () => {
         await kernel.shutdown();
     });
 
-    it('should support full plugin assembly with node plugins', async () => {
+    it('should seed all built-in node executors from the core plugin alone', async () => {
+        // ADR-0018: AutomationServicePlugin seeds the platform's built-in nodes
+        // directly — no companion node-pack plugins required.
         const kernel = new LiteKernel();
         kernel.use(new AutomationServicePlugin());
-        kernel.use(new CrudNodesPlugin());
-        kernel.use(new LogicNodesPlugin());
-        kernel.use(new HttpConnectorPlugin());
         await kernel.bootstrap();
 
         const engine = kernel.getService<AutomationEngine>('automation');
@@ -394,9 +390,15 @@ describe('AutomationServicePlugin (Kernel Integration)', () => {
         expect(nodeTypes).toContain('assignment');
         expect(nodeTypes).toContain('loop');
 
-        // HTTP/Connector nodes
+        // Screen/Script nodes
+        expect(nodeTypes).toContain('screen');
+        expect(nodeTypes).toContain('script');
+
+        // HTTP node (foundational I/O)
         expect(nodeTypes).toContain('http_request');
-        expect(nodeTypes).toContain('connector_action');
+
+        // connector_action is an integration concern — NOT in the built-in baseline.
+        expect(nodeTypes).not.toContain('connector_action');
 
         await kernel.shutdown();
     });
@@ -404,8 +406,6 @@ describe('AutomationServicePlugin (Kernel Integration)', () => {
     it('should execute a flow end-to-end through kernel', async () => {
         const kernel = new LiteKernel();
         kernel.use(new AutomationServicePlugin());
-        kernel.use(new CrudNodesPlugin());
-        kernel.use(new LogicNodesPlugin());
         await kernel.bootstrap();
 
         const automation = kernel.getService<IAutomationService>('automation');
@@ -450,17 +450,18 @@ describe('Hot-plug Node Executor', () => {
         await kernel.bootstrap();
 
         const engine = kernel.getService<AutomationEngine>('automation');
-        expect(engine.getRegisteredNodeTypes()).toHaveLength(0);
+        // Built-ins are already seeded; a brand-new third-party type is absent.
+        expect(engine.getRegisteredNodeTypes()).not.toContain('custom_node');
 
-        // Hot-plug a script node executor (valid FlowNodeAction, no built-in executor)
+        // Hot-plug a third-party node type at runtime (marketplace extensibility).
         engine.registerNodeExecutor({
-            type: 'script',
+            type: 'custom_node',
             async execute() {
                 return { success: true, output: { result: 'custom_script' } };
             },
         });
 
-        expect(engine.getRegisteredNodeTypes()).toContain('script');
+        expect(engine.getRegisteredNodeTypes()).toContain('custom_node');
 
         // Use it in a flow immediately — no restart needed
         engine.registerFlow('hotplug_flow', {
@@ -469,7 +470,7 @@ describe('Hot-plug Node Executor', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'run_script', type: 'script', label: 'Run Script' },
+                { id: 'run_script', type: 'custom_node', label: 'Run Custom' },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -500,15 +501,14 @@ describe('Hot-plug Node Executor', () => {
     });
 });
 
-// ─── CRUD Nodes Plugin Tests ─────────────────────────────────────────
+// ─── Built-in CRUD Nodes Tests ───────────────────────────────────────
 
-describe('CrudNodesPlugin', () => {
+describe('Built-in CRUD nodes', () => {
     let engine: AutomationEngine;
 
     beforeEach(async () => {
         const kernel = new LiteKernel();
         kernel.use(new AutomationServicePlugin());
-        kernel.use(new CrudNodesPlugin());
         await kernel.bootstrap();
         engine = kernel.getService<AutomationEngine>('automation');
     });
@@ -542,15 +542,14 @@ describe('CrudNodesPlugin', () => {
     });
 });
 
-// ─── Logic Nodes Plugin Tests ────────────────────────────────────────
+// ─── Built-in Logic Nodes Tests ──────────────────────────────────────
 
-describe('LogicNodesPlugin', () => {
+describe('Built-in logic nodes', () => {
     let engine: AutomationEngine;
 
     beforeEach(async () => {
         const kernel = new LiteKernel();
         kernel.use(new AutomationServicePlugin());
-        kernel.use(new LogicNodesPlugin());
         await kernel.bootstrap();
         engine = kernel.getService<AutomationEngine>('automation');
     });
@@ -587,23 +586,27 @@ describe('LogicNodesPlugin', () => {
     });
 });
 
-// ─── HttpConnectorPlugin Tests ───────────────────────────────────────
+// ─── Built-in HTTP Node Tests ────────────────────────────────────────
 
-describe('HttpConnectorPlugin', () => {
+describe('Built-in HTTP node', () => {
     let engine: AutomationEngine;
 
     beforeEach(async () => {
         const kernel = new LiteKernel();
         kernel.use(new AutomationServicePlugin());
-        kernel.use(new HttpConnectorPlugin());
         await kernel.bootstrap();
         engine = kernel.getService<AutomationEngine>('automation');
     });
 
-    it('should register http_request and connector_action node types', () => {
+    it('should register the http_request node type', () => {
         const types = engine.getRegisteredNodeTypes();
         expect(types).toContain('http_request');
-        expect(types).toContain('connector_action');
+    });
+
+    it('should NOT register connector_action in the built-in baseline', () => {
+        // connector_action is an integration concern requiring a connector
+        // registry the platform does not ship — left to the integration layer.
+        expect(engine.getRegisteredNodeTypes()).not.toContain('connector_action');
     });
 });
 
@@ -1421,5 +1424,146 @@ describe('AutomationEngine - Execution Status', () => {
         await engine.execute('fail_status');
         const runs = await engine.listRuns('fail_status');
         expect(runs[0].status).toBe('failed');
+    });
+});
+
+// ─── ADR-0018: Action Descriptor Registry & Open Node Types ──────────
+
+describe('Action Descriptor Registry (ADR-0018)', () => {
+    /** Logger that records warn() messages so we can assert soft-validation. */
+    function createCapturingLogger(warnings: string[]) {
+        const logger: any = {
+            info: () => {},
+            warn: (msg: string) => warnings.push(msg),
+            error: () => {},
+            debug: () => {},
+            child: () => logger,
+        };
+        return logger;
+    }
+
+    const baseFlow = (type: string) => ({
+        name: 'plugin_node_flow',
+        label: 'Plugin Node Flow',
+        type: 'autolaunched' as const,
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'custom', type, label: 'Custom' },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'custom' },
+            { id: 'e2', source: 'custom', target: 'end' },
+        ],
+    });
+
+    it('accepts a flow whose node type is a plugin-registered executor (the core bug fix)', () => {
+        const warnings: string[] = [];
+        const engine = new AutomationEngine(createCapturingLogger(warnings));
+
+        // A brand-new, non-built-in node type — previously rejected by the
+        // closed FlowNodeAction enum. Now legal because the executor is registered.
+        engine.registerNodeExecutor({
+            type: 'send_sms',
+            async execute() { return { success: true }; },
+        });
+
+        expect(() => engine.registerFlow('plugin_node_flow', baseFlow('send_sms'))).not.toThrow();
+        // No "unknown node type" warning for a registered executor.
+        expect(warnings.some(w => w.includes('send_sms'))).toBe(false);
+    });
+
+    it('registers the flow but warns when a node type has no executor or descriptor', () => {
+        const warnings: string[] = [];
+        const engine = new AutomationEngine(createCapturingLogger(warnings));
+
+        // Soft-fail per ADR-0018: register but warn (a temporarily-absent
+        // plugin should not block flow registration).
+        expect(() => engine.registerFlow('plugin_node_flow', baseFlow('not_a_real_type'))).not.toThrow();
+        expect(warnings.some(w => w.includes('not_a_real_type'))).toBe(true);
+    });
+
+    it('does not warn for the structural start/end node types', () => {
+        const warnings: string[] = [];
+        const engine = new AutomationEngine(createCapturingLogger(warnings));
+        engine.registerFlow('struct_only', {
+            name: 'struct_only',
+            label: 'Struct Only',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        });
+        expect(warnings.filter(w => w.includes('no registered executor'))).toHaveLength(0);
+    });
+
+    it('publishes a descriptor into the registry when an executor declares one', () => {
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerNodeExecutor({
+            type: 'send_sms',
+            descriptor: {
+                type: 'send_sms',
+                version: '2.1.0',
+                name: 'Send SMS',
+                category: 'io',
+                paradigms: ['flow'],
+                supportsPause: false,
+                supportsCancellation: false,
+                supportsRetry: true,
+                needsOutbox: true,
+                isAsync: false,
+                source: 'plugin',
+                deprecated: false,
+            },
+            async execute() { return { success: true }; },
+        });
+
+        const descriptor = engine.getActionDescriptor('send_sms');
+        expect(descriptor).toBeDefined();
+        expect(descriptor?.name).toBe('Send SMS');
+        expect(descriptor?.category).toBe('io');
+        expect(descriptor?.needsOutbox).toBe(true);
+        expect(engine.getActionDescriptors().map(d => d.type)).toContain('send_sms');
+    });
+
+    it('drops the published descriptor on unregister', () => {
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerNodeExecutor({
+            type: 'send_sms',
+            descriptor: {
+                type: 'send_sms', version: '1.0.0', name: 'Send SMS',
+                category: 'io', paradigms: ['flow'], supportsPause: false,
+                supportsCancellation: false, supportsRetry: true,
+                needsOutbox: false, isAsync: false, source: 'plugin', deprecated: false,
+            },
+            async execute() { return { success: true }; },
+        });
+        expect(engine.getActionDescriptor('send_sms')).toBeDefined();
+        engine.unregisterNodeExecutor('send_sms');
+        expect(engine.getActionDescriptor('send_sms')).toBeUndefined();
+        expect(engine.getActionDescriptors()).toHaveLength(0);
+    });
+
+    it('built-in nodes publish descriptors through the engine registry (core plugin alone)', async () => {
+        const kernel = new LiteKernel();
+        kernel.use(new AutomationServicePlugin());
+        await kernel.bootstrap();
+
+        const automation = kernel.getService('automation') as IAutomationService & {
+            getActionDescriptors(): Array<{ type: string; category: string; source: string }>;
+        };
+        const descriptors = automation.getActionDescriptors();
+        const byType = new Map(descriptors.map(d => [d.type, d]));
+
+        expect(byType.has('decision')).toBe(true);
+        expect(byType.get('decision')?.category).toBe('logic');
+        expect(byType.get('create_record')?.category).toBe('data');
+        expect(byType.get('http_request')?.category).toBe('io');
+
+        // All built-ins are tagged source: 'builtin'.
+        expect(byType.get('decision')?.source).toBe('builtin');
+        expect(byType.get('http_request')?.source).toBe('builtin');
     });
 });

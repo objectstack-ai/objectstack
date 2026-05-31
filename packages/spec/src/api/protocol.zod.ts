@@ -15,6 +15,7 @@ import {
 import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { StateMachineSchema } from '../automation/state-machine.zod';
+import { ActionDescriptorSchema } from '../automation/node-executor.zod';
 import { TranslationDataSchema } from '../system/translation.zod';
 import type {
   GetFeedRequest,
@@ -87,6 +88,18 @@ export const AutomationTriggerResponseSchema = lazySchema(() => z.object({
   success: z.boolean(),
   jobId: z.string().optional(),
   result: z.unknown().optional()
+}));
+
+/**
+ * Response for `GET /api/v1/automation/actions` (ADR-0018).
+ *
+ * Returns the live action/node registry — the platform's built-in actions plus
+ * any plugin-contributed ones — backing the designer palette and flow
+ * validation. Each entry is a canonical {@link ActionDescriptorSchema}.
+ */
+export const AutomationActionsResponseSchema = lazySchema(() => z.object({
+  actions: z.array(ActionDescriptorSchema).describe('Registered action descriptors (built-in + plugin)'),
+  total: z.number().int().nonnegative().describe('Number of descriptors returned (after any filters)'),
 }));
 
 /**
@@ -1224,6 +1237,7 @@ type GetAnalyticsMetaResponse = z.infer<typeof AnalyticsMetadataResponseSchema>;
 
 export type AutomationTriggerRequest = z.infer<typeof AutomationTriggerRequestSchema>;
 export type AutomationTriggerResponse = z.infer<typeof AutomationTriggerResponseSchema>;
+export type AutomationActionsResponse = z.infer<typeof AutomationActionsResponseSchema>;
 
 export type FindDataRequest = z.input<typeof FindDataRequestSchema>;
 export type FindDataResponse = z.infer<typeof FindDataResponseSchema>;

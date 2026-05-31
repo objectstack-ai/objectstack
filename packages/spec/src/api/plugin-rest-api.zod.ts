@@ -1622,6 +1622,21 @@ export const DEFAULT_AUTOMATION_ROUTES: RestApiRouteRegistration = {
       timeout: 120000, // 2 minutes for long-running automations
       cacheable: false,
     },
+    {
+      method: 'GET',
+      path: '/actions',
+      handler: 'getActionDescriptors',
+      category: 'automation',
+      public: false,
+      summary: 'List automation actions',
+      description:
+        'Returns the live action/node registry (built-in + plugin-contributed) backing the ' +
+        'designer palette and flow validation. Supports ?paradigm, ?source, and ?category filters (ADR-0018).',
+      tags: ['Automation'],
+      responseSchema: 'AutomationActionsResponseSchema',
+      permissions: ['automation.read'],
+      cacheable: true,
+    },
   ],
   middleware: [
     { name: 'auth', type: 'authentication', enabled: true, order: 10 },

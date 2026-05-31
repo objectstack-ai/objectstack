@@ -165,6 +165,137 @@ export const NodeExecutorDescriptorSchema = lazySchema(() => z.object({
 
 export type NodeExecutorDescriptor = z.infer<typeof NodeExecutorDescriptorSchema>;
 
+// ─── Action Descriptor (ADR-0018, canonical) ─────────────────────────
+
+/**
+ * Action category — used by the designer to group the palette and by the
+ * runtime to apply category-wide policy (e.g. `human` actions are always
+ * async / suspend the flow).
+ */
+export const ActionCategorySchema = lazySchema(() => z.enum([
+  'logic',    // decision / assignment / loop / gateways
+  'data',     // CRUD on records
+  'io',       // outbound calls — http / notify / connector
+  'human',    // screen / user_task — suspends awaiting human input
+  'control',  // start / end / wait / subflow
+  'custom',   // plugin-defined, uncategorised
+]).describe('Action palette category'));
+
+export type ActionCategory = z.infer<typeof ActionCategorySchema>;
+
+/**
+ * Authoring surfaces that may offer an action. A descriptor opts into the
+ * paradigms whose users should see it in their palette.
+ */
+export const ActionParadigmSchema = lazySchema(() => z.enum([
+  'flow',           // visual Flow canvas
+  'workflow_rule',  // declarative Workflow Rule authoring view (compiles to Flow)
+  'approval',       // Approval Process steps
+]).describe('Authoring paradigm that may offer this action'));
+
+export type ActionParadigm = z.infer<typeof ActionParadigmSchema>;
+
+/**
+ * Canonical, cross-paradigm **Action descriptor** (ADR-0018 §1).
+ *
+ * This is the single source of truth for "what a node/action is" — the
+ * shape a plugin publishes when it registers an executor. It supersedes the
+ * three closed enums (`FlowNodeAction`, `WorkflowAction`, `ApprovalActionType`),
+ * which become *seed* descriptor sets registered at boot.
+ *
+ * The runtime registry (`AutomationEngine.getActionDescriptors()`) aggregates
+ * these and backs both:
+ *  - **flow validation** (`registerFlow()` checks `node.type` is a registered
+ *    action, and that `config` satisfies `configSchema`), and
+ *  - the **designer palette** (label / icon / category / config form).
+ *
+ * Keyed by `type` (not `id` + `nodeTypes` like the legacy
+ * {@link NodeExecutorDescriptorSchema}) so that one descriptor maps to exactly
+ * one registry node type — the unit the engine dispatches on.
+ */
+export const ActionDescriptorSchema = lazySchema(() => z.object({
+  // ── identity ──────────────────────────────────────────────────────
+  /** Registry node type — matches the executor's `type`. */
+  type: z.string().min(1).describe('Registry action/node type (matches the executor type)'),
+  /** Executor version (semver). */
+  version: z.string().describe('Executor version (semver)'),
+  /** Human-readable label (may be an i18n key). */
+  name: z.string().describe('Display label (or i18n key)'),
+  /** Longer description for the palette / docs. */
+  description: z.string().optional().describe('Action description'),
+
+  // ── palette presentation ──────────────────────────────────────────
+  /** Icon id resolved by the designer. */
+  icon: z.string().optional().describe('Icon id resolved by the designer'),
+  /** Palette grouping. */
+  category: ActionCategorySchema.default('custom').describe('Palette category'),
+  /** Which authoring surfaces may offer this action. */
+  paradigms: z.array(ActionParadigmSchema).default(['flow'])
+    .describe('Authoring surfaces that may offer this action'),
+
+  // ── config contract ───────────────────────────────────────────────
+  /**
+   * JSON Schema (compiled from the executor's Zod) describing the node
+   * `config`. Drives Studio form generation and `registerFlow()` config
+   * validation. Optional — actions with no config omit it.
+   */
+  configSchema: z.unknown().optional()
+    .describe('JSON Schema for the node config (drives form + parse validation)'),
+
+  // ── capabilities ──────────────────────────────────────────────────
+  /** Supports async pause/resume (e.g. wait, human_task). */
+  supportsPause: z.boolean().default(false).describe('Supports async pause/resume'),
+  /** Supports mid-execution cancellation. */
+  supportsCancellation: z.boolean().default(false).describe('Supports cancellation'),
+  /** Supports retry on failure. */
+  supportsRetry: z.boolean().default(true).describe('Supports retry on failure'),
+  /** Dispatch through the ADR-0012 service-messaging outbox. */
+  needsOutbox: z.boolean().default(false)
+    .describe('Dispatch via service-messaging outbox (retry/idempotency/dead-letter)'),
+  /** Request/response action that suspends the flow until a reply. */
+  isAsync: z.boolean().default(false)
+    .describe('Suspends the flow awaiting an external reply'),
+
+  // ── provenance ────────────────────────────────────────────────────
+  /**
+   * Whether this action ships with the platform (`builtin`, seeded by the
+   * automation core) or is contributed by a third-party plugin (`plugin`).
+   * Built-in actions are the platform's foundational vocabulary; plugins
+   * extend it (ADR-0018 — open, marketplace-extensible registry).
+   */
+  source: z.enum(['builtin', 'plugin']).default('plugin')
+    .describe('builtin = platform baseline; plugin = third-party contributed'),
+
+  // ── lifecycle ─────────────────────────────────────────────────────
+  /** Marks a retained-but-superseded type kept as a migration alias. */
+  deprecated: z.boolean().default(false).describe('Deprecated alias kept for back-compat'),
+  /** When deprecated, the type that supersedes this one. */
+  aliasOf: z.string().optional().describe('Canonical type this alias forwards to'),
+}).describe('Canonical cross-paradigm action/node descriptor (ADR-0018)'));
+
+export type ActionDescriptor = z.infer<typeof ActionDescriptorSchema>;
+export type ActionDescriptorInput = z.input<typeof ActionDescriptorSchema>;
+
+/**
+ * Type-safe factory for an {@link ActionDescriptor}. Validates and applies
+ * schema defaults at creation time, so an executor can publish a descriptor
+ * by stating only the fields it cares about:
+ *
+ * @example
+ * ```ts
+ * engine.registerNodeExecutor({
+ *   type: 'decision',
+ *   descriptor: defineActionDescriptor({
+ *     type: 'decision', version: '1.0.0', name: 'Decision', category: 'logic',
+ *   }),
+ *   async execute(node, vars, ctx) { ... },
+ * });
+ * ```
+ */
+export function defineActionDescriptor(input: ActionDescriptorInput): ActionDescriptor {
+  return ActionDescriptorSchema.parse(input);
+}
+
 // ─── Built-in Wait Executor Descriptor ───────────────────────────────
 
 /**

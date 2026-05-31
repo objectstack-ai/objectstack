@@ -1,10 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { FlowParsed, FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
-import type { ExecutionLog } from '@objectstack/spec/automation';
+import type { ExecutionLog, ActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, IAutomationService } from '@objectstack/spec/contracts';
 import type { Logger } from '@objectstack/spec/contracts';
-import { FlowSchema } from '@objectstack/spec/automation';
+import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES } from '@objectstack/spec/automation';
 
 // ─── Node Executor Interface (Plugin Extension Point) ───────────────
 
@@ -14,8 +14,16 @@ import { FlowSchema } from '@objectstack/spec/automation';
  * it with the engine to extend automation capabilities.
  */
 export interface NodeExecutor {
-    /** Corresponds to FlowNodeAction enum value */
+    /** Registry node type (built-in id or plugin-defined) */
     readonly type: string;
+
+    /**
+     * Optional ADR-0018 action descriptor. When present, it is published into
+     * the engine's action registry and surfaced via {@link AutomationEngine.getActionDescriptors}
+     * — feeding flow validation and the designer palette. Plugins SHOULD publish
+     * one so their node appears in the palette and validates as a legal flow node.
+     */
+    readonly descriptor?: ActionDescriptor;
 
     /**
      * Execute a node
@@ -89,6 +97,7 @@ export class AutomationEngine implements IAutomationService {
     private flowEnabled = new Map<string, boolean>();
     private flowVersionHistory = new Map<string, Array<{ version: number; definition: FlowParsed; createdAt: string }>>();
     private nodeExecutors = new Map<string, NodeExecutor>();
+    private actionDescriptors = new Map<string, ActionDescriptor>();
     private triggers = new Map<string, FlowTrigger>();
     private executionLogs: ExecutionLogEntry[] = [];
     private maxLogSize = 1000;
@@ -107,12 +116,35 @@ export class AutomationEngine implements IAutomationService {
             this.logger.warn(`Node executor '${executor.type}' replaced`);
         }
         this.nodeExecutors.set(executor.type, executor);
+
+        // Publish the ADR-0018 action descriptor into the registry, so the
+        // type validates as a legal flow node and appears in the designer
+        // palette. A descriptor's `type` should match the executor's; we key
+        // on the descriptor's `type` and warn on mismatch rather than silently
+        // diverging.
+        if (executor.descriptor) {
+            const descriptorType = executor.descriptor.type;
+            if (descriptorType !== executor.type) {
+                this.logger.warn(
+                    `Node executor '${executor.type}' publishes a descriptor for type '${descriptorType}' — registering under both.`,
+                );
+            }
+            this.actionDescriptors.set(descriptorType, executor.descriptor);
+        }
+
         this.logger.info(`Node executor registered: ${executor.type}`);
     }
 
     /** Unregister a node executor (hot-unplug) */
     unregisterNodeExecutor(type: string): void {
+        const executor = this.nodeExecutors.get(type);
         this.nodeExecutors.delete(type);
+        // Drop the published descriptor (keyed by descriptor.type, which may
+        // differ from the executor type).
+        this.actionDescriptors.delete(type);
+        if (executor?.descriptor) {
+            this.actionDescriptors.delete(executor.descriptor.type);
+        }
         this.logger.info(`Node executor unregistered: ${type}`);
     }
 
@@ -133,6 +165,20 @@ export class AutomationEngine implements IAutomationService {
         return [...this.nodeExecutors.keys()];
     }
 
+    /**
+     * Get all published action descriptors (ADR-0018). Backs both flow
+     * validation and the designer palette (`GET /api/v1/automation/actions`).
+     * Only executors that published a descriptor appear here.
+     */
+    getActionDescriptors(): ActionDescriptor[] {
+        return [...this.actionDescriptors.values()];
+    }
+
+    /** Get the action descriptor for a single node type, if published. */
+    getActionDescriptor(type: string): ActionDescriptor | undefined {
+        return this.actionDescriptors.get(type);
+    }
+
     /** Get all registered trigger types */
     getRegisteredTriggerTypes(): string[] {
         return [...this.triggers.keys()];
@@ -145,6 +191,13 @@ export class AutomationEngine implements IAutomationService {
 
         // DAG cycle detection
         this.detectCycles(parsed);
+
+        // ADR-0018 §M1 — validate node types against the live action registry.
+        // The protocol no longer gates `type` with a closed enum; membership is
+        // checked here instead. Soft-fail (warn, don't throw): a flow authored
+        // against a plugin that is currently disabled should still register, and
+        // executeNode() already throws NO_EXECUTOR at run time for unknown types.
+        this.validateNodeTypes(name, parsed);
 
         // Version history management
         const history = this.flowVersionHistory.get(name) ?? [];
@@ -334,6 +387,32 @@ export class AutomationEngine implements IAutomationService {
         // Evict oldest logs when exceeding max size
         if (this.executionLogs.length > this.maxLogSize) {
             this.executionLogs.splice(0, this.executionLogs.length - this.maxLogSize);
+        }
+    }
+
+    /**
+     * Validate each node's `type` against the live action registry (ADR-0018).
+     * A type is known if it is structural (start/end), has a registered
+     * executor, or has a published action descriptor. Unknown types are
+     * warned about (not rejected) so flows authored against a temporarily
+     * absent plugin still register; the runtime surfaces a hard NO_EXECUTOR
+     * error if such a node is actually executed.
+     */
+    private validateNodeTypes(flowName: string, flow: FlowParsed): void {
+        const known = new Set<string>([
+            ...FLOW_STRUCTURAL_NODE_TYPES,
+            ...this.nodeExecutors.keys(),
+            ...this.actionDescriptors.keys(),
+        ]);
+        const unknown = [...new Set(
+            flow.nodes.map(n => n.type).filter(t => !known.has(t)),
+        )];
+        if (unknown.length > 0) {
+            this.logger.warn(
+                `Flow '${flowName}' references node type(s) with no registered executor or descriptor: ` +
+                `${unknown.join(', ')}. They will fail at execution time unless a plugin registers them. ` +
+                `Registered types: ${[...known].join(', ') || '(none)'}`,
+            );
         }
     }
 

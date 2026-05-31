@@ -47,14 +47,10 @@ export interface CapabilitySpec {
  */
 export const CAPABILITY_PROVIDERS: Record<string, CapabilitySpec> = {
     automation: {
+        // Self-contained: AutomationServicePlugin seeds all built-in node
+        // executors itself (ADR-0018), so no companion node-pack plugins.
         pkg: '@objectstack/service-automation',
         export: 'AutomationServicePlugin',
-        extras: [
-            { pkg: '@objectstack/service-automation', export: 'CrudNodesPlugin' },
-            { pkg: '@objectstack/service-automation', export: 'LogicNodesPlugin' },
-            { pkg: '@objectstack/service-automation', export: 'HttpConnectorPlugin' },
-            { pkg: '@objectstack/service-automation', export: 'ScreenNodesPlugin' },
-        ],
     },
     ai: {
         pkg: '@objectstack/service-ai',

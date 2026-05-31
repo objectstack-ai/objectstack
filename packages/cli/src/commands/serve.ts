@@ -1319,19 +1319,12 @@ export default class Serve extends Command {
       };
       const CAPABILITY_PROVIDERS: Record<string, CapabilitySpec> = {
         automation: {
+          // Self-contained: AutomationServicePlugin seeds all built-in node
+          // executors itself (ADR-0018), so flows have executors with no
+          // companion node-pack plugins.
           pkg: '@objectstack/service-automation',
           export: 'AutomationServicePlugin',
           nameMatch: ['service-automation', 'AutomationServicePlugin'],
-          // The default node packs ship from the same package; auto-register them
-          // so flows actually have executors. Users can opt out by listing
-          // their own subset explicitly in `plugins: []` (which sets
-          // `nameMatch` to skip these auto-loads).
-          extras: [
-            { pkg: '@objectstack/service-automation', export: 'CrudNodesPlugin',   nameMatch: ['crud-nodes', 'CrudNodesPlugin'] },
-            { pkg: '@objectstack/service-automation', export: 'LogicNodesPlugin',  nameMatch: ['logic-nodes', 'LogicNodesPlugin'] },
-            { pkg: '@objectstack/service-automation', export: 'HttpConnectorPlugin', nameMatch: ['http-connector', 'HttpConnectorPlugin'] },
-            { pkg: '@objectstack/service-automation', export: 'ScreenNodesPlugin', nameMatch: ['screen-nodes', 'ScreenNodesPlugin'] },
-          ],
         },
         analytics: {
           pkg: '@objectstack/service-analytics',

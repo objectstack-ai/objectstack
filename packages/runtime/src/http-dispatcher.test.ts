@@ -145,6 +145,11 @@ describe('HttpDispatcher', () => {
                 listRuns: vi.fn().mockResolvedValue([{ id: 'run_1', status: 'completed' }]),
                 getRun: vi.fn().mockResolvedValue({ id: 'run_1', status: 'completed' }),
                 trigger: vi.fn().mockResolvedValue({ success: true }),
+                getActionDescriptors: vi.fn().mockReturnValue([
+                    { type: 'decision', name: 'Decision', category: 'logic', paradigms: ['flow'], source: 'builtin' },
+                    { type: 'http_request', name: 'HTTP Request', category: 'io', paradigms: ['flow', 'workflow_rule'], source: 'builtin' },
+                    { type: 'send_sms', name: 'Send SMS', category: 'io', paradigms: ['flow'], source: 'plugin' },
+                ]),
             };
 
             // Set up kernel services to include automation
@@ -231,6 +236,47 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleAutomation('trigger/flow_a', 'POST', { data: 1 }, { request: {} });
             expect(result.handled).toBe(true);
             expect(mockAutomationService.trigger).toHaveBeenCalledWith('flow_a', { data: 1 }, { request: {} });
+        });
+
+        // ── GET /actions — action descriptor registry (ADR-0018) ──────────
+        it('should list action descriptors via GET /actions', async () => {
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(mockAutomationService.getActionDescriptors).toHaveBeenCalled();
+            expect(result.response?.body?.data?.total).toBe(3);
+            expect(result.response?.body?.data?.actions.map((a: any) => a.type)).toEqual(
+                ['decision', 'http_request', 'send_sms'],
+            );
+        });
+
+        it('must NOT let GET /actions be shadowed by the /:name flow lookup', async () => {
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            // The actions registry is returned, NOT a getFlow('actions') result.
+            expect(mockAutomationService.getFlow).not.toHaveBeenCalled();
+            expect(result.response?.body?.data?.actions).toBeDefined();
+        });
+
+        it('should filter GET /actions by ?source', async () => {
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} }, { source: 'plugin' });
+            expect(result.handled).toBe(true);
+            expect(result.response?.body?.data?.total).toBe(1);
+            expect(result.response?.body?.data?.actions[0].type).toBe('send_sms');
+        });
+
+        it('should filter GET /actions by ?paradigm', async () => {
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} }, { paradigm: 'workflow_rule' });
+            expect(result.handled).toBe(true);
+            expect(result.response?.body?.data?.total).toBe(1);
+            expect(result.response?.body?.data?.actions[0].type).toBe('http_request');
+        });
+
+        it('should return an empty registry when the service lacks getActionDescriptors', async () => {
+            delete mockAutomationService.getActionDescriptors;
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(result.response?.body?.data?.actions).toEqual([]);
+            expect(result.response?.body?.data?.total).toBe(0);
         });
     });
 

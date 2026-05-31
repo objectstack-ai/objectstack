@@ -15,6 +15,7 @@
 
 import type { FlowParsed } from '../automation/flow.zod';
 import type { ExecutionLog } from '../automation/execution.zod';
+import type { ActionDescriptor } from '../automation/node-executor.zod';
 
 /**
  * Context passed to a flow/script execution
@@ -102,4 +103,14 @@ export interface IAutomationService {
      * @returns Execution log or null if not found
      */
     getRun?(runId: string): Promise<ExecutionLog | null>;
+
+    /**
+     * Get the action descriptors published by registered node executors
+     * (ADR-0018). Backs flow validation and the designer palette. Plugins
+     * that register an executor with a descriptor extend this set, so the
+     * automation engine's node/action vocabulary is open and marketplace-
+     * extensible rather than a closed enum.
+     * @returns Array of registered action descriptors
+     */
+    getActionDescriptors?(): ActionDescriptor[];
 }
