@@ -67,7 +67,27 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
    * holding a user id (`field`), or queue id (`queue`). Omitted for `manager`
    * (resolved from the submitter's `manager_id`).
    */
-  value: z.string().optional().describe('User id / role / team / department / field / queue — per `type`'),
+  // `xRef` marks this string as a *polymorphic* typed reference (ADR-0018
+  // §configSchema): the concrete picker follows the sibling `type` column, so
+  // the Studio designer shows a user/role/team/department/queue picker — or an
+  // object-field picker (resolved from the flow's `$trigger` object) when
+  // `type` is `field`. `manager` and any unmapped value carry no `value` and
+  // stay free text. A single `.meta()` carries both description and annotation.
+  value: z.string().optional().meta({
+    description: 'User id / role / team / department / field / queue — per `type`',
+    xRef: {
+      kindFrom: 'type',
+      objectSource: '$trigger',
+      map: {
+        user: 'user',
+        role: 'role',
+        team: 'team',
+        department: 'department',
+        field: 'object-field',
+        queue: 'queue',
+      },
+    },
+  }),
 }));
 export type ApprovalNodeApprover = z.infer<typeof ApprovalNodeApproverSchema>;
 
@@ -80,7 +100,13 @@ export const ApprovalEscalationSchema = lazySchema(() => z.object({
   timeoutHours: z.number().min(1).describe('Hours before escalation triggers'),
   action: z.enum(['reassign', 'auto_approve', 'auto_reject', 'notify']).default('notify')
     .describe('Action on escalation timeout'),
-  escalateTo: z.string().optional().describe('User id, role, or manager level to escalate to'),
+  // Escalation hands the request to a role (the common case — e.g. a manager
+  // role or an approvals queue owner); the Studio designer renders a role
+  // picker, but free text is still accepted for a specific user id.
+  escalateTo: z.string().optional().meta({
+    description: 'User id, role, or manager level to escalate to',
+    xRef: { kind: 'role' },
+  }),
   notifySubmitter: z.boolean().default(true).describe('Notify the original submitter on escalation'),
 }));
 export type ApprovalEscalation = z.infer<typeof ApprovalEscalationSchema>;
