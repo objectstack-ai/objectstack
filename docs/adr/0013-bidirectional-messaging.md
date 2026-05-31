@@ -483,6 +483,8 @@ The synthetic-user fallback is what keeps the system honest: nothing happens "as
 
 ### 9. Slack channel — first reference implementation
 
+> **Transport delegation (ADR-0022).** The Slack channel's outbound `send()` (and any Web-API calls below) should delegate to a Slack `Connector` (e.g. `@objectstack/connector-slack`) for auth / base URL / rate-limit / the `chat.*` action set, rather than hand-rolling `fetch`. The channel adds the messaging semantics on top. See [ADR-0022](./0022-connectors-vs-messaging-channels.md) — this lets the `connector_action`-direct path and the channel share one Slack transport.
+
 `@objectstack/plugin-messaging-slack`. Package layout:
 
 ```
