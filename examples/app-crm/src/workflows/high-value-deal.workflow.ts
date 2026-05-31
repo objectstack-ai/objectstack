@@ -1,20 +1,57 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Automation } from '@objectstack/spec';
+import type { StateMachineConfig } from '@objectstack/spec/automation';
 
 /**
- * Example workflow rule — flag high value deals.
- * When a CRM opportunity is created or updated with amount > 100k,
- * the rule fires. (No actions configured to keep the example minimal;
- * Studio shows the rule entry so admins can add email_alert/field_update.)
+ * High-Value Deal lifecycle — state-machine workflow.
+ *
+ * Migrated from the legacy `WorkflowRule` model (removed in the
+ * "reclaim `workflow` for state machines" refactor). The original rule
+ * fired when a `crm_opportunity` was created/updated with `amount > 100k`
+ * and notified sales managers. That intent is preserved here as a guarded
+ * transition: while an opportunity is `open`, an UPDATE whose amount clears
+ * the $100k threshold moves it to the `high_value` state and runs the
+ * notify action. The deal then closes won/lost like any other.
  */
-export const HighValueDealWorkflow: Automation.WorkflowRule = {
-  name: 'crm_high_value_deal_alert',
-  objectName: 'crm_opportunity',
-  triggerType: 'on_create_or_update',
-  description: 'Notify sales managers when a deal larger than $100k is created or updated.',
-  criteria: 'record.amount > 100000',
-  active: true,
-  executionOrder: 100,
-  reevaluateOnChange: false,
+export const HighValueDealWorkflow: StateMachineConfig = {
+  id: 'crm_high_value_deal_alert',
+  description:
+    'Flags a crm_opportunity as high-value and notifies sales managers when the amount exceeds $100k.',
+  initial: 'open',
+  states: {
+    open: {
+      meta: { label: 'Open', description: 'Active opportunity below the high-value threshold.' },
+      on: {
+        UPDATE: {
+          target: 'high_value',
+          cond: { type: 'expression', params: { source: 'record.amount > 100000' } },
+          actions: [
+            {
+              type: 'email_alert',
+              params: {
+                template: 'high_value_deal_alert',
+                recipients: ['{record.owner_manager_email}'],
+              },
+            },
+          ],
+          description: 'Amount cleared the $100k threshold — notify sales managers.',
+        },
+        CLOSE_WON: 'won',
+        CLOSE_LOST: 'lost',
+      },
+    },
+    high_value: {
+      meta: {
+        label: 'High Value',
+        description: 'Opportunity larger than $100k — under sales-manager watch.',
+        color: '#16a34a',
+      },
+      on: {
+        CLOSE_WON: 'won',
+        CLOSE_LOST: 'lost',
+      },
+    },
+    won: { type: 'final', meta: { label: 'Closed Won' } },
+    lost: { type: 'final', meta: { label: 'Closed Lost' } },
+  },
 };
