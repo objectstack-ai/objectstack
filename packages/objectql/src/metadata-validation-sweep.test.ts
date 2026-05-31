@@ -150,15 +150,16 @@ const FIXTURES: Record<string, Fixture> = {
         invalidatedField: 'type',
     },
     workflow: {
+        // `workflow` is the state-machine schema (StateMachineSchema): id +
+        // initial + states. (The legacy workflow-rule shape was retired.)
         valid: {
             name: 'sweep_wf',
-            label: 'Sweep',
-            objectName: 'sweep_account',
-            triggerType: 'on_create',
-            criteria: 'record.amount > 0',
+            id: 'sweep_wf',
+            initial: 'open',
+            states: { open: { type: 'final' } },
         },
-        invalid: { name: 'sweep_wf', label: 'Sweep' },
-        invalidatedField: 'objectName',
+        invalid: { name: 'sweep_wf', id: 'sweep_wf', initial: 'open' },
+        invalidatedField: 'states',
     },
     approval: {
         valid: {
