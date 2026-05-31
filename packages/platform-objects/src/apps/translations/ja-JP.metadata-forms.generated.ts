@@ -788,65 +788,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
-  approval: {
-    label: "承認プロセス",
-    sections: {
-      basics: {
-        label: "基本",
-        description: "承認プロセス ID と対象オブジェクト。"
-      },
-      entry_rules: {
-        label: "エントリールール",
-        description: "送信可能者と保留中レコードの動作。"
-      },
-      steps: {
-        label: "ステップ",
-        description: "順序付き承認チェーン — 各ステップで承認者とルーティングを決定。"
-      },
-      escalation_and_outcomes: {
-        label: "エスカレーションと結果",
-        description: "SLA、エスカレーション、決定後アクション。"
-      }
-    },
-    fields: {
-      name: {
-        helpText: "一意識別子（snake_case）"
-      },
-      label: {
-        helpText: "表示名（例: \"Contract Approval\"）"
-      },
-      object: {
-        helpText: "承認が必要なオブジェクト"
-      },
-      active: {
-        helpText: "この承認プロセスの有効/無効"
-      },
-      description: {
-        helpText: "承認対象と理由"
-      },
-      entryCriteria: {
-        helpText: "CEL 式: これが true の場合のみユーザーが送信可能"
-      },
-      lockRecord: {
-        helpText: "承認保留中はレコード編集をロック"
-      },
-      approvalStatusField: {
-        helpText: "承認状態を反映するフィールド名（例: \"approval_status\"）"
-      },
-      steps: {
-        helpText: "順序付き承認ステップ — 各ステップで承認者と処理を定義"
-      },
-      escalation: {
-        helpText: "タイムアウト後に自動エスカレーションまたは自動承認"
-      },
-      onFinalApprove: {
-        helpText: "全ステップ承認時のアクション（例: ステータス更新）"
-      },
-      onFinalReject: {
-        helpText: "却下時のアクション（例: 申請者へ通知）"
-      }
-    }
-  },
   job: {
     label: "バックグラウンドジョブ"
   },

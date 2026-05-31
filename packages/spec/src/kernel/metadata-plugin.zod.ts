@@ -88,7 +88,8 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // Automation Protocol
   'flow',        // Visual logic flows (FlowSchema)
   'workflow',    // State machines (StateMachineSchema)
-  'approval',    // Approval processes (ApprovalSchema)
+  // ADR-0019: `approval` is no longer a metadata type — approvals are authored
+  // as Approval nodes inside a `flow`.
   'job',         // Background / scheduled jobs (JobSchema)
 
   // System Protocol
@@ -604,10 +605,11 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   { type: 'action', label: 'Action', filePatterns: ['**/*.action.ts', '**/*.action.yml'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
   { type: 'report', label: 'Report', filePatterns: ['**/*.report.ts', '**/*.report.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
 
-  // Automation Protocol — flow/workflow/approval are executionPinned (ADR-0009)
+  // Automation Protocol — flow/workflow are executionPinned (ADR-0009).
+  // ADR-0019: there is no `approval` metadata type — approvals are Approval
+  // nodes inside a `flow`, so they load and version with their enclosing flow.
   { type: 'flow', label: 'Flow', filePatterns: ['**/*.flow.ts', '**/*.flow.yml', '**/*.flow.json'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: true, loadOrder: 80, domain: 'automation' },
   { type: 'workflow', label: 'Workflow', filePatterns: ['**/*.workflow.ts', '**/*.workflow.yml'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: true, loadOrder: 80, domain: 'automation' },
-  { type: 'approval', label: 'Approval Process', filePatterns: ['**/*.approval.ts', '**/*.approval.yml'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: true, loadOrder: 80, domain: 'automation' },
   { type: 'job', label: 'Background Job', filePatterns: ['**/*.job.ts', '**/*.job.yml', '**/*.job.json'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 80, domain: 'automation' },
 
   // System Protocol

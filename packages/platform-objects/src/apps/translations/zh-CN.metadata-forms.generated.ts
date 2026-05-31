@@ -788,65 +788,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
-  approval: {
-    label: "审批流",
-    sections: {
-      basics: {
-        label: "基础信息",
-        description: "名称与目标对象"
-      },
-      entry_rules: {
-        label: "进入规则",
-        description: "何时进入审批"
-      },
-      steps: {
-        label: "审批步骤",
-        description: "逐级审批配置"
-      },
-      escalation_and_outcomes: {
-        label: "升级与结果",
-        description: "超时升级与最终处理"
-      }
-    },
-    fields: {
-      name: {
-        helpText: "唯一标识符（snake_case）"
-      },
-      label: {
-        helpText: "显示名（如：\"合同审批\"）"
-      },
-      object: {
-        helpText: "需要审批的对象"
-      },
-      active: {
-        helpText: "启用或禁用此审批流"
-      },
-      description: {
-        helpText: "审批的对象与原因"
-      },
-      entryCriteria: {
-        helpText: "CEL 表达式：满足时用户可提交"
-      },
-      lockRecord: {
-        helpText: "审批待处理期间锁定记录，禁止编辑"
-      },
-      approvalStatusField: {
-        helpText: "用于镜像审批状态的字段名（如 \"approval_status\"）"
-      },
-      steps: {
-        helpText: "按顺序排列的审批步骤——每一步定义由谁审批以及结果"
-      },
-      escalation: {
-        helpText: "超时后自动升级或自动通过"
-      },
-      onFinalApprove: {
-        helpText: "所有步骤通过后的动作（如更新状态）"
-      },
-      onFinalReject: {
-        helpText: "被拒绝后的动作（如通知提交人）"
-      }
-    }
-  },
   job: {
     label: "后台作业"
   },

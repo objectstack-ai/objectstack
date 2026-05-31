@@ -788,65 +788,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
-  approval: {
-    label: "Approval Process",
-    sections: {
-      basics: {
-        label: "Basics",
-        description: "Approval process identity and the object it gates."
-      },
-      entry_rules: {
-        label: "Entry rules",
-        description: "Who can submit, and what happens to the record while pending."
-      },
-      steps: {
-        label: "Steps",
-        description: "Ordered approval chain — each step picks the approver and decides routing."
-      },
-      escalation_and_outcomes: {
-        label: "Escalation & outcomes",
-        description: "SLA, escalation, and post-decision actions."
-      }
-    },
-    fields: {
-      name: {
-        helpText: "Unique identifier (snake_case)"
-      },
-      label: {
-        helpText: "Display name (e.g., \"Contract Approval\")"
-      },
-      object: {
-        helpText: "Which object needs approval"
-      },
-      active: {
-        helpText: "Enable/disable this approval process"
-      },
-      description: {
-        helpText: "What gets approved and why"
-      },
-      entryCriteria: {
-        helpText: "CEL expression: users can submit only when this is true"
-      },
-      lockRecord: {
-        helpText: "Lock record from editing while approval is pending"
-      },
-      approvalStatusField: {
-        helpText: "Field name to mirror approval status (e.g., \"approval_status\")"
-      },
-      steps: {
-        helpText: "Approval steps in order — each step defines who approves and what happens"
-      },
-      escalation: {
-        helpText: "Auto-escalate or auto-approve after timeout"
-      },
-      onFinalApprove: {
-        helpText: "Actions when all steps approved (e.g., update status)"
-      },
-      onFinalReject: {
-        helpText: "Actions when rejected (e.g., notify submitter)"
-      }
-    }
-  },
   job: {
     label: "Background Job"
   },

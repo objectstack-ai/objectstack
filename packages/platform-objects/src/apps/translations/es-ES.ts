@@ -100,7 +100,6 @@ export const esES: TranslationData = {
         group_automation: { label: 'Automatización' },
         nav_flows: { label: 'Flujos' },
         nav_workflows: { label: 'Reglas de flujo de trabajo' },
-        nav_approvals: { label: 'Procesos de aprobación' },
         group_ai: { label: 'IA' },
         nav_agents: { label: 'Agentes' },
         nav_tools: { label: 'Herramientas' },

@@ -100,7 +100,6 @@ export const jaJP: TranslationData = {
         group_automation: { label: '自動化' },
         nav_flows: { label: 'フロー' },
         nav_workflows: { label: 'ワークフロールール' },
-        nav_approvals: { label: '承認プロセス' },
         group_ai: { label: 'AI' },
         nav_agents: { label: 'エージェント' },
         nav_tools: { label: 'ツール' },

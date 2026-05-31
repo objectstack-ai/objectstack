@@ -123,7 +123,6 @@ export const en: TranslationData = {
         group_automation: { label: 'Automation' },
         nav_flows: { label: 'Flows' },
         nav_workflows: { label: 'Workflow Rules' },
-        nav_approvals: { label: 'Approval Processes' },
         group_ai: { label: 'AI' },
         nav_agents: { label: 'Agents' },
         nav_tools: { label: 'Tools' },

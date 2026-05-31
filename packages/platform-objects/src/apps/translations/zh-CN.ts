@@ -100,7 +100,6 @@ export const zhCN: TranslationData = {
         group_automation: { label: '自动化' },
         nav_flows: { label: '流程' },
         nav_workflows: { label: '工作流规则' },
-        nav_approvals: { label: '审批流程' },
         group_ai: { label: 'AI' },
         nav_agents: { label: '智能体' },
         nav_tools: { label: '工具' },

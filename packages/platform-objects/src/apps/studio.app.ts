@@ -215,14 +215,8 @@ export const STUDIO_APP: App = {
           params: { type: 'workflow', package: '{active_package}' },
           icon: 'zap',
         },
-        {
-          id: 'nav_approvals',
-          type: 'component',
-          label: 'Approval Processes',
-          componentRef: 'metadata:resource',
-          params: { type: 'approval', package: '{active_package}' },
-          icon: 'check-circle',
-        },
+        // ADR-0019: no standalone "Approval Processes" nav — approvals are
+        // authored as Approval nodes inside a Flow (see nav_flows above).
       ],
     },
     {

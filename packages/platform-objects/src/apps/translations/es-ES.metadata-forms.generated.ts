@@ -788,65 +788,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
-  approval: {
-    label: "Proceso de aprobación",
-    sections: {
-      basics: {
-        label: "Aspectos básicos",
-        description: "Identidad del proceso de aprobación y el objeto que controla."
-      },
-      entry_rules: {
-        label: "Reglas de entrada",
-        description: "Quién puede enviar y qué ocurre con el registro mientras está pendiente."
-      },
-      steps: {
-        label: "Pasos",
-        description: "Cadena de aprobación ordenada — cada paso elige aprobador y decide el enrutado."
-      },
-      escalation_and_outcomes: {
-        label: "Escalado y resultados",
-        description: "SLA, escalado y acciones posteriores a la decisión."
-      }
-    },
-    fields: {
-      name: {
-        helpText: "Identificador único (snake_case)"
-      },
-      label: {
-        helpText: "Nombre mostrado (p. ej., \"Contract Approval\")"
-      },
-      object: {
-        helpText: "Qué objeto necesita aprobación"
-      },
-      active: {
-        helpText: "Activa/desactiva este proceso de aprobación"
-      },
-      description: {
-        helpText: "Qué se aprueba y por qué"
-      },
-      entryCriteria: {
-        helpText: "Expresión CEL: los usuarios solo pueden enviar cuando esto sea true"
-      },
-      lockRecord: {
-        helpText: "Bloquea la edición del registro mientras la aprobación está pendiente"
-      },
-      approvalStatusField: {
-        helpText: "Nombre de campo para reflejar el estado de aprobación (p. ej., \"approval_status\")"
-      },
-      steps: {
-        helpText: "Pasos de aprobación en orden — cada paso define quién aprueba y qué ocurre"
-      },
-      escalation: {
-        helpText: "Escala o aprueba automáticamente tras el tiempo de espera"
-      },
-      onFinalApprove: {
-        helpText: "Acciones cuando todos los pasos se aprueban (p. ej., actualizar estado)"
-      },
-      onFinalReject: {
-        helpText: "Acciones al rechazar (p. ej., notificar al remitente)"
-      }
-    }
-  },
   job: {
     label: "Trabajo en segundo plano"
   },

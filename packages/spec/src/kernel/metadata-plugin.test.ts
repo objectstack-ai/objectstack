@@ -20,7 +20,7 @@ describe('MetadataPluginProtocol', () => {
       const types = [
         'object', 'field', 'trigger', 'validation', 'hook',
         'view', 'page', 'dashboard', 'app', 'action', 'report',
-        'flow', 'workflow', 'approval',
+        'flow', 'workflow',
         'datasource', 'translation', 'router', 'function', 'service',
         'permission', 'profile', 'role',
         'agent', 'tool', 'skill',
@@ -35,6 +35,10 @@ describe('MetadataPluginProtocol', () => {
       expect(() => MetadataTypeSchema.parse('unknown')).toThrow();
       expect(() => MetadataTypeSchema.parse('widget')).toThrow();
       expect(() => MetadataTypeSchema.parse('')).toThrow();
+    });
+
+    it('should reject `approval` as a metadata type (ADR-0019: approval is a flow node)', () => {
+      expect(() => MetadataTypeSchema.parse('approval')).toThrow();
     });
   });
 

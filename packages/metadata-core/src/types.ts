@@ -29,7 +29,7 @@ export const MetadataTypeSchema = z.enum([
   'action',
   'flow',
   'workflow',
-  'approval',
+  // ADR-0019: `approval` is a flow node, not a metadata type.
   'job',
   'agent',
   'tool',
