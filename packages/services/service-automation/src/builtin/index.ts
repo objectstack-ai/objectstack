@@ -15,6 +15,7 @@
  *  - human   — screen / script                   (core flow capability)
  *  - io      — http_request                       (foundational outbound I/O)
  *  - io      — connector_action                   (generic integration dispatch)
+ *  - io      — notify                              (outbound notification via messaging service)
  *
  * `connector_action` is the *generic dispatch* counterpart to `http_request`
  * (ADR-0018 §Addendum): the platform ships the node + an (initially empty)
@@ -31,12 +32,14 @@ import { registerCrudNodes } from './crud-nodes.js';
 import { registerScreenNodes } from './screen-nodes.js';
 import { registerHttpNodes } from './http-nodes.js';
 import { registerConnectorNodes } from './connector-nodes.js';
+import { registerNotifyNode } from './notify-node.js';
 
 export { registerLogicNodes } from './logic-nodes.js';
 export { registerCrudNodes } from './crud-nodes.js';
 export { registerScreenNodes } from './screen-nodes.js';
 export { registerHttpNodes } from './http-nodes.js';
 export { registerConnectorNodes } from './connector-nodes.js';
+export { registerNotifyNode } from './notify-node.js';
 
 /**
  * Seed every built-in node executor into the engine. Called by
@@ -49,6 +52,7 @@ export function installBuiltinNodes(engine: AutomationEngine, ctx: PluginContext
     registerScreenNodes(engine, ctx);
     registerHttpNodes(engine, ctx);
     registerConnectorNodes(engine, ctx);
+    registerNotifyNode(engine, ctx);
 
     const types = engine.getRegisteredNodeTypes();
     ctx.logger.info(

@@ -30,6 +30,7 @@ export const FlowNodeAction = z.enum([
   'delete_record',      // CRUD: Delete
   'get_record',         // CRUD: Get/Query
   'http_request',       // Webhook/API Call
+  'notify',             // Outbound notification (ADR-0012) — dispatched via the messaging service
   'script',             // Custom Script (JS/TS)
   'screen',             // Screen / User-Input Element
   'wait',               // Delay/Sleep

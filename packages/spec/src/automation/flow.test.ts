@@ -17,7 +17,7 @@ describe('FlowNodeAction', () => {
     const actions = [
       'start', 'end', 'decision', 'assignment', 'loop',
       'create_record', 'update_record', 'delete_record', 'get_record',
-      'http_request', 'script', 'screen', 'wait', 'subflow', 'connector_action',
+      'http_request', 'notify', 'script', 'screen', 'wait', 'subflow', 'connector_action',
       'parallel_gateway', 'join_gateway', 'boundary_event',
     ];
     
@@ -120,7 +120,7 @@ describe('FlowNodeSchema', () => {
     const types = [
       'start', 'end', 'decision', 'assignment', 'loop',
       'create_record', 'update_record', 'delete_record', 'get_record',
-      'http_request', 'script', 'screen', 'wait', 'subflow', 'connector_action',
+      'http_request', 'notify', 'script', 'screen', 'wait', 'subflow', 'connector_action',
       'parallel_gateway', 'join_gateway', 'boundary_event',
     ] as const;
 

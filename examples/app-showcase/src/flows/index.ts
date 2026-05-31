@@ -90,6 +90,56 @@ export const ReassignWizardFlow = defineFlow({
 });
 
 /**
+ * Task Assigned → Notify Assignee — the worked `notify` example (ADR-0012).
+ *
+ * Where {@link TaskCompletedFlow} hand-waves notification through a `script`
+ * node, this flow uses the baseline `notify` node: it hands a topic +
+ * recipient + message to the messaging service, which fans out to the user's
+ * channels (inbox by default). The `notify` node ships in every automation
+ * engine; delivery is backed by `@objectstack/service-messaging`
+ * (`MessagingServicePlugin`). Without that plugin the node degrades to a
+ * logged no-op instead of failing the flow — install it and this flow starts
+ * landing inbox rows with no edit.
+ */
+export const TaskAssignedNotifyFlow = defineFlow({
+  name: 'showcase_task_assigned_notify',
+  label: 'Notify Assignee on Task Assignment',
+  description: 'Notifies the new assignee (inbox channel) when a task is reassigned.',
+  type: 'autolaunched',
+  nodes: [
+    {
+      id: 'start',
+      type: 'start',
+      label: 'On Task Assignee Change',
+      config: {
+        objectName: 'showcase_task',
+        triggerType: 'record-after-update',
+        condition: 'assignee != previous.assignee',
+      },
+    },
+    {
+      id: 'notify_assignee',
+      type: 'notify',
+      label: 'Notify Assignee',
+      config: {
+        topic: 'task.assigned',
+        recipients: ['{record.assignee}'],
+        channels: ['inbox'],
+        severity: 'info',
+        title: 'New task assigned: {record.title}',
+        message: 'You have been assigned "{record.title}".',
+        actionUrl: '/showcase_task/{record.id}',
+      },
+    },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'notify_assignee' },
+    { id: 'e2', source: 'notify_assignee', target: 'end' },
+  ],
+});
+
+/**
  * Project Budget Approval — ADR-0019 approval-as-flow-node.
  *
  * What used to be a standalone two-step approval *process* is now an ordinary
@@ -213,4 +263,5 @@ export const allFlows = [
   ReassignWizardFlow,
   BudgetApprovalFlow,
   TaskCompletedSlackFlow,
+  TaskAssignedNotifyFlow,
 ];
