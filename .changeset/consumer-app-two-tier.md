@@ -2,12 +2,15 @@
 "@objectstack/spec": minor
 ---
 
-ADR-0019 P2 — manifest two-tier + consumer-App rules (warn-only draft).
+ADR-0019 — App as the consumer-facing unit. The consumer Marketplace surfaces
+exactly one user-visible noun, the App.
 
-Adds `CONSUMER_INSTALLABLE_TYPES` and `isConsumerInstallable(type)` to express
-the package-type tier split (D2: only `app` is consumer-installable), and a new
-`consumer-app-rules` module with `validateConsumerAppPurity` (D6) and
-`validateRequiresShape` (D7). `defineStack()` runs both as **non-blocking
-warnings** — existing apps that bundle code still build; the Marketplace publish
-path will later treat these as errors for consumer `type: app` listings. No
-runtime/registry changes (capability registry + install gate remain P4).
+- Adds `CONSUMER_INSTALLABLE_TYPES` and `isConsumerInstallable(type)` (the single
+  source of truth for "what a consumer can install").
+- Constrains `MarketplaceListingSchema.packageType` to `CONSUMER_INSTALLABLE_TYPES`
+  (default `app`) so a non-App (driver/server/plugin/…) listing cannot be
+  represented — the "consumers see only Apps" guarantee is enforced in the data
+  contract, not a forgettable query filter.
+
+The package `type` enum is unchanged; both additions are non-breaking. No
+runtime/registry/execution changes.

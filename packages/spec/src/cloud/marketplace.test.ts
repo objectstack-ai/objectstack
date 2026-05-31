@@ -105,6 +105,31 @@ describe('MarketplaceListingSchema', () => {
     expect(parsed.pricing).toBe('free');
   });
 
+  it('defaults packageType to `app` (ADR-0019 — only Apps are listable)', () => {
+    const listing = {
+      id: 'listing-001',
+      packageId: 'com.acme.crm',
+      publisherId: 'pub-001',
+      name: 'Acme CRM',
+      category: 'crm' as const,
+      latestVersion: '1.0.0',
+    };
+    expect(MarketplaceListingSchema.parse(listing).packageType).toBe('app');
+  });
+
+  it('rejects a non-consumer-installable packageType (driver/plugin/… cannot be listed)', () => {
+    const listing = {
+      id: 'listing-001',
+      packageId: 'com.acme.pg-driver',
+      publisherId: 'pub-001',
+      name: 'Postgres Driver',
+      category: 'crm' as const,
+      latestVersion: '1.0.0',
+      packageType: 'driver',
+    };
+    expect(() => MarketplaceListingSchema.parse(listing)).toThrow();
+  });
+
   it('should accept full listing', () => {
     const listing = {
       id: 'listing-001',

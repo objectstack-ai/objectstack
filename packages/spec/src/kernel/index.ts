@@ -2,7 +2,6 @@
 
 export * from './cli-extension.zod';
 export * from './cluster.zod';
-export * from './consumer-app-rules';
 export * from './context.zod';
 export * from './dependency-resolution.zod';
 export * from './dev-plugin.zod';

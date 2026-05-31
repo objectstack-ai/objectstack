@@ -1,13 +1,29 @@
 import { describe, it, expect } from 'vitest';
-import { 
-  PluginContextSchema, 
+import {
+  PluginContextSchema,
   PluginLifecycleSchema,
   PluginSchema,
   UpgradeContextSchema,
+  isConsumerInstallable,
+  CONSUMER_INSTALLABLE_TYPES,
   type PluginContextData,
   type PluginLifecycleHooks,
   type PluginDefinition,
 } from './plugin.zod';
+
+describe('isConsumerInstallable (ADR-0019 — App as the consumer unit)', () => {
+  it('only `app` is consumer-installable', () => {
+    expect(CONSUMER_INSTALLABLE_TYPES).toEqual(['app']);
+    expect(isConsumerInstallable('app')).toBe(true);
+    for (const t of ['plugin', 'driver', 'server', 'ui', 'theme', 'agent', 'objectql', 'module', 'adapter']) {
+      expect(isConsumerInstallable(t)).toBe(false);
+    }
+  });
+
+  it('handles undefined', () => {
+    expect(isConsumerInstallable(undefined)).toBe(false);
+  });
+});
 
 describe('PluginContextSchema', () => {
   it('should accept valid plugin context', () => {

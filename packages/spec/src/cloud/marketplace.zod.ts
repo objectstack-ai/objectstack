@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { CONSUMER_INSTALLABLE_TYPES } from '../kernel/plugin.zod';
 
 /**
  * # Marketplace Protocol
@@ -209,6 +210,17 @@ export const MarketplaceListingSchema = lazySchema(() => z.object({
 
   /** Package ID (reverse domain notation) */
   packageId: z.string().describe('Package identifier'),
+
+  /**
+   * Package type of the listing. ADR-0019: the consumer Marketplace surfaces
+   * exactly one user-visible noun — the App — so a listing may only describe a
+   * consumer-installable type. Internal contributions (driver/server/plugin/…)
+   * are never listed; they ship inside an App or are operator-provisioned.
+   * Constrained to {@link CONSUMER_INSTALLABLE_TYPES} so a non-App listing
+   * cannot even be represented.
+   */
+  packageType: z.enum(CONSUMER_INSTALLABLE_TYPES).default('app')
+    .describe('Consumer-installable package type (ADR-0019: only `app` is listable)'),
 
   /** Publisher information */
   publisherId: z.string().describe('Publisher ID'),

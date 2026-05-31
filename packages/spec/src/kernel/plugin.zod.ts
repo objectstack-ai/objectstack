@@ -106,29 +106,20 @@ export const CORE_PLUGIN_TYPES = [
 ] as const;
 
 /**
- * Package-type tiers — ADR-0019 D2 (the bundle model).
+ * Consumer-installable package types — ADR-0019 (App as the consumer unit).
  *
- * The package `type` enum is unchanged; what this split adds is *who installs
- * it*. There are two tiers:
- *
- * - **Consumer unit** (`CONSUMER_INSTALLABLE_TYPES`): the one user-visible noun.
- *   Today only `app`. These are what the consumer Marketplace lists and what a
- *   tenant installs / opens / uninstalls (download = open = uninstall).
- * - **Internal contribution** (everything else): the "frameworks inside the
- *   `.app` bundle" — plugins, modules, drivers, servers, themes, agents, etc.
- *   They ship *inside* an App or are operator-provisioned on the code plane;
- *   they are never independently browsed or installed by a consumer.
- *
- * This is a *semantic* split layered over the existing enum (the schema does
- * not remove any type). Enforcement is a lint/validation rule, not a
- * type-system guarantee — see `consumer-app-rules.ts`.
+ * The package `type` enum is unchanged; this adds a *semantic* split over it:
+ * which types are the one user-visible noun a tenant browses, installs, opens,
+ * and uninstalls. Today that is only `app`. Every other type
+ * (`plugin`/`driver`/`server`/`ui`/`theme`/`agent`/`module`/…) is an internal
+ * contribution — it ships *inside* an App or is operator-provisioned — and is
+ * never independently listed or installed by a consumer.
  */
 export const CONSUMER_INSTALLABLE_TYPES = ['app'] as const;
 
 /**
  * Returns true when a package `type` is a consumer-facing installable unit
- * (ADR-0019 D2). Use this to filter the consumer Marketplace to `type: app`
- * and to gate which packages may carry a consumer `sys_package_installation`.
+ * (ADR-0019). Use this to filter the consumer Marketplace to `type: app`.
  */
 export function isConsumerInstallable(type: string | undefined): boolean {
   return type != null && (CONSUMER_INSTALLABLE_TYPES as readonly string[]).includes(type);
