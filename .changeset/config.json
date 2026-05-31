@@ -38,6 +38,7 @@
       "@objectstack/plugin-sharing",
       "@objectstack/plugin-webhooks",
       "@objectstack/plugin-trigger-record-change",
+      "@objectstack/connector-mcp",
       "@objectstack/connector-rest",
       "@objectstack/connector-slack",
       "@objectstack/express",
