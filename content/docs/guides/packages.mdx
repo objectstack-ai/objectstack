@@ -380,10 +380,10 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 ### @objectstack/plugin-approvals
 
-**Approvals Plugin** — Approval-process engine driven by `sys_approval_process` / `sys_approval_request` metadata.
+**Approvals Plugin** — Contributes the `approval` flow node (ADR-0019): an approval runs on the one automation engine as a durable-pause node, backed by `sys_approval_request` / `sys_approval_action`.
 
-- **Features**: Multi-step approval chains, recall, escalation, audit trail
-- **When to use**: Any workflow that needs human sign-off (expense, quote, contract, …)
+- **Features**: Approver resolution (user/role/team/department/manager/field/queue), `first_response` / `unanimous`, record lock, status mirror, per-node SLA escalation, audit trail
+- **When to use**: Any flow that needs human sign-off (expense, quote, contract, …) — add an `approval` node and branch on `approve` / `reject`
 - **README**: [View README](/packages/plugins/plugin-approvals/README.md)
 
 ### @objectstack/plugin-sharing

@@ -72,8 +72,8 @@ cohesive plugin that "takes over" the entire platform's metadata management:
 ## TypeScript Usage
 
 ```typescript
-import { MetadataBulkRegisterRequest, MetadataBulkResult, MetadataDependency, MetadataEvent, MetadataPluginConfig, MetadataPluginManifest, MetadataQuery, MetadataQueryResult, MetadataType, MetadataTypeRegistryEntry, MetadataValidationResult } from '@objectstack/spec/kernel';
-import type { MetadataBulkRegisterRequest, MetadataBulkResult, MetadataDependency, MetadataEvent, MetadataPluginConfig, MetadataPluginManifest, MetadataQuery, MetadataQueryResult, MetadataType, MetadataTypeRegistryEntry, MetadataValidationResult } from '@objectstack/spec/kernel';
+import { MetadataBulkRegisterRequest, MetadataBulkResult, MetadataDependency, MetadataEvent, MetadataQuery, MetadataQueryResult, MetadataType, MetadataValidationResult } from '@objectstack/spec/kernel';
+import type { MetadataBulkRegisterRequest, MetadataBulkResult, MetadataDependency, MetadataEvent, MetadataQuery, MetadataQueryResult, MetadataType, MetadataValidationResult } from '@objectstack/spec/kernel';
 
 // Validate data
 const result = MetadataBulkRegisterRequest.parse(data);
@@ -137,42 +137,6 @@ const result = MetadataBulkRegisterRequest.parse(data);
 | **timestamp** | `string` | ✅ | Event timestamp |
 | **actor** | `string` | optional | User or system that triggered the event |
 | **payload** | `Record<string, any>` | optional | Event-specific payload |
-
-
----
-
-## MetadataPluginConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **storage** | `Object` | ✅ | Storage backend configuration |
-| **customizationPolicies** | `Object[]` | optional | Default customization policies per type |
-| **mergeStrategy** | `Object` | optional | Merge strategy for package upgrades |
-| **additionalTypes** | `Object[]` | optional | Additional custom metadata types |
-| **enableEvents** | `boolean` | ✅ | Emit metadata change events |
-| **validateOnWrite** | `boolean` | ✅ | Validate metadata on write |
-| **enableVersioning** | `boolean` | ✅ | Track metadata version history |
-| **cacheMaxItems** | `integer` | ✅ | Max items in memory cache |
-| **bootstrap** | `Enum<'eager' \| 'lazy' \| 'artifact-only'>` | ✅ | How metadata is primed at plugin start (eager / lazy / artifact-only) |
-
-
----
-
-## MetadataPluginManifest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Metadata plugin ID |
-| **name** | `string` | ✅ | Plugin name |
-| **version** | `string` | ✅ | Plugin version |
-| **type** | `string` | ✅ | Plugin type |
-| **description** | `string` | ✅ | Plugin description |
-| **capabilities** | `Object` | ✅ | Plugin capabilities |
-| **config** | `Object` | optional | Plugin configuration |
 
 
 ---
@@ -244,27 +208,6 @@ const result = MetadataBulkRegisterRequest.parse(data);
 * `agent`
 * `tool`
 * `skill`
-
-
----
-
-## MetadataTypeRegistryEntry
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'field' \| 'trigger' \| 'validation' \| 'hook' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'flow' \| 'workflow' \| 'approval' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'router' \| 'function' \| 'service' \| 'email_template' \| 'permission' \| 'profile' \| 'role' \| 'agent' \| 'tool' \| 'skill'>` | ✅ | Metadata type identifier |
-| **label** | `string` | ✅ | Display label for the metadata type |
-| **description** | `string` | optional | Description of the metadata type |
-| **filePatterns** | `string[]` | ✅ | Glob patterns to discover files of this type |
-| **supportsOverlay** | `boolean` | ✅ | Whether overlay customization is supported |
-| **allowOrgOverride** | `boolean` | ✅ | Allow per-org overlay writes via runtime metadata API |
-| **allowRuntimeCreate** | `boolean` | ✅ | Allow runtime creation via API |
-| **supportsVersioning** | `boolean` | ✅ | Whether version history is tracked |
-| **executionPinned** | `boolean` | ✅ | Transaction rows reference a specific version_hash; history GC is disabled and getByHash() MUST resolve old hashes (ADR-0009) |
-| **loadOrder** | `integer` | ✅ | Loading priority (lower = earlier) |
-| **domain** | `Enum<'data' \| 'ui' \| 'automation' \| 'system' \| 'security' \| 'ai'>` | ✅ | Protocol domain |
 
 
 ---

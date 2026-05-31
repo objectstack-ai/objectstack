@@ -5,29 +5,13 @@ description: Protocol protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
 
-ObjectStack Protocol - Zod Schema Definitions
+Response for `GET /api/v1/automation/actions` (ADR-0018).
 
-Defines the runtime-validated contract for interacting with ObjectStack metadata and data.
+Returns the live action/node registry — the platform's built-in actions plus
 
-Used by API adapters (HTTP, WebSocket, gRPC) to fetch data/metadata without knowing engine internals.
+any plugin-contributed ones — backing the designer palette and flow
 
-This protocol enables:
-
-- Runtime request/response validation at API gateway level
-
-- Automatic API documentation generation
-
-- Type-safe RPC communication between microservices
-
-- Client SDK generation from schemas
-
-Architecture Alignment:
-
-- Salesforce: REST API Request/Response schemas
-
-- Kubernetes: API Resource schemas with runtime validation
-
-- GraphQL: Schema-first API design
+validation. Each entry is a canonical [ActionDescriptorSchema](ActionDescriptorSchema).
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/protocol.zod.ts`
@@ -36,8 +20,8 @@ Architecture Alignment:
 ## TypeScript Usage
 
 ```typescript
-import { AiInsightsRequest, AiInsightsResponse, AiNlqRequest, AiNlqResponse, AiSuggestRequest, AiSuggestResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DeleteViewRequest, DeleteViewResponse, FindDataRequest, FindDataResponse, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPresenceRequest, GetPresenceResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetViewRequest, GetWorkflowConfigRequest, GetWorkflowStateRequest, GetWorkflowStateResponse, HttpFindQueryParams, ListNotificationsRequest, ListNotificationsResponse, ListViewsRequest, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, NotificationPreferences, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, SaveMetaItemRequest, SaveMetaItemResponse, SetPresenceRequest, SetPresenceResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, WorkflowApproveRequest, WorkflowApproveResponse, WorkflowRejectRequest, WorkflowRejectResponse, WorkflowState, WorkflowTransitionRequest, WorkflowTransitionResponse } from '@objectstack/spec/api';
-import type { AiInsightsRequest, AiInsightsResponse, AiNlqRequest, AiNlqResponse, AiSuggestRequest, AiSuggestResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DeleteViewRequest, DeleteViewResponse, FindDataRequest, FindDataResponse, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPresenceRequest, GetPresenceResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetViewRequest, GetWorkflowConfigRequest, GetWorkflowStateRequest, GetWorkflowStateResponse, HttpFindQueryParams, ListNotificationsRequest, ListNotificationsResponse, ListViewsRequest, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, NotificationPreferences, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, SaveMetaItemRequest, SaveMetaItemResponse, SetPresenceRequest, SetPresenceResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, WorkflowApproveRequest, WorkflowApproveResponse, WorkflowRejectRequest, WorkflowRejectResponse, WorkflowState, WorkflowTransitionRequest, WorkflowTransitionResponse } from '@objectstack/spec/api';
+import { AiInsightsRequest, AiInsightsResponse, AiNlqRequest, AiNlqResponse, AiSuggestRequest, AiSuggestResponse, AutomationActionsResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DeleteViewRequest, DeleteViewResponse, FindDataRequest, FindDataResponse, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPresenceRequest, GetPresenceResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetViewRequest, GetWorkflowConfigRequest, GetWorkflowConfigResponse, GetWorkflowStateRequest, GetWorkflowStateResponse, HttpFindQueryParams, ListNotificationsRequest, ListNotificationsResponse, ListViewsRequest, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, NotificationPreferences, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, SaveMetaItemRequest, SaveMetaItemResponse, SetPresenceRequest, SetPresenceResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, WorkflowApproveRequest, WorkflowApproveResponse, WorkflowRejectRequest, WorkflowRejectResponse, WorkflowState, WorkflowTransitionRequest, WorkflowTransitionResponse } from '@objectstack/spec/api';
+import type { AiInsightsRequest, AiInsightsResponse, AiNlqRequest, AiNlqResponse, AiSuggestRequest, AiSuggestResponse, AutomationActionsResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DeleteViewRequest, DeleteViewResponse, FindDataRequest, FindDataResponse, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPresenceRequest, GetPresenceResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetViewRequest, GetWorkflowConfigRequest, GetWorkflowConfigResponse, GetWorkflowStateRequest, GetWorkflowStateResponse, HttpFindQueryParams, ListNotificationsRequest, ListNotificationsResponse, ListViewsRequest, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, NotificationPreferences, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, SaveMetaItemRequest, SaveMetaItemResponse, SetPresenceRequest, SetPresenceResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, WorkflowApproveRequest, WorkflowApproveResponse, WorkflowRejectRequest, WorkflowRejectResponse, WorkflowState, WorkflowTransitionRequest, WorkflowTransitionResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = AiInsightsRequest.parse(data);
@@ -117,6 +101,18 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **suggestions** | `Object[]` | ✅ | Suggested values |
+
+
+---
+
+## AutomationActionsResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **actions** | `Object[]` | ✅ | Registered action descriptors (built-in + plugin) |
+| **total** | `integer` | ✅ | Number of descriptors returned (after any filters) |
 
 
 ---
@@ -737,6 +733,18 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name to get workflow config for |
+
+
+---
+
+## GetWorkflowConfigResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name |
+| **workflows** | `Object[]` | ✅ | Active state-machine workflows for this object |
 
 
 ---

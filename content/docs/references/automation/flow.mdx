@@ -5,7 +5,23 @@ description: Flow protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
 
-Flow Node Types
+Flow Node Types — **built-in seed set** (ADR-0018).
+
+Historically this `z.enum` *gated* `FlowNodeSchema.type`, which made the
+
+closed protocol reject any plugin-registered node type — defeating the open
+
+runtime registry (`registerNodeExecutor(type: string)`). Per ADR-0018 the
+
+gate is removed: `FlowNodeSchema.type` is now a validated `string`, checked
+
+against the live action registry at `registerFlow()` time, not frozen here.
+
+`FlowNodeAction` is **retained** as the canonical list of built-in type ids
+
+(documentation + the seed descriptor set the engine registers at boot). It
+
+no longer constrains authored flows — plugins extend the vocabulary.
 
 <Callout type="info">
 **Source:** `packages/spec/src/automation/flow.zod.ts`
@@ -30,7 +46,7 @@ const result = FlowNode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Node unique ID |
-| **type** | `Enum<'start' \| 'end' \| 'decision' \| 'assignment' \| 'loop' \| 'create_record' \| 'update_record' \| 'delete_record' \| 'get_record' \| 'http_request' \| 'script' \| 'screen' \| 'wait' \| 'subflow' \| 'connector_action' \| 'parallel_gateway' \| 'join_gateway' \| 'boundary_event'>` | ✅ | Action type |
+| **type** | `string` | ✅ | Action type — a built-in FlowNodeAction id or a plugin-registered node type. Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. |
 | **label** | `string` | ✅ | Node label |
 | **config** | `Record<string, any>` | optional | Node configuration |
 | **connectorConfig** | `Object` | optional |  |

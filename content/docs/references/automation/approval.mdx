@@ -14,40 +14,63 @@ Approval Step Approver Type
 ## TypeScript Usage
 
 ```typescript
-import { ApprovalAction, ApprovalActionType, ApproverType } from '@objectstack/spec/automation';
-import type { ApprovalAction, ApprovalActionType, ApproverType } from '@objectstack/spec/automation';
+import { ApprovalDecision, ApprovalEscalation, ApprovalNodeApprover, ApprovalNodeConfig, ApproverType } from '@objectstack/spec/automation';
+import type { ApprovalDecision, ApprovalEscalation, ApprovalNodeApprover, ApprovalNodeConfig, ApproverType } from '@objectstack/spec/automation';
 
 // Validate data
-const result = ApprovalAction.parse(data);
+const result = ApprovalDecision.parse(data);
 ```
 
 ---
 
-## ApprovalAction
+## ApprovalDecision
+
+### Allowed Values
+
+* `approve`
+* `reject`
+
+
+---
+
+## ApprovalEscalation
 
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'field_update' \| 'email_alert' \| 'webhook' \| 'script' \| 'connector_action' \| 'inbox_notify'>` | ✅ |  |
-| **name** | `string` | ✅ | Action name |
-| **config** | `Record<string, any>` | ✅ | Action configuration |
-| **connectorId** | `string` | optional |  |
-| **actionId** | `string` | optional |  |
+| **enabled** | `boolean` | ✅ | Enable SLA-based escalation for this node |
+| **timeoutHours** | `number` | ✅ | Hours before escalation triggers |
+| **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | ✅ | Action on escalation timeout |
+| **escalateTo** | `string` | optional | User id, role, or manager level to escalate to |
+| **notifySubmitter** | `boolean` | ✅ | Notify the original submitter on escalation |
 
 
 ---
 
-## ApprovalActionType
+## ApprovalNodeApprover
 
-### Allowed Values
+### Properties
 
-* `field_update`
-* `email_alert`
-* `webhook`
-* `script`
-* `connector_action`
-* `inbox_notify`
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'user' \| 'role' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue'>` | ✅ |  |
+| **value** | `string` | optional | User id / role / team / department / field / queue — per `type` |
+
+
+---
+
+## ApprovalNodeConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **approvers** | `Object[]` | ✅ | Allowed approvers for this node |
+| **behavior** | `Enum<'first_response' \| 'unanimous'>` | ✅ | How to combine multiple approvers |
+| **lockRecord** | `boolean` | ✅ | Lock the record from editing while pending |
+| **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
+| **escalation** | `Object` | optional | Per-node SLA escalation |
 
 
 ---

@@ -189,7 +189,7 @@ Cloud, package registry, and project management subcommands (`os projects`, `os 
 | [`@objectstack/plugin-auth`](packages/plugins/plugin-auth) | Authentication plugin (better-auth) |
 | [`@objectstack/plugin-security`](packages/plugins/plugin-security) | RBAC, Row-Level Security, Field-Level Security |
 | [`@objectstack/plugin-sharing`](packages/plugins/plugin-sharing) | Record-level sharing — `sys_record_share` + enforcement middleware |
-| [`@objectstack/plugin-approvals`](packages/plugins/plugin-approvals) | Multi-step approval engine — `sys_approval_process` + `sys_approval_request` |
+| [`@objectstack/plugin-approvals`](packages/plugins/plugin-approvals) | Approval as a flow node — approver resolution, record lock & status mirror over `sys_approval_request` + `sys_approval_action` |
 | [`@objectstack/plugin-audit`](packages/plugins/plugin-audit) | Audit logging plugin |
 | [`@objectstack/plugin-email`](packages/plugins/plugin-email) | Pluggable outbound email transport |
 | [`@objectstack/plugin-webhooks`](packages/plugins/plugin-webhooks) | Outbound webhook delivery — fan-out `data.record.*` events |

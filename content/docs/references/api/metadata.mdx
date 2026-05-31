@@ -50,8 +50,8 @@ the entire platform, including Hono, Next.js, and NestJS adapters.
 ## TypeScript Usage
 
 ```typescript
-import { ConceptListResponse, MetadataBulkResponse, MetadataBulkUnregisterRequest, MetadataDeleteResponse, MetadataDependenciesResponse, MetadataDependentsResponse, MetadataEffectiveResponse, MetadataExistsResponse, MetadataExportRequest, MetadataExportResponse, MetadataImportRequest, MetadataImportResponse, MetadataItemResponse, MetadataListResponse, MetadataNamesResponse, MetadataOverlayResponse, MetadataOverlaySaveRequest, MetadataQueryRequest, MetadataQueryResponse, MetadataRegisterRequest, MetadataTypeInfoResponse, MetadataTypesResponse, MetadataValidateRequest, MetadataValidateResponse } from '@objectstack/spec/api';
-import type { ConceptListResponse, MetadataBulkResponse, MetadataBulkUnregisterRequest, MetadataDeleteResponse, MetadataDependenciesResponse, MetadataDependentsResponse, MetadataEffectiveResponse, MetadataExistsResponse, MetadataExportRequest, MetadataExportResponse, MetadataImportRequest, MetadataImportResponse, MetadataItemResponse, MetadataListResponse, MetadataNamesResponse, MetadataOverlayResponse, MetadataOverlaySaveRequest, MetadataQueryRequest, MetadataQueryResponse, MetadataRegisterRequest, MetadataTypeInfoResponse, MetadataTypesResponse, MetadataValidateRequest, MetadataValidateResponse } from '@objectstack/spec/api';
+import { ConceptListResponse, MetadataBulkResponse, MetadataBulkUnregisterRequest, MetadataDeleteResponse, MetadataDependenciesResponse, MetadataDependentsResponse, MetadataEffectiveResponse, MetadataExistsResponse, MetadataExportRequest, MetadataExportResponse, MetadataImportRequest, MetadataImportResponse, MetadataItemResponse, MetadataListResponse, MetadataNamesResponse, MetadataOverlayResponse, MetadataOverlaySaveRequest, MetadataQueryRequest, MetadataQueryResponse, MetadataRegisterRequest, MetadataTypesResponse, MetadataValidateRequest, MetadataValidateResponse } from '@objectstack/spec/api';
+import type { ConceptListResponse, MetadataBulkResponse, MetadataBulkUnregisterRequest, MetadataDeleteResponse, MetadataDependenciesResponse, MetadataDependentsResponse, MetadataEffectiveResponse, MetadataExistsResponse, MetadataExportRequest, MetadataExportResponse, MetadataImportRequest, MetadataImportResponse, MetadataItemResponse, MetadataListResponse, MetadataNamesResponse, MetadataOverlayResponse, MetadataOverlaySaveRequest, MetadataQueryRequest, MetadataQueryResponse, MetadataRegisterRequest, MetadataTypesResponse, MetadataValidateRequest, MetadataValidateResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = ConceptListResponse.parse(data);
@@ -353,20 +353,6 @@ Metadata query with filtering, sorting, and pagination
 | **name** | `string` | ✅ | Item name (snake_case) |
 | **data** | `Record<string, any>` | ✅ | Metadata payload |
 | **namespace** | `string` | optional | Optional namespace |
-
-
----
-
-## MetadataTypeInfoResponse
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | optional | Type info |
 
 
 ---

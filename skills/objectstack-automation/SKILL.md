@@ -61,7 +61,7 @@ parallel. Flows are the primary automation building block in ObjectStack.
 
 ### Flow Node Types
 
-Flows are built from **18 node types**:
+Flows are built from **19 node types**:
 
 #### Control Flow
 
@@ -95,6 +95,12 @@ Flows are built from **18 node types**:
 | `connector_action` | Invoke a pre-built integration connector |
 | `script` | Execute custom JavaScript/TypeScript logic |
 | `screen` | Display a UI form to the user (screen flows only) |
+
+#### Human Decision
+
+| Node | Purpose |
+|:-----|:--------|
+| `approval` | Route a record for human sign-off — **suspends** the run until a decision, then continues down the `approve` / `reject` branch (contributed by `plugin-approvals`) |
 
 ### Flow Variables
 
@@ -219,69 +225,95 @@ Transitions can have conditions that must be met:
 }
 ```
 
-### Approval Processes
+### Approvals (Flow Nodes)
 
-An **ApprovalProcess** is the canonical multi-step review pattern for a
-business object. Build with the `ApprovalProcess.create({...})` factory from
-`@objectstack/spec/automation` and add to `defineStack({ approvals: [...] })`.
+Since **ADR-0019** there is no standalone approval-process type. An approval is
+authored as an **Approval node** (`type: 'approval'`) on an ordinary flow — the
+run **suspends** when it reaches the node and **resumes** down the node's
+`approve` / `reject` out-edge once a decision is recorded. Multi-step review is
+just successive Approval nodes wired together on the canvas, so the whole review
+is one diagram a reviewer (or AI) can read end-to-end.
+
+> The old process-level concepts re-home onto the flow graph + node config — see
+> the re-home table below. The approval *state* (`sys_approval_request` /
+> `sys_approval_action`, the record lock, the status mirror, approver
+> resolution) is unchanged and still owned by `plugin-approvals`.
 
 ```typescript
-import { ApprovalProcess } from '@objectstack/spec/automation';
-
-export const OpportunityDiscountApproval = ApprovalProcess.create({
+// A record-triggered flow: high-value opportunities need manager sign-off,
+// and director sign-off too when the amount clears 500k.
+{
   name: 'opportunity_discount_approval',
   label: 'Opportunity Discount Approval',
-  object: 'opportunity',
-  active: true,
-  description: 'High-value opportunities (> 100k) require manager + director sign-off.',
-
-  // Auto-submit + record locking — Phase B autopilot
-  entryCriteria: P`record.amount > 100000`,    // CEL predicate
-  lockRecord: true,
-  approvalStatusField: 'approval_status',       // mirrors pending|approved|rejected|recalled
-
-  // Process-level hooks (run once per request)
-  onSubmit: [
-    { type: 'inbox_notify', name: 'notify_approvers',
-      config: { to: 'pending_approvers', title: 'Discount approval needed',
-        body: 'Opportunity {record_id} (> 100k) is awaiting review.', link: '/system/approvals' } },
-  ],
-  onFinalApprove: [
-    { type: 'field_update', name: 'mark_won',
-      config: { field: 'stage', value: 'closed_won' } },
-    { type: 'inbox_notify', name: 'notify_submitter_approved',
-      config: { to: 'submitter', title: 'Discount approved',
-        body: 'Your discount request on {record_id} was approved.', link: '/system/approvals' } },
-  ],
-  onFinalReject: [
-    { type: 'inbox_notify', name: 'notify_submitter_rejected',
-      config: { to: 'submitter', title: 'Discount rejected',
-        body: 'Rejected: {comment}', link: '/system/approvals' } },
-  ],
-  onRecall: [
-    { type: 'inbox_notify', name: 'notify_recall',
-      config: { to: 'pending_approvers', title: 'Discount request recalled',
-        body: 'Submitter recalled the request on {record_id}.' } },
-  ],
-
-  steps: [
+  type: 'record_triggered',
+  trigger: { object: 'opportunity', event: 'after_update' },
+  nodes: [
+    { id: 'start', type: 'start' },
     {
-      name: 'manager_review',
+      id: 'manager_review',
+      type: 'approval',
       label: 'Sales Manager Review',
-      approvers: [{ type: 'role', value: 'sales_manager' }],
-      behavior: 'first_response',           // or 'unanimous'
-      rejectionBehavior: 'back_to_previous', // or 'reject_process'
+      config: {
+        approvers: [{ type: 'role', value: 'sales_manager' }],
+        behavior: 'first_response',            // or 'unanimous'
+        lockRecord: true,                      // lock the record while pending
+        approvalStatusField: 'approval_status', // mirror pending|approved|rejected|recalled onto the row
+      },
     },
+    { id: 'needs_director', type: 'decision', config: { condition: cel`record.amount > 500000` } },
     {
-      name: 'director_signoff',
+      id: 'director_signoff',
+      type: 'approval',
       label: 'Sales Director Sign-off',
-      approvers: [{ type: 'role', value: 'sales_director' }],
-      behavior: 'first_response',
-      rejectionBehavior: 'back_to_previous',
+      config: {
+        approvers: [{ type: 'role', value: 'sales_director' }],
+        behavior: 'unanimous',
+        approvalStatusField: 'approval_status',
+      },
     },
+    { id: 'mark_won', type: 'update_record',
+      config: { object: 'opportunity', recordId: '$record.id', values: { stage: 'closed_won' } } },
+    { id: 'approved', type: 'end' },
+    { id: 'rejected', type: 'end' },
   ],
-});
+  edges: [
+    { id: 'e1', source: 'start',          target: 'manager_review',
+      // entry criteria re-homes onto the edge entering the approval node:
+      condition: cel`record.amount > 100000` },
+    { id: 'e2', source: 'manager_review',  target: 'needs_director',   label: 'approve' },
+    { id: 'e3', source: 'manager_review',  target: 'rejected',         label: 'reject'  },
+    { id: 'e4', source: 'needs_director',  target: 'director_signoff', label: 'true'    },
+    { id: 'e5', source: 'needs_director',  target: 'mark_won',         label: 'false'   },
+    { id: 'e6', source: 'director_signoff', target: 'mark_won',        label: 'approve' },
+    { id: 'e7', source: 'director_signoff', target: 'rejected',        label: 'reject'  },
+    { id: 'e8', source: 'mark_won',         target: 'approved' },
+  ],
+}
 ```
+
+### Re-homing the old process model
+
+If you've seen the pre-ADR-0019 `ApprovalProcess.create({...})` shape, every
+concept maps onto the flow:
+
+| Old process concept | Now |
+|:--------------------|:----|
+| `steps: [...]` (linear list) | successive **Approval nodes** joined by edges |
+| `entryCriteria` (process or step) | a `condition` on the **edge entering** the node |
+| `onApprove` / `onReject` actions | downstream **nodes** wired to the `approve` / `reject` out-edge |
+| `rejectionBehavior: 'back_to_previous'` | a **back-edge** to an earlier node |
+| `rejectionBehavior: 'reject_process'` | the `reject` edge routed to an `end` node |
+| `approvers` / `behavior` / `lockRecord` / `approvalStatusField` / `escalation` | the Approval node's `config` (`ApprovalNodeConfigSchema`) |
+
+There is no `approvals: [...]` stack collection anymore — approval flows live in
+your normal `flows: [...]`.
+
+### Recording a decision
+
+A decision is recorded through `ApprovalService.decide()` (or the REST routes
+`POST /api/v1/approvals/requests/:id/approve` | `/reject`). That finalizes the
+`sys_approval_request` and **resumes** the suspended run down the matching
+branch — you never resume the flow by hand.
 
 ### Approver Types
 
@@ -295,55 +327,41 @@ export const OpportunityDiscountApproval = ApprovalProcess.create({
 | `field`      | User id read from a record field (`value` = field name) |
 | `queue`      | A data-ownership queue |
 
-### Step Behavior
+### Node Config (`ApprovalNodeConfigSchema`)
 
-- `behavior: 'first_response'` — the first approver to respond decides the step.
-- `behavior: 'unanimous'` — every approver must approve.
-- `rejectionBehavior: 'reject_process'` — rejection terminates the whole process.
-- `rejectionBehavior: 'back_to_previous'` — rejection rolls back one step so
-  the submitter (or the previous approver) can revise.
+| Field | Purpose |
+|:------|:--------|
+| `approvers` | Who may act (≥ 1 — see Approver Types above) |
+| `behavior` | `first_response` (first approver decides) or `unanimous` (all must approve). Default `first_response` |
+| `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
+| `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`recalled` onto (should be readonly) |
+| `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }` |
 
-### Step & Process Actions
+### Branching, side-effects & rejection
 
-Action types accepted in `onSubmit`, `onFinalApprove`, `onFinalReject`,
-`onRecall`, and per-step `onApprove`/`onReject`:
+These are wired on the **graph**, not in node config:
 
-| `type` | Purpose |
-|:-------|:--------|
-| `field_update`     | Write a field on the target record |
-| `inbox_notify`     | Insert a `sys_notification` row (in-app inbox) |
-| `email_alert`      | Send templated email to recipients |
-| `webhook`          | POST JSON payload to an external URL |
-| `script`           | Run an L2 hook body (sandboxed JS) |
-| `connector_action` | Invoke a Zapier-style connector action |
-
-### Per-Step Entry Criteria
-
-Use `entryCriteria` on a step to make it conditional (e.g. only require
-director sign-off for amounts > 500k):
-
-```typescript
-{
-  name: 'director_signoff',
-  entryCriteria: P`record.amount > 500000`,
-  approvers: [{ type: 'role', value: 'sales_director' }],
-  behavior: 'first_response',
-  rejectionBehavior: 'back_to_previous',
-}
-```
+- **Conditional step** — put a `decision` node before the Approval node, or a
+  `condition` on the edge entering it (the old per-step `entryCriteria`).
+- **On approve / on reject** — wire downstream nodes (`update_record`,
+  `http_request`, an email node, …) to the `approve` / `reject` out-edge.
+- **Roll back on reject** — route the `reject` edge as a **back-edge** to an
+  earlier node so the submitter can revise (the old `back_to_previous`).
+- **Hard reject** — route the `reject` edge to an `end` node (the old
+  `reject_process`).
 
 ### Approval Best Practices
 
-1. **Always set `entryCriteria` at the process level** so the runtime can
-   auto-submit on insert/update. Hand-crafted submission flows are a smell.
+1. **Gate entry on the edge** (`condition` into the Approval node) so the flow
+   only pauses for records that actually need sign-off.
 2. **Set `approvalStatusField`** to mirror status onto the row — views and
    formulas can then filter on it without joining `sys_approval_request`.
 3. **Keep `lockRecord: true`** unless you have a strong reason to allow
    edits while pending — otherwise approvers chase a moving target.
-4. **Prefer `back_to_previous`** for rejection unless the request is truly
-   terminal; it lets submitters iterate without re-opening the process.
-5. **Use `inbox_notify` over `email_alert`** for internal approval
-   notifications — it keeps the trail inside ObjectStack's audit log.
+4. **Model rejection as a visible branch** — a back-edge to revise, or an `end`
+   node to terminate. The path is on the diagram, not hidden in config.
+5. **Notify from downstream nodes** wired to the `approve` / `reject` edges
+   rather than expecting the node to send mail itself.
 
 ---
 
@@ -439,7 +457,7 @@ For enterprise automation design, align with this CRM-style structure:
 | Automation Type | Typical Location | Pattern |
 |:--|:--|:--|
 | Screen flow | `src/flows/*.flow.ts` | Use explicit `variables`, node graph (`nodes` + `edges`), and decision branches |
-| Approval process | `src/approvals/*.approval.ts` | Set `entryCriteria`, `lockRecord`, `approvalStatusField`, and stage-level approvers |
+| Approval flow | `src/flows/*.flow.ts` | A flow with `approval` node(s); set `approvers` / `behavior` / `lockRecord` / `approvalStatusField` in node `config`, branch on `approve` / `reject` edges |
 | Flow registry | `src/flows/index.ts` | Export `allFlows: Flow[]` and register centrally in `defineStack({ flows })` |
 | Action-to-flow bridge | `src/actions/*.actions.ts` | Trigger screen flows via `Action.type = 'flow'` for user-driven automation entry |
 

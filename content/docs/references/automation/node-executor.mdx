@@ -30,12 +30,69 @@ The protocol covers:
 ## TypeScript Usage
 
 ```typescript
-import { NodeExecutorDescriptor, WaitEventType, WaitExecutorConfig, WaitResumePayload, WaitTimeoutBehavior } from '@objectstack/spec/automation';
-import type { NodeExecutorDescriptor, WaitEventType, WaitExecutorConfig, WaitResumePayload, WaitTimeoutBehavior } from '@objectstack/spec/automation';
+import { ActionCategory, ActionDescriptor, ActionParadigm, NodeExecutorDescriptor, WaitEventType, WaitExecutorConfig, WaitResumePayload, WaitTimeoutBehavior } from '@objectstack/spec/automation';
+import type { ActionCategory, ActionDescriptor, ActionParadigm, NodeExecutorDescriptor, WaitEventType, WaitExecutorConfig, WaitResumePayload, WaitTimeoutBehavior } from '@objectstack/spec/automation';
 
 // Validate data
-const result = NodeExecutorDescriptor.parse(data);
+const result = ActionCategory.parse(data);
 ```
+
+---
+
+## ActionCategory
+
+Action palette category
+
+### Allowed Values
+
+* `logic`
+* `data`
+* `io`
+* `human`
+* `control`
+* `custom`
+
+
+---
+
+## ActionDescriptor
+
+Canonical cross-paradigm action/node descriptor (ADR-0018)
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Registry action/node type (matches the executor type) |
+| **version** | `string` | ✅ | Executor version (semver) |
+| **name** | `string` | ✅ | Display label (or i18n key) |
+| **description** | `string` | optional | Action description |
+| **icon** | `string` | optional | Icon id resolved by the designer |
+| **category** | `Enum<'logic' \| 'data' \| 'io' \| 'human' \| 'control' \| 'custom'>` | ✅ | Palette category |
+| **paradigms** | `Enum<'flow' \| 'workflow_rule' \| 'approval'>[]` | ✅ | Authoring surfaces that may offer this action |
+| **configSchema** | `any` | optional | JSON Schema for the node config (drives form + parse validation) |
+| **supportsPause** | `boolean` | ✅ | Supports async pause/resume |
+| **supportsCancellation** | `boolean` | ✅ | Supports cancellation |
+| **supportsRetry** | `boolean` | ✅ | Supports retry on failure |
+| **needsOutbox** | `boolean` | ✅ | Dispatch via service-messaging outbox (retry/idempotency/dead-letter) |
+| **isAsync** | `boolean` | ✅ | Suspends the flow awaiting an external reply |
+| **source** | `Enum<'builtin' \| 'plugin'>` | ✅ | builtin = platform baseline; plugin = third-party contributed |
+| **deprecated** | `boolean` | ✅ | Deprecated alias kept for back-compat |
+| **aliasOf** | `string` | optional | Canonical type this alias forwards to |
+
+
+---
+
+## ActionParadigm
+
+Authoring paradigm that may offer this action
+
+### Allowed Values
+
+* `flow`
+* `workflow_rule`
+* `approval`
+
 
 ---
 

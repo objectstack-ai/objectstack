@@ -45,6 +45,7 @@ const result = Datasource.parse(data);
 | **active** | `boolean` | ✅ | Is datasource enabled |
 | **schemaMode** | `Enum<'managed' \| 'external' \| 'validate-only'>` | ✅ | Schema ownership mode |
 | **external** | `Object` | optional | External datasource federation settings (schemaMode != "managed") |
+| **origin** | `Enum<'code' \| 'runtime'>` | ✅ | Datasource provenance (server-managed, read-only) |
 
 
 ---

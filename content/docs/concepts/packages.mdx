@@ -585,9 +585,9 @@ Framework adapters that bridge ObjectStack's unified `HttpDispatcher` to specifi
 
 ### @objectstack/plugin-approvals
 
-**Description:** Approval-process engine driven by `sys_approval_process` / `sys_approval_request` metadata.
+**Description:** Contributes the `approval` flow node (ADR-0019) — an approval rides the one automation engine as a durable-pause node, backed by `sys_approval_request` / `sys_approval_action`. There is no separate approval-process engine.
 
-**Key Features:** Multi-step approval chains, recall, escalation, audit trail, per-step assignees and conditions.
+**Key Features:** Approver resolution, `first_response` / `unanimous` behavior, record lock, status mirror, per-node SLA escalation, audit trail; multi-step review is successive `approval` nodes on the flow graph.
 
 **Use Cases:** Expense, quote, contract, and any workflow requiring human sign-off.
 
