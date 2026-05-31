@@ -180,6 +180,8 @@ Every layer has a stable seam. A custom channel (e.g. `plugin-notification-feish
 
 ### 2. The `MessagingChannel` interface
 
+> **Transport delegation (ADR-0022).** Per [ADR-0022](./0022-connectors-vs-messaging-channels.md), a channel's *transport* — provider auth, base URL, rate-limit handling, the provider's action set — should be implemented on top of a `Connector` (ADR-0015/0018), not hand-rolled per channel. `MessagingChannel` adds only the messaging *semantics* (preferences, inbox, outbox, sessions) on that substrate. The interface below is unchanged; this is an implementation guideline for concrete channels.
+
 ```ts
 // packages/spec/src/notification/channel.zod.ts
 export interface MessagingChannel {
