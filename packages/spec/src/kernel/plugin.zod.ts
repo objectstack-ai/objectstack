@@ -105,6 +105,35 @@ export const CORE_PLUGIN_TYPES = [
   'objectql'    // Core: ObjectQL Engine Data Provider
 ] as const;
 
+/**
+ * Package-type tiers — ADR-0019 D2 (the bundle model).
+ *
+ * The package `type` enum is unchanged; what this split adds is *who installs
+ * it*. There are two tiers:
+ *
+ * - **Consumer unit** (`CONSUMER_INSTALLABLE_TYPES`): the one user-visible noun.
+ *   Today only `app`. These are what the consumer Marketplace lists and what a
+ *   tenant installs / opens / uninstalls (download = open = uninstall).
+ * - **Internal contribution** (everything else): the "frameworks inside the
+ *   `.app` bundle" — plugins, modules, drivers, servers, themes, agents, etc.
+ *   They ship *inside* an App or are operator-provisioned on the code plane;
+ *   they are never independently browsed or installed by a consumer.
+ *
+ * This is a *semantic* split layered over the existing enum (the schema does
+ * not remove any type). Enforcement is a lint/validation rule, not a
+ * type-system guarantee — see `consumer-app-rules.ts`.
+ */
+export const CONSUMER_INSTALLABLE_TYPES = ['app'] as const;
+
+/**
+ * Returns true when a package `type` is a consumer-facing installable unit
+ * (ADR-0019 D2). Use this to filter the consumer Marketplace to `type: app`
+ * and to gate which packages may carry a consumer `sys_package_installation`.
+ */
+export function isConsumerInstallable(type: string | undefined): boolean {
+  return type != null && (CONSUMER_INSTALLABLE_TYPES as readonly string[]).includes(type);
+}
+
 export const PluginSchema = lazySchema(() => PluginLifecycleSchema.extend({
   id: z.string().min(1).optional().describe('Unique Plugin ID (e.g. com.example.crm)'),
   type: z.enum([

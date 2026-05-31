@@ -3,6 +3,7 @@
 import { z } from 'zod';
 
 import { ManifestSchema } from './kernel/manifest.zod';
+import { validateConsumerAppPurity, validateRequiresShape } from './kernel/consumer-app-rules';
 import { ClusterCapabilityConfigSchema } from './kernel/cluster.zod';
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
@@ -786,6 +787,24 @@ export function defineStack(
     const lines = nsErrors.map((e) => `  ✗ ${e}`);
     const hint = `\n\nEvery object.name must be \`\${manifest.namespace}_\${shortName}\`. This is the only supported writing style — the platform does not provide ns() helpers or factory wrappers.`;
     throw new Error(`${header}\n\n${lines.join('\n')}${hint}`);
+  }
+
+  // ADR-0019 D6/D7 — consumer-App purity + capability-by-reference.
+  // P2 landing draft: WARN-ONLY (non-breaking). Existing reference apps
+  // (app-crm, app-showcase) import JS action modules and would otherwise
+  // fail; see docs/plans/p2-manifest-two-tier.md. The Marketplace publish
+  // path will later treat these as hard errors for consumer `type: app`.
+  const consumerAppWarnings = [
+    ...validateConsumerAppPurity(result.data.manifest, {
+      pluginCount: result.data.plugins?.length,
+      devPluginCount: result.data.devPlugins?.length,
+    }),
+    ...validateRequiresShape(result.data.requires),
+  ];
+  if (consumerAppWarnings.length > 0) {
+    const header = `[ADR-0019] consumer-App rules — ${consumerAppWarnings.length} warning${consumerAppWarnings.length === 1 ? '' : 's'} (non-blocking; will become errors at Marketplace publish):`;
+    const lines = consumerAppWarnings.map((w) => `  ⚠ ${w}`);
+    console.warn(`${header}\n${lines.join('\n')}`);
   }
 
   return mergeActionsIntoObjects(result.data);
