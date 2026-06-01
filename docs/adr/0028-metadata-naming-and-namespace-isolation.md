@@ -261,35 +261,84 @@ the author/AI as a second style:
 
 ---
 
-## Migration plan (phased, non-breaking until the flip)
+## Migration plan (phased, breakage-controlled)
 
-ObjectStack object names today *are* the special case where `name == namespace +
-'_' + short` and storage is a pass-through. That makes a staged migration
-possible.
+The risk this plan manages is **breaking existing authored stacks/templates** —
+today every template names objects with the hand-written literal (`crm_account`)
+and references it everywhere. The strategy is **no flag day**: each package
+migrates on its own schedule and the old and new forms coexist in the same
+running instance, until the legacy form is finally removed.
 
-- **Phase 0 — Dual-read storage.** Teach `resolveTableName` to accept both
-  `(namespace, short)` and a legacy already-prefixed `name`, deriving the same
-  physical table. No behavior change; unblocks everything else.
-- **Phase 1 — Validators (additive, warn-only).** Generalize the namespace-scope
-  validator across all collections and add the install-time identifier registry,
-  emitting warnings (not errors) for collisions and for hand-written prefixes.
-- **Phase 2 — Kernel re-attribution & decomposition.** Move each `sys_*` object's
-  ownership to its capability plugin (`plugin-auth` ← identity, `plugin-audit` ←
-  audit, `service-job` ← jobs, …); designate `sys_user`/`sys_organization`/
-  `sys_metadata` as core-mandatory and wire `dependencies` + `loadOrder`; shrink
-  or dissolve `platform-objects`. Add `sys` to `RESERVED_NAMESPACES`; enforce the
-  app-cannot-define-kernel rule (apps may still `extend`). Classify the scattered
-  `ai`/`mail`/… objects; delete `nope`. Invariant throughout:
-  single-owner-per-object.
-- **Phase 3 — Transport segments.** Introduce `/data/{namespace}/…` routes and
-  namespaced generated surfaces (GraphQL/OData/SDK/MCP) **side-by-side** with the
-  current ones; deprecate the old shapes.
-- **Phase 4 — Authoring flip + codemod.** Switch authoring to short names; ship a
-  codemod that strips redundant `ns_` prefixes from authored metadata and
-  references. Flip validators warn→error. Connector registry adopts the unified
-  conflict policy.
-- **Phase 5 — Remove legacy.** Drop dual-read and the legacy route/surface shapes
-  after the deprecation window.
+### Three compatibility mechanisms every phase relies on
+
+1. **Per-package naming mode** — a manifest field
+   `namingMode: 'literal' | 'short'`. Default stays `literal` through Phase 3
+   (existing templates work untouched); new packages may opt into `short`; the
+   runtime supports **both simultaneously**, so old and new packages share one DB
+   and one instance. This makes migration *per-package and opt-in* rather than a
+   global cutover.
+2. **Idempotent physical-name resolution (dual-read)** — `resolveTableName`
+   becomes: name already carries the `{namespace}_` prefix → treat as
+   already-qualified, do not re-prefix (legacy packages); bare short name →
+   derive (new packages). Both map to the same physical table, so introducing
+   derivation in Phase 0 does **not** turn `crm_account` into `crm_crm_account`.
+3. **Sealed artifacts are never force-republished** — already-installed packages
+   keep their literal-named sealed artifacts and resolve via dual-read; the
+   codemod rewrites only **source templates**. Runtime keeps reading old artifacts
+   unaffected.
+
+### Phases (each is additive, reversible, and gated by an explicit exit criterion)
+
+- **Phase 0 — Foundations (internal, zero behavior change).** Add `namespace` as
+  a first-class dimension on `MetaRef` / registry keys (legacy derives it from
+  the prefix). Make `resolveTableName` idempotent + namespace-aware. Add the
+  `tableName`/`physicalName` override escape hatch. New capability lies dormant;
+  default path unchanged.
+  *Exit:* full suite green; `examples/app-crm` unchanged and passing.
+- **Phase 1 — Conflict visibility (warn-only).** Install-time identifier registry
+  for `(namespace, type, name)` + transport keys (route/connector/tool) emits
+  **warnings** on collision; generalize the author-time validator across all
+  collections as an opt-in lint; upgrade the connector silent-overwrite to a loud
+  warning. Nothing is blocked.
+  *Exit:* run across all templates and produce a collision report that calibrates
+  Phase 4 scope.
+- **Phase 2 — Kernel re-attribution & decomposition (first-party, app-invisible).**
+  Move each `sys_*` object's ownership to its capability plugin (`plugin-auth` ←
+  identity, `plugin-audit` ← audit, `service-job` ← jobs, …); designate
+  `sys_user`/`sys_organization`/`sys_metadata` core-mandatory and wire
+  `dependencies` + `loadOrder`; shrink/dissolve `platform-objects`. Add `sys` to
+  `RESERVED_NAMESPACES`; enforce the app-cannot-define-kernel rule (warn→error;
+  apps may still `extend`). Classify the scattered `ai`/`mail`/… objects; delete
+  `nope`. Invariant throughout: single-owner-per-object. Templates only
+  *reference* `sys_*`, so resolution is unchanged.
+  *Exit:* kernel objects resolve identically; identity/audit tests green.
+- **Phase 3 — New transport surfaces (dual-serve, additive).** Introduce
+  `/api/v1/data/{namespace}/{object}` and namespaced generated GraphQL/OData/SDK/
+  MCP **alongside** the current shapes; mark the old ones deprecated. Existing
+  routes and clients keep working.
+  *Exit:* both old and new contracts pass their tests.
+- **Phase 4 — Authoring flip + codemod (the one breaking step, mechanized &
+  per-package).** Ship `os migrate namespace`: rewrites a template from
+  `crm_account` to short `account` + manifest `namespace`, updating every
+  reference (objects, views, flows, hooks, app nav, seed `externalId`,
+  translations, permissions, sharing) and flipping its `namingMode` to `short`.
+  Author-time validator goes warn→error for `short` packages; connector registry
+  adopts the unified conflict policy. Breakage is confined to the moment a package
+  opts into `short` and is performed automatically; packages still on `literal`
+  keep working.
+  *Exit:* codemod is idempotent and verified on `app-crm`; author→compile→run
+  round-trip green; legacy sealed artifacts still load.
+- **Phase 5 — Remove legacy.** After a deprecation window: drop dual-read (short
+  form only), remove deprecated routes/generated surfaces, and stop accepting the
+  literal prefix. Only affects packages that never migrated — warned several
+  releases earlier.
+  *Exit:* zero first-party legacy usage; telemetry shows external migration done.
+
+**Decoupling note:** P0–P3 are all additive (independently mergeable and
+reversible); the kernel refactor (P2) is transparent to templates and can land
+and be validated independently of the naming flip (P4). The only true breaking
+change, P4, is per-package opt-in and codemod-driven — there is never a moment
+where unmigrated templates all break at once.
 
 ---
 
