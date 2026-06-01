@@ -7,12 +7,15 @@ import { MessagingService } from './messaging-service.js';
 import { createInboxChannel } from './inbox-channel.js';
 import { SqlNotificationOutbox } from './sql-outbox.js';
 import { NotificationDispatcher, type DispatchCluster } from './dispatcher.js';
+import { createEmailChannel } from './email-channel.js';
+import { NotificationTemplateStore } from './template-renderer.js';
 import {
     InboxMessage,
     NotificationReceipt,
     NotificationDelivery,
     NotificationPreference,
     NotificationSubscription,
+    NotificationTemplate,
 } from './objects/index.js';
 
 export interface MessagingServicePluginOptions {
@@ -123,6 +126,7 @@ export class MessagingServicePlugin implements Plugin {
                 NotificationDelivery,
                 NotificationPreference,
                 NotificationSubscription,
+                NotificationTemplate,
             ],
             navigationContributions: [
                 {
@@ -132,10 +136,33 @@ export class MessagingServicePlugin implements Plugin {
                     items: [
                         { id: 'nav_notification_preferences', type: 'object', label: 'Notification Preferences', objectName: 'sys_notification_preference', icon: 'bell-ring', requiresObject: 'sys_notification_preference' },
                         { id: 'nav_notification_subscriptions', type: 'object', label: 'Notification Subscriptions', objectName: 'sys_notification_subscription', icon: 'rss', requiresObject: 'sys_notification_subscription' },
+                        { id: 'nav_notification_templates', type: 'object', label: 'Notification Templates', objectName: 'sys_notification_template', icon: 'file-text', requiresObject: 'sys_notification_template' },
                     ],
                 },
             ],
         });
+
+        // Email channel (ADR-0030 P3): register when an `email` service is
+        // present. Resolved at kernel:ready so init order with the email plugin
+        // doesn't matter; absent email ⇒ no channel (a notify(channels:['email'])
+        // then reports "not registered" rather than silently no-opping). The
+        // dispatcher looks channels up dynamically, so registering after it is fine.
+        if (typeof ctx.hook === 'function') {
+            const templateStore = new NotificationTemplateStore({ getData });
+            const getEmail = () => {
+                try {
+                    return ctx.getService<import('./email-channel.js').EmailSenderSurface>('email');
+                } catch {
+                    return undefined;
+                }
+            };
+            ctx.hook('kernel:ready', async () => {
+                if (getEmail()) {
+                    service.registerChannel(createEmailChannel({ getEmail, getData, store: templateStore }));
+                    ctx.logger.info('[messaging] email channel registered (renders sys_notification_template)');
+                }
+            });
+        }
 
         // Reliable delivery (P1): wire the outbox + dispatcher once the engine
         // is resolvable. Until then `emit()` runs inline best-effort.

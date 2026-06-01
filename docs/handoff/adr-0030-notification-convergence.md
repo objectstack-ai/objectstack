@@ -159,6 +159,24 @@ flipped — the inbox is being populated the whole time.)
   - *Follow-ups*: subscription-driven fan-out (expand a topic's subscribers when
     a producer emits without an explicit audience) is schema-only so far;
     `digest`/`quiet_hours` fields exist but the batching middleware is P3.
-- **P3 — Channels + templates + digest**: email/push/webhook/Slack channels on
-  connectors (ADR-0022); `sys_notification_template` (topic×channel×locale) +
-  renderer; digest / quiet-hours middleware.
+- **P3 — Channels + templates + digest**: split into slices.
+  - **P3a — email channel + templates**: ✅ shipped. `createEmailChannel`
+    (delegates transport to the `email` service per ADR-0022) +
+    `sys_notification_template` (topic×channel×locale) + `{{ payload.x }}`
+    renderer with generic `payload.title`/`body` fallback. Same `emit` now
+    reaches inbox + email per prefs.
+  - **P3b — digest + quiet-hours**: pending. Plan: express both as **deferring
+    the delivery row's `next_attempt_at`** in the P1 outbox (digest = enqueue to
+    the next window + collapse same-`(user, channel, window)` rows; quiet-hours =
+    push `next_attempt_at` to the window end), reusing the dispatcher's
+    claim/retry/observability — one delivery spine, not a parallel scheduler.
+    Consumes the `digest`/`quiet_hours` fields P2 added. critical/mandatory
+    bypass. tz from `quiet_hours.tz` → `sys_user` → org/UTC.
+  - **Deferred (same seam, incremental)**: **Slack** stays a *connector*
+    (`connector-slack` ships the raw API path today); a Slack notification
+    *channel* needs identity mapping (`sys_channel_user_link`) + OAuth and is
+    enterprise-tier (ADR-0022). **push** needs `sys_user_device` + APNs/FCM.
+    **webhook** should reuse the existing `plugin-webhooks` outbox rather than a
+    redundant channel. **MJML** compilation for email (P3a treats `mjml` format
+    as raw HTML). **`defineTopic()`** declarative topic catalog (Studio
+    discoverability for topics/templates/preferences).

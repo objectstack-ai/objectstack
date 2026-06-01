@@ -54,6 +54,23 @@ export type {
 // Channel seam
 export { createInboxChannel, INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 export type { InboxChannelOptions } from './inbox-channel.js';
+export { createEmailChannel, USER_OBJECT as EMAIL_USER_OBJECT } from './email-channel.js';
+export type { EmailChannelOptions, EmailSenderSurface } from './email-channel.js';
+
+// Templates + renderer (ADR-0030 P3)
+export {
+    NotificationTemplateStore,
+    renderNotification,
+    interpolate,
+    TEMPLATE_OBJECT,
+    DEFAULT_LOCALE,
+} from './template-renderer.js';
+export type {
+    NotificationTemplateRow,
+    RenderedNotification,
+    RenderInput,
+    NotificationTemplateStoreOptions,
+} from './template-renderer.js';
 export type {
     MessagingChannel,
     MessagingChannelContext,
@@ -92,4 +109,5 @@ export {
     NotificationDelivery,
     NotificationPreference,
     NotificationSubscription,
+    NotificationTemplate,
 } from './objects/index.js';

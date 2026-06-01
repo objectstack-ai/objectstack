@@ -5,3 +5,4 @@ export { NotificationReceipt } from './notification-receipt.object.js';
 export { NotificationDelivery } from './notification-delivery.object.js';
 export { NotificationPreference } from './notification-preference.object.js';
 export { NotificationSubscription } from './notification-subscription.object.js';
+export { NotificationTemplate } from './notification-template.object.js';
