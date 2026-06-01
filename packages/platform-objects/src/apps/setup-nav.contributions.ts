@@ -92,8 +92,9 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     group: 'group_diagnostics',
     priority: BASE_PRIORITY,
     items: [
+      // Audit Logs (sys_audit_log) is contributed by @objectstack/plugin-audit
+      // which now owns it (ADR-0029 K2).
       { id: 'nav_sessions', type: 'object', label: 'Sessions', objectName: 'sys_session', icon: 'monitor' },
-      { id: 'nav_audit_logs', type: 'object', label: 'Audit Logs', objectName: 'sys_audit_log', icon: 'scroll-text' },
       { id: 'nav_notifications', type: 'object', label: 'Notification Events', objectName: 'sys_notification', viewName: 'recent', icon: 'bell', requiresObject: 'sys_notification' },
     ],
   },

@@ -19,7 +19,9 @@ import {
 // RBAC objects (SysRole/SysPermissionSet/… + defaultPermissionSets) moved to
 // @objectstack/plugin-security and the sharing objects to
 // @objectstack/plugin-sharing per ADR-0029 K2 — see their packages' tests.
-import { SysAuditLog, SysPresence } from './audit/index.js';
+// sys_audit_log / sys_activity / sys_comment / sys_attachment moved to
+// @objectstack/plugin-audit and sys_presence to @objectstack/service-realtime
+// per ADR-0029 K2 — see their packages' tests.
 // sys_webhook moved to @objectstack/plugin-webhooks per ADR-0029 (K2.a).
 import {
   SysMetadata,
@@ -42,8 +44,6 @@ const systemObjects = [
   ['SysApiKey', SysApiKey, 'sys_api_key'],
   ['SysTwoFactor', SysTwoFactor, 'sys_two_factor'],
   ['SysUserPreference', SysUserPreference, 'sys_user_preference'],
-  ['SysAuditLog', SysAuditLog, 'sys_audit_log'],
-  ['SysPresence', SysPresence, 'sys_presence'],
   ['SysMetadata', SysMetadata, 'sys_metadata'],
   ['SysMetadataHistoryObject', SysMetadataHistoryObject, 'sys_metadata_history'],
   ['SysSetting', SysSetting, 'sys_setting'],

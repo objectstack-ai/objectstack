@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { SysPresence } from '@objectstack/platform-objects/audit';
+import { SysPresence } from './objects/index.js';
 import { InMemoryRealtimeAdapter } from './in-memory-realtime-adapter.js';
 import type { InMemoryRealtimeAdapterOptions } from './in-memory-realtime-adapter.js';
 
@@ -62,6 +62,21 @@ export class RealtimeServicePlugin implements Plugin {
       namespace: 'sys',
       objects: [SysPresence],
     });
+
+    // ADR-0029 D8 — contribute sys_presence translations on kernel:ready.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:ready', async () => {
+        try {
+          const i18n = ctx.getService<any>('i18n');
+          if (i18n && typeof i18n.loadTranslations === 'function') {
+            const { RealtimeTranslations } = await import('./translations/index.js');
+            for (const [locale, data] of Object.entries(RealtimeTranslations)) {
+              i18n.loadTranslations(locale, data as Record<string, unknown>);
+            }
+          }
+        } catch { /* i18n optional */ }
+      });
+    }
 
     ctx.logger.info('RealtimeServicePlugin: registered in-memory realtime adapter');
   }

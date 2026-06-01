@@ -57,13 +57,14 @@ import {
 // bundles keep working until then.
 
 // ── Audit ─────────────────────────────────────────────────────────────────
+// sys_audit_log / sys_activity / sys_comment moved to @objectstack/plugin-audit
+// and sys_presence to @objectstack/service-realtime (ADR-0029 K2 / D8). Their
+// i18n extraction now lives in those packages; the already-generated bundles
+// here keep working until the next regeneration. sys_attachment stays here
+// pending the storage-domain decomposition (it belongs with service-storage).
 import {
-  SysAuditLog,
-  SysPresence,
-  SysActivity,
-  SysComment,
-  SysAttachment,
   SysNotification,
+  SysAttachment,
   SysEmail,
   SysEmailTemplate,
   SysSavedReport,
@@ -144,13 +145,11 @@ export default defineStack({
     // Security: RBAC moved to @objectstack/plugin-security, sharing to
     // @objectstack/plugin-sharing (ADR-0029 K2 / D8).
 
-    // Audit
-    SysAuditLog,
-    SysPresence,
-    SysActivity,
-    SysComment,
-    SysAttachment,
+    // Audit (sys_audit_log / sys_activity / sys_comment moved to
+    // @objectstack/plugin-audit; sys_presence to @objectstack/service-realtime;
+    // sys_attachment stays pending storage-domain decomposition)
     SysNotification,
+    SysAttachment,
     SysEmail,
     SysEmailTemplate,
     SysSavedReport,
