@@ -439,14 +439,8 @@ export const SysUser = ObjectSchema.create({
     mru: true,
   },
 
-  validations: [
-    {
-      name: 'email_unique',
-      type: 'unique',
-      severity: 'error',
-      message: 'Email must be unique',
-      fields: ['email'],
-      caseSensitive: false,
-    },
-  ],
+  // Email uniqueness is enforced by the unique index above (and better-auth's
+  // managed user table). A declarative `unique` validation rule is intentionally
+  // not used — uniqueness needs a DB lookup, not a synchronous validation, so it
+  // is not one of the declarable validation-rule types.
 });
