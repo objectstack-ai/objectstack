@@ -17,6 +17,24 @@ export {
   type SignatureVerificationResult,
 } from './plugin-signature-verifier.js';
 
+// Canonical Ed25519 artifact-signature contract (ADR-0025 F3), shared
+// byte-for-byte with the cloud control plane's package-signing.
+export {
+  SIGNATURE_ALG,
+  type KeyInput,
+  type ParsedSignature,
+  type PublisherVerifyResult,
+  type PluginArtifactVerifyResult,
+  generateEd25519KeyPair,
+  signPayload,
+  parseSignature,
+  verifyPayload,
+  counterSignPayload,
+  verifyPublisherSignature,
+  verifyPlatformSignature,
+  verifyPluginArtifact,
+} from './plugin-artifact-signature.js';
+
 export {
   PluginConfigValidator,
   createPluginConfigValidator,

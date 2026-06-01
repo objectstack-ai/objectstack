@@ -4,6 +4,7 @@ import { Plugin, PluginContext } from './types.js';
 import type { Logger } from '@objectstack/spec/contracts';
 import { z } from 'zod';
 import { PluginConfigValidator } from './security/plugin-config-validator.js';
+import { parseSignature } from './security/plugin-artifact-signature.js';
 
 /**
  * Service Lifecycle Types
@@ -423,10 +424,25 @@ export class PluginLoader {
             return;
         }
         
-        // Plugin signature verification is now implemented in PluginSignatureVerifier
-        // This is a placeholder that logs the verification would happen
-        // The actual verification should be done by the caller with proper security config
-        this.logger.debug(`Plugin ${plugin.name} has signature (use PluginSignatureVerifier for verification)`);
+        // Cryptographic verification of a third-party plugin's PUBLISHER and
+        // PLATFORM signatures is performed against the `.osplugin` artifact
+        // bytes + version identity at materialize/install time, by
+        // `verifyPluginArtifact` (security/plugin-artifact-signature.ts —
+        // ADR-0025 §3.7). By the time a plugin reaches loadPlugin() it is an
+        // in-memory module with no artifact bytes, so we cannot re-run the
+        // artifact chains here; we only validate that any signature carried
+        // on the metadata is well-formed (`ed25519:<keyId>:<base64url>`) and
+        // surface its keyId, failing fast on a malformed value.
+        const parsed = parseSignature(plugin.signature);
+        if (!parsed) {
+            throw new Error(
+                `Plugin ${plugin.name} carries a malformed signature (expected ed25519:<keyId>:<base64url>)`,
+            );
+        }
+        this.logger.debug(
+            `Plugin ${plugin.name} signature well-formed (alg=${parsed.alg}, keyId=${parsed.keyId}); ` +
+            `artifact verification occurs at materialize time`,
+        );
     }
 
     private async getSingletonService<T>(registration: ServiceRegistration): Promise<T> {
