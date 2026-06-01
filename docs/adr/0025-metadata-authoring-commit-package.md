@@ -251,6 +251,19 @@ version (zero-cloud) and the `visibility:'marketplace'` publish path.
   `schema-ahead` repair event rather than fake a DDL rollback; idempotent
   `syncSchemas` reconciles. Because activation is a **pointer swap**, a failed
   publish leaves the previously active version serving traffic untouched.
+- **Expand-contract (baked into the model now, executed in M4).** A
+  `MigrationPlan` is an *ordered* list of steps, not a flat diff, precisely so a
+  production change can run the zero-downtime sequence
+  `add column → backfill → switch reads → drop old` — possibly spanning two
+  sealed versions. M2 ships the naive "apply the diff" executor; the plan shape
+  already supports the multi-step form so M4 adds it without re-modelling. This
+  is why `MigrationPlan` separates `changes` from `backfills` and carries a
+  `destructive` flag rather than being a single DDL string.
+- **Per-target-environment execution.** Because each environment has its own
+  physical database (ADR-0002), `SchemaSyncPort.apply` and `InstallationPort`
+  operate against the **target environment's** engine/driver, not the control
+  plane's. The executor is parameterized by `targetEnv` from publish/promote —
+  the same sealed `checksum` runs against Dev's DB, then Staging's, then Prod's.
 
 ### 5. Concurrency & collaboration
 
@@ -312,7 +325,7 @@ interface PublishResult { packageVersionId:string; semver:string; plan:Migration
 interface DraftWorkspacePort { get; put; delete; list; }              // draft-scoped sys_metadata
 interface PackageVersionPort { openDraft; seal; getActive; deprecate } // sys_package_version lifecycle
 interface InstallationPort   { activate(env,versionId); current(env) } // sys_package_installation pointer
-interface SchemaSyncPort     { plan(objs,prev):SchemaChange[]; apply(changes,tx) } // ISchemaDriver + destructive check
+interface SchemaSyncPort     { plan(objs,prev):SchemaChange[]; apply(targetEnv,changes,tx) } // per-env ISchemaDriver + destructive check
 interface ApprovalPort       { request(kind,ctx):Promise<ApprovalOutcome> }        // plugin-approvals
 interface ChangeLogPort      { append(event):Promise<number> }
 interface RegistryPort       { invalidate(ref); broadcast(event) }
@@ -340,6 +353,55 @@ compensation for the non-transactional gap, pointer-swap activation isolating
 in-flight failures from live traffic.
 
 ---
+
+## Long-term north star & phased delivery
+
+### The complete capability map (where this is going)
+
+A mature metadata-authoring platform (Salesforce DX / OutSystems / Mendix class)
+needs the layers below. ADR-0025 designs *all* of them; the ports, the ordered
+`MigrationPlan`, the sealed-version artifact, and per-target-env execution are
+**baked in now** so later layers slot in without re-modelling.
+
+| Layer | Long-term capability | First delivered |
+|:--|:--|:--|
+| **Authoring** | draft workspace · stage/discard · per-item + set validation · live diff | M1 |
+| **Migration** | schema diff → plan · dry-run preview · destructive gating · **expand-contract zero-downtime** · data backfill expressions | M2 (naive) → M4 (expand-contract/backfill) |
+| **Release** | seal immutable version (semver+checksum) · pointer-swap activation · open next draft | M2 |
+| **Environments** | per-env DB execution · Dev→Staging→Prod promotion · ephemeral preview envs | M3 (promotion) → M4 (ephemeral) |
+| **Governance** | approval gates · RBAC by role · L1/L2/L3 protection · audit/changelog · prod destructive policy | M3 |
+| **Recovery** | rollback (pointer swap + reverse migration) · drift detection / schema-ahead reconcile · post-activate health checks | M3 (rollback) → M4 (drift/health) |
+| **Distribution** | local export/import (§9) · marketplace · **dependency resolution** (`versionRange`) · upgrade paths | §9 exists → M4 |
+| **Collaboration** | edit locks · **branch + merge** · multi-author drafts | M5 |
+| **Source duality** | DB-backed drafts **and** file/Git authoring seal into the *same* version (ADR-0006 "two flows, one schema") | seal accepts either source from M2 |
+
+**Explicitly deferred (but architecturally provided for):** expand-contract
+migrations, Git-style branching/merge, marketplace dependency resolution,
+ephemeral preview environments, drift detection. None of these force a redesign
+because the artifact (sealed version) and the plan (ordered steps) already carry
+the necessary shape.
+
+### Phased delivery roadmap (value-front-loaded, each milestone ships standalone)
+
+**Guiding principles:** (1) every milestone delivers user-visible value on its
+own; (2) every milestone is non-breaking and **coexists with the §9 live-overlay
+MVP** until M5 retires it; (3) risk is sequenced — read-only/no-DDL first,
+production DDL later, collaboration last.
+
+| Milestone | Value delivered (why ship it) | Scope | Risk | Coexistence |
+|:--|:--|:--|:--|:--|
+| **M0 — Seams** | De-risks everything: stable contracts to build against | empty package, `ports.ts`, `StageChange`/`MigrationPlan`/`PublishResult` types, state-machine doc | none (no behavior change) | n/a |
+| **M1 — Staging** | *"Edit safely without touching prod; see exactly what changed."* The single biggest UX/safety win, with **no DDL risk** | `openDraft` + `stage`/`discard` (draft-version-tagged rows); `diff`/`validateSet` + dry-run preview (read-only) | low (no writes to physical schema) | Studio `save`→`stage()`; publish still uses existing path |
+| **M2 — Publish** | *"Edit in UI → publish → live."* The closed loop; replaces per-edit live overlay with explicit, batched publish | migration-plan **executor** (naive diff) · seal version · pointer-swap activation · open next draft; wire `os package publish` + Studio publish button | medium (first prod-path DDL) | "no package" overlay path unchanged |
+| **M3 — Promote & govern** | *"Safe production rollout."* Enterprise-readiness | `promote` Dev→Staging→Prod (same sealed checksum) · approval gates (`plugin-approvals`) · destructive gating by env type · `rollback` (pointer swap + additive reverse) | medium-high (cross-env, prod policy) | per-env DBs already isolated (ADR-0002) |
+| **M4 — Advanced migration & DX** | Zero-downtime prod changes; full surface parity | expand-contract migrations · data backfill expressions · drift detection / health checks · CLI/AI/Git surface parity · marketplace dependency resolution | high (zero-downtime correctness) | additive to M2 executor |
+| **M5 — Collaboration** | Multi-author teams | edit locks → branch + merge → concurrent drafts; **retire §9 flat `package_id` rows** (migrate to version-bound) | high (merge semantics) | final consolidation |
+
+**Recommended MVP cut:** **M0 + M1 + M2** is the smallest end-to-end product —
+it delivers the whole "edit → stage → preview → publish → live" loop a low-code
+user expects, defers all the genuinely hard parts (cross-env promotion,
+zero-downtime migration, branching), and never breaks the existing flow. M3
+follows immediately for any production/multi-env customer.
 
 ## Consequences
 
@@ -379,18 +441,7 @@ in-flight failures from live traffic.
 | **promotion + approval-gate wiring** | **net-new** (primitives exist) |
 | **reverse-migration / rollback executor** | **net-new** |
 
-### Migration plan (incremental, each phase ships green)
-- **Phase 0** — empty package; `ports.ts`, `StageChange`/`MigrationPlan`/
-  `PublishResult` types; the state-machine doc. Zero behavior change.
-- **Phase 1** — `openDraft` + `stage`/`discard` over `DraftWorkspacePort`
-  (`package_version_id`-tagged drafts). Studio `save` → `stage()`; no DDL.
-- **Phase 2** — `diff`/`validateSet` + migration-plan engine + dry-run preview.
-- **Phase 3** — `publish` (seal + batched DDL + pointer-swap activate); wire
-  `os package publish` and the Studio publish button.
-- **Phase 4** — `promote` (Dev→Staging→Prod) + approval-gate; `rollback`;
-  destructive gating by environment type.
-- **Phase 5** — migrate §9 `package_id` rows to version-bound; update
-  `ARCHITECTURE.md`; mark this ADR `Accepted`.
+See "## Long-term north star & phased delivery" below.
 
 ---
 
