@@ -10,18 +10,36 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  * type-safe validation system similar to Salesforce's validation rules but with enhanced capabilities.
  * 
  * ## Overview
- * 
+ *
  * Validation rules are applied at the data layer to ensure data integrity and enforce business logic.
- * The system supports multiple validation types:
- * 
- * 1. **Script Validation**: Formula-based validation using expressions
- * 2. **Uniqueness Validation**: Enforce unique constraints across fields
- * 3. **State Machine Validation**: Control allowed state transitions
- * 4. **Format Validation**: Validate field formats (email, URL, regex, etc.)
- * 5. **Cross-Field Validation**: Validate relationships between multiple fields
- * 6. **Async Validation**: Remote validation via API calls
- * 7. **Custom Validation**: User-defined validation functions
- * 8. **Conditional Validation**: Apply validations based on conditions
+ * A validation rule is a **deterministic, synchronous, side-effect-free predicate over a single
+ * record** — it must be decidable from the incoming write (and, on update, the prior record) with
+ * no I/O. Everything advertised here runs on the write path (see
+ * `objectql/src/validation/rule-validator.ts`); nothing is a silent no-op.
+ *
+ * The system supports these validation types:
+ *
+ * 1. **Script Validation**: Formula-based validation using a CEL predicate
+ * 2. **State Machine Validation**: Control allowed state transitions
+ * 3. **Format Validation**: Validate a field's value (email, URL, phone, JSON, regex)
+ * 4. **Cross-Field Validation**: Validate relationships between multiple fields
+ * 5. **JSON Schema Validation**: Validate a JSON field against a JSON Schema
+ * 6. **Conditional Validation**: Apply a nested rule based on a CEL condition
+ *
+ * ## Deliberately NOT validation rules
+ *
+ * These were once declared here but never enforced. Because the contract above rules them out
+ * (they need I/O or are client-side concerns), they were removed rather than left as silent
+ * no-ops. Use the layer that already does each one correctly:
+ *
+ * - **Uniqueness** → a unique **index** (`ObjectSchema.indexes`, `{ fields, unique: true }`,
+ *   with `partial` for a scoped/conditional constraint), or field-level `unique: true`. A
+ *   SELECT-then-INSERT "rule" is inherently racy (TOCTOU); a DB unique constraint is not.
+ * - **Async / remote validation** → a client-form concern (`debounce`/`validatorUrl` only mean
+ *   anything against keystrokes) and an SSRF/latency hazard on the server write path. Keep it in
+ *   the form layer, or enforce the underlying invariant with a `unique` index / lifecycle hook.
+ * - **Custom handler** → a `beforeInsert` / `beforeUpdate` lifecycle hook, the typed, supported
+ *   extension point for arbitrary validation code.
  * 
  * ## Salesforce Comparison
  * 
@@ -88,18 +106,7 @@ export const ScriptValidationSchema = lazySchema(() => BaseValidationSchema.exte
 }));
 
 /**
- * 2. Uniqueness Validation
- * specialized optimized check for unique constraints.
- */
-export const UniquenessValidationSchema = lazySchema(() => BaseValidationSchema.extend({
-  type: z.literal('unique'),
-  fields: z.array(z.string()).describe('Fields that must be combined unique'),
-  scope: ExpressionInputSchema.optional().describe('Predicate (CEL) limiting uniqueness scope. e.g. P`record.active == true`'),
-  caseSensitive: z.boolean().default(true),
-}));
-
-/**
- * 3. State Machine Validation
+ * 2. State Machine Validation
  * State transition logic.
  */
 export const StateMachineValidationSchema = lazySchema(() => BaseValidationSchema.extend({
@@ -109,7 +116,7 @@ export const StateMachineValidationSchema = lazySchema(() => BaseValidationSchem
 }));
 
 /**
- * 4. Value Format Validation
+ * 3. Value Format Validation
  * Regex or specialized formats.
  */
 export const FormatValidationSchema = lazySchema(() => BaseValidationSchema.extend({
@@ -120,7 +127,7 @@ export const FormatValidationSchema = lazySchema(() => BaseValidationSchema.exte
 }));
 
 /**
- * 5. Cross-Field Validation
+ * 4. Cross-Field Validation
  * Validates relationships between multiple fields.
  * 
  * ## Use Cases
@@ -189,7 +196,7 @@ export const CrossFieldValidationSchema = lazySchema(() => BaseValidationSchema.
 }));
 
 /**
- * 6. JSON Structure Validation
+ * 5. JSON Structure Validation
  * Validates JSON fields against a JSON Schema.
  * 
  * ## Use Cases
@@ -203,145 +210,10 @@ export const JSONValidationSchema = lazySchema(() => BaseValidationSchema.extend
   schema: z.record(z.string(), z.unknown()).describe('JSON Schema object definition'),
 }));
 
-/**
- * 7. Async Validation
- * Remote validation via API call or database query.
- * 
- * ## Use Cases
- * 
- * ### 1. Email Uniqueness Check
- * Check if an email address is already registered in the system.
- * ```typescript
- * {
- *   type: 'async',
- *   name: 'unique_email',
- *   field: 'email',
- *   validatorUrl: '/api/users/check-email',
- *   message: 'This email address is already registered',
- *   debounce: 500,  // Wait 500ms after user stops typing
- *   timeout: 3000
- * }
- * ```
- * 
- * ### 2. Username Availability
- * Verify username is available before form submission.
- * ```typescript
- * {
- *   type: 'async',
- *   name: 'username_available',
- *   field: 'username',
- *   validatorUrl: '/api/users/check-username',
- *   message: 'This username is already taken',
- *   debounce: 300,
- *   timeout: 2000
- * }
- * ```
- * 
- * ### 3. Tax ID Validation
- * Validate tax ID with government API (e.g., IRS, HMRC).
- * ```typescript
- * {
- *   type: 'async',
- *   name: 'validate_tax_id',
- *   field: 'tax_id',
- *   validatorFunction: 'validateTaxIdWithIRS',
- *   message: 'Invalid Tax ID number',
- *   timeout: 10000,  // Government APIs may be slow
- *   params: { country: 'US', format: 'EIN' }
- * }
- * ```
- * 
- * ### 4. Credit Card Validation
- * Verify credit card with payment gateway without charging.
- * ```typescript
- * {
- *   type: 'async',
- *   name: 'validate_card',
- *   field: 'card_number',
- *   validatorUrl: 'https://api.stripe.com/v1/tokens/validate',
- *   message: 'Invalid credit card number',
- *   timeout: 5000,
- *   params: { 
- *     mode: 'validate_only',
- *     checkFunds: false 
- *   }
- * }
- * ```
- * 
- * ### 5. Address Validation
- * Validate and standardize addresses using geocoding services.
- * ```typescript
- * {
- *   type: 'async',
- *   name: 'validate_address',
- *   field: 'street_address',
- *   validatorFunction: 'validateAddressWithGoogleMaps',
- *   message: 'Unable to verify address',
- *   timeout: 4000,
- *   params: {
- *     includeFields: ['city', 'state', 'zip'],
- *     strictMode: true,
- *     country: 'US'
- *   }
- * }
- * ```
- * 
- * ### 6. Domain Name Availability
- * Check if domain name is available for registration.
- * ```typescript
- * {
- *   type: 'async',
- *   name: 'domain_available',
- *   field: 'domain_name',
- *   validatorUrl: '/api/domains/check-availability',
- *   message: 'This domain is already taken or reserved',
- *   debounce: 500,
- *   timeout: 2000
- * }
- * ```
- * 
- * ### 7. Coupon Code Validation
- * Verify coupon code is valid and not expired.
- * ```typescript
- * {
- *   type: 'async',
- *   name: 'validate_coupon',
- *   field: 'coupon_code',
- *   validatorUrl: '/api/coupons/validate',
- *   message: 'Invalid or expired coupon code',
- *   timeout: 2000,
- *   params: {
- *     checkExpiration: true,
- *     checkUsageLimit: true,
- *     userId: '{{current_user_id}}'
- *   }
- * }
- * ```
- */
-export const AsyncValidationSchema = lazySchema(() => BaseValidationSchema.extend({
-  type: z.literal('async'),
-  field: z.string().describe('Field to validate'),
-  validatorUrl: z.string().optional().describe('External API endpoint for validation'),
-  method: z.enum(['GET', 'POST']).default('GET').describe('HTTP method for external call'),
-  headers: z.record(z.string(), z.string()).optional().describe('Custom headers for the request'),
-  validatorFunction: z.string().optional().describe('Reference to custom validator function'),
-  timeout: z.number().optional().default(5000).describe('Timeout in milliseconds'),
-  debounce: z.number().optional().describe('Debounce delay in milliseconds'),
-  params: z.record(z.string(), z.unknown()).optional().describe('Additional parameters to pass to validator'),
-}));
+
 
 /**
- * 8. Custom Validator Function
- * User-defined validation logic with code reference.
- */
-export const CustomValidatorSchema = lazySchema(() => BaseValidationSchema.extend({
-  type: z.literal('custom'),
-  handler: z.string().describe('Name of the custom validation function registered in the system'),
-  params: z.record(z.string(), z.unknown()).optional().describe('Parameters passed to the custom handler'),
-}));
-
-/**
- * 9. Master Validation Rule Schema
+ * 6. Master Validation Rule Schema
  */
 /** Base type for validation rules - used for z.lazy() recursive type annotation */
 export interface BaseValidationRuleShape {
@@ -361,19 +233,16 @@ export interface BaseValidationRuleShape {
 export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape> = z.lazy(() =>
   z.discriminatedUnion('type', [
     ScriptValidationSchema,
-    UniquenessValidationSchema,
     StateMachineValidationSchema,
     FormatValidationSchema,
     CrossFieldValidationSchema,
     JSONValidationSchema,
-    AsyncValidationSchema,
-    CustomValidatorSchema,
     ConditionalValidationSchema,
   ])
 );
 
 /**
- * 8. Conditional Validation
+ * 7. Conditional Validation
  * Validation that only applies when a condition is met.
  * 
  * ## Overview
@@ -557,11 +426,8 @@ export const ConditionalValidationSchema = lazySchema(() => BaseValidationSchema
 
 export type ValidationRule = z.infer<typeof ValidationRuleSchema>;
 export type ScriptValidation = z.infer<typeof ScriptValidationSchema>;
-export type UniquenessValidation = z.infer<typeof UniquenessValidationSchema>;
 export type StateMachineValidation = z.infer<typeof StateMachineValidationSchema>;
 export type FormatValidation = z.infer<typeof FormatValidationSchema>;
 export type CrossFieldValidation = z.infer<typeof CrossFieldValidationSchema>;
 export type JSONValidation = z.infer<typeof JSONValidationSchema>;
-export type AsyncValidation = z.infer<typeof AsyncValidationSchema>;
-export type CustomValidation = z.infer<typeof CustomValidatorSchema>;
 export type ConditionalValidation = z.infer<typeof ConditionalValidationSchema>;

@@ -13,7 +13,7 @@
  * said "an account can't jump from churned straight back to prospect"
  * silently allowed exactly that. This evaluator closes that gap.
  *
- * ## What runs here (Phase 1)
+ * ## What runs here
  *
  *  - `state_machine` — the headline guardrail. On update, if the state field
  *    changed and the new value is not in `transitions[oldValue]`, the write
@@ -22,10 +22,20 @@
  *    TRUE the rule is violated. These share the prior-record gap with
  *    `state_machine` (a PATCH carries only changed fields), so they are
  *    evaluated against the *merged* record `{ ...previous, ...patch }`.
+ *  - `format` — a single field's value against a regex and/or a named format
+ *    (`email` / `url` / `phone` / `json`). Only runs when the write touches
+ *    the field and the value is non-empty (emptiness is the field-shape
+ *    validator's job, not the format rule's).
+ *  - `json_schema` — a JSON field validated against a JSON Schema via ajv.
+ *  - `conditional` — evaluates the `when` CEL predicate and then recurses into
+ *    `then` (true) or `otherwise` (false). The nested rule's violation message
+ *    is surfaced; the *outer* conditional's `severity` decides whether it
+ *    blocks (so `when`-gated guards can be advisory as a unit).
  *
- * Other rule variants (`unique`, `format`, `json_schema`, `async`,
- * `custom`, `conditional`) are not yet enforced here; they fall through
- * untouched and remain declarative until a later phase wires them.
+ * Every variant declared by `ValidationRuleSchema` is enforced here — the
+ * schema deliberately excludes anything that would need I/O or a handler model
+ * (uniqueness → DB index, async → form layer, custom → lifecycle hook), so
+ * there are no silent no-ops.
  *
  * ## Execution-control semantics (from `BaseValidationSchema`)
  *
@@ -56,6 +66,7 @@
 
 import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
+import Ajv, { type ValidateFunction } from 'ajv';
 import { ValidationError, type FieldValidationError } from './record-validator.js';
 
 type Mode = 'insert' | 'update';
@@ -82,6 +93,49 @@ interface PredicateRule extends BaseRule {
   fields?: string[];
 }
 
+interface FormatRule extends BaseRule {
+  type: 'format';
+  field: string;
+  regex?: string;
+  format?: 'email' | 'url' | 'phone' | 'json';
+}
+
+interface JsonSchemaRule extends BaseRule {
+  type: 'json_schema';
+  field: string;
+  schema: Record<string, unknown>;
+}
+
+interface ConditionalRule extends BaseRule {
+  type: 'conditional';
+  when: string | Expression;
+  then: BaseRule;
+  otherwise?: BaseRule;
+}
+
+/**
+ * Context threaded through every rule evaluation. `data` is the raw incoming
+ * write (a PATCH on update); `merged` overlays it on the prior record so a
+ * predicate referencing an unchanged field still sees its persisted value.
+ * Field-scoped rules (`state_machine`, `format`, `json_schema`) key off `data`
+ * to decide whether the write actually touched their field.
+ */
+interface RuleContext {
+  data: Record<string, unknown>;
+  merged: Record<string, unknown>;
+  previous: Record<string, unknown> | undefined;
+  mode: Mode;
+  logger: EvaluateRulesOptions['logger'];
+}
+
+/**
+ * Shared ajv instance. `strict: false` tolerates author-written JSON Schemas
+ * that use vendor keywords; `compile` results are memoised per schema object
+ * (see `jsonSchemaCache`) so we don't recompile on every write.
+ */
+const ajv = new Ajv({ allErrors: true, strict: false });
+const jsonSchemaCache = new WeakMap<object, ValidateFunction>();
+
 export interface EvaluateRulesOptions {
   /** Prior persisted record (update only). Absent on insert. */
   previous?: Record<string, unknown> | null;
@@ -99,14 +153,28 @@ export function needsPriorRecord(
 ): boolean {
   const rules = objectSchema?.validations;
   if (!Array.isArray(rules)) return false;
-  return rules.some(
-    (r) =>
-      r != null &&
-      typeof r === 'object' &&
-      ((r as BaseRule).type === 'state_machine' ||
-        (r as BaseRule).type === 'cross_field' ||
-        (r as BaseRule).type === 'script'),
-  );
+  return rules.some((r) => ruleNeedsPrior(r));
+}
+
+/**
+ * A rule needs the prior record if it reasons about the transition or compares
+ * against unchanged fields (`state_machine` / `cross_field` / `script`), or if
+ * it is a `conditional` whose branches (or `when`) recursively do. `format` and
+ * `json_schema` only inspect the incoming value, so they never need it.
+ */
+function ruleNeedsPrior(r: unknown): boolean {
+  if (r == null || typeof r !== 'object') return false;
+  const type = (r as BaseRule).type;
+  if (type === 'state_machine' || type === 'cross_field' || type === 'script') {
+    return true;
+  }
+  if (type === 'conditional') {
+    const c = r as ConditionalRule;
+    // `when` is evaluated against the merged record; the branches may need prior
+    // state. Be conservative and fetch if either branch does.
+    return ruleNeedsPrior(c.then) || ruleNeedsPrior(c.otherwise);
+  }
+  return false;
 }
 
 /** Normalize an author-time ExpressionInput into the canonical envelope. */
@@ -134,6 +202,7 @@ export function evaluateValidationRules(
   // Merged view used by predicate rules: prior state overlaid with the PATCH,
   // so a rule referencing an unchanged field still sees its persisted value.
   const merged: Record<string, unknown> = { ...(previous ?? {}), ...data };
+  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger };
 
   const errors: FieldValidationError[] = [];
 
@@ -149,12 +218,7 @@ export function evaluateValidationRules(
   for (const rule of ordered) {
     let violation: FieldValidationError | null = null;
     try {
-      if (rule.type === 'state_machine') {
-        violation = checkStateMachine(rule as StateMachineRule, mode, data, previous);
-      } else if (rule.type === 'script' || rule.type === 'cross_field') {
-        violation = checkPredicate(rule as PredicateRule, merged, previous, opts.logger);
-      }
-      // Other rule types are not enforced on the write path (yet).
+      violation = evaluateRule(rule, ctx);
     } catch (err) {
       // Defensive: a broken rule must never brick a write.
       opts.logger?.warn?.(`Validation rule '${rule.name}' threw — skipped`, err);
@@ -174,6 +238,31 @@ export function evaluateValidationRules(
   }
 
   if (errors.length > 0) throw new ValidationError(errors);
+}
+
+/**
+ * Dispatch a single rule to its checker, returning the violation (or null).
+ * Shared by the top-level loop and by `checkConditional`, which recurses into
+ * its `then` / `otherwise` branch. Unknown types return null — but the schema
+ * (`ValidationRuleSchema`) only admits the types handled below, so in practice
+ * every declared rule is covered.
+ */
+function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | null {
+  switch (rule.type) {
+    case 'state_machine':
+      return checkStateMachine(rule as StateMachineRule, ctx.mode, ctx.data, ctx.previous);
+    case 'script':
+    case 'cross_field':
+      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger);
+    case 'format':
+      return checkFormat(rule as FormatRule, ctx.data, ctx.logger);
+    case 'json_schema':
+      return checkJsonSchema(rule as JsonSchemaRule, ctx.data, ctx.logger);
+    case 'conditional':
+      return checkConditional(rule as ConditionalRule, ctx);
+    default:
+      return null;
+  }
 }
 
 /**
@@ -251,6 +340,149 @@ function checkPredicate(
     };
   }
   return null;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Lenient phone matcher: optional leading +, then 7–20 digits with spaces,
+// dashes, dots and parens allowed as separators. Intentionally permissive —
+// strict national formats belong in a `regex`.
+const PHONE_RE = /^\+?[\d\s().-]{7,20}$/;
+
+/**
+ * Format check (`format`). Validates a single field's value against an optional
+ * `regex` and/or a named `format`. Only runs when the write touches the field
+ * (mirrors `state_machine`) and the value is non-empty — requiredness and
+ * type-shape are the field-level validator's job, so an absent/blank value is
+ * not a *format* violation. A malformed `regex` is a broken rule (logged,
+ * fail-open), not a violation.
+ */
+function checkFormat(
+  rule: FormatRule,
+  data: Record<string, unknown>,
+  logger: EvaluateRulesOptions['logger'],
+): FieldValidationError | null {
+  if (!(rule.field in data)) return null;
+  const value = data[rule.field];
+  if (value === null || value === undefined || value === '') return null;
+  const str = String(value);
+
+  if (rule.regex) {
+    let re: RegExp;
+    try {
+      re = new RegExp(rule.regex);
+    } catch {
+      logger?.warn?.(`Validation rule '${rule.name}' has an invalid regex — skipped`);
+      return null;
+    }
+    if (!re.test(str)) return formatViolation(rule);
+  }
+
+  if (rule.format && !matchesNamedFormat(rule.format, str)) {
+    return formatViolation(rule);
+  }
+  return null;
+}
+
+function matchesNamedFormat(format: FormatRule['format'], str: string): boolean {
+  switch (format) {
+    case 'email':
+      return EMAIL_RE.test(str);
+    case 'phone':
+      return PHONE_RE.test(str);
+    case 'url':
+      try {
+        // eslint-disable-next-line no-new
+        new URL(str);
+        return true;
+      } catch {
+        return false;
+      }
+    case 'json':
+      try {
+        JSON.parse(str);
+        return true;
+      } catch {
+        return false;
+      }
+    default:
+      return true;
+  }
+}
+
+function formatViolation(rule: FormatRule): FieldValidationError {
+  return { field: rule.field, code: 'invalid_format', message: rule.message };
+}
+
+/**
+ * JSON Schema check (`json_schema`). Validates a JSON field against the rule's
+ * schema via ajv. The field value may be a parsed object or a JSON string (a
+ * string that fails to parse is itself a violation). Only runs when the write
+ * touches the field and the value is non-null. A schema ajv cannot compile is a
+ * broken rule (logged, fail-open).
+ */
+function checkJsonSchema(
+  rule: JsonSchemaRule,
+  data: Record<string, unknown>,
+  logger: EvaluateRulesOptions['logger'],
+): FieldValidationError | null {
+  if (!(rule.field in data)) return null;
+  let value = data[rule.field];
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return { field: rule.field, code: 'invalid_json', message: rule.message };
+    }
+  }
+
+  let validate = jsonSchemaCache.get(rule.schema);
+  if (!validate) {
+    try {
+      validate = ajv.compile(rule.schema);
+    } catch (err) {
+      logger?.warn?.(
+        `Validation rule '${rule.name}' has an uncompilable JSON Schema — skipped`,
+        err,
+      );
+      return null;
+    }
+    jsonSchemaCache.set(rule.schema, validate);
+  }
+
+  if (!validate(value)) {
+    return { field: rule.field, code: 'json_schema_violation', message: rule.message };
+  }
+  return null;
+}
+
+/**
+ * Conditional check (`conditional`). Evaluates the `when` predicate against the
+ * merged record, then recurses into `then` (true) or `otherwise` (false) via
+ * `evaluateRule`. An un-evaluable `when` is a broken rule (logged, fail-open).
+ * The nested rule supplies the violation (field/code/message); the *outer*
+ * conditional's `severity` governs whether it blocks (handled by the caller).
+ */
+function checkConditional(
+  rule: ConditionalRule,
+  ctx: RuleContext,
+): FieldValidationError | null {
+  const result = ExpressionEngine.evaluate<boolean>(toExpression(rule.when), {
+    record: ctx.merged,
+    previous: ctx.previous ?? undefined,
+  });
+
+  if (!result.ok) {
+    ctx.logger?.warn?.(
+      `Validation rule '${rule.name}' when-predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — skipped`,
+    );
+    return null;
+  }
+
+  const branch = result.value === true ? rule.then : rule.otherwise;
+  if (!branch || branch.active === false) return null;
+  return evaluateRule(branch, ctx);
 }
 
 /**

@@ -60,7 +60,10 @@ export interface FieldValidationError {
     | 'invalid_option'
     // Object-level validation rules (ADR-0020, see rule-validator.ts)
     | 'invalid_transition'
-    | 'rule_violation';
+    | 'rule_violation'
+    | 'invalid_format'
+    | 'invalid_json'
+    | 'json_schema_violation';
   message: string;
   /** Allowed values for select/multiselect, when applicable. */
   options?: string[];

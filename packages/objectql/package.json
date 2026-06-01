@@ -22,6 +22,7 @@
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
+    "ajv": "^8.20.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

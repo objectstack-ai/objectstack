@@ -260,6 +260,9 @@ importers:
       '@objectstack/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../packages/objectql
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -937,6 +940,9 @@ importers:
       '@objectstack/types':
         specifier: workspace:*
         version: link:../types
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       zod:
         specifier: ^4.4.3
         version: 4.4.3

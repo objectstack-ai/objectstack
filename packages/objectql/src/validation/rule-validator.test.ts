@@ -195,8 +195,214 @@ describe('introspection', () => {
 
   it('needsPriorRecord detects rules that require prior state', () => {
     expect(needsPriorRecord(accountSchema)).toBe(true);
-    expect(needsPriorRecord({ validations: [{ type: 'unique', name: 'u', message: 'm', fields: ['x'] }] })).toBe(false);
+    // format only inspects the incoming value → no prior fetch needed.
+    expect(needsPriorRecord({ validations: [{ type: 'format', name: 'f', message: 'm', field: 'x', format: 'email' }] })).toBe(false);
     expect(needsPriorRecord({ validations: [] })).toBe(false);
     expect(needsPriorRecord(undefined)).toBe(false);
+  });
+
+  it('needsPriorRecord recurses into conditional branches', () => {
+    // conditional wrapping a cross_field → needs prior.
+    const wrapsPrior = {
+      validations: [
+        {
+          type: 'conditional' as const,
+          name: 'c',
+          message: 'm',
+          when: { dialect: 'cel', source: 'record.type == "x"' },
+          then: { type: 'cross_field', name: 'cf', message: 'm', fields: ['a'], condition: { dialect: 'cel', source: 'record.a < record.b' } },
+        },
+      ],
+    };
+    expect(needsPriorRecord(wrapsPrior)).toBe(true);
+
+    // conditional wrapping only a format → does not need prior.
+    const wrapsFormat = {
+      validations: [
+        {
+          type: 'conditional' as const,
+          name: 'c',
+          message: 'm',
+          when: { dialect: 'cel', source: 'record.type == "x"' },
+          then: { type: 'format', name: 'f', message: 'm', field: 'email', format: 'email' },
+        },
+      ],
+    };
+    expect(needsPriorRecord(wrapsFormat)).toBe(false);
+  });
+});
+
+describe('format enforcement', () => {
+  const schema = (extra: Record<string, unknown>) => ({
+    validations: [{ type: 'format' as const, name: 'fmt', message: 'Bad format.', ...extra }],
+  });
+
+  it('rejects an invalid named format (email) on insert', () => {
+    expect(() =>
+      evaluateValidationRules(schema({ field: 'email', format: 'email' }), { email: 'not-an-email' }, 'insert'),
+    ).toThrow(ValidationError);
+  });
+
+  it('accepts a valid named format (email)', () => {
+    expect(() =>
+      evaluateValidationRules(schema({ field: 'email', format: 'email' }), { email: 'a@b.com' }, 'insert'),
+    ).not.toThrow();
+  });
+
+  it('validates url / phone / json named formats', () => {
+    expect(() => evaluateValidationRules(schema({ field: 'site', format: 'url' }), { site: 'nope' }, 'insert')).toThrow(ValidationError);
+    expect(() => evaluateValidationRules(schema({ field: 'site', format: 'url' }), { site: 'https://x.io' }, 'insert')).not.toThrow();
+    expect(() => evaluateValidationRules(schema({ field: 'tel', format: 'phone' }), { tel: 'abc' }, 'insert')).toThrow(ValidationError);
+    expect(() => evaluateValidationRules(schema({ field: 'tel', format: 'phone' }), { tel: '+1 (415) 555-2020' }, 'insert')).not.toThrow();
+    expect(() => evaluateValidationRules(schema({ field: 'blob', format: 'json' }), { blob: '{bad' }, 'insert')).toThrow(ValidationError);
+    expect(() => evaluateValidationRules(schema({ field: 'blob', format: 'json' }), { blob: '{"ok":1}' }, 'insert')).not.toThrow();
+  });
+
+  it('enforces a regex', () => {
+    expect(() => evaluateValidationRules(schema({ field: 'zip', regex: '^[0-9]{5}$' }), { zip: '1234' }, 'insert')).toThrow(ValidationError);
+    expect(() => evaluateValidationRules(schema({ field: 'zip', regex: '^[0-9]{5}$' }), { zip: '94107' }, 'insert')).not.toThrow();
+  });
+
+  it('skips when the field is absent or empty (requiredness is not its job)', () => {
+    expect(() => evaluateValidationRules(schema({ field: 'email', format: 'email' }), { other: 1 }, 'insert')).not.toThrow();
+    expect(() => evaluateValidationRules(schema({ field: 'email', format: 'email' }), { email: '' }, 'insert')).not.toThrow();
+  });
+
+  it('skips on update when the PATCH does not touch the field', () => {
+    expect(() =>
+      evaluateValidationRules(schema({ field: 'email', format: 'email' }), { name: 'x' }, 'update', { previous: { email: 'still-bad' } }),
+    ).not.toThrow();
+  });
+
+  it('fails open on an invalid regex', () => {
+    expect(() => evaluateValidationRules(schema({ field: 'x', regex: '((' }), { x: 'anything' }, 'insert')).not.toThrow();
+  });
+
+  it('surfaces an invalid_format code', () => {
+    try {
+      evaluateValidationRules(schema({ field: 'email', format: 'email' }), { email: 'bad' }, 'insert');
+      throw new Error('expected throw');
+    } catch (e) {
+      const err = e as ValidationError;
+      expect(err.fields[0].code).toBe('invalid_format');
+      expect(err.fields[0].field).toBe('email');
+    }
+  });
+});
+
+describe('json_schema enforcement', () => {
+  const schema = {
+    validations: [
+      {
+        type: 'json_schema' as const,
+        name: 'cfg',
+        message: 'Config does not match schema.',
+        field: 'config',
+        schema: { type: 'object', properties: { port: { type: 'number' } }, required: ['port'], additionalProperties: false },
+      },
+    ],
+  };
+
+  it('accepts a conforming object value', () => {
+    expect(() => evaluateValidationRules(schema, { config: { port: 8080 } }, 'insert')).not.toThrow();
+  });
+
+  it('rejects a non-conforming object value', () => {
+    expect(() => evaluateValidationRules(schema, { config: { port: 'nope' } }, 'insert')).toThrow(ValidationError);
+    expect(() => evaluateValidationRules(schema, { config: {} }, 'insert')).toThrow(ValidationError);
+  });
+
+  it('parses and validates a JSON string value', () => {
+    expect(() => evaluateValidationRules(schema, { config: '{"port":80}' }, 'insert')).not.toThrow();
+    expect(() => evaluateValidationRules(schema, { config: '{"port":"x"}' }, 'insert')).toThrow(ValidationError);
+  });
+
+  it('treats an unparseable JSON string as invalid_json', () => {
+    try {
+      evaluateValidationRules(schema, { config: '{bad' }, 'insert');
+      throw new Error('expected throw');
+    } catch (e) {
+      expect((e as ValidationError).fields[0].code).toBe('invalid_json');
+    }
+  });
+
+  it('skips when the field is absent or null', () => {
+    expect(() => evaluateValidationRules(schema, { other: 1 }, 'insert')).not.toThrow();
+    expect(() => evaluateValidationRules(schema, { config: null }, 'insert')).not.toThrow();
+  });
+
+  it('fails open on an uncompilable schema', () => {
+    const broken = {
+      validations: [{ type: 'json_schema' as const, name: 'b', message: 'm', field: 'c', schema: { type: 'not-a-real-type' } }],
+    };
+    expect(() => evaluateValidationRules(broken, { c: { any: 1 } }, 'insert')).not.toThrow();
+  });
+});
+
+describe('conditional enforcement', () => {
+  const schema = {
+    validations: [
+      {
+        type: 'conditional' as const,
+        name: 'enterprise_requires_approval',
+        message: 'Conditional failed.',
+        when: { dialect: 'cel', source: 'record.account_type == "enterprise"' },
+        then: {
+          type: 'script',
+          name: 'require_approval',
+          message: 'Enterprise accounts require an approver.',
+          condition: { dialect: 'cel', source: 'record.approver == null' },
+        },
+        otherwise: {
+          type: 'script',
+          name: 'require_payment',
+          message: 'A payment method is required.',
+          condition: { dialect: 'cel', source: 'record.payment == null' },
+        },
+      },
+    ],
+  };
+
+  it('runs the then-branch when when is true (and it fails)', () => {
+    try {
+      evaluateValidationRules(schema, { account_type: 'enterprise', approver: null }, 'insert');
+      throw new Error('expected throw');
+    } catch (e) {
+      const err = e as ValidationError;
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.fields[0].message).toBe('Enterprise accounts require an approver.');
+    }
+  });
+
+  it('passes the then-branch when satisfied', () => {
+    expect(() =>
+      evaluateValidationRules(schema, { account_type: 'enterprise', approver: 'u1' }, 'insert'),
+    ).not.toThrow();
+  });
+
+  it('runs the otherwise-branch when when is false', () => {
+    expect(() =>
+      evaluateValidationRules(schema, { account_type: 'smb', payment: null }, 'insert'),
+    ).toThrow(ValidationError);
+    expect(() =>
+      evaluateValidationRules(schema, { account_type: 'smb', payment: 'card' }, 'insert'),
+    ).not.toThrow();
+  });
+
+  it('is a no-op when when is false and there is no otherwise', () => {
+    const noElse = { validations: [{ ...schema.validations[0], otherwise: undefined }] };
+    expect(() => evaluateValidationRules(noElse, { account_type: 'smb' }, 'insert')).not.toThrow();
+  });
+
+  it('the outer conditional severity governs blocking (warning → non-blocking)', () => {
+    const advisory = { validations: [{ ...schema.validations[0], severity: 'warning' as const }] };
+    expect(() =>
+      evaluateValidationRules(advisory, { account_type: 'enterprise', approver: null }, 'insert'),
+    ).not.toThrow();
+  });
+
+  it('fails open on an un-evaluable when predicate', () => {
+    const broken = { validations: [{ ...schema.validations[0], when: { dialect: 'cel', source: 'this is (( not valid' } }] };
+    expect(() => evaluateValidationRules(broken, { account_type: 'enterprise', approver: null }, 'insert')).not.toThrow();
   });
 });
