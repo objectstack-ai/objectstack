@@ -4,7 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package + versioned releases), [ADR-0004](./0004-cloud-multi-kernel.md) (cloud multi-kernel), [ADR-0010](./0010-metadata-protection-model.md) (L1/L2/L3 protection), [ADR-0016](./0016-studio-package-authoring-and-publish.md) (package authoring & publish, local export/import)
 **Consumers**: `@objectstack/core` (kernel, plugin-loader, security), `@objectstack/runtime` (sandbox, marketplace install), `@objectstack/cli`, `@objectstack/spec/system` (ObjectStackManifest), `@objectstack/spec/cloud`, `../objectui` (Studio)
-**Related**: [ADR-0026](./0026-client-ui-plugin-distribution.md) (client-side UI plugins — out of scope here), [ADR-0007](./0007-settings-manifest-and-kv-store.md) (settings + secret store), [ADR-0022](./0022-connectors-vs-messaging-channels.md)/[ADR-0023](./0023-openapi-to-connector-generator.md)/[ADR-0024](./0024-mcp-connectors.md) (connectors)
+**Related**: [ADR-0019](./0019-app-as-consumer-unit.md) (App is the only consumer-facing unit — this pipeline serves developers/operators, see §3.11), [ADR-0026](./0026-client-ui-plugin-distribution.md) (client-side UI plugins — out of scope here), [ADR-0007](./0007-settings-manifest-and-kv-store.md) (settings + secret store), [ADR-0022](./0022-connectors-vs-messaging-channels.md)/[ADR-0023](./0023-openapi-to-connector-generator.md)/[ADR-0024](./0024-mcp-connectors.md) (connectors)
 
 ---
 
@@ -19,7 +19,10 @@
 > with the **object/field-level RLS** layer; (5) secrets live in the **settings/KV
 > store** (ADR-0007), never in the artifact; (6) connectors span a declarative
 > (OpenAPI/MCP-generated) sub-path, not only hand-written code plugins. Client-side
-> **UI** plugins are split out to ADR-0026.
+> **UI** plugins are split out to ADR-0026. **Audience (§3.11):** per ADR-0019 the
+> only consumer-facing unit is the **App**; this `.osplugin` pipeline serves
+> **developers/operators/ISVs** — plugins reach a tenant *bundled inside an App* or
+> *operator-provisioned*, never browsed/installed by an end consumer.
 
 ---
 
@@ -359,6 +362,53 @@ heavy code-plugin pipeline. This *strengthens* the §3.9 superset/spectrum claim
 marketplace need this ADR does **not** cover — they load in the browser and need
 a module-federation / iframe-sandbox model. Split to **ADR-0026**.
 
+### 3.11 Audience & relation to ADR-0019 (consumer surface)
+
+ADR-0019 makes the **App** the *only* consumer-facing unit: a consumer browses,
+installs, opens, and uninstalls an **App** (`type: app`), and **internal
+contributions** — `plugin`, `driver`, `server`, `ui`, `theme`, `agent`, … — are
+*never* independently installed by a consumer (`isConsumerInstallable` filters the
+consumer Marketplace to `type: app`). This ADR must not be read as "consumers
+install plugins from a marketplace." It is reconciled as follows:
+
+1. **Audience = developers / operators / ISVs, not end consumers.** The
+   `.osplugin` pipeline is the **supply-side mechanism** for code-bearing
+   contributions. A plugin reaches a tenant by exactly the two ADR-0019 routes:
+   - **Bundled into an App** — the App author lists plugins as internal
+     contributions (`plugins: [...]` in `defineStack`, per
+     `docs/design/marketplace-publishing.md` §6.1); the consumer installs the App
+     and the bundled plugins ride inside it. The `.osplugin` is then a **build-time
+     dependency** the App author composes, signed and version-pinned.
+   - **Operator-provisioned** — a platform operator/admin installs a plugin into a
+     runtime/environment out-of-band (drivers, auth providers, observability
+     exporters, connectors). This is the `os plugin install` / control-plane path
+     in §3.4–§3.5, performed by an operator with the permission-consent step,
+     **not** surfaced in the consumer App Marketplace.
+
+2. **Two catalogs, one backbone.** The browsable listing built in §3.4 is a
+   **developer/operator contribution catalog** (drivers, connectors, AI
+   extensions, …), distinct from the consumer **App Marketplace** of ADR-0019 D2.
+   Both reuse the same `sys_*` registry, signing, and artifact storage; they
+   differ only in *who* may install and *which* `type`s each surface lists. The
+   consumer App Marketplace stays `type: app`-only (ADR-0019 D2, enforced in
+   `MarketplaceListingSchema.packageType`); the contribution catalog lists the
+   internal `type`s and is reachable by operators/developers.
+
+3. **This ADR is the gate ADR-0019 deferred.** ADR-0019 §Out-of-scope explicitly
+   parks a *self-serve, consumer-facing, code-bearing* marketplace as a separate
+   gated bet, and names its load-bearing wall: "**the L2 hook sandbox +
+   capability/permission enforcer** … *this* — not review, not a purity rule — is
+   the load-bearing wall, and its hardness must be proven first." ADR-0025's
+   default-deny tiers (§3.6: T1 QuickJS sandbox, T2 out-of-process) + the
+   permission-consent flow (§3.5) + RLS composition (§3.10 #4) **are exactly that
+   wall.** So this ADR does not *open* the self-serve-consumer gate; it builds and
+   hardens the mechanism that a future go/no-go could open the gate *on top of*.
+   Until that decision, the pipeline serves developers and operators only.
+
+In short: ADR-0019 governs **what a consumer sees** (only Apps); ADR-0025 governs
+**how code contributions are built, signed, distributed, and safely loaded** for
+the developers and operators who compose Apps and provision runtimes.
+
 ## 4. Phasing
 
 - **Phase 1 — Artifact & build.** Define `.osplugin` + `objectstack.plugin.json`
@@ -438,7 +488,10 @@ a module-federation / iframe-sandbox model. Split to **ADR-0026**.
 - [ADR-0016](./0016-studio-package-authoring-and-publish.md) — Package authoring & publish; local export/import (§9)
 - [ADR-0007](./0007-settings-manifest-and-kv-store.md) — Settings manifest + KV/secret store (§3.10 #5)
 - [ADR-0022](./0022-connectors-vs-messaging-channels.md) / [ADR-0023](./0023-openapi-to-connector-generator.md) / [ADR-0024](./0024-mcp-connectors.md) — Connectors: declarative generation vs. code plugins (§3.10 #6)
+- [ADR-0019](./0019-app-as-consumer-unit.md) — App is the only consumer-facing unit; internal contributions ship inside Apps or are operator-provisioned (§3.11); names the L2-sandbox + enforcer as the gate's load-bearing wall
 - [ADR-0026](./0026-client-ui-plugin-distribution.md) — Client-side UI plugin distribution (browser module/sandbox)
+- `docs/design/marketplace-publishing.md` — Marketplace publishing flow; App composition (§6) consuming bundled plugins
+- `packages/spec/src/kernel/plugin.zod.ts` — `isConsumerInstallable` (consumer surface = `type: app`)
 - `packages/plugins/plugin-security/` — RBAC/RLS; composes with plugin permissions (§3.10 #4)
 - `packages/core/src/plugin-loader.ts` — plugin loading, lifecycle, health, signature
 - `packages/core/src/types.ts` — `Plugin` (`init/start/destroy`) + `PluginContext`

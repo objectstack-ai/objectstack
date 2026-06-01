@@ -28,6 +28,17 @@
 
 This document defines the **Marketplace Protocol** for the ObjectStack ecosystem — a comprehensive specification covering how metadata-driven packages are published to the marketplace and how customers discover, install, and manage them.
 
+> **Companion document:** code-bearing contributions (plugins with npm
+> dependencies, drivers, connectors, AI extensions, and client UI plugins) have
+> their own supply-side distribution design in
+> [`plugin-distribution.md`](./plugin-distribution.md) (decisions:
+> [ADR-0025](../adr/0025-plugin-package-distribution.md),
+> [ADR-0026](../adr/0026-client-ui-plugin-distribution.md)). Per ADR-0019 those
+> contributions are **never** consumer-installed directly — they ship *inside an
+> App* or are *operator-provisioned*. This document covers the consumer-facing
+> **App** flow; the companion covers the developer/operator **contribution
+> catalog**. Both share one signed `sys_*` registry + artifact backbone.
+
 ### Key Components
 
 The marketplace protocol consists of three primary schema files:

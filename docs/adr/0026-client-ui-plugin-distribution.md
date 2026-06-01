@@ -3,6 +3,7 @@
 **Status**: Proposed
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0025](./0025-plugin-package-distribution.md) (plugin package distribution — server/runtime plugins), [ADR-0003](./0003-package-as-first-class-citizen.md) (package + versioned releases), [ADR-0010](./0010-metadata-protection-model.md) (protection model)
+**Related**: [ADR-0019](./0019-app-as-consumer-unit.md) (App is the only consumer-facing unit — UI plugins ship inside Apps or are operator-provisioned, see §3.7)
 **Consumers**: `@objectstack/client-react`, `@objectstack/console`, `../objectui` (Studio), `@objectstack/spec/system` (ObjectStackManifest), `@objectstack/spec/cloud`
 
 ---
@@ -164,6 +165,25 @@ then shared-singleton ranges (`react` major must match the host to allow U0 modu
 sharing; a mismatch forces U1 iframe, which can carry its own React). This is the
 client analog of ADR-0025 §3.8 protocol-first gating.
 
+### 3.7 Audience & relation to ADR-0019
+
+As in ADR-0025 §3.11, a UI plugin (`type: ui-plugin`) is an **internal
+contribution**, not a consumer-installable unit (ADR-0019 D2:
+`isConsumerInstallable` = `type: app` only). It reaches a tenant by the same two
+routes:
+
+- **Bundled inside an App** — the App author registers the field/view/widget
+  contributions as part of the App bundle; the consumer installs the App and the
+  UI extensions load with it. This is the dominant path (a "map view" or
+  "signature field" is part of *some App's* UX).
+- **Operator-provisioned** — an admin enables a UI plugin org-wide as a console
+  capability (e.g. a corporate barcode-scanner field across all Apps).
+
+The consumer never browses a "UI plugin" listing; the U0/U1 loading and isolation
+of §3.3 govern *how the host runs* a contribution that arrived by either route.
+The signed registry/install backbone is shared with ADR-0025 (and thus the
+developer/operator contribution catalog, not the consumer App Marketplace).
+
 ## 4. Phasing
 
 - **Phase 1 — Contract & registry.** Define `runtime: 'ui'` + `ui` manifest block
@@ -228,6 +248,7 @@ client analog of ADR-0025 §3.8 protocol-first gating.
 ## 8. References
 
 - [ADR-0025](./0025-plugin-package-distribution.md) — Plugin package distribution (server); `runtime` tiers, signing, registry, §3.10 refinements
+- [ADR-0019](./0019-app-as-consumer-unit.md) — App is the only consumer-facing unit; UI plugins ship inside Apps or are operator-provisioned (§3.7)
 - [ADR-0010](./0010-metadata-protection-model.md) — Protection model (lock states for installed UI extensions)
 - `packages/client-react/` — React client SDK + view/field rendering
 - `packages/console/` — console SPA (load target for UI plugins)
