@@ -1,5 +1,12 @@
 # @objectstack/service-external-datasource
 
+## 7.4.1
+
+### Patch Changes
+
+- @objectstack/spec@7.4.1
+- @objectstack/core@7.4.1
+
 ## 7.4.0
 
 ### Minor Changes

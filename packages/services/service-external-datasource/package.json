@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-external-datasource",
-  "version": "7.4.0",
+  "version": "7.4.1",
   "license": "Apache-2.0",
   "description": "External Datasource Federation service for ObjectStack — implements IExternalDatasourceService (introspect, draft, validate) per ADR-0015",
   "type": "module",

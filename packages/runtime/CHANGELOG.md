@@ -1,5 +1,26 @@
 # @objectstack/runtime
 
+## 7.4.1
+
+### Patch Changes
+
+- @objectstack/spec@7.4.1
+- @objectstack/core@7.4.1
+- @objectstack/types@7.4.1
+- @objectstack/metadata@7.4.1
+- @objectstack/objectql@7.4.1
+- @objectstack/observability@7.4.1
+- @objectstack/formula@7.4.1
+- @objectstack/rest@7.4.1
+- @objectstack/driver-memory@7.4.1
+- @objectstack/driver-sql@7.4.1
+- @objectstack/driver-sqlite-wasm@7.4.1
+- @objectstack/plugin-auth@7.4.1
+- @objectstack/plugin-org-scoping@7.4.1
+- @objectstack/plugin-security@7.4.1
+- @objectstack/service-cluster@7.4.1
+- @objectstack/service-i18n@7.4.1
+
 ## 7.4.0
 
 ### Minor Changes

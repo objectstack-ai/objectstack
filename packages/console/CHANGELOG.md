@@ -1,5 +1,11 @@
 # @objectstack/console
 
+## 7.4.1
+
+### Patch Changes
+
+- d7f86db: fix
+
 ## 7.4.0
 
 ## 7.3.0

@@ -1,5 +1,11 @@
 # @objectstack/core
 
+## 7.4.1
+
+### Patch Changes
+
+- @objectstack/spec@7.4.1
+
 ## 7.4.0
 
 ### Patch Changes

@@ -1,5 +1,7 @@
 # @objectstack/nestjs
 
+## 7.4.1
+
 ## 7.4.0
 
 ## 7.3.0

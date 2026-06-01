@@ -1,5 +1,14 @@
 # @objectstack/example-showcase
 
+## 0.1.2
+
+### Patch Changes
+
+- @objectstack/spec@7.4.1
+- @objectstack/runtime@7.4.1
+- @objectstack/connector-rest@7.4.1
+- @objectstack/connector-slack@7.4.1
+
 ## 0.1.1
 
 ### Patch Changes

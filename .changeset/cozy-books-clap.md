@@ -1,5 +1,0 @@
----
-"@objectstack/console": patch
----
-
-fix

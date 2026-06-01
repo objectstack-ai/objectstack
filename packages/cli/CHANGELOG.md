@@ -1,5 +1,52 @@
 # @objectstack/cli
 
+## 7.4.1
+
+### Patch Changes
+
+- Updated dependencies [d7f86db]
+  - @objectstack/console@7.4.1
+  - @objectstack/spec@7.4.1
+  - @objectstack/core@7.4.1
+  - @objectstack/client@7.4.1
+  - @objectstack/types@7.4.1
+  - @objectstack/objectql@7.4.1
+  - @objectstack/observability@7.4.1
+  - @objectstack/platform-objects@7.4.1
+  - @objectstack/runtime@7.4.1
+  - @objectstack/rest@7.4.1
+  - @objectstack/driver-memory@7.4.1
+  - @objectstack/driver-sql@7.4.1
+  - @objectstack/driver-mongodb@7.4.1
+  - @objectstack/driver-sqlite-wasm@7.4.1
+  - @objectstack/plugin-approvals@7.4.1
+  - @objectstack/plugin-audit@7.4.1
+  - @objectstack/plugin-auth@7.4.1
+  - @objectstack/plugin-email@7.4.1
+  - @objectstack/plugin-hono-server@7.4.1
+  - @objectstack/plugin-mcp-server@7.4.1
+  - @objectstack/plugin-org-scoping@7.4.1
+  - @objectstack/plugin-reports@7.4.1
+  - @objectstack/plugin-security@7.4.1
+  - @objectstack/plugin-sharing@7.4.1
+  - @objectstack/plugin-webhooks@7.4.1
+  - @objectstack/plugin-trigger-record-change@7.4.1
+  - @objectstack/plugin-trigger-schedule@7.4.1
+  - @objectstack/service-ai@7.4.1
+  - @objectstack/service-analytics@7.4.1
+  - @objectstack/service-automation@7.4.1
+  - @objectstack/service-cache@7.4.1
+  - @objectstack/service-external-datasource@7.4.1
+  - @objectstack/service-feed@7.4.1
+  - @objectstack/service-job@7.4.1
+  - @objectstack/service-messaging@7.4.1
+  - @objectstack/service-package@7.4.1
+  - @objectstack/service-queue@7.4.1
+  - @objectstack/service-realtime@7.4.1
+  - @objectstack/service-settings@7.4.1
+  - @objectstack/service-storage@7.4.1
+  - @objectstack/account@7.4.1
+
 ## 7.4.0
 
 ### Minor Changes
