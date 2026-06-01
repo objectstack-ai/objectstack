@@ -362,6 +362,67 @@ export const TaskCompletedRestPingFlow = defineFlow({
   ],
 });
 
+/**
+ * Task Follow-up Reminder — the worked `wait` (durable timer) example.
+ *
+ * When a task is created, the flow pauses at a `wait` node for a fixed delay,
+ * then reminds the assignee to update it. The `wait` node *suspends* the run
+ * (ADR-0019 durable pause, like `screen`/`approval`); a one-shot job scheduled
+ * via the job service (`{ type: 'once', at }`) resumes it when the timer
+ * elapses — so the delayed reminder fires end-to-end with no manual
+ * `engine.resume()`. Without a job service the run still suspends and can be
+ * resumed by an external `resume(runId)` (it never silently no-ops).
+ *
+ * A short demo delay keeps it observable in-session; a production reminder would
+ * use e.g. `timerDuration: 'P3D'`. Install
+ * `requires: ['automation', 'triggers', 'job', 'messaging']`.
+ */
+export const TaskFollowUpFlow = defineFlow({
+  name: 'showcase_task_follow_up',
+  label: 'Task Follow-up Reminder (wait)',
+  description: 'Waits a fixed delay after a task is created, then reminds the assignee — demonstrates the durable wait node.',
+  type: 'autolaunched',
+  nodes: [
+    {
+      id: 'start',
+      type: 'start',
+      label: 'On Task Created',
+      config: {
+        objectName: 'showcase_task',
+        triggerType: 'record-after-create',
+      },
+    },
+    {
+      id: 'hold',
+      type: 'wait',
+      label: 'Wait 1 min',
+      // Timer wait: suspends the run, then a one-shot job resumes it after the
+      // duration. ISO-8601 duration; production reminders would use e.g. 'P3D'.
+      waitEventConfig: { eventType: 'timer', timerDuration: 'PT1M', onTimeout: 'continue' },
+    },
+    {
+      id: 'remind',
+      type: 'notify',
+      label: 'Remind Assignee',
+      config: {
+        topic: 'task.followup',
+        recipients: ['{record.assignee}'],
+        channels: ['inbox'],
+        severity: 'info',
+        title: 'Follow up on: {record.title}',
+        message: 'This task has been open for a while — please update its status.',
+        actionUrl: '/showcase_task/{record.id}',
+      },
+    },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'hold' },
+    { id: 'e2', source: 'hold', target: 'remind' },
+    { id: 'e3', source: 'remind', target: 'end' },
+  ],
+});
+
 export const allFlows = [
   TaskCompletedFlow,
   ReassignWizardFlow,
@@ -370,4 +431,5 @@ export const allFlows = [
   TaskAssignedNotifyFlow,
   ScheduledDigestFlow,
   TaskCompletedRestPingFlow,
+  TaskFollowUpFlow,
 ];
