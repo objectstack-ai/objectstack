@@ -9,11 +9,12 @@
  * in `@objectstack/platform-objects`. They are registered alongside
  * `SETUP_APP` (via `plugin-auth`'s `manifest.register`).
  *
- * `group_integrations` is intentionally **absent** here — its Webhooks /
- * Webhook Deliveries entries are contributed by `@objectstack/plugin-webhooks`,
- * which owns `sys_webhook` / `sys_webhook_delivery` (ADR-0029 K2.a). As each
- * remaining domain moves to its capability plugin (K2.b+), its entries move
- * out of this file into that plugin the same way.
+ * Some groups are intentionally **absent** here because a capability plugin
+ * owns them and contributes their entries:
+ *   - `group_integrations` → `@objectstack/plugin-webhooks` (ADR-0029 K2.a)
+ *   - `group_approvals`     → `@objectstack/plugin-approvals` (ADR-0029 K2.b)
+ * As each remaining domain moves to its capability plugin, its entries move out
+ * of this file into that plugin the same way.
  *
  * Priority 100 keeps platform-objects base entries ahead of later
  * contributions in the same group (mirrors object owner priority).
@@ -65,15 +66,8 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       { id: 'nav_api_keys', type: 'object', label: 'API Keys', objectName: 'sys_api_key', icon: 'key', requiredPermissions: ['manage_platform_settings'] },
     ],
   },
-  {
-    app: 'setup',
-    group: 'group_approvals',
-    priority: BASE_PRIORITY,
-    items: [
-      { id: 'nav_approval_requests', type: 'object', label: 'Requests', objectName: 'sys_approval_request', icon: 'inbox', requiresObject: 'sys_approval_request' },
-      { id: 'nav_approval_actions', type: 'object', label: 'Action History', objectName: 'sys_approval_action', icon: 'history', requiresObject: 'sys_approval_action' },
-    ],
-  },
+  // group_approvals is contributed by @objectstack/plugin-approvals, which owns
+  // sys_approval_request / sys_approval_action (ADR-0029 K2.b).
   {
     app: 'setup',
     group: 'group_configuration',

@@ -73,8 +73,7 @@ import {
   SysEmailTemplate,
   SysSavedReport,
   SysReportSchedule,
-  SysApprovalRequest,
-  SysApprovalAction,
+  // sys_approval_* moved to @objectstack/plugin-approvals (ADR-0029 K2.b / D8).
   SysJob,
   SysJobRun,
   SysJobQueue,
@@ -167,8 +166,7 @@ export default defineStack({
     SysEmailTemplate,
     SysSavedReport,
     SysReportSchedule,
-    SysApprovalRequest,
-    SysApprovalAction,
+    // sys_approval_* moved to @objectstack/plugin-approvals (ADR-0029 K2.b / D8).
     SysJob,
     SysJobRun,
     SysJobQueue,

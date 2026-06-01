@@ -286,11 +286,13 @@ describe('@objectstack/platform-objects', () => {
       }
     });
 
-    it('does not contribute the plugin-owned integrations slot', () => {
-      // group_integrations belongs to @objectstack/plugin-webhooks, not the
-      // platform-objects base contributions.
-      const integrations = SETUP_NAV_CONTRIBUTIONS.find((c) => c.group === 'group_integrations');
-      expect(integrations).toBeUndefined();
+    it('does not contribute slots owned by capability plugins', () => {
+      // group_integrations → @objectstack/plugin-webhooks (K2.a)
+      // group_approvals    → @objectstack/plugin-approvals (K2.b)
+      for (const ownedSlot of ['group_integrations', 'group_approvals']) {
+        const contrib = SETUP_NAV_CONTRIBUTIONS.find((c) => c.group === ownedSlot);
+        expect(contrib).toBeUndefined();
+      }
     });
   });
 });

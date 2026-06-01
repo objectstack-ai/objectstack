@@ -14,8 +14,7 @@ export { SysEmail } from './sys-email.object.js';
 export { SysEmailTemplate } from './sys-email-template.object.js';
 export { SysSavedReport } from './sys-saved-report.object.js';
 export { SysReportSchedule } from './sys-report-schedule.object.js';
-export { SysApprovalRequest } from './sys-approval-request.object.js';
-export { SysApprovalAction } from './sys-approval-action.object.js';
+// sys_approval_request / sys_approval_action moved to @objectstack/plugin-approvals (ADR-0029 K2.b).
 export { SysJob } from './sys-job.object.js';
 export { SysJobRun } from './sys-job-run.object.js';
 export { SysJobQueue } from './sys-job-queue.object.js';

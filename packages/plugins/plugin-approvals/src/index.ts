@@ -10,10 +10,8 @@
  * the `approval` node.
  */
 
-export {
-  SysApprovalRequest,
-  SysApprovalAction,
-} from '@objectstack/platform-objects/audit';
+export { SysApprovalRequest } from './sys-approval-request.object.js';
+export { SysApprovalAction } from './sys-approval-action.object.js';
 export {
   ApprovalService,
   type ApprovalEngine,

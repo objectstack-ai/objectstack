@@ -1,10 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import {
-  SysApprovalRequest,
-  SysApprovalAction,
-} from '@objectstack/platform-objects/audit';
+import { SysApprovalRequest } from './sys-approval-request.object.js';
+import { SysApprovalAction } from './sys-approval-action.object.js';
 import { ApprovalService, type ApprovalEngine } from './approval-service.js';
 import { bindApprovalLockHook, unbindAllHooks } from './lifecycle-hooks.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
@@ -53,6 +51,20 @@ export class ApprovalsServicePlugin implements Plugin {
       defaultDatasource: 'cloud',
       namespace: 'sys',
       objects: [SysApprovalRequest, SysApprovalAction],
+      // ADR-0029 D7 — contribute the Approvals entries into the Setup app's
+      // `group_approvals` slot. This plugin owns these objects (K2.b), so it
+      // ships their menu too; when the plugin isn't installed the slot is empty.
+      navigationContributions: [
+        {
+          app: 'setup',
+          group: 'group_approvals',
+          priority: 100,
+          items: [
+            { id: 'nav_approval_requests', type: 'object', label: 'Requests', objectName: 'sys_approval_request', icon: 'inbox', requiresObject: 'sys_approval_request' },
+            { id: 'nav_approval_actions', type: 'object', label: 'Action History', objectName: 'sys_approval_action', icon: 'history', requiresObject: 'sys_approval_action' },
+          ],
+        },
+      ],
     });
     ctx.logger.info('ApprovalsServicePlugin: schemas registered');
   }
