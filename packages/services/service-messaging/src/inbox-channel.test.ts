@@ -158,51 +158,14 @@ describe('inbox channel', () => {
         expect(ch.classifyError?.(new Error('x'))).toBe('retryable');
     });
 
-    // ── email → user id resolution (notify-by-email lands in the right inbox) ──
-
-    it('resolves an email-shaped recipient to its sys_user id', async () => {
-        const data = fakeData(undefined, (obj, _q) =>
-            obj === 'sys_user' ? { id: 'usr_abc123' } : null,
-        );
-        const ch = createInboxChannel({ getData: () => data.engine });
-
-        await ch.send(silentCtx(), delivery({}, 'ada@example.com'));
-
-        expect(data.findOnes).toHaveLength(1);
-        expect(data.findOnes[0].object).toBe('sys_user');
-        expect(data.findOnes[0].query).toEqual({ where: { email: 'ada@example.com' }, fields: ['id'] });
-        expect(data.inserts[0].row.user_id).toBe('usr_abc123');
-    });
-
-    it('honours a userObject override for resolution', async () => {
-        const data = fakeData(undefined, () => ({ id: 'usr_xyz' }));
-        const ch = createInboxChannel({ getData: () => data.engine, userObject: 'crm_contact' });
-        await ch.send(silentCtx(), delivery({}, 'ada@example.com'));
-        expect(data.findOnes[0].object).toBe('crm_contact');
-        expect(data.inserts[0].row.user_id).toBe('usr_xyz');
-    });
-
-    it('keys by the recipient verbatim when it is not email-shaped (no lookup)', async () => {
+    // Recipients arrive pre-resolved to user ids (RecipientResolver, ADR-0030
+    // P1) — the channel keys the row by `recipient` verbatim and does NOT do
+    // its own identity lookup.
+    it('keys the inbox row by the recipient verbatim, with no user lookup', async () => {
         const data = fakeData();
         const ch = createInboxChannel({ getData: () => data.engine });
         await ch.send(silentCtx(), delivery({}, 'usr_42'));
         expect(data.findOnes).toHaveLength(0);
         expect(data.inserts[0].row.user_id).toBe('usr_42');
-    });
-
-    it('falls back to the email verbatim when no user matches', async () => {
-        const data = fakeData(undefined, () => null);
-        const ch = createInboxChannel({ getData: () => data.engine });
-        await ch.send(silentCtx(), delivery({}, 'ghost@example.com'));
-        expect(data.findOnes).toHaveLength(1);
-        expect(data.inserts[0].row.user_id).toBe('ghost@example.com');
-    });
-
-    it('falls back to the email verbatim when the lookup throws', async () => {
-        const data = fakeData(undefined, () => { throw new Error('user table locked'); });
-        const ch = createInboxChannel({ getData: () => data.engine });
-        const result = await ch.send(silentCtx(), delivery({}, 'ada@example.com'));
-        expect(result.ok).toBe(true);
-        expect(data.inserts[0].row.user_id).toBe('ada@example.com');
     });
 });

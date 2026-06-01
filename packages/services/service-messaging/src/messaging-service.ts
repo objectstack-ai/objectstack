@@ -6,6 +6,7 @@ import type {
     MessagingChannelContext,
     Notification,
 } from './channel.js';
+import { RecipientResolver } from './recipient-resolver.js';
 
 /** The L2 event object every `emit()` writes one row to (ADR-0030). */
 export const NOTIFICATION_EVENT_OBJECT = 'sys_notification';
@@ -80,10 +81,9 @@ export interface MessagingServiceContext extends MessagingChannelContext {
     getData?(): IDataEngine | undefined;
     /** Clock injection for deterministic tests. Defaults to `new Date()`. */
     now?(): string;
+    /** Override the recipient resolver (tests). Defaults to a data-backed one. */
+    recipientResolver?: RecipientResolver;
 }
-
-/** Selector prefixes the inline resolver forwards verbatim (expanded in P1). */
-const DEFERRED_SELECTOR = /^(role:|team:|owner_of:)/;
 
 /**
  * MessagingService — the notification dispatcher (ADR-0012 / ADR-0030).
@@ -105,9 +105,13 @@ const DEFERRED_SELECTOR = /^(role:|team:|owner_of:)/;
 export class MessagingService {
     private readonly channels = new Map<string, MessagingChannel>();
     private readonly now: () => string;
+    private readonly resolver: RecipientResolver;
 
     constructor(private readonly ctx: MessagingServiceContext) {
         this.now = ctx.now ?? (() => new Date().toISOString());
+        this.resolver =
+            ctx.recipientResolver ??
+            new RecipientResolver({ getData: () => ctx.getData?.(), logger: ctx.logger });
     }
 
     /** Register a channel implementation. A duplicate id warns and replaces. */
@@ -159,8 +163,11 @@ export class MessagingService {
         // 2) Write the L2 event (or synthesize an id when there is no data layer).
         const notificationId = await this.writeEvent(data, input);
 
-        // 3) Resolve the audience to recipients.
-        const recipients = this.resolveRecipients(input.audience);
+        // 3) Resolve the audience to recipient user ids (RecipientResolver owns
+        //    role:/team:/owner_of:/email→id expansion).
+        const recipients = await this.resolver.resolve(input.audience, {
+            organizationId: input.organizationId,
+        });
         if (recipients.length === 0) {
             this.ctx.logger.warn(`[messaging] emit: topic '${input.topic}' resolved to 0 recipients`);
             return { notificationId, deduped: false, deliveries: [], delivered: 0, failed: 0 };
@@ -226,32 +233,6 @@ export class MessagingService {
         const created = await data.insert(NOTIFICATION_EVENT_OBJECT, row);
         const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
         return id != null ? String(id) : `evt_${Math.random().toString(36).slice(2)}`;
-    }
-
-    /**
-     * Expand an audience to a flat recipient list. P0 keeps explicit ids and
-     * email-shaped entries (email→id finishes at the inbox channel); deferred
-     * `role:`/`team:`/`owner_of:` selectors warn and are dropped until the P1
-     * `RecipientResolver` lands.
-     */
-    private resolveRecipients(audience: Audience): string[] {
-        const specs = Array.isArray(audience) ? audience : [audience as AudienceSpec];
-        const out: string[] = [];
-        for (const spec of specs) {
-            if (typeof spec !== 'string') {
-                this.ctx.logger.warn(
-                    `[messaging] owner_of: audience resolution lands in P1; '${JSON.stringify(spec)}' skipped`,
-                );
-                continue;
-            }
-            if (DEFERRED_SELECTOR.test(spec)) {
-                this.ctx.logger.warn(`[messaging] audience selector '${spec}' resolution lands in P1; skipped`);
-                continue;
-            }
-            if (spec.trim()) out.push(spec.trim());
-        }
-        // De-dup while preserving order.
-        return [...new Set(out)];
     }
 
     /**

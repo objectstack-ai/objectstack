@@ -29,6 +29,19 @@ export type {
     MessagingServiceContext,
 } from './messaging-service.js';
 
+// Recipient resolution (ADR-0030 P1)
+export {
+    RecipientResolver,
+    USER_OBJECT,
+    MEMBER_OBJECT,
+    TEAM_MEMBER_OBJECT,
+} from './recipient-resolver.js';
+export type {
+    RecipientResolverOptions,
+    RecipientResolverLogger,
+    ResolveContext,
+} from './recipient-resolver.js';
+
 // Channel seam
 export { createInboxChannel, INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 export type { InboxChannelOptions } from './inbox-channel.js';

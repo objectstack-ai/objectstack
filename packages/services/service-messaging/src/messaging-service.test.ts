@@ -119,7 +119,10 @@ describe('MessagingService', () => {
             expect(inbox.seen.map((d) => d.recipient)).toEqual(['user_1']);
         });
 
-        it('skips deferred role:/team:/owner_of: selectors until P1 (no recipients)', async () => {
+        it('resolves role:/team:/owner_of: to 0 recipients when no directory (data) is present', async () => {
+            // Without a data engine the RecipientResolver can't query membership,
+            // so these selectors yield no recipients (rather than throwing).
+            // Directory-backed expansion is covered in recipient-resolver.test.ts.
             const inbox = recordingChannel('inbox');
             service.registerChannel(inbox.channel);
             const result = await service.emit({
@@ -130,6 +133,39 @@ describe('MessagingService', () => {
             expect(inbox.seen).toHaveLength(0);
             expect(result.delivered).toBe(0);
             expect(result.failed).toBe(0);
+        });
+
+        it('resolves role:/team:/owner_of: through the data engine when present', async () => {
+            const engine = {
+                async insert(_o: string, row: any) { return { id: 'evt_x', ...row }; },
+                async find(object: string) {
+                    if (object === 'sys_member') return [{ user_id: 'u_admin1' }, { user_id: 'u_admin2' }];
+                    if (object === 'sys_team_member') return [{ user_id: 'u_sales' }];
+                    return [];
+                },
+                async findOne(object: string) {
+                    return object === 'lead' ? { id: 'l1', owner_id: 'u_owner' } : null;
+                },
+                async update() { return {}; },
+                async delete() { return {}; },
+                async count() { return 0; },
+                async aggregate() { return []; },
+            } as any;
+            service = new MessagingService({ logger: silentLogger(), getData: () => engine });
+            const inbox = recordingChannel('inbox');
+            service.registerChannel(inbox.channel);
+
+            const result = await service.emit({
+                topic: 't',
+                audience: ['role:admin', 'team:sales', { ownerOf: { object: 'lead', id: 'l1' } }, 'u_admin1'],
+                payload: { title: 'Hi' },
+            });
+
+            // u_admin1 de-duped against the role expansion; owner resolved from the record.
+            expect(inbox.seen.map((d) => d.recipient).sort()).toEqual(
+                ['u_admin1', 'u_admin2', 'u_owner', 'u_sales'].sort(),
+            );
+            expect(result.delivered).toBe(4);
         });
 
         it('fans out across every requested channel', async () => {
