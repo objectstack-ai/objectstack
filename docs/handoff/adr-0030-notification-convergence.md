@@ -165,13 +165,19 @@ flipped — the inbox is being populated the whole time.)
     `sys_notification_template` (topic×channel×locale) + `{{ payload.x }}`
     renderer with generic `payload.title`/`body` fallback. Same `emit` now
     reaches inbox + email per prefs.
-  - **P3b — digest + quiet-hours**: pending. Plan: express both as **deferring
-    the delivery row's `next_attempt_at`** in the P1 outbox (digest = enqueue to
-    the next window + collapse same-`(user, channel, window)` rows; quiet-hours =
-    push `next_attempt_at` to the window end), reusing the dispatcher's
-    claim/retry/observability — one delivery spine, not a parallel scheduler.
-    Consumes the `digest`/`quiet_hours` fields P2 added. critical/mandatory
-    bypass. tz from `quiet_hours.tz` → `sys_user` → org/UTC.
+  - **P3b-1 — quiet-hours**: ✅ shipped. Deferred dispatch on the P1 outbox —
+    `EnqueueDeliveryInput.notBefore` → the row's initial `nextAttemptAt`; the
+    dispatcher already skips not-yet-due pending rows. `PreferenceResolver` reads
+    `quiet_hours` off a channel-wildcard row and computes the window end
+    (`quietHoursDeferral`, HH:MM in tz, overnight-aware). critical bypasses.
+    (tz currently from `quiet_hours.tz` → UTC; `sys_user` tz fallback is a
+    follow-up.)
+  - **P3b-2 — digest**: pending. Builds on the same deferral: enqueue digest
+    items to the next window, then a **collapse** step merges same-`(user,
+    channel, window)` rows into one materialization at window time (needs a
+    `digest_key` on the delivery row + a digest assembler in/beside the
+    dispatcher + a digest render template). critical/mandatory bypass. Consumes
+    P2's `digest` field.
   - **Deferred (same seam, incremental)**: **Slack** stays a *connector*
     (`connector-slack` ships the raw API path today); a Slack notification
     *channel* needs identity mapping (`sys_channel_user_link`) + OAuth and is

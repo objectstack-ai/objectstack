@@ -216,6 +216,7 @@ export class MessagingService {
         const targets = await this.preferences.filter(recipients, channels, {
             topic: input.topic,
             organizationId: input.organizationId,
+            severity: input.severity,
         });
         if (targets.length === 0) {
             this.ctx.logger.info(`[messaging] emit: topic '${input.topic}' suppressed for all recipients by preference`);
@@ -269,7 +270,7 @@ export class MessagingService {
             actionUrl: str(payload.url) ?? str(payload.actionUrl),
         };
         const deliveries: DeliveryOutcome[] = [];
-        for (const { recipient, channels } of targets) {
+        for (const { recipient, channels, notBefore } of targets) {
             for (const channel of channels) {
                 try {
                     const id = await outbox.enqueue({
@@ -279,6 +280,9 @@ export class MessagingService {
                         topic: input.topic,
                         payload: deliveryPayload,
                         organizationId: input.organizationId,
+                        // Quiet-hours deferral (P3b): the dispatcher won't claim
+                        // this row until `notBefore`. Absent ⇒ immediate.
+                        notBefore,
                     });
                     deliveries.push({ channel, recipient, ok: true, externalId: id });
                 } catch (err) {

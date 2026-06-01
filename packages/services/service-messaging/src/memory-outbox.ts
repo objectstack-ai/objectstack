@@ -48,6 +48,9 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
             partitionKey: hashPartition(input.notificationId, this.partitionCount),
             status: 'pending',
             attempts: 0,
+            // Deferred dispatch (quiet-hours, P3): claim() skips pending rows
+            // whose nextAttemptAt is still in the future.
+            nextAttemptAt: input.notBefore,
             createdAt: now,
             updatedAt: now,
         });

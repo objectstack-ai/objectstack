@@ -42,13 +42,14 @@ export type {
     ResolveContext,
 } from './recipient-resolver.js';
 
-// Preference filter (ADR-0030 P2)
-export { PreferenceResolver, PREFERENCE_OBJECT } from './preference-resolver.js';
+// Preference filter (ADR-0030 P2) + quiet-hours deferral (P3b)
+export { PreferenceResolver, PREFERENCE_OBJECT, quietHoursDeferral } from './preference-resolver.js';
 export type {
     PreferenceResolverOptions,
     PreferenceResolverLogger,
     PreferenceContext,
     PreferenceTarget,
+    QuietHours,
 } from './preference-resolver.js';
 
 // Channel seam

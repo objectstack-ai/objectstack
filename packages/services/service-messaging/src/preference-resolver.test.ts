@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { PreferenceResolver } from './preference-resolver.js';
+import { PreferenceResolver, quietHoursDeferral } from './preference-resolver.js';
 
 function silentLogger() {
     return { info: () => {}, warn: () => {}, error: () => {} };
@@ -139,5 +139,63 @@ describe('PreferenceResolver', () => {
         const r = resolver(() => data.engine);
         await r.filter(['u1'], ['inbox', 'email'], { topic: 'task.assigned', organizationId: 'org_1' });
         expect(data.queries.every((q) => q.where.organization_id === 'org_1')).toBe(true);
+    });
+});
+
+describe('quietHoursDeferral (P3b)', () => {
+    it('defers to the end of a same-day window when now is inside it', () => {
+        const now = Date.UTC(2026, 0, 1, 9, 0); // 09:00 UTC
+        const out = quietHoursDeferral({ tz: 'UTC', start: '09:00', end: '17:00' }, now);
+        expect(out).toBe(Date.UTC(2026, 0, 1, 17, 0));
+    });
+
+    it('defers across midnight for an overnight window', () => {
+        const now = Date.UTC(2026, 0, 1, 23, 0); // 23:00 UTC, window 22:00–08:00
+        const out = quietHoursDeferral({ tz: 'UTC', start: '22:00', end: '08:00' }, now);
+        expect(out).toBe(Date.UTC(2026, 0, 2, 8, 0)); // 08:00 next day
+    });
+
+    it('returns undefined when now is outside the window', () => {
+        const now = Date.UTC(2026, 0, 1, 12, 0);
+        expect(quietHoursDeferral({ tz: 'UTC', start: '22:00', end: '08:00' }, now)).toBeUndefined();
+        expect(quietHoursDeferral({ tz: 'UTC', start: '09:00', end: '17:00' }, Date.UTC(2026, 0, 1, 18, 0))).toBeUndefined();
+    });
+
+    it('returns undefined for a degenerate window or bad input', () => {
+        const now = Date.UTC(2026, 0, 1, 12, 0);
+        expect(quietHoursDeferral({ tz: 'UTC', start: '09:00', end: '09:00' }, now)).toBeUndefined();
+        expect(quietHoursDeferral({ start: 'nonsense' } as any, now)).toBeUndefined();
+    });
+});
+
+describe('PreferenceResolver — quiet hours', () => {
+    it('stamps notBefore on the target when the recipient is inside quiet hours', async () => {
+        const now = Date.UTC(2026, 0, 1, 23, 0);
+        const rows = [pref({ user_id: 'u1', topic: '*', channel: '*', enabled: true })];
+        (rows[0] as any).quiet_hours = { tz: 'UTC', start: '22:00', end: '08:00' };
+        const data = fakeData(rows);
+        const r = resolver(() => data.engine);
+        const out = await r.filter(['u1'], ['inbox', 'email'], { topic: 'task.assigned', now });
+        expect(out).toEqual([{ recipient: 'u1', channels: ['inbox', 'email'], notBefore: Date.UTC(2026, 0, 2, 8, 0) }]);
+    });
+
+    it('does not defer a critical event (bypasses quiet hours)', async () => {
+        const now = Date.UTC(2026, 0, 1, 23, 0);
+        const rows = [pref({ user_id: 'u1', topic: '*', channel: '*', enabled: true })];
+        (rows[0] as any).quiet_hours = { tz: 'UTC', start: '22:00', end: '08:00' };
+        const data = fakeData(rows);
+        const r = resolver(() => data.engine);
+        const out = await r.filter(['u1'], ['inbox'], { topic: 'task.assigned', now, severity: 'critical' });
+        expect(out).toEqual([{ recipient: 'u1', channels: ['inbox'] }]); // no notBefore
+    });
+
+    it('accepts a JSON-string quiet_hours value', async () => {
+        const now = Date.UTC(2026, 0, 1, 23, 0);
+        const rows = [pref({ user_id: 'u1', topic: '*', channel: '*', enabled: true })];
+        (rows[0] as any).quiet_hours = JSON.stringify({ tz: 'UTC', start: '22:00', end: '08:00' });
+        const data = fakeData(rows);
+        const r = resolver(() => data.engine);
+        const out = await r.filter(['u1'], ['inbox'], { topic: 'task.assigned', now });
+        expect(out[0].notBefore).toBe(Date.UTC(2026, 0, 2, 8, 0));
     });
 });

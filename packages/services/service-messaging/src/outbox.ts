@@ -54,6 +54,13 @@ export interface EnqueueDeliveryInput {
     topic?: string;
     payload: DeliveryPayload;
     organizationId?: string;
+    /**
+     * Earliest dispatch time (epoch ms). When set, the row enqueues with
+     * `nextAttemptAt = notBefore`, so the dispatcher (which skips pending rows
+     * whose `nextAttemptAt` is in the future) defers the send until then. Used
+     * by the ADR-0030 P3 quiet-hours scheduler; absent ⇒ immediate.
+     */
+    notBefore?: number;
 }
 
 export interface ClaimOptions {

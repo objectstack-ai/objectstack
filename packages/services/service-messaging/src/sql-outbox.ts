@@ -81,6 +81,9 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             partition_key: hashPartition(input.notificationId, this.partitionCount),
             status: 'pending',
             attempts: 0,
+            // Deferred dispatch (quiet-hours, P3): claim() skips pending rows
+            // whose next_attempt_at is in the future.
+            next_attempt_at: input.notBefore ?? null,
             created_at: now,
             updated_at: now,
         };
