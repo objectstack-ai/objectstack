@@ -236,6 +236,40 @@ export const NavigationItemSchema: z.ZodType<any> = z.lazy(() =>
 );
 
 /**
+ * Navigation Contribution (ADR-0029 D7)
+ *
+ * Lets a package inject navigation items into an app it does **not** own —
+ * the UI-layer analog of object `objectExtensions`. A capability plugin
+ * contributes its menu entries into a shared admin app (e.g. `setup`) so the
+ * app can be a thin "shell + group anchors" while each plugin ships the menu
+ * for the objects it owns.
+ *
+ * The runtime merges all contributions into the owning app's `navigation`
+ * tree by **target group id + priority** (lower priority applied first,
+ * mirroring object extender ordering). When `group` is omitted the items are
+ * appended at the app's top level. Contributed items keep the normal nav
+ * gating fields (`requiresObject` / `requiredPermissions` / `visible`), so an
+ * uninstalled capability simply contributes nothing and its slot stays empty.
+ *
+ * @example
+ * {
+ *   app: 'setup',
+ *   group: 'group_integrations',
+ *   priority: 100,
+ *   items: [
+ *     { id: 'nav_webhooks', type: 'object', label: 'Webhooks', objectName: 'sys_webhook', requiresObject: 'sys_webhook' },
+ *   ],
+ * }
+ */
+export const NavigationContributionSchema = lazySchema(() => z.object({
+  app: SnakeCaseIdentifierSchema.describe('Target app name to contribute navigation into (e.g. "setup")'),
+  group: SnakeCaseIdentifierSchema.optional().describe('Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level'),
+  priority: z.number().int().min(0).default(200).describe('Merge priority within the target group — lower applied first (matches object extender priority)'),
+  items: z.array(NavigationItemSchema).describe('Navigation items contributed into the target app/group'),
+}).describe('A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)'));
+export type NavigationContribution = z.infer<typeof NavigationContributionSchema>;
+
+/**
  * App Branding Configuration
  * Allows configuring the look and feel of the specific app.
  */

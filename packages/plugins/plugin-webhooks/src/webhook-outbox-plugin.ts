@@ -136,6 +136,21 @@ export class WebhookOutboxPlugin implements Plugin {
                 description:
                     'Registers sys_webhook (configuration) and sys_webhook_delivery (durable outbox telemetry).',
                 objects: [SysWebhook, SysWebhookDelivery],
+                // ADR-0029 D7 — contribute the Webhooks entries into the
+                // Setup app's `group_integrations` slot. The plugin owns these
+                // objects (K2.a), so it ships their menu too; when the plugin
+                // isn't installed the slot stays empty.
+                navigationContributions: [
+                    {
+                        app: 'setup',
+                        group: 'group_integrations',
+                        priority: 100,
+                        items: [
+                            { id: 'nav_webhooks', type: 'object', label: 'Webhooks', objectName: 'sys_webhook', icon: 'webhook', requiresObject: 'sys_webhook' },
+                            { id: 'nav_webhook_deliveries', type: 'object', label: 'Webhook Deliveries', objectName: 'sys_webhook_delivery', icon: 'send', requiresObject: 'sys_webhook_delivery' },
+                        ],
+                    },
+                ],
             });
         } else {
             ctx.logger.warn?.(

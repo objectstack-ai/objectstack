@@ -318,6 +318,15 @@ export class SchemaRegistry {
   private metadata = new Map<string, Map<string, any>>();
 
   /**
+   * App name → navigation contributions (ADR-0029 D7).
+   *
+   * Lets packages inject nav items into apps they do not own (the UI analog
+   * of object extenders). Merged into the owning app's `navigation` tree on
+   * read in {@link getApp} / {@link getAllApps} by group id + priority.
+   */
+  private appNavContributions = new Map<string, Array<{ packageId?: string; group?: string; priority: number; items: any[] }>>();
+
+  /**
    * Package ids that must be installed in a DISABLED state. Seeded once at
    * boot (from persisted state) BEFORE any package registration so that every
    * registration path — boot artifact, marketplace rehydrate, local import —
@@ -952,11 +961,98 @@ export class SchemaRegistry {
   }
 
   getApp(name: string): any {
-    return this.getItem('app', name);
+    const app = this.getItem('app', name);
+    if (!app) return app;
+    return this.applyNavContributions(app);
   }
 
   getAllApps(): any[] {
-    return this.listItems('app');
+    return this.listItems('app').map((app: any) => this.applyNavContributions(app));
+  }
+
+  // ==========================================
+  // App navigation contributions (ADR-0029 D7)
+  // ==========================================
+
+  /**
+   * Register a navigation contribution — a package injecting nav items into
+   * an app it does not own (the UI-layer analog of object `extend`).
+   *
+   * Contributions are merged into the target app's `navigation` tree lazily
+   * on read ({@link getApp} / {@link getAllApps}) by group id + priority, so
+   * registration order does not matter and the owning app can be registered
+   * before or after its contributors.
+   */
+  registerAppNavContribution(
+    contribution: { app: string; group?: string; priority?: number; items?: any[] },
+    packageId?: string,
+  ): void {
+    if (!contribution || !contribution.app) return;
+    const list = this.appNavContributions.get(contribution.app) ?? [];
+    list.push({
+      packageId,
+      group: contribution.group,
+      priority: contribution.priority ?? 200,
+      items: Array.isArray(contribution.items) ? contribution.items : [],
+    });
+    this.appNavContributions.set(contribution.app, list);
+    this.log(
+      `[Registry] Navigation contribution: ${packageId ?? '(unknown)'} -> ${contribution.app}` +
+        (contribution.group ? `/${contribution.group}` : '') +
+        ` (${list[list.length - 1].items.length} items)`,
+    );
+  }
+
+  /** Contributions registered for an app (empty array when none). */
+  getAppNavContributions(appName: string): Array<{ packageId?: string; group?: string; priority: number; items: any[] }> {
+    return this.appNavContributions.get(appName) ?? [];
+  }
+
+  /**
+   * Return a copy of `app` with all registered navigation contributions
+   * merged into its `navigation` tree. The stored app is never mutated, so
+   * repeated reads stay idempotent.
+   */
+  private applyNavContributions(app: any): any {
+    const contributions = this.appNavContributions.get(app?.name);
+    if (!contributions || contributions.length === 0) return app;
+
+    const cloned = structuredClone(app);
+    const nav: any[] = Array.isArray(cloned.navigation) ? cloned.navigation : (cloned.navigation = []);
+
+    // Lower priority applied first — mirrors object extender ordering.
+    const sorted = [...contributions].sort((a, b) => a.priority - b.priority);
+    for (const c of sorted) {
+      if (!c.items.length) continue;
+      if (c.group) {
+        const group = this.findNavGroup(nav, c.group);
+        if (group) {
+          if (!Array.isArray(group.children)) group.children = [];
+          group.children.push(...c.items);
+        } else {
+          this.log(
+            `[Registry] Navigation contribution from "${c.packageId ?? '(unknown)'}" targets ` +
+              `missing group "${c.group}" in app "${app.name}" — appending at top level.`,
+          );
+          nav.push(...c.items);
+        }
+      } else {
+        nav.push(...c.items);
+      }
+    }
+    return cloned;
+  }
+
+  /** Depth-first search for a `type: 'group'` nav item by id. */
+  private findNavGroup(items: any[], groupId: string): any | undefined {
+    for (const item of items) {
+      if (item && item.id === groupId && item.type === 'group') return item;
+      if (item && Array.isArray(item.children)) {
+        const found = this.findNavGroup(item.children, groupId);
+        if (found) return found;
+      }
+    }
+    return undefined;
   }
 
   // ==========================================
@@ -1026,6 +1122,7 @@ export class SchemaRegistry {
     this.mergedObjectCache.clear();
     this.namespaceRegistry.clear();
     this.metadata.clear();
+    this.appNavContributions.clear();
     this.log('[Registry] Reset complete');
   }
 }

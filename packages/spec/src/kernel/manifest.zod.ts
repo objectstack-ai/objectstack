@@ -5,6 +5,7 @@ import { PluginCapabilityManifestSchema } from './plugin-capability.zod';
 import { PluginLoadingConfigSchema } from './plugin-loading.zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
 import { DatasetSchema } from '../data/dataset.zod';
+import { NavigationContributionSchema } from '../ui/app.zod';
 
 /**
  * Schema for the ObjectStack Manifest.
@@ -380,6 +381,17 @@ export const ManifestSchema = z.object({
    * Allows packages to extend UI components, add functionality, etc.
    */
   extensions: z.record(z.string(), z.unknown()).optional().describe('Extension points and contributions'),
+
+  /**
+   * Navigation contributions (ADR-0029 D7).
+   *
+   * Lets this package inject navigation items into apps it does not own
+   * (e.g. a capability plugin adding its menu entries into the `setup` app).
+   * The runtime merges these into the target app's `navigation` tree by
+   * group id + priority. See {@link NavigationContributionSchema}.
+   */
+  navigationContributions: z.array(NavigationContributionSchema).optional()
+    .describe('Navigation items this package contributes into apps owned by other packages'),
 
   /**
    * Plugin Loading Configuration.

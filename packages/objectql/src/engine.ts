@@ -802,6 +802,20 @@ export class ObjectQL implements IDataEngine {
           this.logger.debug('Registered manifest-as-app', { app: manifest.name, from: id });
       }
 
+      // 4b. Register navigation contributions (ADR-0029 D7) — nav items this
+      //     package injects into apps owned by other packages (e.g. a
+      //     capability plugin adding its menu into the `setup` app). Merged
+      //     into the target app's navigation on read by group id + priority.
+      if (Array.isArray((manifest as any).navigationContributions) && (manifest as any).navigationContributions.length > 0) {
+          for (const contribution of (manifest as any).navigationContributions) {
+              this._registry.registerAppNavContribution(contribution, id);
+          }
+          this.logger.debug('Registered navigation contributions', {
+              from: id,
+              count: (manifest as any).navigationContributions.length,
+          });
+      }
+
       // 5. Register all other metadata types generically
       const metadataArrayKeys = [
         // UI Protocol

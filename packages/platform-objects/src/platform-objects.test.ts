@@ -30,7 +30,7 @@ import {
   SysMetadataHistoryObject,
 } from './metadata/index.js';
 import { SysSetting } from './system/index.js';
-import { SETUP_APP } from './apps/index.js';
+import { SETUP_APP, SETUP_NAV_CONTRIBUTIONS } from './apps/index.js';
 import { AppSchema } from '@objectstack/spec/ui';
 
 const systemObjects = [
@@ -245,25 +245,52 @@ describe('@objectstack/platform-objects', () => {
     });
   });
 
-  describe('SETUP_APP', () => {
+  describe('SETUP_APP (ADR-0029 D7 shell)', () => {
     it('parses cleanly through AppSchema', () => {
       expect(() => AppSchema.parse(SETUP_APP)).not.toThrow();
     });
 
-    it('exposes an Integrations group with Webhooks + Webhook Deliveries', () => {
+    it('is a shell of group anchors with no enumerated objects', () => {
+      const nav = SETUP_APP.navigation ?? [];
+      expect(nav.length).toBeGreaterThan(0);
+      for (const item of nav) {
+        expect(item.type).toBe('group');
+        // Shell groups carry no children — entries come from contributions.
+        expect((item as { children?: unknown[] }).children).toEqual([]);
+      }
+    });
+
+    it('keeps the group_integrations anchor (filled by plugin-webhooks contribution)', () => {
       const group = SETUP_APP.navigation?.find((n) => n.id === 'group_integrations');
       expect(group).toBeDefined();
       expect(group?.type).toBe('group');
-      const children = (group as { children?: Array<{ id: string; objectName?: string; requiresObject?: string }> }).children ?? [];
-      const webhooks = children.find((c) => c.id === 'nav_webhooks');
-      const deliveries = children.find((c) => c.id === 'nav_webhook_deliveries');
-      expect(webhooks?.objectName).toBe('sys_webhook');
-      expect(deliveries?.objectName).toBe('sys_webhook_delivery');
-      // Both entries are plugin-owned (WebhookOutboxPlugin registers
-      // sys_webhook + sys_webhook_delivery), so they must gracefully
-      // hide when the plugin isn't installed in the stack.
-      expect(webhooks?.requiresObject).toBe('sys_webhook');
-      expect(deliveries?.requiresObject).toBe('sys_webhook_delivery');
+      // The webhooks entries are no longer static here — plugin-webhooks
+      // contributes them into this slot (ADR-0029 D7 / K2.a).
+      expect((group as { children?: unknown[] }).children).toEqual([]);
+    });
+  });
+
+  describe('SETUP_NAV_CONTRIBUTIONS (ADR-0029 D7)', () => {
+    const shellGroupIds = new Set(
+      (SETUP_APP.navigation ?? []).map((n) => n.id),
+    );
+
+    it('all target the setup app and an existing shell group', () => {
+      expect(SETUP_NAV_CONTRIBUTIONS.length).toBeGreaterThan(0);
+      for (const c of SETUP_NAV_CONTRIBUTIONS) {
+        expect(c.app).toBe('setup');
+        expect(c.group).toBeDefined();
+        expect(shellGroupIds.has(c.group!)).toBe(true);
+        expect(Array.isArray(c.items)).toBe(true);
+        expect(c.items.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('does not contribute the plugin-owned integrations slot', () => {
+      // group_integrations belongs to @objectstack/plugin-webhooks, not the
+      // platform-objects base contributions.
+      const integrations = SETUP_NAV_CONTRIBUTIONS.find((c) => c.group === 'group_integrations');
+      expect(integrations).toBeUndefined();
     });
   });
 });

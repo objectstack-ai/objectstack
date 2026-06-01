@@ -5,6 +5,7 @@ import type { BetterAuthOptions } from 'better-auth';
 import { AuthConfig } from '@objectstack/spec/system';
 import {
   SETUP_APP,
+  SETUP_NAV_CONTRIBUTIONS,
   STUDIO_APP,
   ACCOUNT_APP,
   SystemOverviewDashboard,
@@ -143,6 +144,10 @@ export class AuthPlugin implements Plugin {
       // owner of its registration since it loads first among the trio
       // (auth + security + audit) that supplies the underlying objects.
       apps: [SETUP_APP, STUDIO_APP, ACCOUNT_APP],
+      // ADR-0029 D7 — the Setup App is a shell of group anchors; its entries
+      // for platform-objects-owned objects are contributed here. Capability
+      // plugins (e.g. plugin-webhooks) contribute their own slots' entries.
+      navigationContributions: SETUP_NAV_CONTRIBUTIONS,
       // Slotted record-detail pages for system objects — currently
       // sys_organization gets a Members / Invitations / Teams tab strip
       // (see SysOrganizationDetailPage for the rationale and the

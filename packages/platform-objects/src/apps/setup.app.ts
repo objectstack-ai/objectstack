@@ -1,26 +1,28 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Platform Setup App — static definition.
+ * Platform Setup App — navigation **shell** (ADR-0029 D7).
  *
- * Lists every `sys_*` administrative object as a left-hand navigation
- * entry in ObjectUI's "Setup" area. Lives here (alongside the object
- * schemas it references) instead of being assembled at runtime by
- * `@objectstack/plugin-setup` — that plugin existed only because the
- * referenced objects used to live in three different runtime plugins
- * (auth/security/audit). Now that all `sys_*` objects are centralized
- * in `@objectstack/platform-objects`, the Setup App is a fixed metadata
- * artifact too and can be exported as plain data.
+ * The Setup App is now a thin shell: it defines the app envelope plus the
+ * stable left-nav **group anchors** ("slots"), but enumerates **no** objects.
+ * Each capability plugin contributes its own menu entries into a slot via
+ * `navigationContributions` (the UI-layer analog of object `extend`), so the
+ * menu for an object ships with the package that owns the object.
  *
- * The runtime registration happens in `plugin-auth` (which is always
- * loaded alongside security + audit and already calls
- * `manifest.register({...})`).
+ * - Items owned by `@objectstack/platform-objects` are contributed by
+ *   `SETUP_NAV_CONTRIBUTIONS` (see `setup-nav.contributions.ts`), registered
+ *   alongside this app.
+ * - Items owned by a capability plugin are contributed by that plugin — e.g.
+ *   `@objectstack/plugin-webhooks` fills `group_integrations` with its
+ *   `sys_webhook` / `sys_webhook_delivery` entries (ADR-0029 K2.a).
+ *
+ * The runtime merges all contributions into this app's `navigation` tree by
+ * group id + priority on read, so the rendered Setup nav is identical to the
+ * former static artifact — just assembled from its owners. A disabled
+ * capability contributes nothing and its slot stays empty.
  *
  * Menu shape: flat `navigation[]` with `type: 'group'` category nodes,
- * matching the convention used by the HotCRM reference app at
- * https://github.com/objectstack-ai/hotcrm (see `src/apps/crm.app.ts`).
- * The legacy `areas[]` shape was abandoned because it rendered poorly
- * compared to the category style ObjectUI is built around.
+ * matching the convention used by the HotCRM reference app.
  */
 
 import type { App } from '@objectstack/spec/ui';
@@ -43,176 +45,68 @@ export const SETUP_APP: App = {
     primaryColor: '#475569', // Slate-600 — neutral admin palette
   },
   requiredPermissions: ['setup.access'],
+  // Shell only — the stable group anchors. Children are supplied by
+  // `navigationContributions` from the packages that own the objects.
   navigation: [
     {
       id: 'group_overview',
       type: 'group',
       label: 'Overview',
       icon: 'layout-dashboard',
-      // Platform-wide metrics — aggregate counts across ALL tenants
-      // and are mislabeled for an org admin (RLS would filter to a
-      // single org but the dashboard still reads "Total Users" etc.).
-      // Hidden until a tenant-scoped `organization_overview` ships.
       requiredPermissions: ['manage_platform_settings'],
-      children: [
-        { id: 'nav_system_overview', type: 'dashboard', label: 'System Overview', dashboardName: 'system_overview', icon: 'activity' },
-      ],
+      children: [],
     },
     {
-      // App Marketplace — browse + install packages. The browse page is
-      // always available: single-environment runtimes use the
-      // `MarketplaceProxy` plugin to browse the remote catalog;
-      // control-plane (cloud) deployments add `sys_package_installation`
-      // to track per-env installs. The "Installed Apps" entry is gated
-      // on that object so it only appears when the catalog backend
-      // exposes installations (i.e. control-plane / multi-tenant).
       id: 'group_apps',
       type: 'group',
       label: 'Apps',
       icon: 'package',
-      children: [
-        {
-          id: 'nav_marketplace_browse',
-          type: 'url',
-          label: 'Browse Marketplace',
-          url: '/apps/setup/system/marketplace',
-          icon: 'store',
-        },
-        {
-          id: 'nav_marketplace_installed',
-          type: 'url',
-          label: 'Installed Apps',
-          url: '/apps/setup/system/marketplace/installed',
-          icon: 'package-check',
-          requiresObject: 'sys_package_installation',
-        },
-      ],
+      children: [],
     },
     {
       id: 'group_people_org',
       type: 'group',
       label: 'People & Organization',
       icon: 'users',
-      children: [
-        // HR-shaped grouping: who exists, where they sit in the org chart,
-        // and which tenants/teams they belong to. `sys_department` is the
-        // platform-owned org skeleton (M10.17.1); `sys_team` is better-auth's
-        // flat collaboration grouping.
-        //
-        // M10.30b: removed top-level Department Members / Team Members /
-        // Org Members entries — they are M:N join tables and the natural
-        // entry point is the parent record's detail page.
-        { id: 'nav_users', type: 'object', label: 'Users', objectName: 'sys_user', icon: 'user' },
-        { id: 'nav_departments', type: 'object', label: 'Departments', objectName: 'sys_department', icon: 'building', requiresObject: 'sys_department' },
-        { id: 'nav_teams', type: 'object', label: 'Teams', objectName: 'sys_team', icon: 'users-round' },
-        { id: 'nav_organizations', type: 'object', label: 'Organizations', objectName: 'sys_organization', icon: 'building-2' },
-        { id: 'nav_invitations', type: 'object', label: 'Invitations', objectName: 'sys_invitation', icon: 'mail' },
-      ],
+      children: [],
     },
     {
       id: 'group_access_control',
       type: 'group',
       label: 'Access Control',
       icon: 'shield',
-      children: [
-        // M10.30b: removed top-level User Permission Sets / Role Permission
-        // Sets entries — same M:N → parent-detail-tab argument as the
-        // People & Org cleanup.
-        { id: 'nav_roles', type: 'object', label: 'Roles', objectName: 'sys_role', icon: 'shield-check' },
-        { id: 'nav_permission_sets', type: 'object', label: 'Permission Sets', objectName: 'sys_permission_set', icon: 'lock' },
-        // Sharing rules / record shares / API keys are platform-managed
-        // (shared across orgs or operate on the global identity surface).
-        // Org admins see Roles + Permission Sets read-only via RLS but
-        // these advanced entries are hidden behind manage_platform_settings.
-        { id: 'nav_sharing_rules', type: 'object', label: 'Sharing Rules', objectName: 'sys_sharing_rule', icon: 'share-2', requiresObject: 'sys_sharing_rule', requiredPermissions: ['manage_platform_settings'] },
-        { id: 'nav_record_shares', type: 'object', label: 'Record Shares', objectName: 'sys_record_share', icon: 'link', requiresObject: 'sys_record_share', requiredPermissions: ['manage_platform_settings'] },
-        { id: 'nav_api_keys', type: 'object', label: 'API Keys', objectName: 'sys_api_key', icon: 'key', requiredPermissions: ['manage_platform_settings'] },
-      ],
+      children: [],
     },
     {
       id: 'group_approvals',
       type: 'group',
       label: 'Approvals',
       icon: 'check-circle',
-      // Approval processes are configured at the platform level and
-      // reused across tenants. Hidden from org admins.
       requiredPermissions: ['manage_platform_settings'],
-      children: [
-        { id: 'nav_approval_requests', type: 'object', label: 'Requests', objectName: 'sys_approval_request', icon: 'inbox', requiresObject: 'sys_approval_request' },
-        { id: 'nav_approval_actions', type: 'object', label: 'Action History', objectName: 'sys_approval_action', icon: 'history', requiresObject: 'sys_approval_action' },
-      ],
+      children: [],
     },
     {
       id: 'group_configuration',
       type: 'group',
       label: 'Configuration',
       icon: 'sliders-horizontal',
-      children: [
-        // Metadata-driven settings hub. Each entry maps to a SettingsManifest
-        // namespace exposed by @objectstack/service-settings. URL navigation
-        // is used (not `object`) because settings are stored in a generic
-        // K/V table (`sys_setting`) rather than per-namespace objects, and
-        // the renderer is a dedicated <SettingsView> page in objectui.
-        //
-        // Order mirrors `builtinSettingsManifests` so left-nav order matches
-        // the All-Settings index. AI groups chat + embedder under one entry
-        // because operators reason about them together; Knowledge is its
-        // own entry because the adapter selection is independent.
-        //
-        // Permission gating: tenant-scoped manifests (branding,
-        // feature_flags) stay on `setup.access` so org admins can
-        // configure their own org. Global manifests (mail, storage,
-        // AI, knowledge) and the "All Settings" index sit behind
-        // `manage_platform_settings` because they affect every tenant.
-        { id: 'nav_settings_hub', type: 'url', label: 'All Settings', url: '/apps/setup/system/settings', icon: 'settings-2', requiredPermissions: ['manage_platform_settings'] },
-        { id: 'nav_settings_branding', type: 'url', label: 'Branding', url: '/apps/setup/system/settings/branding', icon: 'palette' },
-        { id: 'nav_settings_mail', type: 'url', label: 'Email', url: '/apps/setup/system/settings/mail', icon: 'mail', requiredPermissions: ['manage_platform_settings'] },
-        { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'] },
-        { id: 'nav_settings_ai', type: 'url', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles', requiredPermissions: ['manage_platform_settings'] },
-        { id: 'nav_settings_knowledge', type: 'url', label: 'Knowledge', url: '/apps/setup/system/settings/knowledge', icon: 'book-open', requiredPermissions: ['manage_platform_settings'] },
-        { id: 'nav_settings_feature_flags', type: 'url', label: 'Feature Flags', url: '/apps/setup/system/settings/feature_flags', icon: 'flag' },
-      ],
+      children: [],
     },
     {
       id: 'group_diagnostics',
       type: 'group',
       label: 'Diagnostics',
       icon: 'stethoscope',
-      // Sessions / audit logs / notifications expose cross-tenant
-      // telemetry and are platform-only.
       requiredPermissions: ['manage_platform_settings'],
-      children: [
-        // Day-to-day observability surfaces. M10.30b removed `sys_activity`
-        // and `sys_comment` — both are CRM operational data authored from
-        // record pages, not platform admin surfaces.
-        { id: 'nav_sessions', type: 'object', label: 'Sessions', objectName: 'sys_session', icon: 'monitor' },
-        { id: 'nav_audit_logs', type: 'object', label: 'Audit Logs', objectName: 'sys_audit_log', icon: 'scroll-text' },
-        { id: 'nav_notifications', type: 'object', label: 'Notifications', objectName: 'sys_notification', icon: 'bell', requiresObject: 'sys_notification' },
-      ],
+      children: [],
     },
     {
       id: 'group_integrations',
       type: 'group',
       label: 'Integrations',
       icon: 'plug',
-      // Webhook configuration and delivery telemetry are platform-only.
       requiredPermissions: ['manage_platform_settings'],
-      children: [
-        // Outbound HTTP integrations. `sys_webhook` always ships with
-        // platform-objects, so the Webhooks entry is always visible.
-        // `sys_webhook_delivery` is the durable outbox row from
-        // `@objectstack/plugin-webhooks/schema` — gated on `requiresObject`
-        // so the Deliveries entry only renders when the plugin has been
-        // wired into `defineStack({ objects: [SysWebhookDelivery, ...] })`.
-        //
-        // This is the canonical demonstration of "everything is an object":
-        // managing webhooks (configuration) and inspecting deliveries
-        // (operational telemetry) reuses the same generic ObjectView /
-        // ObjectListView UI as any business object — no bespoke webhook
-        // admin page.
-        { id: 'nav_webhooks', type: 'object', label: 'Webhooks', objectName: 'sys_webhook', icon: 'webhook', requiresObject: 'sys_webhook' },
-        { id: 'nav_webhook_deliveries', type: 'object', label: 'Webhook Deliveries', objectName: 'sys_webhook_delivery', icon: 'send', requiresObject: 'sys_webhook_delivery' },
-      ],
+      children: [],
     },
     {
       id: 'group_advanced',
@@ -220,37 +114,8 @@ export const SETUP_APP: App = {
       label: 'Advanced',
       icon: 'wrench',
       expanded: false,
-      // OAuth apps / JWKS / verifications / two-factor / device codes /
-      // identity links / user preferences are all platform support
-      // surfaces — hidden from org admins.
       requiredPermissions: ['manage_platform_settings'],
-      children: [
-        // Better-auth internals — rarely useful for humans, but exposed
-        // so support engineers can inspect token state without dropping
-        // to SQL. The objectui sidebar collapses this group by default;
-        // edits should hit the read-only banner since these are all
-        // `managedBy: 'better-auth'`.
-        //
-        // M10.30b changes:
-        //  - Removed the 3 OAuth satellite menus (access tokens / refresh
-        //    tokens / consents). They live under their parent OAuth App.
-        //  - Renamed "Linked Accounts" → "Identity Links" to distinguish
-        //    from sys_user / org members.
-        //  - Demoted "All Metadata" from the (now-deleted) Platform group
-        //    to this Advanced/debug bucket.
-        //  - The raw `sys_app` / `sys_package` / `sys_package_installation`
-        //    object-list menus stay removed (they are control-plane admin
-        //    surfaces and live in `cloud-control.app.ts`). End-user
-        //    marketplace access lives in the top-level `Apps` group above,
-        //    pointing at the React browse/installed pages.
-        { id: 'nav_oauth_apps', type: 'object', label: 'OAuth Applications', objectName: 'sys_oauth_application', icon: 'app-window' },
-        { id: 'nav_jwks', type: 'object', label: 'Signing Keys (JWKS)', objectName: 'sys_jwks', icon: 'key-round' },
-        { id: 'nav_verifications', type: 'object', label: 'Verifications', objectName: 'sys_verification', icon: 'mail-check' },
-        { id: 'nav_two_factor', type: 'object', label: 'Two-Factor', objectName: 'sys_two_factor', icon: 'smartphone' },
-        { id: 'nav_device_codes', type: 'object', label: 'Device Codes', objectName: 'sys_device_code', icon: 'qr-code' },
-        { id: 'nav_accounts', type: 'object', label: 'Identity Links', objectName: 'sys_account', icon: 'link-2' },
-        { id: 'nav_user_preferences', type: 'object', label: 'User Preferences', objectName: 'sys_user_preference', icon: 'sliders' },
-      ],
+      children: [],
     },
   ],
 };
