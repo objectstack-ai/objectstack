@@ -3,7 +3,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-    entry: ['src/index.ts', 'src/sql-outbox.ts', 'src/schema.ts'],
+    entry: ['src/index.ts', 'src/schema.ts'],
     splitting: true,
     sourcemap: true,
     clean: true,

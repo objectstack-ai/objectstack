@@ -3,23 +3,21 @@
 /**
  * @objectstack/plugin-webhooks
  *
- * Persistent, cluster-aware webhook outbox + dispatcher.
+ * Webhook fan-out on top of the shared outbound-HTTP delivery substrate
+ * (ADR-0018 M3). The durable outbox, cluster-coordinated dispatcher, retry /
+ * backoff / dead-letter, and retention all live in
+ * `@objectstack/service-messaging` (`sys_http_delivery` + `HttpDispatcher`).
  *
- * Implements stages 3–5 of the pipeline in
- * `content/docs/concepts/webhook-delivery.mdx` (Persist · Dispatch ·
- * Retry). Stages 1–2 (Event capture · Match) integrate via the
- * `webhook.outbox.enqueue()` service consumers call after persistence.
+ * This package ships only the webhook-specific concerns:
+ *   - the `sys_webhook` configuration object,
+ *   - the {@link AutoEnqueuer} that turns `data.record.*` events into outbox
+ *     rows (`source: 'webhook'`),
+ *   - the redeliver admin endpoint.
  *
- * The first real cross-node consumer of `cluster.lock`.
+ * **Requires** `MessagingServicePlugin` (a foundational, always-on capability).
  *
  * ## Subpath exports
- * - `@objectstack/plugin-webhooks/sql` — `SqlWebhookOutbox` (production
- *   storage; durable rows via ObjectQL / any driver)
- * - `@objectstack/plugin-webhooks/schema` — `SysWebhookDelivery` object
- *   schema to register in `defineStack({ objects: [...] })`
- *
- * The main entry intentionally ships only the `MemoryWebhookOutbox` so
- * downstream bundles don't pay for the SQL impl unless they import it.
+ * - `@objectstack/plugin-webhooks/schema` — `SysWebhook` object schema.
  */
 
 export {
@@ -27,30 +25,5 @@ export {
     type WebhookOutboxPluginOptions,
 } from './webhook-outbox-plugin.js';
 
-export { WebhookDispatcher, type DispatcherOptions } from './dispatcher.js';
-export { MemoryWebhookOutbox } from './memory-outbox.js';
-export { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
-export {
-    DeliveryRetentionSweeper,
-    type DeliveryRetentionOptions,
-} from './retention.js';
-export { hashPartition } from './partition.js';
-export {
-    sendOnce,
-    classifyAttempt,
-    nextRetryDelayMs,
-    DEFAULT_TIMEOUT_MS,
-    type AttemptOutcome,
-    type FetchImpl,
-} from './http-sender.js';
-export type {
-    AckFailure,
-    AckResult,
-    AckSuccess,
-    ClaimOptions,
-    DeliveryStatus,
-    EnqueueInput,
-    IWebhookOutbox,
-    WebhookDelivery,
-} from './outbox.js';
-export { RedeliverError } from './outbox.js';
+export { AutoEnqueuer, type AutoEnqueuerOptions, type HttpEnqueueFn } from './auto-enqueuer.js';
+export { SysWebhook } from './sys-webhook.object.js';

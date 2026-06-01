@@ -9,7 +9,7 @@ import type {
 import { RecipientResolver } from './recipient-resolver.js';
 import { PreferenceResolver, type PreferenceTarget } from './preference-resolver.js';
 import type { INotificationOutbox } from './outbox.js';
-import type { EnqueueHttpInput, IHttpOutbox } from './http-outbox.js';
+import type { EnqueueHttpInput, HttpDelivery, HttpDeliveryStatus, IHttpOutbox } from './http-outbox.js';
 
 /** The L2 event object every `emit()` writes one row to (ADR-0030). */
 export const NOTIFICATION_EVENT_OBJECT = 'sys_notification';
@@ -179,6 +179,25 @@ export class MessagingService {
             throw new Error('messaging: HTTP delivery outbox not configured (no data engine / reliableDelivery off)');
         }
         return this.httpOutbox.enqueue(input);
+    }
+
+    /**
+     * Reset a terminal HTTP delivery row back to `pending` so the dispatcher
+     * re-sends it (ADR-0018 M3). Backs the webhook redeliver admin endpoint.
+     * Throws if no HTTP outbox is wired, or `HttpRedeliverError` for a missing /
+     * non-terminal row.
+     */
+    async redeliverHttp(id: string): Promise<HttpDelivery> {
+        if (!this.httpOutbox) {
+            throw new Error('messaging: HTTP delivery outbox not configured');
+        }
+        return this.httpOutbox.redeliver(id);
+    }
+
+    /** List HTTP delivery rows (admin/tests). Empty when no outbox is wired. */
+    async listHttp(filter?: { status?: HttpDeliveryStatus; source?: string }): Promise<HttpDelivery[]> {
+        if (!this.httpOutbox) return [];
+        return this.httpOutbox.list(filter);
     }
 
     /** Register a channel implementation. A duplicate id warns and replaces. */

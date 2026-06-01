@@ -3,18 +3,17 @@
 /**
  * AutoEnqueuer end-to-end test.
  *
- * Verifies that the bridge between `IRealtimeService` (data events) and
- * `IWebhookOutbox` (delivery rows) works as documented:
+ * Verifies the bridge between `IRealtimeService` (data events) and the shared
+ * `service-messaging` HTTP outbox (ADR-0018 M3 — enqueue via `messaging.enqueueHttp`):
  *
  *   - On startup, subscription rules are loaded from the engine.
  *   - `data.record.created/updated/deleted` events fan out to matching
- *     `sys_webhook` rows.
+ *     `sys_webhook` rows, enqueued as `source: 'webhook'`.
  *   - The `triggers` CSV column filters which actions fire.
  *   - The `object_name` field scopes events to a specific object.
  *   - Edits to `sys_webhook` self-heal the cache without restart.
  *   - Enqueue is fire-and-forget (handler never throws or blocks).
- *   - The deterministic eventId means two replays of the same event
- *     produce one outbox row (dedup via the underlying outbox).
+ *   - The deterministic dedupKey (`<webhookId>:<eventId>`) collapses replays.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -24,12 +23,30 @@ import type {
     RealtimeEventHandler,
     RealtimeEventPayload,
 } from '@objectstack/spec/contracts';
-import { AutoEnqueuer } from './auto-enqueuer.js';
-import { MemoryWebhookOutbox } from './memory-outbox.js';
+import type { EnqueueHttpInput } from '@objectstack/service-messaging';
+import { AutoEnqueuer, type HttpEnqueueFn } from './auto-enqueuer.js';
 
 // ---------------------------------------------------------------------------
 // Fakes
 // ---------------------------------------------------------------------------
+
+/**
+ * Records `enqueueHttp` calls and dedups on `(source, dedupKey)` — mirroring the
+ * shared outbox's UNIQUE constraint so the replay test still holds.
+ */
+function makeRecorder() {
+    const calls: EnqueueHttpInput[] = [];
+    const seen = new Map<string, string>();
+    const enqueue: HttpEnqueueFn = async (input) => {
+        const key = `${input.source}::${input.dedupKey}`;
+        const existing = seen.get(key);
+        if (existing) return existing;
+        seen.set(key, key);
+        calls.push(input);
+        return key;
+    };
+    return { enqueue, calls };
+}
 
 class FakeRealtime implements IRealtimeService {
     private subs = new Map<string, { handler: RealtimeEventHandler; opts?: any }>();
@@ -42,7 +59,7 @@ class FakeRealtime implements IRealtimeService {
             await sub.handler(event);
         }
     }
-    async subscribe(channel: string, handler: any, opts?: any): Promise<string> {
+    async subscribe(_channel: string, handler: any, opts?: any): Promise<string> {
         const id = `s-${++this.n}`;
         this.subs.set(id, { handler, opts });
         return id;
@@ -62,9 +79,7 @@ class FakeEngine implements IDataEngine {
     async find(name: string, q?: any): Promise<any[]> {
         const all = this.rows[name] ?? [];
         if (!q?.where) return all;
-        return all.filter((r) =>
-            Object.entries(q.where).every(([k, v]) => r[k] === v),
-        );
+        return all.filter((r) => Object.entries(q.where).every(([k, v]) => r[k] === v));
     }
     async findOne(name: string, q?: any): Promise<any> {
         return (await this.find(name, q))[0] ?? null;
@@ -77,10 +92,7 @@ class FakeEngine implements IDataEngine {
     async update(name: string, data: any, opts?: any): Promise<any> {
         const arr = this.rows[name] ?? [];
         for (const r of arr) {
-            if (
-                opts?.where &&
-                Object.entries(opts.where).every(([k, v]) => r[k] === v)
-            ) {
+            if (opts?.where && Object.entries(opts.where).every(([k, v]) => r[k] === v)) {
                 Object.assign(r, data);
             }
         }
@@ -90,11 +102,7 @@ class FakeEngine implements IDataEngine {
         const arr = this.rows[name] ?? [];
         const before = arr.length;
         this.rows[name] = arr.filter(
-            (r) =>
-                !(
-                    opts?.where &&
-                    Object.entries(opts.where).every(([k, v]) => r[k] === v)
-                ),
+            (r) => !(opts?.where && Object.entries(opts.where).every(([k, v]) => r[k] === v)),
         );
         return { affected: before - this.rows[name].length };
     }
@@ -139,7 +147,6 @@ function event(
 }
 
 async function flush() {
-    // Let microtasks run — fire-and-forget enqueues return on next tick.
     await new Promise((r) => setTimeout(r, 0));
 }
 
@@ -151,48 +158,41 @@ describe('AutoEnqueuer', () => {
     it('enqueues a delivery when a matching data event fires', async () => {
         const engine = new FakeEngine({ sys_webhook: [webhook()] });
         const realtime = new FakeRealtime();
-        const outbox = new MemoryWebhookOutbox();
-        const ae = new AutoEnqueuer(engine, realtime, outbox, {
-            refreshIntervalMs: 0,
-        });
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
         await realtime.publish(event('created', 'contact', { id: 'c-1', name: 'Alice' }));
         await flush();
 
-        const rows = await outbox.list();
-        expect(rows).toHaveLength(1);
-        expect(rows[0].url).toBe('https://hooks.example/wh');
-        expect(rows[0].eventType).toBe('data.record.created');
-        expect((rows[0].payload as any).recordId).toBe('c-1');
+        expect(calls).toHaveLength(1);
+        expect(calls[0].source).toBe('webhook');
+        expect(calls[0].refId).toBe('wh-1');
+        expect(calls[0].url).toBe('https://hooks.example/wh');
+        expect(calls[0].label).toBe('data.record.created');
+        expect((calls[0].payload as any).recordId).toBe('c-1');
         await ae.stop();
     });
 
     it('skips events for other objects', async () => {
         const engine = new FakeEngine({ sys_webhook: [webhook({ object_name: 'contact' })] });
         const realtime = new FakeRealtime();
-        const outbox = new MemoryWebhookOutbox();
-        const ae = new AutoEnqueuer(engine, realtime, outbox, {
-            refreshIntervalMs: 0,
-        });
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
         await realtime.publish(event('created', 'lead', { id: 'l-1' }));
         await flush();
 
-        expect(await outbox.list()).toHaveLength(0);
+        expect(calls).toHaveLength(0);
         await ae.stop();
     });
 
     it('respects the triggers CSV (create-only webhook ignores updates)', async () => {
-        const engine = new FakeEngine({
-            sys_webhook: [webhook({ triggers: 'create' })],
-        });
+        const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: 'create' })] });
         const realtime = new FakeRealtime();
-        const outbox = new MemoryWebhookOutbox();
-        const ae = new AutoEnqueuer(engine, realtime, outbox, {
-            refreshIntervalMs: 0,
-        });
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
         await realtime.publish(event('created', 'contact', { id: 'c-1' }));
@@ -200,9 +200,8 @@ describe('AutoEnqueuer', () => {
         await realtime.publish(event('deleted', 'contact', { id: 'c-1' }, '2026-05-24T00:00:02.000Z'));
         await flush();
 
-        const rows = await outbox.list();
-        expect(rows).toHaveLength(1);
-        expect(rows[0].eventType).toBe('data.record.created');
+        expect(calls).toHaveLength(1);
+        expect(calls[0].label).toBe('data.record.created');
         await ae.stop();
     });
 
@@ -214,18 +213,15 @@ describe('AutoEnqueuer', () => {
             ],
         });
         const realtime = new FakeRealtime();
-        const outbox = new MemoryWebhookOutbox();
-        const ae = new AutoEnqueuer(engine, realtime, outbox, {
-            refreshIntervalMs: 0,
-        });
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
         await realtime.publish(event('created', 'contact', { id: 'c-1' }));
         await flush();
 
-        const rows = await outbox.list();
-        expect(rows).toHaveLength(2);
-        expect(rows.map((r) => r.url).sort()).toEqual([
+        expect(calls).toHaveLength(2);
+        expect(calls.map((r) => r.url).sort()).toEqual([
             'https://amplitude.test',
             'https://slack.test',
         ]);
@@ -233,58 +229,44 @@ describe('AutoEnqueuer', () => {
     });
 
     it('skips inactive webhooks', async () => {
-        const engine = new FakeEngine({
-            sys_webhook: [webhook({ active: false })],
-        });
+        const engine = new FakeEngine({ sys_webhook: [webhook({ active: false })] });
         const realtime = new FakeRealtime();
-        const outbox = new MemoryWebhookOutbox();
-        const ae = new AutoEnqueuer(engine, realtime, outbox, {
-            refreshIntervalMs: 0,
-        });
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
         await realtime.publish(event('created', 'contact', { id: 'c-1' }));
         await flush();
 
-        expect(await outbox.list()).toHaveLength(0);
+        expect(calls).toHaveLength(0);
         await ae.stop();
     });
 
     it('skips manual-only webhooks (no triggers)', async () => {
-        const engine = new FakeEngine({
-            sys_webhook: [webhook({ triggers: '' })],
-        });
+        const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: '' })] });
         const realtime = new FakeRealtime();
-        const outbox = new MemoryWebhookOutbox();
-        const ae = new AutoEnqueuer(engine, realtime, outbox, {
-            refreshIntervalMs: 0,
-        });
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
         await realtime.publish(event('created', 'contact', { id: 'c-1' }));
         await flush();
 
-        expect(await outbox.list()).toHaveLength(0);
+        expect(calls).toHaveLength(0);
         await ae.stop();
     });
 
     it('self-heals the cache when sys_webhook changes', async () => {
-        // Start with no webhooks; add one via the engine; the next event
-        // should be enqueued without an explicit refresh() call.
         const engine = new FakeEngine({ sys_webhook: [] });
         const realtime = new FakeRealtime();
-        const outbox = new MemoryWebhookOutbox();
-        const ae = new AutoEnqueuer(engine, realtime, outbox, {
-            refreshIntervalMs: 0,
-        });
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
         await realtime.publish(event('created', 'contact', { id: 'c-1' }));
         await flush();
-        expect(await outbox.list()).toHaveLength(0);
+        expect(calls).toHaveLength(0);
 
-        // Admin adds a webhook through the API and the engine publishes
-        // a data.record.created event for sys_webhook itself.
         await engine.insert('sys_webhook', webhook());
         await realtime.publish({
             type: 'data.record.created',
@@ -295,56 +277,45 @@ describe('AutoEnqueuer', () => {
         await flush();
         await flush(); // Two ticks: the self-heal handler itself awaits refresh
 
-        await realtime.publish(
-            event('created', 'contact', { id: 'c-2' }, '2026-05-24T00:01:01.000Z'),
-        );
+        await realtime.publish(event('created', 'contact', { id: 'c-2' }, '2026-05-24T00:01:01.000Z'));
         await flush();
 
-        const rows = await outbox.list();
-        expect(rows).toHaveLength(1);
-        expect((rows[0].payload as any).recordId).toBe('c-2');
+        expect(calls).toHaveLength(1);
+        expect((calls[0].payload as any).recordId).toBe('c-2');
         await ae.stop();
     });
 
-    it('uses deterministic eventId so dedup catches replays', async () => {
+    it('uses a deterministic dedupKey so replays collapse', async () => {
         const engine = new FakeEngine({ sys_webhook: [webhook()] });
         const realtime = new FakeRealtime();
-        const outbox = new MemoryWebhookOutbox();
-        const ae = new AutoEnqueuer(engine, realtime, outbox, {
-            refreshIntervalMs: 0,
-        });
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
-        // Publish identical event twice — outbox dedup must collapse.
         const evt = event('created', 'contact', { id: 'c-1' });
         await realtime.publish(evt);
         await realtime.publish(evt);
         await flush();
 
-        expect(await outbox.list()).toHaveLength(1);
+        expect(calls).toHaveLength(1);
         await ae.stop();
     });
 
     it('handler is fire-and-forget (publish does not block on enqueue)', async () => {
         const engine = new FakeEngine({ sys_webhook: [webhook()] });
         const realtime = new FakeRealtime();
-        const outbox = new MemoryWebhookOutbox();
         let slowResolve!: () => void;
         const blocker = new Promise<void>((res) => {
             slowResolve = res;
         });
+        const calls: EnqueueHttpInput[] = [];
+        const enqueue: HttpEnqueueFn = async (input) => {
+            await blocker;
+            calls.push(input);
+            return 'id';
+        };
 
-        // Wrap outbox to make enqueue slow.
-        const slow: typeof outbox = Object.assign(outbox, {
-            enqueue: async (...args: Parameters<typeof outbox.enqueue>) => {
-                await blocker;
-                return MemoryWebhookOutbox.prototype.enqueue.apply(outbox, args);
-            },
-        });
-
-        const ae = new AutoEnqueuer(engine, realtime, slow, {
-            refreshIntervalMs: 0,
-        });
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
         const before = Date.now();
@@ -354,7 +325,7 @@ describe('AutoEnqueuer', () => {
 
         slowResolve();
         await flush();
-        expect(await outbox.list()).toHaveLength(1);
+        expect(calls).toHaveLength(1);
         await ae.stop();
     });
 
@@ -366,25 +337,21 @@ describe('AutoEnqueuer', () => {
             ],
         });
         const realtime = new FakeRealtime();
-        const outbox = new MemoryWebhookOutbox();
-        const orig = outbox.enqueue.bind(outbox);
-        outbox.enqueue = vi.fn(async (input) => {
-            if (input.webhookId === 'wh-bad') throw new Error('boom');
-            return orig(input);
+        const calls: EnqueueHttpInput[] = [];
+        const enqueue: HttpEnqueueFn = vi.fn(async (input) => {
+            if (input.refId === 'wh-bad') throw new Error('boom');
+            calls.push(input);
+            return 'id';
         });
         const warn = vi.fn();
-        const ae = new AutoEnqueuer(engine, realtime, outbox, {
-            refreshIntervalMs: 0,
-            logger: { warn },
-        });
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
         await ae.start();
 
         await realtime.publish(event('created', 'contact', { id: 'c-1' }));
         await flush();
 
-        const rows = await outbox.list();
-        expect(rows).toHaveLength(1);
-        expect(rows[0].url).toBe('https://good.test');
+        expect(calls).toHaveLength(1);
+        expect(calls[0].url).toBe('https://good.test');
         expect(warn).toHaveBeenCalled();
         await ae.stop();
     });

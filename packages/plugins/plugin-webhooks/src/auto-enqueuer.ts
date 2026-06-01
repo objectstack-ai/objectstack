@@ -1,7 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IDataEngine, IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
-import type { IWebhookOutbox } from './outbox.js';
+import type { EnqueueHttpInput } from '@objectstack/service-messaging';
+
+/**
+ * Enqueue callback into the shared `service-messaging` HTTP outbox (ADR-0018 M3).
+ * The plugin supplies one bound to `messaging.enqueueHttp(...)`; webhooks no
+ * longer own a delivery outbox/dispatcher — they share the generic substrate.
+ */
+export type HttpEnqueueFn = (input: EnqueueHttpInput) => Promise<string>;
 
 /**
  * Optional logger interface (subset of console / kernel logger).
@@ -98,7 +105,7 @@ export class AutoEnqueuer {
     constructor(
         private readonly engine: IDataEngine,
         private readonly realtime: IRealtimeService,
-        private readonly outbox: IWebhookOutbox,
+        private readonly enqueue: HttpEnqueueFn,
         opts: AutoEnqueuerOptions = {},
     ) {
         this.subscriptionsObject = opts.subscriptionsObject ?? 'sys_webhook';
@@ -274,32 +281,36 @@ export class AutoEnqueuer {
         for (const sub of subs) {
             if (!sub.triggers.has(trigger)) continue;
 
-            // Fire-and-forget — never await on the hot path.
-            void this.outbox
-                .enqueue({
-                    webhookId: sub.id,
+            // Fire-and-forget — never await on the hot path. Map the webhook
+            // delivery onto the generic HTTP-outbox shape (ADR-0018 M3):
+            //  - source 'webhook' + dedupKey '<webhookId>:<eventId>' preserves
+            //    the old (event_id, webhook_id) at-most-once enqueue;
+            //  - refId = webhookId keeps per-webhook partition affinity / ordering;
+            //  - label = event type → X-Objectstack-Event header.
+            void this.enqueue({
+                source: 'webhook',
+                refId: sub.id,
+                dedupKey: `${sub.id}:${eventId}`,
+                label: event.type,
+                url: sub.url,
+                method: sub.method,
+                headers: sub.headers,
+                signingSecret: sub.secret,
+                timeoutMs: sub.timeoutMs,
+                payload: {
+                    object: event.object,
+                    recordId,
+                    action,
+                    timestamp: event.timestamp,
+                    ...payload,
+                },
+            }).catch((err) =>
+                this.logger.warn?.('[webhook-auto-enqueuer] enqueue failed', {
+                    webhook: sub.name,
                     eventId,
-                    eventType: event.type,
-                    url: sub.url,
-                    method: sub.method,
-                    headers: sub.headers,
-                    secret: sub.secret,
-                    timeoutMs: sub.timeoutMs,
-                    payload: {
-                        object: event.object,
-                        recordId,
-                        action,
-                        timestamp: event.timestamp,
-                        ...payload,
-                    },
-                })
-                .catch((err) =>
-                    this.logger.warn?.('[webhook-auto-enqueuer] enqueue failed', {
-                        webhook: sub.name,
-                        eventId,
-                        err: (err as Error)?.message ?? err,
-                    }),
-                );
+                    err: (err as Error)?.message ?? err,
+                }),
+            );
         }
     }
 

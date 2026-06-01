@@ -12,11 +12,6 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
-    "./sql": {
-      "types": "./dist/sql-outbox.d.ts",
-      "import": "./dist/sql-outbox.js",
-      "require": "./dist/sql-outbox.cjs"
-    },
     "./schema": {
       "types": "./dist/schema.d.ts",
       "import": "./dist/schema.js",
@@ -29,10 +24,8 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
-    "@objectstack/platform-objects": "workspace:*",
-    "@objectstack/service-cluster": "workspace:*",
-    "@objectstack/spec": "workspace:*",
-    "@objectstack/types": "workspace:*"
+    "@objectstack/service-messaging": "workspace:*",
+    "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

@@ -1550,18 +1550,12 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
-      '@objectstack/platform-objects':
+      '@objectstack/service-messaging':
         specifier: workspace:*
-        version: link:../../platform-objects
-      '@objectstack/service-cluster':
-        specifier: workspace:*
-        version: link:../../services/service-cluster
+        version: link:../../services/service-messaging
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
-      '@objectstack/types':
-        specifier: workspace:*
-        version: link:../../types
     devDependencies:
       '@types/node':
         specifier: ^25.9.1
