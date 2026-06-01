@@ -13,6 +13,7 @@ import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
+import { createHash } from 'node:crypto';
 
 /**
  * Default ID length for auto-generated IDs.
@@ -134,7 +135,9 @@ export class SqlDriver implements IDataDriver {
       schemaSync: true,
       batchSchemaSync: false,
       migrations: false,
-      indexes: false,
+      // Object-level declared `indexes` (incl. multi-column UNIQUE) are
+      // materialized during `initObjects` — see `syncDeclaredIndexes`.
+      indexes: true,
 
       // Performance & Optimization
       connectionPooling: true,
@@ -1127,6 +1130,128 @@ export class SqlDriver implements IDataDriver {
             }
           }
         });
+      }
+
+      // Materialize object-level declared indexes (`indexes: [{ fields,
+      // unique }]`). These are distinct from field-level `unique` (handled
+      // in `createColumn`) and carry the multi-column UNIQUE guarantees that
+      // dedup/convergence paths rely on (ADR-0030). Done after the table is
+      // created/altered so every referenced column physically exists.
+      const declaredIndexes = (obj as any).indexes;
+      if (Array.isArray(declaredIndexes) && declaredIndexes.length > 0) {
+        const colInfo = await this.knex(tableName).columnInfo();
+        const physicalColumns = new Set(Object.keys(colInfo));
+        await this.syncDeclaredIndexes(tableName, declaredIndexes, physicalColumns);
+      }
+    }
+  }
+
+  /**
+   * Build a deterministic index name for a declared index so repeated
+   * `initObjects` runs converge on the same identifier (and can detect an
+   * already-materialized index by name). Long names are hash-suffixed to
+   * stay within the 63/64-char identifier limits of Postgres/MySQL.
+   */
+  protected buildIndexName(tableName: string, fields: string[], unique: boolean): string {
+    const prefix = unique ? 'uniq' : 'idx';
+    const base = `${prefix}_${tableName}_${fields.join('_')}`;
+    const MAX = 60;
+    if (base.length <= MAX) return base;
+    const hash = createHash('sha1').update(base).digest('hex').slice(0, 8);
+    return `${`${prefix}_${tableName}`.slice(0, MAX - 9)}_${hash}`;
+  }
+
+  /**
+   * Read the names of indexes that already exist on a table, per dialect.
+   * Used to make declared-index sync idempotent across repeated runs.
+   * Failures are swallowed — at worst we attempt a create and absorb the
+   * "already exists" error in `syncDeclaredIndexes`.
+   */
+  protected async getExistingIndexNames(tableName: string): Promise<Set<string>> {
+    const names = new Set<string>();
+    try {
+      if (this.isSqlite) {
+        const safe = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+        const rows: any = await this.knex.raw(`PRAGMA index_list(${safe})`);
+        for (const r of rows) names.add(r.name);
+      } else if (this.isPostgres) {
+        const res: any = await this.knex.raw(
+          `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = ?`,
+          [tableName],
+        );
+        for (const r of res.rows) names.add(r.indexname);
+      } else if (this.isMysql) {
+        const res: any = await this.knex.raw(
+          `SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+          [tableName],
+        );
+        for (const r of res[0]) names.add(r.INDEX_NAME);
+      }
+    } catch {
+      // Best-effort — fall through and let creation handle conflicts.
+    }
+    return names;
+  }
+
+  /**
+   * Materialize declared object-level indexes.
+   *
+   * - Multi-column and single-column indexes are both supported.
+   * - `unique: true` emits a UNIQUE index. NULL-distinct semantics are the
+   *   default across SQLite/Postgres/MySQL, so multiple NULL rows remain
+   *   allowed while non-NULL duplicates are rejected — matching the
+   *   convergence-on-conflict pattern the messaging pipeline relies on.
+   * - Idempotent: indexes already present (by deterministic name) are
+   *   skipped, and an "already exists" race is absorbed.
+   * - Indexes referencing a column that wasn't materialized (e.g. a virtual
+   *   `formula` field) are skipped with a warning rather than failing sync.
+   */
+  protected async syncDeclaredIndexes(
+    tableName: string,
+    indexes: Array<{ name?: string; fields?: string[]; unique?: boolean }>,
+    physicalColumns: Set<string>,
+  ): Promise<void> {
+    const existing = await this.getExistingIndexNames(tableName);
+
+    for (const idx of indexes) {
+      const fields = Array.isArray(idx?.fields)
+        ? idx.fields.filter((f): f is string => typeof f === 'string' && f.length > 0)
+        : [];
+      if (fields.length === 0) continue;
+
+      const missing = fields.filter((f) => !physicalColumns.has(f));
+      if (missing.length > 0) {
+        this.logger.warn(
+          `[sql-driver] skipping declared index on "${tableName}" — column(s) not materialized: ${missing.join(', ')}`,
+          { tableName, fields },
+        );
+        continue;
+      }
+
+      const unique = idx.unique === true;
+      const name =
+        typeof idx.name === 'string' && idx.name.trim()
+          ? idx.name.trim()
+          : this.buildIndexName(tableName, fields, unique);
+
+      if (existing.has(name)) continue;
+
+      try {
+        await this.knex.schema.alterTable(tableName, (table) => {
+          if (unique) {
+            table.unique(fields, { indexName: name });
+          } else {
+            table.index(fields, name);
+          }
+        });
+        existing.add(name);
+      } catch (e: any) {
+        const msg = String(e?.message ?? e);
+        // A concurrent creator or a pre-existing equivalent index under a
+        // different name can race us here — both are benign for our intent
+        // (the index exists). Anything else is a real failure.
+        if (/already exists|duplicate key name|exists/i.test(msg)) continue;
+        throw e;
       }
     }
   }

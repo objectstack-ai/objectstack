@@ -291,6 +291,148 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     expect(columns).toHaveProperty('display_name');
   });
 
+  it('should materialize a declared single-column unique index and reject duplicates', async () => {
+    const objects = [
+      {
+        name: 'idx_unique_obj',
+        fields: {
+          slug: { type: 'string' },
+        },
+        indexes: [{ fields: ['slug'], unique: true }],
+      },
+    ];
+
+    await driver.initObjects(objects as any);
+
+    // PRAGMA proves a non-PK unique index was actually created.
+    const list: any = await knexInstance.raw('PRAGMA index_list(idx_unique_obj)');
+    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
+    expect(declared.length).toBe(1);
+    expect(declared[0].unique).toBe(1);
+
+    await driver.create('idx_unique_obj', { slug: 's1' });
+    await expect(driver.create('idx_unique_obj', { slug: 's1' })).rejects.toThrow(
+      /UNIQUE constraint failed|duplicate key value/,
+    );
+  });
+
+  it('should materialize a declared multi-column unique index (compound dedup)', async () => {
+    const objects = [
+      {
+        name: 'idx_multi_obj',
+        fields: {
+          notification_id: { type: 'string' },
+          recipient_id: { type: 'string' },
+          channel: { type: 'string' },
+        },
+        indexes: [{ fields: ['notification_id', 'recipient_id', 'channel'], unique: true }],
+      },
+    ];
+
+    await driver.initObjects(objects as any);
+
+    const list: any = await knexInstance.raw('PRAGMA index_list(idx_multi_obj)');
+    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
+    expect(declared.length).toBe(1);
+    expect(declared[0].unique).toBe(1);
+
+    await driver.create('idx_multi_obj', { notification_id: 'n1', recipient_id: 'r1', channel: 'bell' });
+    // Same tuple → rejected.
+    await expect(
+      driver.create('idx_multi_obj', { notification_id: 'n1', recipient_id: 'r1', channel: 'bell' }),
+    ).rejects.toThrow(/UNIQUE constraint failed|duplicate key value/);
+    // Differing channel → allowed.
+    await driver.create('idx_multi_obj', { notification_id: 'n1', recipient_id: 'r1', channel: 'email' });
+    const rows = await driver.find('idx_multi_obj', {});
+    expect(rows.length).toBe(2);
+  });
+
+  it('should allow multiple NULLs under a declared unique index (NULL-distinct)', async () => {
+    const objects = [
+      {
+        name: 'idx_null_obj',
+        fields: {
+          dedup_key: { type: 'string' },
+        },
+        indexes: [{ fields: ['dedup_key'], unique: true }],
+      },
+    ];
+
+    await driver.initObjects(objects as any);
+
+    // Two rows with no dedup_key (NULL) must both be insertable.
+    await driver.create('idx_null_obj', {});
+    await driver.create('idx_null_obj', {});
+    const rows = await driver.find('idx_null_obj', {});
+    expect(rows.length).toBe(2);
+  });
+
+  it('should materialize a declared non-unique index', async () => {
+    const objects = [
+      {
+        name: 'idx_plain_obj',
+        fields: {
+          status: { type: 'string' },
+          partition_key: { type: 'string' },
+        },
+        indexes: [{ fields: ['status', 'partition_key'] }],
+      },
+    ];
+
+    await driver.initObjects(objects as any);
+
+    const list: any = await knexInstance.raw('PRAGMA index_list(idx_plain_obj)');
+    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
+    expect(declared.length).toBe(1);
+    expect(declared[0].unique).toBe(0);
+  });
+
+  it('should be idempotent when initObjects runs repeatedly with declared indexes', async () => {
+    const objects = [
+      {
+        name: 'idx_idem_obj',
+        fields: { slug: { type: 'string' } },
+        indexes: [{ fields: ['slug'], unique: true }],
+      },
+    ];
+
+    await driver.initObjects(objects as any);
+    // Second run must not throw "index already exists".
+    await driver.initObjects(objects as any);
+
+    const list: any = await knexInstance.raw('PRAGMA index_list(idx_idem_obj)');
+    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
+    expect(declared.length).toBe(1);
+  });
+
+  it('should skip a declared index referencing a non-materialized (virtual) column', async () => {
+    const warnings: string[] = [];
+    (driver as any).logger = { warn: (msg: string) => warnings.push(msg) };
+
+    const objects = [
+      {
+        name: 'idx_virtual_obj',
+        fields: {
+          name: { type: 'string' },
+          total: { type: 'formula', expression: 'a + b', data_type: 'number' },
+        },
+        indexes: [{ fields: ['total'], unique: true }],
+      },
+    ];
+
+    // Must not throw even though `total` has no physical column.
+    await driver.initObjects(objects as any);
+
+    const list: any = await knexInstance.raw('PRAGMA index_list(idx_virtual_obj)');
+    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
+    expect(declared.length).toBe(0);
+    expect(warnings.some((w) => w.includes('total'))).toBe(true);
+  });
+
+  it('reports indexes capability as supported', () => {
+    expect((driver as any).supports.indexes).toBe(true);
+  });
+
   it('should use short object name as physical table name in initObjects', async () => {
     const objects = [
       {
