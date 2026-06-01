@@ -101,7 +101,9 @@ Each node performs a specific action in the flow.
 | `end` | Flow termination |
 | `decision` | Conditional branching (if/else) |
 | `assignment` | Set variable values |
-| `loop` | Iterate over a collection |
+| `loop` | Structured iteration **container** — runs a body region once per item (ADR-0031) |
+| `parallel` | Structured **parallel block** — runs N branch regions concurrently, implicit join (ADR-0031) |
+| `try_catch` | Structured **try/catch/retry** error handling (ADR-0031) |
 | `create_record` | Create a new record |
 | `update_record` | Update existing records |
 | `delete_record` | Delete records |
@@ -200,6 +202,99 @@ Each node performs a specific action in the flow.
   },
 }
 ```
+
+## Structured control flow (ADR-0031)
+
+`loop`, `parallel`, and `try_catch` are **structured control-flow constructs** —
+the native, AI-authored model for iteration, concurrency, and error handling.
+Unlike free-form BPMN gateways (kept in the protocol for import/export interop
+only), these constructs are **well-formed by construction**: each owns its body
+as a self-contained, single-entry/single-exit **region** carried in `config`
+(representation **B** — a nested sub-graph). Ordinary step-to-step edges stay
+acyclic — iteration and concurrency are scoped containers, not back-edges — so
+the **DAG invariant is preserved** and termination stays analyzable. Regions are
+validated at `registerFlow()` (single-entry/single-exit, acyclic, bounded loop);
+a malformed construct is rejected before the flow can run.
+
+A region runs in the **enclosing variable scope** (the iterator value and any
+body mutations are visible to the surrounding flow) — it is *not* a separate
+`subflow` invocation. The container node's ordinary out-edges are the
+"after-loop / after-block" continuation.
+
+### Loop container
+
+Runs its `body` region once per item of a collection, binding the current item
+(and optionally its index) as flow variables, under a hard max-iteration guard.
+
+```typescript
+{
+  id: 'notify_each',
+  type: 'loop',
+  label: 'For each task',
+  config: {
+    collection: '{tasks}',        // template/variable resolving to an array
+    iteratorVariable: 'task',     // current item, visible inside the body
+    indexVariable: 'i',           // optional zero-based index
+    maxIterations: 500,           // hard cap (clamped to the engine ceiling)
+    body: {                       // single-entry/single-exit region
+      nodes: [
+        { id: 'send', type: 'script', label: 'Notify', config: { /* … */ } },
+      ],
+      edges: [],
+    },
+  },
+}
+```
+
+A `loop` node with **no `body`** keeps the legacy flat-graph behavior — the
+container is additive.
+
+### Parallel block
+
+Declares N branch regions that run **concurrently** and **join implicitly** when
+all complete — there is no author-visible split/join gateway. Branches should
+write distinct variables (last-writer-wins on collision); a failing branch fails
+the block.
+
+```typescript
+{
+  id: 'fan_out',
+  type: 'parallel',
+  label: 'Notify in parallel',
+  config: {
+    branches: [                   // ≥ 2 regions
+      { name: 'Email', nodes: [{ id: 'email', type: 'script', label: 'Email', config: { /* … */ } }], edges: [] },
+      { name: 'Slack', nodes: [{ id: 'slack', type: 'script', label: 'Slack', config: { /* … */ } }], edges: [] },
+    ],
+  },
+}
+```
+
+### Try / catch / retry
+
+Wraps a protected `try` region; on failure runs the optional `catch` region
+(with the caught error bound to `errorVariable`), optionally retrying the `try`
+region first with exponential backoff. This surfaces the engine's existing
+`fault` + retry semantics as a structured construct (rather than BPMN boundary
+events).
+
+```typescript
+{
+  id: 'guarded',
+  type: 'try_catch',
+  label: 'Charge with fallback',
+  config: {
+    try: { nodes: [{ id: 'charge', type: 'http_request', label: 'Charge', config: { /* … */ } }], edges: [] },
+    catch: { nodes: [{ id: 'flag', type: 'update_record', label: 'Flag failure', config: { /* … */ } }], edges: [] },
+    errorVariable: '$error',
+    retry: { maxRetries: 3, retryDelayMs: 1000, backoffMultiplier: 2 },
+  },
+}
+```
+
+> BPMN `parallel_gateway` / `join_gateway` / `boundary_event` remain in the
+> protocol as the **interop** representation and map onto these constructs on
+> import/export — they are not the native authoring model.
 
 ## Edges
 

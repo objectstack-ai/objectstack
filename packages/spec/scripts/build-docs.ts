@@ -386,6 +386,13 @@ Object.entries(CATEGORIES).forEach(([category, title]) => {
   
   mdx += `<Cards>\n`;
   Array.from(zodFiles).sort().forEach(zodFile => {
+      // Only card zod files that actually produced a reference page. A
+      // `.zod.ts` whose schemas are all unrepresentable in JSON Schema — e.g.
+      // they embed a transform (the ADR-0031 control-flow constructs and the
+      // Flow edge schema carry CEL-expression transforms) — generates no page,
+      // so carding it would be a dangling 404 link. This aligns the index with
+      // `meta.json`, which already lists only generated pages.
+      if (!fs.existsSync(path.join(DOCS_ROOT, category, `${zodFile}.mdx`))) return;
       const fileTitle = zodFile.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
       // Link relative to the category folder (where index.mdx lives)
       mdx += `  <Card href="/docs/references/${category}/${zodFile}" title="${fileTitle}" description="Source: packages/spec/src/${category}/${zodFile}.zod.ts" />\n`;
