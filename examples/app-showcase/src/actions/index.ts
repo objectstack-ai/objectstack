@@ -33,15 +33,20 @@ export const OpenDocsAction: Action = {
   refreshAfter: false,
 };
 
-/** flow — launch a screen flow wizard from the toolbar. */
+/**
+ * flow — launch the Reassign screen-flow wizard. Row-level (`list_item`) so the
+ * row's `recordId` flows into the flow, which collects `new_assignee` via a
+ * `screen` node and writes it back with `update_record`. The objectui
+ * FlowRunner renders the screen and resumes the run.
+ */
 export const BulkReassignAction: Action = {
   name: 'showcase_bulk_reassign',
-  label: 'Bulk Reassign',
+  label: 'Reassign…',
   icon: 'users',
   objectName: task,
   type: 'flow',
   target: 'showcase_reassign_wizard',
-  locations: ['list_toolbar'],
+  locations: ['list_item', 'list_toolbar'],
   refreshAfter: true,
 };
 
