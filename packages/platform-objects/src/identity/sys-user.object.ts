@@ -439,14 +439,8 @@ export const SysUser = ObjectSchema.create({
     mru: true,
   },
 
-  validations: [
-    {
-      name: 'email_unique',
-      type: 'unique',
-      severity: 'error',
-      message: 'Email must be unique',
-      fields: ['email'],
-      caseSensitive: false,
-    },
-  ],
+  // Email uniqueness is enforced by the unique index declared above
+  // (`indexes: [{ fields: ['email'], unique: true }]`). The standalone `unique`
+  // validation rule was removed in #1485 — uniqueness is an index concern, not
+  // an enforceable validation-rule type — so no `validations` block is needed.
 });
