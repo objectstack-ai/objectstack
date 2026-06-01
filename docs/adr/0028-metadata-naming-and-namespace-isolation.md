@@ -3,7 +3,7 @@
 **Status**: Proposed (2026-06-01)
 **Deciders**: ObjectStack Protocol Architects
 **Supersedes**: the hand-written object-namespace-prefix authoring rule documented in `packages/spec/src/kernel/manifest.zod.ts` (the `namespace` field) and enforced by `validateNamespacePrefix()` in `packages/spec/src/stack.zod.ts` — there is no standalone ADR for that rule today.
-**Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source per type, org overlay), [ADR-0008](./0008-metadata-repository-and-change-log.md) (Repository · ChangeLog · Cache · Registry; `MetaRef = org/type/name`), [ADR-0010](./0010-metadata-protection-model.md) (protection model), [ADR-0019](./0019-app-as-consumer-unit.md) (app as the consumer-installable unit), [ADR-0025](./0025-plugin-package-distribution.md) (package distribution)
+**Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source per type, org overlay), [ADR-0008](./0008-metadata-repository-and-change-log.md) (Repository · ChangeLog · Cache · Registry; `MetaRef = org/type/name`), [ADR-0010](./0010-metadata-protection-model.md) (protection model), [ADR-0019](./0019-app-as-consumer-unit.md) (app as the consumer-installable unit), [ADR-0025](./0025-plugin-package-distribution.md) (package distribution), [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) (**prerequisite** — kernel object ownership; D5/D6 below assume the kernel is properly owned per ADR-0029)
 **Consumers**: `@objectstack/spec` (manifest + stack validators), `@objectstack/objectql` (`SchemaRegistry`, `StorageNameMapping`, ownership model), `@objectstack/plugins/driver-sql` (physical table derivation), `@objectstack/rest` + `@objectstack/api` (route + generated-surface naming), `@objectstack/services/service-automation` (connector registry), `@objectstack/services/service-ai` (tool registry), `@objectstack/platform-objects` (kernel object ownership), `@objectstack/cli` (`os validate`)
 
 ---
@@ -165,8 +165,12 @@ isolation boundary between marketplace apps.
 Separate two things the current code conflates: the kernel **contract**
 (namespace, reference surface, stability guarantee) and the kernel
 **code ownership** (which package defines each object). The contract is
-*unified*; ownership is *distributed*. The kernel object set is the platform's
-**public contract** and the sole cross-boundary reference target. It is:
+*unified* (owned by this ADR); ownership is *distributed* (the mechanics —
+re-attribution, decomposition, load-order — are specified by
+**[ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md)**;
+the bullets below summarize only what the naming model relies on). The kernel
+object set is the platform's **public contract** and the sole cross-boundary
+reference target. It is:
 
 - **One reserved namespace** — `sys` — added to `RESERVED_NAMESPACES`. Apps
   reference it via a single well-known import (`sys.user`, `sys.organization`),
@@ -302,16 +306,14 @@ running instance, until the legacy form is finally removed.
   warning. Nothing is blocked.
   *Exit:* run across all templates and produce a collision report that calibrates
   Phase 4 scope.
-- **Phase 2 — Kernel re-attribution & decomposition (first-party, app-invisible).**
-  Move each `sys_*` object's ownership to its capability plugin (`plugin-auth` ←
-  identity, `plugin-audit` ← audit, `service-job` ← jobs, …); designate
-  `sys_user`/`sys_organization`/`sys_metadata` core-mandatory and wire
-  `dependencies` + `loadOrder`; shrink/dissolve `platform-objects`. Add `sys` to
-  `RESERVED_NAMESPACES`; enforce the app-cannot-define-kernel rule (warn→error;
-  apps may still `extend`). Classify the scattered `ai`/`mail`/… objects; delete
-  `nope`. Invariant throughout: single-owner-per-object. Templates only
-  *reference* `sys_*`, so resolution is unchanged.
-  *Exit:* kernel objects resolve identically; identity/audit tests green.
+- **Phase 2 — Kernel ownership (delegated to ADR-0029).** Kernel re-attribution,
+  `platform-objects` decomposition, `sys` reservation, and the
+  app-cannot-define-kernel boundary are owned by **[ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md)**
+  and sequenced **first** (it is template-transparent and independently
+  shippable). ADR-0028 only relies on its outcome — reserved `sys`,
+  single-owner-per-object, apps reference-but-not-define. This phase is a
+  dependency checkpoint, not new work here.
+  *Exit:* ADR-0029 K0–K3 complete (reserved `sys`, kernel objects single-owned).
 - **Phase 3 — New transport surfaces (dual-serve, additive).** Introduce
   `/api/v1/data/{namespace}/{object}` and namespaced generated GraphQL/OData/SDK/
   MCP **alongside** the current shapes; mark the old ones deprecated. Existing
