@@ -5,21 +5,19 @@ import { defineTool } from '@objectstack/spec/ai';
 /**
  * delete_field — AI Tool Metadata
  *
- * Removes a field (column) from an existing data object.
- * This is a destructive operation.
+ * Removes a field (column) from an existing data object. This is a destructive
+ * operation, but ADR-0033 stages it as a draft — the field is only actually
+ * dropped when a human reviews and publishes (which re-runs the destructive
+ * data-loss check). The draft IS the approval gate.
  */
 export const deleteFieldTool = defineTool({
   name: 'delete_field',
   label: 'Delete Field',
   description:
-    'Removes a field (column) from an existing data object. This is a destructive operation. ' +
+    'Removes a field (column) from an existing data object, staged as a draft for human review. This is a destructive operation; it is NOT published until a human publishes the draft. ' +
     'Use this when the user explicitly wants to remove an attribute or column from a table.',
   category: 'data',
   builtIn: true,
-  // NOTE: requiresConfirmation is intentionally false (default) because the
-  // server-side tool-call loop in AIService.chatWithTools/streamChatWithTools
-  // executes tool calls immediately without checking this flag.  The flag
-  // should only be set once server-side approval gating is implemented.
   parameters: {
     type: 'object',
     properties: {

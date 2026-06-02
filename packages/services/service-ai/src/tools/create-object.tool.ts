@@ -7,21 +7,20 @@ import { defineTool } from '@objectstack/spec/ai';
  *
  * Creates a new data object (table) with schema validation.
  * Validates snake_case naming for object and initial fields,
- * checks for duplicates, and registers the object definition.
+ * checks for duplicates, and stages the object as a draft.
+ *
+ * ADR-0033: this never publishes — the object lands in the draft workspace
+ * for a human to review and publish. The draft IS the approval gate, which is
+ * why no `requiresConfirmation` flag is needed (it was never enforced anyway).
  */
 export const createObjectTool = defineTool({
   name: 'create_object',
   label: 'Create Object',
   description:
-    'Creates a new data object (table) with the specified name, label, and optional field definitions. ' +
-    'Use this when the user wants to create a new entity, table, or data model.',
+    'Creates a new data object (table) with the specified name, label, and optional field definitions, staged as a draft for human review. ' +
+    'Use this when the user wants to create a new entity, table, or data model. The change is NOT published.',
   category: 'data',
   builtIn: true,
-  // NOTE: requiresConfirmation is intentionally false (default) because the
-  // server-side tool-call loop in AIService.chatWithTools/streamChatWithTools
-  // executes tool calls immediately without checking this flag.  The flag
-  // should only be set once server-side approval gating is implemented to
-  // avoid giving users a false sense of safety.
   parameters: {
     type: 'object',
     properties: {

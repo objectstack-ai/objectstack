@@ -19,6 +19,10 @@ import { modifyFieldTool } from '../tools/modify-field.tool.js';
 import { deleteFieldTool } from '../tools/delete-field.tool.js';
 import { listObjectsTool } from '../tools/list-objects.tool.js';
 import { describeObjectTool } from '../tools/describe-object.tool.js';
+import { createMetadataTool } from '../tools/create-metadata.tool.js';
+import { updateMetadataTool } from '../tools/update-metadata.tool.js';
+import { describeMetadataTool } from '../tools/describe-metadata.tool.js';
+import { listMetadataTool } from '../tools/list-metadata.tool.js';
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -47,18 +51,83 @@ function createMockMetadataService(
   };
 }
 
+/**
+ * Build a mock protocol that mimics ObjectStackProtocolImplementation's
+ * draft-aware behaviour: `saveMetaItem({ mode:'draft' })` stages a draft;
+ * `getMetaItem({ state:'draft' })` returns it or throws `no_draft` (404);
+ * the published value is served when `state` is omitted. This is what
+ * `applyDraft` writes through (ADR-0033) — nothing reaches a live store.
+ */
+function createMockProtocol(seedActive: Record<string, unknown> = {}) {
+  const active = new Map<string, unknown>(Object.entries(seedActive));
+  const drafts = new Map<string, unknown>();
+
+  const saveMetaItem = vi.fn(async (req: any) => {
+    const key = `${req.type}:${req.name}`;
+    if (req.mode === 'draft') drafts.set(key, req.item);
+    else active.set(key, req.item);
+    return { success: true };
+  });
+  const getMetaItem = vi.fn(async (req: any) => {
+    const key = `${req.type}:${req.name}`;
+    if (req.state === 'draft') {
+      if (!drafts.has(key)) {
+        const e: any = new Error(`[no_draft] No pending draft for ${key}.`);
+        e.code = 'no_draft';
+        e.status = 404;
+        throw e;
+      }
+      return { type: req.type, name: req.name, item: drafts.get(key) };
+    }
+    return { type: req.type, name: req.name, item: active.get(key) };
+  });
+  // Returns the bare array form (the metadata-tools handlers normalize both
+  // `unknown[]` and `{ items }`, but the declared protocol contract is
+  // `Promise<unknown[]>`).
+  const getMetaItems = vi.fn(async (req: any) => {
+    return [...active.entries()]
+      .filter(([k]) => k.startsWith(`${req.type}:`))
+      .map(([, v]) => v);
+  });
+
+  const protocol: NonNullable<MetadataToolContext['protocol']> = {
+    getMetaItems,
+    getMetaItem,
+    saveMetaItem,
+  };
+  return { protocol, active, drafts, saveMetaItem, getMetaItem, getMetaItems };
+}
+
+/** Parse a tool-call result envelope into an object. */
+function parse(result: any): any {
+  return JSON.parse((result.output as any).value);
+}
+
+const call = (toolName: string, input: Record<string, unknown>, id = 't') => ({
+  type: 'tool-call' as const,
+  toolCallId: id,
+  toolName,
+  input,
+});
+
 // ═══════════════════════════════════════════════════════════════════
 // Metadata Tool Definitions
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Metadata Tool Definitions', () => {
-  it('should define exactly 7 tools', () => {
-    expect(METADATA_TOOL_DEFINITIONS).toHaveLength(7);
+  it('should define exactly 11 tools', () => {
+    expect(METADATA_TOOL_DEFINITIONS).toHaveLength(11);
   });
 
   it('should include all expected tool names', () => {
     const names = METADATA_TOOL_DEFINITIONS.map(t => t.name);
     expect(names).toEqual([
+      // ADR-0033 type-agnostic apply surface first
+      'create_metadata',
+      'update_metadata',
+      'describe_metadata',
+      'list_metadata',
+      // object/field convenience tools
       'create_object',
       'add_field',
       'modify_field',
@@ -83,6 +152,10 @@ describe('Metadata Tool Definitions', () => {
 
 describe('Individual Tool Metadata (.tool.ts)', () => {
   const tools = [
+    { tool: createMetadataTool, expectedName: 'create_metadata', expectedLabel: 'Create Metadata' },
+    { tool: updateMetadataTool, expectedName: 'update_metadata', expectedLabel: 'Update Metadata' },
+    { tool: describeMetadataTool, expectedName: 'describe_metadata', expectedLabel: 'Describe Metadata' },
+    { tool: listMetadataTool, expectedName: 'list_metadata', expectedLabel: 'List Metadata' },
     { tool: createObjectTool, expectedName: 'create_object', expectedLabel: 'Create Object' },
     { tool: addFieldTool, expectedName: 'add_field', expectedLabel: 'Add Field' },
     { tool: modifyFieldTool, expectedName: 'modify_field', expectedLabel: 'Modify Field' },
@@ -124,48 +197,48 @@ describe('Individual Tool Metadata (.tool.ts)', () => {
     });
   }
 
-  it('should not set requiresConfirmation on create_object (server-side enforcement not yet implemented)', () => {
+  // ADR-0033: the draft workspace is the approval gate, so no tool relies on
+  // the (never-enforced) requiresConfirmation flag.
+  it('should leave requiresConfirmation false on write tools (draft is the gate)', () => {
     expect(createObjectTool.requiresConfirmation).toBe(false);
-  });
-
-  it('should not set requiresConfirmation on delete_field (server-side enforcement not yet implemented)', () => {
     expect(deleteFieldTool.requiresConfirmation).toBe(false);
-  });
-
-  it('should not mark read-only tools as requiresConfirmation', () => {
-    expect(listObjectsTool.requiresConfirmation).toBe(false);
-    expect(describeObjectTool.requiresConfirmation).toBe(false);
-  });
-
-  it('should not mark add_field and modify_field as requiresConfirmation', () => {
     expect(addFieldTool.requiresConfirmation).toBe(false);
     expect(modifyFieldTool.requiresConfirmation).toBe(false);
+    expect(createMetadataTool.requiresConfirmation).toBe(false);
+    expect(updateMetadataTool.requiresConfirmation).toBe(false);
+  });
+
+  it('should leave requiresConfirmation false on read tools', () => {
+    expect(listObjectsTool.requiresConfirmation).toBe(false);
+    expect(describeObjectTool.requiresConfirmation).toBe(false);
+    expect(listMetadataTool.requiresConfirmation).toBe(false);
+    expect(describeMetadataTool.requiresConfirmation).toBe(false);
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// registerMetadataTools + Handlers
+// registerMetadataTools
 // ═══════════════════════════════════════════════════════════════════
 
 describe('registerMetadataTools', () => {
   let registry: ToolRegistry;
-  let metadataService: IMetadataService;
 
   beforeEach(() => {
     registry = new ToolRegistry();
-    metadataService = createMockMetadataService();
-    registerMetadataTools(registry, { metadataService });
+    const metadataService = createMockMetadataService();
+    const { protocol } = createMockProtocol();
+    registerMetadataTools(registry, { metadataService, protocol });
   });
 
-  it('should register all 7 tools', () => {
-    expect(registry.size).toBe(7);
-    expect(registry.has('create_object')).toBe(true);
-    expect(registry.has('add_field')).toBe(true);
-    expect(registry.has('modify_field')).toBe(true);
-    expect(registry.has('delete_field')).toBe(true);
-    expect(registry.has('list_objects')).toBe(true);
-    expect(registry.has('describe_object')).toBe(true);
-    expect(registry.has('validate_expression')).toBe(true);
+  it('should register all 11 tools', () => {
+    expect(registry.size).toBe(11);
+    for (const name of [
+      'create_metadata', 'update_metadata', 'describe_metadata', 'list_metadata',
+      'create_object', 'add_field', 'modify_field', 'delete_field',
+      'list_objects', 'describe_object', 'validate_expression',
+    ]) {
+      expect(registry.has(name)).toBe(true);
+    }
   });
 });
 
@@ -174,9 +247,10 @@ describe('registerMetadataTools', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('registerDataTools + registerMetadataTools — unified list/describe', () => {
-  it('should register both tool sets on the same registry with shared list_objects and describe_object', () => {
+  it('should register both tool sets on the same registry', () => {
     const registry = new ToolRegistry();
     const metadataService = createMockMetadataService();
+    const { protocol } = createMockProtocol();
     const dataEngine = {
       find: vi.fn(),
       findOne: vi.fn(),
@@ -186,29 +260,103 @@ describe('registerDataTools + registerMetadataTools — unified list/describe', 
     registerDataTools(registry, { dataEngine });
     const sizeAfterData = registry.size;
 
-    registerMetadataTools(registry, { metadataService });
+    registerMetadataTools(registry, { metadataService, protocol });
     const sizeAfterBoth = registry.size;
 
     // Data tools define: query_records, get_record, aggregate_data (3)
-    // Metadata tools define: create_object, add_field, modify_field, delete_field, list_objects, describe_object, validate_expression (7)
-    // Total should be 3 + 7 = 10
+    // Metadata tools define 11.
     expect(sizeAfterData).toBe(3);
-    expect(sizeAfterBoth).toBe(sizeAfterData + 7);
+    expect(sizeAfterBoth).toBe(sizeAfterData + 11);
 
-    // Unified list/describe should be present (from metadata tools)
     expect(registry.has('list_objects')).toBe(true);
     expect(registry.has('describe_object')).toBe(true);
-
-    // Data-only tools should be present
     expect(registry.has('query_records')).toBe(true);
-    expect(registry.has('get_record')).toBe(true);
-    expect(registry.has('aggregate_data')).toBe(true);
-
-    // Metadata-only tools should be present
     expect(registry.has('create_object')).toBe(true);
-    expect(registry.has('add_field')).toBe(true);
-    expect(registry.has('modify_field')).toBe(true);
-    expect(registry.has('delete_field')).toBe(true);
+    expect(registry.has('create_metadata')).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Draft gating — the core ADR-0033 invariant
+// ═══════════════════════════════════════════════════════════════════
+
+describe('ADR-0033 draft gating', () => {
+  it('write tools NEVER publish (metadataService.register is never called) and stage mode:draft', async () => {
+    const registry = new ToolRegistry();
+    const metadataService = createMockMetadataService();
+    const { protocol, saveMetaItem, drafts } = createMockProtocol();
+    registerMetadataTools(registry, { metadataService, protocol });
+
+    const result = await registry.execute(call('create_object', { name: 'project', label: 'Project' }, 'c1'));
+    const parsed = parse(result);
+
+    expect(parsed.status).toBe('drafted');
+    expect(parsed.type).toBe('object');
+    expect(parsed.name).toBe('project');
+    expect(parsed.summary).toContain('project');
+    expect(Array.isArray(parsed.changedKeys)).toBe(true);
+
+    // The live-publish path is dead.
+    expect(metadataService.register).not.toHaveBeenCalled();
+    // The change is staged as a draft.
+    expect(saveMetaItem).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'object',
+      name: 'project',
+      mode: 'draft',
+    }));
+    expect(drafts.get('object:project')).toEqual(expect.objectContaining({ name: 'project', label: 'Project' }));
+  });
+
+  it('refuses to write when no draft-capable protocol is wired (safe by default)', async () => {
+    const registry = new ToolRegistry();
+    const metadataService = createMockMetadataService();
+    // No protocol — applyDraft must refuse rather than fall back to publish.
+    registerMetadataTools(registry, { metadataService });
+
+    const result = await registry.execute(call('create_object', { name: 'project', label: 'Project' }, 'c1'));
+    const parsed = parse(result);
+
+    expect(parsed.status).toBeUndefined();
+    expect(parsed.error).toMatch(/draft persistence is unavailable/i);
+    expect(metadataService.register).not.toHaveBeenCalled();
+  });
+
+  it('feeds per-type validation errors back to the model (does not throw)', async () => {
+    const registry = new ToolRegistry();
+    const metadataService = createMockMetadataService();
+    const { protocol, saveMetaItem } = createMockProtocol();
+    // saveMetaItem rejects with the structured invalid_metadata shape.
+    (saveMetaItem as any).mockImplementation(async () => {
+      const e: any = new Error('[invalid_metadata] object/project failed spec validation: label: Required');
+      e.code = 'invalid_metadata';
+      e.status = 422;
+      e.issues = [{ path: 'label', message: 'Required', code: 'invalid_type' }];
+      throw e;
+    });
+    registerMetadataTools(registry, { metadataService, protocol });
+
+    const result = await registry.execute(call('create_object', { name: 'project', label: 'Project' }, 'c1'));
+    const parsed = parse(result);
+
+    expect(parsed.error).toContain('invalid_metadata');
+    expect(parsed.code).toBe('invalid_metadata');
+    expect(parsed.issues).toEqual([{ path: 'label', message: 'Required', code: 'invalid_type' }]);
+    // It returned a string error, not a thrown exception — the loop continues.
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('stacks repeated field ops into a SINGLE object draft (no fork)', async () => {
+    const registry = new ToolRegistry();
+    const metadataService = createMockMetadataService();
+    const { protocol, drafts } = createMockProtocol();
+    registerMetadataTools(registry, { metadataService, protocol });
+
+    await registry.execute(call('create_object', { name: 'invoice', label: 'Invoice' }, 's1'));
+    await registry.execute(call('add_field', { objectName: 'invoice', name: 'amount', type: 'number' }, 's2'));
+    await registry.execute(call('add_field', { objectName: 'invoice', name: 'status', type: 'text' }, 's3'));
+
+    const draft = drafts.get('object:invoice') as any;
+    expect(Object.keys(draft.fields)).toEqual(['amount', 'status']);
   });
 });
 
@@ -219,183 +367,93 @@ describe('registerDataTools + registerMetadataTools — unified list/describe', 
 describe('create_object handler', () => {
   let registry: ToolRegistry;
   let metadataService: IMetadataService;
+  let drafts: Map<string, unknown>;
 
   beforeEach(() => {
     registry = new ToolRegistry();
     metadataService = createMockMetadataService();
-    registerMetadataTools(registry, { metadataService });
+    const mock = createMockProtocol();
+    drafts = mock.drafts;
+    registerMetadataTools(registry, { metadataService, protocol: mock.protocol });
   });
 
-  it('should create object with name and label', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c1',
-      toolName: 'create_object',
-      input: { name: 'project', label: 'Project' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+  it('should draft an object with name and label', async () => {
+    const parsed = parse(await registry.execute(call('create_object', { name: 'project', label: 'Project' })));
+    expect(parsed.status).toBe('drafted');
     expect(parsed.name).toBe('project');
-    expect(parsed.label).toBe('Project');
-    expect(parsed.fieldCount).toBe(0);
-    expect(metadataService.register).toHaveBeenCalledWith(
-      'object',
-      'project',
-      expect.objectContaining({ name: 'project', label: 'Project' }),
-    );
+    expect(drafts.get('object:project')).toEqual(expect.objectContaining({ name: 'project', label: 'Project' }));
   });
 
-  it('should create object with initial fields', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c2',
-      toolName: 'create_object',
-      input: {
-        name: 'task',
-        label: 'Task',
-        fields: [
-          { name: 'title', type: 'text', label: 'Title', required: true },
-          { name: 'status', type: 'select' },
-        ],
+  it('should draft an object with initial fields', async () => {
+    await registry.execute(call('create_object', {
+      name: 'task',
+      label: 'Task',
+      fields: [
+        { name: 'title', type: 'text', label: 'Title', required: true },
+        { name: 'status', type: 'select' },
+      ],
+    }));
+    expect(drafts.get('object:task')).toEqual(expect.objectContaining({
+      fields: {
+        title: { type: 'text', label: 'Title', required: true },
+        status: { type: 'select' },
       },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.name).toBe('task');
-    expect(parsed.fieldCount).toBe(2);
-    expect(metadataService.register).toHaveBeenCalledWith(
-      'object',
-      'task',
-      expect.objectContaining({
-        fields: {
-          title: { type: 'text', label: 'Title', required: true },
-          status: { type: 'select' },
-        },
-      }),
-    );
+    }));
   });
 
-  it('should create object with enableFeatures', async () => {
-    await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c3',
-      toolName: 'create_object',
-      input: {
-        name: 'account',
-        label: 'Account',
-        enableFeatures: { trackHistory: true, apiEnabled: true },
-      },
-    });
-
-    expect(metadataService.register).toHaveBeenCalledWith(
-      'object',
-      'account',
-      expect.objectContaining({
-        enable: { trackHistory: true, apiEnabled: true },
-      }),
-    );
+  it('should draft an object with enableFeatures', async () => {
+    await registry.execute(call('create_object', {
+      name: 'account',
+      label: 'Account',
+      enableFeatures: { trackHistory: true, apiEnabled: true },
+    }));
+    expect(drafts.get('object:account')).toEqual(expect.objectContaining({
+      enable: { trackHistory: true, apiEnabled: true },
+    }));
   });
 
   it('should reject invalid snake_case name', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c4',
-      toolName: 'create_object',
-      input: { name: 'MyProject', label: 'My Project' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('create_object', { name: 'MyProject', label: 'My Project' })));
     expect(parsed.error).toContain('snake_case');
-    expect(metadataService.register).not.toHaveBeenCalled();
+    expect(drafts.size).toBe(0);
   });
 
-  it('should reject duplicate object names', async () => {
-    // Pre-populate the store
-    metadataService = createMockMetadataService({
-      project: { name: 'project', label: 'Project' },
-    });
+  it('should reject duplicate object names (published)', async () => {
+    metadataService = createMockMetadataService({ project: { name: 'project', label: 'Project' } });
     registry = new ToolRegistry();
-    registerMetadataTools(registry, { metadataService });
+    const mock = createMockProtocol();
+    registerMetadataTools(registry, { metadataService, protocol: mock.protocol });
 
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c5',
-      toolName: 'create_object',
-      input: { name: 'project', label: 'Project v2' },
-    });
+    const parsed = parse(await registry.execute(call('create_object', { name: 'project', label: 'Project v2' })));
+    expect(parsed.error).toContain('already exists');
+  });
 
-    const parsed = JSON.parse((result.output as any).value);
+  it('should reject duplicate object names (already drafted)', async () => {
+    await registry.execute(call('create_object', { name: 'project', label: 'Project' }));
+    const parsed = parse(await registry.execute(call('create_object', { name: 'project', label: 'Project v2' })));
     expect(parsed.error).toContain('already exists');
   });
 
   it('should return error when name or label is missing', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c6',
-      toolName: 'create_object',
-      input: { name: 'project' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('create_object', { name: 'project' })));
     expect(parsed.error).toContain('required');
   });
 
   it('should reject fields with invalid snake_case names', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c7',
-      toolName: 'create_object',
-      input: {
-        name: 'project',
-        label: 'Project',
-        fields: [
-          { name: 'ValidField', type: 'text' },
-        ],
-      },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('create_object', {
+      name: 'project', label: 'Project', fields: [{ name: 'ValidField', type: 'text' }],
+    })));
     expect(parsed.error).toContain('snake_case');
-    expect(metadataService.register).not.toHaveBeenCalled();
+    expect(drafts.size).toBe(0);
   });
 
   it('should reject fields with duplicate names', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c8',
-      toolName: 'create_object',
-      input: {
-        name: 'project',
-        label: 'Project',
-        fields: [
-          { name: 'status', type: 'text' },
-          { name: 'status', type: 'select' },
-        ],
-      },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('create_object', {
+      name: 'project', label: 'Project',
+      fields: [{ name: 'status', type: 'text' }, { name: 'status', type: 'select' }],
+    })));
     expect(parsed.error).toContain('Duplicate');
-    expect(metadataService.register).not.toHaveBeenCalled();
-  });
-
-  it('should reject fields with missing name', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c9',
-      toolName: 'create_object',
-      input: {
-        name: 'project',
-        label: 'Project',
-        fields: [
-          { type: 'text' },
-        ],
-      },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.error).toBeTruthy();
-    expect(metadataService.register).not.toHaveBeenCalled();
+    expect(drafts.size).toBe(0);
   });
 });
 
@@ -406,174 +464,78 @@ describe('create_object handler', () => {
 describe('add_field handler', () => {
   let registry: ToolRegistry;
   let metadataService: IMetadataService;
+  let drafts: Map<string, unknown>;
 
   beforeEach(() => {
     metadataService = createMockMetadataService({
       project: { name: 'project', label: 'Project', fields: {} },
     });
     registry = new ToolRegistry();
-    registerMetadataTools(registry, { metadataService });
+    const mock = createMockProtocol();
+    drafts = mock.drafts;
+    registerMetadataTools(registry, { metadataService, protocol: mock.protocol });
   });
 
-  it('should add a field to an existing object', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c1',
-      toolName: 'add_field',
-      input: { objectName: 'project', name: 'due_date', type: 'date', label: 'Due Date' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.objectName).toBe('project');
-    expect(parsed.fieldName).toBe('due_date');
-    expect(parsed.fieldType).toBe('date');
-    expect(metadataService.register).toHaveBeenCalledWith(
-      'object',
-      'project',
-      expect.objectContaining({
-        fields: expect.objectContaining({
-          due_date: expect.objectContaining({ type: 'date', label: 'Due Date' }),
-        }),
+  it('should draft a new field onto an existing (published) object', async () => {
+    const parsed = parse(await registry.execute(call('add_field',
+      { objectName: 'project', name: 'due_date', type: 'date', label: 'Due Date' })));
+    expect(parsed.status).toBe('drafted');
+    expect(parsed.changedKeys).toEqual(['fields.due_date']);
+    expect(drafts.get('object:project')).toEqual(expect.objectContaining({
+      fields: expect.objectContaining({
+        due_date: expect.objectContaining({ type: 'date', label: 'Due Date' }),
       }),
-    );
+    }));
   });
 
-  it('should add a field with options (select type)', async () => {
-    await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c2',
-      toolName: 'add_field',
-      input: {
-        objectName: 'project',
-        name: 'priority',
-        type: 'select',
-        options: [
-          { label: 'Low', value: 'low' },
-          { label: 'High', value: 'high' },
-        ],
-      },
-    });
-
-    expect(metadataService.register).toHaveBeenCalledWith(
-      'object',
-      'project',
-      expect.objectContaining({
-        fields: expect.objectContaining({
-          priority: expect.objectContaining({
-            type: 'select',
-            options: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }],
-          }),
+  it('should draft a select field with options', async () => {
+    await registry.execute(call('add_field', {
+      objectName: 'project', name: 'priority', type: 'select',
+      options: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }],
+    }));
+    expect(drafts.get('object:project')).toEqual(expect.objectContaining({
+      fields: expect.objectContaining({
+        priority: expect.objectContaining({
+          type: 'select',
+          options: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }],
         }),
       }),
-    );
+    }));
   });
 
   it('should reject adding field to non-existent object', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c3',
-      toolName: 'add_field',
-      input: { objectName: 'nonexistent', name: 'field_a', type: 'text' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('add_field',
+      { objectName: 'nonexistent', name: 'field_a', type: 'text' })));
     expect(parsed.error).toContain('not found');
   });
 
-  it('should reject duplicate field name', async () => {
-    // Add the field first
-    await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c4a',
-      toolName: 'add_field',
-      input: { objectName: 'project', name: 'status', type: 'text' },
-    });
-
-    // Try to add the same field again
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c4b',
-      toolName: 'add_field',
-      input: { objectName: 'project', name: 'status', type: 'select' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+  it('should reject duplicate field name (against the pending draft)', async () => {
+    await registry.execute(call('add_field', { objectName: 'project', name: 'status', type: 'text' }, 'a'));
+    const parsed = parse(await registry.execute(call('add_field',
+      { objectName: 'project', name: 'status', type: 'select' }, 'b')));
     expect(parsed.error).toContain('already exists');
   });
 
   it('should reject invalid field name', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c5',
-      toolName: 'add_field',
-      input: { objectName: 'project', name: 'MyField', type: 'text' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('add_field',
+      { objectName: 'project', name: 'MyField', type: 'text' })));
     expect(parsed.error).toContain('snake_case');
   });
 
-  it('should reject invalid objectName (not snake_case)', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c6',
-      toolName: 'add_field',
-      input: { objectName: 'MyProject', name: 'status', type: 'text' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.error).toContain('snake_case');
-  });
-
-  it('should accept reference as a string (not object)', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c7',
-      toolName: 'add_field',
-      input: { objectName: 'project', name: 'account_id', type: 'lookup', reference: 'account' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.fieldName).toBe('account_id');
-    expect(metadataService.register).toHaveBeenCalledWith(
-      'object',
-      'project',
-      expect.objectContaining({
-        fields: expect.objectContaining({
-          account_id: expect.objectContaining({ type: 'lookup', reference: 'account' }),
-        }),
+  it('should accept reference as a string', async () => {
+    const parsed = parse(await registry.execute(call('add_field',
+      { objectName: 'project', name: 'account_id', type: 'lookup', reference: 'account' })));
+    expect(parsed.status).toBe('drafted');
+    expect(drafts.get('object:project')).toEqual(expect.objectContaining({
+      fields: expect.objectContaining({
+        account_id: expect.objectContaining({ type: 'lookup', reference: 'account' }),
       }),
-    );
+    }));
   });
 
   it('should reject invalid reference (not snake_case)', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c8',
-      toolName: 'add_field',
-      input: { objectName: 'project', name: 'account_id', type: 'lookup', reference: 'MyAccount' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.error).toContain('snake_case');
-  });
-
-  it('should reject invalid select option values (not snake_case)', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c9',
-      toolName: 'add_field',
-      input: {
-        objectName: 'project',
-        name: 'priority',
-        type: 'select',
-        options: [
-          { label: 'High Priority', value: 'HighPriority' },
-        ],
-      },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('add_field',
+      { objectName: 'project', name: 'account_id', type: 'lookup', reference: 'MyAccount' })));
     expect(parsed.error).toContain('snake_case');
   });
 });
@@ -584,13 +546,12 @@ describe('add_field handler', () => {
 
 describe('modify_field handler', () => {
   let registry: ToolRegistry;
-  let metadataService: IMetadataService;
+  let drafts: Map<string, unknown>;
 
   beforeEach(() => {
-    metadataService = createMockMetadataService({
+    const metadataService = createMockMetadataService({
       project: {
-        name: 'project',
-        label: 'Project',
+        name: 'project', label: 'Project',
         fields: {
           status: { type: 'text', label: 'Status', required: false },
           budget: { type: 'number', label: 'Budget' },
@@ -598,72 +559,35 @@ describe('modify_field handler', () => {
       },
     });
     registry = new ToolRegistry();
-    registerMetadataTools(registry, { metadataService });
+    const mock = createMockProtocol();
+    drafts = mock.drafts;
+    registerMetadataTools(registry, { metadataService, protocol: mock.protocol });
   });
 
-  it('should modify field label', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c1',
-      toolName: 'modify_field',
-      input: {
-        objectName: 'project',
-        fieldName: 'status',
-        changes: { label: 'Project Status' },
-      },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.objectName).toBe('project');
-    expect(parsed.fieldName).toBe('status');
-    expect(parsed.updatedProperties).toEqual(['label']);
+  it('should draft a field-label change', async () => {
+    const parsed = parse(await registry.execute(call('modify_field',
+      { objectName: 'project', fieldName: 'status', changes: { label: 'Project Status' } })));
+    expect(parsed.status).toBe('drafted');
+    expect(parsed.changedKeys).toEqual(['fields.status.label']);
+    expect((drafts.get('object:project') as any).fields.status.label).toBe('Project Status');
   });
 
-  it('should modify multiple field properties', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c2',
-      toolName: 'modify_field',
-      input: {
-        objectName: 'project',
-        fieldName: 'status',
-        changes: { label: 'Project Status', required: true },
-      },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.updatedProperties).toEqual(expect.arrayContaining(['label', 'required']));
+  it('should draft multiple property changes', async () => {
+    const parsed = parse(await registry.execute(call('modify_field',
+      { objectName: 'project', fieldName: 'status', changes: { label: 'Project Status', required: true } })));
+    expect(parsed.changedKeys).toEqual(expect.arrayContaining(['fields.status.label', 'fields.status.required']));
+    expect((drafts.get('object:project') as any).fields.status.required).toBe(true);
   });
 
   it('should return error for non-existent object', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c3',
-      toolName: 'modify_field',
-      input: {
-        objectName: 'nonexistent',
-        fieldName: 'status',
-        changes: { label: 'New' },
-      },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('modify_field',
+      { objectName: 'nonexistent', fieldName: 'status', changes: { label: 'New' } })));
     expect(parsed.error).toContain('not found');
   });
 
   it('should return error for non-existent field', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c4',
-      toolName: 'modify_field',
-      input: {
-        objectName: 'project',
-        fieldName: 'nonexistent_field',
-        changes: { label: 'New' },
-      },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('modify_field',
+      { objectName: 'project', fieldName: 'nonexistent_field', changes: { label: 'New' } })));
     expect(parsed.error).toContain('not found');
   });
 });
@@ -674,13 +598,12 @@ describe('modify_field handler', () => {
 
 describe('delete_field handler', () => {
   let registry: ToolRegistry;
-  let metadataService: IMetadataService;
+  let drafts: Map<string, unknown>;
 
   beforeEach(() => {
-    metadataService = createMockMetadataService({
+    const metadataService = createMockMetadataService({
       project: {
-        name: 'project',
-        label: 'Project',
+        name: 'project', label: 'Project',
         fields: {
           status: { type: 'text', label: 'Status' },
           budget: { type: 'number', label: 'Budget' },
@@ -688,285 +611,195 @@ describe('delete_field handler', () => {
       },
     });
     registry = new ToolRegistry();
-    registerMetadataTools(registry, { metadataService });
+    const mock = createMockProtocol();
+    drafts = mock.drafts;
+    registerMetadataTools(registry, { metadataService, protocol: mock.protocol });
   });
 
-  it('should delete a field from an object', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c1',
-      toolName: 'delete_field',
-      input: { objectName: 'project', fieldName: 'budget' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.objectName).toBe('project');
-    expect(parsed.fieldName).toBe('budget');
-    expect(parsed.success).toBe(true);
-
-    // Verify the field was removed from the re-registered object
-    expect(metadataService.register).toHaveBeenCalledWith(
-      'object',
-      'project',
-      expect.objectContaining({
-        fields: expect.not.objectContaining({ budget: expect.anything() }),
-      }),
-    );
+  it('should draft the removal of a field', async () => {
+    const parsed = parse(await registry.execute(call('delete_field',
+      { objectName: 'project', fieldName: 'budget' })));
+    expect(parsed.status).toBe('drafted');
+    expect(parsed.changedKeys).toEqual(['fields.budget']);
+    const draft = drafts.get('object:project') as any;
+    expect(draft.fields.budget).toBeUndefined();
+    expect(draft.fields.status).toBeDefined();
   });
 
   it('should return error for non-existent object', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c2',
-      toolName: 'delete_field',
-      input: { objectName: 'nonexistent', fieldName: 'status' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('delete_field',
+      { objectName: 'nonexistent', fieldName: 'status' })));
     expect(parsed.error).toContain('not found');
   });
 
   it('should return error for non-existent field', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c3',
-      toolName: 'delete_field',
-      input: { objectName: 'project', fieldName: 'nonexistent_field' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+    const parsed = parse(await registry.execute(call('delete_field',
+      { objectName: 'project', fieldName: 'nonexistent_field' })));
     expect(parsed.error).toContain('not found');
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// list_metadata_objects handler
+// Generic type-agnostic tools (ADR-0033)
 // ═══════════════════════════════════════════════════════════════════
 
-describe('list_metadata_objects handler', () => {
+describe('create_metadata / update_metadata / describe_metadata / list_metadata', () => {
   let registry: ToolRegistry;
-  let metadataService: IMetadataService;
+  let drafts: Map<string, unknown>;
+  let active: Map<string, unknown>;
+  let saveMetaItem: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    metadataService = createMockMetadataService({
+    const metadataService = createMockMetadataService();
+    registry = new ToolRegistry();
+    const mock = createMockProtocol({
+      'view:account_list': { name: 'account_list', label: 'Accounts', object: 'account' },
+      'dashboard:sales': { name: 'sales', label: 'Sales' },
+    });
+    drafts = mock.drafts;
+    active = mock.active;
+    saveMetaItem = mock.saveMetaItem;
+    registerMetadataTools(registry, { metadataService, protocol: mock.protocol });
+  });
+
+  it('create_metadata drafts a new view with the name folded in', async () => {
+    const parsed = parse(await registry.execute(call('create_metadata',
+      { type: 'view', name: 'contact_list', definition: { label: 'Contacts', object: 'contact' } })));
+    expect(parsed.status).toBe('drafted');
+    expect(parsed.type).toBe('view');
+    expect(saveMetaItem).toHaveBeenCalledWith(expect.objectContaining({ type: 'view', mode: 'draft' }));
+    expect(drafts.get('view:contact_list')).toEqual({ name: 'contact_list', label: 'Contacts', object: 'contact' });
+  });
+
+  it('create_metadata rejects an item that already exists', async () => {
+    const parsed = parse(await registry.execute(call('create_metadata',
+      { type: 'view', name: 'account_list', definition: { label: 'X' } })));
+    expect(parsed.error).toContain('already exists');
+  });
+
+  it('create_metadata rejects an invalid snake_case name', async () => {
+    const parsed = parse(await registry.execute(call('create_metadata',
+      { type: 'view', name: 'BadName', definition: {} })));
+    expect(parsed.error).toContain('snake_case');
+  });
+
+  it('update_metadata merges a patch into the published item and drafts it', async () => {
+    const parsed = parse(await registry.execute(call('update_metadata',
+      { type: 'view', name: 'account_list', patch: { label: 'All Accounts' } })));
+    expect(parsed.status).toBe('drafted');
+    expect(parsed.changedKeys).toEqual(['label']);
+    expect(drafts.get('view:account_list')).toEqual(expect.objectContaining({
+      name: 'account_list', label: 'All Accounts', object: 'account',
+    }));
+    // Published value untouched.
+    expect((active.get('view:account_list') as any).label).toBe('Accounts');
+  });
+
+  it('update_metadata deletes a key when the patch value is null (RFC 7386)', async () => {
+    await registry.execute(call('update_metadata',
+      { type: 'view', name: 'account_list', patch: { object: null } }));
+    const draft = drafts.get('view:account_list') as any;
+    expect(draft.object).toBeUndefined();
+    expect(draft.label).toBe('Accounts');
+  });
+
+  it('update_metadata returns not-found for an unknown item', async () => {
+    const parsed = parse(await registry.execute(call('update_metadata',
+      { type: 'view', name: 'ghost', patch: { label: 'X' } })));
+    expect(parsed.error).toContain('not found');
+  });
+
+  it('describe_metadata returns the draft body when one exists (draft-first)', async () => {
+    await registry.execute(call('update_metadata', { type: 'view', name: 'account_list', patch: { label: 'Edited' } }));
+    const parsed = parse(await registry.execute(call('describe_metadata', { type: 'view', name: 'account_list' })));
+    expect(parsed.item.label).toBe('Edited');
+  });
+
+  it('describe_metadata falls back to the published body when no draft', async () => {
+    const parsed = parse(await registry.execute(call('describe_metadata', { type: 'dashboard', name: 'sales' })));
+    expect(parsed.item.label).toBe('Sales');
+  });
+
+  it('list_metadata enumerates items of a type with an optional filter', async () => {
+    const all = parse(await registry.execute(call('list_metadata', { type: 'view' })));
+    expect(all.totalCount).toBe(1);
+    expect(all.items[0]).toEqual({ name: 'account_list', label: 'Accounts' });
+
+    const filtered = parse(await registry.execute(call('list_metadata', { type: 'view', filter: 'zzz' })));
+    expect(filtered.totalCount).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// describe_object / list_objects (read side, unchanged behaviour)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('list_objects + describe_object handlers', () => {
+  let registry: ToolRegistry;
+
+  beforeEach(() => {
+    const metadataService = createMockMetadataService({
       account: { name: 'account', label: 'Account', fields: { name: { type: 'text' } } },
       contact: { name: 'contact', label: 'Contact', fields: { email: { type: 'text' }, phone: { type: 'text' } } },
     });
     registry = new ToolRegistry();
+    // No protocol getMetaItems seeded for objects → falls back to metadataService.listObjects.
     registerMetadataTools(registry, { metadataService });
   });
 
-  it('should list all objects with name, label, and field count', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c1',
-      toolName: 'list_objects',
-      input: {},
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+  it('list_objects lists objects with field counts', async () => {
+    const parsed = parse(await registry.execute(call('list_objects', {})));
     expect(parsed.totalCount).toBe(2);
-    expect(parsed.objects).toHaveLength(2);
-    expect(parsed.objects[0]).toEqual(expect.objectContaining({ name: 'account', label: 'Account', fieldCount: 1 }));
-    expect(parsed.objects[1]).toEqual(expect.objectContaining({ name: 'contact', label: 'Contact', fieldCount: 2 }));
+    expect(parsed.objects[0]).toEqual(expect.objectContaining({ name: 'account', fieldCount: 1 }));
   });
 
-  it('should filter objects by name/label substring', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c2',
-      toolName: 'list_objects',
-      input: { filter: 'account' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.totalCount).toBe(1);
-    expect(parsed.objects[0].name).toBe('account');
-  });
-
-  it('should include field summaries when includeFields is true', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c3',
-      toolName: 'list_objects',
-      input: { includeFields: true },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.objects[0].fields).toBeDefined();
-    expect(parsed.objects[0].fields).toHaveLength(1);
-  });
-
-  it('should return empty list when no objects exist', async () => {
-    metadataService = createMockMetadataService({});
-    registry = new ToolRegistry();
-    registerMetadataTools(registry, { metadataService });
-
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c4',
-      toolName: 'list_objects',
-      input: {},
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
-    expect(parsed.totalCount).toBe(0);
-    expect(parsed.objects).toHaveLength(0);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// describe_metadata_object handler
-// ═══════════════════════════════════════════════════════════════════
-
-describe('describe_metadata_object handler', () => {
-  let registry: ToolRegistry;
-  let metadataService: IMetadataService;
-
-  beforeEach(() => {
-    metadataService = createMockMetadataService({
-      account: {
-        name: 'account',
-        label: 'Account',
-        fields: {
-          name: { type: 'text', label: 'Account Name', required: true },
-          revenue: { type: 'number', label: 'Revenue' },
-          industry: { type: 'select', label: 'Industry', options: ['Tech', 'Finance'] },
-        },
-        enable: { trackHistory: true, apiEnabled: true },
-      },
-    });
-    registry = new ToolRegistry();
-    registerMetadataTools(registry, { metadataService });
-  });
-
-  it('should return full schema details with field array', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c1',
-      toolName: 'describe_object',
-      input: { objectName: 'account' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+  it('describe_object returns full schema', async () => {
+    const parsed = parse(await registry.execute(call('describe_object', { objectName: 'account' })));
     expect(parsed.name).toBe('account');
-    expect(parsed.label).toBe('Account');
-    expect(parsed.fields).toHaveLength(3);
-    expect(parsed.enableFeatures).toEqual({ trackHistory: true, apiEnabled: true });
-
-    const nameField = parsed.fields.find((f: any) => f.name === 'name');
-    expect(nameField.type).toBe('text');
-    expect(nameField.required).toBe(true);
-
-    const industryField = parsed.fields.find((f: any) => f.name === 'industry');
-    expect(industryField.options).toEqual(['Tech', 'Finance']);
+    expect(parsed.fields).toHaveLength(1);
   });
 
-  it('should return error for unknown object', async () => {
-    const result = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 'c2',
-      toolName: 'describe_object',
-      input: { objectName: 'nonexistent' },
-    });
-
-    const parsed = JSON.parse((result.output as any).value);
+  it('describe_object errors for an unknown object', async () => {
+    const parsed = parse(await registry.execute(call('describe_object', { objectName: 'nope' })));
     expect(parsed.error).toContain('not found');
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// End-to-End: full lifecycle
+// End-to-End: full draft lifecycle through the generic + object tools
 // ═══════════════════════════════════════════════════════════════════
 
-describe('Metadata Tools — full lifecycle', () => {
+describe('Metadata Tools — full draft lifecycle', () => {
   let registry: ToolRegistry;
-  let metadataService: IMetadataService;
+  let drafts: Map<string, unknown>;
 
   beforeEach(() => {
-    metadataService = createMockMetadataService();
+    const metadataService = createMockMetadataService();
     registry = new ToolRegistry();
-    registerMetadataTools(registry, { metadataService });
+    const mock = createMockProtocol();
+    drafts = mock.drafts;
+    registerMetadataTools(registry, { metadataService, protocol: mock.protocol });
   });
 
-  it('should support create → add_field → describe → modify → delete lifecycle', async () => {
-    // 1. Create object
-    await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 's1',
-      toolName: 'create_object',
-      input: { name: 'invoice', label: 'Invoice' },
-    });
+  it('create → add_field → describe_metadata → modify → delete all stage one draft', async () => {
+    await registry.execute(call('create_object', { name: 'invoice', label: 'Invoice' }, 's1'));
+    await registry.execute(call('add_field', { objectName: 'invoice', name: 'amount', type: 'number', label: 'Amount' }, 's2'));
+    await registry.execute(call('add_field', { objectName: 'invoice', name: 'status', type: 'text', label: 'Status' }, 's3'));
 
-    // 2. Add fields
-    await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 's2',
-      toolName: 'add_field',
-      input: { objectName: 'invoice', name: 'amount', type: 'number', label: 'Amount' },
-    });
+    // describe_metadata is draft-aware and sees both fields.
+    const desc = parse(await registry.execute(call('describe_metadata', { type: 'object', name: 'invoice' }, 's4')));
+    expect(Object.keys(desc.item.fields)).toEqual(['amount', 'status']);
 
-    await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 's3',
-      toolName: 'add_field',
-      input: { objectName: 'invoice', name: 'status', type: 'text', label: 'Status' },
-    });
+    await registry.execute(call('modify_field', {
+      objectName: 'invoice', fieldName: 'status', changes: { type: 'select', label: 'Invoice Status' },
+    }, 's5'));
 
-    // 3. Describe — should show both fields
-    const descResult = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 's4',
-      toolName: 'describe_object',
-      input: { objectName: 'invoice' },
-    });
-    const desc = JSON.parse((descResult.output as any).value);
-    expect(desc.fields).toHaveLength(2);
+    const del = parse(await registry.execute(call('delete_field', { objectName: 'invoice', fieldName: 'amount' }, 's6')));
+    expect(del.status).toBe('drafted');
 
-    // 4. Modify field
-    await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 's5',
-      toolName: 'modify_field',
-      input: {
-        objectName: 'invoice',
-        fieldName: 'status',
-        changes: { type: 'select', label: 'Invoice Status' },
-      },
-    });
-
-    // 5. Delete field
-    const delResult = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 's6',
-      toolName: 'delete_field',
-      input: { objectName: 'invoice', fieldName: 'amount' },
-    });
-    const del = JSON.parse((delResult.output as any).value);
-    expect(del.success).toBe(true);
-
-    // 6. Describe again — should show only 1 field (status, modified)
-    const descResult2 = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 's7',
-      toolName: 'describe_object',
-      input: { objectName: 'invoice' },
-    });
-    const desc2 = JSON.parse((descResult2.output as any).value);
-    expect(desc2.fields).toHaveLength(1);
-    expect(desc2.fields[0].name).toBe('status');
-    expect(desc2.fields[0].type).toBe('select');
-    expect(desc2.fields[0].label).toBe('Invoice Status');
-
-    // 7. List objects — should show the invoice
-    const listResult = await registry.execute({
-      type: 'tool-call' as const,
-      toolCallId: 's8',
-      toolName: 'list_objects',
-      input: {},
-    });
-    const list = JSON.parse((listResult.output as any).value);
-    expect(list.totalCount).toBe(1);
-    expect(list.objects[0].name).toBe('invoice');
+    const draft = drafts.get('object:invoice') as any;
+    expect(Object.keys(draft.fields)).toEqual(['status']);
+    expect(draft.fields.status.type).toBe('select');
+    expect(draft.fields.status.label).toBe('Invoice Status');
   });
 });

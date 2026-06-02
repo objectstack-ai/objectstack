@@ -16,6 +16,10 @@ export { deleteFieldTool } from './delete-field.tool.js';
 export { listObjectsTool } from './list-objects.tool.js';
 export { describeObjectTool } from './describe-object.tool.js';
 export { validateExpressionTool } from './validate-expression.tool.js';
+export { createMetadataTool } from './create-metadata.tool.js';
+export { updateMetadataTool } from './update-metadata.tool.js';
+export { describeMetadataTool } from './describe-metadata.tool.js';
+export { listMetadataTool } from './list-metadata.tool.js';
 
 import { createObjectTool } from './create-object.tool.js';
 import { addFieldTool } from './add-field.tool.js';
@@ -24,10 +28,20 @@ import { deleteFieldTool } from './delete-field.tool.js';
 import { listObjectsTool } from './list-objects.tool.js';
 import { describeObjectTool } from './describe-object.tool.js';
 import { validateExpressionTool } from './validate-expression.tool.js';
+import { createMetadataTool } from './create-metadata.tool.js';
+import { updateMetadataTool } from './update-metadata.tool.js';
+import { describeMetadataTool } from './describe-metadata.tool.js';
+import { listMetadataTool } from './list-metadata.tool.js';
 import { validateExpression, introspectScope, type FieldRole } from '@objectstack/formula';
 
 /** All built-in metadata management tool definitions (Tool metadata). */
 export const METADATA_TOOL_DEFINITIONS: Tool[] = [
+  // ADR-0033 type-agnostic apply surface (preferred for any metadata type)
+  createMetadataTool,
+  updateMetadataTool,
+  describeMetadataTool,
+  listMetadataTool,
+  // Object/field convenience tools (now draft-gated thin wrappers)
   createObjectTool,
   addFieldTool,
   modifyFieldTool,
@@ -187,7 +201,181 @@ export interface MetadataToolContext {
    */
   protocol?: {
     getMetaItems(request: { type: string; packageId?: string; organizationId?: string }): Promise<unknown[]>;
+    /**
+     * Read a single metadata item. With `state:'draft'` returns the pending
+     * draft row and throws `no_draft` (404) when none exists — it does NOT
+     * fall through to the published value, so callers must catch and fall
+     * back. The runtime object backing `ctx.protocol` is the full
+     * ObjectStackProtocolImplementation, which provides this.
+     */
+    getMetaItem?(request: {
+      type: string;
+      name: string;
+      packageId?: string;
+      organizationId?: string;
+      state?: 'active' | 'draft';
+    }): Promise<unknown>;
+    /**
+     * Save a metadata item. ADR-0033: AI writes ALWAYS pass `mode:'draft'` so
+     * nothing the agent authors goes live until a human publishes. Validates
+     * against the per-type Zod schema (ADR-0005) and throws `invalid_metadata`
+     * / `destructive_change` with structured `issues` on rejection.
+     */
+    saveMetaItem?(request: {
+      type: string;
+      name: string;
+      item?: unknown;
+      organizationId?: string;
+      parentVersion?: string | null;
+      actor?: string;
+      force?: boolean;
+      mode?: 'draft' | 'publish';
+      packageId?: string | null;
+    }): Promise<unknown>;
   };
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0033 — draft-gated write core
+//
+// Every metadata mutation an AI makes routes through `applyDraft`, which
+// writes `mode:'draft'` via the protocol's `saveMetaItem`. The draft IS the
+// approval gate: nothing is live until a human publishes. We never call
+// `metadataService.register(...)` from a tool handler — that path publishes
+// straight to the live schema (the exact hazard ADR-0033 closes).
+// ---------------------------------------------------------------------------
+
+interface ApplyDraftInput {
+  /** Metadata type (singular, e.g. 'object', 'view'). */
+  type: string;
+  /** Item name (snake_case). */
+  name: string;
+  /** The full item body to stage as a draft. */
+  item: unknown;
+  /** Acting user id (from the tool execution context) for provenance/audit. */
+  actor?: string;
+  /** Owning package id, when resolved. */
+  packageId?: string | null;
+  /**
+   * Bypass the destructive-data 409. Defaults to `true` for draft writes: a
+   * draft never applies DDL or drops data — the human's *publish* is the
+   * moment data is touched, and it re-runs its own checks. Blocking staging on
+   * the publish-time guard would prevent the agent from proposing schema
+   * changes for review, which is the whole point.
+   */
+  force?: boolean;
+  /** Human-readable one-line summary for the result envelope. */
+  summary: string;
+  /** Paths that changed, for the review/diff surface. */
+  changedKeys: string[];
+}
+
+/**
+ * Stage `item` as a draft and return the ADR-0033 result envelope
+ * `{ status:'drafted', type, name, summary, changedKeys }`. On validation /
+ * destructive-change rejection, returns the structured error as a string so
+ * the tool-call loop feeds it back to the model for self-correction (same
+ * validate-by-default spine as ADR-0032 / the `validate_expression` tool) —
+ * it never throws.
+ */
+async function applyDraft(ctx: MetadataToolContext, input: ApplyDraftInput): Promise<string> {
+  if (!ctx.protocol?.saveMetaItem) {
+    // Safe by default: with no draft-capable protocol wired we refuse rather
+    // than fall back to an immediate-publish path. (In a real runtime the
+    // ObjectQL protocol service is always present.)
+    return JSON.stringify({
+      error:
+        'Draft persistence is unavailable: no protocol service is wired, so metadata changes cannot be staged for review.',
+    });
+  }
+  try {
+    await ctx.protocol.saveMetaItem({
+      type: input.type,
+      name: input.name,
+      item: input.item,
+      mode: 'draft',
+      force: input.force ?? true,
+      ...(input.actor ? { actor: input.actor } : {}),
+      ...(input.packageId !== undefined && input.packageId !== null
+        ? { packageId: input.packageId }
+        : {}),
+    });
+    return JSON.stringify({
+      status: 'drafted',
+      type: input.type,
+      name: input.name,
+      summary: input.summary,
+      changedKeys: input.changedKeys,
+    });
+  } catch (err) {
+    const e = err as { message?: string; code?: string; issues?: unknown };
+    return JSON.stringify({
+      error: e.message ?? String(err),
+      ...(e.code ? { code: e.code } : {}),
+      ...(e.issues ? { issues: e.issues } : {}),
+    });
+  }
+}
+
+/**
+ * Read the current body of a metadata item, **draft-first**: returns the
+ * pending draft if one exists, else the live/published value, else undefined.
+ * This is what lets successive field ops (`add_field`, `modify_field`, …)
+ * stack into the *same* single draft rather than each starting from the last
+ * published version (ADR-0033 §3: "read-modify-write the single object draft,
+ * they do not fork drafts").
+ */
+async function readDraftFirst(
+  ctx: MetadataToolContext,
+  type: string,
+  name: string,
+): Promise<unknown | undefined> {
+  if (ctx.protocol?.getMetaItem) {
+    // Draft row first. `getMetaItem({state:'draft'})` throws `no_draft` (404)
+    // when none exists — catch and fall through to the published value.
+    try {
+      const draft = await ctx.protocol.getMetaItem({ type, name, state: 'draft' });
+      const draftItem = (draft as { item?: unknown } | undefined)?.item;
+      if (draftItem) return draftItem;
+    } catch {
+      /* no draft — fall through */
+    }
+    try {
+      const active = await ctx.protocol.getMetaItem({ type, name });
+      const activeItem = (active as { item?: unknown } | undefined)?.item;
+      if (activeItem) return activeItem;
+    } catch {
+      /* not found via protocol — fall through to the metadata service */
+    }
+  }
+  if (type === 'object') {
+    return ctx.metadataService.getObject(name);
+  }
+  return ctx.metadataService.get(type, name);
+}
+
+/**
+ * RFC 7386 JSON Merge Patch: recursively merge `patch` into `target`; a `null`
+ * value deletes that key; a non-object `patch` replaces wholesale. Used by
+ * `update_metadata` so the agent can express a partial change without
+ * restating the whole item.
+ */
+function mergePatch(target: unknown, patch: unknown): unknown {
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
+    return patch;
+  }
+  const base: Record<string, unknown> =
+    target && typeof target === 'object' && !Array.isArray(target)
+      ? { ...(target as Record<string, unknown>) }
+      : {};
+  for (const [key, value] of Object.entries(patch as Record<string, unknown>)) {
+    if (value === null) {
+      delete base[key];
+    } else {
+      base[key] = mergePatch(base[key], value);
+    }
+  }
+  return base;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +419,7 @@ function createValidateExpressionHandler(ctx: MetadataToolContext): ToolHandler 
 }
 
 function createCreateObjectHandler(ctx: MetadataToolContext): ToolHandler {
-  return async (args) => {
+  return async (args, exec) => {
     const { name, label, packageId: explicitPackageId, fields, enableFeatures } = args as {
       name: string;
       label: string;
@@ -256,8 +444,9 @@ function createCreateObjectHandler(ctx: MetadataToolContext): ToolHandler {
       return JSON.stringify({ error: `Invalid object name "${name}". Must be snake_case.` });
     }
 
-    // Check if the object already exists
-    const existing = await ctx.metadataService.getObject(name);
+    // Check if the object already exists (draft-first — an AI-drafted object
+    // not yet published still counts as existing).
+    const existing = await readDraftFirst(ctx, 'object', name);
     if (existing) {
       return JSON.stringify({ error: `Object "${name}" already exists` });
     }
@@ -293,19 +482,22 @@ function createCreateObjectHandler(ctx: MetadataToolContext): ToolHandler {
       ...(enableFeatures ? { enable: enableFeatures } : {}),
     };
 
-    await ctx.metadataService.register('object', name, objectDef);
-
-    return JSON.stringify({
+    return applyDraft(ctx, {
+      type: 'object',
       name,
-      label,
-      ...(packageId ? { packageId } : {}),
-      fieldCount: Object.keys(fieldMap).length,
+      item: objectDef,
+      actor: exec?.actor?.id,
+      packageId,
+      summary: `Drafted new object "${name}" (${label})${
+        Object.keys(fieldMap).length ? ` with ${Object.keys(fieldMap).length} field(s)` : ''
+      }`,
+      changedKeys: Object.keys(objectDef),
     });
   };
 }
 
 function createAddFieldHandler(ctx: MetadataToolContext): ToolHandler {
-  return async (args) => {
+  return async (args, exec) => {
     const { objectName, name, label, type, required, defaultValue, options, reference, packageId: explicitPackageId } = args as {
       objectName: string;
       name: string;
@@ -350,8 +542,9 @@ function createAddFieldHandler(ctx: MetadataToolContext): ToolHandler {
       }
     }
 
-    // Verify the target object exists
-    const objectDef = await ctx.metadataService.getObject(objectName);
+    // Verify the target object exists (draft-first so repeated field ops stack
+    // into the same single draft rather than forking from the published copy).
+    const objectDef = await readDraftFirst(ctx, 'object', objectName);
     if (!objectDef) {
       return JSON.stringify({ error: `Object "${objectName}" not found` });
     }
@@ -372,24 +565,22 @@ function createAddFieldHandler(ctx: MetadataToolContext): ToolHandler {
       ...(reference ? { reference } : {}),
     };
 
-    // Merge the new field into the existing object definition and re-register
+    // Merge the new field into the existing object definition and stage it.
     const updatedFields = { ...(def.fields ?? {}), [name]: fieldDef };
-    await ctx.metadataService.register('object', objectName, {
-      ...def,
-      fields: updatedFields,
-    });
-
-    return JSON.stringify({
-      objectName,
-      fieldName: name,
-      fieldType: type,
+    return applyDraft(ctx, {
+      type: 'object',
+      name: objectName,
+      item: { ...def, fields: updatedFields },
+      actor: exec?.actor?.id,
       packageId: resolved.packageId,
+      summary: `Drafted field "${name}" (${type}) on object "${objectName}"`,
+      changedKeys: [`fields.${name}`],
     });
   };
 }
 
 function createModifyFieldHandler(ctx: MetadataToolContext): ToolHandler {
-  return async (args) => {
+  return async (args, exec) => {
     const { objectName, fieldName, changes, packageId: explicitPackageId } = args as {
       objectName: string;
       fieldName: string;
@@ -415,8 +606,8 @@ function createModifyFieldHandler(ctx: MetadataToolContext): ToolHandler {
       return JSON.stringify({ error: `Invalid field name "${fieldName}". Must be snake_case.` });
     }
 
-    // Verify the target object exists
-    const objectDef = await ctx.metadataService.getObject(objectName);
+    // Verify the target object exists (draft-first — see add_field).
+    const objectDef = await readDraftFirst(ctx, 'object', objectName);
     if (!objectDef) {
       return JSON.stringify({ error: `Object "${objectName}" not found` });
     }
@@ -431,22 +622,20 @@ function createModifyFieldHandler(ctx: MetadataToolContext): ToolHandler {
     const updatedField = { ...existingField, ...changes };
     const updatedFields = { ...def.fields, [fieldName]: updatedField };
 
-    await ctx.metadataService.register('object', objectName, {
-      ...def,
-      fields: updatedFields,
-    });
-
-    return JSON.stringify({
-      objectName,
-      fieldName,
-      updatedProperties: Object.keys(changes),
+    return applyDraft(ctx, {
+      type: 'object',
+      name: objectName,
+      item: { ...def, fields: updatedFields },
+      actor: exec?.actor?.id,
       packageId: resolved.packageId,
+      summary: `Drafted change to field "${fieldName}" on object "${objectName}" (${Object.keys(changes).join(', ')})`,
+      changedKeys: Object.keys(changes).map((k) => `fields.${fieldName}.${k}`),
     });
   };
 }
 
 function createDeleteFieldHandler(ctx: MetadataToolContext): ToolHandler {
-  return async (args) => {
+  return async (args, exec) => {
     const { objectName, fieldName, packageId: explicitPackageId } = args as {
       objectName: string;
       fieldName: string;
@@ -471,8 +660,8 @@ function createDeleteFieldHandler(ctx: MetadataToolContext): ToolHandler {
       return JSON.stringify({ error: `Invalid field name "${fieldName}". Must be snake_case.` });
     }
 
-    // Verify the target object exists
-    const objectDef = await ctx.metadataService.getObject(objectName);
+    // Verify the target object exists (draft-first — see add_field).
+    const objectDef = await readDraftFirst(ctx, 'object', objectName);
     if (!objectDef) {
       return JSON.stringify({ error: `Object "${objectName}" not found` });
     }
@@ -482,18 +671,18 @@ function createDeleteFieldHandler(ctx: MetadataToolContext): ToolHandler {
       return JSON.stringify({ error: `Field "${fieldName}" not found on object "${objectName}"` });
     }
 
-    // Remove the field and re-register
+    // Remove the field and stage the change. Dropping a field is destructive,
+    // but it only lands in the draft here — the human's publish is the gate
+    // that actually touches data (and re-runs the destructive check).
     const { [fieldName]: _removed, ...remainingFields } = def.fields;
-    await ctx.metadataService.register('object', objectName, {
-      ...def,
-      fields: remainingFields,
-    });
-
-    return JSON.stringify({
-      objectName,
-      fieldName,
-      success: true,
+    return applyDraft(ctx, {
+      type: 'object',
+      name: objectName,
+      item: { ...def, fields: remainingFields },
+      actor: exec?.actor?.id,
       packageId: resolved.packageId,
+      summary: `Drafted removal of field "${fieldName}" from object "${objectName}"`,
+      changedKeys: [`fields.${fieldName}`],
     });
   };
 }
@@ -619,6 +808,160 @@ function createDescribeObjectHandler(ctx: MetadataToolContext): ToolHandler {
 }
 
 // ---------------------------------------------------------------------------
+// ADR-0033 — type-agnostic apply surface
+//
+// A small generic surface (`create_metadata` / `update_metadata` /
+// `describe_metadata` / `list_metadata`) that works for ANY metadata type —
+// view, dashboard, flow, … — not just objects. Coverage of new types grows by
+// teaching the agent these tools, not by adding bespoke per-type write tools.
+// Every write goes through `applyDraft` (draft-gated, per-type Zod validated).
+// ---------------------------------------------------------------------------
+
+function createCreateMetadataHandler(ctx: MetadataToolContext): ToolHandler {
+  return async (args, exec) => {
+    const { type, name, definition, packageId: explicitPackageId } = args as {
+      type: string;
+      name: string;
+      definition: unknown;
+      packageId?: string;
+    };
+
+    if (!type || !name || definition === undefined || definition === null) {
+      return JSON.stringify({ error: '"type", "name", and "definition" are required' });
+    }
+    if (!isSnakeCase(name)) {
+      return JSON.stringify({ error: `Invalid name "${name}". Must be snake_case.` });
+    }
+
+    // Reject re-creating an item that already exists (draft or published).
+    const existing = await readDraftFirst(ctx, type, name);
+    if (existing) {
+      return JSON.stringify({
+        error: `${type} "${name}" already exists — use update_metadata to change it.`,
+      });
+    }
+
+    // Ensure the canonical `name` is present on the body (most type schemas
+    // require it); the explicit `name` arg is authoritative.
+    const item =
+      definition && typeof definition === 'object' && !Array.isArray(definition)
+        ? { name, ...(definition as Record<string, unknown>) }
+        : definition;
+    const changedKeys =
+      item && typeof item === 'object' && !Array.isArray(item)
+        ? Object.keys(item as Record<string, unknown>)
+        : [];
+
+    return applyDraft(ctx, {
+      type,
+      name,
+      item,
+      actor: exec?.actor?.id,
+      packageId: explicitPackageId ?? null,
+      summary: `Drafted new ${type} "${name}"`,
+      changedKeys,
+    });
+  };
+}
+
+function createUpdateMetadataHandler(ctx: MetadataToolContext): ToolHandler {
+  return async (args, exec) => {
+    const { type, name, patch, packageId: explicitPackageId } = args as {
+      type: string;
+      name: string;
+      patch: unknown;
+      packageId?: string;
+    };
+
+    if (!type || !name || patch === undefined) {
+      return JSON.stringify({ error: '"type", "name", and "patch" are required' });
+    }
+
+    // Read-modify-write the SINGLE draft (never fork): start from the pending
+    // draft if any, else the published value.
+    const current = await readDraftFirst(ctx, type, name);
+    if (!current) {
+      return JSON.stringify({
+        error: `${type} "${name}" not found — use create_metadata to create it first.`,
+      });
+    }
+
+    const merged = mergePatch(current, patch);
+    const changedKeys =
+      patch && typeof patch === 'object' && !Array.isArray(patch)
+        ? Object.keys(patch as Record<string, unknown>)
+        : [];
+
+    return applyDraft(ctx, {
+      type,
+      name,
+      item: merged,
+      actor: exec?.actor?.id,
+      packageId: explicitPackageId ?? null,
+      summary: `Drafted update to ${type} "${name}"`,
+      changedKeys,
+    });
+  };
+}
+
+function createDescribeMetadataHandler(ctx: MetadataToolContext): ToolHandler {
+  return async (args) => {
+    const { type, name } = args as { type: string; name: string };
+    if (!type || !name) {
+      return JSON.stringify({ error: '"type" and "name" are required' });
+    }
+    const item = await readDraftFirst(ctx, type, name);
+    if (!item) {
+      return JSON.stringify({ error: `${type} "${name}" not found` });
+    }
+    return JSON.stringify({ type, name, item });
+  };
+}
+
+function createListMetadataHandler(ctx: MetadataToolContext): ToolHandler {
+  return async (args) => {
+    const { type, filter } = args as { type: string; filter?: string };
+    if (!type) {
+      return JSON.stringify({ error: '"type" is required' });
+    }
+
+    // Prefer the protocol enumerator (same source as GET /api/v1/meta/:type);
+    // fall back to the metadata service registry.
+    let items: unknown[] = [];
+    if (ctx.protocol?.getMetaItems) {
+      try {
+        const res = await ctx.protocol.getMetaItems({ type });
+        items = Array.isArray(res)
+          ? res
+          : res && typeof res === 'object' && Array.isArray((res as { items?: unknown[] }).items)
+            ? (res as { items: unknown[] }).items
+            : [];
+      } catch {
+        items = await ctx.metadataService.list(type);
+      }
+    } else {
+      items = await ctx.metadataService.list(type);
+    }
+    if (!Array.isArray(items)) items = [];
+
+    let summaries = (items as Array<Record<string, unknown>>).map((it) => ({
+      name: it?.name,
+      label: it?.label ?? it?.name,
+    }));
+    if (filter) {
+      const lower = filter.toLowerCase();
+      summaries = summaries.filter(
+        (s) =>
+          String(s.name ?? '').toLowerCase().includes(lower) ||
+          String(s.label ?? '').toLowerCase().includes(lower),
+      );
+    }
+
+    return JSON.stringify({ type, items: summaries, totalCount: summaries.length });
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Public Registration Helper
 // ---------------------------------------------------------------------------
 
@@ -639,6 +982,12 @@ export function registerMetadataTools(
   registry: ToolRegistry,
   context: MetadataToolContext,
 ): void {
+  // ADR-0033 type-agnostic apply surface.
+  registry.register(createMetadataTool, createCreateMetadataHandler(context));
+  registry.register(updateMetadataTool, createUpdateMetadataHandler(context));
+  registry.register(describeMetadataTool, createDescribeMetadataHandler(context));
+  registry.register(listMetadataTool, createListMetadataHandler(context));
+  // Object/field convenience tools (draft-gated thin wrappers).
   registry.register(createObjectTool, createCreateObjectHandler(context));
   registry.register(addFieldTool, createAddFieldHandler(context));
   registry.register(modifyFieldTool, createModifyFieldHandler(context));
