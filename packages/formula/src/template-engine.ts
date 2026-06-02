@@ -21,8 +21,14 @@ import type { Expression } from '@objectstack/spec';
 import { buildScope } from './stdlib';
 import type { DialectEngine, EvalContext, EvalResult } from './types';
 
-/** A hole: capture the full inner content (no `}` allowed inside). */
-const HOLE_RE = /\{\{\s*([^}]*?)\s*\}\}/g;
+/**
+ * A hole: capture the full inner content (no `}` allowed inside). Uses a single
+ * greedy `[^}]*` (not `\s*…\s*` around a lazy group) so the pattern is linear —
+ * `\s` is a subset of `[^}]`, and wrapping a lazy group in `\s*` creates an
+ * ambiguous (polynomial-ReDoS) matcher. Surrounding whitespace is stripped in
+ * `parseHole` instead.
+ */
+const HOLE_RE = /\{\{([^}]*)\}\}/g;
 
 // ───────────────────────── formatter whitelist (ADR-0032 §3) ──────────────
 
