@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/fastify",
-  "version": "7.6.0",
+  "version": "7.7.0",
   "license": "Apache-2.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

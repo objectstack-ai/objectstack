@@ -1,5 +1,11 @@
 # @objectstack/nestjs
 
+## 7.7.0
+
+### Patch Changes
+
+- @objectstack/runtime@7.7.0
+
 ## 7.6.0
 
 ### Patch Changes

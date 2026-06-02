@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-queue",
-  "version": "7.6.0",
+  "version": "7.7.0",
   "license": "Apache-2.0",
   "description": "Queue Service for ObjectStack — implements IQueueService with in-memory and BullMQ adapters",
   "type": "module",

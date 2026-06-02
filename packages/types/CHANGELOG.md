@@ -1,5 +1,14 @@
 # @objectstack/types
 
+## 7.7.0
+
+### Patch Changes
+
+- Updated dependencies [b391955]
+- Updated dependencies [f06b64e]
+- Updated dependencies [023bf93]
+  - @objectstack/spec@7.7.0
+
 ## 7.6.0
 
 ### Patch Changes

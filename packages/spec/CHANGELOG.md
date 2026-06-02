@@ -1,5 +1,54 @@
 # @objectstack/spec
 
+## 7.7.0
+
+### Minor Changes
+
+- b391955: feat(ai): blueprint app-building — propose/draft the navigation app, not just the data model
+
+  The plan-first blueprint (ADR-0033 §4) now also designs the **app** (the navigation shell end users open in the App Launcher), so "build me a project-management application" yields an openable app — not just its objects, views, and dashboards.
+
+  - `SolutionBlueprintSchema` (`@objectstack/spec/ai`) gains an optional `app: { name, label?, icon?, nav? }`, where each nav entry targets a created object or dashboard. `nav` may be omitted to auto-surface every object (then dashboard).
+  - `apply_blueprint` expands the app into an `AppSchema` body (single-level `navigation` of object/dashboard items) and drafts it last — through the same draft-gated, per-type-validated `stageDraft` path as everything else. It never sets `isDefault`.
+  - `propose_blueprint` now asks the agent to include the app and reports `counts.app`.
+
+  Still draft-gated: nothing is live until the human publishes. Scope is basic app-building (one app, flat nav); areas/groups/mobile-nav remain author-it-later via `update_metadata`.
+
+- f06b64e: feat(ai): ADR-0033 Phase C — plan-first blueprint authoring
+
+  For high-level goals ("build me a project-management system") the metadata assistant now designs before it builds. Adds a `SolutionBlueprintSchema` (`@objectstack/spec/ai`) describing proposed objects, fields, relationships, views, dashboards, and seed data with stated assumptions, plus two tools:
+
+  - `propose_blueprint(goal)` — emits a structured blueprint via structured output. **Nothing is persisted**; the agent presents it for conversational confirmation and asks at most 1–2 structure-deciding questions.
+  - `apply_blueprint(blueprint)` — only after the human approves, batch-drafts every artifact through the Phase A draft path (`protocol.saveMetaItem({mode:'draft'})`), validated per-type and partial-tolerant (a bad item is reported, the rest still draft). Seed data is reported as proposed, not auto-applied (no runtime `dataset` type).
+
+  A new `solution_design` skill carries the plan-first instructions and is bound to `metadata_assistant` alongside `metadata_authoring`. The shared draft-write primitive is exported from the metadata tools as `stageDraft` and reused, keeping one draft-write path.
+
+- 023bf93: fix(spec): reject unknown top-level keys on `ObjectSchema.create()` (#1535)
+
+  `ObjectSchemaBase` is a plain `z.object({...})` (Zod default `.strip()`), so any
+  unknown top-level key passed to `ObjectSchema.create()` — `workflows`, a typo'd
+  `validation`/`indexs`, etc. — was discarded silently: no error, no warning, and a
+  green `tsc`. Declarative metadata an author believed they shipped (e.g. object-level
+  `workflows: [...]`) vanished from every built artifact, dead from day one. This is the
+  metadata-shape analogue of ADR-0032's "no silent failure" principle.
+
+  `create()` now rejects unknown top-level keys with a precise, fixable build error that
+  names the offending key(s), suggests the intended key on a likely typo
+  (`validation` → `validations`), and — for known-confusable keys like `workflows` —
+  points authors at the supported mechanism (a lifecycle hook `src/objects/<name>.hook.ts`
+  or a top-level `record_change` flow; there is no object-level `workflows[]` field). The
+  factory signature also constrains excess keys to `never`, so the mistake is caught at
+  `tsc` time as well as at build.
+
+  The non-strict `ObjectSchema.parse()` load path (registry/artifact validation) is
+  unchanged.
+
+  Also fixes two platform objects (`sys_secret`, `sys_setting_audit`) that carried
+  silently-stripped `views`/`scope`/`defaultViewName` keys: their intended list views are
+  migrated to the supported `listViews` field (`type: 'list'` → `'grid'`) so they now
+  render instead of being dropped. The `objectstack-data` skill's CRM blueprint no longer
+  teaches the non-existent `workflows[]` shape.
+
 ## 7.6.0
 
 ### Minor Changes

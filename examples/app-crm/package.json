@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/example-crm",
-  "version": "4.0.34",
+  "version": "4.0.35",
   "description": "Minimal CRM example — a smoke-test workspace that exercises the metadata loading pipeline (objects → views → app → dashboard → hook → flow → seed). For a full-featured enterprise CRM see https://github.com/objectstack-ai/hotcrm.",
   "license": "Apache-2.0",
   "private": true,

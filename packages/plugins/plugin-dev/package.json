@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-dev",
-  "version": "7.6.0",
+  "version": "7.7.0",
   "license": "Apache-2.0",
   "description": "Development Mode Plugin for ObjectStack — auto-enables all services with in-memory implementations",
   "main": "dist/index.js",

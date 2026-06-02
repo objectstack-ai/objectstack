@@ -1,5 +1,63 @@
 # @objectstack/cli
 
+## 7.7.0
+
+### Patch Changes
+
+- 1e0b6d7: fix(cli): honor OS_LOG_LEVEL / --log-level instead of hardcoding the kernel logger to `silent` (#1533)
+
+  `os serve` / `os start` built the runtime kernel with a hardcoded `{ level: 'silent' }` logger, suppressing every plugin `logger.warn` / `logger.error`. A record-change flow whose condition or node faulted (surfaced via `logger.warn` in `plugin-trigger-record-change`) produced zero operator-visible output — the flow simply had no effect — undercutting ADR-0032's "fail loudly" promise when run via the CLI.
+
+  The kernel logger level is now resolved from `--verbose` (→ `debug`) → `--log-level <level>` → `$OS_LOG_LEVEL` / `$LOG_LEVEL` → default `warn`. Defaulting to `warn` surfaces flow/hook execution-failure warnings and automation-engine errors out of the box, while the existing boot-quiet window still suppresses info-level startup chatter. Pass `--log-level silent` (or `OS_LOG_LEVEL=silent`) to restore the previous fully-quiet behavior. `start` and `dev` gain a matching `--log-level` flag and forward it (plus the existing `--verbose`) to the spawned `serve`.
+
+- Updated dependencies [b391955]
+- Updated dependencies [984ddff]
+- Updated dependencies [f06b64e]
+- Updated dependencies [825ab06]
+- Updated dependencies [023bf93]
+  - @objectstack/spec@7.7.0
+  - @objectstack/service-ai@7.7.0
+  - @objectstack/formula@7.7.0
+  - @objectstack/platform-objects@7.7.0
+  - @objectstack/account@7.7.0
+  - @objectstack/client@7.7.0
+  - @objectstack/core@7.7.0
+  - @objectstack/objectql@7.7.0
+  - @objectstack/observability@7.7.0
+  - @objectstack/driver-memory@7.7.0
+  - @objectstack/driver-mongodb@7.7.0
+  - @objectstack/driver-sql@7.7.0
+  - @objectstack/driver-sqlite-wasm@7.7.0
+  - @objectstack/plugin-approvals@7.7.0
+  - @objectstack/plugin-audit@7.7.0
+  - @objectstack/plugin-auth@7.7.0
+  - @objectstack/plugin-email@7.7.0
+  - @objectstack/plugin-hono-server@7.7.0
+  - @objectstack/plugin-mcp-server@7.7.0
+  - @objectstack/plugin-org-scoping@7.7.0
+  - @objectstack/plugin-reports@7.7.0
+  - @objectstack/plugin-security@7.7.0
+  - @objectstack/plugin-sharing@7.7.0
+  - @objectstack/plugin-trigger-record-change@7.7.0
+  - @objectstack/plugin-trigger-schedule@7.7.0
+  - @objectstack/plugin-webhooks@7.7.0
+  - @objectstack/rest@7.7.0
+  - @objectstack/runtime@7.7.0
+  - @objectstack/service-analytics@7.7.0
+  - @objectstack/service-automation@7.7.0
+  - @objectstack/service-cache@7.7.0
+  - @objectstack/service-datasource@7.7.0
+  - @objectstack/service-feed@7.7.0
+  - @objectstack/service-job@7.7.0
+  - @objectstack/service-messaging@7.7.0
+  - @objectstack/service-package@7.7.0
+  - @objectstack/service-queue@7.7.0
+  - @objectstack/service-realtime@7.7.0
+  - @objectstack/service-settings@7.7.0
+  - @objectstack/service-storage@7.7.0
+  - @objectstack/types@7.7.0
+  - @objectstack/console@7.7.0
+
 ## 7.6.0
 
 ### Minor Changes

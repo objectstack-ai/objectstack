@@ -1,5 +1,30 @@
 # @objectstack/runtime
 
+## 7.7.0
+
+### Patch Changes
+
+- Updated dependencies [b391955]
+- Updated dependencies [f06b64e]
+- Updated dependencies [825ab06]
+- Updated dependencies [023bf93]
+  - @objectstack/spec@7.7.0
+  - @objectstack/formula@7.7.0
+  - @objectstack/core@7.7.0
+  - @objectstack/metadata@7.7.0
+  - @objectstack/objectql@7.7.0
+  - @objectstack/observability@7.7.0
+  - @objectstack/driver-memory@7.7.0
+  - @objectstack/driver-sql@7.7.0
+  - @objectstack/driver-sqlite-wasm@7.7.0
+  - @objectstack/plugin-auth@7.7.0
+  - @objectstack/plugin-org-scoping@7.7.0
+  - @objectstack/plugin-security@7.7.0
+  - @objectstack/rest@7.7.0
+  - @objectstack/service-cluster@7.7.0
+  - @objectstack/service-i18n@7.7.0
+  - @objectstack/types@7.7.0
+
 ## 7.6.0
 
 ### Minor Changes

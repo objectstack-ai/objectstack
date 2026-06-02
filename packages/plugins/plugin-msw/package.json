@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-msw",
-  "version": "7.6.0",
+  "version": "7.7.0",
   "description": "MSW (Mock Service Worker) Plugin for ObjectStack Runtime",
   "license": "Apache-2.0",
   "main": "dist/index.js",

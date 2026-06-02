@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-ai",
-  "version": "7.6.0",
+  "version": "7.7.0",
   "license": "Apache-2.0",
   "description": "AI Service for ObjectStack — implements IAIService with LLM adapter layer, conversation management, tool registry, and REST/SSE routes",
   "type": "module",
