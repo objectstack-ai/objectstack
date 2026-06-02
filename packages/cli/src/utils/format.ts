@@ -183,6 +183,8 @@ export interface ServerReadyOptions {
   pluginNames?: string[];
   uiEnabled?: boolean;
   consolePath?: string;
+  /** REST API base path (default '/api/v1'). Drives the API Docs link. */
+  apiBasePath?: string;
   /** Resolved storage driver display name (e.g. "MongoDBDriver", "SqlDriver(pg)"). */
   driverLabel?: string;
   /** Resolved DB URL with credentials redacted. */
@@ -202,7 +204,8 @@ export function printServerReady(opts: ServerReadyOptions) {
   console.log('');
   console.log(chalk.bold.green('  ✓ Server is ready'));
   console.log('');
-  console.log(chalk.cyan('  ➜') + chalk.bold('  API:       ') + chalk.cyan(base + '/'));
+  const apiBase = opts.apiBasePath ?? '/api/v1';
+  console.log(chalk.cyan('  ➜') + chalk.bold('  API Docs:  ') + chalk.cyan(base + apiBase + '/docs'));
   if (opts.uiEnabled && opts.consolePath) {
     console.log(chalk.cyan('  ➜') + chalk.bold('  Console:   ') + chalk.cyan(base + opts.consolePath + '/'));
   }
