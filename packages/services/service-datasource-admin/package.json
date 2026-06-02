@@ -1,0 +1,62 @@
+{
+  "name": "@objectstack/service-datasource-admin",
+  "version": "7.5.0",
+  "license": "Apache-2.0",
+  "description": "Runtime UI-created datasource lifecycle (ADR-0015 Addendum) — list/test/create/update/remove datasources defined in the UI. Mechanism only: credential storage is delegated to a host-provided SecretBinder (CryptoProvider) and drivers to a swappable factory, so a managed credential vault / multi-tenant overlay can be layered on without forking.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "import": "./dist/contracts/index.js",
+      "require": "./dist/contracts/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/spec": "workspace:*"
+  },
+  "peerDependencies": {
+    "@objectstack/driver-memory": "workspace:*",
+    "@objectstack/driver-mongodb": "workspace:*",
+    "@objectstack/driver-sql": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@objectstack/driver-sql": { "optional": true },
+    "@objectstack/driver-mongodb": { "optional": true },
+    "@objectstack/driver-memory": { "optional": true }
+  },
+  "devDependencies": {
+    "@objectstack/driver-memory": "workspace:*",
+    "@objectstack/driver-sql": "workspace:*",
+    "@types/node": "^25.9.1",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  },
+  "keywords": [
+    "objectstack",
+    "datasource",
+    "datasource-admin",
+    "runtime-datasource"
+  ],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/framework.git",
+    "directory": "packages/services/service-datasource-admin"
+  }
+}
