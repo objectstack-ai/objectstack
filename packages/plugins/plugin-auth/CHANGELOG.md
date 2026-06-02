@@ -1,5 +1,63 @@
 # Changelog
 
+## 8.0.0
+
+### Patch Changes
+
+- 8c01eea: fix(dev): seed the dev admin in-process and fix the port-drift seed failure.
+
+  `os dev` (and `pnpm dev:showcase`) seeded the admin over HTTP against a
+  hard-coded `localhost:3000`. In dev, `serve` auto-shifts off a busy port, so
+  the seed POST hit the wrong server (or nothing) and the running instance never
+  got an admin. A second, divergent seed in `plugin-dev` inserted a
+  credential-less `sys_user` row that could not log in.
+
+  Consolidate to a single in-process seed:
+
+  - **`@objectstack/plugin-auth`** — `maybeSeedDevAdmin()` runs on `kernel:ready`
+    and creates `admin@objectos.ai` / `admin123` through better-auth's real
+    `signUpEmail` pipeline (hashed credential), so the account is loginable;
+    `plugin-security` then promotes it to platform admin. Empty-DB only
+    (excludes the system service account), idempotent, never overwrites an
+    existing account. Hard-gated to `NODE_ENV=development`; opt out with
+    `OS_SEED_ADMIN=0`.
+  - **`@objectstack/cli`** — removed the HTTP seed; `--seed-admin` now passes
+    `OS_SEED_ADMIN[_EMAIL|_PASSWORD]` to the serve child. `serve` publishes its
+    actually-bound port over IPC and to a `runtime.<env>.json` state file under
+    `OS_HOME`.
+  - **`@objectstack/plugin-dev`** — removed the credential-less raw insert;
+    `seedAdminUser` maps to the unified `OS_SEED_ADMIN` toggle.
+
+- b7a4f14: fix(dev): surface the seeded dev-admin credentials in the `serve` startup banner.
+
+  When the runtime seeds the dev admin on an empty DB, the confirmation was
+  emitted via `ctx.logger` during `runtime.start()` — inside serve's boot-quiet
+  window — so it was swallowed and never reached the console. plugin-auth now
+  records the seed result on the `auth` service and `serve` prints it in the
+  ready banner (after stdout is restored), e.g.:
+
+  ```
+    🔑  Dev admin: admin@objectos.ai / admin123
+        seeded on empty DB · dev only — do not use in production
+  ```
+
+  Shown only when an admin was actually seeded this boot (empty DB) — never on a
+  DB that already had a user, so stale credentials are never displayed. Visible
+  in both `serve --dev` and `os dev` (the child's stdout is inherited).
+
+- Updated dependencies [955d4c8]
+- Updated dependencies [b046ec2]
+- Updated dependencies [02d6359]
+- Updated dependencies [7648242]
+- Updated dependencies [8fa1e7f]
+- Updated dependencies [7ae6abc]
+- Updated dependencies [55866f5]
+- Updated dependencies [60f9c45]
+  - @objectstack/spec@8.0.0
+  - @objectstack/platform-objects@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/types@8.0.0
+
 ## 7.5.0
 
 ### Patch Changes

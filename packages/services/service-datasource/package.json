@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-datasource",
-  "version": "7.5.0",
+  "version": "8.0.0",
   "license": "Apache-2.0",
   "description": "The datasource service (ADR-0015): external-table federation (introspect/draft/import/validate) + runtime UI datasource lifecycle (list/test/create/update/remove + REST routes). Open-source mechanism; the tier line falls on which ICryptoProvider / driver factory a host injects.",
   "type": "module",
@@ -35,9 +35,15 @@
     "@objectstack/driver-sql": "workspace:*"
   },
   "peerDependenciesMeta": {
-    "@objectstack/driver-sql": { "optional": true },
-    "@objectstack/driver-mongodb": { "optional": true },
-    "@objectstack/driver-memory": { "optional": true }
+    "@objectstack/driver-sql": {
+      "optional": true
+    },
+    "@objectstack/driver-mongodb": {
+      "optional": true
+    },
+    "@objectstack/driver-memory": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@objectstack/driver-memory": "workspace:*",

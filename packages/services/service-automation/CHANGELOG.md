@@ -1,5 +1,114 @@
 # @objectstack/service-automation
 
+## 8.0.0
+
+### Minor Changes
+
+- 955d4c8: ADR-0018 M3: unified `http` / `notify` executors backed by a generic HTTP outbox.
+
+  Promotes a reliable outbound-HTTP delivery outbox into `service-messaging` (the
+  raw-callout counterpart to the notification outbox) and routes the Flow `http`
+  node through it — closing the "`http_request` is a bare `fetch()` with no retry"
+  gap. The five divergent outbound verbs collapse onto canonical `http` / `notify`.
+
+  **`@objectstack/service-messaging` (additive):**
+
+  - `IHttpOutbox` / `HttpDelivery` generic raw-callout shape
+    (`source` / `refId` / `dedupKey` / `label` / `signingSecret`), `SqlHttpOutbox`
+    over a new `sys_http_delivery` object, `MemoryHttpOutbox`, `HttpDispatcher`
+    (per-partition cluster lock, claim/ack/retry/dead-letter), and a shared
+    `sendOnce` + 7-step jittered retry schedule.
+  - `MessagingService` gains `setHttpOutbox()` / `isHttpDeliveryReady()` /
+    `enqueueHttp()`; the plugin wires the outbox + dispatcher at `kernel:ready`.
+
+  **`@objectstack/service-automation`:**
+
+  - Canonical `http` executor — `durable: true` enqueues onto the messaging HTTP
+    outbox (retry/dead-letter); otherwise an inline `fetch()` preserving
+    `http_request`'s request/response semantics.
+  - `engine.registerNodeAlias()` — registers a delegating executor + a
+    `deprecated` / `aliasOf` descriptor. `http_request` / `http_call` / `webhook`
+    are now deprecated aliases of `http`; existing flows keep running.
+  - `notify` descriptor marked `needsOutbox` (its delivery is outbox-backed).
+
+  **`@objectstack/spec`:** `flow.zod` adds `http` to the builtin node-type seed set.
+
+  `plugin-webhooks` cut-over to the shared outbox is a deliberate follow-up.
+
+- 60f9c45: feat(automation): structured control-flow constructs (ADR-0031) — loop container
+
+  Adopt structured control-flow as the native, AI-authored flow model (ADR-0031),
+  choosing representation **(B) nested sub-structure**: containers carry their body
+  as a self-contained single-entry/single-exit region in `config`.
+
+  - **spec**: new `automation/control-flow.zod.ts` defining the `loop` container
+    (`config.body`), `parallel` block (`config.branches[]`, implicit join), and
+    `try/catch/retry` (`config.try`/`config.catch`/`config.retry`) configs, plus
+    region well-formedness analysis (`analyzeRegion`, `findRegionEntry`) and
+    `validateControlFlow` (single-entry/single-exit, acyclic; bounded loop).
+  - **engine**: `registerFlow()` now rejects malformed control-flow regions before
+    a flow can run; new `AutomationEngine.runRegion()` executes a body region in
+    the enclosing variable scope without touching the shared DAG traversal.
+  - **loop executor**: replaces the no-op `loop` stub with a real iteration
+    container — binds the iterator/index variables and runs the body once per item
+    under a hard max-iteration guard. Legacy flat-graph loops (no `config.body`)
+    keep working — the construct is additive.
+
+  Parallel-block and try/catch _engine execution_ and BPMN interop mapping remain
+  follow-ups (issue #1479, tasks 3–5).
+
+- f06a6a5: feat(automation): structured parallel block (ADR-0031, task 3)
+
+  Implement engine execution for the `parallel` block — a structured construct
+  with an **implicit join** (ADR-0031 §Decision 2). The `parallel` node declares N
+  branch regions in `config.branches[]`; the executor runs them concurrently in
+  the enclosing variable scope (via `AutomationEngine.runRegion`) and continues
+  once when all branches complete — no author-visible split/join gateway.
+
+  - New `builtin/parallel-node.ts` executor (registered as a built-in).
+  - Branch failure fails the block (surfaced as a node failure → fault edge/error
+    handling); durable pause inside a branch is a clear error.
+  - Well-formedness (≥2 branches, single-entry/single-exit regions) is already
+    enforced at `registerFlow()` by `validateControlFlow` (shipped with the loop
+    container).
+
+  Showcase `FanOutNotifyFlow` demonstrates the parallel block. Try/catch execution
+  and BPMN interop mapping remain follow-ups (#1479 tasks 4–5).
+
+- 4ee139d: feat(automation): structured try/catch/retry block (ADR-0031, task 4)
+
+  Implement engine execution for the `try_catch` construct — structured error
+  handling (ADR-0031 §Decision 3). The node runs a protected `try` region; on
+  failure it retries with exponential backoff (`config.retry`), and if it still
+  fails the optional `catch` region runs with the caught error bound to
+  `config.errorVariable` (default `$error`). Both regions execute in the enclosing
+  variable scope via `AutomationEngine.runRegion`.
+
+  - New `builtin/try-catch-node.ts` executor (registered as a built-in).
+  - `try` success (incl. a successful retry) → node succeeds; `catch` handling a
+    failure → node succeeds; no `catch` / failing `catch` → node fails to the
+    flow's fault edge / error handling.
+  - Well-formedness (single-entry/single-exit `try`/`catch` regions) is already
+    enforced at `registerFlow()` by `validateControlFlow` (shipped with the loop
+    container).
+
+  Showcase `ResilientSyncFlow` demonstrates the construct. This completes the
+  native control-flow execution trio (loop / parallel / try-catch); BPMN interop
+  mapping remains a follow-up (#1479 task 5).
+
+### Patch Changes
+
+- Updated dependencies [955d4c8]
+- Updated dependencies [b046ec2]
+- Updated dependencies [02d6359]
+- Updated dependencies [7648242]
+- Updated dependencies [8fa1e7f]
+- Updated dependencies [55866f5]
+- Updated dependencies [60f9c45]
+  - @objectstack/spec@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/formula@8.0.0
+
 ## 7.5.0
 
 ### Minor Changes

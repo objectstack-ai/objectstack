@@ -1,5 +1,12 @@
 # @objectstack/nextjs
 
+## 8.0.0
+
+### Patch Changes
+
+- Updated dependencies [8e539cc]
+  - @objectstack/runtime@8.0.0
+
 ## 7.5.0
 
 ## 7.4.1

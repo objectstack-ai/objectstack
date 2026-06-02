@@ -1,5 +1,112 @@
 # @objectstack/service-messaging
 
+## 8.0.0
+
+### Minor Changes
+
+- 955d4c8: ADR-0018 M3: unified `http` / `notify` executors backed by a generic HTTP outbox.
+
+  Promotes a reliable outbound-HTTP delivery outbox into `service-messaging` (the
+  raw-callout counterpart to the notification outbox) and routes the Flow `http`
+  node through it — closing the "`http_request` is a bare `fetch()` with no retry"
+  gap. The five divergent outbound verbs collapse onto canonical `http` / `notify`.
+
+  **`@objectstack/service-messaging` (additive):**
+
+  - `IHttpOutbox` / `HttpDelivery` generic raw-callout shape
+    (`source` / `refId` / `dedupKey` / `label` / `signingSecret`), `SqlHttpOutbox`
+    over a new `sys_http_delivery` object, `MemoryHttpOutbox`, `HttpDispatcher`
+    (per-partition cluster lock, claim/ack/retry/dead-letter), and a shared
+    `sendOnce` + 7-step jittered retry schedule.
+  - `MessagingService` gains `setHttpOutbox()` / `isHttpDeliveryReady()` /
+    `enqueueHttp()`; the plugin wires the outbox + dispatcher at `kernel:ready`.
+
+  **`@objectstack/service-automation`:**
+
+  - Canonical `http` executor — `durable: true` enqueues onto the messaging HTTP
+    outbox (retry/dead-letter); otherwise an inline `fetch()` preserving
+    `http_request`'s request/response semantics.
+  - `engine.registerNodeAlias()` — registers a delegating executor + a
+    `deprecated` / `aliasOf` descriptor. `http_request` / `http_call` / `webhook`
+    are now deprecated aliases of `http`; existing flows keep running.
+  - `notify` descriptor marked `needsOutbox` (its delivery is outbox-backed).
+
+  **`@objectstack/spec`:** `flow.zod` adds `http` to the builtin node-type seed set.
+
+  `plugin-webhooks` cut-over to the shared outbox is a deliberate follow-up.
+
+- 11905fa: ADR-0018 M3 (Phase 5): `plugin-webhooks` now delivers through the shared
+  `service-messaging` HTTP outbox instead of its own.
+
+  The webhook delivery substrate — durable outbox, cluster-coordinated dispatcher,
+  retry/backoff/dead-letter, retention — is removed from `plugin-webhooks` and
+  replaced by the generic `sys_http_delivery` outbox + `HttpDispatcher` in
+  `@objectstack/service-messaging`. Webhooks keep only their domain concerns: the
+  `sys_webhook` config object, the `AutoEnqueuer` (now enqueues `source: 'webhook'`
+  rows via `messaging.enqueueHttp`), and the redeliver admin endpoint (now backed
+  by `messaging.redeliverHttp`).
+
+  **`@objectstack/service-messaging`:** `MessagingService` gains `redeliverHttp(id)`
+  and `listHttp(filter)` over the HTTP outbox.
+
+  **`@objectstack/plugin-webhooks` — BREAKING:**
+
+  - Now **requires** `MessagingServicePlugin` (declared as a plugin dependency).
+  - Removed exports: `WebhookDispatcher`, `MemoryWebhookOutbox`, `SqlWebhookOutbox`
+    (and the `./sql` subpath), `DeliveryRetentionSweeper`, `hashPartition`,
+    `sendOnce` / `classifyAttempt` / `nextRetryDelayMs`, and the `IWebhookOutbox` /
+    `WebhookDelivery` / `EnqueueInput` / `AckResult` / `RedeliverError` types.
+  - Removed the `sys_webhook_delivery` object — webhook deliveries are now rows in
+    `sys_http_delivery` (`source = 'webhook'`). The Setup nav points there.
+  - `AutoEnqueuer`'s constructor takes an `HttpEnqueueFn` instead of an
+    `IWebhookOutbox`.
+  - `WebhookOutboxPluginOptions` reduced to `{ autoEnqueue }` (dispatcher / outbox /
+    retention / nodeId options removed — those now live on `MessagingServicePlugin`).
+
+- 8e539cc: Implement the `/api/v1/notifications` REST surface (ADR-0030)
+
+  The notification REST routes (`GET /notifications`, `POST /notifications/read`,
+  `POST /notifications/read/all`) were declared in the spec but never had a
+  server-side handler — no plugin registered the `notification` core service, so
+  the routes were never advertised in discovery and `client.notifications.*`
+  calls 404'd. (The Console bell works today only because it bypasses these
+  endpoints and reads the inbox via the generic data API.)
+
+  This wires the surface end-to-end against the ADR-0030 L5 model:
+
+  - **`MessagingService`** gains an inbox read API: `listInbox(userId, opts)`
+    reads `sys_inbox_message` joined with `sys_notification_receipt` for
+    read-state (a message is unread until its event has a `read`/`clicked`/
+    `dismissed` receipt); `markRead(userId, ids)` and `markAllRead(userId)`
+    upsert the receipt to `read`, keyed `(notification_id, user_id,
+channel:'inbox')` — updating the existing `delivered` receipt in place,
+    inserting only when absent. No reliance on the re-modeled `sys_notification`
+    L2 event (which carries no recipient/read columns).
+  - **`MessagingServicePlugin`** now also registers the messaging service under
+    the `notification` core service slot, so the dispatcher resolves + advertises
+    the routes. The legacy `INotificationService.send()` abstraction is unused and
+    unconsumed.
+  - **`HttpDispatcher`** gains `handleNotification` + a `/notifications` dispatch
+    branch: it takes the authenticated user from the execution context and maps
+    list / mark-read / mark-all-read to the service. Responses match the spec
+    schemas (`{ notifications, unreadCount }`, `{ success, readCount }`).
+
+  Pairs with the objectui SDK consumer repoint (`useClientNotifications` →
+  `markRead`/`registerDevice` signatures). Device registration and preference
+  endpoints remain out of scope (unimplemented as before).
+
+### Patch Changes
+
+- Updated dependencies [955d4c8]
+- Updated dependencies [b046ec2]
+- Updated dependencies [02d6359]
+- Updated dependencies [7648242]
+- Updated dependencies [8fa1e7f]
+- Updated dependencies [55866f5]
+- Updated dependencies [60f9c45]
+  - @objectstack/spec@8.0.0
+  - @objectstack/core@8.0.0
+
 ## 7.5.0
 
 ### Patch Changes

@@ -1,5 +1,70 @@
 # @objectstack/runtime
 
+## 8.0.0
+
+### Minor Changes
+
+- 8e539cc: Implement the `/api/v1/notifications` REST surface (ADR-0030)
+
+  The notification REST routes (`GET /notifications`, `POST /notifications/read`,
+  `POST /notifications/read/all`) were declared in the spec but never had a
+  server-side handler — no plugin registered the `notification` core service, so
+  the routes were never advertised in discovery and `client.notifications.*`
+  calls 404'd. (The Console bell works today only because it bypasses these
+  endpoints and reads the inbox via the generic data API.)
+
+  This wires the surface end-to-end against the ADR-0030 L5 model:
+
+  - **`MessagingService`** gains an inbox read API: `listInbox(userId, opts)`
+    reads `sys_inbox_message` joined with `sys_notification_receipt` for
+    read-state (a message is unread until its event has a `read`/`clicked`/
+    `dismissed` receipt); `markRead(userId, ids)` and `markAllRead(userId)`
+    upsert the receipt to `read`, keyed `(notification_id, user_id,
+channel:'inbox')` — updating the existing `delivered` receipt in place,
+    inserting only when absent. No reliance on the re-modeled `sys_notification`
+    L2 event (which carries no recipient/read columns).
+  - **`MessagingServicePlugin`** now also registers the messaging service under
+    the `notification` core service slot, so the dispatcher resolves + advertises
+    the routes. The legacy `INotificationService.send()` abstraction is unused and
+    unconsumed.
+  - **`HttpDispatcher`** gains `handleNotification` + a `/notifications` dispatch
+    branch: it takes the authenticated user from the execution context and maps
+    list / mark-read / mark-all-read to the service. Responses match the spec
+    schemas (`{ notifications, unreadCount }`, `{ success, readCount }`).
+
+  Pairs with the objectui SDK consumer repoint (`useClientNotifications` →
+  `markRead`/`registerDevice` signatures). Device registration and preference
+  endpoints remain out of scope (unimplemented as before).
+
+### Patch Changes
+
+- Updated dependencies [955d4c8]
+- Updated dependencies [b046ec2]
+- Updated dependencies [02d6359]
+- Updated dependencies [7648242]
+- Updated dependencies [8c01eea]
+- Updated dependencies [8fa1e7f]
+- Updated dependencies [be20aa4]
+- Updated dependencies [55866f5]
+- Updated dependencies [b7a4f14]
+- Updated dependencies [60f9c45]
+  - @objectstack/spec@8.0.0
+  - @objectstack/objectql@8.0.0
+  - @objectstack/plugin-auth@8.0.0
+  - @objectstack/driver-sqlite-wasm@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/formula@8.0.0
+  - @objectstack/metadata@8.0.0
+  - @objectstack/observability@8.0.0
+  - @objectstack/driver-memory@8.0.0
+  - @objectstack/driver-sql@8.0.0
+  - @objectstack/plugin-org-scoping@8.0.0
+  - @objectstack/plugin-security@8.0.0
+  - @objectstack/rest@8.0.0
+  - @objectstack/service-cluster@8.0.0
+  - @objectstack/service-i18n@8.0.0
+  - @objectstack/types@8.0.0
+
 ## 7.5.0
 
 ### Patch Changes

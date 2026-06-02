@@ -1,5 +1,168 @@
 # @objectstack/spec
 
+## 8.0.0
+
+### Minor Changes
+
+- 955d4c8: ADR-0018 M3: unified `http` / `notify` executors backed by a generic HTTP outbox.
+
+  Promotes a reliable outbound-HTTP delivery outbox into `service-messaging` (the
+  raw-callout counterpart to the notification outbox) and routes the Flow `http`
+  node through it — closing the "`http_request` is a bare `fetch()` with no retry"
+  gap. The five divergent outbound verbs collapse onto canonical `http` / `notify`.
+
+  **`@objectstack/service-messaging` (additive):**
+
+  - `IHttpOutbox` / `HttpDelivery` generic raw-callout shape
+    (`source` / `refId` / `dedupKey` / `label` / `signingSecret`), `SqlHttpOutbox`
+    over a new `sys_http_delivery` object, `MemoryHttpOutbox`, `HttpDispatcher`
+    (per-partition cluster lock, claim/ack/retry/dead-letter), and a shared
+    `sendOnce` + 7-step jittered retry schedule.
+  - `MessagingService` gains `setHttpOutbox()` / `isHttpDeliveryReady()` /
+    `enqueueHttp()`; the plugin wires the outbox + dispatcher at `kernel:ready`.
+
+  **`@objectstack/service-automation`:**
+
+  - Canonical `http` executor — `durable: true` enqueues onto the messaging HTTP
+    outbox (retry/dead-letter); otherwise an inline `fetch()` preserving
+    `http_request`'s request/response semantics.
+  - `engine.registerNodeAlias()` — registers a delegating executor + a
+    `deprecated` / `aliasOf` descriptor. `http_request` / `http_call` / `webhook`
+    are now deprecated aliases of `http`; existing flows keep running.
+  - `notify` descriptor marked `needsOutbox` (its delivery is outbox-backed).
+
+  **`@objectstack/spec`:** `flow.zod` adds `http` to the builtin node-type seed set.
+
+  `plugin-webhooks` cut-over to the shared outbox is a deliberate follow-up.
+
+- b046ec2: feat(automation): BPMN ⇄ structured-construct model mapping (ADR-0031, task 5)
+
+  Add the semantic bridge between the structured control-flow constructs (the
+  native model) and the BPMN gateway/boundary/multi-instance vocabulary (kept for
+  interop only), at the **flow-model level** — independent of any wire format
+  (`automation/bpmn-mapping.ts`):
+
+  - `exportConstructsToBpmn(flow)` expands each construct into its BPMN
+    interchange shape — `parallel` → `parallel_gateway` (AND-split) + branch
+    regions + `join_gateway` (AND-join); `try_catch` → the protected activity +
+    an error `boundary_event` + the handler region; `loop` → its body marked with
+    multi-instance loop characteristics — so external BPM tools see a well-formed
+    BPMN graph. Each expansion's anchor carries an `osConstruct` extension marker.
+  - `importBpmnToConstructs(flow)` folds that BPMN shape back into the constructs:
+    exact reconstruction from the `osConstruct` marker (so `construct → BPMN →
+construct` is identity), and a best-effort structural fold of foreign
+    `parallel_gateway`/`join_gateway` pairs, with diagnostics for shapes it can't
+    safely fold.
+
+  BPMN 2.0 **XML** (de)serialization layers on top of this mapping and remains a
+  plugin concern (per `bpmn-interop.zod.ts`), out of scope here.
+
+- 7648242: Enforce every declared validation-rule type on the write path; trim the three that can't be (#1475).
+
+  The `validations` union advertised nine rule types but only three (`state_machine`,
+  `cross_field`, `script`) ran on insert/update — the other six were accepted by the
+  schema yet silently did nothing. This closes that gap on both sides: implement the
+  synchronous types, and trim the ones that don't belong in a write-path rule.
+
+  **`@objectstack/objectql` (additive):** the rule evaluator now enforces three more
+  types, all deterministic, synchronous, side-effect-free predicates over one record:
+
+  - `format` — a field value against a `regex` and/or a named format
+    (`email` / `url` / `phone` / `json`). Runs only when the write touches the field
+    and the value is non-empty; a malformed regex fails open.
+  - `json_schema` — a JSON field validated against a JSON Schema via `ajv` (compiled
+    result memoised per schema). Accepts a parsed object or a JSON string; an
+    unparseable string is itself a violation; an uncompilable schema fails open.
+  - `conditional` — evaluates `when`, then recurses into `then` / `otherwise`. The
+    nested rule supplies the message; the outer conditional's `severity` decides
+    blocking. `needsPriorRecord` now recurses into conditional branches.
+
+  Adds `ajv` as a dependency and three error codes (`invalid_format`, `invalid_json`,
+  `json_schema_violation`).
+
+  **`@objectstack/spec` (breaking for unused declarations):** removes the
+  `unique`, `async`, and `custom` validation-rule variants (and the
+  `UniquenessValidationSchema` / `AsyncValidationSchema` / `CustomValidatorSchema`
+  exports). They were never enforced and each needs I/O or a handler model a
+  write-path rule must not carry. Use the layer that already does each correctly:
+  uniqueness → a unique index (`ObjectSchema.indexes`, `partial` for scope) or
+  field-level `unique: true`; async/remote → the client form layer; custom code →
+  a `beforeInsert` / `beforeUpdate` lifecycle hook. Field-level `unique: true` is
+  unaffected.
+
+  `examples/app-showcase` demonstrates and verifies each newly-enforced type. See the
+  ADR-0020 addendum for the rationale.
+
+- 60f9c45: feat(automation): structured control-flow constructs (ADR-0031) — loop container
+
+  Adopt structured control-flow as the native, AI-authored flow model (ADR-0031),
+  choosing representation **(B) nested sub-structure**: containers carry their body
+  as a self-contained single-entry/single-exit region in `config`.
+
+  - **spec**: new `automation/control-flow.zod.ts` defining the `loop` container
+    (`config.body`), `parallel` block (`config.branches[]`, implicit join), and
+    `try/catch/retry` (`config.try`/`config.catch`/`config.retry`) configs, plus
+    region well-formedness analysis (`analyzeRegion`, `findRegionEntry`) and
+    `validateControlFlow` (single-entry/single-exit, acyclic; bounded loop).
+  - **engine**: `registerFlow()` now rejects malformed control-flow regions before
+    a flow can run; new `AutomationEngine.runRegion()` executes a body region in
+    the enclosing variable scope without touching the shared DAG traversal.
+  - **loop executor**: replaces the no-op `loop` stub with a real iteration
+    container — binds the iterator/index variables and runs the body once per item
+    under a hard max-iteration guard. Legacy flat-graph loops (no `config.body`)
+    keep working — the construct is additive.
+
+  Parallel-block and try/catch _engine execution_ and BPMN interop mapping remain
+  follow-ups (issue #1479, tasks 3–5).
+
+### Patch Changes
+
+- 02d6359: docs(automation): document ADR-0031 control-flow constructs; fix dangling reference card
+
+  - **guide**: `content/docs/guides/metadata/flow.mdx` now documents the structured
+    control-flow constructs — the `loop` container, `parallel` block (implicit
+    join), and `try_catch` (try/catch/retry) — with config examples and the
+    region/DAG model. The Node Types table is updated accordingly.
+  - **doc generator**: `build-docs.ts` now cards only reference pages that were
+    actually generated. Control-flow's schemas embed CEL-expression transforms
+    (like `Flow`/`FlowEdge`) and so have no JSON-Schema page; the index previously
+    carded every `.zod.ts`, producing a dangling "Control Flow" 404 link. Cards
+    now align with `meta.json` (generated pages only).
+
+- 8fa1e7f: Fix the docs generator (`build-docs.ts`) leaking an unmatched `<` / `{` into generated MDX, which broke the `apps/docs` Turbopack build (e.g. a SemVer range `">=4.0 <5"` in a `.describe()` string was read as the start of a JSX tag). Unmatched openers are now emitted as HTML entities (`&lt;` / `&#123;`); union-variant descriptions also go through the escaper.
+- 55866f5: Fail loud instead of silently minting an ephemeral encryption key; ship a persistent env-master-key provider as the default (#1507).
+
+  The default `ICryptoProvider` backs every secret-at-rest in the platform —
+  encrypted settings (`sys_setting.value_enc`), ObjectQL `secret` fields, and
+  runtime datasource credentials. Its key resolution previously fell back,
+  **silently**, to a fresh per-process `randomBytes(32)` key (or auto-minted a
+  new on-disk key on every boot) when no stable key was available. In an
+  ephemeral-FS container or a multi-node cluster, each restart / each node then
+  encrypts under a different key, and every previously-written `sys_secret` value
+  becomes undecryptable. The failure was invisible at encrypt and boot time and
+  only surfaced later as "all my saved passwords / API keys / DB credentials
+  fail to decrypt".
+
+  - **Renamed `InMemoryCryptoProvider` → `LocalCryptoProvider`.** The old name
+    implied an ephemeral key when the provider in fact persists one.
+    `InMemoryCryptoProvider` stays as a deprecated alias for backward
+    compatibility.
+  - **Added `OS_SECRET_KEY`** as the canonical production master key (32-byte
+    hex or base64), the documented production default. `OS_DEV_CRYPTO_KEY`
+    remains the dev convenience key.
+  - **Fail-loud in production.** When `NODE_ENV=production` and no stable key
+    source (env var or a pre-existing persisted file) is available, the provider
+    now throws an actionable error at construction instead of generating a key —
+    turning silent data-loss into a config error at boot. It never auto-mints a
+    key in production. Development and test keep the ergonomic fallback
+    (persisted dev key / ephemeral test key).
+  - `serve` surfaces the production-key error verbatim and refuses to wire an
+    unstable provider for `secret` fields.
+
+  KMS / Vault providers (managed custody, per-tenant keys, automatic rotation)
+  remain future/enterprise plug-ins behind the same `ICryptoProvider` seam;
+  "your stored secret is still there after a reboot" stays open-source.
+
 ## 7.5.0
 
 ## 7.4.1

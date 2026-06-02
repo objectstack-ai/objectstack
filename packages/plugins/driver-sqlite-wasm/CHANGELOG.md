@@ -1,5 +1,30 @@
 # @objectstack/driver-sqlite-wasm
 
+## 8.0.0
+
+### Patch Changes
+
+- be20aa4: Fix `COMMIT; - cannot commit - no transaction is active` under `persist: 'on-write'` (#1494).
+
+  sql.js's `Database.export()` closes and reopens the database (it has no in-place
+  serialize), which rolls back any open transaction. The fire-and-forget flush
+  triggered after a write inside a Knex transaction (e.g. the autonumber sequence
+  `BEGIN…COMMIT`) could therefore abort that transaction, leaving the trailing
+  `COMMIT` to fail. The connection is now transaction-aware: `flush()` is deferred
+  while a transaction is open and runs once it fully closes, so committed data is
+  still persisted without aborting in-flight transactions.
+
+- Updated dependencies [955d4c8]
+- Updated dependencies [b046ec2]
+- Updated dependencies [02d6359]
+- Updated dependencies [7648242]
+- Updated dependencies [8fa1e7f]
+- Updated dependencies [55866f5]
+- Updated dependencies [60f9c45]
+  - @objectstack/spec@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/driver-sql@8.0.0
+
 ## 7.5.0
 
 ### Patch Changes
