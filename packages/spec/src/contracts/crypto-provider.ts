@@ -11,11 +11,14 @@
  *
  * Why an interface (not a concrete class):
  *
- *  - **Local dev** ships an `InMemoryCryptoProvider` that wraps the
- *    existing `NoopCryptoAdapter` semantics so unit tests stay fast.
- *  - **Production deployments** plug in `AwsKmsCryptoProvider`,
- *    `GcpKmsCryptoProvider`, or `HashicorpVaultCryptoProvider` without
- *    touching `SettingsService`.
+ *  - **Default / self-host** ships a `LocalCryptoProvider`: AES-256-GCM
+ *    keyed off `OS_SECRET_KEY` (or a persisted dev key). Secrets surviving
+ *    a restart is correctness, not a premium feature, so this provider is
+ *    open-source and fails loud rather than silently minting an ephemeral
+ *    key in production.
+ *  - **Managed custody** plugs in `AwsKmsCryptoProvider`,
+ *    `GcpKmsCryptoProvider`, or `HashicorpVaultCryptoProvider` (per-tenant
+ *    keys, automatic rotation) without touching `SettingsService`.
  *  - Custom KMS providers (PKCS#11 HSMs, customer-managed keys) can be
  *    registered by the host application via `SettingsServiceOptions`.
  *

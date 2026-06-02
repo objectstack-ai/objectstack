@@ -1682,37 +1682,48 @@ export default class Serve extends Command {
       // objectql's `secret` field type encrypts on write to `sys_secret`
       // and fails closed when no ICryptoProvider is registered. objectql
       // must NOT depend on a crypto implementation (layering), so the
-      // host injects one here. Dev/self-host gets an independent
-      // InMemoryCryptoProvider; production hosts swap this for a
-      // KMS/Vault-backed provider (e.g. via an env-gated branch or a
-      // dedicated plugin) before secrets are written. We resolve the
-      // data engine by its registered service name and feature-detect
-      // `setCryptoProvider` so older engines / alternate data services
-      // degrade gracefully (writing a secret then fails closed, as
-      // designed, rather than silently storing cleartext).
+      // host injects one here. Dev/self-host gets a LocalCryptoProvider
+      // (AES-256-GCM keyed off `OS_SECRET_KEY` or a persisted dev key);
+      // production hosts swap this for a KMS/Vault-backed provider (e.g.
+      // via an env-gated branch or a dedicated plugin) before secrets are
+      // written. We resolve the data engine by its registered service name
+      // and feature-detect `setCryptoProvider` so older engines / alternate
+      // data services degrade gracefully (writing a secret then fails
+      // closed, as designed, rather than silently storing cleartext).
       try {
         const dataEngine: any =
           kernel.getService?.('data') ?? kernel.getService?.('objectql');
         if (dataEngine && typeof dataEngine.setCryptoProvider === 'function') {
-          const { InMemoryCryptoProvider } = await import(
+          const { LocalCryptoProvider } = await import(
             /* webpackIgnore: true */ '@objectstack/service-settings'
           );
-          dataEngine.setCryptoProvider(new InMemoryCryptoProvider());
+          // In production LocalCryptoProvider throws when no stable key
+          // (OS_SECRET_KEY / persisted file) is available — that is the
+          // fail-loud guard against silently minting an ephemeral key and
+          // losing every sys_secret value after a restart. Let that error
+          // be loud: secret writes must not proceed under an unstable key.
+          dataEngine.setCryptoProvider(new LocalCryptoProvider());
           if (isDev) {
             console.log(
               chalk.dim(
-                '  ↪ secret fields: InMemoryCryptoProvider wired (dev) — swap for KMS/Vault in production',
+                '  ↪ secret fields: LocalCryptoProvider wired (dev) — set OS_SECRET_KEY and swap for KMS/Vault in production',
               ),
             );
           }
         }
       } catch (err: any) {
-        // Non-fatal: without a provider, secret writes fail closed by
-        // design. Surface a hint so operators know why a `secret` field
+        const msg = String(err?.message ?? err);
+        if (msg.includes('Refusing to start in production')) {
+          // Fail-loud config error: print the actionable guidance verbatim.
+          console.error(chalk.red(msg));
+          throw err;
+        }
+        // Otherwise non-fatal: without a provider, secret writes fail closed
+        // by design. Surface a hint so operators know why a `secret` field
         // write might reject.
         console.warn(
           chalk.yellow(
-            `  ⚠ secret fields: no CryptoProvider wired (${err?.message ?? err}); writing a secret field will fail closed`,
+            `  ⚠ secret fields: no CryptoProvider wired (${msg}); writing a secret field will fail closed`,
           ),
         );
       }

@@ -12,7 +12,7 @@
  * touches metadata.
  *
  * This is the dev/self-host wiring; production hosts swap the
- * `InMemoryCryptoProvider` for a KMS-backed `ICryptoProvider` and pass it here.
+ * `LocalCryptoProvider` for a KMS-backed `ICryptoProvider` and pass it here.
  */
 
 import type { CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';

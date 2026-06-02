@@ -1076,7 +1076,7 @@ export class ObjectQL implements IDataEngine {
    * **fail-closed** — the write throws rather than persist cleartext.
    *
    * Mirrors the Settings subsystem's ICryptoProvider wiring; the host (e.g.
-   * `serve`) injects `InMemoryCryptoProvider` in dev and a KMS/Vault-backed
+   * `serve`) injects `LocalCryptoProvider` in dev and a KMS/Vault-backed
    * provider in production.
    */
   setCryptoProvider(provider: ICryptoProvider): void {
@@ -1126,7 +1126,7 @@ export class ObjectQL implements IDataEngine {
       if (!this.cryptoProvider) {
         throw new Error(
           `Cannot persist secret field "${object}.${field}": no CryptoProvider is registered. `
-            + 'Wire one via engine.setCryptoProvider(...) (e.g. InMemoryCryptoProvider in dev, '
+            + 'Wire one via engine.setCryptoProvider(...) (e.g. LocalCryptoProvider in dev, '
             + 'a KMS/Vault provider in production). Refusing to store cleartext (fail-closed).',
         );
       }

@@ -7,7 +7,7 @@ import { SettingsService } from './settings-service.js';
 import type { ICryptoProvider } from '@objectstack/spec/contracts';
 import type { SettingsAuditSink, SettingsAuditWriter, SettingsEngine, SettingsSecretStore } from './settings-service.types.js';
 import type { CryptoAdapter } from './crypto-adapter.js';
-import { InMemoryCryptoProvider } from './in-memory-crypto-provider.js';
+import { LocalCryptoProvider } from './local-crypto-provider.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import {
   settingsObjects,
@@ -38,9 +38,11 @@ export interface SettingsServicePluginOptions {
   /**
    * Phase 3 KMS hook. When provided, encrypted specifier values are
    * routed through this provider into `sys_secret`; `sys_setting.value_enc`
-   * holds the handle id only. Defaults to `InMemoryCryptoProvider`
-   * (NOT suitable for production secrets — replace with an AWS / GCP
-   * KMS-backed implementation).
+   * holds the handle id only. Defaults to `LocalCryptoProvider`, an
+   * AES-256-GCM provider keyed off `OS_SECRET_KEY` (or a persisted dev key).
+   * In production it refuses to boot without a stable key rather than
+   * silently minting an ephemeral one. Swap in an AWS / GCP / Vault
+   * KMS-backed implementation for managed custody and per-tenant keys.
    */
   cryptoProvider?: ICryptoProvider;
   /** Override the default base path (`/api/settings`). */
@@ -176,7 +178,7 @@ export class SettingsServicePlugin implements Plugin {
           {
             secretStore: this.buildSecretStore(engine),
             auditWriter: this.buildAuditWriter(ctx, engine),
-            cryptoProvider: this.opts.cryptoProvider ?? new InMemoryCryptoProvider(),
+            cryptoProvider: this.opts.cryptoProvider ?? new LocalCryptoProvider(),
           },
         );
       }

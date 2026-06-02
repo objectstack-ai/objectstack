@@ -10,10 +10,19 @@ export {
   type CryptoAdapter,
   NoopCryptoAdapter,
 } from './crypto-adapter.js';
-// Default ICryptoProvider for dev / self-host kernels (no KMS). Hosts swap in
-// a KMS-backed provider for production; exported so other subsystems (e.g. the
-// runtime-UI datasource secret binder) can reuse the same dev wrapping.
-export { InMemoryCryptoProvider } from './in-memory-crypto-provider.js';
+// Default, KMS-free ICryptoProvider. AES-256-GCM keyed off `OS_SECRET_KEY`
+// (production) or a persisted dev key; fails loud in production rather than
+// silently minting an ephemeral key. Hosts swap in a KMS/Vault provider for
+// managed custody. Exported so other subsystems (e.g. the runtime-UI
+// datasource secret binder) can reuse the same wrapping. `InMemoryCryptoProvider`
+// remains a deprecated alias for backward compatibility.
+export {
+  LocalCryptoProvider,
+  InMemoryCryptoProvider,
+  type LocalCryptoProviderOptions,
+  type CryptoMode,
+  type KeySource,
+} from './local-crypto-provider.js';
 export {
   type SettingsActionHandler,
   type SettingsAuditSink,
