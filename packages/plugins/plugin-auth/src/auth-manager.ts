@@ -235,6 +235,15 @@ export class AuthManager {
   private auth: Auth<any> | null = null;
   private config: AuthManagerOptions;
 
+  /**
+   * Result of the dev-only admin seed (set by `AuthPlugin.maybeSeedDevAdmin`
+   * when it provisions the well-known admin on an empty DB). The `serve`
+   * command reads this after boot to surface the credentials in the startup
+   * banner. Undefined when no seed ran (production, opt-out, or a DB that
+   * already had a user).
+   */
+  public devSeedResult?: { email: string; password: string };
+
   constructor(config: AuthManagerOptions) {
     this.config = config;
 

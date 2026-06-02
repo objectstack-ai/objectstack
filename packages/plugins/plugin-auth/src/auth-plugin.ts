@@ -389,6 +389,12 @@ export class AuthPlugin implements Plugin {
       // is otherwise disabled.
       await api.signUpEmail({ body: { email, password, name } });
       ctx.logger.info(`🔑 Dev admin seeded: ${email} / ${password}`);
+      // Surface the credentials in the `serve` startup banner. The
+      // ctx.logger line above is swallowed by serve's boot-quiet window
+      // (the seed runs during runtime.start(), before stdout is restored),
+      // so the CLI reads this off the `auth` service and prints it after
+      // the banner instead.
+      this.authManager.devSeedResult = { email, password };
     } catch (err: any) {
       // Best-effort. The common benign case is a race where a real sign-up
       // landed first (unique-email violation) — treat as "already seeded".

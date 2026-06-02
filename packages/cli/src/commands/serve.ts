@@ -1601,14 +1601,15 @@ export default class Serve extends Command {
         }
       }
 
+      // Shared dev crypto provider for ALL of sys_secret (datasource creds
+      // below + secret fields after start). One instance ⇒ one key, so every
+      // encrypted secret decrypts under the same provider. Created lazily by
+      // whichever block runs first.
+      let sharedCryptoProvider: any = undefined;
+
       // ── External Datasource Federation (ADR-0015) ─────────────────
       // Federation (introspect / draft / import / validate of external
-      // tables) ships in the open framework. The runtime-UI datasource
-      // *lifecycle* (ADR-0015 Addendum — the "Add Datasource" wizard backend:
-      // create / update / remove runtime datasources) was extracted into the
-      // private `@objectstack/datasource-admin` package; a private host wires
-      // its `DatasourceAdminServicePlugin` + routes after the data/metadata
-      // services exist (see that package's README).
+      // tables) ships in the open framework.
       try {
         const dsMod: any = await import('@objectstack/service-external-datasource');
         const { ExternalDatasourceServicePlugin } = dsMod;
@@ -1636,7 +1637,114 @@ export default class Serve extends Command {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (!msg.includes('Cannot find module') && !msg.includes('ERR_MODULE_NOT_FOUND')) {
-          console.error(`[Datasource] runtime-UI lifecycle wiring failed: ${msg}`);
+          console.error(`[Datasource] federation wiring failed: ${msg}`);
+        }
+      }
+
+      // ── Runtime Datasource Admin (ADR-0015 Addendum) ──────────────
+      // The "Add Datasource" wizard backend: list / test / create / update /
+      // remove datasources defined in the UI at runtime. This is open-source
+      // *mechanism* (`@objectstack/service-datasource-admin`); the tier line
+      // falls on which ICryptoProvider / driver factory a host injects, not on
+      // whether the UI can manage datasources. Mounted by default so a
+      // self-host runtime is a complete low-code platform out of the box.
+      //
+      // Credentials are bound through the SAME crypto provider used for
+      // `secret` fields below (`sharedCryptoProvider`), so every secret in
+      // `sys_secret` (settings, secret fields, datasource creds) shares one
+      // key. Wired BEFORE runtime.start() so the plugin's kernel:ready boot
+      // rehydration (which decrypts persisted creds) has its binder ready.
+      try {
+        const adminMod: any = await import('@objectstack/service-datasource-admin');
+        const {
+          DatasourceAdminServicePlugin,
+          createDefaultDatasourceDriverFactory,
+          createDatasourceSecretBinder,
+          registerDatasourceAdminRoutes,
+        } = adminMod;
+
+        if (
+          DatasourceAdminServicePlugin &&
+          !hasPluginMatching(['service-datasource-admin', 'DatasourceAdminServicePlugin'])
+        ) {
+          // Lazy data-engine surface for the secret store (resolved per call
+          // so it works whether the engine is registered as 'data' or
+          // 'objectql', and regardless of init ordering).
+          const resolveEngine = (): any =>
+            kernel.getService?.('data') ?? kernel.getService?.('objectql');
+          const lazySecretEngine = {
+            insert: (o: string, d: any, opt?: any) => resolveEngine()?.insert(o, d, opt),
+            delete: (o: string, opt?: any) => resolveEngine()?.delete(o, opt),
+            find: (o: string, q?: any) => resolveEngine()?.find(o, q),
+          };
+
+          // Fail-closed binder over the shared dev crypto provider. If the
+          // provider can't be created, leave `secrets` undefined — the plugin
+          // then rejects secret-bearing create/update instead of storing
+          // cleartext (by design).
+          let secrets: any = undefined;
+          try {
+            const { InMemoryCryptoProvider } = await import(
+              /* webpackIgnore: true */ '@objectstack/service-settings'
+            );
+            sharedCryptoProvider = sharedCryptoProvider ?? new InMemoryCryptoProvider();
+            secrets = createDatasourceSecretBinder({
+              engine: lazySecretEngine,
+              cryptoProvider: sharedCryptoProvider,
+            });
+          } catch (cryptoErr: any) {
+            console.warn(
+              chalk.yellow(
+                `  ⚠ datasource admin: no CryptoProvider (${cryptoErr?.message ?? cryptoErr}); secret-bearing datasource create/update will fail closed`,
+              ),
+            );
+          }
+
+          await kernel.use(
+            new DatasourceAdminServicePlugin({
+              driverFactory: createDefaultDatasourceDriverFactory(),
+              secrets,
+            }),
+          );
+          trackPlugin('DatasourceAdminServicePlugin');
+
+          // REST routes under /api/v1/datasources. Registered via a tiny
+          // plugin so it resolves http.server during init (same pattern as
+          // the hostname guard above).
+          const adminRoutePlugin: any = {
+            name: 'com.objectstack.cli.datasource-admin-routes',
+            version: '1.0.0',
+            init: async (ctx: any) => {
+              try {
+                const httpServer: any =
+                  ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
+                if (!httpServer || typeof httpServer.get !== 'function') {
+                  ctx.logger?.warn?.(
+                    '[datasource-admin] http.server unavailable; REST routes not installed',
+                  );
+                  return;
+                }
+                registerDatasourceAdminRoutes(httpServer, ctx, '/api/v1');
+              } catch (routeErr: any) {
+                ctx.logger?.warn?.(
+                  `[datasource-admin] route registration failed: ${routeErr?.message ?? routeErr}`,
+                );
+              }
+            },
+          };
+          await kernel.use(adminRoutePlugin);
+          trackPlugin('DatasourceAdminRoutes');
+
+          if (isDev) {
+            console.log(
+              chalk.dim('  ↪ datasource admin: runtime UI lifecycle wired (/api/v1/datasources)'),
+            );
+          }
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes('Cannot find module') && !msg.includes('ERR_MODULE_NOT_FOUND')) {
+          console.error(`[Datasource] runtime-UI admin wiring failed: ${msg}`);
         }
       }
 
@@ -1695,10 +1803,13 @@ export default class Serve extends Command {
         const dataEngine: any =
           kernel.getService?.('data') ?? kernel.getService?.('objectql');
         if (dataEngine && typeof dataEngine.setCryptoProvider === 'function') {
-          const { InMemoryCryptoProvider } = await import(
-            /* webpackIgnore: true */ '@objectstack/service-settings'
-          );
-          dataEngine.setCryptoProvider(new InMemoryCryptoProvider());
+          if (!sharedCryptoProvider) {
+            const { InMemoryCryptoProvider } = await import(
+              /* webpackIgnore: true */ '@objectstack/service-settings'
+            );
+            sharedCryptoProvider = new InMemoryCryptoProvider();
+          }
+          dataEngine.setCryptoProvider(sharedCryptoProvider);
           if (isDev) {
             console.log(
               chalk.dim(
@@ -1754,6 +1865,17 @@ export default class Serve extends Command {
         }
       }
 
+      // Surface the dev admin seeded this boot (if any) in the banner. The
+      // seed runs in-process during runtime.start() under serve's boot-quiet
+      // window, so plugin-auth records the result on the `auth` service and
+      // we print it here, after stdout is restored. Visible in both
+      // `serve --dev` and `os dev` (the child's stdout is inherited).
+      let seededAdmin: { email: string; password: string } | undefined;
+      try {
+        const authSvc: any = kernel.getService?.('auth');
+        if (authSvc?.devSeedResult?.email) seededAdmin = authSvc.devSeedResult;
+      } catch { /* auth service not present — nothing to show */ }
+
       // ── Clean startup summary ──────────────────────────────────────
       printServerReady({
         port,
@@ -1766,6 +1888,7 @@ export default class Serve extends Command {
         driverLabel: resolvedDriverLabel,
         databaseUrl: redactDbUrl(resolvedDatabaseUrl),
         multiTenant: String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false',
+        seededAdmin,
       });
 
       // ── Publish the actually-bound port ────────────────────────────

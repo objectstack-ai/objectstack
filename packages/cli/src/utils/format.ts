@@ -189,6 +189,12 @@ export interface ServerReadyOptions {
   databaseUrl?: string;
   /** Whether the SecurityPlugin was wired in multi-tenant mode (default true). */
   multiTenant?: boolean;
+  /**
+   * Credentials of the dev admin seeded on an empty DB this boot (dev only).
+   * When present, the banner surfaces them so backend debugging never has to
+   * guess the login. Absent when nothing was seeded.
+   */
+  seededAdmin?: { email: string; password: string };
 }
 
 export function printServerReady(opts: ServerReadyOptions) {
@@ -199,6 +205,14 @@ export function printServerReady(opts: ServerReadyOptions) {
   console.log(chalk.cyan('  ➜') + chalk.bold('  API:       ') + chalk.cyan(base + '/'));
   if (opts.uiEnabled && opts.consolePath) {
     console.log(chalk.cyan('  ➜') + chalk.bold('  Console:   ') + chalk.cyan(base + opts.consolePath + '/'));
+  }
+  if (opts.seededAdmin) {
+    console.log('');
+    console.log(
+      chalk.green('  🔑') + chalk.bold('  Dev admin: ') +
+      chalk.bold.green(`${opts.seededAdmin.email} / ${opts.seededAdmin.password}`),
+    );
+    console.log(chalk.dim('      seeded on empty DB · dev only — do not use in production'));
   }
   console.log('');
   console.log(chalk.dim(`  Config:  ${opts.configFile}`));

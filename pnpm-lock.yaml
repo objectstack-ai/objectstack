@@ -536,6 +536,9 @@ importers:
       '@objectstack/service-cache':
         specifier: workspace:*
         version: link:../services/service-cache
+      '@objectstack/service-datasource-admin':
+        specifier: workspace:*
+        version: link:../services/service-datasource-admin
       '@objectstack/service-external-datasource':
         specifier: workspace:*
         version: link:../services/service-external-datasource
@@ -1838,6 +1841,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../plugins/driver-sql
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-hono-server
       '@types/node':
         specifier: ^25.9.1
         version: 25.9.1

@@ -42,6 +42,7 @@
   "devDependencies": {
     "@objectstack/driver-memory": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/plugin-hono-server": "workspace:*",
     "@types/node": "^25.9.1",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
