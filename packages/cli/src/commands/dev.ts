@@ -71,7 +71,7 @@ export default class Dev extends Command {
       default: false,
     }),
     'seed-admin': Flags.boolean({
-      description: 'After the server is ready, POST /api/v1/auth/sign-up/email to seed an admin account. Default: on (idempotent — creates the admin only on an empty DB, skips if the email already exists). Disable with --no-seed-admin.',
+      description: 'Seed a known, loginable dev admin (admin@objectos.ai / admin123) in-process via the runtime on an EMPTY DB, then promote it to platform admin. Default: on (idempotent — only acts on a zero-user DB, never overwrites an existing account). Disable with --no-seed-admin.',
       allowNo: true,
     }),
     'admin-email': Flags.string({
@@ -173,11 +173,23 @@ export default class Dev extends Command {
       // flag below already opts the serve command into dev semantics,
       // and serve.ts will set NODE_ENV='development' internally before
       // any runtime modules are imported.
+      // ── Dev admin seeding (in-process) ──────────────────────────────
+      // Seeding is performed IN-PROCESS by the runtime
+      // (@objectstack/plugin-auth → maybeSeedDevAdmin) on an empty DB — no
+      // HTTP POST, no port, no readiness race. The CLI's only job is to pass
+      // the toggle + credentials through to the serve child via env.
+      // Default ON in dev; `--no-seed-admin` disables it. The seed is
+      // idempotent (empty-DB only) and never overwrites an existing account.
+      const seedAdmin = flags['seed-admin'] ?? true;
+
       const effectiveDb = flags.database ?? freshDbUrl;
       const localEnv: NodeJS.ProcessEnv = {
         ...process.env,
         OS_ENVIRONMENT_ID: environmentId,
         OS_ARTIFACT_PATH: artifactPath,
+        OS_SEED_ADMIN: seedAdmin ? '1' : '0',
+        ...(seedAdmin && flags['admin-email'] ? { OS_SEED_ADMIN_EMAIL: flags['admin-email'] } : {}),
+        ...(seedAdmin && flags['admin-password'] ? { OS_SEED_ADMIN_PASSWORD: flags['admin-password'] } : {}),
         ...(freshHome ? { OS_HOME: freshHome } : {}),
         ...(freshStorageRoot ? { OS_STORAGE_ROOT: freshStorageRoot } : {}),
         ...(effectiveDb ? { OS_DATABASE_URL: effectiveDb } : {}),
@@ -202,30 +214,25 @@ export default class Dev extends Command {
           ...(flags.verbose ? ['--verbose'] : []),
           ...(flags.preset ? ['--preset', flags.preset] : []),
         ],
-        { stdio: 'inherit', env: localEnv },
+        // 'ipc' adds a message channel so the serve child can report the
+        // port it ACTUALLY bound (dev auto-shifts off a busy port). Without
+        // this, the parent only knows the requested port.
+        { stdio: ['inherit', 'inherit', 'inherit', 'ipc'], env: localEnv },
       );
 
-      // ── Seed admin account after the server is ready ────────────────
-      // `--seed-admin` defaults to ON in dev. The seed is idempotent and
-      // NON-DESTRUCTIVE: it POSTs the public sign-up endpoint, which creates
-      // `admin@objectos.ai` only on an EMPTY DB (then `bootstrapPlatformAdmin`
-      // in @objectstack/plugin-security promotes that first user to platform
-      // admin). When the email already exists — i.e. a persistent dev DB you
-      // signed up against before — better-auth returns 422/400 and we skip
-      // (see the `r.status === 422 || 400` branch below), so a custom password
-      // is never overwritten. There's therefore no need to gate on ephemeral
-      // vs persistent: seeding an empty DB is exactly what you want, and a
-      // populated DB is left untouched.
-      // The dev-mode bootstrap bypass (auth-manager.ts) lets the very first
-      // sign-up through even when OS_DISABLE_SIGNUP=true.
-      const seedAdmin = flags['seed-admin'] ?? true;
-      if (seedAdmin) {
-        void this.seedAdminAccount({
-          port: port ?? '3000',
-          email: flags['admin-email'],
-          password: flags['admin-password'],
-        });
-      }
+      // ── Learn the actually-bound port from the serve child ──────────
+      // The child emits `{ type: 'objectstack:listening', port, url }` once
+      // its HTTP server is up. We surface it so the printed URL is correct
+      // even when the port was auto-shifted (e.g. 3000 busy → 3001).
+      const requestedPort = port ?? '3000';
+      serveChild.on('message', (msg: any) => {
+        if (msg?.type === 'objectstack:listening' && msg.port) {
+          const actual = String(msg.port);
+          if (actual !== requestedPort) {
+            console.log(chalk.dim(`  ↪ server bound to port ${actual} (requested ${requestedPort})`));
+          }
+        }
+      });
 
       // ── Watch-recompile loop ────────────────────────────────────────
       // When the agent edits an objectstack source file (config or
@@ -244,7 +251,6 @@ export default class Dev extends Command {
           configPath,
           artifactPath,
           binPath,
-          port: port ?? '3000',
           verbose: flags.verbose,
         });
       }
@@ -300,7 +306,6 @@ export default class Dev extends Command {
     configPath: string;
     artifactPath: string;
     binPath: string;
-    port: string;
     verbose?: boolean;
   }): void {
     void (async () => {
@@ -387,63 +392,6 @@ export default class Dev extends Command {
     })().catch((e) => {
       console.error(chalk.yellow(`  ⚠ watch-recompile failed to start: ${e?.message ?? e}`));
     });
-  }
-
-  /**
-   * Poll `/api/v1/health` until 200, then POST `/api/v1/auth/sign-up/email`
-   * to provision an admin account. Best-effort: any failure is logged
-   * but does not bring down the dev server.
-   *
-   * Pairs naturally with `--fresh`: an ephemeral DB has zero users, so
-   * the first sign-up is automatically the platform admin (promoted by
-   * `bootstrapPlatformAdmin` in @objectstack/plugin-security).
-   */
-  private async seedAdminAccount(opts: {
-    port: string;
-    email: string;
-    password: string;
-  }): Promise<void> {
-    const base = `http://localhost:${opts.port}`;
-    const deadline = Date.now() + 30_000;
-
-    while (Date.now() < deadline) {
-      try {
-        const r = await fetch(`${base}/api/v1/health`);
-        if (r.ok) break;
-      } catch { /* not ready */ }
-      await new Promise(r => setTimeout(r, 250));
-    }
-
-    try {
-      const r = await fetch(`${base}/api/v1/auth/sign-up/email`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          // better-auth enforces a same-origin / trusted-origin check on
-          // POST. localhost is auto-trusted in dev (auth-manager.ts), but
-          // we still must send an Origin header for the check to fire.
-          'origin': base,
-        },
-        body: JSON.stringify({
-          email: opts.email,
-          password: opts.password,
-          name: 'Dev Admin',
-        }),
-      });
-      if (r.ok) {
-        console.log(chalk.green(
-          `\n🔑 Admin seeded: ${chalk.bold(opts.email)} / ${chalk.bold(opts.password)}`,
-        ));
-      } else if (r.status === 422 || r.status === 400) {
-        // User already exists — normal when reusing a non-fresh DB.
-        console.log(chalk.dim(`  (admin ${opts.email} already exists — skipping seed)`));
-      } else {
-        const body = await r.text().catch(() => '');
-        console.log(chalk.yellow(`  ⚠ seed-admin failed (HTTP ${r.status}): ${body.slice(0, 200)}`));
-      }
-    } catch (e: any) {
-      console.log(chalk.yellow(`  ⚠ seed-admin request failed: ${e?.message ?? e}`));
-    }
   }
 }
 

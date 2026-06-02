@@ -2,7 +2,7 @@
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
-import { AuthConfig } from '@objectstack/spec/system';
+import { AuthConfig, SystemObjectName, SystemUserId } from '@objectstack/spec/system';
 import {
   SETUP_APP,
   SETUP_NAV_CONTRIBUTIONS,
@@ -286,6 +286,13 @@ export class AuthPlugin implements Plugin {
       });
     }
 
+    // Dev-only: provision a known, loginable platform admin on an empty DB.
+    // Registered as its own kernel:ready hook (independent of registerRoutes)
+    // so it runs whenever the runtime boots in development.
+    ctx.hook('kernel:ready', async () => {
+      await this.maybeSeedDevAdmin(ctx);
+    });
+
     // Register auth middleware on ObjectQL engine (if available)
     try {
       const ql = ctx.getService<any>('objectql');
@@ -310,6 +317,83 @@ export class AuthPlugin implements Plugin {
   async destroy(): Promise<void> {
     // Cleanup if needed
     this.authManager = null;
+  }
+
+  /**
+   * Dev-only admin bootstrap.
+   *
+   * On an EMPTY database (zero users), provision a well-known, loginable
+   * admin (admin@objectos.ai / admin123 by default) so backend debugging
+   * never blocks on a first-run sign-up wizard. The account is created
+   * through better-auth's real server-side `signUpEmail` pipeline (hashed
+   * credential + the same hooks the HTTP endpoint runs), so it is fully
+   * loginable; plugin-security's first-user middleware then promotes it to
+   * platform admin automatically.
+   *
+   * This replaces two earlier, divergent seeds:
+   *   • the CLI-side HTTP seed (`os dev`), which POSTed the public sign-up
+   *     endpoint from the parent process — racing server readiness and
+   *     targeting a hard-coded port that broke under dev port auto-shift; and
+   *   • plugin-dev's raw `sys_user` insert, which produced a credential-less,
+   *     un-loginable row.
+   * Running it in-process needs no port and no readiness polling.
+   *
+   * Idempotent and non-destructive: it only ever acts on a zero-user DB and
+   * never touches an existing account, so a custom password is never
+   * overwritten.
+   *
+   * HARD-GATED to development (NODE_ENV==='development'): a known-credential
+   * admin can never be provisioned in production. Opt out within dev via
+   * OS_SEED_ADMIN=0 (or false/off/no).
+   */
+  private async maybeSeedDevAdmin(ctx: PluginContext): Promise<void> {
+    if (process.env.NODE_ENV !== 'development') return;
+    const flag = String(process.env.OS_SEED_ADMIN ?? '').trim().toLowerCase();
+    if (['0', 'false', 'off', 'no'].includes(flag)) return;
+
+    const email = process.env.OS_SEED_ADMIN_EMAIL?.trim() || 'admin@objectos.ai';
+    const password = process.env.OS_SEED_ADMIN_PASSWORD?.trim() || 'admin123';
+    const name = process.env.OS_SEED_ADMIN_NAME?.trim() || 'Dev Admin';
+
+    let ql: any;
+    try { ql = ctx.getService<any>('objectql'); } catch { /* unavailable */ }
+    if (!ql || typeof ql.find !== 'function') return;
+
+    try {
+      // Only seed when no HUMAN user exists yet. A fresh DB still contains
+      // the system service account (SystemUserId.SYSTEM, role='system'),
+      // which must NOT count — mirror plugin-security's first-user detection
+      // so the seed fires on a genuinely empty DB. Any real human user (or a
+      // prior sign-up) disables the seed for good; we never touch or
+      // overwrite an existing account.
+      const rows = await ql
+        .find(SystemObjectName.USER, { where: {}, limit: 50 }, { context: { isSystem: true } })
+        .catch(() => []);
+      const humans = (Array.isArray(rows) ? rows : [])
+        .filter((u: any) => u && u.id !== SystemUserId.SYSTEM && u.role !== 'system');
+      if (humans.length > 0) {
+        ctx.logger.debug('[auth] dev admin seed skipped — a user already exists');
+        return;
+      }
+
+      if (!this.authManager) return;
+      const api: any = await this.authManager.getApi();
+      if (typeof api?.signUpEmail !== 'function') {
+        ctx.logger.warn('[auth] dev admin seed skipped — signUpEmail unavailable');
+        return;
+      }
+
+      // Real auth pipeline: creates sys_user + a hashed `credential` account
+      // and runs the sign-up hooks. The dev-mode OS_DISABLE_SIGNUP bypass
+      // (auth-manager.ts) lets this through on an empty DB even when sign-up
+      // is otherwise disabled.
+      await api.signUpEmail({ body: { email, password, name } });
+      ctx.logger.info(`🔑 Dev admin seeded: ${email} / ${password}`);
+    } catch (err: any) {
+      // Best-effort. The common benign case is a race where a real sign-up
+      // landed first (unique-email violation) — treat as "already seeded".
+      ctx.logger.warn(`[auth] dev admin seed skipped: ${err?.message ?? err}`);
+    }
   }
 
   /**

@@ -9,6 +9,7 @@ import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
+import { resolveObjectStackHome } from '@objectstack/runtime';
 import {
   printHeader,
   printKV,
@@ -1766,6 +1767,35 @@ export default class Serve extends Command {
         databaseUrl: redactDbUrl(resolvedDatabaseUrl),
         multiTenant: String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false',
       });
+
+      // ── Publish the actually-bound port ────────────────────────────
+      // `port` here is the port the HTTP server actually bound — already
+      // resolved past any dev auto-shift (busy 3000 → 3001). Publish it so
+      // supervisors and the `os dev` parent never have to guess:
+      //   • IPC: when spawned with an 'ipc' channel (as `os dev` does), the
+      //     parent learns the real port without polling.
+      //   • runtime.json: a small state file under OS_HOME for external
+      //     supervisors / health checks (pid + port + url).
+      const runtimeUrl = `http://localhost:${port}`;
+      try {
+        if (typeof process.send === 'function') {
+          process.send({ type: 'objectstack:listening', port: Number(port), url: runtimeUrl });
+        }
+      } catch { /* IPC channel closed — best-effort */ }
+      try {
+        const environmentId = process.env.OS_ENVIRONMENT_ID ?? 'env_local';
+        const runtimeFile = path.join(resolveObjectStackHome(), `runtime.${environmentId}.json`);
+        fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
+        fs.writeFileSync(runtimeFile, JSON.stringify({
+          pid: process.pid,
+          port: Number(port),
+          url: runtimeUrl,
+          environmentId,
+          startedAt: new Date().toISOString(),
+        }, null, 2));
+        const cleanupRuntimeFile = () => { try { fs.rmSync(runtimeFile, { force: true }); } catch { /* noop */ } };
+        process.on('exit', cleanupRuntimeFile);
+      } catch { /* non-fatal — supervision file is best-effort */ }
 
       // Kernel already registers SIGINT/SIGTERM handlers during bootstrap.
       // No duplicate handler needed here — just keep the process alive.

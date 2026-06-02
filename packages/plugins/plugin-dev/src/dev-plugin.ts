@@ -2,7 +2,6 @@
 
 import { Plugin, PluginContext, createMemoryCache, createMemoryQueue, createMemoryJob, createMemoryI18n } from '@objectstack/core';
 import { readEnvWithDeprecation } from '@objectstack/types';
-import { SystemObjectName } from '@objectstack/spec/system';
 
 /**
  * All 17 core kernel service names as defined in CoreServiceName.
@@ -686,9 +685,15 @@ export class DevPlugin implements Plugin {
       }
     }
 
-    // Seed default admin user
-    if (this.options.seedAdminUser) {
-      await this.seedAdmin(ctx);
+    // Dev admin seeding is now centralised in the runtime
+    // (@objectstack/plugin-auth → maybeSeedDevAdmin), which provisions a
+    // REAL, loginable platform admin via better-auth's signUpEmail pipeline.
+    // The previous raw `sys_user` insert here produced a credential-less,
+    // un-loginable row and has been removed. We only translate this plugin's
+    // `seedAdminUser` option into the OS_SEED_ADMIN toggle the runtime reads,
+    // without clobbering an explicit env value the operator already set.
+    if (process.env.OS_SEED_ADMIN == null) {
+      process.env.OS_SEED_ADMIN = this.options.seedAdminUser ? '1' : '0';
     }
 
     ctx.logger.info('─────────────────────────────────────────');
@@ -718,40 +723,4 @@ export class DevPlugin implements Plugin {
     }
   }
 
-  /**
-   * Seed a default admin user for development.
-   */
-  private async seedAdmin(ctx: PluginContext): Promise<void> {
-    try {
-      const dataEngine = ctx.getService<any>('data');
-      if (!dataEngine) return;
-
-      // Check if admin already exists
-      const existing = await dataEngine.find(SystemObjectName.USER, {
-        filter: { email: 'admin@dev.local' },
-        limit: 1,
-      }).catch(() => null);
-
-      if (existing?.length) {
-        ctx.logger.debug('Dev admin user already exists');
-        return;
-      }
-
-      await dataEngine.insert(SystemObjectName.USER, {
-        data: {
-          name: 'Admin',
-          email: 'admin@dev.local',
-          username: 'admin',
-          role: 'admin',
-        },
-      }).catch(() => {
-        // Table might not exist yet — that's fine for dev
-      });
-
-      ctx.logger.info('🔑 Dev admin user seeded: admin@dev.local');
-    } catch {
-      // Non-fatal — user seeding is best-effort
-      ctx.logger.debug('Could not seed admin user (data engine may not be ready)');
-    }
-  }
 }
