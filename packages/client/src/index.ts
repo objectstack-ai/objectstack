@@ -40,10 +40,6 @@ import {
   GetWorkflowStateResponse,
   WorkflowTransitionRequest,
   WorkflowTransitionResponse,
-  WorkflowApproveRequest,
-  WorkflowApproveResponse,
-  WorkflowRejectRequest,
-  WorkflowRejectResponse,
   ListViewsResponse,
   GetViewResponse,
   CreateViewRequest,
@@ -87,6 +83,12 @@ import {
   WellKnownCapabilities,
   ApiRoutes,
 } from '@objectstack/spec/api';
+import type {
+  ApprovalRequestRow,
+  ApprovalActionRow,
+  ApprovalStatus,
+  ApprovalDecisionResult,
+} from '@objectstack/spec/contracts';
 import { Logger, createLogger } from '@objectstack/core/logger';
 import { RealtimeAPI } from './realtime-api';
 
@@ -2494,36 +2496,90 @@ export class ObjectStackClient {
         })
       });
       return this.unwrapResponse<WorkflowTransitionResponse>(res);
+    }
+    // ADR-0019: approve/reject are no longer workflow operations. Approval is a
+    // flow node — see the `approvals` namespace below for recording decisions.
+  };
+
+  /**
+   * Approval Services (ADR-0019)
+   *
+   * Approval is a first-class flow node, not a workflow step: a flow's
+   * Approval node opens a request and suspends the run; recording a decision
+   * here finalises the request and resumes the owning flow down the matching
+   * `approve` / `reject` edge. This namespace drives the "my approvals" inbox
+   * and the decision API exposed under `/api/v1/approvals`.
+   */
+  approvals = {
+    /**
+     * List approval requests ("my approvals" inbox). Filter by status, target
+     * object / record, the user expected to act next, or the submitter.
+     */
+    listRequests: async (filter?: {
+      object?: string;
+      recordId?: string;
+      status?: ApprovalStatus | ApprovalStatus[];
+      approverId?: string;
+      submitterId?: string;
+    }): Promise<ApprovalRequestRow[]> => {
+      const route = this.getRoute('approvals');
+      const params = new URLSearchParams();
+      if (filter?.object) params.set('object', filter.object);
+      if (filter?.recordId) params.set('recordId', filter.recordId);
+      if (filter?.status) {
+        params.set('status', Array.isArray(filter.status) ? filter.status.join(',') : filter.status);
+      }
+      if (filter?.approverId) params.set('approverId', filter.approverId);
+      if (filter?.submitterId) params.set('submitterId', filter.submitterId);
+      const qs = params.toString();
+      const res = await this.fetch(`${this.baseUrl}${route}/requests${qs ? `?${qs}` : ''}`);
+      const body = await this.unwrapResponse<{ data?: ApprovalRequestRow[] } | ApprovalRequestRow[]>(res);
+      return Array.isArray(body) ? body : (body?.data ?? []);
     },
 
     /**
-     * Approve a workflow step
+     * Get a single approval request by id.
      */
-    approve: async (request: WorkflowApproveRequest): Promise<WorkflowApproveResponse> => {
-      const route = this.getRoute('workflow');
-      const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(request.object)}/${encodeURIComponent(request.recordId)}/approve`, {
-        method: 'POST',
-        body: JSON.stringify({
-          comment: request.comment,
-          data: request.data
-        })
-      });
-      return this.unwrapResponse<WorkflowApproveResponse>(res);
+    getRequest: async (requestId: string): Promise<ApprovalRequestRow> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}`);
+      return this.unwrapResponse<ApprovalRequestRow>(res);
     },
 
     /**
-     * Reject a workflow step
+     * Record an approve decision on a request. Finalises the request when the
+     * node's behaviour is satisfied and resumes the owning flow run.
      */
-    reject: async (request: WorkflowRejectRequest): Promise<WorkflowRejectResponse> => {
-      const route = this.getRoute('workflow');
-      const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(request.object)}/${encodeURIComponent(request.recordId)}/reject`, {
+    approve: async (requestId: string, decision?: { actorId?: string; comment?: string }): Promise<ApprovalDecisionResult> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/approve`, {
         method: 'POST',
-        body: JSON.stringify({
-          reason: request.reason,
-          comment: request.comment
-        })
+        body: JSON.stringify({ actorId: decision?.actorId, comment: decision?.comment })
       });
-      return this.unwrapResponse<WorkflowRejectResponse>(res);
+      return this.unwrapResponse<ApprovalDecisionResult>(res);
+    },
+
+    /**
+     * Record a reject decision on a request. Resumes the owning flow run down
+     * the `reject` edge.
+     */
+    reject: async (requestId: string, decision?: { actorId?: string; comment?: string }): Promise<ApprovalDecisionResult> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ actorId: decision?.actorId, comment: decision?.comment })
+      });
+      return this.unwrapResponse<ApprovalDecisionResult>(res);
+    },
+
+    /**
+     * Audit trail (the immutable action log) for an approval request.
+     */
+    listActions: async (requestId: string): Promise<ApprovalActionRow[]> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/actions`);
+      const body = await this.unwrapResponse<{ data?: ApprovalActionRow[] } | ApprovalActionRow[]>(res);
+      return Array.isArray(body) ? body : (body?.data ?? []);
     }
   };
 
@@ -3286,6 +3342,7 @@ export class ObjectStackClient {
       permissions: '/api/v1/permissions',
       realtime: '/api/v1/realtime',
       workflow: '/api/v1/workflow',
+      approvals: '/api/v1/approvals',
       views: '/api/v1/ui/views',
       notifications: '/api/v1/notifications',
       ai: '/api/v1/ai',
@@ -3611,10 +3668,6 @@ export type {
   GetWorkflowStateResponse,
   WorkflowTransitionRequest,
   WorkflowTransitionResponse,
-  WorkflowApproveRequest,
-  WorkflowApproveResponse,
-  WorkflowRejectRequest,
-  WorkflowRejectResponse,
   ListViewsResponse,
   GetViewResponse,
   CreateViewResponse,
@@ -3654,3 +3707,13 @@ export type {
   EmailPasswordConfigPublic,
   AuthFeaturesConfig,
 } from '@objectstack/spec/api';
+
+// Approval runtime types (ADR-0019) — surfaced so SDK consumers can type the
+// `client.approvals` namespace without reaching into `@objectstack/spec`.
+export type {
+  ApprovalRequestRow,
+  ApprovalActionRow,
+  ApprovalStatus,
+  ApprovalDecisionInput,
+  ApprovalDecisionResult,
+} from '@objectstack/spec/contracts';

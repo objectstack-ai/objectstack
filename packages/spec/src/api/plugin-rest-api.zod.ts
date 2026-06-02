@@ -1119,7 +1119,7 @@ export const DEFAULT_WORKFLOW_ROUTES: RestApiRouteRegistration = {
   prefix: '/api/v1/workflow',
   service: 'workflow',
   category: 'workflow',
-  methods: ['getWorkflowConfig', 'getWorkflowState', 'workflowTransition', 'workflowApprove', 'workflowReject'],
+  methods: ['getWorkflowConfig', 'getWorkflowState', 'workflowTransition'],
   authRequired: true,
   endpoints: [
     {
@@ -1161,34 +1161,9 @@ export const DEFAULT_WORKFLOW_ROUTES: RestApiRouteRegistration = {
       permissions: ['workflow.transition'],
       cacheable: false,
     },
-    {
-      method: 'POST',
-      path: '/:object/:recordId/approve',
-      handler: 'workflowApprove',
-      category: 'workflow',
-      public: false,
-      summary: 'Approve workflow step',
-      description: 'Approves a pending workflow approval step',
-      tags: ['Workflow'],
-      requestSchema: 'WorkflowApproveRequestSchema',
-      responseSchema: 'WorkflowApproveResponseSchema',
-      permissions: ['workflow.approve'],
-      cacheable: false,
-    },
-    {
-      method: 'POST',
-      path: '/:object/:recordId/reject',
-      handler: 'workflowReject',
-      category: 'workflow',
-      public: false,
-      summary: 'Reject workflow step',
-      description: 'Rejects a pending workflow approval step',
-      tags: ['Workflow'],
-      requestSchema: 'WorkflowRejectRequestSchema',
-      responseSchema: 'WorkflowRejectResponseSchema',
-      permissions: ['workflow.reject'],
-      cacheable: false,
-    },
+    // ADR-0019: approve/reject are no longer workflow routes. Approval is a
+    // flow node; decisions are recorded on the approvals runtime via
+    // `POST /api/v1/approvals/requests/:id/{approve,reject}`.
   ],
   middleware: [
     { name: 'auth', type: 'authentication', enabled: true, order: 10 },

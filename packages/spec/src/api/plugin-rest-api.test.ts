@@ -537,9 +537,10 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_WORKFLOW_ROUTES.methods).toContain('getWorkflowConfig');
       expect(DEFAULT_WORKFLOW_ROUTES.methods).toContain('getWorkflowState');
       expect(DEFAULT_WORKFLOW_ROUTES.methods).toContain('workflowTransition');
-      expect(DEFAULT_WORKFLOW_ROUTES.methods).toContain('workflowApprove');
-      expect(DEFAULT_WORKFLOW_ROUTES.methods).toContain('workflowReject');
-      expect(DEFAULT_WORKFLOW_ROUTES.endpoints).toHaveLength(5);
+      // ADR-0019: approve/reject are no longer workflow routes (moved to /approvals).
+      expect(DEFAULT_WORKFLOW_ROUTES.methods).not.toContain('workflowApprove');
+      expect(DEFAULT_WORKFLOW_ROUTES.methods).not.toContain('workflowReject');
+      expect(DEFAULT_WORKFLOW_ROUTES.endpoints).toHaveLength(3);
     });
 
     it('should validate DEFAULT_REALTIME_ROUTES', () => {

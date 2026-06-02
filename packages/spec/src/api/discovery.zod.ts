@@ -109,6 +109,9 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
   /** Base URL for Workflow Engine */
   workflow: z.string().optional().describe('e.g. /api/v1/workflow'),
 
+  /** Base URL for Approvals (ADR-0019: approval as a flow node) */
+  approvals: z.string().optional().describe('e.g. /api/v1/approvals'),
+
   /** Base URL for Realtime (WebSocket/SSE) */
   realtime: z.string().optional().describe('e.g. /api/v1/realtime'),
 

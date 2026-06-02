@@ -34,8 +34,6 @@ import {
   GetWorkflowStateRequestSchema,
   WorkflowTransitionRequestSchema,
   WorkflowTransitionResponseSchema,
-  WorkflowApproveRequestSchema,
-  WorkflowRejectRequestSchema,
   // Realtime
   RealtimeConnectRequestSchema,
   RealtimeConnectResponseSchema,
@@ -224,12 +222,6 @@ describe('ObjectStack Protocol', () => {
     }).success).toBe(true);
     expect(WorkflowTransitionResponseSchema.safeParse({
       object: 'lead', recordId: 'l1', success: true, state,
-    }).success).toBe(true);
-    expect(WorkflowApproveRequestSchema.safeParse({
-      object: 'lead', recordId: 'l1', comment: 'Approved',
-    }).success).toBe(true);
-    expect(WorkflowRejectRequestSchema.safeParse({
-      object: 'lead', recordId: 'l1', reason: 'Missing info',
     }).success).toBe(true);
   });
 

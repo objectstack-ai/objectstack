@@ -726,33 +726,11 @@ export const WorkflowTransitionResponseSchema = lazySchema(() => z.object({
   state: WorkflowStateSchema.describe('New workflow state after transition'),
 }));
 
-export const WorkflowApproveRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  recordId: z.string().describe('Record ID'),
-  comment: z.string().optional().describe('Approval comment'),
-  data: z.record(z.string(), z.unknown()).optional().describe('Additional data'),
-}));
-
-export const WorkflowApproveResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  recordId: z.string().describe('Record ID'),
-  success: z.boolean().describe('Whether the approval succeeded'),
-  state: WorkflowStateSchema.describe('New workflow state after approval'),
-}));
-
-export const WorkflowRejectRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  recordId: z.string().describe('Record ID'),
-  reason: z.string().describe('Rejection reason'),
-  comment: z.string().optional().describe('Additional comment'),
-}));
-
-export const WorkflowRejectResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  recordId: z.string().describe('Record ID'),
-  success: z.boolean().describe('Whether the rejection succeeded'),
-  state: WorkflowStateSchema.describe('New workflow state after rejection'),
-}));
+// ADR-0019: approval is no longer a workflow step. The approve/reject surface
+// moved off `workflow` onto the dedicated approvals runtime (a flow's Approval
+// node opens a request and suspends; a decision resumes it). Decisions are
+// recorded via `POST /approvals/requests/:id/{approve,reject}`, not on a
+// workflow record. `workflow` is reclaimed for state machines (transitions).
 
 // ==========================================
 // Realtime Operations
@@ -1125,10 +1103,6 @@ export const ObjectStackProtocolSchema = lazySchema(() => z.object({
     .describe('Get workflow state for a record'),
   workflowTransition: z.function()
     .describe('Execute a workflow state transition'),
-  workflowApprove: z.function()
-    .describe('Approve a workflow step'),
-  workflowReject: z.function()
-    .describe('Reject a workflow step'),
 
   // Realtime Operations
   realtimeConnect: z.function()
@@ -1287,10 +1261,6 @@ export type GetWorkflowStateRequest = z.input<typeof GetWorkflowStateRequestSche
 export type GetWorkflowStateResponse = z.infer<typeof GetWorkflowStateResponseSchema>;
 export type WorkflowTransitionRequest = z.input<typeof WorkflowTransitionRequestSchema>;
 export type WorkflowTransitionResponse = z.infer<typeof WorkflowTransitionResponseSchema>;
-export type WorkflowApproveRequest = z.input<typeof WorkflowApproveRequestSchema>;
-export type WorkflowApproveResponse = z.infer<typeof WorkflowApproveResponseSchema>;
-export type WorkflowRejectRequest = z.input<typeof WorkflowRejectRequestSchema>;
-export type WorkflowRejectResponse = z.infer<typeof WorkflowRejectResponseSchema>;
 
 // Realtime Types
 export type RealtimeConnectRequest = z.input<typeof RealtimeConnectRequestSchema>;
@@ -1466,8 +1436,6 @@ export interface ObjectStackProtocol {
   getWorkflowConfig?(request: GetWorkflowConfigRequest): Promise<GetWorkflowConfigResponse>;
   getWorkflowState?(request: GetWorkflowStateRequest): Promise<GetWorkflowStateResponse>;
   workflowTransition?(request: WorkflowTransitionRequest): Promise<WorkflowTransitionResponse>;
-  workflowApprove?(request: WorkflowApproveRequest): Promise<WorkflowApproveResponse>;
-  workflowReject?(request: WorkflowRejectRequest): Promise<WorkflowRejectResponse>;
 
   // Realtime (optional)
   realtimeConnect?(request: RealtimeConnectRequest): Promise<RealtimeConnectResponse>;

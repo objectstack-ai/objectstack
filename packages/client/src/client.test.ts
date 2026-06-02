@@ -272,36 +272,76 @@ describe('Workflow namespace', () => {
         expect(body.comment).toBe('Ready for review');
     });
 
-    it('should approve workflow', async () => {
+    // ADR-0019: approve/reject left the workflow namespace — they now live on
+    // `client.approvals` (approval is a flow node, not a workflow step).
+});
+
+describe('Approvals namespace (ADR-0019)', () => {
+    it('should list approval requests with filters', async () => {
         const { client, fetchMock } = createMockClient({
-            success: true,
-            data: { success: true, newState: 'approved' }
+            data: [{ id: 'req-1', status: 'pending', object_name: 'order', record_id: 'rec-1', process_name: 'flow:approve' }]
         });
-        const result = await client.workflow.approve({
-            object: 'order',
-            recordId: 'rec-1',
-            comment: 'Looks good'
+        const result = await client.approvals.listRequests({ status: 'pending', approverId: 'user-1' });
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe('req-1');
+        const url = fetchMock.mock.calls[0][0] as string;
+        expect(url).toContain('/api/v1/approvals/requests');
+        expect(url).toContain('status=pending');
+        expect(url).toContain('approverId=user-1');
+    });
+
+    it('should join array status filters', async () => {
+        const { client, fetchMock } = createMockClient({ data: [] });
+        await client.approvals.listRequests({ status: ['approved', 'rejected'] });
+        const url = decodeURIComponent(fetchMock.mock.calls[0][0] as string);
+        expect(url).toContain('status=approved,rejected');
+    });
+
+    it('should get a single approval request', async () => {
+        const { client, fetchMock } = createMockClient({
+            id: 'req-1', status: 'pending', object_name: 'order', record_id: 'rec-1', process_name: 'flow:approve'
         });
-        expect(result.newState).toBe('approved');
+        const result = await client.approvals.getRequest('req-1');
+        expect(result.id).toBe('req-1');
+        const url = fetchMock.mock.calls[0][0] as string;
+        expect(url).toContain('/api/v1/approvals/requests/req-1');
+    });
+
+    it('should record an approve decision', async () => {
+        const { client, fetchMock } = createMockClient({
+            request: { id: 'req-1', status: 'approved' }, finalized: true, decision: 'approve', resumed: true
+        });
+        const result = await client.approvals.approve('req-1', { actorId: 'user-1', comment: 'Looks good' });
+        expect(result.finalized).toBe(true);
+        expect(result.decision).toBe('approve');
         const [url, opts] = fetchMock.mock.calls[0];
-        expect(url).toContain('/api/v1/workflow/order/rec-1/approve');
+        expect(url).toContain('/api/v1/approvals/requests/req-1/approve');
+        expect(opts.method).toBe('POST');
+        const body = JSON.parse(opts.body);
+        expect(body.actorId).toBe('user-1');
+        expect(body.comment).toBe('Looks good');
+    });
+
+    it('should record a reject decision', async () => {
+        const { client, fetchMock } = createMockClient({
+            request: { id: 'req-1', status: 'rejected' }, finalized: true, decision: 'reject'
+        });
+        const result = await client.approvals.reject('req-1', { comment: 'Missing fields' });
+        expect(result.decision).toBe('reject');
+        const [url, opts] = fetchMock.mock.calls[0];
+        expect(url).toContain('/api/v1/approvals/requests/req-1/reject');
         expect(opts.method).toBe('POST');
     });
 
-    it('should reject workflow', async () => {
+    it('should list the action audit trail', async () => {
         const { client, fetchMock } = createMockClient({
-            success: true,
-            data: { success: true, newState: 'rejected' }
+            data: [{ id: 'act-1', request_id: 'req-1', action: 'approve', actor_id: 'user-1' }]
         });
-        const result = await client.workflow.reject({
-            object: 'order',
-            recordId: 'rec-1',
-            reason: 'Incomplete data',
-            comment: 'Missing fields'
-        });
-        expect(result.newState).toBe('rejected');
-        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.reason).toBe('Incomplete data');
+        const result = await client.approvals.listActions('req-1');
+        expect(result).toHaveLength(1);
+        expect(result[0].action).toBe('approve');
+        const url = fetchMock.mock.calls[0][0] as string;
+        expect(url).toContain('/api/v1/approvals/requests/req-1/actions');
     });
 });
 
