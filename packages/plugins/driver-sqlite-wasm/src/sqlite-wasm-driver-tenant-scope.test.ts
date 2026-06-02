@@ -214,6 +214,9 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
       driver = new SqliteWasmDriver({ filename: ':memory:' });
       // Swap logger to capture warns.
       (driver as any).logger = { warn: (msg: string, meta: any) => warnSpy.push({ msg, meta }) };
+      // The tenant-audit warning only fires in multi-tenant mode (single-tenant
+      // stacks now always have an organization_id column but no isolation).
+      (driver as any)._multiTenantMode = true;
       await driver.initObjects(objects);
 
       await driver.create('account', { id: 'x1', organization_id: 'org_a', name: 'X1' });
