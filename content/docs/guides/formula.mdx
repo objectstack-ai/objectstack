@@ -54,6 +54,27 @@ All dialects share the same variable scope (`record`, `previous`, `os.user`,
 `os.org`, `os.env`, `vars` for flow steps), so you author once and never have
 to relearn the syntax across surfaces.
 
+<Callout type="warn">
+**Predicates are bare CEL — never wrap field references in `{…}` braces.** The
+most common mistake (and the root cause of issue #1491) is a condition like
+`{record.rating} >= 4`: in CEL, `{…}` is a **map literal**, so it is a parse
+error. Write bare CEL: `record.rating >= 4`. Braces belong only in `{{ … }}`
+text templates. As of 7.6 a malformed expression no longer silently does
+nothing — it fails `objectstack build` and throws at runtime.
+</Callout>
+
+**Template formatting (7.6).** A `template` hole is a field path with an optional
+whitelisted formatter — `{{ path | formatter[:arg] }}` — with defined value→string
+semantics (no arbitrary logic; put logic in a CEL field):
+
+```ts
+tmpl`Deal {{record.name}} — {{record.amount | currency}} closes {{record.close_date | date:long}}`
+```
+
+Formatters: `currency[:CODE]`, `number[:decimals]`, `percent[:decimals]`,
+`date[:short|long|iso]`, `datetime[:…]`, `upper`, `lower`, `trim`, `truncate:N`,
+`default:'…'`, `json`. Single-brace `{x}` is **not** a valid template hole.
+
 At **input** time you may write a bare string for shorthand — the spec
 transforms it into the right envelope based on the field type. The compiled
 artifact always contains the full envelope (and, after M9.2, the AST).
@@ -288,8 +309,12 @@ const result = ExpressionEngine.evaluate(
 // => { ok: true, value: 42 }
 ```
 
-Evaluation never throws — failures return `{ ok: false, error }`. Callers
-choose whether to surface, log, or silently fall back.
+The low-level engine never throws — `evaluate()` returns `{ ok: false, error }`.
+But **call sites must not silently swallow that** (ADR-0032): `objectstack build`
+**fails** on an invalid expression (with a located, schema-aware message), and at
+runtime the flow/rule engines **throw** a loud, attributed error instead of
+treating a bad expression as `false`/`null`. The `validate_expression` agent tool
+runs this same validator so you can check an expression before saving.
 
 ---
 

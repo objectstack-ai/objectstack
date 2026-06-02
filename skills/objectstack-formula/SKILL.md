@@ -27,8 +27,19 @@ formula / condition / predicate / dynamic-seed metadata.
 > CEL was chosen because it has (a) a formal grammar, (b) a public training
 > corpus, (c) AST-first persistence, and (d) sandboxed bounded execution.
 > The previous custom Salesforce-flavor engine was **deleted** in M9.5.
-> **Do not emit Salesforce-flavor syntax** — it will silently evaluate to
-> `null`.
+>
+> **Predicates / formulas are bare CEL — never wrap field references in `{…}`
+> braces.** The #1 authoring mistake (root cause of #1491) is a condition like
+> `{record.rating} >= 4`: in CEL, `{…}` is a **map literal**, so it is a parse
+> error. Write bare CEL: `record.rating >= 4`. Braces are *only* for `{{ … }}`
+> text templates (see Template surfaces).
+>
+> **As of 7.6 (ADR-0032) a malformed expression no longer fails silently.**
+> It used to evaluate to `null`/`false` (a flow "fired" but did nothing). Now
+> `objectstack build` **fails** with a located, corrective, schema-aware message
+> (unknown `record.<field>` → did-you-mean), and at runtime the engine **throws**
+> (the flow/rule fails loudly). The `validate_expression` agent tool runs the
+> same shared validator so you can check an expression *before* saving.
 
 ---
 
@@ -272,10 +283,29 @@ All accept bare strings (auto-wrapped to `{dialect:'cron', source}`) or the
 | `ai/orchestration.cron` | recurring runs |
 | `ai/devops-agent.iterationFrequency` | iteration cadence |
 
-### Template surfaces (`{{path}}` interpolation)
+### Template surfaces (`{{ path }}` interpolation)
 
-Strict Mustache subset — only `{{record.x}}`, `{{os.user.id}}`, etc. No
-conditionals, no helpers. Same scope as CEL.
+Mustache subset — a **field/variable path** plus an optional **whitelisted
+formatter**: `{{ path }}` or `{{ path | formatter[:arg] }}`. No conditionals,
+no arbitrary logic (move logic into a CEL field). Same variable scope as CEL.
+Double braces only — single `{x}` is **not** a valid hole.
+
+**Formatters (7.6)** — value→string is defined per formatter (not implicit):
+
+| Formatter | Example | Output |
+|:---|:---|:---|
+| `currency[:CODE]` | `{{ record.amount \| currency }}` / `:EUR` | `$1,234.50` |
+| `number[:decimals]` | `{{ record.n \| number:2 }}` | `1,234.50` |
+| `percent[:decimals]` | `{{ record.rate \| percent }}` (0.42→) | `42%` |
+| `date[:short\|long\|iso]` / `datetime[:…]` | `{{ record.due \| date:long }}` | locale date |
+| `upper` / `lower` / `trim` | `{{ record.code \| upper }}` | `ABC` |
+| `truncate:N` | `{{ record.body \| truncate:80 }}` | `…` |
+| `default:'…'` | `{{ record.x \| default:'N/A' }}` | fallback |
+| `json` | `{{ record.obj \| json }}` | JSON |
+
+```ts
+tmpl`Deal {{ record.name }} — {{ record.amount | currency }} closes {{ record.close_date | date:long }}`
+```
 
 | Surface | Field |
 |:---|:---|
