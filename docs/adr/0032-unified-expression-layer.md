@@ -25,11 +25,14 @@ The deciding lens, as in ADR-0010/0011/0031, is **AI/pro-code authoring**. When 
 
 ## Context — current state (verified 2026-06-02)
 
-This came out of a real incident (issue #1491). A record-change flow loaded, bound, and fired correctly — but produced **zero** observable effect. Root cause: a decision/edge condition was authored as `'{record.rating} >= 4'`. Evidence, end to end:
+This ADR is motivated by issue #1491, where record-change flows **loaded but never fired** on data writes — reproduced even with the **condition omitted**. The committed fix (static `import` of `@objectstack/formula` in `service-automation/engine.ts`, replacing a CJS `require` that bundled to a throwing tsup `__require` stub — see the comment at `engine.ts:11`) traced the symptom to the formula engine **throwing on every CEL evaluation**, which `evaluateCondition`'s `catch → return false` silently converted into "start condition not met → flow skipped, `success:true`." Every flow skipped; no error, no warning, nothing in any log. **That silent `catch → false` is the disease this ADR targets** — it turned an unrelated bundling fault into an invisible, platform-wide no-op.
 
-- **Coercion.** `ExpressionInputSchema` (`spec/automation/flow.zod.ts`) turns any bare string into `{dialect:'cel', source}`. So `'{record.rating} >= 4'` is evaluated **as CEL**.
-- **Collision.** CEL reads `{ … }` as a **map literal**, so `{record.rating}` is a parse error (`Expected COLON, got RBRACE`) — confirmed against `@objectstack/formula`. The single-brace template delimiter **directly collides** with CEL syntax.
-- **Silent failure.** `engine.ts evaluateCondition` returns **`false`** on eval error. The `decision` node took no branch, the flow ended in ~1ms `success:true`, and the `update_record`/`notify` nodes never ran. No error, no warning, nothing in any log.
+The same silent path also swallows a **second, independent hazard** that the contract (not just the bundling) must fix: **single-brace template syntax colliding with CEL**. Tracing it end to end:
+
+- **Coercion.** `ExpressionInputSchema` (defined in `spec/shared/expression.zod.ts:84`, consumed by `automation/flow.zod.ts`) turns any bare string into `{dialect:'cel', source}`. So a condition like `'{record.rating} >= 4'` is evaluated **as CEL**.
+- **Collision.** CEL reads `{ … }` as a **map literal**, so `{record.rating}` (no `:`) is a parse error (`Expected COLON, got RBRACE`). The single-brace template delimiter **directly collides** with CEL syntax.
+- **Silent failure (again).** `engine.ts evaluateCondition` returns **`false`** on parse/eval error (`engine.ts:1456`, and the bare `catch { return false }` at `1458`). The `decision` node would take no branch, the flow would end ~1ms `success:true`, and downstream nodes would never run — the *same* invisible failure mode as #1491.
+- **The anti-pattern is even taught in-spec.** `automation/flow.zod.ts:213-214`'s own JSDoc example uses `condition: "{amount} < 500"` — the exact single-brace form that silently evaluates to `false`. The hazard is not hypothetical; the reference docs demonstrate it.
 - **Two template engines already exist.** `service-automation/builtin/template.ts` interpolates **single** `{…}` (`{var}`, `{record.x}`, `{$User.Id}`, `{NOW()}`, `{TODAY()+N}`) for flow node fields; `Object.titleFormat` / notification templates use **double** `{{…}}` mustache. CEL date helpers are **lowercase** `today()` / `daysFromNow(int)`; the template engine uses **uppercase** `TODAY()` / `NOW()`. Same intent, three spellings.
 
 Why an AI (and a human) writes it wrong: the author sees `{record.name}` work in `notify.title` and **over-generalizes** the single-brace syntax to the condition — a natural inference the platform does nothing to block, and whose failure is invisible.
@@ -78,7 +81,12 @@ The canonical serialized form remains the existing envelope `{ dialect, source, 
 
 ### 4. Zero silent failure: validate at build time, delete the fallback-to-false path.
 
-`objectstack build` (and `registerFlow` / metadata registration) **parses and validates every expression**, failing with a precise source location on any error. The runtime **"eval error → return false"** branch in `evaluateCondition` is **removed** — it does not exist in the target design. A malformed expression is a **build error**, never a silent runtime no-op. (#1491 would have failed `objectstack build` at the offending line.)
+Two complementary halves, catching two distinct failure modes:
+
+- **Build-time validation.** `objectstack build` (and `registerFlow` / metadata registration) **parses and validates every expression**, failing with a precise source location on any error. This catches the *malformed-expression* class — e.g. the single-brace `{amount} < 500` would fail `objectstack build` at the offending line instead of silently becoming `false` at runtime.
+- **No silent runtime fallback.** The **"eval error → return false"** branch in `evaluateCondition` (`engine.ts:1456`/`1458`) is **removed** — it does not exist in the target design. This catches the *runtime-fault* class — e.g. the #1491 bundling fault, where the engine itself threw at runtime on valid expressions, surfaces **loudly** instead of as an invisible platform-wide no-op. (Build-time validation alone would *not* have caught #1491, because the expressions were syntactically valid; the silent `catch` is what hid it.)
+
+One policy, repo-wide. Today the silent/inconsistent handling is not confined to `evaluateCondition`: the same `EvalResult` is treated five different ways — `seed-loader.ts` fails **loud** (flips `success:false`), `hook-wrappers.ts` warns + treats as **false**, `rule-validator.ts` warns + **skips** (returns `null`, fail-open), `engine.ts` formula projection writes **`null`** with no log, and flow `evaluateCondition` returns **`false`** with no log. The target is a **single, declared failure policy** applied at every expression call site, not five ad-hoc ones.
 
 ### 5. Schema-aware validation — the greenfield payoff.
 
@@ -106,7 +114,7 @@ Reserved for future dialects (`sql`, `cron`) via the same envelope; CEL is the d
 ## Consequences
 
 **Positive**
-- The #1491 class of bug becomes **unrepresentable** (type error) or **caught at build** (validator) — never a silent runtime no-op.
+- The malformed-expression class (single-brace, bad field refs) becomes **unrepresentable** (type error) or **caught at build** (validator); the runtime-fault class (the actual #1491 bundling failure) surfaces **loudly** instead of as a silent no-op. Neither can produce an invisible `success:true` again.
 - One mental model for every author; the format is LLM-safe and LLM-self-correcting.
 - Schema-aware errors raise authoring quality across *all* CEL surfaces (flows, validations, sharing, formula fields), not just flows.
 
@@ -119,8 +127,8 @@ Reserved for future dialects (`sql`, `cron`) via the same envelope; CEL is the d
 ## Sequencing (roadmap)
 
 1. **Contract** — `spec`: expression fields become typed envelopes (`Predicate` / `Template` / `Expr<T>`); remove bare-string acceptance and the string→CEL coercion. Land `` cel`` `` / `` tpl`` `` builders.
-2. **Engine** — `formula`: `{{CEL}}` template interpolation; unify date helpers under CEL stdlib (`today()`/`daysFromNow`). `service-automation`: route templates through it; **delete** the eval-error→false fallback in `evaluateCondition`.
-3. **Build-time validation** — CLI/registration parses every expression; fail with location. (Catches the whole #1491 class immediately.)
+2. **Engine** — `formula`: `{{CEL}}` template interpolation; unify date helpers under CEL stdlib (`today()`/`daysFromNow`). `service-automation`: route templates through it; **delete** the eval-error→false fallback in `evaluateCondition`, and adopt **one declared failure policy** across all five call sites (seed / hook / validation / projection / condition) rather than today's five ad-hoc ones.
+3. **Build-time validation** — CLI/registration parses every expression; fail with location. (Catches the malformed-expression class immediately.) Also fix the in-spec authoring examples that still teach the anti-pattern (`automation/flow.zod.ts:213-214` `condition: "{amount} < 500"`) and the skills/docs.
 4. **Schema-aware validation** — project object schema into the CEL type env; field-existence + return-type checks (see Open Question 1 for v1 depth).
 5. **Designer** — GUI condition/template builders emit the canonical IR; one validator shared with build.
 
