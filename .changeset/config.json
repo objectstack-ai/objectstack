@@ -60,7 +60,7 @@
       "@objectstack/service-cache",
       "@objectstack/service-cluster",
       "@objectstack/service-cluster-redis",
-      "@objectstack/service-external-datasource",
+      "@objectstack/service-datasource",
       "@objectstack/service-feed",
       "@objectstack/service-i18n",
       "@objectstack/service-job",

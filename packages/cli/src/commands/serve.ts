@@ -1611,7 +1611,7 @@ export default class Serve extends Command {
       // Federation (introspect / draft / import / validate of external
       // tables) ships in the open framework.
       try {
-        const dsMod: any = await import('@objectstack/service-external-datasource');
+        const dsMod: any = await import('@objectstack/service-datasource');
         const { ExternalDatasourceServicePlugin } = dsMod;
 
         if (
@@ -1644,7 +1644,7 @@ export default class Serve extends Command {
       // ── Runtime Datasource Admin (ADR-0015 Addendum) ──────────────
       // The "Add Datasource" wizard backend: list / test / create / update /
       // remove datasources defined in the UI at runtime. This is open-source
-      // *mechanism* (`@objectstack/service-datasource-admin`); the tier line
+      // *mechanism* (`@objectstack/service-datasource`); the tier line
       // falls on which ICryptoProvider / driver factory a host injects, not on
       // whether the UI can manage datasources. Mounted by default so a
       // self-host runtime is a complete low-code platform out of the box.
@@ -1655,7 +1655,7 @@ export default class Serve extends Command {
       // key. Wired BEFORE runtime.start() so the plugin's kernel:ready boot
       // rehydration (which decrypts persisted creds) has its binder ready.
       try {
-        const adminMod: any = await import('@objectstack/service-datasource-admin');
+        const adminMod: any = await import('@objectstack/service-datasource');
         const {
           DatasourceAdminServicePlugin,
           createDefaultDatasourceDriverFactory,

@@ -1,8 +1,8 @@
 {
-  "name": "@objectstack/service-datasource-admin",
+  "name": "@objectstack/service-datasource",
   "version": "7.5.0",
   "license": "Apache-2.0",
-  "description": "Runtime UI-created datasource lifecycle (ADR-0015 Addendum) — list/test/create/update/remove datasources defined in the UI. Mechanism only: credential storage is delegated to a host-provided SecretBinder (CryptoProvider) and drivers to a swappable factory, so a managed credential vault / multi-tenant overlay can be layered on without forking.",
+  "description": "The datasource service (ADR-0015): external-table federation (introspect/draft/import/validate) + runtime UI datasource lifecycle (list/test/create/update/remove + REST routes). Open-source mechanism; the tier line falls on which ICryptoProvider / driver factory a host injects.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -51,6 +51,8 @@
   "keywords": [
     "objectstack",
     "datasource",
+    "federation",
+    "introspection",
     "datasource-admin",
     "runtime-datasource"
   ],
@@ -58,6 +60,11 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/objectstack-ai/framework.git",
-    "directory": "packages/services/service-datasource-admin"
+    "directory": "packages/services/service-datasource"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/framework/issues",
+  "publishConfig": {
+    "access": "public"
   }
 }

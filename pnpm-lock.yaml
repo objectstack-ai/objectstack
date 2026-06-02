@@ -536,12 +536,9 @@ importers:
       '@objectstack/service-cache':
         specifier: workspace:*
         version: link:../services/service-cache
-      '@objectstack/service-datasource-admin':
+      '@objectstack/service-datasource':
         specifier: workspace:*
-        version: link:../services/service-datasource-admin
-      '@objectstack/service-external-datasource':
-        specifier: workspace:*
-        version: link:../services/service-external-datasource
+        version: link:../services/service-datasource
       '@objectstack/service-feed':
         specifier: workspace:*
         version: link:../services/service-feed
@@ -1823,7 +1820,7 @@ importers:
         specifier: ^4.1.8
         version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(@vitest/coverage-v8@4.1.8)(happy-dom@20.9.0)(msw@2.14.6(@types/node@25.9.1)(typescript@6.0.3))(vite@8.0.16(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
-  packages/services/service-datasource-admin:
+  packages/services/service-datasource:
     dependencies:
       '@objectstack/core':
         specifier: workspace:*
@@ -1850,25 +1847,6 @@ importers:
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.4)(typescript@6.0.3)(yaml@2.9.0)
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.8
-        version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(@vitest/coverage-v8@4.1.8)(happy-dom@20.9.0)(msw@2.14.6(@types/node@25.9.1)(typescript@6.0.3))(vite@8.0.16(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/services/service-external-datasource:
-    dependencies:
-      '@objectstack/core':
-        specifier: workspace:*
-        version: link:../../core
-      '@objectstack/spec':
-        specifier: workspace:*
-        version: link:../../spec
-    devDependencies:
-      '@types/node':
-        specifier: ^25.9.1
-        version: 25.9.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
