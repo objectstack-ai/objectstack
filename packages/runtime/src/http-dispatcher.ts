@@ -1463,6 +1463,30 @@ export class HttpDispatcher {
                 return { handled: true, response: this.error('Metadata service not available', 503) };
             }
 
+            // POST /packages/:id/publish-drafts → promote every pending DRAFT
+            // bound to the package to active in one shot ("publish whole app",
+            // ADR-0033). Routes through protocol.publishPackageDrafts (which
+            // reuses the per-item publish primitive) — no metadata service
+            // dependency, unlike /publish above.
+            if (parts.length === 2 && parts[1] === 'publish-drafts' && m === 'POST') {
+                const id = decodeURIComponent(parts[0]);
+                const protocol = await this.resolveService('protocol');
+                if (protocol && typeof (protocol as any).publishPackageDrafts === 'function') {
+                    try {
+                        const organizationId = await this.resolveActiveOrganizationId(_context);
+                        const result = await (protocol as any).publishPackageDrafts({
+                            packageId: id,
+                            ...(organizationId ? { organizationId } : {}),
+                            ...(body?.actor ? { actor: body.actor } : {}),
+                        });
+                        return { handled: true, response: this.success(result) };
+                    } catch (e: any) {
+                        return { handled: true, response: this.error(e.message, e.statusCode || 500) };
+                    }
+                }
+                return { handled: true, response: this.error('Draft publishing not supported', 501) };
+            }
+
             // POST /packages/:id/revert → revert package to last published state
             if (parts.length === 2 && parts[1] === 'revert' && m === 'POST') {
                 const id = decodeURIComponent(parts[0]);

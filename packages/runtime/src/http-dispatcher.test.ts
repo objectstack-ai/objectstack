@@ -952,6 +952,36 @@ describe('HttpDispatcher', () => {
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(503);
         });
+
+        it('POST /packages/:id/publish-drafts routes to protocol.publishPackageDrafts', async () => {
+            const publishPackageDrafts = vi.fn().mockResolvedValue({
+                success: true, publishedCount: 3, failedCount: 0, published: [], failed: [],
+            });
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
+                if (name === 'protocol') return Promise.resolve({ publishPackageDrafts });
+                if (name === 'objectql') return Promise.resolve({ registry: { getAllPackages: vi.fn().mockReturnValue([]) } });
+                return null;
+            });
+
+            const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, { request: {} });
+
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(200);
+            expect(publishPackageDrafts).toHaveBeenCalledWith(expect.objectContaining({ packageId: 'app.edu' }));
+            expect((result.response as any)?.body?.data?.publishedCount).toBe(3);
+        });
+
+        it('POST /packages/:id/publish-drafts returns 501 when protocol lacks the method', async () => {
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
+                if (name === 'protocol') return Promise.resolve({});
+                if (name === 'objectql') return Promise.resolve({ registry: { getAllPackages: vi.fn().mockReturnValue([]) } });
+                return null;
+            });
+
+            const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(501);
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════

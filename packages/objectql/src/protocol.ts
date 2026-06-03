@@ -3718,6 +3718,63 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     }
 
     /**
+     * Publish every pending DRAFT bound to a package in one shot (ADR-0033) —
+     * the "publish whole app" action. Promotes each draft→active by reusing the
+     * per-item {@link publishMetaItem} primitive (which runs the overridable /
+     * lock guards and refreshes the runtime registry), so this needs NO
+     * `metadata` service (unlike `MetadataService.publishPackage`, which reads
+     * the in-memory registry and 503s when that service is absent). Per-item
+     * failures are collected and do NOT abort the rest.
+     */
+    async publishPackageDrafts(request: {
+        packageId: string;
+        organizationId?: string;
+        actor?: string;
+    }): Promise<{
+        success: boolean;
+        publishedCount: number;
+        failedCount: number;
+        published: Array<{ type: string; name: string; version: string }>;
+        failed: Array<{ type: string; name: string; error: string; code?: string }>;
+    }> {
+        await this.ensureOverlayIndex();
+        const orgId = request.organizationId ?? null;
+        const repo = this.getOverlayRepo(orgId);
+        const drafts = await repo.listDrafts({ packageId: request.packageId });
+
+        const published: Array<{ type: string; name: string; version: string }> = [];
+        const failed: Array<{ type: string; name: string; error: string; code?: string }> = [];
+
+        for (const d of drafts) {
+            try {
+                const r = await this.publishMetaItem({
+                    type: d.type,
+                    name: d.name,
+                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    message: `publish app package '${request.packageId}'`,
+                });
+                published.push({ type: d.type, name: d.name, version: r.version });
+            } catch (e: any) {
+                failed.push({
+                    type: d.type,
+                    name: d.name,
+                    error: e?.message ?? 'publish failed',
+                    ...(e?.code ? { code: e.code } : {}),
+                });
+            }
+        }
+
+        return {
+            success: failed.length === 0 && published.length > 0,
+            publishedCount: published.length,
+            failedCount: failed.length,
+            published,
+            failed,
+        };
+    }
+
+    /**
      * Restore the body recorded at history `toVersion` as the new
      * live row. Writes a history event with `op='revert'`. 404
      * (`[version_not_found]`) when the target version doesn't exist;

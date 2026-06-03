@@ -614,6 +614,18 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 }
             });
 
+            // ADR-0033 — publish every pending draft bound to a package ("publish
+            // whole app"). Distinct from /publish (which needs the metadata
+            // service): this promotes sys_metadata draft rows via the protocol.
+            server.post(`${prefix}/packages/:id/publish-drafts`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.handlePackages(`/${req.params.id}/publish-drafts`, 'POST', req.body, {}, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+
             server.post(`${prefix}/packages/:id/revert`, async (req: any, res: any) => {
                 try {
                     const result = await dispatcher.handlePackages(`/${req.params.id}/revert`, 'POST', req.body, {}, { request: req });
