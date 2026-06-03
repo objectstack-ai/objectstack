@@ -210,7 +210,16 @@ function objectBody(o: SolutionBlueprint['objects'][number]): Record<string, unk
 /** Map a blueprint view's kind to a ListView `type`. */
 const LIST_TYPE: Record<string, string> = { list: 'grid', kanban: 'kanban', calendar: 'calendar' };
 
-/** Convert a blueprint view into a `view` metadata body (list- or form-family). */
+/**
+ * Convert a blueprint view into a `view` metadata RECORD (ADR-0005 view item).
+ *
+ * Emits the canonical single-view shape the console binds + renders:
+ *   `{ object, viewKind: 'list'|'form', config: <ListView|FormView> }`
+ * NOT the bare `{ list: … }` container fragment — without the top-level
+ * `object` (and the `<object>.<key>` record name set by {@link viewName}) the
+ * console can't associate the view with its object, so it never surfaces as a
+ * tab and a kanban silently falls back to the default grid.
+ */
 function viewBody(
   v: NonNullable<SolutionBlueprint['views']>[number],
   columnsByObject: Map<string, string[]>,
@@ -218,17 +227,25 @@ function viewBody(
 ): Record<string, unknown> {
   const cols = v.columns?.length ? v.columns : columnsByObject.get(v.object) ?? ['name'];
   const data = { provider: 'object', object: v.object };
+  // The body MUST carry a top-level `name` (the `<object>.<key>` record name):
+  // getMetaItems only surfaces overlay rows whose body has `name`, so a view
+  // without it is silently dropped from the object's view list (never a tab).
+  const name = viewName(v);
   if (v.type === 'form') {
     return {
-      form: {
+      name,
+      object: v.object,
+      viewKind: 'form',
+      config: {
         type: 'simple',
         data,
         sections: [{ fields: cols.map((field) => ({ field })) }],
+        ...(v.label ? { label: v.label } : {}),
       },
       ...(v.label ? { label: v.label } : {}),
     };
   }
-  const list: Record<string, unknown> = {
+  const config: Record<string, unknown> = {
     type: LIST_TYPE[v.type] ?? 'grid',
     data,
     columns: cols,
@@ -240,9 +257,24 @@ function viewBody(
   if (v.type === 'kanban') {
     const groupByField = v.groupBy || groupFieldByObject?.get(v.object);
     // KanbanConfig requires both the group-by field and the card columns.
-    if (groupByField) list.kanban = { groupByField, columns: cols };
+    if (groupByField) config.kanban = { groupByField, columns: cols };
   }
-  return { list };
+  return {
+    name,
+    object: v.object,
+    viewKind: 'list',
+    config,
+    ...(v.label ? { label: v.label } : {}),
+  };
+}
+
+/**
+ * Canonical view record name: `<object>.<key>` (e.g. `delivery_task.task_kanban`).
+ * The console keys an object's view tabs off this `<object>.` prefix, so a bare
+ * view name never appears as a selectable view on the object page.
+ */
+function viewName(v: NonNullable<SolutionBlueprint['views']>[number]): string {
+  return v.name.startsWith(`${v.object}.`) ? v.name : `${v.object}.${v.name}`;
 }
 
 /** Convert a blueprint dashboard into a `dashboard` metadata body. */
@@ -401,7 +433,7 @@ function createApplyBlueprintHandler(ctx: BlueprintToolContext): ToolHandler {
       await record('object', o.name, objectBody(o));
     }
     for (const v of blueprint.views ?? []) {
-      await record('view', v.name, viewBody(v, columnsByObject, groupFieldByObject));
+      await record('view', viewName(v), viewBody(v, columnsByObject, groupFieldByObject));
     }
     for (const d of blueprint.dashboards ?? []) {
       await record('dashboard', d.name, dashboardBody(d));

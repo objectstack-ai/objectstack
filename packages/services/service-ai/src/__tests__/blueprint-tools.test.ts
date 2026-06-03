@@ -172,7 +172,8 @@ describe('apply_blueprint handler', () => {
     expect(parsed.drafted).toEqual([
       { type: 'object', name: 'project' },
       { type: 'object', name: 'task' },
-      { type: 'view', name: 'open_tasks' },
+      // View is named `<object>.<key>` so the console binds it to the object.
+      { type: 'view', name: 'task.open_tasks' },
     ]);
     expect(parsed.failed).toEqual([]);
 
@@ -183,10 +184,16 @@ describe('apply_blueprint handler', () => {
     // Object body expanded fields into a record keyed by name.
     const task = drafts.get('object:task') as any;
     expect(task.fields.project_id).toMatchObject({ type: 'lookup', reference: 'project' });
-    // View body became a list sub-view bound to the object.
-    const view = drafts.get('view:open_tasks') as any;
-    expect(view.list.data).toEqual({ provider: 'object', object: 'task' });
-    expect(view.list.columns).toEqual(['title']);
+    // View is the canonical record shape: top-level object + viewKind + config
+    // (NOT a bare `{ list }`), so the console can bind + render it.
+    const view = drafts.get('view:task.open_tasks') as any;
+    // Top-level name is REQUIRED — getMetaItems only surfaces overlay rows
+    // whose body carries `name`, so a nameless view never lists as a tab.
+    expect(view.name).toBe('task.open_tasks');
+    expect(view.object).toBe('task');
+    expect(view.viewKind).toBe('list');
+    expect(view.config.data).toEqual({ provider: 'object', object: 'task' });
+    expect(view.config.columns).toEqual(['title']);
   });
 
   it('emits kanban config (groupByField + columns) — explicit groupBy wins, else infers the select field', async () => {
@@ -208,12 +215,14 @@ describe('apply_blueprint handler', () => {
     await registry.execute(call('apply_blueprint', { blueprint }));
 
     // Inferred from the object's first select field.
-    const inferred = drafts.get('view:lead_board') as any;
-    expect(inferred.list.type).toBe('kanban');
-    expect(inferred.list.kanban).toEqual({ groupByField: 'stage', columns: ['name', 'stage'] });
+    const inferred = drafts.get('view:lead.lead_board') as any;
+    expect(inferred.object).toBe('lead');
+    expect(inferred.viewKind).toBe('list');
+    expect(inferred.config.type).toBe('kanban');
+    expect(inferred.config.kanban).toEqual({ groupByField: 'stage', columns: ['name', 'stage'] });
     // Explicit groupBy on the view wins.
-    const explicit = drafts.get('view:lead_board2') as any;
-    expect(explicit.list.kanban.groupByField).toBe('stage');
+    const explicit = drafts.get('view:lead.lead_board2') as any;
+    expect(explicit.config.kanban.groupByField).toBe('stage');
   });
 
   it('reports seed data as proposed-but-not-applied', async () => {
@@ -236,7 +245,7 @@ describe('apply_blueprint handler', () => {
     const parsed = parse(await registry.execute(call('apply_blueprint', { blueprint: SAMPLE_BLUEPRINT })));
     expect(parsed.drafted.map((d: any) => d.name)).toEqual(['project', 'task']);
     expect(parsed.failed).toHaveLength(1);
-    expect(parsed.failed[0]).toMatchObject({ type: 'view', name: 'open_tasks', code: 'invalid_metadata' });
+    expect(parsed.failed[0]).toMatchObject({ type: 'view', name: 'task.open_tasks', code: 'invalid_metadata' });
     // Partial success is still 'drafted' (some items landed).
     expect(parsed.status).toBe('drafted');
   });
@@ -263,8 +272,8 @@ describe('apply_blueprint handler', () => {
       views: [{ object: 'lead', name: 'all_leads', type: 'list' }],
     };
     await registry.execute(call('apply_blueprint', { blueprint: bp }));
-    const view = drafts.get('view:all_leads') as any;
-    expect(view.list.columns).toEqual(['name', 'email']);
+    const view = drafts.get('view:lead.all_leads') as any;
+    expect(view.config.columns).toEqual(['name', 'email']);
   });
 
   it('drafts the app (navigation shell) with explicit nav referencing the objects', async () => {
