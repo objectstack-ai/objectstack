@@ -460,6 +460,15 @@ function createApplyBlueprintHandler(ctx: BlueprintToolContext): ToolHandler {
       // The app's artifacts were auto-homed in a writable package (zero user
       // package steps); informational only — no action required.
       ...(appPackage ? { package: appPackage } : {}),
+      // Surface the package id at the top level (not just nested under `package`)
+      // and spell out the binding rule, so when the agent proceeds to draft
+      // automation for this app (e.g. an approval `flow`) it passes this
+      // `packageId` to create_metadata and the new artifact lands in the app
+      // package instead of becoming an orphan draft.
+      ...(packageId ? { packageId } : {}),
+      ...(packageId
+        ? { bindingHint: `To add automation (e.g. an approval flow) for this app, pass packageId="${packageId}" to create_metadata so it is grouped under the app — do not leave it unbound.` }
+        : {}),
       // Phase C does not auto-apply seed data — no runtime-draftable `dataset`
       // type exists; surface it so a human can wire it deliberately.
       seedDataProposed,

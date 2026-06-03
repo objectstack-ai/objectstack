@@ -85,9 +85,18 @@ function createMockProtocol(seedActive: Record<string, unknown> = {}) {
   // `unknown[]` and `{ items }`, but the declared protocol contract is
   // `Promise<unknown[]>`).
   const getMetaItems = vi.fn(async (req: any) => {
-    return [...active.entries()]
+    const fromActive = [...active.entries()]
       .filter(([k]) => k.startsWith(`${req.type}:`))
       .map(([, v]) => v);
+    if (!req.previewDrafts) return fromActive;
+    // Mirror protocol.getMetaItems({ previewDrafts }): overlay draft rows on top
+    // of active (draft wins by name; draft-only surfaces).
+    const byName = new Map<string, unknown>();
+    for (const v of fromActive) byName.set((v as any)?.name, v);
+    for (const [k, v] of drafts.entries()) {
+      if (k.startsWith(`${req.type}:`)) byName.set((v as any)?.name ?? k, v);
+    }
+    return [...byName.values()];
   });
 
   const protocol: NonNullable<MetadataToolContext['protocol']> = {
@@ -785,6 +794,15 @@ describe('create_metadata / update_metadata / describe_metadata / list_metadata'
 
     const filtered = parse(await registry.execute(call('list_metadata', { type: 'view', filter: 'zzz' })));
     expect(filtered.totalCount).toBe(0);
+  });
+
+  it('list_metadata surfaces a draft-only item (previewDrafts) so the agent sees its own pending work', async () => {
+    // A brand-new object the agent just drafted (never published). Active-only
+    // reads hide it, so the agent reports its own object as "not found" when it
+    // later tries to author a flow against it. previewDrafts overlays it.
+    drafts.set('object:expense_claim', { name: 'expense_claim', label: 'Expense Claim' });
+    const res = parse(await registry.execute(call('list_metadata', { type: 'object' })));
+    expect(res.items.map((i: any) => i.name)).toContain('expense_claim');
   });
 });
 

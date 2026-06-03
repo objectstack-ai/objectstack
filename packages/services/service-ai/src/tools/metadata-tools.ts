@@ -205,7 +205,15 @@ export interface MetadataToolContext {
    * complete set of available objects.
    */
   protocol?: {
-    getMetaItems(request: { type: string; packageId?: string; organizationId?: string }): Promise<unknown[]>;
+    /**
+     * `previewDrafts` overlays pending `state='draft'` rows on the active list
+     * so the authoring agent can DISCOVER metadata it (or a prior turn) just
+     * drafted but nobody has published yet — e.g. referencing a just-drafted
+     * object when authoring a flow. Without it, `getMetaItems` is active-only
+     * and the agent reports its own draft objects as "not found". Older runtimes
+     * ignore the unknown property (graceful: stays active-only).
+     */
+    getMetaItems(request: { type: string; packageId?: string; organizationId?: string; previewDrafts?: boolean }): Promise<unknown[]>;
     /**
      * Read a single metadata item. With `state:'draft'` returns the pending
      * draft row and throws `no_draft` (404) when none exists — it does NOT
@@ -765,7 +773,7 @@ function createListObjectsHandler(ctx: MetadataToolContext): ToolHandler {
     let objects: unknown[] = [];
     if (ctx.protocol?.getMetaItems) {
       try {
-        const fromProtocol = await ctx.protocol.getMetaItems({ type: 'object' });
+        const fromProtocol = await ctx.protocol.getMetaItems({ type: 'object', previewDrafts: true });
         // Protocol can return either a plain array OR a wrapped envelope
         // `{ type, items: [] }` (the shape returned by the protocol shim
         // backing `GET /api/v1/meta/object`). Normalize both.
@@ -833,7 +841,7 @@ function createDescribeObjectHandler(ctx: MetadataToolContext): ToolHandler {
     let objectDef: unknown | undefined = await ctx.metadataService.getObject(objectName);
     if (!objectDef && ctx.protocol?.getMetaItems) {
       try {
-        const all = await ctx.protocol.getMetaItems({ type: 'object' });
+        const all = await ctx.protocol.getMetaItems({ type: 'object', previewDrafts: true });
         const arr: ObjectDef[] = Array.isArray(all)
           ? (all as ObjectDef[])
           : (all && typeof all === 'object' && Array.isArray((all as any).items)
@@ -991,7 +999,7 @@ function createListMetadataHandler(ctx: MetadataToolContext): ToolHandler {
     let items: unknown[] = [];
     if (ctx.protocol?.getMetaItems) {
       try {
-        const res = await ctx.protocol.getMetaItems({ type });
+        const res = await ctx.protocol.getMetaItems({ type, previewDrafts: true });
         items = Array.isArray(res)
           ? res
           : res && typeof res === 'object' && Array.isArray((res as { items?: unknown[] }).items)

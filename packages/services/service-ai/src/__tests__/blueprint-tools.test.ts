@@ -196,6 +196,24 @@ describe('apply_blueprint handler', () => {
     expect(view.config.columns).toEqual(['title']);
   });
 
+  it('surfaces packageId + bindingHint so follow-up automation (a flow) binds to the app package', async () => {
+    const reg = new ToolRegistry();
+    const proto = createMockProtocol();
+    // installPackage present → ensureAppPackage materialises an app package.
+    (proto.protocol as any).installPackage = vi.fn(async () => ({ success: true }));
+    registerBlueprintTools(reg, { ai: createMockAi().ai, protocol: proto.protocol, metadataService: createMockMetadataService() });
+
+    const parsed = parse(await reg.execute(call('apply_blueprint', {
+      blueprint: { ...SAMPLE_BLUEPRINT, app: { name: 'pm_app', label: 'PM' } },
+    })));
+
+    // Without these, the agent's follow-up create_metadata(flow) had no package
+    // to bind to and produced an ORPHAN flow draft.
+    expect(parsed.packageId).toBe('app.pm_app');
+    expect(parsed.bindingHint).toContain('app.pm_app');
+    expect(parsed.bindingHint).toMatch(/create_metadata/);
+  });
+
   it('emits kanban config (groupByField + columns) — explicit groupBy wins, else infers the select field', async () => {
     const blueprint = {
       summary: 'recruiting',
