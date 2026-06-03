@@ -1,6 +1,6 @@
 # ObjectStack — AGENTS.md
 
-Primary AI instruction file for this repo. Mirrored at `.github/copilot-instructions.md` — keep both in sync.
+Primary AI instruction file for this repo. Read natively by Claude Code, GitHub Copilot (coding agent + CLI, since Aug 2025), and other agents — no separate `.github/copilot-instructions.md` mirror needed.
 
 > **v5.0 breaking rename: `project` → `environment`** everywhere (CLI `-e`, `/api/v1/environments/:id`, header `X-Environment-Id`, `OS_ENVIRONMENT_ID`, DB column `environment_id`). No aliases. See ADR-0006. "Project" now only means the npm/monorepo sense.
 
@@ -63,9 +63,12 @@ Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. 
 
 ## Multi-agent working discipline
 
-This repo is worked on by **multiple agents in parallel**. Branches get switched
-and shared files change *under you* mid-task — this is expected, not a bug.
-Operate defensively:
+This repo is worked on by **multiple agents in parallel**. Prefer **one git
+worktree per agent/task** (`git worktree add ../framework-<task> -b <branch>`;
+run `pnpm install` in the new tree) so file systems are physically isolated —
+that avoids most of the contention below. When agents must share one working
+tree, branches get switched and shared files change *under you* mid-task — this
+is expected, not a bug. Operate defensively:
 
 1. **Only touch the files your task needs.** Don't "fix" unrelated diffs,
    reverts, or other agents' in-flight edits, and don't try to manage the whole
@@ -84,6 +87,10 @@ Operate defensively:
    your working-tree change between the edit and the commit. On a real conflict,
    re-apply only *your* lines and let the PR merge integrate the rest.
 6. **Don't rebase or force-update shared branches** to tidy other agents' commits.
+7. **Merge only after remote CI is fully green. Never `gh pr merge --auto`.**
+   Auto-merge can land a still-red PR onto shared `main` and break it for every
+   parallel agent (see #1475). Merge serially; rebase other open branches before
+   merging the next one.
 
 ---
 
