@@ -518,6 +518,7 @@ export class AutomationEngine implements IAutomationService {
         // fires later). Activate any already-registered flow that maps to this type.
         for (const name of this.flows.keys()) {
             if (this.boundFlowTriggers.has(name)) continue;
+            if (!this.shouldAutoBindFlow(name)) continue;
             const resolved = this.resolveTriggerBinding(name);
             if (resolved?.triggerType === trigger.type) {
                 this.activateFlowTrigger(name);
@@ -581,12 +582,30 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Deployment state gates background subscriptions, not manual execution.
+     *
+     * `registerFlow()` makes a flow available to run directly, but record and
+     * schedule triggers are side-effecting background work. Only deployed flows
+     * should subscribe automatically; otherwise draft examples can start
+     * emitting notifications or mutating records as soon as a project boots.
+     *
+     * `active` is kept for older bundles that predate `status: 'active'`.
+     */
+    private shouldAutoBindFlow(flowName: string): boolean {
+        if (this.flowEnabled.get(flowName) === false) return false;
+        const flow = this.flows.get(flowName);
+        if (!flow) return false;
+        return flow.status === 'active' || flow.active === true;
+    }
+
+    /**
      * Bind a flow to its matching registered trigger (idempotent). No-op when
      * the flow has no trigger binding or no trigger is registered for its type
      * yet — {@link registerTrigger} re-attempts activation when one arrives.
      */
     private activateFlowTrigger(flowName: string): void {
         if (this.boundFlowTriggers.has(flowName)) return;
+        if (!this.shouldAutoBindFlow(flowName)) return;
         const resolved = this.resolveTriggerBinding(flowName);
         if (!resolved) return;
         const trigger = this.triggers.get(resolved.triggerType);

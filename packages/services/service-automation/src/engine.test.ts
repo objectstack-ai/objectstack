@@ -2064,6 +2064,7 @@ function recordChangeFlow(name: string, overrides?: Record<string, unknown>) {
     return {
         name,
         label: name,
+        status: 'active' as const,
         type: 'autolaunched' as const,
         nodes: [
             {
@@ -2118,6 +2119,42 @@ describe('AutomationEngine - Flow Trigger Wiring', () => {
             { flowName: 'rc_flow', triggerType: 'record_change' },
         ]);
         expect(rec.started[0]?.flowName).toBe('rc_flow');
+    });
+
+    it('does not bind draft flows to background triggers', () => {
+        const rec = recordingTrigger('record_change');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('draft_flow', {
+            ...recordChangeFlow('draft_flow'),
+            status: 'draft',
+        });
+
+        expect(engine.getActiveTriggerBindings()).toHaveLength(0);
+        expect(rec.started).toHaveLength(0);
+    });
+
+    it('does not bind draft schedule flows', () => {
+        const rec = recordingTrigger('schedule');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('draft_digest', {
+            name: 'draft_digest',
+            label: 'Draft Digest',
+            status: 'draft',
+            type: 'schedule' as const,
+            nodes: [
+                {
+                    id: 'start',
+                    type: 'start' as const,
+                    label: 'Every Minute',
+                    config: { schedule: { type: 'interval', intervalMs: 60_000 } },
+                },
+                { id: 'end', type: 'end' as const, label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        });
+
+        expect(engine.getActiveTriggerBindings()).toHaveLength(0);
+        expect(rec.started).toHaveLength(0);
     });
 
     it('does not bind flows without an auto-trigger start config', () => {
