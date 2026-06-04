@@ -28,6 +28,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { createHmac, randomUUID } from 'node:crypto';
+import { runSetInitialPassword } from '@objectstack/plugin-auth';
 import type { KernelManager } from './kernel-manager.js';
 import type { EnvironmentDriverRegistry } from './environment-registry.js';
 
@@ -407,6 +408,31 @@ export class AuthProxyPlugin implements Plugin {
                         } catch (err: any) {
                             ctx.logger?.error?.('[AuthProxyPlugin] set-initial-password failed', err instanceof Error ? err : new Error(String(err)));
                             return c.json({ success: false, error: { code: 'set_password_failed', message: String(err?.message ?? err) } }, 500);
+                        }
+                    }
+
+                    // ── set-initial-password ──────────────────────────
+                    // POST /api/v1/auth/set-initial-password
+                    //
+                    // better-auth's `setPassword` is a server-only API (no
+                    // HTTP route), and the full AuthPlugin — which exposes it
+                    // as a custom route — is SKIPPED on a per-environment
+                    // runtime. So without this short-circuit the request falls
+                    // through to better-auth and 404s, dead-ending the
+                    // `sso-exchange` → "Set local password" recovery flow
+                    // (see #1544). Reuse the exact same wrapper the AuthPlugin
+                    // uses so the two paths can never drift again.
+                    if (c.req.method === 'POST' && subPath === 'set-initial-password') {
+                        try {
+                            if (typeof authSvc?.getApi !== 'function') {
+                                return c.json({ success: false, error: { code: 'unavailable', message: 'Auth API unavailable' } }, 503);
+                            }
+                            const authApi = await authSvc.getApi();
+                            const { status, body } = await runSetInitialPassword(authApi, c.req.raw);
+                            return c.json(body, status);
+                        } catch (err: any) {
+                            ctx.logger?.error?.('[AuthProxyPlugin] set-initial-password failed', err instanceof Error ? err : new Error(String(err)));
+                            return c.json({ success: false, error: { code: 'internal', message: err?.message ?? String(err) } }, 500);
                         }
                     }
 

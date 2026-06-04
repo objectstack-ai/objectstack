@@ -10,6 +10,7 @@
 
 export * from './auth-plugin.js';
 export * from './auth-manager.js';
+export * from './set-initial-password.js';
 export * from './objectql-adapter.js';
 export * from './auth-schema-config.js';
 export type { AuthConfig, AuthProviderConfig, AuthPluginConfig } from '@objectstack/spec/system';
