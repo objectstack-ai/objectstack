@@ -29,6 +29,10 @@ export function baseOptions(): BaseLayoutProps {
         url: '/docs/',
         active: 'nested-url',
       },
+      {
+        text: 'Website',
+        url: 'https://www.objectstack.ai',
+      },
     ],
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };

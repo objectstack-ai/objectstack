@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     template: '%s | ObjectStack Protocol',
     default: 'ObjectStack Protocol',
   },
-  description: 'The Metadata-Driven Documentation Engine for the Low-Code Era.',
+  description: 'Documentation for the ObjectStack Protocol and runtime.',
   icons: {
     icon: 'https://objectstack.ai/logo.png',
   },
