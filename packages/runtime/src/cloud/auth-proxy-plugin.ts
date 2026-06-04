@@ -280,7 +280,7 @@ export class AuthProxyPlugin implements Plugin {
                     // the user in the env by email, mints a fresh better-auth
                     // session, sets the signed session cookie and 302s to
                     // `next`. If the user has no credential account yet, we
-                    // redirect to /_console/system/profile?recovery_needed=true
+                    // redirect to the standalone /_console/set-password page
                     // so they can configure a disaster-recovery local password.
                     if (c.req.method === 'GET' && subPath === 'sso-exchange') {
                         try {
@@ -338,7 +338,7 @@ export class AuthProxyPlugin implements Plugin {
 
                             const finalNext = hasCredentialAccount
                                 ? next
-                                : `/_console/system/profile?recovery_needed=true&next=${encodeURIComponent(next)}`;
+                                : `/_console/set-password?next=${encodeURIComponent(next)}`;
                             const headers = new Headers();
                             headers.set('Set-Cookie', setCookie);
                             headers.set('Location', finalNext);
