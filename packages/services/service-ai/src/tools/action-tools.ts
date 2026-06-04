@@ -1,25 +1,31 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Actions-as-Tools — turn declarative {@link Action} metadata into
- * AI-callable tools so an agent can not only **read** the user's data
+ * Actions-as-Tools (ADR-0011) — turn declarative {@link Action} metadata
+ * into AI-callable tools so an agent can not only **read** the user's data
  * (via `query_data` / `data_explorer`) but also **act** on it.
  *
- * Phase 1 scope (this module):
- *   - Only `type: 'script'` actions are auto-exposed. Their handler is
- *     resolved through {@link IDataEngine.executeAction} (the same
- *     dispatcher used by Studio's "row toolbar" buttons), so the LLM
- *     ends up calling exactly the same business logic the UI does.
- *   - Skip any action that is dangerous (`confirmText`, `variant: 'danger'`,
- *     `mode: 'delete'`) — these require Phase 2 HITL plumbing.
- *   - Skip any action whose owner opted out via `aiExposed: false` (the
- *     hint is read from the action record but not formalised in the Zod
- *     schema yet; spec change is backwards-compatible additive).
+ * Exposure is **opt-in** (ADR-0011): an action becomes a tool only when its
+ * metadata sets `ai.exposed === true`, in which case `ai.description` (the
+ * LLM-facing contract) is required by the spec. There is no heuristic
+ * auto-exposure — in an AI-authoring world the opt-in flag is the governance
+ * gate between "an action exists" and "the agent fleet may invoke it".
  *
- * The tool's JSON Schema is materialised from `action.params[]`,
- * resolving field-backed params (`{ field: 'priority' }`) against the
- * owning object so the LLM sees the same type/options/required
- * constraints the modal dialog would render.
+ * Supported dispatch types: `script` (via {@link IDataEngine.executeAction} —
+ * the same dispatcher Studio's row-toolbar buttons use), `api` (HTTP call to
+ * the action `target`), and `flow` (automation runner). UI-only types
+ * (`url`, `modal`, `form`) have no headless path and are never exposed.
+ *
+ * Destructive actions (`confirmText`, `mode:'delete'`, `variant:'danger'`,
+ * or `ai.requiresConfirmation:true`) route through the HITL approval queue
+ * when it is wired (`enableActionApproval` + `aiService`); otherwise they are
+ * skipped. An author may assert a destructive-looking action is safe by
+ * setting `ai.requiresConfirmation:false` (the bridge logs a warning).
+ *
+ * The tool's JSON Schema is materialised from `action.params[]`, resolving
+ * field-backed params (`{ field: 'priority' }`) against the owning object so
+ * the LLM sees the same type/options/required constraints the modal dialog
+ * would render, then refined by `ai.paramHints`.
  */
 
 import type {
@@ -158,12 +164,28 @@ interface ActionInvocationResult {
  * headless invocation path.
  */
 /**
- * True when an action is "dangerous" and should be routed through the
- * HITL approval queue (rather than dispatched directly). Exported so
- * Studio's AI-exposure surface can highlight which actions require
- * approval.
+ * True when an AI invocation of this action must be gated behind human
+ * confirmation (HITL approval queue) rather than dispatched directly.
+ *
+ * The author's explicit `ai.requiresConfirmation` wins. When unset, an action
+ * is treated as confirmation-requiring if it looks destructive (`confirmText`
+ * set, `mode:'delete'`, or `variant:'danger'`). Exported so Studio's
+ * AI-exposure surface can highlight which actions require approval.
  */
 export function actionRequiresApproval(action: Action): boolean {
+  const override = action.ai?.requiresConfirmation;
+  if (override !== undefined) return override;
+  return Boolean(
+    action.confirmText || action.mode === 'delete' || action.variant === 'danger',
+  );
+}
+
+/**
+ * True when an action *looks* destructive by heuristic, independent of any
+ * `ai.requiresConfirmation` override. Used to detect the "author asserted a
+ * destructive action is safe" case so the bridge can warn.
+ */
+function actionLooksDestructive(action: Action): boolean {
   return Boolean(
     action.confirmText || action.mode === 'delete' || action.variant === 'danger',
   );
@@ -179,8 +201,14 @@ export function actionSkipReason(
     aiService?: ActionToolsContext['aiService'];
   },
 ): string | null {
-  if (action.aiExposed === false) {
-    return 'opted-out via aiExposed:false';
+  // ADR-0011: opt-in. An action is exposed only when it explicitly says so.
+  if (action.ai?.exposed !== true) {
+    return 'not AI-exposed (set ai.exposed:true to opt in)';
+  }
+  // Spec requires a description when exposed; be defensive against raw
+  // (non-Zod-parsed) metadata reaching this path.
+  if (!action.ai.description) {
+    return 'ai.exposed:true but ai.description is missing';
   }
   // Skip Studio-only types (no headless invocation surface).
   if (action.type === 'url' || action.type === 'modal' || action.type === 'form') {
@@ -204,16 +232,23 @@ export function actionSkipReason(
       return 'no apiClient or apiBaseUrl configured';
     }
   }
-  // Safety: dangerous actions normally require explicit human approval.
-  // When the caller has opted in to the HITL queue (and wired aiService),
-  // we *register* them and route to the queue instead of skipping.
+  // Safety: actions requiring confirmation must route through the HITL queue.
+  // When the caller has opted in (and wired aiService), we *register* them and
+  // route to the queue; otherwise we skip — an exposed action whose author did
+  // not assert it safe must never run unattended.
   if (actionRequiresApproval(action)) {
     const approvalReady =
       ctx?.enableActionApproval === true && Boolean(ctx?.aiService?.proposePendingAction);
     if (!approvalReady) {
-      if (action.confirmText) return 'requires confirmation (confirmText set)';
-      if (action.mode === 'delete') return "mode='delete' — destructive";
-      if (action.variant === 'danger') return "variant='danger' — destructive";
+      const why =
+        action.ai?.requiresConfirmation === true
+          ? 'ai.requiresConfirmation:true'
+          : action.confirmText
+            ? 'confirmText set'
+            : action.mode === 'delete'
+              ? "mode='delete'"
+              : "variant='danger'";
+      return `requires confirmation (${why}) — wire HITL approval (enableActionApproval) or set ai.requiresConfirmation:false to assert it is safe`;
     }
   }
   return null;
@@ -341,6 +376,20 @@ function buildParametersSchema(
     if (resolved.required) required.push(resolved.name);
   }
 
+  // ADR-0011: apply per-parameter AI hints last so they refine the LLM-facing
+  // schema (tighter enum, clearer description, examples) without touching the
+  // UI-facing field metadata. Spec validation guarantees keys reference a real
+  // param (or the injected `recordId`).
+  const hints = action.ai?.paramHints;
+  if (hints) {
+    for (const [key, hint] of Object.entries(hints)) {
+      const target = properties[key] ?? (properties[key] = { type: 'string' });
+      if (hint.description !== undefined) target.description = hint.description;
+      if (hint.enum !== undefined) target.enum = hint.enum;
+      if (hint.examples !== undefined) target.examples = hint.examples;
+    }
+  }
+
   return {
     type: 'object',
     properties,
@@ -356,23 +405,40 @@ export function actionToolName(action: Action, prefix = 'action_'): string {
   return `${prefix}${action.name}`;
 }
 
-function describeAction(action: Action, ownerObject: ObjectDef | undefined): string {
+/**
+ * Defensive fallback description for raw (non-Zod-parsed) metadata that
+ * somehow reaches the bridge with `ai.exposed:true` but no `ai.description`.
+ * Normal authored actions never hit this — the spec requires a description
+ * when exposed. We deliberately do NOT derive descriptions from the UI label
+ * for the happy path (ADR-0011 Non-Goal).
+ */
+function fallbackDescription(action: Action, ownerObject: ObjectDef | undefined): string {
   const label =
-    typeof action.label === 'string'
-      ? action.label
-      : action.name.replace(/_/g, ' ');
-  const target = action.objectName ?? ownerObject?.name;
-  const targetLabel = ownerObject?.label ?? target;
-  const parts: string[] = [];
-  parts.push(`${label}${targetLabel ? ` — operates on ${targetLabel}` : ''}.`);
-  if (action.successMessage && typeof action.successMessage === 'string') {
-    parts.push(`On success: ${action.successMessage}`);
+    typeof action.label === 'string' ? action.label : action.name.replace(/_/g, ' ');
+  const targetLabel = ownerObject?.label ?? action.objectName ?? ownerObject?.name;
+  return `${label}${targetLabel ? ` — operates on ${targetLabel}` : ''}.`;
+}
+
+/** Top-level property names of a JSON-Schema object, if any. */
+function outputSchemaKeys(schema: Record<string, unknown> | undefined): string[] {
+  if (!schema || typeof schema !== 'object') return [];
+  const props = (schema as { properties?: unknown }).properties;
+  if (!props || typeof props !== 'object') return [];
+  return Object.keys(props as Record<string, unknown>);
+}
+
+/**
+ * Compose the LLM-facing tool description: the authored `ai.description`
+ * (required when exposed), plus a compact "Returns:" line summarising
+ * `ai.outputSchema` so the model can reason about chaining the result.
+ */
+function buildToolDescription(action: Action, ownerObject: ObjectDef | undefined): string {
+  const base = action.ai?.description ?? fallbackDescription(action, ownerObject);
+  const keys = outputSchemaKeys(action.ai?.outputSchema);
+  if (keys.length > 0) {
+    return `${base}\n\nReturns an object with: ${keys.join(', ')}.`;
   }
-  if (action.mode) parts.push(`Mode: ${action.mode}.`);
-  parts.push(
-    'Use this when the user asks to perform this operation in natural language.',
-  );
-  return parts.join(' ');
+  return base;
 }
 
 // ── Builders ────────────────────────────────────────────────────────
@@ -392,12 +458,16 @@ export function actionToToolDefinition(
   // with full context (apiClient, automation, HITL approval wiring). This
   // function only checks the *structural* invariants that make a
   // definition impossible to build.
-  if (action.aiExposed === false) return null;
+  if (action.ai?.exposed !== true) return null;
   if (action.type === 'url' || action.type === 'modal' || action.type === 'form') return null;
   return {
     name: actionToolName(action, toolPrefix),
-    description: describeAction(action, ownerObject),
+    description: buildToolDescription(action, ownerObject),
     parameters: buildParametersSchema(action, ownerObject, allObjects),
+    ...(action.ai.category ? { category: action.ai.category } : {}),
+    ...(action.ai.outputSchema ? { outputSchema: action.ai.outputSchema } : {}),
+    ...(action.objectName ? { objectName: action.objectName } : {}),
+    requiresConfirmation: actionRequiresApproval(action),
   };
 }
 
@@ -763,6 +833,12 @@ export async function registerActionsAsTools(
 ): Promise<{
   registered: string[];
   skipped: Array<{ action: string; reason: string }>;
+  /**
+   * Non-fatal lint advisories surfaced while building tools — e.g. an author
+   * exposed a destructive-looking action and asserted it safe via
+   * `ai.requiresConfirmation:false`. Callers (the plugin) log these.
+   */
+  warnings: Array<{ action: string; warning: string }>;
 }> {
   const objects = (await context.metadata.listObjects()) as ObjectDef[];
   const objMap = new Map<string, ObjectDef>(
@@ -771,6 +847,7 @@ export async function registerActionsAsTools(
 
   const registered: string[] = [];
   const skipped: Array<{ action: string; reason: string }> = [];
+  const warnings: Array<{ action: string; warning: string }> = [];
   const prefix = context.toolPrefix ?? 'action_';
 
   for (const obj of objects) {
@@ -794,6 +871,18 @@ export async function registerActionsAsTools(
       if (reason !== null) {
         skipped.push({ action: normalized.name, reason });
         continue;
+      }
+
+      // Lint guardrail: the action is exposed and will run unattended, yet it
+      // looks destructive and the author explicitly asserted it safe. Register
+      // it (the author's call) but make the assertion visible.
+      if (actionLooksDestructive(normalized) && normalized.ai?.requiresConfirmation === false) {
+        warnings.push({
+          action: normalized.name,
+          warning:
+            'exposed destructive-looking action with ai.requiresConfirmation:false — ' +
+            'it will run without human approval; confirm this is intended.',
+        });
       }
 
       const definition = actionToToolDefinition(normalized, obj, objMap, prefix);
@@ -857,5 +946,5 @@ export async function registerActionsAsTools(
     }
   }
 
-  return { registered, skipped };
+  return { registered, skipped, warnings };
 }

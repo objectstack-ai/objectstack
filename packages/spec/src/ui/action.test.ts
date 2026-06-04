@@ -564,6 +564,108 @@ describe('Action I18n Integration', () => {
   });
 });
 
+// ============================================================================
+// ADR-0011: AI exposure block (opt-in)
+// ============================================================================
+
+describe('ActionSchema - ai block (ADR-0011)', () => {
+  const longDescription =
+    'Classify a support case and suggest a priority, category, and queue for the agent.';
+
+  it('defaults ai.exposed to false when an ai block is supplied without it', () => {
+    const result = ActionSchema.parse({
+      name: 'maybe_expose',
+      label: 'Maybe',
+      ai: {},
+    });
+    expect(result.ai?.exposed).toBe(false);
+  });
+
+  it('accepts an action with no ai block (not exposed)', () => {
+    const result = ActionSchema.parse({ name: 'plain', label: 'Plain' });
+    expect(result.ai).toBeUndefined();
+  });
+
+  it('requires a description when exposed is true', () => {
+    expect(() =>
+      ActionSchema.parse({
+        name: 'expose_no_desc',
+        label: 'Expose',
+        ai: { exposed: true },
+      }),
+    ).toThrow(/ai\.description/);
+  });
+
+  it('rejects a description shorter than 40 chars', () => {
+    expect(() =>
+      ActionSchema.parse({
+        name: 'expose_short',
+        label: 'Expose',
+        ai: { exposed: true, description: 'too short' },
+      }),
+    ).toThrow();
+  });
+
+  it('accepts a fully-specified ai block', () => {
+    const result = ActionSchema.parse({
+      name: 'triage_case',
+      label: 'Triage Case',
+      objectName: 'crm_case',
+      params: [{ name: 'priority', type: 'text' }],
+      ai: {
+        exposed: true,
+        description: longDescription,
+        category: 'analytics',
+        paramHints: { priority: { description: 'P0-P3', enum: ['P0', 'P1', 'P2', 'P3'] } },
+        outputSchema: { type: 'object', properties: { priority: { type: 'string' } } },
+        requiresConfirmation: false,
+      },
+    });
+    expect(result.ai?.exposed).toBe(true);
+    expect(result.ai?.category).toBe('analytics');
+    expect(result.ai?.requiresConfirmation).toBe(false);
+  });
+
+  it('rejects an invalid ai.category value', () => {
+    expect(() =>
+      ActionSchema.parse({
+        name: 'bad_category',
+        label: 'Bad',
+        ai: { exposed: true, description: longDescription, category: 'not_a_category' },
+      }),
+    ).toThrow();
+  });
+
+  it('rejects paramHints keys that do not match a declared param', () => {
+    expect(() =>
+      ActionSchema.parse({
+        name: 'bad_hint',
+        label: 'Bad Hint',
+        params: [{ name: 'priority', type: 'text' }],
+        ai: { exposed: true, description: longDescription, paramHints: { nonexistent: { description: 'x' } } },
+      }),
+    ).toThrow(/paramHints/);
+  });
+
+  it('allows paramHints to reference the injected recordId', () => {
+    expect(() =>
+      ActionSchema.parse({
+        name: 'hint_record_id',
+        label: 'Hint',
+        objectName: 'task',
+        locations: ['record_header'],
+        ai: { exposed: true, description: longDescription, paramHints: { recordId: { description: 'The task id.' } } },
+      }),
+    ).not.toThrow();
+  });
+
+  it('does not require a description when exposed is false', () => {
+    expect(() =>
+      ActionSchema.parse({ name: 'opted_out', label: 'Out', ai: { exposed: false } }),
+    ).not.toThrow();
+  });
+});
+
 describe('Action ARIA Integration', () => {
   it('should accept action with ARIA attributes', () => {
     expect(() => ActionSchema.parse({

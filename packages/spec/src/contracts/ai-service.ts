@@ -170,6 +170,25 @@ export interface AIToolDefinition {
     description: string;
     /** JSON Schema describing the tool parameters */
     parameters: Record<string, unknown>;
+    /**
+     * Optional tool category (mirrors `ToolSchema.category`). Carried by
+     * action-backed tools from `action.ai.category`; surfaced by tool-listing
+     * routes. Not sent to the model.
+     */
+    category?: string;
+    /**
+     * Optional JSON Schema for the tool's return value. Action-backed tools
+     * derive this from `action.ai.outputSchema` to enable downstream chaining.
+     */
+    outputSchema?: Record<string, unknown>;
+    /** Object this tool operates on, when the tool is action-backed. */
+    objectName?: string;
+    /**
+     * Whether invoking this tool requires human-in-the-loop confirmation.
+     * Action-backed tools set this from the action's confirmation policy
+     * (`action.ai.requiresConfirmation`, or the destructive-action default).
+     */
+    requiresConfirmation?: boolean;
 }
 
 // ---------------------------------------------------------------------------

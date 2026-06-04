@@ -58,7 +58,7 @@ export const actionForm = defineForm({
       columns: 2,
       fields: [
         { field: 'bulkEnabled', colSpan: 1, helpText: 'Allow applying to multiple selected records' },
-        { field: 'aiExposed', colSpan: 1, helpText: 'Allow AI agents to call this action' },
+        { field: 'ai', colSpan: 2, helpText: 'AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents.' },
         { field: 'recordIdParam', visibleOn: "data.type == 'api'", colSpan: 1, helpText: 'Body parameter name for record ID' },
         { field: 'recordIdField', visibleOn: "data.type == 'api' && data.recordIdParam", colSpan: 1, helpText: 'Field to use as record ID (default: "id")' },
         { field: 'bodyShape', visibleOn: "data.type == 'api'", colSpan: 2, helpText: 'Request body structure (flat or nested)' },

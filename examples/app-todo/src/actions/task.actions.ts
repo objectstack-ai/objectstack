@@ -13,6 +13,10 @@ export const CompleteTaskAction: Action = {
   locations: ['record_header', 'list_item'],
   successMessage: 'Task marked as complete!',
   refreshAfter: true,
+  ai: {
+    exposed: true,
+    description: 'Mark a todo task as complete. Use when the user says a task is done or finished.',
+  },
 };
 
 /** Mark Task as In Progress */
@@ -26,6 +30,10 @@ export const StartTaskAction: Action = {
   locations: ['record_header', 'list_item'],
   successMessage: 'Task started!',
   refreshAfter: true,
+  ai: {
+    exposed: true,
+    description: 'Mark a todo task as in progress. Use when the user says they are starting or working on a task.',
+  },
 };
 
 /** Defer Task */
@@ -87,6 +95,10 @@ export const CloneTaskAction: Action = {
   locations: ['record_header'],
   successMessage: 'Task cloned successfully!',
   refreshAfter: true,
+  ai: {
+    exposed: true,
+    description: 'Duplicate an existing todo task, copying its fields into a new task record.',
+  },
 };
 
 /** Mass Complete Tasks */
@@ -100,6 +112,10 @@ export const MassCompleteTasksAction: Action = {
   locations: ['list_toolbar'],
   successMessage: 'Selected tasks marked as complete!',
   refreshAfter: true,
+  ai: {
+    exposed: true,
+    description: 'Mark all currently selected todo tasks as complete in one bulk operation.',
+  },
 };
 
 /** Delete Completed Tasks */
@@ -118,6 +134,13 @@ export const DeleteCompletedAction: Action = {
   confirmText: 'Permanently delete all completed tasks? This cannot be undone.',
   successMessage: 'Completed tasks deleted!',
   refreshAfter: true,
+  ai: {
+    exposed: true,
+    description:
+      'Permanently delete every completed todo task. Destructive and irreversible — only after the user confirms.',
+    // confirmText + variant:'danger' default this to requiring HITL approval;
+    // it registers only when enableActionApproval is on, then routes to the queue.
+  },
 };
 
 /** Export Tasks to CSV */
@@ -131,4 +154,8 @@ export const ExportToCsvAction: Action = {
   locations: ['list_toolbar'],
   successMessage: 'Export completed!',
   refreshAfter: false,
+  ai: {
+    exposed: true,
+    description: 'Export the current list of todo tasks to a downloadable CSV file.',
+  },
 };

@@ -149,6 +149,90 @@ export const ACTION_LOCATIONS = [
 export const ActionLocationSchema = z.enum(ACTION_LOCATIONS);
 export type ActionLocation = z.infer<typeof ActionLocationSchema>;
 
+/**
+ * Tool category values for {@link ActionAiSchema.category}.
+ *
+ * Mirrors `ToolCategorySchema` in `../ai/tool.zod`. Kept **inline** rather
+ * than imported to avoid a `ui → ai` import cycle (`ai/*.form.ts` already
+ * imports `defineForm` from `ui/view.zod`). If you change the canonical
+ * tool categories, update both sides.
+ */
+const ActionAiCategorySchema = z.enum([
+  'data',
+  'action',
+  'flow',
+  'integration',
+  'vector_search',
+  'analytics',
+  'utility',
+]);
+
+/**
+ * AI exposure block (ADR-0011 "Actions as AI Tools").
+ *
+ * **Opt-in, default off.** An action becomes an AI-callable tool only when
+ * `exposed: true`. This is a deliberate governance gate: in an AI-authoring
+ * world the platform's value is that a human can govern exactly which
+ * capabilities the agent fleet is allowed to invoke — a half-finished or
+ * unreviewed action must never be silently armed.
+ *
+ * When exposed, `description` is **required** — it is the LLM-facing contract
+ * (when/why to call), authored explicitly rather than derived from the
+ * UI `label`. The bridge in `@objectstack/service-ai` translates this block
+ * into an `AIToolDefinition`.
+ */
+export const ActionAiSchema = z.object({
+  /**
+   * Expose this action to AI agents as a callable tool. Default `false`.
+   * Setting `true` REQUIRES `description`.
+   */
+  exposed: z.boolean().default(false).describe('Expose this action to AI agents. Requires `description` when true.'),
+
+  /**
+   * LLM-facing description: tells the model when and why to call this action.
+   * Distinct from the UI `label`. Plain English, ≥ 40 chars for useful tool
+   * selection. Required whenever `exposed` is true.
+   */
+  description: z.string().min(40).optional().describe('LLM-facing description (≥40 chars). Required when exposed.'),
+
+  /**
+   * Override the derived tool category. Defaults to `action` (side-effect).
+   * Use `data` for read-only actions, `analytics` for aggregations, etc.
+   */
+  category: ActionAiCategorySchema.optional().describe('Tool category override (defaults to "action").'),
+
+  /**
+   * Per-parameter AI hints, keyed by param name (or the injected `recordId`).
+   * Tightens the JSON Schema the LLM sees (e.g. add `enum`, override
+   * `description`, supply `examples`) WITHOUT changing the UI-facing field
+   * metadata. Keys must match a declared `params[].name` (or `recordId`).
+   */
+  paramHints: z.record(z.string(), z.object({
+    description: z.string().optional(),
+    enum: z.array(z.union([z.string(), z.number()])).optional(),
+    examples: z.array(z.unknown()).optional(),
+  })).optional().describe('Per-parameter AI hints keyed by param name.'),
+
+  /**
+   * Output JSON Schema for the action's return value. Enables structured
+   * downstream tool chaining (one action's output feeds another's input) and
+   * is summarised into the tool description so the model knows what it gets
+   * back. Optional — when omitted the return value is treated as freeform.
+   */
+  outputSchema: z.record(z.string(), z.unknown()).optional().describe('JSON Schema for the action return value.'),
+
+  /**
+   * Override confirmation for AI calls. When unset, the bridge defaults to
+   * `true` for actions that look destructive (`confirmText` set, `mode:'delete'`,
+   * or `variant:'danger'`). Set explicitly to `false` to assert a destructive-
+   * looking action is safe to run without human approval, or `true` to force a
+   * human-in-the-loop gate on an otherwise-safe action.
+   */
+  requiresConfirmation: z.boolean().optional().describe('Override HITL confirmation for AI invocations.'),
+});
+
+export type ActionAi = z.infer<typeof ActionAiSchema>;
+
 export const ActionSchema = lazySchema(() => z.object({
   /** Machine name of the action */
   name: SnakeCaseIdentifierSchema.describe('Machine name (lowercase snake_case)'),
@@ -289,13 +373,11 @@ export const ActionSchema = lazySchema(() => z.object({
   bulkEnabled: z.boolean().optional().describe('Whether this action can be applied to multiple selected records'),
 
   /**
-   * AI exposure opt-out. When `false`, this action is **not** auto-registered
-   * as an AI tool (see service-ai's `registerActionsAsTools`). When unset or
-   * `true` the platform decides based on safety heuristics (script-type, no
-   * confirmation gate, not destructive). Use this for sensitive ops you want
-   * to keep human-only even though they otherwise look safe.
+   * AI exposure block (ADR-0011). Opt-in, default off: an action is exposed
+   * to AI agents only when `ai.exposed === true`, in which case `ai.description`
+   * is required. See {@link ActionAiSchema}.
    */
-  aiExposed: z.boolean().optional().describe('Set to false to keep this action out of the AI tool registry.'),
+  ai: ActionAiSchema.optional().describe('AI exposure (opt-in). Set ai.exposed=true + ai.description to make this callable by agents.'),
 
   /**
    * Row-context: when the action runs from a list_item location, this body key
@@ -359,6 +441,29 @@ export const ActionSchema = lazySchema(() => z.object({
 }, {
   message: "Action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form'.",
   path: ['target'],
+}).refine((data) => {
+  // ADR-0011: an exposed action must carry an LLM-facing description.
+  if (data.ai?.exposed === true && !data.ai.description) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'ai.description is required (≥40 chars) when ai.exposed is true.',
+  path: ['ai', 'description'],
+}).refine((data) => {
+  // ADR-0011: paramHints keys must reference a declared param (or the
+  // auto-injected `recordId`), so a typo can't silently no-op.
+  const hints = data.ai?.paramHints;
+  if (!hints) return true;
+  const known = new Set<string>(['recordId']);
+  for (const p of data.params ?? []) {
+    const key = p.name ?? p.field;
+    if (key) known.add(key);
+  }
+  return Object.keys(hints).every((k) => known.has(k));
+}, {
+  message: 'ai.paramHints keys must match a declared param name (or "recordId").',
+  path: ['ai', 'paramHints'],
 }));
 
 export type Action = z.infer<typeof ActionSchema>;

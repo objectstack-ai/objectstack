@@ -666,7 +666,7 @@ export class AIServicePlugin implements Plugin {
             const apiBaseUrl =
               this.options.apiActionBaseUrl ?? process.env.OS_AI_ACTION_API_BASE_URL;
             const apiHeaders = this.options.apiActionHeaders;
-            const { registered, skipped } = await registerActionsAsTools(
+            const { registered, skipped, warnings } = await registerActionsAsTools(
               this.service.toolRegistry,
               {
                 metadata: metadataService,
@@ -688,6 +688,9 @@ export class AIServicePlugin implements Plugin {
                 `[AI] Skipped ${skipped.length} action(s) for AI exposure`,
                 { skipped },
               );
+            }
+            for (const w of warnings) {
+              ctx.logger.warn(`[AI] action '${w.action}': ${w.warning}`);
             }
           } catch (err) {
             ctx.logger.warn(

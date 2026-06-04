@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Action } from '@objectstack/spec/ui';
 import {
   actionSkipReason,
+  actionToToolDefinition,
   buildApiRequestBody,
   createFetchApiClient,
   registerActionsAsTools,
@@ -11,6 +12,8 @@ import {
 } from '../tools/action-tools.js';
 import { ToolRegistry } from '../tools/tool-registry.js';
 
+// Actions are AI-exposed only by opt-in (ADR-0011), so the baseline fixture
+// carries a valid `ai` block. Tests that exercise the opt-in gate override it.
 const baseAction = (over: Partial<Action> = {}): Action =>
   ({
     name: 'do_thing',
@@ -19,6 +22,7 @@ const baseAction = (over: Partial<Action> = {}): Action =>
     target: 'doThingHandler',
     objectName: 'task',
     locations: ['record_header'],
+    ai: { exposed: true, description: 'Do the thing the user asked for on this task record.' },
     ...over,
   }) as Action;
 
@@ -52,8 +56,89 @@ describe('actionSkipReason', () => {
     expect(actionSkipReason(baseAction({ variant: 'danger' }))).toMatch(/danger/);
   });
 
-  it('respects aiExposed:false', () => {
-    expect(actionSkipReason(baseAction({ aiExposed: false }))).toMatch(/aiExposed/);
+  it('is opt-in: skips actions that did not set ai.exposed', () => {
+    expect(actionSkipReason(baseAction({ ai: undefined }))).toMatch(/not AI-exposed/);
+    expect(actionSkipReason(baseAction({ ai: { exposed: false } as never }))).toMatch(/not AI-exposed/);
+  });
+
+  it('skips an exposed action missing a description (defensive)', () => {
+    expect(
+      actionSkipReason(baseAction({ ai: { exposed: true } as never })),
+    ).toMatch(/description is missing/);
+  });
+
+  it('ai.requiresConfirmation:false lets an exposed destructive action run', () => {
+    // delete looks destructive, but the author asserts it is safe → exposed.
+    expect(
+      actionSkipReason(baseAction({
+        mode: 'delete',
+        ai: { exposed: true, description: 'Archive this task record; it is reversible from trash.', requiresConfirmation: false },
+      })),
+    ).toBeNull();
+  });
+
+  it('ai.requiresConfirmation:true gates an otherwise-safe action behind HITL', () => {
+    const a = baseAction({
+      ai: { exposed: true, description: 'Update the task title to the value the user supplied.', requiresConfirmation: true },
+    });
+    expect(actionSkipReason(a)).toMatch(/requires confirmation/);
+    expect(
+      actionSkipReason(a, {
+        enableActionApproval: true,
+        aiService: { proposePendingAction: async () => ({ id: 'x' }) },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('actionToToolDefinition — ai: block translation', () => {
+  it('returns null when not exposed', () => {
+    expect(actionToToolDefinition(baseAction({ ai: undefined }), undefined, new Map())).toBeNull();
+  });
+
+  it('uses ai.description and carries category/objectName/requiresConfirmation', () => {
+    const def = actionToToolDefinition(
+      baseAction({ ai: { exposed: true, description: 'Triage a support case and suggest a priority and queue.', category: 'analytics' } }),
+      undefined,
+      new Map(),
+    );
+    expect(def).not.toBeNull();
+    expect(def!.description).toContain('Triage a support case');
+    expect(def!.category).toBe('analytics');
+    expect(def!.objectName).toBe('task');
+    expect(def!.requiresConfirmation).toBe(false);
+  });
+
+  it('summarises ai.outputSchema into the description and carries it through', () => {
+    const outputSchema = {
+      type: 'object',
+      properties: { priority: { type: 'string' }, queue: { type: 'string' } },
+    };
+    const def = actionToToolDefinition(
+      baseAction({ ai: { exposed: true, description: 'Triage a support case and return a structured suggestion.', outputSchema } }),
+      undefined,
+      new Map(),
+    );
+    expect(def!.outputSchema).toEqual(outputSchema);
+    expect(def!.description).toMatch(/Returns an object with: priority, queue\./);
+  });
+
+  it('merges ai.paramHints into the parameter JSON Schema', () => {
+    const def = actionToToolDefinition(
+      baseAction({
+        params: [{ name: 'priority', type: 'text' }],
+        ai: {
+          exposed: true,
+          description: 'Set the priority on the task record to one of the allowed values.',
+          paramHints: { priority: { description: 'One of P0-P3.', enum: ['P0', 'P1', 'P2', 'P3'] } },
+        },
+      }),
+      undefined,
+      new Map(),
+    );
+    const props = (def!.parameters as { properties: Record<string, Record<string, unknown>> }).properties;
+    expect(props.priority.enum).toEqual(['P0', 'P1', 'P2', 'P3']);
+    expect(props.priority.description).toBe('One of P0-P3.');
   });
 });
 
@@ -370,5 +455,35 @@ describe('actionRequiresApproval + HITL queue routing', () => {
     // Dispatcher returns parsed envelope (helps AIService store structured result).
     expect((result as any).ok).toBe(true);
     expect((result as any).result).toEqual({ deleted: true });
+  });
+});
+
+describe('lint guardrail — asserted-safe destructive actions', () => {
+  it('registers but warns when a destructive action sets ai.requiresConfirmation:false', async () => {
+    const reg = new ToolRegistry();
+    const action = baseAction({
+      name: 'archive_task',
+      mode: 'delete',
+      type: 'script',
+      target: 'archiveTaskHandler',
+      locations: [],
+      params: [],
+      ai: {
+        exposed: true,
+        description: 'Archive this task record; the operation is reversible from the trash.',
+        requiresConfirmation: false,
+      },
+    } as Partial<Action>);
+    const objects = [{ name: 'task', label: 'Task', fields: {}, actions: [action] }];
+    const { registered, skipped, warnings } = await registerActionsAsTools(reg, {
+      metadata: { listObjects: async () => objects } as never,
+      dataEngine: { find: async () => [], executeAction: async () => ({ ok: true }) } as never,
+    } as never);
+
+    expect(skipped).toEqual([]);
+    expect(registered).toEqual(['action_archive_task']);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].action).toBe('archive_task');
+    expect(warnings[0].warning).toMatch(/without human approval/);
   });
 });

@@ -151,9 +151,9 @@ export const AiPendingActionObject = ObjectSchema.create({
       variant: 'primary',
       confirmText: 'Approve and execute this action now?',
       successMessage: 'Action approved and executed.',
-      // The approval click is the operator's authorisation gesture —
-      // the LLM must not be allowed to bypass HITL by approving itself.
-      aiExposed: false,
+      // Human-only by design: not opted into AI (no `ai.exposed`). The approval
+      // click is the operator's authorisation gesture — the LLM must not be
+      // able to bypass HITL by approving itself.
     },
     {
       name: 'reject_pending_action',
@@ -165,7 +165,7 @@ export const AiPendingActionObject = ObjectSchema.create({
       variant: 'danger',
       confirmText: 'Reject this pending action? It will not be executed.',
       successMessage: 'Action rejected.',
-      aiExposed: false,
+      // Human-only by design: not opted into AI (no `ai.exposed`).
     },
   ],
 

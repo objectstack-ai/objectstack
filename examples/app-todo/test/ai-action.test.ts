@@ -1,9 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // AI **action** integration demo — the write-side counterpart to
-// `ai-agent.test.ts`. Confirms that every `type: 'script'` action on
-// the Task object is auto-registered as an `action_<name>` tool, and
-// that the `data_chat` agent can pick the right one in plain English.
+// `ai-agent.test.ts`. Confirms that every `type: 'script'` action on the
+// Task object that opts in via `ai.exposed` (ADR-0011) is registered as an
+// `action_<name>` tool, and that the `data_chat` agent can pick the right
+// one in plain English.
 //
 // Run via: `pnpm --filter @example/app-todo test:action`
 //
@@ -189,7 +190,7 @@ import { registerTaskActionHandlers } from '../src/actions/register-handlers';
   }
 
   console.log('\n🎉 Action Demo Successful!');
-  console.log('   • Script-type actions auto-exposed as `action_*` tools');
+  console.log('   • Opted-in script actions (ai.exposed) registered as `action_*` tools');
   console.log('   • Agent routed user request to action_complete_task');
   console.log('   • Task status mutated from incomplete → completed');
   console.log('   • chat_with_tools trace persisted in ai_traces');
