@@ -189,8 +189,10 @@ export type ActionCategory = z.infer<typeof ActionCategorySchema>;
  */
 export const ActionParadigmSchema = lazySchema(() => z.enum([
   'flow',           // visual Flow canvas
-  'workflow_rule',  // declarative Workflow Rule authoring view (compiles to Flow)
   'approval',       // Approval Process steps
+  // 'workflow_rule' retired (ADR-0018 M5 dropped; see ADR-0019): Workflow Rules
+  // were removed in #1398 and `workflow` was reclaimed for state machines, so
+  // there is no declarative rule authoring view to compile to Flow.
 ]).describe('Authoring paradigm that may offer this action'));
 
 export type ActionParadigm = z.infer<typeof ActionParadigmSchema>;

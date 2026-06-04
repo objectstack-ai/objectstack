@@ -450,7 +450,7 @@ export class AutomationEngine implements IAutomationService {
                 description: `Deprecated alias of '${canonicalType}' (ADR-0018 M3). Author new flows with '${canonicalType}'.`,
                 category: meta?.category ?? 'io',
                 source: 'builtin',
-                paradigms: meta?.paradigms ?? ['flow', 'workflow_rule', 'approval'],
+                paradigms: meta?.paradigms ?? ['flow', 'approval'],
                 supportsRetry: true,
                 needsOutbox: meta?.needsOutbox ?? false,
                 deprecated: true,

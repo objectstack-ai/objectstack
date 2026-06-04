@@ -67,7 +67,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // Delivery is outbox-backed inside the messaging service (ADR-0030
             // emit → sys_notification_delivery), so it inherits retry/dead-letter.
             needsOutbox: true,
-            paradigms: ['flow', 'workflow_rule', 'approval'],
+            paradigms: ['flow', 'approval'],
         }),
         async execute(node, variables, context) {
             const cfg = (node.config ?? {}) as Record<string, unknown>;

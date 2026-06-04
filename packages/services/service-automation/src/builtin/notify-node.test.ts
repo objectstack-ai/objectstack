@@ -72,7 +72,7 @@ describe('notify (baseline node)', () => {
         expect(descriptor?.source).toBe('builtin');
         expect(descriptor?.category).toBe('io');
         expect(descriptor?.paradigms).toEqual(
-            expect.arrayContaining(['flow', 'workflow_rule', 'approval']),
+            expect.arrayContaining(['flow', 'approval']),
         );
     });
 

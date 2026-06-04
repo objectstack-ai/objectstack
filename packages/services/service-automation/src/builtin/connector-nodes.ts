@@ -32,8 +32,9 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             category: 'io',
             source: 'builtin',
             supportsRetry: true,
-            // Present in all three authoring paradigms (ADR-0018 §registry table).
-            paradigms: ['flow', 'workflow_rule', 'approval'],
+            // Present in both authoring paradigms (ADR-0018 §registry table;
+            // workflow_rule retired per ADR-0019).
+            paradigms: ['flow', 'approval'],
             // Config contract — drives the Studio property form and flow validation.
             configSchema: {
                 type: 'object',

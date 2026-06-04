@@ -147,7 +147,7 @@ describe('HttpDispatcher', () => {
                 trigger: vi.fn().mockResolvedValue({ success: true }),
                 getActionDescriptors: vi.fn().mockReturnValue([
                     { type: 'decision', name: 'Decision', category: 'logic', paradigms: ['flow'], source: 'builtin' },
-                    { type: 'http_request', name: 'HTTP Request', category: 'io', paradigms: ['flow', 'workflow_rule'], source: 'builtin' },
+                    { type: 'http_request', name: 'HTTP Request', category: 'io', paradigms: ['flow', 'approval'], source: 'builtin' },
                     { type: 'send_sms', name: 'Send SMS', category: 'io', paradigms: ['flow'], source: 'plugin' },
                 ]),
                 getConnectorDescriptors: vi.fn().mockReturnValue([
@@ -270,7 +270,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should filter GET /actions by ?paradigm', async () => {
-            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} }, { paradigm: 'workflow_rule' });
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} }, { paradigm: 'approval' });
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.total).toBe(1);
             expect(result.response?.body?.data?.actions[0].type).toBe('http_request');

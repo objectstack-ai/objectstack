@@ -73,7 +73,7 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             // and the messaging HTTP outbox is wired).
             needsOutbox: true,
             supportsRetry: true,
-            paradigms: ['flow', 'workflow_rule', 'approval'],
+            paradigms: ['flow', 'approval'],
             configSchema: {
                 type: 'object',
                 required: ['url'],

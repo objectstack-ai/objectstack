@@ -58,7 +58,7 @@ describe('http (canonical node) + deprecated aliases', () => {
         expect(d?.source).toBe('builtin');
         expect(d?.category).toBe('io');
         expect(d?.needsOutbox).toBe(true);
-        expect(d?.paradigms).toEqual(expect.arrayContaining(['flow', 'workflow_rule', 'approval']));
+        expect(d?.paradigms).toEqual(expect.arrayContaining(['flow', 'approval']));
     });
 
     it('registers http_request/http_call/webhook as deprecated aliases of http', () => {
