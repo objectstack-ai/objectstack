@@ -1757,30 +1757,48 @@ export class HttpDispatcher {
             return { success: false, error: 'seed apply: required services unavailable' };
         }
         const datasets: any[] = [];
+        const readErrors: string[] = [];
         for (const name of names) {
-            try {
-                const item: any = await protocol.getMetaItem({
-                    type: 'seed',
-                    name,
-                    ...(organizationId ? { organizationId } : {}),
-                });
-                // getMetaItem returns the item body directly; tolerate a
-                // wrapper ({metadata|body}) just in case.
-                const seed = item?.object && Array.isArray(item?.records)
-                    ? item
-                    : (item?.metadata ?? item?.body);
-                if (seed?.object && Array.isArray(seed?.records)) datasets.push(seed);
-            } catch {
-                /* skip an unreadable seed; keep applying the rest */
+            // Read the just-published seed body. Try the active org first, then
+            // fall back to an env-wide read — a workspace seed is often stored
+            // org-wide (organization_id IS NULL), and resolving the wrong scope
+            // here is what silently produced "0 rows loaded".
+            const attempts = organizationId
+                ? [{ type: 'seed', name, organizationId }, { type: 'seed', name }]
+                : [{ type: 'seed', name }];
+            let item: any;
+            for (const args of attempts) {
+                try {
+                    item = await protocol.getMetaItem(args);
+                    if (item) break;
+                } catch (e) {
+                    readErrors.push(`read ${name}: ${(e as Error)?.message ?? String(e)}`);
+                }
+            }
+            // getMetaItem returns the item body directly; tolerate a wrapper.
+            const seed = item?.object && Array.isArray(item?.records)
+                ? item
+                : (item?.metadata ?? item?.body);
+            if (seed?.object && Array.isArray(seed?.records)) {
+                datasets.push(seed);
+            } else {
+                readErrors.push(`seed "${name}" body unreadable (keys: ${item ? Object.keys(item).join(',') : 'none'})`);
             }
         }
-        if (datasets.length === 0) return { success: true, inserted: 0, updated: 0 };
+        // Seeds were published but none could be read back → surface it (do NOT
+        // report success with 0 rows, which hides the failure).
+        if (datasets.length === 0) {
+            return { success: false, inserted: 0, updated: 0, error: 'seed apply: no readable seed bodies', errors: readErrors };
+        }
 
         const { SeedLoaderService } = await import('./seed-loader.js');
         const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
         const loader = new SeedLoaderService(ql, metadata, (this as any).logger ?? console);
         const request = SeedLoaderRequestSchema.parse({
-            datasets,
+            // ADR field is `seeds` (renamed from `datasets`); this constructor
+            // was added in the same PR and the rename missed it — passing
+            // `datasets` left `seeds` undefined and the loader saw nothing.
+            seeds: datasets,
             config: {
                 defaultMode: 'upsert',
                 multiPass: true,
@@ -1792,7 +1810,7 @@ export class HttpDispatcher {
             success: r.success,
             inserted: r.summary.totalInserted,
             updated: r.summary.totalUpdated,
-            errors: r.errors,
+            errors: [...readErrors, ...(r.errors ?? [])],
         };
     }
 
