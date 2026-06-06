@@ -32,6 +32,7 @@ import { ObjectSchema } from '../data/object.zod';
 import { HookSchema } from '../data/hook.zod';
 import { ValidationRuleSchema } from '../data/validation.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
+import { SeedSchema } from '../data/dataset.zod';
 
 import { ViewSchema } from '../ui/view.zod';
 import { PageSchema } from '../ui/page.zod';
@@ -68,6 +69,7 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   field: FieldSchema,
   hook: HookSchema,
   validation: ValidationRuleSchema,
+  seed: SeedSchema, // fixture/init data; runtime-draftable, applied on publish
   // `trigger` — no standalone Zod schema yet; falls back to raw-JSON
   // editor until the data-trigger spec lands.
 

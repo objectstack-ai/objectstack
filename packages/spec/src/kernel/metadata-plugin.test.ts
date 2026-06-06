@@ -18,7 +18,7 @@ describe('MetadataPluginProtocol', () => {
   describe('MetadataTypeSchema', () => {
     it('should accept all built-in metadata types', () => {
       const types = [
-        'object', 'field', 'trigger', 'validation', 'hook',
+        'object', 'field', 'trigger', 'validation', 'hook', 'seed',
         'view', 'page', 'dashboard', 'app', 'action', 'report',
         'flow', // ADR-0020: `workflow` retired as a metadata type
         'datasource', 'translation', 'router', 'function', 'service',
@@ -39,6 +39,19 @@ describe('MetadataPluginProtocol', () => {
 
     it('should reject `approval` as a metadata type (ADR-0019: approval is a flow node)', () => {
       expect(() => MetadataTypeSchema.parse('approval')).toThrow();
+    });
+
+    it('registers `seed` as a runtime-draftable data type applied on publish', () => {
+      // accepted by the type enum
+      expect(MetadataTypeSchema.parse('seed')).toBe('seed');
+      // present in the default registry with the right capabilities
+      const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'seed');
+      expect(entry).toBeDefined();
+      expect(entry?.domain).toBe('data');
+      expect(entry?.allowRuntimeCreate).toBe(true); // AI/authors can stage seed drafts
+      // loads after objects/fields so referenced schema already exists
+      const objectOrder = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'object')?.loadOrder ?? 0;
+      expect((entry?.loadOrder ?? 0)).toBeGreaterThan(objectOrder);
     });
   });
 

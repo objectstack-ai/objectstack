@@ -1487,6 +1487,25 @@ export class HttpDispatcher {
                             ...(organizationId ? { organizationId } : {}),
                             ...(body?.actor ? { actor: body.actor } : {}),
                         });
+                        // Publishing a `seed` draft is what actually loads its
+                        // rows. Best-effort + idempotent (upsert): apply every
+                        // just-published seed now so the data is live the moment
+                        // the user clicks publish. A seed-load failure NEVER
+                        // fails the publish — it is surfaced under `seedApplied`.
+                        try {
+                            const seedNames = ((result as any)?.published ?? [])
+                                .filter((p: any) => p?.type === 'seed')
+                                .map((p: any) => p.name as string);
+                            if (seedNames.length > 0) {
+                                (result as any).seedApplied = await this.applyPublishedSeeds(
+                                    seedNames,
+                                    organizationId,
+                                    _context,
+                                );
+                            }
+                        } catch (e: any) {
+                            (result as any).seedApplied = { success: false, error: e?.message ?? 'seed apply failed' };
+                        }
                         return { handled: true, response: this.success(result) };
                     } catch (e: any) {
                         return { handled: true, response: this.error(e.message, e.statusCode || 500) };
@@ -1715,6 +1734,68 @@ export class HttpDispatcher {
      * Physical database addressing (database_url, database_driver, etc.)
      * is stored directly on the sys_environment row.
      */
+    /**
+     * Apply just-published `seed` metadata: load each seed's rows into its
+     * target object so publishing a seed draft makes the data live (the runtime
+     * counterpart to staging it). Reads each seed body via the protocol, then
+     * runs the {@link SeedLoaderService} for the active org. Best-effort and
+     * idempotent (upsert) — callers must never let this fail the publish.
+     *
+     * Lives at the runtime layer (not in the objectql publish primitive)
+     * because the seed loader needs the data engine + metadata service, which
+     * objectql cannot depend on without a layering cycle.
+     */
+    private async applyPublishedSeeds(
+        names: string[],
+        organizationId: string | undefined,
+        _context: HttpProtocolContext,
+    ): Promise<{ success: boolean; inserted?: number; updated?: number; errors?: unknown[]; error?: string }> {
+        const protocol: any = await this.resolveService('protocol');
+        const metadata: any = await this.getService(CoreServiceName.enum.metadata);
+        const ql: any = await this.resolveService('objectql');
+        if (!protocol || typeof protocol.getMetaItem !== 'function' || !ql || !metadata) {
+            return { success: false, error: 'seed apply: required services unavailable' };
+        }
+        const datasets: any[] = [];
+        for (const name of names) {
+            try {
+                const item: any = await protocol.getMetaItem({
+                    type: 'seed',
+                    name,
+                    ...(organizationId ? { organizationId } : {}),
+                });
+                // getMetaItem returns the item body directly; tolerate a
+                // wrapper ({metadata|body}) just in case.
+                const seed = item?.object && Array.isArray(item?.records)
+                    ? item
+                    : (item?.metadata ?? item?.body);
+                if (seed?.object && Array.isArray(seed?.records)) datasets.push(seed);
+            } catch {
+                /* skip an unreadable seed; keep applying the rest */
+            }
+        }
+        if (datasets.length === 0) return { success: true, inserted: 0, updated: 0 };
+
+        const { SeedLoaderService } = await import('./seed-loader.js');
+        const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
+        const loader = new SeedLoaderService(ql, metadata, (this as any).logger ?? console);
+        const request = SeedLoaderRequestSchema.parse({
+            datasets,
+            config: {
+                defaultMode: 'upsert',
+                multiPass: true,
+                ...(organizationId ? { organizationId } : {}),
+            },
+        });
+        const r = await loader.load(request);
+        return {
+            success: r.success,
+            inserted: r.summary.totalInserted,
+            updated: r.summary.totalUpdated,
+            errors: r.errors,
+        };
+    }
+
     /**
      * Resolve the calling user id from the request session, if any.
      * Returns `undefined` for anonymous calls or when auth is not wired up.

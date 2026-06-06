@@ -76,6 +76,7 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'trigger',     // Data-layer event triggers (TriggerSchema)
   'validation',  // Validation rules (ValidationSchema)
   'hook',        // Data hooks (HookSchema)
+  'seed',        // Seed/fixture data — runtime-draftable; publishing applies it (SeedSchema)
 
   // UI Protocol
   'view',        // List/form views (ViewSchema)
@@ -594,6 +595,14 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   { type: 'trigger', label: 'Trigger', filePatterns: ['**/*.trigger.ts', '**/*.trigger.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 30, domain: 'data' },
   { type: 'validation', label: 'Validation Rule', filePatterns: ['**/*.validation.ts', '**/*.validation.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 30, domain: 'data' },
   { type: 'hook', label: 'Hook', filePatterns: ['**/*.hook.ts', '**/*.hook.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 30, domain: 'data' },
+  // `seed`: fixture / initialization data (SeedSchema = object + records + mode +
+  // externalId). Runtime-draftable so the AI (and any author) can stage seed
+  // rows as a DRAFT (ADR-0033) and PUBLISH them like any other artifact;
+  // publishing a seed draft is what actually loads the rows (runtime applies it
+  // via SeedLoaderService — see runtime publish-drafts handler). loadOrder is
+  // last in the data domain so every referenced object/field already exists.
+  // NOTE: distinct from the (analytics-bound) `dataset` name — see ADR.
+  { type: 'seed', label: 'Seed Data', description: 'Fixture / initialization data applied on publish', filePatterns: ['**/*.seed.ts', '**/*.seed.yml', '**/*.seed.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 95, domain: 'data' },
 
   // UI Protocol
   // `view/page/dashboard/action/report`: UI artifacts benefit from version

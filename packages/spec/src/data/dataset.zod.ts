@@ -59,6 +59,23 @@ export const DatasetSchema = lazySchema(() => z.object({
   records: z.array(z.record(z.string(), z.unknown())).describe('Data records'),
 }));
 
+/**
+ * Seed metadata-type schema — the runtime-draftable, publishable form of
+ * fixture / initialization data (the `seed` metadata type).
+ *
+ * It shares the {@link DatasetSchema} shape today (object + externalId + mode +
+ * env + records), but is exported under its own name so the `seed` metadata
+ * type can evolve independently of the `dataset` name, which ADR reserves for a
+ * future data-analysis capability. Authoring tools (incl. the AI metadata
+ * assistant) stage `type: 'seed'` drafts against this schema; publishing the
+ * draft is what applies the rows (runtime SeedLoaderService).
+ */
+export const SeedSchema = DatasetSchema;
+
+/** A seed metadata item (same shape as {@link Dataset}). */
+export type Seed = z.infer<typeof SeedSchema>;
+export type SeedInput = z.input<typeof SeedSchema>;
+
 /** Parsed/output type — all defaults are applied (env, mode, externalId always present) */
 export type Dataset = z.infer<typeof DatasetSchema>;
 
