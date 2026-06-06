@@ -541,6 +541,38 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 }
             });
 
+            // ── MCP (Streamable HTTP) + API keys (ADR-0036) ─────────────
+            // Mounted explicitly (there is no catch-all) and routed through
+            // dispatch() so the host's project-aware kernel swap + execution
+            // context resolution run first. /mcp accepts POST (JSON-RPC), GET
+            // (SSE) and DELETE (session end) — the transport reads the method
+            // from the request, the dispatcher gates on OS_MCP_SERVER_ENABLED
+            // and the resolved principal. NOTE: the dispatch() branches alone
+            // are unreachable over HTTP without these registrations.
+            const mountMcp = (method: 'GET' | 'POST' | 'DELETE') => {
+                const register = method === 'GET' ? server.get : method === 'DELETE' ? server.delete : server.post;
+                register.call(server, `${prefix}/mcp`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch(method, '/mcp', req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            };
+            mountMcp('POST');
+            mountMcp('GET');
+            mountMcp('DELETE');
+
+            server.post(`${prefix}/keys`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.dispatch('POST', '/keys', req.body, req.query, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+
             // ── Packages ────────────────────────────────────────────────
             server.get(`${prefix}/packages`, async (req: any, res: any) => {
                 try {
