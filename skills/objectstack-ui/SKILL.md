@@ -61,6 +61,44 @@ App navigation, Dashboards, Reports, and Actions.
 | `tabbed` | Tabbed sections — for complex objects with many field groups |
 | `wizard` | Step-by-step flow — guided data entry (onboarding, applications) |
 
+### Master-Detail Forms (parent + child line items)
+
+To let users enter a record **together with its child line items** (invoice +
+lines, project + tasks) and save them **atomically**, you almost never need a
+custom page or form config. Prefer, in order:
+
+1. **Relationship `inlineEdit` (default, zero UI config).** Declare it in the
+   DATA MODEL — set `inlineEdit: true` on the child's `master_detail` field that
+   references the parent (see the objectstack-data skill → Relationships →
+   Inline Editing). Every standard New/Edit form for the parent (modal, drawer,
+   full-page) then auto-renders an editable child grid and saves parent +
+   children in one atomic `/api/v1/batch`. **No view metadata needed.**
+
+2. **Form view `subforms` (override / tuning).** Add to a form view only when you
+   need to override the derived columns/order, or expose a child the
+   relationship didn't mark inline:
+
+   ```typescript
+   formViews: {
+     default: {
+       type: 'simple',
+       sections: [{ label: 'Invoice', fields: ['number', 'account'] }],
+       subforms: [
+         { childObject: 'invoice_line', // relationshipField + columns are
+           title: 'Line Items',         // derived from the child object;
+           addLabel: 'Add line' },      // set `columns` here only to override.
+       ],
+     },
+   },
+   ```
+
+3. **`object-master-detail-form` page block (bespoke layout).** Use a page only
+   for free-form layouts. Same `details: [{ childObject }]` shorthand.
+
+The relationship FK and grid columns are derived from the child object's
+metadata in every case; select options and lookups carry through. A parent
+`summary` field rolls child values up server-side (see objectstack-data).
+
 ---
 
 ## Configuring a List View

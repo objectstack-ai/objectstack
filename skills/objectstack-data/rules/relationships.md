@@ -169,20 +169,66 @@ Configure `deleteBehavior` on `master_detail` relationships:
 
 ## Roll-up Summaries
 
-Available only on `master_detail` relationships:
+A parent `summary` field aggregates a child collection. The engine recomputes it
+**server-side** whenever a child is inserted/updated/deleted (inside the same
+transaction as the write, so it's consistent and never summed on the client).
 
 ```typescript
-// On parent object
+// On the PARENT object:
 {
   type: 'summary',
-  reference: 'child_object',     // Name of child object
-  summaryType: 'count',           // 'count' | 'sum' | 'min' | 'max' | 'avg'
-  summaryField: 'amount',         // Field to aggregate (not needed for count)
-  referenceFilters: {             // Optional: filter which children to include
-    status: 'active',
+  summaryOperations: {
+    object: 'invoice_line',        // child object to aggregate
+    field: 'amount',               // child field to aggregate (ignored for count)
+    function: 'sum',               // 'count' | 'sum' | 'min' | 'max' | 'avg'
+    // relationshipField: 'invoice' // optional; auto-detected from the child's
+                                     // master_detail/lookup field referencing
+                                     // this parent when omitted
   },
 }
 ```
+
+Empty collections roll up to `0` for `count`/`sum`, `null` for `min`/`max`/`avg`.
+Pairs naturally with inline editing (below): the parent total updates atomically
+as line items are saved.
+
+## Inline Editing (Master-Detail Entry)
+
+Declare inline editing **on the relationship**, in the data model — not in a form
+view. Set `inlineEdit: true` on the child's `master_detail` (or `lookup`) field
+that points back to the parent. The parent's **standard** create/edit form then
+renders an editable grid for these children and saves parent + children in **one
+atomic transaction** — with no form-view config and no bespoke page. The UI is
+derived from metadata (relationship FK + child fields → grid columns).
+
+```typescript
+// On the CHILD object's FK field:
+export default ObjectSchema.create({
+  name: 'invoice_line',
+  fields: {
+    invoice: {
+      type: 'master_detail',
+      reference: 'invoice',
+      inlineEdit: true,            // ← edited inline within the Invoice form
+      inlineTitle: 'Line Items',   // optional grid title
+      // inlineColumns / inlineAmountField — optional overrides; columns are
+      // otherwise derived from this object's fields.
+    },
+    quantity: { type: 'number' },
+    amount:   { type: 'currency' },
+  },
+});
+```
+
+**Set `inlineEdit` only for true line-item / composition children** (invoice
+lines, order items, expense lines) — the things a user enters *together with*
+the parent. **Leave it off for associations** (comments, attachments, activity,
+audit): those are also `master_detail` (cascade delete) but should NOT clutter
+the parent's entry form — surface them as related lists on the detail page.
+
+A form view may still set `subforms` to override the derived columns/order, but
+the relationship `inlineEdit` is the primary, zero-config path. See the
+objectstack-ui skill (Master-Detail Forms) for the rendering side.
 
 ## Incorrect vs Correct
 
