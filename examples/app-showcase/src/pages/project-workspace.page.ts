@@ -44,42 +44,13 @@ export const ProjectWorkspacePage: Page = {
             formType: 'simple',
             submitText: 'Create Project + Tasks',
             fields: ['name', 'account', 'status', 'health', 'budget', 'end_date'],
+            // Config-driven master-detail: only the child object is named. The
+            // relationship FK (showcase_task.project) and the editable grid
+            // columns are auto-derived from the child object's metadata — no
+            // hand-authored columns block. Add `columns`/`relationshipField`
+            // here only to override the derived defaults.
             details: [
-              {
-                title: 'Tasks',
-                childObject: 'showcase_task',
-                relationshipField: 'project',
-                amountField: 'estimate_hours',
-                addLabel: 'Add task',
-                columns: [
-                  { field: 'title', label: 'Title', type: 'text', required: true },
-                  {
-                    field: 'status',
-                    label: 'Status',
-                    type: 'select',
-                    options: [
-                      { label: 'Backlog', value: 'backlog' },
-                      { label: 'To Do', value: 'todo' },
-                      { label: 'In Progress', value: 'in_progress' },
-                      { label: 'In Review', value: 'in_review' },
-                      { label: 'Done', value: 'done' },
-                    ],
-                  },
-                  {
-                    field: 'priority',
-                    label: 'Priority',
-                    type: 'select',
-                    options: [
-                      { label: 'Low', value: 'low' },
-                      { label: 'Medium', value: 'medium' },
-                      { label: 'High', value: 'high' },
-                      { label: 'Urgent', value: 'urgent' },
-                    ],
-                  },
-                  { field: 'estimate_hours', label: 'Estimate (h)', type: 'number' },
-                  { field: 'due_date', label: 'Due Date', type: 'date' },
-                ],
-              },
+              { title: 'Tasks', childObject: 'showcase_task', addLabel: 'Add task' },
             ],
           },
         },
