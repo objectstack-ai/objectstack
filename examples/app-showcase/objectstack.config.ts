@@ -10,7 +10,7 @@ import { ShowcaseApp } from './src/apps/index.js';
 import { ChartGalleryDashboard } from './src/dashboards/index.js';
 import { allReports } from './src/reports/index.js';
 import { allActions } from './src/actions/index.js';
-import { ComponentGalleryPage, ProjectWorkspacePage } from './src/pages/index.js';
+import { ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage } from './src/pages/index.js';
 import { allFlows } from './src/flows/index.js';
 import { allWebhooks } from './src/webhooks/index.js';
 import { allJobs } from './src/jobs/index.js';
@@ -113,7 +113,7 @@ export default defineStack({
   apps: [ShowcaseApp],
   portals: allPortals,
   views: [TaskViews, ProjectViews],
-  pages: [ComponentGalleryPage, ProjectWorkspacePage],
+  pages: [ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage],
   dashboards: [ChartGalleryDashboard],
   reports: allReports,
   actions: allActions,
