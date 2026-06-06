@@ -56,31 +56,33 @@ Lovable/Airtable/Power Apps produce a UI bound to their runtime. ObjectStack pro
 ### 1. REST — surface, don't rebuild
 No runtime change. A new **Integrations & APIs** page reads `/api/v1/discovery` + `/api/v1/meta/object`, shows the env **Base URL** (`window.location.origin`), lists each published object's endpoints (`GET/POST /data/{object}`, `GET/PATCH/DELETE /data/{object}/:id`), links to the existing API Console, and renders copy-paste **cURL / JS / Python** samples using the user's key.
 
-### 2. Auth — self-serve API keys, via better-auth's `apiKey` plugin
-**Mechanism (decided):** do NOT hand-roll key hashing/verification. Enable
-better-auth's mature **`apiKey` plugin** (flag-gated, the same `plugins.push(...)`
-+ `build<Plugin>PluginSchema()` pattern auth-manager already uses for
-org/twoFactor/admin/jwt). It hashes keys, verifies an incoming key header, and
-**resolves it to the user's session** — so the request runs as that principal
-under the existing permissions + RLS (no parallel auth, no escalation).
+### 2. Auth — self-serve API keys (hand-rolled verification)
 
-**Schema reconciliation (the real work):** better-auth's `apikey` model needs
-fields `sys_api_key` lacks (`requestCount`, `remaining`, `refill*`,
-`rateLimit*`, `metadata`, `start`) and uses `enabled` where `sys_api_key` has the
-inverted `revoked`. Two options:
-- **(A) Plugin owns its table** — let the plugin create/manage `apikey` with its
-  full schema; keep `sys_api_key` as a read model or deprecate it. Lowest risk,
-  fastest to correct auth; cost: a second key table to reconcile.
-- **(B) Map onto `sys_api_key`** — a `buildApiKeyPluginSchema()` remaps
-  modelName/fields to `sys_api_key` columns, adding the missing fields and
-  resolving `enabled`↔`revoked`. Unifies on the existing object; more schema work + migration risk.
+> **Correction (verified 2026-06-06).** The pinned **better-auth 1.6.13 has NO
+> `apiKey` plugin** (its `dist/plugins` ships access, admin, anonymous, bearer,
+> captcha, jwt, magic-link, **mcp**, oidc-provider, organization, two-factor,
+> username, … but *not* api-key). So "just enable the plugin" is not an option
+> on this version. (Note for Phase 2: better-auth 1.6.13 **does** ship an `mcp`
+> plugin — `mcp()` + `withMcpAuth` + OAuth discovery — which Phase 2 can use.)
 
-**Recommendation: (A) first** for correct, battle-tested auth quickly; fold
-`sys_api_key` into it (B) as a follow-up if a single table is wanted.
+**Mechanism (revised):** **hand-roll** the API-key check as a small, isolated
+auth step in the runtime request pipeline (where the session principal is
+resolved today): if `Authorization: Bearer <key>` is present and matches a
+`sys_api_key` (constant-time hash compare; not revoked; not expired), resolve it
+to its `user_id` and establish **the same principal context the session path
+produces** — then the existing object permissions + RLS apply unchanged (no
+parallel auth, no escalation). Reuse the platform's hashing util; store only the
+hash (the model already does). `last_used_at` bumped on use.
 
-- UI "Generate API key" calls the plugin's create endpoint; the raw key is
+This is the **most security-sensitive change in this ADR** — hand-rolled auth.
+It MUST be its own focused, fully-tested change (see the Security note below),
+not bundled. Alternative (rejected for now): bump better-auth to a version that
+ships `apiKey` — a global auth-surface version bump is higher blast-radius than a
+small, well-tested key-verification step.
+
+- UI "Generate API key" → `POST /api/v1/data/sys_api_key`; the raw key is
   returned **once**, shown in a copy-once panel, prefix-only thereafter.
-- Keys are **per environment**; the plugin provides revoke + expiry.
+- Keys are **per environment**; revoke/restore + expiry already on the object.
 
 > **Security note**: this is a deliberate, security-sensitive change — it opens
 > the tenant data backend to non-browser callers. It must be implemented as a
