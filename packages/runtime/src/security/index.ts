@@ -12,3 +12,12 @@ export {
   type RateLimitDefaults,
   type RateLimitStore,
 } from './rate-limit.js';
+export {
+  API_KEY_PREFIX,
+  hashApiKey,
+  generateApiKey,
+  extractApiKey,
+  parseScopes,
+  isExpired,
+  type GeneratedApiKey,
+} from './api-key.js';

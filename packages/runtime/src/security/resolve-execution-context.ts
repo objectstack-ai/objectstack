@@ -5,9 +5,10 @@
  *
  * Builds an {@link ExecutionContext} from an incoming HTTP request by combining:
  *  - better-auth Bearer/Session cookies (`authService.api.getSession`)
- *  - API Key headers (`X-API-Key` / `Authorization: ApiKey <token>`) — first
- *    via better-auth's apiKey plugin if available, otherwise a direct lookup
- *    against the `sys_api_key` system object.
+ *  - API Key headers (`X-API-Key` / `Authorization: ApiKey <token>`) — a
+ *    hand-rolled check that hashes the inbound key and looks it up against the
+ *    `sys_api_key` system object by its at-rest hash, rejecting revoked or
+ *    expired keys. (better-auth 1.6.x ships no apiKey plugin.)
  *  - `sys_member` lookup for `(userId, activeOrganizationId)` to populate
  *    organization-scoped roles, plus any extra permission sets bound through
  *    the `sys_user_permission_set` / `sys_role_permission_set` link tables.
@@ -20,6 +21,8 @@
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
+import { extractApiKey, hashApiKey, isExpired, parseScopes } from './api-key.js';
+
 interface ResolveOptions {
   /** Function returning a service from the active kernel (or undefined). */
   getService: (name: string) => Promise<any> | any;
@@ -27,31 +30,6 @@ interface ResolveOptions {
   getQl: () => Promise<any> | any;
   /** The raw incoming HTTP request (Fetch Request, Node IncomingMessage, …). */
   request: any;
-}
-
-function readHeader(headers: any, name: string): string | undefined {
-  if (!headers) return undefined;
-  const lower = name.toLowerCase();
-  if (typeof headers.get === 'function') {
-    const v = headers.get(name) ?? headers.get(lower);
-    return v == null ? undefined : String(v);
-  }
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === lower) {
-      const v = headers[key];
-      return Array.isArray(v) ? v[0] : v == null ? undefined : String(v);
-    }
-  }
-  return undefined;
-}
-
-function extractApiKey(headers: any): string | undefined {
-  const x = readHeader(headers, 'x-api-key');
-  if (x) return x.trim();
-  const auth = readHeader(headers, 'authorization');
-  if (!auth) return undefined;
-  const m = auth.match(/^ApiKey\s+(.+)$/i);
-  return m ? m[1].trim() : undefined;
 }
 
 /**
@@ -110,38 +88,27 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
 
   // 1. API Key path — takes precedence over session, since callers explicitly
   //    opt in to API-key auth via the header.
+  //
+  //    better-auth 1.6.x ships no apiKey plugin, so this is a hand-rolled
+  //    check: hash the inbound key, look it up against `sys_api_key` by the
+  //    at-rest hash, and reject revoked or expired keys. The raw key is never
+  //    stored or logged. Once resolved, the principal flows through the exact
+  //    same role/permission/RLS resolution as the session path below.
   const apiKey = extractApiKey(headers);
   if (apiKey) {
-    try {
-      const authService: any = await opts.getService('auth');
-      // better-auth apiKey plugin (if enabled) exposes a verify endpoint.
-      const verify = authService?.api?.verifyApiKey ?? authService?.api?.apiKey?.verify;
-      if (typeof verify === 'function') {
-        const res = await verify({ body: { key: apiKey } });
-        const payload = res?.key ?? res;
-        if (payload?.userId) userId = payload.userId;
-        if (payload?.organizationId) tenantId = payload.organizationId;
-        if (Array.isArray(payload?.permissions)) {
-          ctx.permissions!.push(...payload.permissions);
-        }
-        if (Array.isArray(payload?.scopes)) {
-          ctx.permissions!.push(...payload.scopes);
-        }
-      }
-    } catch {
-      // ignore — fall through to direct lookup
-    }
-
-    if (!userId) {
-      // Direct lookup against sys_api_key — supports keys provisioned outside
-      // of better-auth (legacy or self-managed).
-      const ql = await opts.getQl();
-      const rows = await tryFind(ql, 'sys_api_key', { key: apiKey, active: true }, 1);
-      const row = rows[0];
-      if (row) {
+    const ql = await opts.getQl();
+    const keyHash = hashApiKey(apiKey);
+    // Match by the indexed hash only — never query by the raw key.
+    const rows = await tryFind(ql, 'sys_api_key', { key: keyHash, revoked: false }, 1);
+    const row = rows[0];
+    if (row && row.revoked !== true) {
+      const expiresAt = row.expires_at ?? row.expiresAt;
+      if (!isExpired(expiresAt, Date.now())) {
         userId = row.user_id ?? row.userId;
         tenantId = row.organization_id ?? row.organizationId;
-        if (Array.isArray(row.scopes)) ctx.permissions!.push(...row.scopes);
+        for (const scope of parseScopes(row.scopes)) {
+          if (!ctx.permissions!.includes(scope)) ctx.permissions!.push(scope);
+        }
       }
     }
   }
