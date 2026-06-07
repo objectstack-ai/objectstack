@@ -1324,6 +1324,24 @@ export class RestServer {
                             discovery.routes.ui = `${realBase}/ui`;
                         }
 
+                        // MCP (Streamable HTTP) is opt-in per env — advertise it
+                        // only when OS_MCP_SERVER_ENABLED=true so the objectui
+                        // Integrations page surfaces the connect card. The /mcp
+                        // route is mounted bare (not project-scoped), so point at
+                        // the unscoped base. This `/discovery` (served by
+                        // @objectstack/rest) is separate from the dispatcher's
+                        // getDiscoveryInfo — both must advertise `mcp`.
+                        const mcpEnabled =
+                            (globalThis as any)?.process?.env?.OS_MCP_SERVER_ENABLED === 'true';
+                        if (mcpEnabled) {
+                            const unscopedBase = isScoped
+                                ? basePath.replace(/\/(environments|projects)\/:environmentId$/, '')
+                                : basePath;
+                            (discovery.routes as any).mcp = `${unscopedBase}/mcp`;
+                        } else {
+                            delete (discovery.routes as any).mcp;
+                        }
+
                         // Align auth route with the versioned base path if present.
                         // Auth is a control-plane concern, so use the unscoped base.
                         if (discovery.routes.auth) {

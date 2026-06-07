@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RouteManager, RouteGroupBuilder } from './route-manager';
 import { RestServer, mapDataError } from './rest-server';
 import { createRestApiPlugin } from './rest-api-plugin';
@@ -1550,5 +1550,48 @@ describe('mapDataError — schema/constraint envelopes', () => {
     );
     expect(r.status).toBe(409);
     expect(r.body.code).toBe('UNIQUE_VIOLATION');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Discovery — MCP advertisement (#152)
+// ---------------------------------------------------------------------------
+
+describe('discovery — routes.mcp (ADR-0036, #152)', () => {
+  function discoveryHandler() {
+    const server = createMockServer();
+    const protocol = createMockProtocol();
+    // protocol discovery carries a `routes` object the server augments.
+    (protocol.getDiscovery as any) = vi.fn().mockResolvedValue({ routes: { data: '', metadata: '' } });
+    const rest = new RestServer(server as any, protocol as any);
+    rest.registerRoutes();
+    const entry = rest.getRouteManager().get('GET', '/api/v1/discovery');
+    if (!entry) throw new Error('discovery route not registered');
+    return entry.handler as (req: any, res: any) => Promise<void>;
+  }
+
+  async function invoke(handler: (req: any, res: any) => Promise<void>) {
+    let body: any;
+    const res: any = { json: (b: any) => { body = b; }, status: () => res };
+    await handler({ params: {} }, res);
+    return body;
+  }
+
+  const prev = process.env.OS_MCP_SERVER_ENABLED;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+    else process.env.OS_MCP_SERVER_ENABLED = prev;
+  });
+
+  it('advertises routes.mcp when OS_MCP_SERVER_ENABLED=true', async () => {
+    process.env.OS_MCP_SERVER_ENABLED = 'true';
+    const body = await invoke(discoveryHandler());
+    expect(body.routes.mcp).toBe('/api/v1/mcp');
+  });
+
+  it('omits routes.mcp when MCP is not enabled (opt-in)', async () => {
+    delete process.env.OS_MCP_SERVER_ENABLED;
+    const body = await invoke(discoveryHandler());
+    expect(body.routes.mcp).toBeUndefined();
   });
 });
