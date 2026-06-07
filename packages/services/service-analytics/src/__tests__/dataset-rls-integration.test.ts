@@ -100,6 +100,54 @@ describe('Dataset RLS integration (R1 gate)', () => {
     expect(captured[0].params.filter((p) => String(p).startsWith('__rls_deny__'))).toHaveLength(2);
   });
 
+  it('supports an ASYNC read-scope provider (production security.getReadFilter shape)', async () => {
+    // The production bridge resolves RLS from the `security` service, which can
+    // hit the DB — i.e. the provider returns a Promise. The service must
+    // pre-resolve it before the synchronous SQL builder runs and still scope
+    // BOTH base and joined objects by the per-request tenant.
+    const captured: { sql: string; params: unknown[] }[] = [];
+    const compiled = compileDataset(dataset);
+    const asyncReadScope = async (
+      _object: string,
+      context?: ExecutionContext,
+    ): Promise<FilterCondition | undefined> => {
+      await Promise.resolve();
+      return context?.tenantId ? { organization_id: context.tenantId } : undefined;
+    };
+    const service = new AnalyticsService({
+      cubes: [compiled.cube],
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      executeRawSql: async (_o, sql, params) => { captured.push({ sql, params }); return []; },
+      getReadScope: asyncReadScope,
+      getAllowedRelationships: () => compiled.allowedRelationships,
+    });
+    await new DatasetExecutor(service).execute(
+      compiled,
+      { dimensions: ['region'], measures: ['revenue'] },
+      ctx('org_async'),
+    );
+    expect(captured[0].sql).toMatch(/"opportunity"\."organization_id" = \$\d+/);
+    expect(captured[0].sql).toMatch(/"account"\."organization_id" = \$\d+/);
+    expect(captured[0].params.filter((p) => p === 'org_async')).toHaveLength(2);
+  });
+
+  it('fail-closed: an async provider that REJECTS denies the whole query (no unscoped SQL)', async () => {
+    const captured: { sql: string; params: unknown[] }[] = [];
+    const compiled = compileDataset(dataset);
+    const service = new AnalyticsService({
+      cubes: [compiled.cube],
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      executeRawSql: async (_o, sql, params) => { captured.push({ sql, params }); return []; },
+      getReadScope: async () => { throw new Error('security service unavailable'); },
+      getAllowedRelationships: () => compiled.allowedRelationships,
+    });
+    await expect(
+      new DatasetExecutor(service).execute(compiled, { dimensions: ['region'], measures: ['revenue'] }, ctx('org_A')),
+    ).rejects.toThrow(/fail-closed/);
+    // Crucially, no SQL was emitted — we denied before building/executing it.
+    expect(captured).toHaveLength(0);
+  });
+
   it('rejects the join when the relationship is not declared (defense in depth)', async () => {
     const captured: { sql: string; params: unknown[] }[] = [];
     const compiled = compileDataset(dataset);

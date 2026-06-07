@@ -288,6 +288,102 @@ describe('SecurityPlugin', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getReadFilter service (ADR-0021 D-C) — the reusable READ scope the
+  // analytics raw-SQL path bridges to. Must produce the SAME FilterCondition
+  // the engine middleware injects on `find`, and fail CLOSED on any error.
+  // -------------------------------------------------------------------------
+  describe('getReadFilter service', () => {
+    it('registers a "security" service exposing getReadFilter', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const call = (harness.ctx.registerService as any).mock.calls.find(
+        (c: any[]) => c[0] === 'security',
+      );
+      expect(call).toBeTruthy();
+      expect(typeof call[1].getReadFilter).toBe('function');
+    });
+
+    it('returns the SAME tenant filter the find-path injects (org-scoping on)', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet], orgScoping: true });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const ctx = { userId: 'u1', tenantId: 'org-1', roles: [], permissions: [] };
+      const filter = await plugin.getReadFilter('task', ctx);
+      expect(filter).toEqual({ organization_id: 'org-1' });
+    });
+
+    it('returns undefined (no scope) when tenant_isolation is stripped (org-scoping off)', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const filter = await plugin.getReadFilter('task', { userId: 'u1', tenantId: 'org-1', roles: [], permissions: [] });
+      expect(filter).toBeUndefined();
+    });
+
+    it('fail-closed: wildcard org policy on an object missing the column → deny sentinel', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [tenantPolicySet],
+        objectFields: ['id', 'name'], // no organization_id, tenancy not opted out
+        orgScoping: true,
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const filter = await plugin.getReadFilter('task', { userId: 'u1', tenantId: 'org-1', roles: [], permissions: [] });
+      expect(filter).toEqual(RLS_DENY_FILTER);
+    });
+
+    it('tenancy opt-out → undefined (not denied), matching the find-path', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [tenantPolicySet],
+        objectFields: ['id', 'name'],
+        schemaExtra: { tenancy: { enabled: false, strategy: 'shared' } },
+        orgScoping: true,
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const filter = await plugin.getReadFilter('task', { userId: 'u1', tenantId: 'org-1', roles: [], permissions: [] });
+      expect(filter).toBeUndefined();
+    });
+
+    it('system context bypasses scoping (returns undefined)', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet], orgScoping: true });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const filter = await plugin.getReadFilter('task', { isSystem: true, userId: 'u1', tenantId: 'org-1' });
+      expect(filter).toBeUndefined();
+    });
+
+    it('anonymous (no userId/roles/permissions) → undefined (authn gated elsewhere)', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet], orgScoping: true });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const filter = await plugin.getReadFilter('task', { roles: [], permissions: [] });
+      expect(filter).toBeUndefined();
+    });
+
+    it('fail-closed: a permission-resolution throw yields the deny sentinel (never allow-all)', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet], orgScoping: true });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      // Force resolution to blow up.
+      (plugin as any).permissionEvaluator.resolvePermissionSets = async () => {
+        throw new Error('metadata service unavailable');
+      };
+      const filter = await plugin.getReadFilter('task', { userId: 'u1', tenantId: 'org-1', roles: [], permissions: [] });
+      expect(filter).toEqual(RLS_DENY_FILTER);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // FLS write enforcement (Backend FLS strip — gap #1)
   // -------------------------------------------------------------------------
   // Permission set that allows full CRUD on `task` but denies edit on

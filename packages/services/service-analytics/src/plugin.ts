@@ -57,7 +57,14 @@ export interface AnalyticsServicePluginOptions {
    * emits). When omitted, the plugin auto-bridges to a registered `'security'`
    * service exposing `getReadFilter(object, context)` if one is present.
    */
-  getReadScope?: (objectName: string, context?: ExecutionContext) => FilterCondition | null | undefined;
+  getReadScope?: (
+    objectName: string,
+    context?: ExecutionContext,
+  ) =>
+    | FilterCondition
+    | null
+    | undefined
+    | Promise<FilterCondition | null | undefined>;
   /**
    * ADR-0021 D-C — join allowlist per cube (the dataset's declared `include`).
    * Typically wired from the dataset registry's compiled `allowedRelationships`.
@@ -221,7 +228,14 @@ export class AnalyticsServicePlugin implements Plugin {
     // `getReadFilter(object, context)` (resolved at call time so plugin-init
     // order does not matter). This keeps analytics decoupled from security.
     interface SecurityReadFilter {
-      getReadFilter(object: string, context?: ExecutionContext): FilterCondition | null | undefined;
+      getReadFilter(
+        object: string,
+        context?: ExecutionContext,
+      ):
+        | FilterCondition
+        | null
+        | undefined
+        | Promise<FilterCondition | null | undefined>;
     }
     let getReadScope = this.options.getReadScope;
     let autoBridgedReadScope = false;

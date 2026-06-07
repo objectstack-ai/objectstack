@@ -63,8 +63,20 @@ export interface AnalyticsServiceConfig {
    * object (exactly what `RLSCompiler` emits). The service binds the active
    * context per query and the strategy compiles the filter into alias-qualified
    * SQL injected into every base and joined table.
+   *
+   * MAY be async: the production bridge resolves RLS from the `security`
+   * service's `getReadFilter`, which can hit the database. The service
+   * pre-resolves the scope for every base + joined object of a query (before
+   * the synchronous SQL builder runs), so a sync return still works unchanged.
    */
-  getReadScope?: (objectName: string, context?: ExecutionContext) => FilterCondition | null | undefined;
+  getReadScope?: (
+    objectName: string,
+    context?: ExecutionContext,
+  ) =>
+    | FilterCondition
+    | null
+    | undefined
+    | Promise<FilterCondition | null | undefined>;
   /**
    * ADR-0021 D-C — join allowlist per cube (the dataset's declared `include`).
    * Joins outside this set are rejected by the strategy. Compiled datasets
@@ -188,12 +200,74 @@ export class AnalyticsService implements IAnalyticsService {
    * current request's ExecutionContext (ADR-0021 D-C). The strategy then sees a
    * `getReadScope(objectName)` that already knows the active tenant.
    */
-  private callCtx(context?: ExecutionContext): StrategyContext {
+  private async callCtx(
+    query: AnalyticsQuery,
+    context?: ExecutionContext,
+  ): Promise<StrategyContext> {
     if (!this.readScopeProvider) return this.baseCtx;
+    // Pre-resolve the read scope for every object the strategy will scan (base
+    // + all declared joins) BEFORE the synchronous SQL builder runs, since the
+    // provider may be async (the production `security.getReadFilter` bridge).
+    // The strategy then reads each object's filter synchronously from the map.
+    const scopes = await this.resolveReadScopes(query, context);
     return {
       ...this.baseCtx,
-      getReadScope: (objectName: string) => this.readScopeProvider!(objectName, context),
+      getReadScope: (objectName: string) => scopes.get(objectName) ?? null,
     };
+  }
+
+  /**
+   * Resolve the read scope (tenant + RLS `FilterCondition`) for the base object
+   * AND every joined object of the query's cube, keyed by object name. This is
+   * the async pre-pass that lets the synchronous strategy enforce scoping even
+   * when the provider (security `getReadFilter`) resolves asynchronously.
+   *
+   * The object set is `cube.sql` (base) plus every `cube.joins[*].name` — a
+   * SUPERSET of what the strategy actually scans (the strategy only joins along
+   * declared relationships), so no scanned object is ever left unscoped.
+   *
+   * Fail-closed: if the provider throws for an object, the whole query is
+   * rejected rather than emitting SQL with that object unscoped.
+   */
+  private async resolveReadScopes(
+    query: AnalyticsQuery,
+    context?: ExecutionContext,
+  ): Promise<Map<string, FilterCondition>> {
+    const map = new Map<string, FilterCondition>();
+    const provider = this.readScopeProvider;
+    if (!provider || !query.cube) return map;
+    const cube = this.cubeRegistry.get(query.cube);
+    if (!cube) return map;
+
+    const objects = new Set<string>();
+    if (typeof cube.sql === 'string' && cube.sql.trim()) {
+      objects.add(cube.sql.trim());
+    }
+    const joins = (cube as { joins?: Record<string, { name?: string }> }).joins;
+    if (joins) {
+      for (const [alias, j] of Object.entries(joins)) {
+        objects.add(j?.name ?? alias);
+      }
+    }
+
+    for (const object of objects) {
+      let filter: FilterCondition | null | undefined;
+      try {
+        filter = await provider(object, context);
+      } catch (e) {
+        // Deny the entire query — never fall through to unscoped SQL.
+        this.logger.error?.(
+          `[Analytics] read-scope resolution failed for object "${object}" — ` +
+          `rejecting query (fail-closed, ADR-0021 D-C)`,
+          e instanceof Error ? e : new Error(String(e)),
+        );
+        throw new Error(
+          `[Analytics] read-scope resolution failed for "${object}"; query denied (fail-closed).`,
+        );
+      }
+      if (filter != null) map.set(object, filter);
+    }
+    return map;
   }
 
   /**
@@ -205,7 +279,7 @@ export class AnalyticsService implements IAnalyticsService {
     }
 
     this.ensureCube(query);
-    const ctx = this.callCtx(context);
+    const ctx = await this.callCtx(query, context);
     const strategy = this.resolveStrategy(query, ctx);
     this.logger.debug(`[Analytics] Query on cube "${query.cube}" → ${strategy.name}`);
 
@@ -274,7 +348,7 @@ export class AnalyticsService implements IAnalyticsService {
     }
 
     this.ensureCube(query);
-    const ctx = this.callCtx(context);
+    const ctx = await this.callCtx(query, context);
     const strategy = this.resolveStrategy(query, ctx);
     this.logger.debug(`[Analytics] generateSql on cube "${query.cube}" → ${strategy.name}`);
 

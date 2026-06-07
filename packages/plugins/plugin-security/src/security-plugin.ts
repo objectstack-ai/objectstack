@@ -99,6 +99,15 @@ export class SecurityPlugin implements Plugin {
    * zero rows.
    */
   private readonly tenancyDisabledCache = new Map<string, boolean>();
+  /**
+   * Service handles captured in `start()` so the request-time RLS resolution
+   * (used by BOTH the engine middleware and the public {@link getReadFilter}
+   * service method) shares one code path. `null` until `start()` wires them.
+   */
+  private metadata: any = null;
+  private ql: any = null;
+  private dbLoader?: (names: string[]) => Promise<PermissionSet[]>;
+  private logger: { info?: (...a: any[]) => void; warn?: (...a: any[]) => void; error?: (...a: any[]) => void } = {};
 
   constructor(options: SecurityPluginOptions = {}) {
     this.bootstrapPermissionSets =
@@ -189,6 +198,12 @@ export class SecurityPlugin implements Plugin {
       return;
     }
 
+    // Capture handles so the request-time RLS resolution is shared by the
+    // engine middleware AND the public getReadFilter service method.
+    this.metadata = metadata;
+    this.ql = ql;
+    this.logger = ctx.logger;
+
     // Probe for OrgScopingPlugin presence. When registered, its
     // `init()` exposes itself as the `org-scoping` service. We capture
     // the boolean once at start time (plugin DI graph is static after
@@ -238,6 +253,24 @@ export class SecurityPlugin implements Plugin {
           }));
         }
       : undefined;
+    this.dbLoader = dbLoader;
+
+    // ADR-0021 D-C — expose the per-request READ scope as a reusable service.
+    // The analytics raw-SQL path (which bypasses this engine middleware)
+    // auto-bridges to `getService('security').getReadFilter(object, context)`
+    // to enforce tenant/RLS on every base + joined object. We register the
+    // service only once the metadata/ql/dbLoader handles are wired (above), so
+    // a degraded start never exposes a half-initialised resolver.
+    try {
+      ctx.registerService('security', {
+        getReadFilter: (object: string, context?: any) => this.getReadFilter(object, context),
+      });
+      ctx.logger.info('[security] registered "security" service (getReadFilter) for raw-SQL RLS bridging');
+    } catch (e) {
+      ctx.logger.warn?.('[security] failed to register "security" service', {
+        error: (e as Error).message,
+      });
+    }
 
     // Register security middleware
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
@@ -261,51 +294,14 @@ export class SecurityPlugin implements Plugin {
       }
 
       // 1. Resolve permission sets from BOTH role names and explicit
-      //    permission set names attached to the execution context.
+      //    permission set names attached to the execution context. The
+      //    resolution (incl. the implicit + post-resolution baseline
+      //    fallback) is shared with the public getReadFilter service via
+      //    resolvePermissionSetsForContext — keeping the find-path RLS and
+      //    the analytics raw-SQL RLS provably in lock-step.
       let permissionSets: PermissionSet[] = [];
       try {
-        const requested = [...roles, ...explicitPermissionSets];
-        // Implicit baseline: when an authenticated request resolved zero
-        // permission sets, fall back to the configured baseline (default
-        // `member_default`). This guarantees tenant + owner RLS even
-        // before an admin has assigned a profile/permission set.
-        if (
-          requested.length === 0 &&
-          opCtx.context?.userId &&
-          this.fallbackPermissionSet
-        ) {
-          requested.push(this.fallbackPermissionSet);
-        }
-        permissionSets = await this.permissionEvaluator.resolvePermissionSets(
-          requested,
-          metadata,
-          this.bootstrapPermissionSets,
-          dbLoader,
-        );
-        // **Post-resolution fallback** — closes the fail-open hole that
-        // appears when a user's `roles` array is populated (e.g. a
-        // better-auth `sys_member.role` like `owner`/`admin`/`member`)
-        // but no `sys_role`→`sys_permission_set` binding exists yet, so
-        // resolution returns an empty array. Without this, both the
-        // CRUD check (`permissionSets.length > 0`) and the RLS injection
-        // (`allRlsPolicies.length > 0`) below get skipped → the user
-        // sees every tenant's data. Authenticated users with no
-        // resolved permission sets always inherit the configured
-        // baseline (default `member_default`, which carries
-        // `tenant_isolation` + `owner_only_writes`).
-        if (
-          permissionSets.length === 0 &&
-          opCtx.context?.userId &&
-          this.fallbackPermissionSet
-        ) {
-          const fallback = await this.permissionEvaluator.resolvePermissionSets(
-            [this.fallbackPermissionSet],
-            metadata,
-            this.bootstrapPermissionSets,
-            dbLoader,
-          );
-          permissionSets = fallback;
-        }
+        permissionSets = await this.resolvePermissionSetsForContext(opCtx.context);
       } catch (e) {
         // Fail CLOSED. A permission-resolution failure must DENY the request,
         // never bypass the checks (that would let a degraded metadata service
@@ -417,48 +413,17 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
-      // 3. RLS filter injection
-      const allRlsPolicies = this.collectRLSPolicies(permissionSets, opCtx.object, opCtx.operation);
-      if (allRlsPolicies.length > 0 && opCtx.ast) {
-        // Field-existence safety: wildcard policies (`object: '*'`) target
-        // fields like `organization_id` that may not exist on every object
-        // (e.g. system tables, CRM apps that haven't yet adopted multi-tenancy).
-        //
-        // We treat such policies as a *deny* contribution rather than dropping
-        // them, so they fail-closed when no per-object policy provides an
-        // alternate match. Any per-object policy that DOES compile against
-        // the object will OR-combine and grant access (e.g. `sys_user_self`).
-        // When the schema lookup itself fails we keep all policies (drivers
-        // will surface column errors clearly during compilation).
-        const objectFields = await this.getObjectFieldNames(metadata, opCtx.object, ql);
-        const tenancyDisabled = this.tenancyDisabledCache.get(opCtx.object) === true;
-        let dropped = 0;
-        const compilable = objectFields
-          ? allRlsPolicies.filter((p) => {
-              const targetField = this.extractTargetField(p.using);
-              if (!targetField) return true;
-              if (objectFields.has(targetField)) return true;
-              // Schema-level opt-out: when the object explicitly
-              // disabled tenancy (`tenancy.enabled === false`), the
-              // wildcard `tenant_isolation` policy targeting
-              // `organization_id` was never meant to apply. Treat as
-              // "not applicable" — skip silently without contributing
-              // to the deny sentinel, mirroring how the registry skips
-              // injecting the column itself for these tables.
-              if (tenancyDisabled && targetField === 'organization_id') {
-                return false;
-              }
-              dropped++;
-              return false;
-            })
-          : allRlsPolicies;
-        let rlsFilter = this.rlsCompiler.compileFilter(compilable, opCtx.context);
-        // If every applicable policy was dropped because of missing fields,
-        // contribute the deny sentinel (zero rows) — matches the rls-compiler
-        // semantics for "policies were applicable but none compiled".
-        if (rlsFilter == null && dropped > 0) {
-          rlsFilter = { ...RLS_DENY_FILTER };
-        }
+      // 3. RLS filter injection. The policy collection + field-existence
+      // safety + compile (incl. the fail-closed deny sentinel) is shared with
+      // the public getReadFilter service via computeRlsFilter, so the engine
+      // find-path and the analytics raw-SQL path enforce identical scoping.
+      if (opCtx.ast) {
+        const rlsFilter = await this.computeRlsFilter(
+          permissionSets,
+          opCtx.object,
+          opCtx.operation,
+          opCtx.context,
+        );
         if (rlsFilter) {
           if (opCtx.ast.where) {
             opCtx.ast.where = { $and: [opCtx.ast.where, rlsFilter] };
@@ -598,6 +563,145 @@ export class SecurityPlugin implements Plugin {
 
   async destroy(): Promise<void> {
     // No cleanup needed
+  }
+
+  /**
+   * ADR-0021 D-C — resolve the per-request READ scope (tenant + RLS predicate)
+   * for one object as a canonical `FilterCondition`, WITHOUT touching the
+   * ObjectQL engine. This is the seam the analytics raw-SQL path bridges to so
+   * it enforces the SAME row scoping the engine middleware applies on `find`.
+   *
+   * Returns:
+   *   - `undefined` → no scope applies (system context, or an unauthenticated
+   *     request with no userId/roles/permissions — authn is gated elsewhere).
+   *   - a `FilterCondition` → AND it into the object's scan (the join's `ON`/
+   *     `WHERE` for analytics; the where clause for a plain find).
+   *   - the `RLS_DENY_FILTER` sentinel → policies applied but none compiled, or
+   *     resolution failed — fail-closed to zero rows. NEVER returns "allow all"
+   *     on error, so a degraded permission subsystem cannot leak cross-tenant
+   *     rows through analytics.
+   *
+   * Async because permission-set resolution can hit the database; the analytics
+   * service pre-resolves these per request (base + every joined object) before
+   * the synchronous SQL builder runs.
+   */
+  async getReadFilter(
+    object: string,
+    context?: any,
+  ): Promise<Record<string, unknown> | null | undefined> {
+    // System operations bypass scoping (mirrors the middleware's isSystem skip).
+    if (context?.isSystem) return undefined;
+    const roles = context?.roles ?? [];
+    const explicit = context?.permissions ?? [];
+    // Unauthenticated + role-less + permission-less → no scope (the auth layer,
+    // not RLS, gates anonymous access; the analytics REST endpoint already 401s
+    // without a token). Mirrors the middleware's early `return next()`.
+    if (roles.length === 0 && explicit.length === 0 && !context?.userId) {
+      return undefined;
+    }
+    try {
+      const permissionSets = await this.resolvePermissionSetsForContext(context);
+      const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
+      return filter ?? undefined;
+    } catch (e) {
+      // Fail CLOSED — a resolution failure must deny (zero rows), never expose
+      // every tenant's data through the raw-SQL analytics path.
+      this.logger.error?.(
+        `[security] getReadFilter failed for object '${object}' ` +
+          `(user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return { ...RLS_DENY_FILTER };
+    }
+  }
+
+  /**
+   * Resolve the effective permission sets for an execution context — roles +
+   * explicit permission sets, with the configured baseline applied both as an
+   * implicit request (when none were named) and as a post-resolution fallback
+   * (when named ones resolved to nothing). Shared by the engine middleware and
+   * {@link getReadFilter} so both enforce identical RLS. May throw if the
+   * underlying metadata/db resolution fails (callers fail-closed).
+   */
+  private async resolvePermissionSetsForContext(
+    context: any,
+  ): Promise<PermissionSet[]> {
+    const roles = context?.roles ?? [];
+    const explicitPermissionSets = context?.permissions ?? [];
+    const requested = [...roles, ...explicitPermissionSets];
+    // Implicit baseline: an authenticated request that named no roles/perms
+    // still gets the configured baseline (default `member_default`) so tenant +
+    // owner RLS apply before an admin assigns a profile.
+    if (requested.length === 0 && context?.userId && this.fallbackPermissionSet) {
+      requested.push(this.fallbackPermissionSet);
+    }
+    let permissionSets = await this.permissionEvaluator.resolvePermissionSets(
+      requested,
+      this.metadata,
+      this.bootstrapPermissionSets,
+      this.dbLoader,
+    );
+    // Post-resolution fallback — closes the fail-open hole where a populated
+    // `roles` array maps to no permission set yet (no sys_role binding), which
+    // would otherwise skip RLS entirely and expose every tenant's data.
+    if (
+      permissionSets.length === 0 &&
+      context?.userId &&
+      this.fallbackPermissionSet
+    ) {
+      permissionSets = await this.permissionEvaluator.resolvePermissionSets(
+        [this.fallbackPermissionSet],
+        this.metadata,
+        this.bootstrapPermissionSets,
+        this.dbLoader,
+      );
+    }
+    return permissionSets;
+  }
+
+  /**
+   * Compile the applicable RLS policies for (object, operation) into a single
+   * `FilterCondition`, applying the field-existence safety net (wildcard
+   * policies targeting a column the object lacks fail-closed to the deny
+   * sentinel, unless the object explicitly opted out of tenancy). Shared by the
+   * engine middleware and {@link getReadFilter}. Returns `null` when no policy
+   * applies (caller adds no filter).
+   */
+  private async computeRlsFilter(
+    permissionSets: PermissionSet[],
+    object: string,
+    operation: string,
+    context: any,
+  ): Promise<Record<string, unknown> | null> {
+    const allRlsPolicies = this.collectRLSPolicies(permissionSets, object, operation);
+    if (allRlsPolicies.length === 0) return null;
+    // Field-existence safety: wildcard policies (`object: '*'`) target fields
+    // like `organization_id` that may not exist on every object. Treat such a
+    // policy as a *deny* contribution (fail-closed) rather than dropping it —
+    // unless the object explicitly opted out of tenancy, where it's "not
+    // applicable" and skipped silently. When the schema lookup itself fails we
+    // keep all policies (drivers surface column errors clearly at compile time).
+    const objectFields = await this.getObjectFieldNames(this.metadata, object, this.ql);
+    const tenancyDisabled = this.tenancyDisabledCache.get(object) === true;
+    let dropped = 0;
+    const compilable = objectFields
+      ? allRlsPolicies.filter((p) => {
+          const targetField = this.extractTargetField(p.using);
+          if (!targetField) return true;
+          if (objectFields.has(targetField)) return true;
+          if (tenancyDisabled && targetField === 'organization_id') {
+            return false;
+          }
+          dropped++;
+          return false;
+        })
+      : allRlsPolicies;
+    let rlsFilter = this.rlsCompiler.compileFilter(compilable, context);
+    // Every applicable policy dropped for a missing field → deny sentinel.
+    if (rlsFilter == null && dropped > 0) {
+      rlsFilter = { ...RLS_DENY_FILTER };
+    }
+    return rlsFilter;
   }
 
   /**
