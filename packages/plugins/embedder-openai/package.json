@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/embedder-openai",
-  "version": "7.9.0",
+  "version": "8.0.0",
   "license": "Apache-2.0",
   "description": "OpenAI-compatible embedder for ObjectStack — works against OpenAI, 阿里通义 DashScope, 智谱 BigModel, 硅基流动 SiliconFlow, 火山引擎 Doubao, MiniMax, Ollama, and any drop-in OpenAI-shape endpoint.",
   "main": "dist/index.js",

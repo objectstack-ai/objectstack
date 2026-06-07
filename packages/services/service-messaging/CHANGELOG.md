@@ -1,5 +1,54 @@
 # @objectstack/service-messaging
 
+## 8.0.0
+
+### Minor Changes
+
+- 9f311f8: feat(messaging): digest batching for notifications (ADR-0030 P3b-2)
+
+  Recipients can now batch a topic into a `daily` / `weekly` **digest** instead of
+  receiving every notification immediately. Builds on P3b-1's deferral seam:
+
+  - `PreferenceResolver` consumes the `digest` preference field and `digestDeferral()`
+    defers a batched recipient to the next window (local midnight / Monday 00:00),
+    tagging the target with a stable `window`. Digest takes precedence over
+    quiet-hours; `critical` and mandatory topics bypass it.
+  - `sys_notification_delivery` gains a `digest_key` (`recipient|channel|window`).
+    Batched rows partition by that key so a window's rows co-locate, and the normal
+    outbox `claim()` skips them while the new `claimDigest()` drains a window whole.
+  - The dispatcher's digest pass collapses each `(recipient, channel, window)` group
+    into one `renderDigest()` message under the existing per-partition cluster lock,
+    then acks every row in the group with that single outcome.
+
+  Additive: non-digest notifications are unchanged. Timezone-from-`sys_user`,
+  configurable send-hour, and MJML digest emails are deferred follow-ups.
+
+### Patch Changes
+
+- c70eec1: fix(messaging): converge mark-read receipt on unique-index race
+
+  `markRead`'s `upsertReadReceipt` did `findOne`-then-`insert` (check-then-act), so
+  a concurrent mark-read — or the best-effort `delivered` receipt write still in
+  flight — could win the `UNIQUE(notification_id, user_id, channel)` index between
+  the read and the write. Clicking a notification then threw
+  `UNIQUE constraint failed: sys_notification_receipt...`. The insert now catches a
+  unique violation and falls back to flipping the now-present row to `read`, with a
+  cross-driver `isUniqueViolation` helper (SQLite / Postgres `23505` /
+  MySQL `ER_DUP_ENTRY`).
+
+- Updated dependencies [a46c017]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [3306d2f]
+- Updated dependencies [c262301]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+  - @objectstack/spec@8.0.0
+  - @objectstack/core@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

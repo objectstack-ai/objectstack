@@ -1,5 +1,98 @@
 # @objectstack/objectql
 
+## 8.0.0
+
+### Minor Changes
+
+- b990b89: fix(autonumber): one owner for autonumber generation — the persistent driver sequence (#1603)
+
+  Autonumber values were generated in TWO places: the SQL driver's persistent,
+  atomic `_objectstack_sequences` table AND a non-persistent in-memory counter in
+  the ObjectQL engine. Because the engine pre-filled the field BEFORE calling the
+  driver, the driver always saw a value already set and skipped — so the
+  persistent sequence was effectively dead code, and a multi-instance / post-restart
+  deployment could mint duplicate numbers from the in-memory counter.
+
+  This makes generation single-owner:
+
+  - **`@objectstack/spec`** — `DriverCapabilities` gains an optional `autonumber`
+    flag: "driver natively generates persistent autonumber/sequence values".
+
+  - **`@objectstack/driver-sql`** — advertises `supports.autonumber = true`.
+    `bulkCreate()` now fills autonumber fields too (previously only `create()` /
+    `upsert()` did), so bulk inserts also draw from the persistent sequence.
+    Field parsing now honors either the spec-canonical `autonumberFormat` key OR
+    the `format` shorthand (both appear in metadata).
+
+  - **`@objectstack/objectql`** — when the driver advertises native autonumber
+    support, the engine NO LONGER pre-fills (it defers entirely to the persistent
+    driver sequence as the single source of truth). For drivers without native
+    support (memory, mongodb) the in-memory fallback is unchanged. The fallback
+    also now reads either `autonumberFormat` or `format`. Record-validation
+    exempts `autonumber` fields from the `required` check — the value is
+    runtime-owned and assigned after validation, so a required record number is
+    never rejected as "missing".
+
+  No metadata changes required. Existing data is respected: the driver bootstraps
+  each sequence from the current max numeric tail on first use.
+
+- 99111ec: Field-level conditional rules (CEL): `visibleWhen` / `readonlyWhen` / `requiredWhen`, enforced server-side.
+
+  Add three CEL-predicate field props (over `record`) evaluated on both sides. **Spec**: `visibleWhen` / `readonlyWhen` / `requiredWhen` (`requiredWhen` canonical; `conditionalRequired` kept as a back-compat alias). **Server (objectql)**: the validator now enforces `requiredWhen`/`conditionalRequired` over the merged record (so the rule can't be bypassed by a direct API write), and the update path ignores writes to a field whose `readonlyWhen` is TRUE (keeps the persisted value). `needsPriorRecord` accounts for conditional fields so the prior record is fetched on update.
+
+- 9e2e229: feat(objectql): compute roll-up `summary` fields server-side
+
+  The `summary` field type was declared in the spec but never computed — its value
+  stayed empty. ObjectQL now recomputes roll-up summaries automatically: a parent
+  field whose `summaryOperations` aggregates (`count`/`sum`/`min`/`max`/`avg`) a
+  field across child records is recalculated whenever a child is inserted,
+  updated, or deleted.
+
+  - **`@objectstack/spec`** — `summaryOperations` gains an optional
+    `relationshipField` (the child→parent FK). When omitted the engine
+    auto-detects it from the child's `lookup`/`master_detail` field whose
+    `reference` points back at the parent; set it explicitly only when the child
+    has more than one such reference.
+
+  - **`@objectstack/objectql`** — after `afterInsert` / `afterUpdate` /
+    `afterDelete` on a child object, the engine finds the affected parent (from
+    the child's FK, plus the prior FK on update/delete so a re-parented child
+    updates both), re-aggregates the child collection, and writes the result onto
+    the parent's summary field. It runs in the caller's execution context, so when
+    a transaction is open (e.g. the cross-object `/api/v1/batch`) the rollup
+    commits atomically with the child writes. A small index of child→summary
+    descriptors is built lazily from the registry and invalidated on package
+    registration.
+
+  Empty collections roll up to `0` for `count`/`sum` and `null` for
+  `min`/`max`/`avg`. This lets master-detail forms stop computing parent totals on
+  the client — the server is now the single source of truth.
+
+- 345e189: Robust multi-write transactions (ADR-0034). `engine.transaction()` now establishes an ambient transaction (AsyncLocalStorage) so every data operation during the callback — including internal reads performed while a write runs — binds to the active transaction's connection instead of asking the pool for another one and deadlocking on SQLite's single-connection pool. Adds a cross-object transactional batch endpoint (`POST /api/v1/data/batch`) with intra-batch `{ $ref: <opIndex> }` parent references, so a parent and its children can be created atomically in one transaction.
+
+### Patch Changes
+
+- e6374b5: fix(objectql): master_detail cascade delete + autonumber generation
+
+  - `delete` now applies referential delete behavior for incoming relations: `master_detail` cascades to children (the parent owns the child lifecycle; only an explicit `restrict` deviates), `lookup` honors its `deleteBehavior` (default `set_null`). Recurses for grandchildren, depth-guarded, single-id deletes. Previously deleting a parent left its children orphaned.
+  - `insert` now generates values for empty `autonumber` fields before required-validation (`max+1`, seeded per `object.field`, honors `autonumberFormat`). Previously a required autonumber was rejected as "missing" and autonumber fields were never populated.
+
+- Updated dependencies [a46c017]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [3306d2f]
+- Updated dependencies [c262301]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+  - @objectstack/spec@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/formula@8.0.0
+  - @objectstack/metadata-core@8.0.0
+  - @objectstack/types@8.0.0
+
 ## 7.9.0
 
 ### Minor Changes

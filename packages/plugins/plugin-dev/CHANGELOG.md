@@ -1,5 +1,43 @@
 # @objectstack/plugin-dev
 
+## 8.0.0
+
+### Patch Changes
+
+- Updated dependencies [a46c017]
+- Updated dependencies [f68be58]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [93f97b2]
+- Updated dependencies [bc0d85b]
+- Updated dependencies [2537e28]
+- Updated dependencies [0ec7717]
+- Updated dependencies [e6374b5]
+- Updated dependencies [1e8b680]
+- Updated dependencies [0a6438e]
+- Updated dependencies [3306d2f]
+- Updated dependencies [ae7fb3f]
+- Updated dependencies [c262301]
+- Updated dependencies [e1478fe]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+- Updated dependencies [345e189]
+  - @objectstack/spec@8.0.0
+  - @objectstack/runtime@8.0.0
+  - @objectstack/objectql@8.0.0
+  - @objectstack/plugin-hono-server@8.0.0
+  - @objectstack/plugin-auth@8.0.0
+  - @objectstack/plugin-security@8.0.0
+  - @objectstack/rest@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/driver-memory@8.0.0
+  - @objectstack/plugin-org-scoping@8.0.0
+  - @objectstack/service-i18n@8.0.0
+  - @objectstack/types@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

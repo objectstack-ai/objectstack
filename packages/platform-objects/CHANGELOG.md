@@ -1,5 +1,21 @@
 # @objectstack/platform-objects
 
+## 8.0.0
+
+### Patch Changes
+
+- Updated dependencies [a46c017]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [3306d2f]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+  - @objectstack/spec@8.0.0
+  - @objectstack/metadata-core@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

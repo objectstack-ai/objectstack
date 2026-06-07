@@ -1,5 +1,91 @@
 # @objectstack/cli
 
+## 8.0.0
+
+### Patch Changes
+
+- d9f72fe: refactor(mcp)!: rename `@objectstack/plugin-mcp-server` → `@objectstack/mcp` (ADR-0036)
+
+  The outbound MCP-server package drops the legacy `plugin-` prefix and moves to
+  the top level (`packages/mcp`), parallel to `@objectstack/rest` — both are "your
+  app exposed over a protocol". Inbound MCP (consuming external servers) stays
+  `@objectstack/connector-mcp`.
+
+  **Breaking:** the package name changed. Update imports
+  `@objectstack/plugin-mcp-server` → `@objectstack/mcp`. The exported API
+  (`MCPServerPlugin`, `MCPServerRuntime`, `registerObjectTools`, `McpDataBridge`,
+  …) is unchanged. The internal plugin id is now `com.objectstack.mcp`. Pre-launch
+  clean break — no compatibility shim (only `@objectstack/cli` depended on it
+  internally).
+
+- Updated dependencies [a46c017]
+- Updated dependencies [f68be58]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [93f97b2]
+- Updated dependencies [87cb13c]
+- Updated dependencies [bc0d85b]
+- Updated dependencies [2537e28]
+- Updated dependencies [0ec7717]
+- Updated dependencies [9f311f8]
+- Updated dependencies [c70eec1]
+- Updated dependencies [e6374b5]
+- Updated dependencies [1e8b680]
+- Updated dependencies [0a6438e]
+- Updated dependencies [3306d2f]
+- Updated dependencies [d9f72fe]
+- Updated dependencies [ae7fb3f]
+- Updated dependencies [c262301]
+- Updated dependencies [e1478fe]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+- Updated dependencies [345e189]
+  - @objectstack/spec@8.0.0
+  - @objectstack/service-ai@8.0.0
+  - @objectstack/runtime@8.0.0
+  - @objectstack/objectql@8.0.0
+  - @objectstack/driver-sql@8.0.0
+  - @objectstack/plugin-hono-server@8.0.0
+  - @objectstack/mcp@8.0.0
+  - @objectstack/service-messaging@8.0.0
+  - @objectstack/plugin-auth@8.0.0
+  - @objectstack/plugin-security@8.0.0
+  - @objectstack/driver-mongodb@8.0.0
+  - @objectstack/rest@8.0.0
+  - @objectstack/service-automation@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/account@8.0.0
+  - @objectstack/client@8.0.0
+  - @objectstack/formula@8.0.0
+  - @objectstack/observability@8.0.0
+  - @objectstack/platform-objects@8.0.0
+  - @objectstack/driver-memory@8.0.0
+  - @objectstack/driver-sqlite-wasm@8.0.0
+  - @objectstack/plugin-approvals@8.0.0
+  - @objectstack/plugin-audit@8.0.0
+  - @objectstack/plugin-email@8.0.0
+  - @objectstack/plugin-org-scoping@8.0.0
+  - @objectstack/plugin-reports@8.0.0
+  - @objectstack/plugin-sharing@8.0.0
+  - @objectstack/plugin-trigger-record-change@8.0.0
+  - @objectstack/plugin-trigger-schedule@8.0.0
+  - @objectstack/plugin-webhooks@8.0.0
+  - @objectstack/service-analytics@8.0.0
+  - @objectstack/service-cache@8.0.0
+  - @objectstack/service-datasource@8.0.0
+  - @objectstack/service-feed@8.0.0
+  - @objectstack/service-job@8.0.0
+  - @objectstack/service-package@8.0.0
+  - @objectstack/service-queue@8.0.0
+  - @objectstack/service-realtime@8.0.0
+  - @objectstack/service-settings@8.0.0
+  - @objectstack/service-storage@8.0.0
+  - @objectstack/types@8.0.0
+  - @objectstack/console@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

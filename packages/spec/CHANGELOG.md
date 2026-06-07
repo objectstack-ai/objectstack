@@ -1,5 +1,167 @@
 # @objectstack/spec
 
+## 8.0.0
+
+### Minor Changes
+
+- b990b89: fix(autonumber): one owner for autonumber generation — the persistent driver sequence (#1603)
+
+  Autonumber values were generated in TWO places: the SQL driver's persistent,
+  atomic `_objectstack_sequences` table AND a non-persistent in-memory counter in
+  the ObjectQL engine. Because the engine pre-filled the field BEFORE calling the
+  driver, the driver always saw a value already set and skipped — so the
+  persistent sequence was effectively dead code, and a multi-instance / post-restart
+  deployment could mint duplicate numbers from the in-memory counter.
+
+  This makes generation single-owner:
+
+  - **`@objectstack/spec`** — `DriverCapabilities` gains an optional `autonumber`
+    flag: "driver natively generates persistent autonumber/sequence values".
+
+  - **`@objectstack/driver-sql`** — advertises `supports.autonumber = true`.
+    `bulkCreate()` now fills autonumber fields too (previously only `create()` /
+    `upsert()` did), so bulk inserts also draw from the persistent sequence.
+    Field parsing now honors either the spec-canonical `autonumberFormat` key OR
+    the `format` shorthand (both appear in metadata).
+
+  - **`@objectstack/objectql`** — when the driver advertises native autonumber
+    support, the engine NO LONGER pre-fills (it defers entirely to the persistent
+    driver sequence as the single source of truth). For drivers without native
+    support (memory, mongodb) the in-memory fallback is unchanged. The fallback
+    also now reads either `autonumberFormat` or `format`. Record-validation
+    exempts `autonumber` fields from the `required` check — the value is
+    runtime-owned and assigned after validation, so a required record number is
+    never rejected as "missing".
+
+  No metadata changes required. Existing data is respected: the driver bootstraps
+  each sequence from the current max numeric tail on first use.
+
+- 99111ec: Field-level conditional rules (CEL): `visibleWhen` / `readonlyWhen` / `requiredWhen`, enforced server-side.
+
+  Add three CEL-predicate field props (over `record`) evaluated on both sides. **Spec**: `visibleWhen` / `readonlyWhen` / `requiredWhen` (`requiredWhen` canonical; `conditionalRequired` kept as a back-compat alias). **Server (objectql)**: the validator now enforces `requiredWhen`/`conditionalRequired` over the merged record (so the rule can't be bypassed by a direct API write), and the update path ignores writes to a field whose `readonlyWhen` is TRUE (keeps the persisted value). `needsPriorRecord` accounts for conditional fields so the prior record is fetched on update.
+
+- d5a8161: feat(spec): resilientFetch — timeout + backoff for outbound HTTP (P1-1)
+
+  Outbound calls in the connectors/embedder were naked `fetch` with no timeout or
+  retry, so a slow or rate-limited external API could hang an agent turn with no
+  recovery.
+
+  New shared `resilientFetch` (`@objectstack/spec/shared`):
+
+  - per-attempt timeout via `AbortController` (default 30s);
+  - exponential backoff with jitter, up to 3 attempts, on network errors / 429 / 5xx;
+  - honours a `Retry-After` header on 429;
+  - never retries a caller-initiated abort (intentional cancellation).
+
+  Wired into `connector-rest`, `connector-slack`, and `embedder-openai`.
+  `connector-mcp` talks through the MCP SDK transport, so it gets a 30s per-request
+  `timeout` on `callTool` / `listTools` instead.
+
+  A stateful per-host **circuit breaker** is deliberately left as a follow-up:
+  timeout + backoff already removes the hang/no-recovery risk.
+
+- 5cf1f1b: feat(spec): `inlineEdit` on relationship fields for declarative master-detail
+
+  A `master_detail`/`lookup` field can now declare `inlineEdit: true` (plus
+  optional `inlineTitle` / `inlineColumns` / `inlineAmountField`) to mean "these
+  child records are entered/edited inline within the parent's form". The intent
+  lives in the data model: the parent's standard create/edit form then renders an
+  atomic master-detail form (object fields + an editable child grid) with no form
+  view config and no bespoke page. Use for line-item/composition children; leave
+  off for associations (comments, attachments). Renderer support is in objectui.
+
+- 9ef89d4: feat(spec): `FormViewSchema.subforms` for config-driven master-detail
+
+  A form view can now declare inline child collections via `subforms`, so the
+  standard create/edit form for an object can render as a master-detail form
+  (object fields on top, an editable child grid below, persisted atomically)
+  without a bespoke page. Each entry needs only `childObject`; the relationship
+  FK and grid columns are derived from the child object's metadata (override via
+  `relationshipField` / `columns`). Renderer support: ObjectForm already renders
+  `subforms` (objectui), and the ObjectView form path passes them through.
+
+- 9e2e229: feat(objectql): compute roll-up `summary` fields server-side
+
+  The `summary` field type was declared in the spec but never computed — its value
+  stayed empty. ObjectQL now recomputes roll-up summaries automatically: a parent
+  field whose `summaryOperations` aggregates (`count`/`sum`/`min`/`max`/`avg`) a
+  field across child records is recalculated whenever a child is inserted,
+  updated, or deleted.
+
+  - **`@objectstack/spec`** — `summaryOperations` gains an optional
+    `relationshipField` (the child→parent FK). When omitted the engine
+    auto-detects it from the child's `lookup`/`master_detail` field whose
+    `reference` points back at the parent; set it explicitly only when the child
+    has more than one such reference.
+
+  - **`@objectstack/objectql`** — after `afterInsert` / `afterUpdate` /
+    `afterDelete` on a child object, the engine finds the affected parent (from
+    the child's FK, plus the prior FK on update/delete so a re-parented child
+    updates both), re-aggregates the child collection, and writes the result onto
+    the parent's summary field. It runs in the caller's execution context, so when
+    a transaction is open (e.g. the cross-object `/api/v1/batch`) the rollup
+    commits atomically with the child writes. A small index of child→summary
+    descriptors is built lazily from the registry and invalidated on package
+    registration.
+
+  Empty collections roll up to `0` for `count`/`sum` and `null` for
+  `min`/`max`/`avg`. This lets master-detail forms stop computing parent totals on
+  the client — the server is now the single source of truth.
+
+### Patch Changes
+
+- a46c017: feat(ai): actions opt in to being AI tools via an `ai:` block (ADR-0011)
+
+  Realigns ADR-0011 with its original opt-in design. An Action becomes an
+  AI-callable tool only when its metadata sets `ai.exposed: true`, which requires
+  an explicit, LLM-facing `ai.description` (≥40 chars, distinct from the UI
+  `label`). There is no heuristic auto-exposure and no description derived from
+  the label — a clean break from the first implementation's opt-out `aiExposed`
+  flag, which is removed (no compatibility shim; the platform has not shipped).
+
+  The `ai:` block also carries `category`, `paramHints` (per-parameter JSON-Schema
+  refinement), `outputSchema` (summarised into the tool description for chaining),
+  and `requiresConfirmation` (overrides the destructive-action HITL default).
+  `AIToolDefinition` is extended to carry `category` / `outputSchema` / `objectName`
+  / `requiresConfirmation`. The `@objectstack/service-ai` bridge
+  (`action-tools.ts`) now gates on opt-in, merges `paramHints`, and emits a lint
+  warning when an exposed destructive-looking action asserts itself safe via
+  `ai.requiresConfirmation: false`.
+
+- 3306d2f: feat(automation): surface structured-region body steps in run observability (#1505)
+
+  `loop` / `parallel` / `try_catch` previously ran their body, branch, and handler
+  regions against a region-local step log that was **discarded** — run logs
+  (`listRuns` / `getRun`) showed the container as a single opaque step, hiding the
+  per-iteration / per-branch steps that actually executed.
+
+  `AutomationEngine.runRegion()` now **returns** its body steps, and the container
+  node folds them into the parent run log via a new `NodeExecutionResult.childSteps`
+  field. Each surfaced step is tagged with its **immediate** container via three new
+  optional fields on `ExecutionStepLogSchema` (and the engine's `StepLogEntry`):
+
+  - `parentNodeId` — the enclosing `loop` / `parallel` / `try_catch` node
+  - `iteration` — zero-based loop iteration or parallel branch index
+  - `regionKind` — `loop-body` | `parallel-branch` | `try` | `catch`
+
+  Tagging fills only fields left undefined, so nested regions keep each step's
+  innermost container. A failed try-region attempt's partial steps are still not
+  surfaced (preserving `try_catch` retry semantics). Fully additive — existing run
+  logs and consumers are unaffected.
+
+- bc44195: chore(automation): retire the `workflow_rule` authoring paradigm (ADR-0018 M5 dropped)
+
+  ADR-0019 already removed the Workflow-Rule → Flow compiler (Workflow Rules were
+  removed in #1398 and `workflow` was reclaimed for state machines), but the
+  `workflow_rule` paradigm tag survived in `ActionParadigmSchema` and on every
+  built-in node descriptor. There is no declarative Workflow-Rule authoring view
+  to feed, so the tag is now retired: `ActionParadigmSchema` keeps `['flow',
+'approval']`, and the `http` / `notify` / `connector_action` descriptors (plus
+  the deprecated-alias fallback) advertise `['flow', 'approval']`. Approval
+  execution convergence is delivered by the ADR-0019 approval Flow node, not a
+  compiler. ADR-0018's status and migration table are updated to mark M3 shipped,
+  M4 framework-complete, and M5 dropped.
+
 ## 7.9.0
 
 ## 7.8.0

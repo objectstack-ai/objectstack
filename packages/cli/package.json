@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/cli",
-  "version": "7.9.0",
+  "version": "8.0.0",
   "description": "Command Line Interface for ObjectStack Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -1,5 +1,28 @@
 # @objectstack/hono
 
+## 8.0.0
+
+### Patch Changes
+
+- e15c845: feat(hono): re-export the `Hono` type from `@objectstack/hono`
+
+  Downstream apps that consume `createHonoApp()` only need the `Hono` type to
+  annotate the returned app. They can now `import type { Hono } from '@objectstack/hono'`
+  instead of adding their own `hono` dependency, which guarantees a single
+  `hono` across a `link:`/cross-package boundary (no duplicate-package
+  type-identity errors, no version-pin alignment). `hono` remains a normal
+  runtime dependency of this package, so standalone usage is unaffected.
+
+- Updated dependencies [f68be58]
+- Updated dependencies [93f97b2]
+- Updated dependencies [bc0d85b]
+- Updated dependencies [2537e28]
+- Updated dependencies [0ec7717]
+- Updated dependencies [c262301]
+  - @objectstack/runtime@8.0.0
+  - @objectstack/plugin-hono-server@8.0.0
+  - @objectstack/types@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

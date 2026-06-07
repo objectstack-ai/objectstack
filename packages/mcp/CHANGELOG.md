@@ -1,5 +1,102 @@
 # @objectstack/plugin-mcp-server
 
+## 8.0.0
+
+### Major Changes
+
+- d9f72fe: refactor(mcp)!: rename `@objectstack/plugin-mcp-server` → `@objectstack/mcp` (ADR-0036)
+
+  The outbound MCP-server package drops the legacy `plugin-` prefix and moves to
+  the top level (`packages/mcp`), parallel to `@objectstack/rest` — both are "your
+  app exposed over a protocol". Inbound MCP (consuming external servers) stays
+  `@objectstack/connector-mcp`.
+
+  **Breaking:** the package name changed. Update imports
+  `@objectstack/plugin-mcp-server` → `@objectstack/mcp`. The exported API
+  (`MCPServerPlugin`, `MCPServerRuntime`, `registerObjectTools`, `McpDataBridge`,
+  …) is unchanged. The internal plugin id is now `com.objectstack.mcp`. Pre-launch
+  clean break — no compatibility shim (only `@objectstack/cli` depended on it
+  internally).
+
+### Minor Changes
+
+- 87cb13c: feat(mcp): generic ObjectStack Agent Skill generator (ADR-0036 Phase 2b)
+
+  Adds `renderSkillMarkdown({ mcpUrl, envName })` — produces a portable
+  `SKILL.md` (open Agent Skills standard: Claude Code, OpenAI Codex, Gemini CLI,
+  Copilot, Cursor, …) that teaches any skills-capable agent how to drive an
+  ObjectStack environment over MCP.
+
+  Per ADR-0036 Amendment C, this is ONE generic skill, not a per-app artifact:
+
+  - the content never enumerates a tenant's schema — it instructs the agent to
+    discover live via `list_objects` / `describe_object`, so one install works for
+    every app the caller's key can reach and a new app needs no reinstall;
+  - only the connection URL is environment-specific, slotted in by the caller;
+  - it documents the object-CRUD tools, auth via `x-api-key` (Bearer is session
+    auth), and the governance model (every call runs under the caller's
+    permissions + RLS — fewer rows / write rejections are expected, not bugs).
+
+  Exported: `renderSkillMarkdown`, `OBJECTSTACK_SKILL_NAME`,
+  `OBJECTSTACK_SKILL_DESCRIPTION`, `RenderSkillOptions`. The objectui/cloud
+  surfacing layer calls this to offer a one-click skill download alongside the
+  env's remote-MCP URL and a show-once key.
+
+- bc0d85b: feat(mcp): Streamable HTTP transport — every app is a network-reachable MCP server (ADR-0036 Phase 2)
+
+  The MCP server plugin spoke **stdio only**, so a remote agent (Claude Desktop /
+  Cursor) could not connect to a hosted env. This adds the **Streamable HTTP**
+  transport and wires it into the runtime's request path, building on the Phase 1a
+  `sys_api_key` auth foundation.
+
+  - **`@objectstack/mcp`** (renamed from `@objectstack/plugin-mcp-server` — see the rename changeset)
+
+    - `MCPServerRuntime.handleHttpRequest(request, { bridge, parsedBody })` —
+      serves one MCP request over the Web-standard `WebStandardStreamableHTTPServerTransport`
+      (runs on Node 18+, Workers, Deno, Bun). **Stateless**: a fresh, isolated
+      `McpServer` + transport is built per request (the SDK-recommended pattern),
+      in JSON-response mode so the response is fully buffered — no streaming
+      pass-through concerns over the Worker→container hop.
+    - New `registerObjectTools` + `McpDataBridge` (`mcp-http-tools.ts`): the
+      object-CRUD tool set (`list_objects`, `describe_object`, `query_records`,
+      `get_record`, `create_record`, `update_record`, `delete_record`). All
+      execution is delegated to an injected, **principal-bound** bridge — the tool
+      layer never touches the data engine directly. System (`sys_*`) objects are
+      **not exposed** by default (fail-closed guard on every object-scoped tool).
+      The internal AI/authoring toolRegistry is deliberately NOT bridged onto the
+      external surface.
+
+  - **`@objectstack/runtime`**
+    - `HttpDispatcher` serves `/mcp`: **opt-in** via `OS_MCP_SERVER_ENABLED=true`
+      (404 when off, so the surface isn't advertised); **fail-closed auth**
+      (anonymous → 401 — requires the principal resolved by Phase 1a's API-key
+      path or a session). It builds an `McpDataBridge` that runs every operation
+      through the existing `callData` path bound to the request's
+      `ExecutionContext`, so external agents run under the key's permissions + RLS,
+      never a parallel or escalated path. The discovery endpoint advertises `mcp`
+      only when enabled.
+
+  Security: every external MCP entry runs as the scoped `sys_api_key` principal
+  under existing object permissions + RLS; MCP is opt-in per env; no raw keys or
+  secrets cross the wire. Fully unit-tested (transport handshake/tools, gate,
+  auth, principal binding).
+
+### Patch Changes
+
+- Updated dependencies [a46c017]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [3306d2f]
+- Updated dependencies [c262301]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+  - @objectstack/spec@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/types@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

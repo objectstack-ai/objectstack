@@ -1,5 +1,36 @@
 # @objectstack/plugin-hono-server
 
+## 8.0.0
+
+### Patch Changes
+
+- 93f97b2: fix(hono-server): drain in-flight requests on shutdown instead of force-closing (P1-3)
+
+  `HonoHttpServer.close()` called `closeAllConnections()`, which terminated active
+  connections mid-response — so a SIGTERM during a rolling deploy dropped in-flight
+  requests. It now drains gracefully: `server.close()` stops accepting new
+  connections and lets active requests finish, `closeIdleConnections()` releases
+  idle keep-alive sockets so the process exits promptly, and a bounded drain window
+  (default 10s, configurable, well under the kernel's 60s `shutdownTimeout`)
+  force-closes only the stragglers so shutdown can't hang.
+
+  Note: the kernel already handles SIGINT/SIGTERM/SIGQUIT with an ordered,
+  timeout-bounded shutdown — this fixes the one place that wasn't draining.
+
+- Updated dependencies [a46c017]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [3306d2f]
+- Updated dependencies [c262301]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+  - @objectstack/spec@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/types@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

@@ -1,5 +1,77 @@
 # @objectstack/driver-sql
 
+## 8.0.0
+
+### Minor Changes
+
+- b990b89: fix(autonumber): one owner for autonumber generation — the persistent driver sequence (#1603)
+
+  Autonumber values were generated in TWO places: the SQL driver's persistent,
+  atomic `_objectstack_sequences` table AND a non-persistent in-memory counter in
+  the ObjectQL engine. Because the engine pre-filled the field BEFORE calling the
+  driver, the driver always saw a value already set and skipped — so the
+  persistent sequence was effectively dead code, and a multi-instance / post-restart
+  deployment could mint duplicate numbers from the in-memory counter.
+
+  This makes generation single-owner:
+
+  - **`@objectstack/spec`** — `DriverCapabilities` gains an optional `autonumber`
+    flag: "driver natively generates persistent autonumber/sequence values".
+
+  - **`@objectstack/driver-sql`** — advertises `supports.autonumber = true`.
+    `bulkCreate()` now fills autonumber fields too (previously only `create()` /
+    `upsert()` did), so bulk inserts also draw from the persistent sequence.
+    Field parsing now honors either the spec-canonical `autonumberFormat` key OR
+    the `format` shorthand (both appear in metadata).
+
+  - **`@objectstack/objectql`** — when the driver advertises native autonumber
+    support, the engine NO LONGER pre-fills (it defers entirely to the persistent
+    driver sequence as the single source of truth). For drivers without native
+    support (memory, mongodb) the in-memory fallback is unchanged. The fallback
+    also now reads either `autonumberFormat` or `format`. Record-validation
+    exempts `autonumber` fields from the `required` check — the value is
+    runtime-owned and assigned after validation, so a required record number is
+    never rejected as "missing".
+
+  No metadata changes required. Existing data is respected: the driver bootstraps
+  each sequence from the current max numeric tail on first use.
+
+### Patch Changes
+
+- 1e8b680: fix(security): close four P0 launch-readiness findings
+
+  - **plugin-auth (P0-1):** `generateSecret()` now throws (fails boot) when no
+    `OS_AUTH_SECRET` is set and `NODE_ENV==='production'`, instead of silently
+    falling back to a predictable `dev-secret-<timestamp>` (session forgery). The
+    dev/test fallback is unchanged.
+  - **plugin-security (P0-2):** the permission-resolution `catch` now **fails
+    closed** — it logs at ERROR and throws `PermissionDeniedError` rather than
+    `return next()`. A degraded metadata service can no longer let every
+    authenticated request bypass RBAC/RLS. System operations still bypass as before.
+  - **driver-sql (P0-3):** the `contains` / `$contains` operator now escapes LIKE
+    metacharacters (`%` / `_` / `\`) in the user value and binds an explicit
+    `ESCAPE '\'`, so a value of `%` matches literally instead of every row
+    (filter bypass). Correct across SQLite/MySQL/Postgres.
+  - **driver-mongodb (P0-4):** the field-operator translator now rejects unknown
+    `$`-operators instead of passing them through, blocking `$where` / `$function`
+    / `$expr` (server-side JS execution / query-intent bypass). All legitimate
+    ObjectQL operators remain allowlisted.
+
+  +12 regression tests across the four packages.
+
+- Updated dependencies [a46c017]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [3306d2f]
+- Updated dependencies [c262301]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+  - @objectstack/spec@8.0.0
+  - @objectstack/core@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

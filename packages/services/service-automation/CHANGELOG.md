@@ -1,5 +1,57 @@
 # @objectstack/service-automation
 
+## 8.0.0
+
+### Patch Changes
+
+- 3306d2f: feat(automation): surface structured-region body steps in run observability (#1505)
+
+  `loop` / `parallel` / `try_catch` previously ran their body, branch, and handler
+  regions against a region-local step log that was **discarded** — run logs
+  (`listRuns` / `getRun`) showed the container as a single opaque step, hiding the
+  per-iteration / per-branch steps that actually executed.
+
+  `AutomationEngine.runRegion()` now **returns** its body steps, and the container
+  node folds them into the parent run log via a new `NodeExecutionResult.childSteps`
+  field. Each surfaced step is tagged with its **immediate** container via three new
+  optional fields on `ExecutionStepLogSchema` (and the engine's `StepLogEntry`):
+
+  - `parentNodeId` — the enclosing `loop` / `parallel` / `try_catch` node
+  - `iteration` — zero-based loop iteration or parallel branch index
+  - `regionKind` — `loop-body` | `parallel-branch` | `try` | `catch`
+
+  Tagging fills only fields left undefined, so nested regions keep each step's
+  innermost container. A failed try-region attempt's partial steps are still not
+  surfaced (preserving `try_catch` retry semantics). Fully additive — existing run
+  logs and consumers are unaffected.
+
+- bc44195: chore(automation): retire the `workflow_rule` authoring paradigm (ADR-0018 M5 dropped)
+
+  ADR-0019 already removed the Workflow-Rule → Flow compiler (Workflow Rules were
+  removed in #1398 and `workflow` was reclaimed for state machines), but the
+  `workflow_rule` paradigm tag survived in `ActionParadigmSchema` and on every
+  built-in node descriptor. There is no declarative Workflow-Rule authoring view
+  to feed, so the tag is now retired: `ActionParadigmSchema` keeps `['flow',
+'approval']`, and the `http` / `notify` / `connector_action` descriptors (plus
+  the deprecated-alias fallback) advertise `['flow', 'approval']`. Approval
+  execution convergence is delivered by the ADR-0019 approval Flow node, not a
+  compiler. ADR-0018's status and migration table are updated to mark M3 shipped,
+  M4 framework-complete, and M5 dropped.
+
+- Updated dependencies [a46c017]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [3306d2f]
+- Updated dependencies [c262301]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+  - @objectstack/spec@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/formula@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

@@ -1,5 +1,164 @@
 # @objectstack/runtime
 
+## 8.0.0
+
+### Minor Changes
+
+- f68be58: feat(runtime): API-key generation endpoint — show-once `sys_api_key` (ADR-0036, closes framework#1629)
+
+  Adds `POST /api/v1/keys` — the only path that mints a `sys_api_key`. Phase 1a
+  shipped key _verification_ and the `generateApiKey()` primitive; this is the
+  missing _generation_ half that unblocks the self-serve connect flow.
+
+  - Requires an authenticated principal; returns the **raw secret exactly once**
+    (`{ id, name, prefix, key }`). Only the sha256 **hash** is persisted — the raw
+    key is never stored, logged, or re-displayable.
+  - **Security (zero-tolerance):** `user_id` is pinned to the caller and never read
+    from the body (no impersonation); the body is whitelisted to `name` (+ optional
+    validated future `expires_at`) — any `key`/`id`/`user_id`/`revoked` in the body
+    is ignored, so a caller cannot forge a known-secret or escalate. The row is
+    written with an elevated `{ isSystem: true }` context (sys_api_key is
+    protection-locked) with server-controlled contents. Anonymous → 401;
+    non-POST → 405; past/unparseable `expires_at` → 400.
+  - `scopes` are intentionally NOT accepted from the body in v1 (the verify path
+    adds scopes to permissions, so honouring arbitrary body scopes would be an
+    escalation vector); a generated key acts exactly AS the caller via `user_id`
+    resolution. Scoped/narrowing keys need subset-enforcement — deferred.
+
+  11 security tests (show-once, hash-not-raw persisted, round-trip auth via the
+  verify path, impersonation blocked, forgery blocked, 401/405/400, expiry
+  end-to-end). Full runtime suite green (376).
+
+- bc0d85b: feat(mcp): Streamable HTTP transport — every app is a network-reachable MCP server (ADR-0036 Phase 2)
+
+  The MCP server plugin spoke **stdio only**, so a remote agent (Claude Desktop /
+  Cursor) could not connect to a hosted env. This adds the **Streamable HTTP**
+  transport and wires it into the runtime's request path, building on the Phase 1a
+  `sys_api_key` auth foundation.
+
+  - **`@objectstack/mcp`** (renamed from `@objectstack/plugin-mcp-server` — see the rename changeset)
+
+    - `MCPServerRuntime.handleHttpRequest(request, { bridge, parsedBody })` —
+      serves one MCP request over the Web-standard `WebStandardStreamableHTTPServerTransport`
+      (runs on Node 18+, Workers, Deno, Bun). **Stateless**: a fresh, isolated
+      `McpServer` + transport is built per request (the SDK-recommended pattern),
+      in JSON-response mode so the response is fully buffered — no streaming
+      pass-through concerns over the Worker→container hop.
+    - New `registerObjectTools` + `McpDataBridge` (`mcp-http-tools.ts`): the
+      object-CRUD tool set (`list_objects`, `describe_object`, `query_records`,
+      `get_record`, `create_record`, `update_record`, `delete_record`). All
+      execution is delegated to an injected, **principal-bound** bridge — the tool
+      layer never touches the data engine directly. System (`sys_*`) objects are
+      **not exposed** by default (fail-closed guard on every object-scoped tool).
+      The internal AI/authoring toolRegistry is deliberately NOT bridged onto the
+      external surface.
+
+  - **`@objectstack/runtime`**
+    - `HttpDispatcher` serves `/mcp`: **opt-in** via `OS_MCP_SERVER_ENABLED=true`
+      (404 when off, so the surface isn't advertised); **fail-closed auth**
+      (anonymous → 401 — requires the principal resolved by Phase 1a's API-key
+      path or a session). It builds an `McpDataBridge` that runs every operation
+      through the existing `callData` path bound to the request's
+      `ExecutionContext`, so external agents run under the key's permissions + RLS,
+      never a parallel or escalated path. The discovery endpoint advertises `mcp`
+      only when enabled.
+
+  Security: every external MCP entry runs as the scoped `sys_api_key` principal
+  under existing object permissions + RLS; MCP is opt-in per env; no raw keys or
+  secrets cross the wire. Fully unit-tested (transport handshake/tools, gate,
+  auth, principal binding).
+
+### Patch Changes
+
+- 2537e28: fix(runtime): adapt node/Hono req → Web Request for the MCP transport (ADR-0036)
+
+  The MCP Streamable HTTP transport needs a Web-standard `Request`, but the
+  runtime HTTP adapter hands the dispatcher a node/Hono-style req (plain `headers`
+  object, path-only `url`). `handleMcp` rejected it with 400 ("MCP transport
+  requires a standard HTTP request") — so the live endpoint was unusable even
+  once routed + registered. Unit tests passed a real `Request`, hiding it; caught
+  in staging e2e on `initialize`.
+
+  `handleMcp` now reconstructs a Web `Request` (method, absolute URL from
+  host+path, normalised headers, JSON body from the parsed body) when the inbound
+  req isn't already Web-standard. Regression tests cover a POST and a GET
+  node-style req.
+
+- 0ec7717: fix(runtime): mount /mcp and /keys HTTP routes (ADR-0036) — were unreachable
+
+  The dispatcher mounts routes EXPLICITLY on the HTTP server (no catch-all). The
+  MCP transport (#1626) and key-generation (#1630) added branches inside
+  `dispatch()` but never registered the corresponding `server.<verb>()` routes, so
+  `/api/v1/mcp` and `/api/v1/keys` 404'd at the HTTP layer before ever reaching
+  the dispatcher. Unit tests called the handlers directly, hiding the gap; it only
+  showed up in live staging e2e.
+
+  - Register `/mcp` (GET/POST/DELETE → dispatch, transport reads the method) and
+    `/keys` (POST) in the dispatcher plugin, routed through `dispatch()` so the
+    host's project-aware kernel swap + executionContext resolution run first.
+  - Add `dispatcher-plugin.routes.test.ts` asserting the routes are registered
+    (the regression that would have caught this).
+
+- c262301: fix(rest): REST data API honors sys_api_key — one shared verifier with MCP (closes #1633)
+
+  Staging e2e found the MCP surface authenticated a `sys_api_key` but the REST data
+  API (`@objectstack/rest`) returned 401 for the same key — its `resolveExecCtx`
+  only checked the better-auth session, never the API key.
+
+  Converged both surfaces onto ONE verifier so they can't drift:
+
+  - **`@objectstack/core/security`** now owns the shared `sys_api_key` primitives
+    (`hashApiKey`, `generateApiKey`, `extractApiKey`, `parseScopes`, `isExpired`)
+    plus a new `resolveApiKeyPrincipal(ql, headers, nowMs?)` that hashes the
+    inbound key, looks it up by the indexed at-rest hash, and rejects unknown /
+    revoked / expired / owner-less keys (fail-closed). `core` is the natural home:
+    both `rest` and `runtime` depend on it, it depends on neither (no cycle), and
+    it's server-side (already uses `node:crypto`).
+  - **`@objectstack/runtime`** — `security/api-key.ts` re-exports the primitives
+    from core (stable import surface) and `resolveExecutionContext` now delegates
+    its API-key branch to `resolveApiKeyPrincipal`.
+  - **`@objectstack/rest`** — `resolveExecCtx` resolves the data engine once and
+    tries `resolveApiKeyPrincipal` (x-api-key / `Authorization: ApiKey`) BEFORE the
+    session, so `/api/v1/data` + `/api/v1/meta` now authenticate an API key under
+    the key's permissions + RLS, exactly like the dispatcher/MCP path.
+
+  Tests: core `api-key.test.ts` (primitives + verifier: valid / revoked / expired /
+  unknown / owner-less / plaintext-not-matched / fail-closed-ql). runtime + rest
+  suites green.
+
+- Updated dependencies [a46c017]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [e6374b5]
+- Updated dependencies [1e8b680]
+- Updated dependencies [0a6438e]
+- Updated dependencies [3306d2f]
+- Updated dependencies [ae7fb3f]
+- Updated dependencies [c262301]
+- Updated dependencies [e1478fe]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+- Updated dependencies [345e189]
+  - @objectstack/spec@8.0.0
+  - @objectstack/objectql@8.0.0
+  - @objectstack/driver-sql@8.0.0
+  - @objectstack/plugin-auth@8.0.0
+  - @objectstack/plugin-security@8.0.0
+  - @objectstack/rest@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/formula@8.0.0
+  - @objectstack/metadata@8.0.0
+  - @objectstack/observability@8.0.0
+  - @objectstack/driver-memory@8.0.0
+  - @objectstack/driver-sqlite-wasm@8.0.0
+  - @objectstack/plugin-org-scoping@8.0.0
+  - @objectstack/service-cluster@8.0.0
+  - @objectstack/service-i18n@8.0.0
+  - @objectstack/types@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

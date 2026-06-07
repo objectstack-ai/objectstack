@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/driver-memory",
-  "version": "7.9.0",
+  "version": "8.0.0",
   "license": "Apache-2.0",
   "description": "In-Memory Driver for ObjectStack (Reference Implementation)",
   "main": "dist/index.js",

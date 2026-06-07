@@ -1,5 +1,35 @@
 # @objectstack/service-cluster-redis
 
+## 8.0.0
+
+### Patch Changes
+
+- 0a6438e: perf(rest): cache hostname→environment resolution; document cluster pub/sub durability (P1-4, P1-5)
+
+  - **rest (P1-4):** `resolveByHostname()` ran on every unscoped request — a
+    control-plane lookup (typically a DB query) in the hot path. `RestServer` now
+    caches `hostname → environmentId` in-memory with a 30s TTL across all three
+    resolution sites, caching negative results too so unknown hosts don't hammer the
+    registry. Registry errors are not cached, so a transient blip self-heals.
+  - **service-cluster-redis (P1-5):** recorded the durability contract for
+    `metadata.changed` in `pubsub.ts`. Redis pub/sub is at-most-once **by design**;
+    the event is a cache-invalidation hint only — the durable source of truth is the
+    transactional `sys_metadata` (+ `sys_metadata_history`) write, so a missed event
+    causes a stale cache until the next reload, never data loss. No code change to
+    the delivery semantics; risk accepted and documented.
+
+- Updated dependencies [a46c017]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [3306d2f]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+  - @objectstack/spec@8.0.0
+  - @objectstack/service-cluster@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

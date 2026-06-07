@@ -1,5 +1,94 @@
 # @objectstack/rest
 
+## 8.0.0
+
+### Minor Changes
+
+- 345e189: Robust multi-write transactions (ADR-0034). `engine.transaction()` now establishes an ambient transaction (AsyncLocalStorage) so every data operation during the callback — including internal reads performed while a write runs — binds to the active transaction's connection instead of asking the pool for another one and deadlocking on SQLite's single-connection pool. Adds a cross-object transactional batch endpoint (`POST /api/v1/data/batch`) with intra-batch `{ $ref: <opIndex> }` parent references, so a parent and its children can be created atomically in one transaction.
+
+### Patch Changes
+
+- 0a6438e: perf(rest): cache hostname→environment resolution; document cluster pub/sub durability (P1-4, P1-5)
+
+  - **rest (P1-4):** `resolveByHostname()` ran on every unscoped request — a
+    control-plane lookup (typically a DB query) in the hot path. `RestServer` now
+    caches `hostname → environmentId` in-memory with a 30s TTL across all three
+    resolution sites, caching negative results too so unknown hosts don't hammer the
+    registry. Registry errors are not cached, so a transient blip self-heals.
+  - **service-cluster-redis (P1-5):** recorded the durability contract for
+    `metadata.changed` in `pubsub.ts`. Redis pub/sub is at-most-once **by design**;
+    the event is a cache-invalidation hint only — the durable source of truth is the
+    transactional `sys_metadata` (+ `sys_metadata_history`) write, so a missed event
+    causes a stale cache until the next reload, never data loss. No code change to
+    the delivery semantics; risk accepted and documented.
+
+- ae7fb3f: fix(rest): advertise `routes.mcp` in /discovery when MCP is enabled (cloud#152)
+
+  The objectui Integrations page reads `discovery.routes.mcp` to show the "Connect
+  an AI agent" card, but it stayed absent on live envs even with MCP enabled. Root
+  cause (NOT a cache, as first suspected): `@objectstack/rest` serves its OWN
+  `/discovery` (`protocol.getDiscovery()`), separate from the dispatcher's
+  `getDiscoveryInfo` where the `mcp` field was added — so the REST-served discovery
+  never advertised it.
+
+  The REST discovery handler now adds `routes.mcp` (pointing at the unscoped
+  `/api/v1/mcp`, since the MCP route is mounted bare) when
+  `OS_MCP_SERVER_ENABLED=true`, and omits it otherwise — mirroring the dispatcher
+  discovery and the opt-in gate. 2 tests (enabled → advertised, disabled → absent).
+
+- c262301: fix(rest): REST data API honors sys_api_key — one shared verifier with MCP (closes #1633)
+
+  Staging e2e found the MCP surface authenticated a `sys_api_key` but the REST data
+  API (`@objectstack/rest`) returned 401 for the same key — its `resolveExecCtx`
+  only checked the better-auth session, never the API key.
+
+  Converged both surfaces onto ONE verifier so they can't drift:
+
+  - **`@objectstack/core/security`** now owns the shared `sys_api_key` primitives
+    (`hashApiKey`, `generateApiKey`, `extractApiKey`, `parseScopes`, `isExpired`)
+    plus a new `resolveApiKeyPrincipal(ql, headers, nowMs?)` that hashes the
+    inbound key, looks it up by the indexed at-rest hash, and rejects unknown /
+    revoked / expired / owner-less keys (fail-closed). `core` is the natural home:
+    both `rest` and `runtime` depend on it, it depends on neither (no cycle), and
+    it's server-side (already uses `node:crypto`).
+  - **`@objectstack/runtime`** — `security/api-key.ts` re-exports the primitives
+    from core (stable import surface) and `resolveExecutionContext` now delegates
+    its API-key branch to `resolveApiKeyPrincipal`.
+  - **`@objectstack/rest`** — `resolveExecCtx` resolves the data engine once and
+    tries `resolveApiKeyPrincipal` (x-api-key / `Authorization: ApiKey`) BEFORE the
+    session, so `/api/v1/data` + `/api/v1/meta` now authenticate an API key under
+    the key's permissions + RLS, exactly like the dispatcher/MCP path.
+
+  Tests: core `api-key.test.ts` (primitives + verifier: valid / revoked / expired /
+  unknown / owner-less / plaintext-not-matched / fail-closed-ql). runtime + rest
+  suites green.
+
+- e1478fe: fix(rest): map schema-mismatch & not-null driver errors to structured 4xx
+
+  `mapDataError` collapsed any SQL-looking driver error into a generic
+  `500 DATABASE_ERROR`, so a bad write payload to the data API leaked a 500
+  instead of a fixable 4xx (e.g. `POST /data/sys_team` with an unknown field,
+  or omitting a required column). It now maps unknown-column errors to
+  `400 INVALID_FIELD { field }` and not-null violations to
+  `400 VALIDATION_FAILED { fields:[{required}] }` across SQLite/Postgres/MySQL
+  phrasings, placed before the unknown-object branch so Postgres
+  `column … of relation … does not exist` is not mis-mapped to 404. Genuine
+  driver faults still return 500; unique violations still return 409.
+
+- Updated dependencies [a46c017]
+- Updated dependencies [b990b89]
+- Updated dependencies [99111ec]
+- Updated dependencies [d5a8161]
+- Updated dependencies [5cf1f1b]
+- Updated dependencies [9ef89d4]
+- Updated dependencies [3306d2f]
+- Updated dependencies [c262301]
+- Updated dependencies [bc44195]
+- Updated dependencies [9e2e229]
+  - @objectstack/spec@8.0.0
+  - @objectstack/core@8.0.0
+  - @objectstack/service-package@8.0.0
+
 ## 7.9.0
 
 ### Patch Changes

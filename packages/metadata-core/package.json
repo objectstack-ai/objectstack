@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata-core",
-  "version": "7.9.0",
+  "version": "8.0.0",
   "license": "Apache-2.0",
   "description": "Metadata Repository contracts: types, canonicalization, errors, interface (ADR-0008).",
   "type": "module",
