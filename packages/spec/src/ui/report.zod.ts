@@ -103,15 +103,36 @@ export const ReportSchema = lazySchema(() => z.object({
   name: SnakeCaseIdentifierSchema.describe('Report unique name'),
   label: I18nLabelSchema.describe('Report label'),
   description: I18nLabelSchema.optional(),
-  
-  /** Data Source */
-  objectName: z.string().describe('Primary object'),
-  
+
+  /**
+   * Data Source — inline single-object query.
+   * Optional since ADR-0021: a report may instead bind to a semantic-layer
+   * `dataset` (see `dataset`/`rows`/`values` below). Exactly one shape is used
+   * per report; the `superRefine` enforces it. Required for the legacy inline
+   * shape (no `dataset`).
+   */
+  objectName: z.string().optional().describe('Primary object (inline-query reports; omit when `dataset` is set)'),
+
   /** Report Configuration */
   type: ReportType.default('tabular').describe('Report format type'),
-  
-  columns: z.array(ReportColumnSchema).describe('Columns to display'),
-  
+
+  columns: z.array(ReportColumnSchema).optional().describe('Columns to display (inline-query reports)'),
+
+  /**
+   * ADR-0021 — bind to a semantic-layer `dataset` (the governed alternative to
+   * the inline `objectName` + `columns` query). When set, the report renders
+   * the dataset's named measures grouped by the chosen dimensions — numbers
+   * stay consistent with every other surface that uses the same dataset.
+   * Additive / dual-form: existing inline reports are unchanged.
+   */
+  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021)'),
+  /** Dimension names (from the dataset) to group rows by. Dataset-bound only. */
+  rows: z.array(z.string()).optional().describe('Dimension names down (dataset-bound)'),
+  /** Measure names (from the dataset) to display. Dataset-bound only. */
+  values: z.array(z.string()).optional().describe('Measure names to show (dataset-bound)'),
+  /** Render-time scope filter, ANDed at query time. Dataset-bound only. */
+  runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter (dataset-bound)'),
+
   /** Grouping (for Summary/Matrix) */
   groupingsDown: z.array(ReportGroupingSchema).optional().describe('Row groupings'),
   groupingsAcross: z.array(ReportGroupingSchema).optional().describe('Column groupings (Matrix only)'),
@@ -154,6 +175,34 @@ export const ReportSchema = lazySchema(() => z.object({
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 
+}).superRefine((r, ctx) => {
+  // ADR-0021 dual-form: a report is EITHER dataset-bound OR an inline query.
+  if (r.dataset) {
+    if (!r.values || r.values.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'a dataset-bound report needs `values` (measure names from the dataset).',
+        path: ['values'],
+      });
+    }
+  } else {
+    // Legacy inline shape — keep requiring objectName + columns so existing
+    // reports stay valid and a half-specified report is rejected.
+    if (!r.objectName) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'report needs `objectName` (or bind a `dataset`).',
+        path: ['objectName'],
+      });
+    }
+    if (!r.columns) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'report needs `columns` (or bind a `dataset` with `values`).',
+        path: ['columns'],
+      });
+    }
+  }
 }));
 
 export type JoinedReportBlock = z.infer<typeof JoinedReportBlockSchema>;

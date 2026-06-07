@@ -543,3 +543,41 @@ describe('ReportSchema - Negative Validation', () => {
     })).toThrow();
   });
 });
+
+describe('ReportSchema — dataset binding (ADR-0021 dual-form)', () => {
+  it('accepts a dataset-bound report (dataset + values, no objectName/columns)', () => {
+    expect(() => ReportSchema.parse({
+      name: 'revenue_by_region',
+      label: 'Revenue by Region',
+      dataset: 'sales',
+      rows: ['region'],
+      values: ['revenue'],
+    })).not.toThrow();
+  });
+
+  it('rejects a dataset-bound report with no values', () => {
+    expect(() => ReportSchema.parse({
+      name: 'bad', label: 'Bad', dataset: 'sales', rows: ['region'],
+    })).toThrowError(/needs `values`/);
+  });
+
+  it('still accepts a legacy inline report (objectName + columns)', () => {
+    expect(() => ReportSchema.parse({
+      name: 'legacy', label: 'Legacy', objectName: 'crm_opportunity',
+      columns: [{ field: 'amount', aggregate: 'sum' }],
+    })).not.toThrow();
+  });
+
+  it('rejects an inline report missing objectName/columns (and no dataset)', () => {
+    expect(() => ReportSchema.parse({ name: 'bad2', label: 'Bad2' }))
+      .toThrowError(/needs `objectName`|needs `columns`/);
+  });
+
+  it('carries runtimeFilter on a dataset-bound report', () => {
+    const r = ReportSchema.parse({
+      name: 'scoped', label: 'Scoped', dataset: 'sales', values: ['revenue'],
+      runtimeFilter: { stage: 'won' },
+    });
+    expect((r as any).runtimeFilter).toEqual({ stage: 'won' });
+  });
+});
