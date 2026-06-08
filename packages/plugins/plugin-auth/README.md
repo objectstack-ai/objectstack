@@ -24,7 +24,7 @@ Authentication & Identity Plugin for ObjectStack.
 - ✅ **Session Management** - Automatic session handling
 - ✅ **Password Reset** - Email-based password reset flow
 - ✅ **Email Verification** - Email verification workflow
-- ✅ **2FA** - Two-factor authentication (when enabled)
+- ⚠️ **2FA backend wiring** - better-auth two-factor plugin can be enabled for custom UIs
 - ✅ **Passkeys** - WebAuthn/Passkey support (when enabled)
 - ✅ **Magic Links** - Passwordless authentication (when enabled)
 - ✅ **Organizations** - Multi-tenant support (when enabled)
@@ -91,7 +91,7 @@ new AuthPlugin({
   baseUrl: 'http://localhost:3000',
   plugins: {
     organization: true,  // Enable organization/teams
-    twoFactor: true,     // Enable 2FA
+    twoFactor: true,     // Enable backend 2FA endpoints for a custom UI
     passkeys: true,      // Enable passkey support
   }
 })
@@ -105,7 +105,7 @@ The plugin accepts configuration via `AuthConfig` schema from `@objectstack/spec
 - `baseUrl` - Base URL for auth routes
 - `databaseUrl` - Database connection string
 - `providers` - Array of OAuth provider configurations
-- `plugins` - Enable additional auth features (organization, 2FA, passkeys, magic link)
+- `plugins` - Enable additional auth features (organization, backend 2FA, passkeys, magic link)
 - `session` - Session configuration (expiry, update frequency)
 
 ## API Routes
@@ -132,9 +132,13 @@ The plugin forwards all requests under `/api/v1/auth/*` directly to better-auth'
 - `GET /api/v1/auth/authorize/[provider]` - Start OAuth flow
 - `GET /api/v1/auth/callback/[provider]` - OAuth callback
 
-### 2FA (when enabled)
-- `POST /api/v1/auth/two-factor/enable` - Enable 2FA
-- `POST /api/v1/auth/two-factor/verify` - Verify 2FA code
+### 2FA backend (when enabled)
+- `POST /api/v1/auth/two-factor/enable` - Start 2FA enrollment
+- `POST /api/v1/auth/two-factor/verify-totp` - Verify a TOTP code
+
+The open-source Console does not yet provide a complete TOTP enrollment,
+login challenge, and backup-code recovery flow. Keep `plugins.twoFactor`
+disabled unless your application UI handles that full flow.
 
 ### Passkeys (when enabled)
 - `POST /api/v1/auth/passkey/register` - Register a passkey
@@ -158,7 +162,7 @@ This package provides authentication services powered by better-auth. Current im
 6. ✅ Direct request forwarding to better-auth handler
 7. ✅ Full better-auth API support
 8. ✅ OAuth providers (configurable)
-9. ✅ 2FA, passkeys, magic links (configurable)
+9. ⚠️ Backend 2FA wiring, passkeys, magic links (configurable; custom UI required for 2FA)
 10. ✅ ObjectQL-based database implementation (no ORM required)
 
 ### Architecture

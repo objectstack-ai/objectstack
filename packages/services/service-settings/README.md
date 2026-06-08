@@ -2,7 +2,7 @@
 
 Settings service for ObjectStack. Implements ADR-0007: a generic
 namespace **manifest** mechanism + a single K/V table (`sys_setting`) +
-a resolver that layers `Env > Tenant > User > Default`.
+a resolver that layers `OS_* env > Tenant > User > Default`.
 
 ## What it gives you
 
@@ -26,9 +26,12 @@ a resolver that layers `Env > Tenant > User > Default`.
 
 ## Env override
 
-`process.env[NAMESPACE_KEY]` (uppercased) takes precedence over any
-stored value. Such fields are returned with `source: 'env', locked:
-true` and writes (service or REST) fail with HTTP 409.
+`process.env[OS_NAMESPACE_KEY]` (uppercased, with dots / hyphens converted
+to underscores) takes precedence over any stored value. For example,
+`mail.smtp_host` resolves from `OS_MAIL_SMTP_HOST`, and
+`feature_flags.ai_enabled` resolves from `OS_FEATURE_FLAGS_AI_ENABLED`.
+Such fields are returned with `source: 'env', locked: true` and writes
+(service or REST) fail with HTTP 409.
 
 ## Encryption
 

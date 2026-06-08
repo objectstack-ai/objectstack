@@ -51,7 +51,7 @@ Our HTTP server uses Hono, which already uses Web standard Request/Response:
 | Bug Risk | Low - using library as designed | High - custom code, edge cases |
 | Updates | Get better-auth updates automatically | Must update wrapper code |
 | OAuth Support | Built-in, configured via options | Must implement OAuth flows |
-| 2FA Support | Built-in, configured via options | Must implement 2FA logic |
+| 2FA Support | Backend plugin wiring, configured via options; UI must handle enrollment/challenge/recovery | Must implement 2FA logic |
 | Passkeys | Built-in, configured via options | Must implement WebAuthn |
 | Magic Links | Built-in, configured via options | Must implement email flows |
 
@@ -121,7 +121,7 @@ rawApp.all('/api/v1/auth/*', async (c) => {
 - ✅ Session Management
 - ✅ Password Reset
 - ✅ Email Verification
-- ✅ 2FA (when enabled)
+- ⚠️ Backend 2FA wiring (when enabled; custom UI required)
 - ✅ Passkeys (when enabled)
 - ✅ Magic Links (when enabled)
 - ✅ Organizations (when enabled)
@@ -147,20 +147,24 @@ const plugin = new AuthPlugin({
   // Advanced features - just enable, no implementation needed
   plugins: {
     organization: true,  // Multi-tenant support
-    twoFactor: true,     // 2FA
+    twoFactor: true,     // Backend 2FA endpoints for a custom UI
     passkeys: true,      // WebAuthn
     magicLink: true,     // Passwordless
   }
 });
 ```
 
-All better-auth endpoints work immediately:
+Better-auth endpoints are forwarded immediately:
 - `/api/v1/auth/sign-up/email`
 - `/api/v1/auth/sign-in/email`
 - `/api/v1/auth/authorize/google`
 - `/api/v1/auth/two-factor/enable`
 - `/api/v1/auth/passkey/register`
 - And many more...
+
+For 2FA specifically, do not expose it as an end-user feature until the UI
+also handles TOTP confirmation, the password sign-in `twoFactorRedirect`
+challenge, and backup-code recovery.
 
 ## Lessons Learned
 

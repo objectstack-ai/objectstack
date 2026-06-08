@@ -17,5 +17,5 @@ export const settingsPluginManifestHeader = {
   scope: 'system' as const,
   name: 'Settings Service',
   description:
-    'Generic settings registry + K/V resolver with Env > Tenant > User > Default precedence. ADR-0007.',
+    'Generic settings registry + K/V resolver with OS_* env > Tenant > User > Default precedence. ADR-0007.',
 };

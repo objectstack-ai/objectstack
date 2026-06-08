@@ -9,7 +9,7 @@
  *    `objectql` data engine, with an in-memory fallback so the service
  *    is usable before a real persistence layer is wired up (e.g. unit
  *    tests, bootstrap, control-plane mock).
- *  - Resolve effective values with `Env > Tenant > User > Default`
+ *  - Resolve effective values with `OS_* env > Tenant > User > Default`
  *    precedence and tag every value with provenance.
  *  - Encrypt-at-rest for `encrypted: true` specifiers using a pluggable
  *    {@link CryptoAdapter}.
@@ -198,12 +198,12 @@ export interface SettingsServiceOptions {
 }
 
 /**
- * Convert `(namespace, key)` to the env var convention defined in
- * ADR-0007: uppercase, dots → underscores, hyphens → underscores.
+ * Convert `(namespace, key)` to the ObjectStack-owned env var convention:
+ * `OS_` prefix, uppercase, dots → underscores, hyphens → underscores.
  */
 export function envKeyOf(namespace: string, key: string): string {
   const slug = `${namespace}_${key}`.replace(/[.-]/g, '_').toUpperCase();
-  return slug;
+  return `OS_${slug}`;
 }
 
 /** Thrown when a caller tries to write a value pinned by env. */

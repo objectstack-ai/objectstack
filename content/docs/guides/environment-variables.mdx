@@ -60,15 +60,28 @@ read at startup unless noted otherwise. Boolean variables accept `true` / `false
 |:---|:---|:---|:---|
 | `OS_AUTH_URL` | url | `http://localhost:<OS_PORT>` | Public base URL of the auth server. Required behind a proxy or in production. |
 | `OS_AUTH_SECRET` | string | auto-generated (dev) | Secret used to sign sessions and cookies. **Required** in production. |
-| `OS_AUTH_ADMIN` | boolean | `true` | Enable the admin plugin (first user becomes admin). |
-| `OS_AUTH_TWO_FACTOR` | boolean | `true` | Enable the two-factor authentication plugin. |
+| `OS_AUTH_TWO_FACTOR` | boolean | `false` | Enable the low-level better-auth two-factor plugin. Keep disabled unless your UI handles enrollment, login challenge, and backup-code recovery. |
 | `OS_DISABLE_SIGNUP` | boolean | `false` | When `true`, block new email/password sign-ups. The very first user can still sign up to bootstrap admin. |
+| `OS_AUTH_EMAIL_PASSWORD_ENABLED` | boolean | settings default | Settings env override for `auth.email_password_enabled`. Controls local email/password login. |
+| `OS_AUTH_SIGNUP_ENABLED` | boolean | settings default | Settings env override for `auth.signup_enabled`. Takes precedence over UI settings and is preferred over `OS_DISABLE_SIGNUP`. |
+| `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` | boolean | settings default | Settings env override for `auth.require_email_verification`. |
+| `OS_AUTH_GOOGLE_ENABLED` | boolean | settings default | Settings env override for `auth.google_enabled`. Requires Google OAuth credentials from Settings or env. |
+| `GOOGLE_CLIENT_ID` | string | — | Deployment-level Google OAuth client id for the open-source Google login implementation. |
+| `GOOGLE_CLIENT_SECRET` | string | — | Deployment-level Google OAuth client secret for the open-source Google login implementation. |
 | `OS_MULTI_ORG_ENABLED` | boolean | `false` | When `true`, expose organization creation/switching UI. When `false`, run in single-tenant mode. |
 | `OS_OIDC_PROVIDER_ENABLED` | boolean | `false` | When `true`, expose this instance as an OIDC identity provider. |
 | `OS_COOKIE_DOMAIN` | string | — | Cookie domain for cross-subdomain session sharing (e.g. `.example.com`). |
 | `OS_TRUSTED_ORIGINS` | csv | — | Comma-separated list of origins permitted for auth callbacks / CSRF. |
 | `OS_TERMS_URL` | url | — | URL shown next to the "Terms of Service" link on the sign-up form. Empty string hides the link. |
 | `OS_PRIVACY_URL` | url | — | URL shown next to the "Privacy Policy" link on the sign-up form. Empty string hides the link. |
+
+Auth settings precedence:
+
+1. Environment variables win over values saved in the Setup UI.
+2. `OS_AUTH_<SETTING_KEY>` settings env vars are the canonical form for settings-backed auth controls.
+3. Existing deployment toggles such as `OS_AUTH_TWO_FACTOR` and `OS_DISABLE_SIGNUP` remain supported.
+4. Google credentials can be saved in Setup → Authentication. `google_client_secret` is encrypted at rest.
+5. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` remain supported for deployment-level Google OAuth configuration.
 
 ---
 
@@ -112,11 +125,69 @@ read at startup unless noted otherwise. Boolean variables accept `true` / `false
 
 | Variable | Type | Default | Description |
 |:---|:---|:---|:---|
-| `OS_AI_MODEL` | string | `gpt-4o-mini` | Default chat model id. |
-| `OS_AI_ACTION_API_BASE_URL` | url | — | Override the base URL the AI action runtime calls (useful for self-hosted proxies). |
+| `AI_GATEWAY_MODEL` | string | — | Vercel AI Gateway model id (for example `openai/gpt-4.1-mini` or `anthropic/claude-sonnet-4-5`). When set, the AI service boots with the gateway adapter before trying direct providers. |
+| `AI_GATEWAY_API_KEY` | string | — | Vercel AI Gateway API key. Required by the gateway SDK for real gateway calls; by itself it does not select the gateway adapter. Pair it with `AI_GATEWAY_MODEL`. |
+| `OPENAI_API_KEY` | string | — | Selects the direct OpenAI adapter when no gateway model is configured. Default model: `gpt-4o`. |
+| `ANTHROPIC_API_KEY` | string | — | Selects the direct Anthropic adapter when gateway and OpenAI are not configured. Default model: `claude-sonnet-4-20250514`. |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | string | — | Selects the direct Google Gemini adapter when gateway, OpenAI, and Anthropic are not configured. Default model: `gemini-2.0-flash`. |
+| `OS_AI_MODEL` | string | provider default | Overrides the model id for direct OpenAI / Anthropic / Google provider detection. Does not override `AI_GATEWAY_MODEL`; gateway model ids already include the provider prefix. |
+| `OS_AI_ACTION_API_BASE_URL` | url | — | Base URL prepended to relative `type: 'api'` action targets exposed as AI tools. Without this or a plugin `apiActionBaseUrl`, relative API actions are skipped for AI exposure. |
+| `OS_AI_PROVIDER` | enum | — | Settings override for the AI provider. Supported values include `gateway`, `openai`, `anthropic`, `google`, `deepseek`, `dashscope`, `cloudflare`, `siliconflow`, and `openrouter`. When set, it locks the Settings UI value. |
+| `OS_AI_GATEWAY_MODEL` | string | — | Settings override for the Vercel AI Gateway model id. Use with `OS_AI_PROVIDER=gateway`. |
+| `OS_AI_GATEWAY_API_KEY` | string | — | Settings override for the Vercel AI Gateway API key. Use with `OS_AI_PROVIDER=gateway`. |
+| `OS_AI_OPENAI_BASE_URL` | url | — | Settings override for the OpenAI-compatible chat base URL. Use with `OS_AI_PROVIDER=openai` for Azure, local gateways, or third-party OpenAI-shaped APIs. |
+| `OS_AI_OPENAI_API_KEY` | string | — | Settings override for the OpenAI-compatible API key. Stored only in env; the Settings UI cannot overwrite it while present. |
+| `OS_AI_OPENAI_MODEL` | string | `gpt-4o` | Settings override for the OpenAI-compatible chat model id. |
+| `OS_AI_ANTHROPIC_API_KEY` | string | — | Settings override for the Anthropic API key. Use with `OS_AI_PROVIDER=anthropic`. |
+| `OS_AI_ANTHROPIC_MODEL` | string | `claude-sonnet-4-20250514` | Settings override for the Anthropic model id. |
+| `OS_AI_GOOGLE_API_KEY` | string | — | Settings override for the Google Generative AI API key. Use with `OS_AI_PROVIDER=google`. |
+| `OS_AI_GOOGLE_MODEL` | string | `gemini-2.0-flash` | Settings override for the Google model id. |
+| `OS_AI_<PROVIDER>_API_KEY` | string | — | Settings override for preset OpenAI-compatible providers, for example `OS_AI_DEEPSEEK_API_KEY`, `OS_AI_DASHSCOPE_API_KEY`, `OS_AI_SILICONFLOW_API_KEY`, or `OS_AI_OPENROUTER_API_KEY`. |
+| `OS_AI_<PROVIDER>_MODEL` | string | provider default | Settings override for preset provider model ids, for example `OS_AI_DEEPSEEK_MODEL=deepseek-chat`. |
 
-> Provider credentials (`OPENAI_API_KEY`, `AI_GATEWAY_*`, etc.) keep their
-> upstream names.
+The boot-time LLM adapter priority is:
+
+1. Explicit `AIServicePlugin({ adapter })` or per-plugin `gatewayModel` option.
+2. `AI_GATEWAY_MODEL` using `@ai-sdk/gateway`.
+3. `OPENAI_API_KEY` using `@ai-sdk/openai`.
+4. `ANTHROPIC_API_KEY` using `@ai-sdk/anthropic`.
+5. `GOOGLE_GENERATIVE_AI_API_KEY` using `@ai-sdk/google`.
+6. `MemoryLLMAdapter` echo mode when no real provider is configured.
+
+After boot, if the Settings service is mounted, `@objectstack/service-ai`
+reads the `ai` Settings namespace and swaps the adapter when the provider
+comes from env or a stored Settings UI value. The manifest default
+`provider=memory` is ignored so it does not mask boot-time auto-detection;
+an explicit `OS_AI_PROVIDER=memory` or stored UI value does switch the runtime
+back to memory. Settings values resolve as:
+
+```text
+env (`OS_<NAMESPACE>_<KEY>`) > stored Settings UI value > default
+```
+
+That means `OS_AI_PROVIDER=openai` plus `OS_AI_OPENAI_BASE_URL=...` wins over
+both the Settings UI and the boot-time provider auto-detection. ObjectStack
+does not read unprefixed settings override names such as `AI_PROVIDER` or
+`AI_OPENAI_BASE_URL`.
+
+For example, a third-party OpenAI-compatible provider can be deployment-locked
+without using the Settings UI:
+
+```bash
+OS_AI_PROVIDER=openai
+OS_AI_OPENAI_API_KEY=sk-...
+OS_AI_OPENAI_MODEL=your-model
+OS_AI_OPENAI_BASE_URL=https://your-provider.example.com/v1
+```
+
+Provider credentials keep their upstream names. ObjectStack does not rename
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, or
+`AI_GATEWAY_*` to `OS_*`.
+
+> **OpenAI-compatible base URLs.** Use `OS_AI_OPENAI_BASE_URL` with
+> `OS_AI_PROVIDER=openai`, configure the same fields in **Settings → AI**, or
+> pass an explicit adapter in code. Do not rely on `OPENAI_BASE_URL` as a
+> platform-level environment variable.
 
 ---
 

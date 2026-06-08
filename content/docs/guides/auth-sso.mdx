@@ -1,16 +1,21 @@
 ---
 title: Social & Enterprise SSO
-description: Enable social sign-in (Google, GitHub, Microsoft, Apple) and enterprise OIDC/SSO in ObjectStack Studio.
+description: Enable Google sign-in in open source, and extend auth providers through packages.
 ---
 
 # Social & Enterprise SSO
 
-ObjectStack supports multiple authentication providers out of the box:
+ObjectStack open source ships one built-in social sign-in implementation:
 
-- **Social OAuth**: Google, GitHub, Microsoft, Apple — via better-auth's built-in `socialProviders`
-- **Enterprise SSO**: Any OIDC-compliant provider (Okta, Azure AD, Keycloak, Ping Identity, …) — via better-auth's `genericOAuth` plugin
+- **Google OAuth**: configure in Setup → Authentication, or from
+  `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` deployment env vars
 
-The Studio login and registration pages automatically render **Continue with …** buttons for every enabled provider. No UI changes are required.
+Additional providers should be contributed by product or enterprise packages through
+the `auth:configure` hook. Those packages can add better-auth `socialProviders`
+or OIDC/generic OAuth providers without forking `@objectstack/plugin-auth`.
+
+The Studio login and registration pages automatically render **Continue with ...**
+buttons for every enabled provider returned by `/api/v1/auth/config`.
 
 ---
 
@@ -27,15 +32,24 @@ The Studio login and registration pages automatically render **Continue with …
    For local development: `http://localhost:3000/api/v1/auth/callback/google`
 4. Copy the **Client ID** and **Client Secret**.
 
+Then either save the values in **Setup → Authentication → Social sign-in** or
+provide them as deployment environment variables:
+
 ```bash
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 
-# Optional: override default scopes (comma-separated)
-# GOOGLE_OAUTH_SCOPES=openid,email,profile
+# Optional settings env override. UI settings are lower precedence than env.
+# OS_AUTH_GOOGLE_ENABLED=false
 ```
 
-### GitHub
+## Extension Packages
+
+The providers below are examples for enterprise or product packages, not built-in
+open-source settings. A package can register them by listening to `auth:configure`
+and mutating the draft auth config.
+
+### GitHub Example
 
 1. Go to [GitHub Developer Settings](https://github.com/settings/developers) → **OAuth Apps** → **New OAuth App**.
 2. Set **Authorization callback URL**:
@@ -84,14 +98,16 @@ APPLE_CLIENT_SECRET=your-apple-private-key-jwt
 
 ---
 
-## Enterprise SSO (OIDC)
+## Enterprise SSO (OIDC) Extension Example
 
-For enterprise single sign-on, set the `OIDC_PROVIDERS` environment variable to a JSON array. Each entry maps to one SSO provider.
+Enterprise packages can pass `oidcProviders` into `@objectstack/plugin-auth`
+or contribute them through `auth:configure`. The open-source package does not
+ship a generic OIDC settings UI.
 
 ### Quick start — Okta
 
-```bash
-OIDC_PROVIDERS='[
+```ts
+const oidcProviders = [
   {
     "providerId": "okta",
     "name": "Okta",
@@ -100,13 +116,13 @@ OIDC_PROVIDERS='[
     "clientSecret": "your-okta-client-secret",
     "scopes": ["openid", "email", "profile"]
   }
-]'
+];
 ```
 
 ### Quick start — Azure AD (OIDC)
 
-```bash
-OIDC_PROVIDERS='[
+```ts
+const oidcProviders = [
   {
     "providerId": "azure-ad",
     "name": "Azure AD",
@@ -114,13 +130,13 @@ OIDC_PROVIDERS='[
     "clientId": "your-azure-client-id",
     "clientSecret": "your-azure-client-secret"
   }
-]'
+];
 ```
 
 ### Quick start — Keycloak
 
-```bash
-OIDC_PROVIDERS='[
+```ts
+const oidcProviders = [
   {
     "providerId": "keycloak",
     "name": "Keycloak",
@@ -129,13 +145,13 @@ OIDC_PROVIDERS='[
     "clientSecret": "your-client-secret",
     "pkce": true
   }
-]'
+];
 ```
 
 ### Multiple enterprise providers
 
-```bash
-OIDC_PROVIDERS='[
+```ts
+const oidcProviders = [
   {
     "providerId": "okta",
     "name": "Okta SSO",
@@ -150,7 +166,7 @@ OIDC_PROVIDERS='[
     "clientId": "...",
     "clientSecret": "..."
   }
-]'
+];
 ```
 
 ### OIDC provider fields

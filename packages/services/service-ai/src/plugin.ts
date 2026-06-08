@@ -971,8 +971,10 @@ export class AIServicePlugin implements Plugin {
       try {
         const payload = await settings.getNamespace('ai');
         const values: Record<string, unknown> = {};
+        const sources: Record<string, string | undefined> = {};
         for (const [k, v] of Object.entries(payload.values as Record<string, any>)) {
           values[k] = v?.value;
+          sources[k] = v?.source;
         }
         // ── Conversation auto-titling ─────────────────────────────
         // Flip on whenever any non-memory provider is wired. Pure
@@ -991,9 +993,10 @@ export class AIServicePlugin implements Plugin {
         });
 
         const provider = providerForTitles;
-        // memory provider is the manifest default; treat it as "no override"
-        // so the env-detected adapter chosen at init stays in place.
-        if (provider === 'memory') return;
+        // The manifest default is `memory`; default values should not mask
+        // boot-time env auto-detection. A stored or env-locked `memory` value
+        // is explicit, though, and should switch the service back to memory.
+        if (provider === 'memory' && (sources.provider ?? 'default') === 'default') return;
         const built = await this.buildAdapterFromValues(ctx, values);
         if (!built) {
           ctx.logger.warn(

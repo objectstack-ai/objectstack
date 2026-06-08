@@ -97,6 +97,74 @@ describe('AuthPlugin', () => {
       expect(mockContext.registerService).toHaveBeenCalled();
     });
 
+    it('should enable Google from env when not explicitly configured', async () => {
+      const prevClientId = process.env.GOOGLE_CLIENT_ID;
+      const prevClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+      process.env.GOOGLE_CLIENT_ID = 'google-env-client-id';
+      process.env.GOOGLE_CLIENT_SECRET = 'google-env-client-secret';
+      try {
+        authPlugin = new AuthPlugin({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+        });
+
+        await authPlugin.init(mockContext);
+
+        const manager = (mockContext.registerService as any).mock.calls.find(
+          ([name]: [string]) => name === 'auth',
+        )?.[1] as AuthManager;
+        const publicConfig = manager.getPublicConfig();
+        expect(publicConfig.socialProviders).toEqual([
+          { id: 'google', name: 'Google', enabled: true, type: 'social' },
+        ]);
+      } finally {
+        if (prevClientId === undefined) delete process.env.GOOGLE_CLIENT_ID;
+        else process.env.GOOGLE_CLIENT_ID = prevClientId;
+        if (prevClientSecret === undefined) delete process.env.GOOGLE_CLIENT_SECRET;
+        else process.env.GOOGLE_CLIENT_SECRET = prevClientSecret;
+      }
+    });
+
+    it('should expose auth:configure for provider extension packages', async () => {
+      const prevClientId = process.env.GOOGLE_CLIENT_ID;
+      const prevClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+      delete process.env.GOOGLE_CLIENT_ID;
+      delete process.env.GOOGLE_CLIENT_SECRET;
+      try {
+        mockContext.trigger = vi.fn(async (name: string, draft: any) => {
+          if (name !== 'auth:configure') return;
+          draft.socialProviders = {
+            ...(draft.socialProviders ?? {}),
+            github: { clientId: 'github-client-id', clientSecret: 'github-client-secret' },
+          };
+        });
+        authPlugin = new AuthPlugin({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+        });
+
+        await authPlugin.init(mockContext);
+
+        expect(mockContext.trigger).toHaveBeenCalledWith(
+          'auth:configure',
+          expect.objectContaining({ secret: 'test-secret-at-least-32-chars-long' }),
+          mockContext,
+        );
+        const manager = (mockContext.registerService as any).mock.calls.find(
+          ([name]: [string]) => name === 'auth',
+        )?.[1] as AuthManager;
+        const publicConfig = manager.getPublicConfig();
+        expect(publicConfig.socialProviders).toEqual([
+          { id: 'github', name: 'GitHub', enabled: true, type: 'social' },
+        ]);
+      } finally {
+        if (prevClientId === undefined) delete process.env.GOOGLE_CLIENT_ID;
+        else process.env.GOOGLE_CLIENT_ID = prevClientId;
+        if (prevClientSecret === undefined) delete process.env.GOOGLE_CLIENT_SECRET;
+        else process.env.GOOGLE_CLIENT_SECRET = prevClientSecret;
+      }
+    });
+
     it('should configure plugins', async () => {
       authPlugin = new AuthPlugin({
         secret: 'test-secret-at-least-32-chars-long',
@@ -446,6 +514,255 @@ describe('AuthPlugin', () => {
       expect(mockContext.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('failed to apply branding.workspace_name'),
       );
+    });
+  });
+
+  describe('Auth settings binding (auth namespace)', () => {
+    let hookCapture: ReturnType<typeof createHookCapture>;
+    const previousGoogleClientId = process.env.GOOGLE_CLIENT_ID;
+    const previousGoogleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const previousGoogleEnabled = process.env.OS_AUTH_GOOGLE_ENABLED;
+    const previousSignupEnabled = process.env.OS_AUTH_SIGNUP_ENABLED;
+
+    const restoreGoogleEnv = () => {
+      if (previousGoogleClientId === undefined) delete process.env.GOOGLE_CLIENT_ID;
+      else process.env.GOOGLE_CLIENT_ID = previousGoogleClientId;
+      if (previousGoogleClientSecret === undefined) delete process.env.GOOGLE_CLIENT_SECRET;
+      else process.env.GOOGLE_CLIENT_SECRET = previousGoogleClientSecret;
+      if (previousGoogleEnabled === undefined) delete process.env.OS_AUTH_GOOGLE_ENABLED;
+      else process.env.OS_AUTH_GOOGLE_ENABLED = previousGoogleEnabled;
+      if (previousSignupEnabled === undefined) delete process.env.OS_AUTH_SIGNUP_ENABLED;
+      else process.env.OS_AUTH_SIGNUP_ENABLED = previousSignupEnabled;
+    };
+
+    const clearAuthSettingsEnv = () => {
+      delete process.env.OS_AUTH_GOOGLE_ENABLED;
+      delete process.env.OS_AUTH_SIGNUP_ENABLED;
+    };
+
+    const makeSettings = (values: Record<string, { value: unknown; source: string }>) => ({
+      getNamespace: vi.fn(async (namespace: string) => {
+        if (namespace !== 'auth') return { values: {} };
+        return { values };
+      }),
+      subscribe: vi.fn(),
+    });
+
+    const bootWithAuthSettings = async (
+      values: Record<string, { value: unknown; source: string }>,
+      options: ConstructorParameters<typeof AuthPlugin>[0] = {},
+      preserveAuthSettingsEnv = false,
+    ) => {
+      if (!preserveAuthSettingsEnv) clearAuthSettingsEnv();
+      hookCapture = createHookCapture();
+      const settings = makeSettings(values);
+      mockContext.hook = hookCapture.hookFn;
+      mockContext.getService = vi.fn((name: string) => {
+        if (name === 'manifest') return { register: vi.fn() };
+        if (name === 'settings') return settings;
+        return undefined;
+      });
+      authPlugin = new AuthPlugin({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        ...options,
+      });
+
+      await authPlugin.init(mockContext);
+      const manager = (mockContext.registerService as any).mock.calls.find(
+        ([name]: [string]) => name === 'auth',
+      )?.[1] as AuthManager;
+      await authPlugin.start(mockContext);
+      await hookCapture.trigger('kernel:ready');
+      return { manager, settings };
+    };
+
+    afterEach(() => {
+      restoreGoogleEnv();
+    });
+
+    it('applies email/password login, registration, and verification settings', async () => {
+      delete process.env.GOOGLE_CLIENT_ID;
+      delete process.env.GOOGLE_CLIENT_SECRET;
+
+      const { manager } = await bootWithAuthSettings({
+        email_password_enabled: { value: false, source: 'global' },
+        signup_enabled: { value: false, source: 'global' },
+        require_email_verification: { value: true, source: 'global' },
+      });
+
+      expect(manager.getPublicConfig().emailPassword).toEqual({
+        enabled: false,
+        disableSignUp: true,
+        requireEmailVerification: true,
+      });
+    });
+
+    it('accepts numeric boolean values saved by the Setup settings form', async () => {
+      const { manager } = await bootWithAuthSettings({
+        signup_enabled: { value: 0, source: 'global' },
+        require_email_verification: { value: 1, source: 'global' },
+      });
+
+      expect(manager.getPublicConfig().emailPassword.disableSignUp).toBe(true);
+      expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(true);
+    });
+
+    it('enables Google from env credentials when google_enabled is explicit true', async () => {
+      process.env.GOOGLE_CLIENT_ID = 'google-env-client-id';
+      process.env.GOOGLE_CLIENT_SECRET = 'google-env-client-secret';
+      delete process.env.OS_AUTH_GOOGLE_ENABLED;
+
+      const { manager } = await bootWithAuthSettings({
+        google_enabled: { value: true, source: 'global' },
+      });
+
+      expect(manager.getPublicConfig().socialProviders).toEqual([
+        { id: 'google', name: 'Google', enabled: true, type: 'social' },
+      ]);
+      expect((manager as any).config.socialProviders.google.clientId).toBe(
+        'google-env-client-id',
+      );
+    });
+
+    it('enables Google from settings-managed credentials', async () => {
+      delete process.env.GOOGLE_CLIENT_ID;
+      delete process.env.GOOGLE_CLIENT_SECRET;
+      delete process.env.OS_AUTH_GOOGLE_ENABLED;
+
+      const { manager } = await bootWithAuthSettings({
+        google_enabled: { value: true, source: 'global' },
+        google_client_id: { value: 'google-settings-client-id', source: 'global' },
+        google_client_secret: { value: 'google-settings-client-secret', source: 'global' },
+      });
+
+      expect(manager.getPublicConfig().socialProviders).toEqual([
+        { id: 'google', name: 'Google', enabled: true, type: 'social' },
+      ]);
+      expect((manager as any).config.socialProviders.google.clientId).toBe(
+        'google-settings-client-id',
+      );
+    });
+
+    it('keeps deployment Google credentials ahead of settings-managed credentials', async () => {
+      process.env.GOOGLE_CLIENT_ID = 'google-env-client-id';
+      process.env.GOOGLE_CLIENT_SECRET = 'google-env-client-secret';
+      delete process.env.OS_AUTH_GOOGLE_ENABLED;
+
+      const { manager } = await bootWithAuthSettings({
+        google_enabled: { value: true, source: 'global' },
+        google_client_id: { value: 'google-settings-client-id', source: 'global' },
+        google_client_secret: { value: 'google-settings-client-secret', source: 'global' },
+      });
+
+      expect(manager.getPublicConfig().socialProviders).toEqual([
+        { id: 'google', name: 'Google', enabled: true, type: 'social' },
+      ]);
+      expect((manager as any).config.socialProviders.google.clientId).toBe(
+        'google-env-client-id',
+      );
+    });
+
+    it('disables env-backed Google when google_enabled is explicit false', async () => {
+      process.env.GOOGLE_CLIENT_ID = 'google-env-client-id';
+      process.env.GOOGLE_CLIENT_SECRET = 'google-env-client-secret';
+      delete process.env.OS_AUTH_GOOGLE_ENABLED;
+
+      const { manager } = await bootWithAuthSettings({
+        google_enabled: { value: false, source: 'global' },
+      });
+
+      expect(manager.getPublicConfig().socialProviders).toEqual([]);
+    });
+
+    it('does not let manifest defaults override configured auth options', async () => {
+      delete process.env.GOOGLE_CLIENT_ID;
+      delete process.env.GOOGLE_CLIENT_SECRET;
+
+      const { manager } = await bootWithAuthSettings({
+        email_password_enabled: { value: true, source: 'default' },
+        signup_enabled: { value: true, source: 'default' },
+        require_email_verification: { value: false, source: 'default' },
+        google_enabled: { value: true, source: 'default' },
+      }, {
+        emailAndPassword: {
+          enabled: true,
+          disableSignUp: true,
+          requireEmailVerification: true,
+        },
+        plugins: {
+          admin: false,
+          twoFactor: false,
+        },
+        socialProviders: {
+          github: { clientId: 'github-client-id', clientSecret: 'github-client-secret' },
+        },
+      });
+
+      expect(manager.getPublicConfig().emailPassword).toEqual({
+        enabled: true,
+        disableSignUp: true,
+        requireEmailVerification: true,
+      });
+      expect(manager.getPublicConfig().features.twoFactor).toBe(false);
+      expect(manager.getPublicConfig().socialProviders).toEqual([
+        { id: 'github', name: 'GitHub', enabled: true, type: 'social' },
+      ]);
+    });
+
+    it('lets OS_AUTH_* env overrides win over stored auth settings', async () => {
+      process.env.OS_AUTH_SIGNUP_ENABLED = 'false';
+      process.env.OS_AUTH_GOOGLE_ENABLED = 'false';
+      process.env.GOOGLE_CLIENT_ID = 'google-env-client-id';
+      process.env.GOOGLE_CLIENT_SECRET = 'google-env-client-secret';
+
+      const { manager } = await bootWithAuthSettings({
+        signup_enabled: { value: true, source: 'global' },
+        google_enabled: { value: true, source: 'global' },
+      }, {}, true);
+
+      const publicConfig = manager.getPublicConfig();
+      expect(publicConfig.emailPassword.disableSignUp).toBe(true);
+      expect(publicConfig.socialProviders).toEqual([]);
+    });
+
+    it('subscribes to auth settings changes and reapplies them', async () => {
+      clearAuthSettingsEnv();
+      let values: Record<string, { value: unknown; source: string }> = {
+        signup_enabled: { value: true, source: 'global' },
+      };
+      const settings = {
+        getNamespace: vi.fn(async () => ({ values })),
+        subscribe: vi.fn(),
+      };
+      hookCapture = createHookCapture();
+      mockContext.hook = hookCapture.hookFn;
+      mockContext.getService = vi.fn((name: string) => {
+        if (name === 'manifest') return { register: vi.fn() };
+        if (name === 'settings') return settings;
+        return undefined;
+      });
+      authPlugin = new AuthPlugin({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+      });
+      await authPlugin.init(mockContext);
+      const manager = (mockContext.registerService as any).mock.calls.find(
+        ([name]: [string]) => name === 'auth',
+      )?.[1] as AuthManager;
+      await authPlugin.start(mockContext);
+      await hookCapture.trigger('kernel:ready');
+
+      expect(manager.getPublicConfig().emailPassword.disableSignUp).toBe(false);
+
+      values = { signup_enabled: { value: false, source: 'global' } };
+      const handler = settings.subscribe.mock.calls.find(
+        ([namespace]: [string]) => namespace === 'auth',
+      )?.[1] as () => void;
+      handler();
+      await Promise.resolve();
+
+      expect(manager.getPublicConfig().emailPassword.disableSignUp).toBe(true);
     });
   });
 

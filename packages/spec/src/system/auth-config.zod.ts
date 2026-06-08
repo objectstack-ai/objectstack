@@ -185,7 +185,7 @@ export const OidcProviderConfigSchema = lazySchema(() => z.object({
 
 export const OidcProvidersConfigSchema = lazySchema(() => z.array(OidcProviderConfigSchema).optional().describe(
   'List of OIDC/OAuth2 providers for enterprise SSO. ' +
-  'Can also be provided via OIDC_PROVIDERS env var as a JSON array.'
+  'Product or enterprise packages can pass this directly or contribute it through auth:configure.'
 ));
 
 export type OidcProviderConfig = z.infer<typeof OidcProviderConfigSchema>;

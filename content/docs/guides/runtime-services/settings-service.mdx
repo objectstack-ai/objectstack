@@ -1,6 +1,6 @@
 ---
 title: services.settings
-description: Namespace-based configuration service with env/global/tenant/user/default cascade.
+description: Namespace-based configuration service with OS env/global/tenant/user/default cascade.
 ---
 
 # `services.settings`
@@ -29,5 +29,5 @@ services.settings.subscribe(namespace: string | undefined, handler: SettingsChan
 
 ## Notes
 
-- Effective resolution order: **Env > Global > Tenant > User > Default**
+- Effective resolution order: **OS_* env > Global > Tenant > User > Default**
 - Encrypted keys are supported through crypto adapters/providers.

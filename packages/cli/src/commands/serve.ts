@@ -1197,15 +1197,15 @@ export default class Serve extends Command {
               // /admin/* endpoints), so leaving it on for everyone is
               // safe. Opt-out via OS_AUTH_ADMIN=false.
               //
-              // Similarly enable twoFactor by default — it powers the
-              // Setup app's `sys_two_factor` toolbar actions (Enable 2FA,
-              // Disable 2FA). Opt-out via OS_AUTH_TWO_FACTOR=false.
+              // twoFactor stays opt-in until the Console login UI ships the
+              // complete TOTP challenge flow. Enabling only the backend plugin
+              // lets users enroll but can leave them unable to finish login.
               //
               // (api-key plugin: not yet shipped by better-auth — generic
               // CRUD on `sys_api_key` handles row creation in the meantime.)
               plugins: {
                 admin: String(process.env.OS_AUTH_ADMIN ?? 'true').toLowerCase() !== 'false',
-                twoFactor: String(process.env.OS_AUTH_TWO_FACTOR ?? 'true').toLowerCase() !== 'false',
+                twoFactor: String(process.env.OS_AUTH_TWO_FACTOR ?? 'false').toLowerCase() === 'true',
               },
               advanced: process.env.OS_COOKIE_DOMAIN
                 ? ({

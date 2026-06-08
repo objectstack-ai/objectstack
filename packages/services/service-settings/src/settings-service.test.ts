@@ -19,8 +19,8 @@ describe('reference manifests are spec-valid', () => {
 
 describe('envKeyOf', () => {
   it('uppercases and underscores', () => {
-    expect(envKeyOf('mail', 'smtp_host')).toBe('MAIL_SMTP_HOST');
-    expect(envKeyOf('feature_flags', 'ai-enabled')).toBe('FEATURE_FLAGS_AI_ENABLED');
+    expect(envKeyOf('mail', 'smtp_host')).toBe('OS_MAIL_SMTP_HOST');
+    expect(envKeyOf('feature_flags', 'ai-enabled')).toBe('OS_FEATURE_FLAGS_AI_ENABLED');
   });
 });
 
@@ -59,25 +59,25 @@ describe('SettingsService — resolver precedence', () => {
   });
 
   it('env wins over tenant and locks the field', async () => {
-    const svc = new SettingsService({ env: { BRANDING_WORKSPACE_NAME: 'EnvCorp' } });
+    const svc = new SettingsService({ env: { OS_BRANDING_WORKSPACE_NAME: 'EnvCorp' } });
     svc.registerManifest(brandingSettingsManifest);
     await svc.set('branding', 'workspace_name', 'Tenant').catch(() => {});
     const r = await svc.get('branding', 'workspace_name');
     expect(r.source).toBe('env');
     expect(r.value).toBe('EnvCorp');
     expect(r.locked).toBe(true);
-    expect(r.lockedReason).toContain('BRANDING_WORKSPACE_NAME');
+    expect(r.lockedReason).toContain('OS_BRANDING_WORKSPACE_NAME');
   });
 
   it('coerces env strings via default-type hint', async () => {
-    const svc = new SettingsService({ env: { FEATURE_FLAGS_AI_ENABLED: 'true' } });
+    const svc = new SettingsService({ env: { OS_FEATURE_FLAGS_AI_ENABLED: 'true' } });
     svc.registerManifest(featureFlagsSettingsManifest);
     const r = await svc.get('feature_flags', 'ai_enabled');
     expect(r.value).toBe(true);
   });
 
   it('rejects writes against env-locked keys', async () => {
-    const svc = new SettingsService({ env: { BRANDING_WORKSPACE_NAME: 'EnvCorp' } });
+    const svc = new SettingsService({ env: { OS_BRANDING_WORKSPACE_NAME: 'EnvCorp' } });
     svc.registerManifest(brandingSettingsManifest);
     await expect(svc.set('branding', 'workspace_name', 'X')).rejects.toBeInstanceOf(SettingsLockedError);
   });
@@ -119,7 +119,7 @@ describe('SettingsService — global scope', () => {
   });
 
   it('env still wins over global', async () => {
-    const svc = new SettingsService({ env: { MAIL_FROM_EMAIL: 'env@example.com' } });
+    const svc = new SettingsService({ env: { OS_MAIL_FROM_EMAIL: 'env@example.com' } });
     svc.registerManifest(mailSettingsManifest);
     await svc.set('mail', 'from_email', 'global@example.com').catch(() => {});
     const r = await svc.get('mail', 'from_email');

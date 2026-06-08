@@ -1214,6 +1214,30 @@ describe('AIServicePlugin', () => {
       expect(svc.adapterName).toBe('preset');
     });
 
+    it('treats stored memory provider as an explicit settings override', async () => {
+      const customAdapter: LLMAdapter = {
+        name: 'preset', chat: async () => ({ content: 'preset' }), complete: async () => ({ content: '' }),
+      };
+      const settings = {
+        getNamespace: vi.fn(async () => ({
+          manifest: { namespace: 'ai' },
+          values: { provider: { value: 'memory', source: 'global' } },
+        })),
+        subscribe: vi.fn(),
+        registerAction: vi.fn(),
+      };
+      const plugin = new AIServicePlugin({ adapter: customAdapter });
+      const ctx = createCtxWithSettings(settings);
+      await plugin.init(ctx);
+      await plugin.start!(ctx);
+
+      const kernelReady = (ctx.hook as any).mock.calls.find(([n]: any[]) => n === 'kernel:ready');
+      await kernelReady[1]();
+
+      const svc = ctx.getService<AIService>('ai');
+      expect(svc.adapterName).toBe('memory');
+    });
+
     it('live test action returns warning for memory provider', async () => {
       const settings: any = {
         getNamespace: vi.fn(async () => ({ manifest: { namespace: 'ai' }, values: {} })),

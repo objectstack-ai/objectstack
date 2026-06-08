@@ -134,6 +134,20 @@ function installWebContainerRequestStatePolyfill(): void {
   }
 }
 
+function readBooleanEnv(name: string, legacyName?: string): boolean | undefined {
+  const env = (globalThis as any)?.process?.env as Record<string, string | undefined> | undefined;
+  const raw = env?.[name] ?? (legacyName ? env?.[legacyName] : undefined);
+  if (raw == null) return undefined;
+  const normalized = String(raw).trim().toLowerCase();
+  return !['0', 'false', 'off', 'no'].includes(normalized);
+}
+
+function readDisableSignUpEnv(): boolean | undefined {
+  const signupEnabled = readBooleanEnv('OS_AUTH_SIGNUP_ENABLED');
+  if (signupEnabled != null) return !signupEnabled;
+  return readBooleanEnv('OS_DISABLE_SIGNUP');
+}
+
 /**
  * Extended options for AuthManager
  */
@@ -340,33 +354,28 @@ export class AuthManager {
       ...(this.config.socialProviders ? { socialProviders: this.config.socialProviders as any } : {}),
 
       // Email and password configuration.
-      // `disableSignUp`: the env var `OS_DISABLE_SIGNUP=true` overrides
-      // the config-file value so deployments can flip the toggle without
-      // a code change (`getPublicConfig()` applies the same precedence so
-      // `/auth/config` stays consistent with the server enforcement).
+      // `disableSignUp`: env overrides config/settings so deployments can
+      // lock the registration policy without relying on UI state.
       emailAndPassword: (() => {
-        const disableSignUpEnv = (globalThis as any)?.process?.env?.OS_DISABLE_SIGNUP;
-        const disableSignUpFromEnv = disableSignUpEnv != null
-          ? String(disableSignUpEnv).toLowerCase() === 'true'
-          : undefined;
+        const disableSignUpFromEnv = readDisableSignUpEnv();
         const effectiveDisableSignUp = disableSignUpFromEnv ?? this.config.emailAndPassword?.disableSignUp;
         return {
-        enabled: this.config.emailAndPassword?.enabled ?? true,
-        ...(passwordHasher ? { password: passwordHasher } : {}),
-        ...(effectiveDisableSignUp != null
-          ? { disableSignUp: effectiveDisableSignUp } : {}),
-        ...(this.config.emailAndPassword?.requireEmailVerification != null
-          ? { requireEmailVerification: this.config.emailAndPassword.requireEmailVerification } : {}),
-        ...(this.config.emailAndPassword?.minPasswordLength != null
-          ? { minPasswordLength: this.config.emailAndPassword.minPasswordLength } : {}),
-        ...(this.config.emailAndPassword?.maxPasswordLength != null
-          ? { maxPasswordLength: this.config.emailAndPassword.maxPasswordLength } : {}),
-        ...(this.config.emailAndPassword?.resetPasswordTokenExpiresIn != null
-          ? { resetPasswordTokenExpiresIn: this.config.emailAndPassword.resetPasswordTokenExpiresIn } : {}),
-        ...(this.config.emailAndPassword?.autoSignIn != null
-          ? { autoSignIn: this.config.emailAndPassword.autoSignIn } : {}),
-        ...(this.config.emailAndPassword?.revokeSessionsOnPasswordReset != null
-          ? { revokeSessionsOnPasswordReset: this.config.emailAndPassword.revokeSessionsOnPasswordReset } : {}),
+          enabled: this.config.emailAndPassword?.enabled ?? true,
+          ...(passwordHasher ? { password: passwordHasher } : {}),
+          ...(effectiveDisableSignUp != null
+            ? { disableSignUp: effectiveDisableSignUp } : {}),
+          ...(this.config.emailAndPassword?.requireEmailVerification != null
+            ? { requireEmailVerification: this.config.emailAndPassword.requireEmailVerification } : {}),
+          ...(this.config.emailAndPassword?.minPasswordLength != null
+            ? { minPasswordLength: this.config.emailAndPassword.minPasswordLength } : {}),
+          ...(this.config.emailAndPassword?.maxPasswordLength != null
+            ? { maxPasswordLength: this.config.emailAndPassword.maxPasswordLength } : {}),
+          ...(this.config.emailAndPassword?.resetPasswordTokenExpiresIn != null
+            ? { resetPasswordTokenExpiresIn: this.config.emailAndPassword.resetPasswordTokenExpiresIn } : {}),
+          ...(this.config.emailAndPassword?.autoSignIn != null
+            ? { autoSignIn: this.config.emailAndPassword.autoSignIn } : {}),
+          ...(this.config.emailAndPassword?.revokeSessionsOnPasswordReset != null
+            ? { revokeSessionsOnPasswordReset: this.config.emailAndPassword.revokeSessionsOnPasswordReset } : {}),
         sendResetPassword: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }) => {
           const email = this.getEmailService();
           if (!email) {
@@ -615,9 +624,10 @@ export class AuthManager {
     // override per-environment without touching the application bundle.
     const oidcEnv = (globalThis as any)?.process?.env?.OS_OIDC_PROVIDER_ENABLED;
     const oidcFromEnv = oidcEnv != null ? String(oidcEnv).toLowerCase() === 'true' : undefined;
+    const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
     const enabled = {
       organization: pluginConfig.organization ?? true,
-      twoFactor: pluginConfig.twoFactor ?? false,
+      twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
       passkeys: pluginConfig.passkeys ?? false,
       magicLink: pluginConfig.magicLink ?? false,
       oidcProvider: oidcFromEnv ?? pluginConfig.oidcProvider ?? false,
@@ -1097,6 +1107,46 @@ export class AuthManager {
   }
 
   /**
+   * Merge runtime configuration into the manager.
+   *
+   * Settings-backed auth policy can change after the manager is constructed.
+   * better-auth itself is created lazily, so changing config before the first
+   * request is enough. If an instance already exists, reset it so the next
+   * request rebuilds with the new policy.
+   */
+  applyConfigPatch(patch: Partial<AuthManagerOptions>): void {
+    const next: AuthManagerOptions = {
+      ...this.config,
+      ...patch,
+      ...(patch.emailAndPassword
+        ? {
+          emailAndPassword: {
+            ...(this.config.emailAndPassword ?? {}),
+            ...patch.emailAndPassword,
+          },
+        }
+        : {}),
+      ...(patch.plugins
+        ? {
+          plugins: {
+            ...(this.config.plugins ?? {}),
+            ...patch.plugins,
+          },
+        }
+        : {}),
+    };
+
+    if ('socialProviders' in patch) {
+      next.socialProviders = patch.socialProviders;
+    }
+
+    this.config = next;
+    if (this.auth && !patch.authInstance) {
+      this.auth = null;
+    }
+  }
+
+  /**
    * Inject (or replace) the outbound email service used by better-auth
    * callbacks. Safe to call after construction but BEFORE the first
    * request hits the auth handler — callbacks read this via
@@ -1253,17 +1303,11 @@ export class AuthManager {
       }
     }
 
-    // Extract email/password config (safe fields only).
-    // `OS_DISABLE_SIGNUP=true` is an env-var override so deployments can
-    // turn off self-service registration without editing the config file
-    // (mirrors the `OS_MULTI_ORG_ENABLED` pattern below). The env var, when
-    // set to a truthy value, wins over the config-file setting; otherwise
-    // we fall back to `emailAndPassword.disableSignUp` (default `false`).
+    // Extract email/password config (safe fields only). Deployment env can
+    // lock registration policy; otherwise we fall back to configured/settings
+    // `emailAndPassword.disableSignUp` (default `false`).
     const emailPasswordConfig: Partial<EmailAndPasswordConfig> = this.config.emailAndPassword ?? {};
-    const disableSignUpEnv = (globalThis as any)?.process?.env?.OS_DISABLE_SIGNUP;
-    const disableSignUpFromEnv = disableSignUpEnv != null
-      ? String(disableSignUpEnv).toLowerCase() === 'true'
-      : undefined;
+    const disableSignUpFromEnv = readDisableSignUpEnv();
     const emailPassword = {
       enabled: emailPasswordConfig.enabled !== false, // Default to true
       disableSignUp: disableSignUpFromEnv ?? emailPasswordConfig.disableSignUp ?? false,
@@ -1307,15 +1351,17 @@ export class AuthManager {
     // frontend will render UI for endpoints that 404.
     const oidcEnv = (globalThis as any)?.process?.env?.OS_OIDC_PROVIDER_ENABLED;
     const oidcFromEnv = oidcEnv != null ? String(oidcEnv).toLowerCase() === 'true' : undefined;
+    const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
 
     const features = {
-      twoFactor: pluginConfig.twoFactor ?? false,
+      twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
       passkeys: pluginConfig.passkeys ?? false,
       magicLink: pluginConfig.magicLink ?? false,
       organization: pluginConfig.organization ?? true,
       multiOrgEnabled,
       oidcProvider: oidcFromEnv ?? pluginConfig.oidcProvider ?? false,
       deviceAuthorization: pluginConfig.deviceAuthorization ?? false,
+      admin: pluginConfig.admin ?? false,
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
     };

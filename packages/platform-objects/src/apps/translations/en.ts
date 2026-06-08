@@ -33,7 +33,6 @@ export const en: TranslationData = {
         nav_account_notifications: { label: 'Notifications' },
         nav_account_approvals: { label: 'Approvals' },
         nav_account_memberships: { label: 'My Organizations' },
-        nav_account_two_factor: { label: 'Two-Factor Authentication' },
         nav_account_linked: { label: 'Linked Accounts' },
         nav_account_sessions: { label: 'Active Sessions' },
         nav_account_api_keys: { label: 'API Keys' },
@@ -84,6 +83,7 @@ export const en: TranslationData = {
         nav_settings_hub: { label: 'All Settings' },
         nav_settings_mail: { label: 'Email' },
         nav_settings_branding: { label: 'Branding' },
+        nav_settings_auth: { label: 'Authentication' },
         nav_settings_feature_flags: { label: 'Feature Flags' },
 
         // Diagnostics
@@ -95,7 +95,6 @@ export const en: TranslationData = {
         nav_oauth_apps: { label: 'OAuth Applications' },
         nav_jwks: { label: 'Signing Keys (JWKS)' },
         nav_verifications: { label: 'Verifications' },
-        nav_two_factor: { label: 'Two-Factor' },
         nav_device_codes: { label: 'Device Codes' },
         nav_accounts: { label: 'Identity Links' },
         nav_user_preferences: { label: 'User Preferences' },

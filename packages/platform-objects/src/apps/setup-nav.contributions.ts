@@ -80,6 +80,7 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     items: [
       { id: 'nav_settings_hub', type: 'url', label: 'All Settings', url: '/apps/setup/system/settings', icon: 'settings-2', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_branding', type: 'url', label: 'Branding', url: '/apps/setup/system/settings/branding', icon: 'palette' },
+      { id: 'nav_settings_auth', type: 'url', label: 'Authentication', url: '/apps/setup/system/settings/auth', icon: 'lock-keyhole', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_mail', type: 'url', label: 'Email', url: '/apps/setup/system/settings/mail', icon: 'mail', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_ai', type: 'url', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles', requiredPermissions: ['manage_platform_settings'] },
@@ -106,7 +107,6 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       { id: 'nav_oauth_apps', type: 'object', label: 'OAuth Applications', objectName: 'sys_oauth_application', icon: 'app-window' },
       { id: 'nav_jwks', type: 'object', label: 'Signing Keys (JWKS)', objectName: 'sys_jwks', icon: 'key-round' },
       { id: 'nav_verifications', type: 'object', label: 'Verifications', objectName: 'sys_verification', icon: 'mail-check' },
-      { id: 'nav_two_factor', type: 'object', label: 'Two-Factor', objectName: 'sys_two_factor', icon: 'smartphone' },
       { id: 'nav_device_codes', type: 'object', label: 'Device Codes', objectName: 'sys_device_code', icon: 'qr-code' },
       { id: 'nav_accounts', type: 'object', label: 'Identity Links', objectName: 'sys_account', icon: 'link-2' },
       { id: 'nav_user_preferences', type: 'object', label: 'User Preferences', objectName: 'sys_user_preference', icon: 'sliders' },

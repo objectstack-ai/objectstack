@@ -969,6 +969,7 @@ describe('AuthManager', () => {
         organization: true,
         oidcProvider: false,
         deviceAuthorization: false,
+        admin: false,
         multiOrgEnabled: false,
         privacyUrl: 'https://objectstack.ai/privacy',
         termsUrl: 'https://objectstack.ai/terms',

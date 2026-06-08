@@ -16,8 +16,8 @@
  * `member_default` permission set.
  *
  * The C-tier `resultDialog` actions previously shipped on these objects
- * make the experience equivalent to the old account SPA:
- *   - `sys_two_factor.enable_two_factor` — QR + backup codes
+ * make the experience equivalent to the old account SPA for supported
+ * surfaces:
  *   - `sys_oauth_application.create` — one-time client_secret reveal
  *   - `sys_account.link_social` — OAuth redirect URL
  *
@@ -42,8 +42,8 @@ export const ACCOUNT_APP: App = {
     primaryColor: '#0ea5e9', // sky-500 — distinct from Setup's slate
   },
   // No `requiredPermissions`: any authenticated user must be able to
-  // manage their own 2FA / linked accounts / personal OAuth apps. RLS on
-  // each object scopes rows to the caller.
+  // manage their own linked accounts / personal OAuth apps. RLS on each
+  // object scopes rows to the caller.
   navigation: [
     // Profile is the canonical landing — a hand-written React settings card
     // (Vercel/Linear style) registered in the Console SPA as
@@ -112,14 +112,6 @@ export const ACCOUNT_APP: App = {
       icon: 'shield',
       defaultOpen: true,
       children: [
-        {
-          id: 'nav_account_two_factor',
-          type: 'object',
-          label: 'Two-Factor Authentication',
-          objectName: 'sys_two_factor',
-          icon: 'smartphone',
-          requiresObject: 'sys_two_factor',
-        },
         {
           id: 'nav_account_linked',
           type: 'object',

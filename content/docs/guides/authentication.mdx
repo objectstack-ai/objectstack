@@ -33,7 +33,7 @@ The `@objectstack/plugin-auth` package provides enterprise-grade authentication 
 - ✅ **Session Management** - Automatic session handling with configurable expiry
 - ✅ **Password Reset** - Email-based password reset flow
 - ✅ **Email Verification** - Email verification workflow
-- ✅ **2FA** - Two-factor authentication
+- ⚙️ **2FA backend** - better-auth two-factor plugin wiring is available for custom UIs
 - ✅ **Passkeys** - WebAuthn/Passkey support
 - ✅ **Magic Links** - Passwordless authentication
 - ✅ **Organizations** - Multi-tenant support
@@ -91,14 +91,19 @@ Set up your authentication secret in `.env`:
 
 ```bash
 # Required: Secret for session token encryption
-AUTH_SECRET=your-super-secret-key-min-32-chars
+OS_AUTH_SECRET=your-super-secret-key-min-32-chars
 
-# Optional: OAuth providers (if using)
+# Optional: open-source Google login
+# You can also configure these in Setup → Authentication.
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+# Optional: lock auth settings from env. Env wins over Setup UI values.
+OS_AUTH_SIGNUP_ENABLED=false
+OS_AUTH_GOOGLE_ENABLED=true
 ```
 
-> **Important**: Never commit `AUTH_SECRET` to version control. Use a strong random string (minimum 32 characters).
+> **Important**: Never commit `OS_AUTH_SECRET` to version control. Use a strong random string (minimum 32 characters).
 
 ### 2. Plugin Configuration
 
@@ -255,7 +260,7 @@ Enable OAuth providers in your plugin configuration:
 
 ```typescript
 new AuthPlugin({
-  secret: process.env.AUTH_SECRET,
+  secret: process.env.OS_AUTH_SECRET,
   baseUrl: 'http://localhost:3000',
   providers: [
     {
@@ -291,14 +296,23 @@ Better-Auth automatically handles the OAuth callback at `/api/v1/auth/callback/g
 
 ### Two-Factor Authentication (2FA)
 
-Enable 2FA in your configuration:
+ObjectStack wires the better-auth two-factor plugin at the backend layer, but
+the open-source Console login UI does not yet ship the complete TOTP challenge
+flow. Do not expose 2FA as an end-user feature until your UI handles:
+
+- enrollment (`/two-factor/enable`),
+- TOTP confirmation (`/two-factor/verify-totp`),
+- the `twoFactorRedirect` response returned by password sign-in, and
+- backup-code recovery.
+
+For custom account UIs, enable the backend plugin in configuration:
 
 ```typescript
 new AuthPlugin({
   secret: process.env.AUTH_SECRET,
   baseUrl: 'http://localhost:3000',
   plugins: {
-    twoFactor: true,  // Enable 2FA
+    twoFactor: true,  // Enable backend two-factor endpoints
   }
 })
 ```
@@ -311,17 +325,20 @@ const response = await fetch('http://localhost:3000/api/v1/auth/two-factor/enabl
   headers: { 
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${accessToken}`
-  }
+  },
+  body: JSON.stringify({
+    password: currentPassword,
+  }),
 });
 
-const { qrCode, secret } = await response.json();
-// Display qrCode to user for scanning with authenticator app
+const { totpURI, backupCodes } = await response.json();
+// Display totpURI as a QR code and show backupCodes once.
 ```
 
 #### Verify 2FA Code
 
 ```typescript
-const response = await fetch('http://localhost:3000/api/v1/auth/two-factor/verify', {
+const response = await fetch('http://localhost:3000/api/v1/auth/two-factor/verify-totp', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -515,8 +532,8 @@ All endpoints are available under `/api/v1/auth/*`:
 
 #### Two-Factor Authentication
 
-- `POST /api/v1/auth/two-factor/enable` - Enable 2FA for user
-- `POST /api/v1/auth/two-factor/verify` - Verify 2FA code
+- `POST /api/v1/auth/two-factor/enable` - Start 2FA enrollment for the current user
+- `POST /api/v1/auth/two-factor/verify-totp` - Verify a TOTP code
 
 #### Passkeys
 
@@ -554,7 +571,7 @@ For complete API documentation, see the [Better-Auth API Reference](https://www.
 3. **Environment Variables**: Never commit secrets to version control
    ```bash
    # .env (not committed)
-   AUTH_SECRET=your-secret-here
+   OS_AUTH_SECRET=your-secret-here
    GOOGLE_CLIENT_ID=your-client-id
    ```
 
@@ -574,7 +591,7 @@ For complete API documentation, see the [Better-Auth API Reference](https://www.
 
 1. **Email Verification**: Require email verification for sensitive operations
 2. **Password Requirements**: Enforce strong password policies
-3. **2FA for Admin**: Require 2FA for administrative accounts
+3. **2FA for Admin**: Require 2FA only after your UI supports the full TOTP challenge and recovery flow
 4. **OAuth Options**: Provide multiple OAuth providers for convenience
 
 ### Error Handling

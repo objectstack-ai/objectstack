@@ -22,10 +22,9 @@ The default `objectstack dev` preset does **not** include AI services. Pass
 compatible LLM gateway via env vars:
 
 ```bash
-OPENAI_BASE_URL=https://ai-gateway.vercel.sh/v1 \
 AI_GATEWAY_API_KEY=vck_*** \
 AI_GATEWAY_MODEL=openai/gpt-4.1-mini \
-CORS_ORIGIN=http://localhost:5173 \
+OS_CORS_ORIGIN=http://localhost:5173 \
 pnpm dev --preset full
 ```
 
@@ -52,7 +51,7 @@ curl http://localhost:3002/api/v1/ai/models
 | Reject a proposed action                                  | `POST /api/v1/ai/pending-actions/:id/reject`  | Body: `{ actor: string, reason?: string }`. |
 
 All endpoints accept the standard tenancy header `X-Environment-Id`. The
-default Hono adapter reflects CORS origins from the `CORS_ORIGIN` env var
+default Hono adapter reflects CORS origins from the `OS_CORS_ORIGIN` env var
 and already exposes `X-Environment-Id` in the allow-list, so cross-origin
 calls from a Vite dev server (`http://localhost:5173`) work out of the box.
 
@@ -113,7 +112,7 @@ needs no additional plumbing.
 
 - **`/api/v1/ai/*` returns 404** → the AI tier is not loaded. Re-run dev
   with `--preset full`.
-- **CORS blocked** → set `CORS_ORIGIN=http://your-frontend-origin` before
+- **CORS blocked** → set `OS_CORS_ORIGIN=http://your-frontend-origin` before
   launching the dev server.
 - **Chat returns JSON instead of streaming** → upgrade
   `@objectstack/runtime` to the patch above.

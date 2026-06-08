@@ -69,7 +69,7 @@ describe('settings-routes', () => {
 
   it('PUT returns 409 for env-locked', async () => {
     const http = new MockHttp();
-    const svc = new SettingsService({ env: { BRANDING_WORKSPACE_NAME: 'X' } });
+    const svc = new SettingsService({ env: { OS_BRANDING_WORKSPACE_NAME: 'X' } });
     svc.registerManifest(brandingSettingsManifest);
     registerSettingsRoutes(http, svc);
 

@@ -18,7 +18,7 @@ export const featureFlagsSettingsManifest: SettingsManifest = {
   specifiers: [
     { type: 'info_banner', id: 'beta_notice', label: 'Heads up', required: false,
       bannerText:
-        'Beta features may change without notice. Pin via env vars (e.g. `FEATURE_FLAGS_AI_ENABLED=true`) to lock for the whole deployment.',
+        'Beta features may change without notice. Pin via env vars (e.g. `OS_FEATURE_FLAGS_AI_ENABLED=true`) to lock for the whole deployment.',
       bannerSeverity: 'warning' },
 
     { type: 'group', id: 'productivity', label: 'Productivity', required: false },

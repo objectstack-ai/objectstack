@@ -2,7 +2,7 @@
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
-import { AuthConfig, SystemObjectName, SystemUserId } from '@objectstack/spec/system';
+import { AuthConfig, type SocialProviderConfig, SystemObjectName, SystemUserId } from '@objectstack/spec/system';
 import {
   SETUP_APP,
   SETUP_NAV_CONTRIBUTIONS,
@@ -11,7 +11,7 @@ import {
   SystemOverviewDashboard,
 } from '@objectstack/platform-objects/apps';
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
-import { AuthManager } from './auth-manager.js';
+import { AuthManager, type AuthManagerOptions } from './auth-manager.js';
 import { runSetInitialPassword } from './set-initial-password.js';
 import {
   authIdentityObjects,
@@ -102,6 +102,7 @@ export class AuthPlugin implements Plugin {
   
   private options: AuthPluginOptions;
   private authManager: AuthManager | null = null;
+  private configuredSocialProviders: SocialProviderConfig | undefined;
 
   constructor(options: AuthPluginOptions = {}) {
     this.options = {
@@ -109,6 +110,33 @@ export class AuthPlugin implements Plugin {
       basePath: '/api/v1/auth',
       ...options
     };
+  }
+
+  /**
+   * Open-source provider fallback: enable Google sign-in from conventional
+   * provider env vars when the application did not configure Google itself.
+   * Enterprise / product packages can contribute richer provider sets through
+   * the `auth:configure` hook below.
+   */
+  private applyEnvSocialProviderFallbacks(config: AuthManagerOptions & AuthPluginOptions): void {
+    const env = (globalThis as any)?.process?.env as Record<string, string | undefined> | undefined;
+    if (String(env?.OS_AUTH_GOOGLE_ENABLED ?? 'true').toLowerCase() === 'false') return;
+    const googleClientId = env?.GOOGLE_CLIENT_ID;
+    const googleClientSecret = env?.GOOGLE_CLIENT_SECRET;
+    if (!googleClientId || !googleClientSecret) return;
+
+    const socialProviders = {
+      ...(config.socialProviders ?? {}),
+    } as NonNullable<AuthPluginOptions['socialProviders']>;
+
+    if (!socialProviders.google) {
+      socialProviders.google = {
+        clientId: googleClientId,
+        clientSecret: googleClientSecret,
+        enabled: true,
+      };
+      config.socialProviders = socialProviders;
+    }
   }
 
   async init(ctx: PluginContext): Promise<void> {
@@ -125,11 +153,22 @@ export class AuthPlugin implements Plugin {
       ctx.logger.warn('No data engine service found - auth will use in-memory storage');
     }
 
-    // Initialize auth manager with data engine
-    this.authManager = new AuthManager({
+    const authConfig: AuthManagerOptions & AuthPluginOptions = {
       ...this.options,
       dataEngine,
-    });
+    };
+    this.applyEnvSocialProviderFallbacks(authConfig);
+
+    // Open extension point for packages that contribute auth providers
+    // (enterprise SSO, hosted control-plane SSO, etc.) without forking
+    // framework's AuthPlugin. Handlers mutate the draft config in place.
+    await ctx.trigger('auth:configure', authConfig, ctx);
+    this.configuredSocialProviders = authConfig.socialProviders
+      ? { ...authConfig.socialProviders }
+      : undefined;
+
+    // Initialize auth manager with data engine
+    this.authManager = new AuthManager(authConfig);
 
     // Register auth service
     ctx.registerService('auth', this.authManager);
@@ -193,6 +232,8 @@ export class AuthPlugin implements Plugin {
         // / sendMagicLink) can actually deliver mail. Resolved here on
         // kernel:ready so EmailServicePlugin has had a chance to register.
         if (this.authManager) {
+          await this.bindAuthSettings(ctx);
+
           try {
             const emailSvc = ctx.getService<any>('email');
             if (emailSvc) {
@@ -313,6 +354,113 @@ export class AuthPlugin implements Plugin {
     }
 
     ctx.logger.info('Auth Plugin started successfully');
+  }
+
+  /**
+   * Bind the small open-source auth settings namespace to better-auth config.
+   *
+   * Only explicit settings values (stored or OS_AUTH_* env overrides) affect
+   * runtime config. Manifest defaults are UI defaults and do not mask code or
+   * deployment configuration.
+   */
+  private async bindAuthSettings(ctx: PluginContext): Promise<void> {
+    if (!this.authManager) return;
+
+    let settings: any;
+    try {
+      settings = ctx.getService<any>('settings');
+    } catch {
+      return;
+    }
+    if (!settings || typeof settings.getNamespace !== 'function') return;
+
+    const applySettings = async (): Promise<void> => {
+      if (!this.authManager) return;
+      try {
+        const payload = await settings.getNamespace('auth');
+        const values: Record<string, unknown> = {};
+        const sources: Record<string, string | undefined> = {};
+        for (const [key, entry] of Object.entries(payload.values as Record<string, any>)) {
+          values[key] = entry?.value;
+          sources[key] = entry?.source;
+        }
+
+        const isExplicit = (key: string) => (sources[key] ?? 'default') !== 'default';
+        const asBoolean = (value: unknown, fallback: boolean): boolean => {
+          if (typeof value === 'boolean') return value;
+          if (typeof value === 'string') return value.toLowerCase() !== 'false';
+          if (typeof value === 'number') return value !== 0;
+          return fallback;
+        };
+        const asTrimmedString = (value: unknown): string | undefined => {
+          if (typeof value !== 'string') return undefined;
+          const trimmed = value.trim();
+          return trimmed ? trimmed : undefined;
+        };
+
+        const patch: Partial<AuthManagerOptions> = {};
+        const emailAndPassword: Partial<NonNullable<AuthConfig['emailAndPassword']>> = {};
+        if (isExplicit('email_password_enabled')) {
+          emailAndPassword.enabled = asBoolean(values.email_password_enabled, true);
+        }
+        if (isExplicit('signup_enabled')) {
+          emailAndPassword.disableSignUp = !asBoolean(values.signup_enabled, true);
+        }
+        if (isExplicit('require_email_verification')) {
+          emailAndPassword.requireEmailVerification = asBoolean(
+            values.require_email_verification,
+            false,
+          );
+        }
+        if (Object.keys(emailAndPassword).length > 0) {
+          patch.emailAndPassword = emailAndPassword as AuthManagerOptions['emailAndPassword'];
+        }
+
+        if (
+          isExplicit('google_enabled') ||
+          isExplicit('google_client_id') ||
+          isExplicit('google_client_secret')
+        ) {
+          const socialProviders = {
+            ...(this.configuredSocialProviders ?? {}),
+          } as NonNullable<SocialProviderConfig>;
+          const env = (globalThis as any)?.process?.env as Record<string, string | undefined> | undefined;
+          const googleEnabledFromEnv = env?.OS_AUTH_GOOGLE_ENABLED != null
+            ? asBoolean(env.OS_AUTH_GOOGLE_ENABLED, true)
+            : undefined;
+          const googleClientId = asTrimmedString(values.google_client_id) ?? env?.GOOGLE_CLIENT_ID;
+          const googleClientSecret = asTrimmedString(values.google_client_secret) ?? env?.GOOGLE_CLIENT_SECRET;
+          if (googleEnabledFromEnv ?? (isExplicit('google_enabled') ? asBoolean(values.google_enabled, true) : true)) {
+            if (!socialProviders.google && googleClientId && googleClientSecret) {
+              socialProviders.google = {
+                clientId: googleClientId,
+                clientSecret: googleClientSecret,
+                enabled: true,
+              };
+            }
+          } else {
+            delete socialProviders.google;
+          }
+          patch.socialProviders = Object.keys(socialProviders).length > 0
+            ? socialProviders
+            : undefined;
+        }
+
+        if (Object.keys(patch).length > 0) {
+          this.authManager.applyConfigPatch(patch);
+        }
+      } catch (err: any) {
+        ctx.logger.warn('Auth: failed to apply auth settings: ' + (err?.message ?? err));
+      }
+    };
+
+    await applySettings();
+    if (typeof settings.subscribe === 'function') {
+      settings.subscribe('auth', () => {
+        void applySettings();
+      });
+      ctx.logger.info('Auth: bound to settings namespace=auth');
+    }
   }
 
   async destroy(): Promise<void> {
@@ -789,5 +937,3 @@ export class AuthPlugin implements Plugin {
     );
   }
 }
-
-

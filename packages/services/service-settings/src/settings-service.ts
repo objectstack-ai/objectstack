@@ -236,7 +236,7 @@ export class SettingsService {
     if (!reg) throw new UnknownNamespaceError(namespace);
     if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
 
-    // 1. env
+    // 1. OS_* env
     const envName = envKeyOf(namespace, key);
     const envRaw = this.env[envName];
     if (typeof envRaw === 'string') {
@@ -258,7 +258,7 @@ export class SettingsService {
     // we load everything for the namespace and pick the right row below.
     const rows = await this.loadRows(namespace, scope === 'user' ? ctx.userId ?? null : null);
 
-    // 2. cascade walk — env (handled above) > global > tenant > user > default
+    // 2. cascade walk — OS_* env (handled above) > global > tenant > user > default
     //
     // Build the full chain in declared order so the UI can render
     // "Inherited from Global / Locked by Global / Overrides tenant"

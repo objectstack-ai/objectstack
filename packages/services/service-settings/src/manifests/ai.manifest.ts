@@ -12,11 +12,9 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
 // The actual LLM adapter selection still happens in
 // `@objectstack/service-ai`'s plugin (env-var driven by default).
 // This manifest gives operators a UI to inspect and override those
-// env-derived defaults without redeploying; the AIServicePlugin can
-// later prefer settings over env when implemented. Until then this
-// manifest is the canonical surface for "what AI provider is wired,
-// and which API key is in use" — a request operators repeatedly need
-// answered during onboarding and incident response.
+// env-derived defaults without redeploying. AIServicePlugin binds to this
+// namespace once the kernel is ready; env-locked settings values use the
+// OS_AI_* convention and win over UI-stored values.
 const manifest = {
   namespace: 'ai',
   version: 1,

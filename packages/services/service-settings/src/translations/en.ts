@@ -72,6 +72,39 @@ export const en: TranslationData = {
       },
     },
 
+    auth: {
+      title: 'Authentication',
+      description: 'Sign-in, registration, and built-in auth feature controls.',
+      groups: {
+        email_password: {
+          title: 'Email and password',
+          description: 'Control local email/password sign-in and self-service registration.',
+        },
+        social: {
+          title: 'Social sign-in',
+          description:
+            'Configure the built-in Google sign-in provider. Deployment env vars still win.',
+        },
+      },
+      keys: {
+        email_password_enabled: { label: 'Enable email/password login' },
+        signup_enabled: { label: 'Allow self-service registration' },
+        require_email_verification: { label: 'Require email verification' },
+        google_enabled: {
+          label: 'Enable Google login',
+          help: 'Requires a Google OAuth client ID and secret from Google Cloud Console.',
+        },
+        google_client_id: {
+          label: 'Google client ID',
+          help: 'OAuth client ID from Google Cloud Console. GOOGLE_CLIENT_ID can also be set on the server.',
+        },
+        google_client_secret: {
+          label: 'Google client secret',
+          help: 'Stored encrypted at rest. GOOGLE_CLIENT_SECRET can also be set on the server.',
+        },
+      },
+    },
+
     feature_flags: {
       title: 'Feature Flags',
       description: 'Toggle experimental and beta features for this workspace.',
