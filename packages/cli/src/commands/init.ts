@@ -440,10 +440,14 @@ export default class Init extends Command {
       // 1b. Create pnpm-workspace.yaml so pnpm compiles the native deps the
       // standalone store needs (see SCAFFOLD_BUILT_DEPENDENCIES). Harmless for
       // npm/yarn/bun, which ignore this file and build native modules anyway.
+      // Use an exclusive write ('wx') rather than exists()-then-write so the
+      // "don't clobber an existing file" check is atomic (no TOCTOU race).
       const pnpmWorkspacePath = path.join(targetDir, 'pnpm-workspace.yaml');
-      if (!fs.existsSync(pnpmWorkspacePath)) {
-        fs.writeFileSync(pnpmWorkspacePath, renderPnpmWorkspaceYaml());
+      try {
+        fs.writeFileSync(pnpmWorkspacePath, renderPnpmWorkspaceYaml(), { flag: 'wx' });
         createdFiles.push('pnpm-workspace.yaml');
+      } catch (err: any) {
+        if (err?.code !== 'EEXIST') throw err;
       }
 
       // 2. Create objectstack.config.ts
