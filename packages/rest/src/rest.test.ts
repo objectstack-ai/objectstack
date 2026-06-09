@@ -1595,3 +1595,88 @@ describe('discovery — routes.mcp (ADR-0036, #152)', () => {
     expect(body.routes.mcp).toBeUndefined();
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// Metadata translation — envelope unwrapping
+//
+// Regression guard for the Setup-app i18n gap: `getMetaItem` returns an
+// envelope `{ type, name, item, ... }` whose translatable document (and its
+// `navigation` tree) is nested at `.item`. Translating the envelope's top
+// level instead of the inner doc left every nav label in English. The
+// single-item app route bypasses the HTTP cache (for per-user RBAC
+// filtering), so it only ever sees the envelope shape.
+// ──────────────────────────────────────────────────────────────────────────
+describe('RestServer metadata translation — envelope unwrap', () => {
+  // Minimal i18n service exposing one zh-CN bundle for the `setup` app.
+  const fakeI18n = {
+    getLocales: () => ['zh-CN'],
+    getDefaultLocale: () => 'zh-CN',
+    getTranslations: (locale: string) =>
+      locale === 'zh-CN'
+        ? {
+            apps: {
+              setup: {
+                label: '系统设置',
+                navigation: {
+                  group_configuration: { label: '配置' },
+                  nav_settings_storage: { label: '文件存储' },
+                },
+              },
+            },
+          }
+        : undefined,
+  };
+  const zhReq = { headers: { 'accept-language': 'zh-CN' } };
+  // A fresh app document each call (helpers must not mutate the input).
+  const makeDoc = () => ({
+    name: 'setup',
+    label: 'Setup',
+    navigation: [
+      {
+        id: 'group_configuration',
+        type: 'group',
+        label: 'Configuration',
+        children: [{ id: 'nav_settings_storage', type: 'url', label: 'File Storage' }],
+      },
+    ],
+  });
+
+  it('translates the inner document of a getMetaItem envelope', async () => {
+    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any);
+    const envelope = { type: 'app', name: 'setup', item: makeDoc(), lock: null };
+    const out = await (rest as any).translateMetaItem(zhReq, 'app', undefined, envelope, fakeI18n);
+    // Envelope shape preserved …
+    expect(out.type).toBe('app');
+    expect(out.name).toBe('setup');
+    expect(out.lock).toBeNull();
+    // … and the nested doc — not the envelope top level — is translated.
+    expect(out.item.label).toBe('系统设置');
+    expect(out.item.navigation[0].label).toBe('配置');
+    expect(out.item.navigation[0].children[0].label).toBe('文件存储');
+  });
+
+  it('still translates a bare (already-unwrapped) document', async () => {
+    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any);
+    const out = await (rest as any).translateMetaItem(zhReq, 'app', undefined, makeDoc(), fakeI18n);
+    expect(out.label).toBe('系统设置');
+    expect(out.navigation[0].children[0].label).toBe('文件存储');
+  });
+
+  it('translates list responses in the `{ items: [...] }` envelope shape', async () => {
+    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any);
+    // translateMetaItems resolves the i18n service itself; stub the lookup.
+    (rest as any).resolveI18nService = async () => fakeI18n;
+    const listEnvelope = { items: [{ type: 'app', name: 'setup', item: makeDoc() }] };
+    const out = await (rest as any).translateMetaItems(zhReq, 'app', undefined, listEnvelope);
+    expect(Array.isArray(out.items)).toBe(true);
+    expect(out.items[0].item.navigation[0].children[0].label).toBe('文件存储');
+  });
+
+  it('translates a bare array of unwrapped documents', async () => {
+    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any);
+    (rest as any).resolveI18nService = async () => fakeI18n;
+    const out = await (rest as any).translateMetaItems(zhReq, 'app', undefined, [makeDoc()]);
+    expect(Array.isArray(out)).toBe(true);
+    expect(out[0].navigation[0].children[0].label).toBe('文件存储');
+  });
+});
