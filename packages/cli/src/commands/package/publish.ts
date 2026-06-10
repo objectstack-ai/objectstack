@@ -165,9 +165,13 @@ export default class PackagePublish extends Command {
       description: 'Marketplace category slug (e.g. crm, hr, devtools)',
     }),
     visibility: Flags.string({
-      description: 'Who can see / install this package',
+      description:
+        "Who can see / install this package. " +
+        "'org' (default): auto-visible/installable across your organization's environments. " +
+        "'private': only explicitly-granted orgs/envs. " +
+        "'marketplace': public after review.",
       options: ['private', 'org', 'marketplace'],
-      default: 'private',
+      default: 'org',
     }),
     org: Flags.string({
       description: 'owner_org_id (required when using a bearer key in service mode; ignored in user mode)',
