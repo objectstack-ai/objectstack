@@ -30,6 +30,7 @@ export const SystemOverviewDashboard = Dashboard.create({
     // ── Row 1: Platform KPIs ────────────────────────────────────────
     {
       id: 'widget_total_users',
+      dataset: 'sys_user_metrics', values: ['user_count'],
       title: 'Total Users',
       type: 'metric',
       object: 'sys_user',
@@ -40,6 +41,7 @@ export const SystemOverviewDashboard = Dashboard.create({
     },
     {
       id: 'widget_organizations',
+      dataset: 'sys_organization_metrics', values: ['org_count'],
       title: 'Organizations',
       type: 'metric',
       object: 'sys_organization',
@@ -50,6 +52,7 @@ export const SystemOverviewDashboard = Dashboard.create({
     },
     {
       id: 'widget_active_sessions',
+      dataset: 'sys_session_metrics', values: ['session_count'],
       title: 'Active Sessions',
       type: 'metric',
       object: 'sys_session',
@@ -60,6 +63,7 @@ export const SystemOverviewDashboard = Dashboard.create({
     },
     {
       id: 'widget_packages_installed',
+      dataset: 'sys_package_installation_metrics', values: ['package_count'],
       title: 'Packages Installed',
       type: 'metric',
       object: 'sys_package_installation',
@@ -80,6 +84,7 @@ export const SystemOverviewDashboard = Dashboard.create({
     // need a richer enum or a separate detail field first.
     {
       id: 'widget_login_events',
+      dataset: 'sys_audit_log_metrics', values: ['event_count'],
       title: 'Login Events',
       type: 'metric',
       object: 'sys_audit_log',
@@ -91,6 +96,7 @@ export const SystemOverviewDashboard = Dashboard.create({
     },
     {
       id: 'widget_permission_changes',
+      dataset: 'sys_audit_log_metrics', values: ['event_count'],
       title: 'Permission Changes',
       type: 'metric',
       object: 'sys_audit_log',
@@ -102,6 +108,7 @@ export const SystemOverviewDashboard = Dashboard.create({
     },
     {
       id: 'widget_config_changes',
+      dataset: 'sys_audit_log_metrics', values: ['event_count'],
       title: 'Config Changes',
       type: 'metric',
       object: 'sys_audit_log',
@@ -120,6 +127,7 @@ export const SystemOverviewDashboard = Dashboard.create({
     // to scope these widgets.
     {
       id: 'widget_events_by_type',
+      dataset: 'sys_audit_log_metrics', dimensions: ['action'], values: ['event_count'],
       title: 'Audit Events by Action',
       description: 'Distribution of audit events by action type',
       type: 'pie',
@@ -130,6 +138,7 @@ export const SystemOverviewDashboard = Dashboard.create({
     },
     {
       id: 'widget_events_by_user',
+      dataset: 'sys_audit_log_metrics', dimensions: ['user_id'], values: ['event_count'],
       title: 'Events by User',
       description: 'Activity distribution across users',
       type: 'bar',

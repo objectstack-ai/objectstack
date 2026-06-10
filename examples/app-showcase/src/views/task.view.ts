@@ -150,6 +150,10 @@ export const TaskViews = defineView({
         yAxisFields: ['estimate_hours'],
         aggregation: 'sum',
         groupByField: 'priority',
+        // ADR-0021 dual-form — bind to the task dataset.
+        dataset: 'showcase_task_metrics',
+        dimensions: ['status', 'priority'],
+        values: ['est_hours'],
       },
     },
   },

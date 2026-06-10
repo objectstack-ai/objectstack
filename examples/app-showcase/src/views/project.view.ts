@@ -33,7 +33,11 @@ export const ProjectViews = defineView({
       type: 'chart',
       data,
       columns: ['account', 'budget'],
-      chart: { chartType: 'bar', xAxisField: 'account', yAxisFields: ['budget', 'spent'], aggregation: 'sum' },
+      chart: {
+        chartType: 'bar', xAxisField: 'account', yAxisFields: ['budget', 'spent'], aggregation: 'sum',
+        // ADR-0021 dual-form — bind to the project dataset.
+        dataset: 'showcase_project_metrics', dimensions: ['account'], values: ['budget_sum', 'spent_sum'],
+      },
     },
   },
   formViews: {

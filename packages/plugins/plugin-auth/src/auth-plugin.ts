@@ -9,6 +9,7 @@ import {
   STUDIO_APP,
   ACCOUNT_APP,
   SystemOverviewDashboard,
+  SystemOverviewDatasets,
 } from '@objectstack/platform-objects/apps';
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
 import { AuthManager, type AuthManagerOptions } from './auth-manager.js';
@@ -203,6 +204,8 @@ export class AuthPlugin implements Plugin {
       // not exist on sys_user). Schema-embedded listViews is the single
       // source of truth.
       dashboards: [SystemOverviewDashboard],
+      // ADR-0021 — datasets backing the System Overview dashboard's widgets.
+      datasets: SystemOverviewDatasets,
     });
 
     ctx.logger.info('Auth Plugin initialized successfully');

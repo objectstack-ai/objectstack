@@ -6,3 +6,4 @@
  */
 
 export { SystemOverviewDashboard } from './system_overview.dashboard.js';
+export { SystemOverviewDatasets } from './system.datasets.js';
