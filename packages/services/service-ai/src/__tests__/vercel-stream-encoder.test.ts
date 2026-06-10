@@ -103,6 +103,20 @@ describe('encodeStreamPart', () => {
     });
   });
 
+  it('encodes a custom data-* part (e.g. build progress) verbatim, with id for reconciliation', () => {
+    const part = {
+      type: 'data-build-progress',
+      id: 'build',
+      data: { phase: 'objects', items: [{ type: 'object', name: 'deal', status: 'done' }] },
+    } as unknown as TextStreamPart<ToolSet>;
+    const payload = parseSSE(encodeStreamPart(part));
+    expect(payload).toEqual({
+      type: 'data-build-progress',
+      id: 'build',
+      data: { phase: 'objects', items: [{ type: 'object', name: 'deal', status: 'done' }] },
+    });
+  });
+
   it('should return empty string for finish (handled by generator)', () => {
     const part = {
       type: 'finish',

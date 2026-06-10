@@ -92,6 +92,13 @@ export function encodeStreamPart(part: TextStreamPart<ToolSet>): string {
 
     // finish-step and finish are handled by the generator, not here
     default:
+      // Custom data parts (Vercel UI-message-stream `data-*`) — e.g. a tool's
+      // mid-execution progress (`data-build-progress`). Emit verbatim with the
+      // optional `id` (present ⇒ the client RECONCILES/replaces the part).
+      if (typeof (part as any).type === 'string' && (part as any).type.startsWith('data-')) {
+        const p = part as { type: string; id?: string; data?: unknown };
+        return sse({ type: p.type, ...(p.id ? { id: p.id } : {}), data: p.data });
+      }
       // Pass through any unknown event types that might be custom
       // (e.g., step-start, step-finish from custom providers)
       if ((part as any).type?.startsWith('step-')) {

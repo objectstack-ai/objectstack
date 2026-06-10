@@ -24,7 +24,7 @@ import type { z } from 'zod';
 import { createLogger } from '@objectstack/core';
 import { MemoryLLMAdapter } from './adapters/memory-adapter.js';
 import { ToolRegistry } from './tools/tool-registry.js';
-import type { ToolExecutionResult } from './tools/tool-registry.js';
+import type { ToolExecutionResult, ToolExecutionContext } from './tools/tool-registry.js';
 import { InMemoryConversationService } from './conversation/in-memory-conversation-service.js';
 import { ModelRegistry } from './model-registry.js';
 import {
@@ -808,10 +808,45 @@ export class AIService implements IAIService {
         await this.persistMessage(conversationId, assistantTurn, turnObservability);
       }
 
-      const toolResults: ToolExecutionResult[] = await this.toolRegistry.executeAll(
-        result.toolCalls,
-        toolExecutionContext,
-      );
+      // Drain tool PROGRESS events (emitted via `ctx.onProgress` during a
+      // long-running tool, e.g. apply_blueprint's build tree) into the stream
+      // WHILE the tools run, then yield their final results. Backward-compatible:
+      // a tool that never emits leaves `progress` empty, so this awaits execution
+      // exactly once — identical to the previous single `await executeAll`.
+      const progress: TextStreamPart<ToolSet>[] = [];
+      let resolveTick: (() => void) | null = null;
+      const tick = (): void => {
+        const r = resolveTick;
+        resolveTick = null;
+        r?.();
+      };
+      const execCtx: ToolExecutionContext = {
+        ...(toolExecutionContext ?? {}),
+        onProgress: (part) => {
+          progress.push(part as unknown as TextStreamPart<ToolSet>);
+          tick();
+        },
+      };
+      const execPromise = this.toolRegistry.executeAll(result.toolCalls, execCtx);
+      let execSettled = false;
+      // Swallow rejection on the tracking chain (the real throw is re-surfaced by
+      // `await execPromise` below) so it never becomes an unhandled rejection.
+      void execPromise.then(
+        () => {},
+        () => {},
+      ).finally(() => {
+        execSettled = true;
+        tick();
+      });
+      // Yield any buffered progress, then park until the next emit or completion.
+      while (true) {
+        while (progress.length > 0) yield progress.shift()!;
+        if (execSettled) break;
+        await new Promise<void>((resolve) => {
+          resolveTick = resolve;
+        });
+      }
+      const toolResults: ToolExecutionResult[] = await execPromise;
 
       for (const tr of toolResults) {
         if (tr.isError && onToolError) {

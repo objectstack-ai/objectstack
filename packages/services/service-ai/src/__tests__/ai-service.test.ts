@@ -418,6 +418,50 @@ describe('AIService', () => {
     expect(after?.messages.map(m => m.role)).toEqual(['user', 'assistant', 'tool', 'assistant']);
   });
 
+  it('streamChatWithTools drains a tool\'s onProgress events into the stream, before its result', async () => {
+    const registry = new ToolRegistry();
+    registry.register(
+      { name: 'build', description: 'B', parameters: {} },
+      async (_args, ctx) => {
+        // A long-running tool reporting progress mid-execution.
+        ctx?.onProgress?.({ type: 'data-build-progress', id: 'b', data: { phase: 'objects', done: 1 } });
+        ctx?.onProgress?.({ type: 'data-build-progress', id: 'b', data: { phase: 'seed', done: 2 } });
+        return 'built';
+      },
+    );
+    let calls = 0;
+    const adapter: LLMAdapter = {
+      name: 'progress-test',
+      chat: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            content: '',
+            model: 'test',
+            toolCalls: [{ type: 'tool-call' as const, toolCallId: 'tc1', toolName: 'build', input: {} }],
+          };
+        }
+        return { content: 'done', model: 'test' };
+      },
+      complete: async () => ({ content: '' }),
+    };
+    const service = new AIService({ adapter, toolRegistry: registry, logger: silentLogger });
+
+    const events: TextStreamPart<ToolSet>[] = [];
+    for await (const ev of service.streamChatWithTools([{ role: 'user', content: 'build' }])) {
+      events.push(ev);
+    }
+
+    const progress = events.filter((e) => (e as { type: string }).type === 'data-build-progress');
+    expect(progress).toHaveLength(2);
+    expect((progress[0] as any).data).toMatchObject({ phase: 'objects' });
+    expect((progress[1] as any).data).toMatchObject({ phase: 'seed' });
+    // Progress surfaces BEFORE the tool-result (the whole point — mid-execution).
+    const firstProgress = events.findIndex((e) => (e as { type: string }).type === 'data-build-progress');
+    const toolResult = events.findIndex((e) => (e as { type: string }).type === 'tool-result');
+    expect(firstProgress).toBeLessThan(toolResult);
+  });
+
   it('streamChatWithTools auto-persists user + assistant turns when conversationId is provided', async () => {
     const conversationService = new InMemoryConversationService();
     const adapter: LLMAdapter = {

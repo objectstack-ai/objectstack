@@ -404,6 +404,21 @@ export interface ToolExecutionContext {
     environmentId?: string;
     /** Distributed-trace id for cross-service correlation. */
     traceId?: string;
+    /**
+     * Emit a progress event WHILE a long-running tool executes, surfaced to the
+     * client mid-stream (before the tool returns). Set only on the streaming
+     * path (`streamChatWithTools`); `undefined` for non-streaming/system calls,
+     * so handlers must call it optionally (`ctx.onProgress?.(…)`).
+     *
+     * `type` is a Vercel UI-message-stream custom data-part name (must start
+     * with `data-`, e.g. `data-build-progress`). Pass a stable `id` to RECONCILE
+     * (replace) the part across emits — ideal for a single progress object that
+     * updates in place; omit `id` for append-only events. `data` is the payload.
+     *
+     * Example (apply_blueprint streaming its build tree):
+     *   ctx.onProgress?.({ type: 'data-build-progress', id: 'build', data: { phase, items } });
+     */
+    onProgress?: (part: { type: string; id?: string; data?: unknown }) => void;
 }
 
 /**
