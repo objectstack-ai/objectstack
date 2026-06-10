@@ -126,14 +126,17 @@ const FIXTURES: Record<string, Fixture> = {
         invalidatedField: 'name',
     },
     report: {
+        // ADR-0021 single-form: a report binds a dataset + selects values by name.
         valid: {
             name: 'sweep_report',
             label: 'Sweep',
-            objectName: 'sweep_account',
-            columns: [{ field: 'amount', label: 'Amount' }],
+            type: 'summary',
+            dataset: 'sweep_account_metrics',
+            rows: ['stage'],
+            values: ['amount_sum'],
         },
         invalid: { name: 'sweep_report', label: 'Sweep' },
-        invalidatedField: 'objectName',
+        invalidatedField: 'dataset',
     },
     flow: {
         valid: {

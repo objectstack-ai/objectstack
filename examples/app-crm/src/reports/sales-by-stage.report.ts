@@ -15,13 +15,7 @@ export const SalesByStageReport: UI.Report = {
   name: 'crm_sales_by_stage',
   label: 'Sales by Stage',
   description: 'Total opportunity amount grouped by sales stage.',
-  objectName: 'crm_opportunity',
   type: 'summary',
-  columns: [
-    { field: 'stage', label: 'Stage' },
-    { field: 'amount', label: 'Amount', aggregate: 'sum' },
-  ],
-  groupingsDown: [{ field: 'stage', sortOrder: 'asc' }],
   dataset: 'opportunity_metrics',
   rows: ['stage'],
   values: ['total_amount'],

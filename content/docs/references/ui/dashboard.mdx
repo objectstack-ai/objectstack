@@ -14,8 +14,8 @@ Color variant for dashboard widgets (e.g., KPI cards).
 ## TypeScript Usage
 
 ```typescript
-import { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant, WidgetMeasure } from '@objectstack/spec/ui';
-import type { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant, WidgetMeasure } from '@objectstack/spec/ui';
+import { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant } from '@objectstack/spec/ui';
+import type { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant } from '@objectstack/spec/ui';
 
 // Validate data
 const result = Dashboard.parse(data);
@@ -101,14 +101,11 @@ Dashboard header action
 | **actionUrl** | `string` | optional | URL or target for the widget action button |
 | **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api'>` | optional | Type of action for the widget action button |
 | **actionIcon** | `string` | optional | Icon identifier for the widget action button |
-| **object** | `string` | optional | Data source object name |
-| **filter** | `[__schema0](./__schema0)` | optional | Data filter criteria |
+| **filter** | `[__schema0](./__schema0)` | optional | Presentation-scope filter (runtimeFilter) |
 | **compareTo** | `string \| string \| Object` | optional | Period-over-period comparison window |
-| **categoryField** | `string` | optional | Field for grouping (X-Axis) |
-| **categoryGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Bucket categoryField date values into day/week/month/quarter/year periods |
-| **valueField** | `string` | optional | Field for values (Y-Axis) |
-| **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregate function |
-| **measures** | `Object[]` | optional | Multiple measures for pivot/matrix analysis |
+| **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
+| **dimensions** | `string[]` | optional | Dimension names — X/group/split |
+| **values** | `string[]` | ✅ | Measure names — Y (at least one) |
 | **layout** | `Object` | ✅ | Grid layout position |
 | **options** | `any` | optional | Widget specific configuration |
 | **responsive** | `Object` | optional | Responsive layout configuration |
@@ -180,22 +177,6 @@ Widget color variant
 * `success`
 * `warning`
 * `danger`
-
-
----
-
-## WidgetMeasure
-
-Widget measure definition
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **valueField** | `string` | ✅ | Field to aggregate |
-| **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregate function |
-| **label** | `string` | optional | Measure display label |
-| **format** | `string` | optional | Number format string |
 
 
 ---

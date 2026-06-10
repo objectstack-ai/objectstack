@@ -14,13 +14,7 @@ export const HoursByStatusReport: Report = {
   name: 'showcase_hours_by_status',
   label: 'Hours by Status (Summary)',
   description: 'Estimated hours grouped by task status.',
-  objectName: task,
   type: 'summary',
-  columns: [
-    { field: 'status', label: 'Status' },
-    { field: 'estimate_hours', label: 'Hours', aggregate: 'sum' },
-  ],
-  groupingsDown: [{ field: 'status', sortOrder: 'asc' }],
   // ADR-0021 Phase 2 — dataset binding (dual-form).
   dataset: 'showcase_task_metrics',
   rows: ['status'],
@@ -32,11 +26,7 @@ export const StatusPriorityMatrixReport: Report = {
   name: 'showcase_status_priority_matrix',
   label: 'Status × Priority (Matrix)',
   description: 'Task counts cross-tabulated by status and priority.',
-  objectName: task,
   type: 'matrix',
-  columns: [{ field: 'estimate_hours', label: 'Hours', aggregate: 'sum' }],
-  groupingsDown: [{ field: 'status', sortOrder: 'asc' }],
-  groupingsAcross: [{ field: 'priority', sortOrder: 'asc' }],
   // ADR-0021 Phase 2 — dataset binding (dual-form). Matrix flattens rows+across
   // into `rows` for now (cell values identical); across-dimension is a follow-up.
   dataset: 'showcase_task_metrics',
@@ -49,35 +39,28 @@ export const TaskOverviewReport: Report = {
   name: 'showcase_task_overview',
   label: 'Task Overview (Joined)',
   description: 'Multiple task sub-reports stacked into one joined view.',
-  objectName: task,
   type: 'joined',
-  columns: [],
   blocks: [
     {
       // Analytics block → dataset-bound (dual-form); reconciled by the harness.
       name: 'open_block',
       label: 'Open Tasks',
       type: 'summary',
-      objectName: task,
-      columns: [{ field: 'estimate_hours', label: 'Hours', aggregate: 'sum' }],
-      groupingsDown: [{ field: 'status', sortOrder: 'asc' }],
-      filter: { done: false },
       dataset: 'showcase_task_metrics',
       rows: ['status'],
       values: ['est_hours'],
       runtimeFilter: { done: false },
     },
     {
-      // Record-list block → stays inline (a ListView/embed in the terminal form).
+      // Single-form: a count of completed tasks (the former record-list detail
+      // moves to a click-through drilldown).
       name: 'done_block',
       label: 'Completed Tasks',
-      type: 'tabular',
-      objectName: task,
-      columns: [
-        { field: 'title', label: 'Title' },
-        { field: 'assignee', label: 'Assignee' },
-      ],
-      filter: { done: true },
+      type: 'summary',
+      dataset: 'showcase_task_metrics',
+      rows: ['status'],
+      values: ['task_count'],
+      runtimeFilter: { done: true },
     },
   ],
 };

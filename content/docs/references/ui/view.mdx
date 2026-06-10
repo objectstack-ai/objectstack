@@ -170,10 +170,9 @@ List chart view configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **chartType** | `Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>` | ✅ | Chart visualisation type |
-| **xAxisField** | `string` | ✅ | Field used as the X axis / category dimension |
-| **yAxisFields** | `string[]` | ✅ | Field(s) used as the Y axis / measures |
-| **aggregation** | `Enum<'sum' \| 'avg' \| 'count' \| 'min' \| 'max'>` | optional | Aggregation function applied to Y axis fields |
-| **groupByField** | `string` | optional | Optional field used to split / stack the chart |
+| **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
+| **dimensions** | `string[]` | optional | Dimension names — X/group/split |
+| **values** | `string[]` | ✅ | Measure names — Y (at least one) |
 
 
 ---

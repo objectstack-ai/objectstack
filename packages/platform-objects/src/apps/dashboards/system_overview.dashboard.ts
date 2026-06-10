@@ -33,9 +33,7 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_user_metrics', values: ['user_count'],
       title: 'Total Users',
       type: 'metric',
-      object: 'sys_user',
       layout: { x: 0, y: 0, w: 3, h: 2 },
-      aggregate: 'count',
       colorVariant: 'teal',
       description: 'Total registered users in the system',
     },
@@ -44,9 +42,7 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_organization_metrics', values: ['org_count'],
       title: 'Organizations',
       type: 'metric',
-      object: 'sys_organization',
       layout: { x: 3, y: 0, w: 3, h: 2 },
-      aggregate: 'count',
       colorVariant: 'orange',
       description: 'Total organizations on the platform',
     },
@@ -55,9 +51,7 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_session_metrics', values: ['session_count'],
       title: 'Active Sessions',
       type: 'metric',
-      object: 'sys_session',
       layout: { x: 6, y: 0, w: 3, h: 2 },
-      aggregate: 'count',
       colorVariant: 'blue',
       description: 'Number of currently active user sessions',
     },
@@ -66,13 +60,11 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_package_installation_metrics', values: ['package_count'],
       title: 'Packages Installed',
       type: 'metric',
-      object: 'sys_package_installation',
       // Cloud-only object — only registered when service-tenant is loaded.
       // Hide this widget gracefully in single-environment runtimes.
       requiresObject: 'sys_package_installation',
       layout: { x: 9, y: 0, w: 3, h: 2 },
       filter: { status: 'installed' },
-      aggregate: 'count',
       colorVariant: 'success',
       description: 'Active package installations across projects',
     },
@@ -87,10 +79,8 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_audit_log_metrics', values: ['event_count'],
       title: 'Login Events',
       type: 'metric',
-      object: 'sys_audit_log',
       layout: { x: 0, y: 2, w: 4, h: 2 },
       filter: { action: 'login' },
-      aggregate: 'count',
       colorVariant: 'blue',
       description: 'Authentication events recorded by the audit log',
     },
@@ -99,10 +89,8 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_audit_log_metrics', values: ['event_count'],
       title: 'Permission Changes',
       type: 'metric',
-      object: 'sys_audit_log',
       layout: { x: 4, y: 2, w: 4, h: 2 },
       filter: { action: 'permission_change' },
-      aggregate: 'count',
       colorVariant: 'warning',
       description: 'Recent permission and role modifications',
     },
@@ -111,10 +99,8 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_audit_log_metrics', values: ['event_count'],
       title: 'Config Changes',
       type: 'metric',
-      object: 'sys_audit_log',
       layout: { x: 8, y: 2, w: 4, h: 2 },
       filter: { action: 'config_change' },
-      aggregate: 'count',
       colorVariant: 'blue',
       description: 'System configuration modifications',
     },
@@ -131,10 +117,7 @@ export const SystemOverviewDashboard = Dashboard.create({
       title: 'Audit Events by Action',
       description: 'Distribution of audit events by action type',
       type: 'pie',
-      object: 'sys_audit_log',
       layout: { x: 0, y: 4, w: 6, h: 4 },
-      categoryField: 'action',
-      aggregate: 'count',
     },
     {
       id: 'widget_events_by_user',
@@ -142,29 +125,22 @@ export const SystemOverviewDashboard = Dashboard.create({
       title: 'Events by User',
       description: 'Activity distribution across users',
       type: 'bar',
-      object: 'sys_audit_log',
       layout: { x: 6, y: 4, w: 6, h: 4 },
-      categoryField: 'user_id',
-      aggregate: 'count',
     },
 
-    // ── Row 4: Recent audit events table ────────────────────────────
-    // `type: 'table'` renders the underlying rows directly, so this
-    // panel actually shows the latest events instead of just repeating
-    // the total-count metric. `valueField`/`aggregate` are intentionally
-    // omitted — table widgets pull raw records.
+    // ── Row 4: Audit events by action ───────────────────────────────
+    // ADR-0021 single-form: a dataset-bound breakdown of events by action.
+    // (The raw recent-events record list belongs in a ListView on
+    // sys_audit_log — a row-level lens, not a dashboard analytics widget.)
     {
       id: 'widget_recent_events',
-      title: 'Recent Audit Events',
-      description: 'Latest platform events (login, permission, config, …)',
+      title: 'Audit Events by Action',
+      description: 'Event volume grouped by action (login, permission, config, …)',
       type: 'table',
-      object: 'sys_audit_log',
+      dataset: 'sys_audit_log_metrics',
+      dimensions: ['action'],
+      values: ['event_count'],
       layout: { x: 0, y: 8, w: 12, h: 4 },
-      options: {
-        columns: ['created_at', 'user_id', 'action', 'object_name', 'record_id'],
-        sort: [{ field: 'created_at', order: 'desc' }],
-        pageSize: 20,
-      },
     },
   ],
   globalFilters: [

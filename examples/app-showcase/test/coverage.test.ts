@@ -57,7 +57,12 @@ describe('showcase coverage (introspected against the spec)', () => {
   });
 
   it('covers every report type', () => {
-    const expected = enumValues((ui as Record<string, unknown>).ReportType ?? (ui as Record<string, unknown>).ReportTypeSchema);
+    // ADR-0021 single-form: `tabular` (a flat record list) is intentionally NOT
+    // demonstrated as a report — a flat list is an object-bound ListView lens
+    // (ADR-0017), not an analytics projection, so the former TaskListReport now
+    // lives on showcase_task as a `tabular` ListView (see src/reports/index.ts).
+    const expected = enumValues((ui as Record<string, unknown>).ReportType ?? (ui as Record<string, unknown>).ReportTypeSchema)
+      .filter((t) => t !== 'tabular');
     const used = new Set<string>();
     for (const r of allReports) {
       if (r.type) used.add(r.type);

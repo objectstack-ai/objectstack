@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { LiteKernel } from './lite-kernel';
 import type { Plugin } from './types';
+
+// Unique per-process temp path — a shared hardcoded /tmp file can be owned by a
+// different user (CI / multi-user hosts), causing EACCES under concurrent runs.
+const TEST_LOG_FILE = join(tmpdir(), `objectstack-test-kernel-${process.pid}.log`);
 
 describe('LiteKernel with Configurable Logger', () => {
     let kernel: LiteKernel;
@@ -35,7 +41,7 @@ describe('LiteKernel with Configurable Logger', () => {
                 logger: {
                     level: 'info',
                     format: 'json',
-                    file: '/tmp/test-kernel.log'
+                    file: TEST_LOG_FILE
                 }
             });
             

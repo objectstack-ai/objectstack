@@ -110,7 +110,6 @@ export const TaskViews = defineView({
       timeline: {
         startDateField: 'created_at',
         titleField: 'title',
-        groupByField: 'status',
         colorField: 'priority',
         scale: 'week',
       },
@@ -146,10 +145,6 @@ export const TaskViews = defineView({
       columns: ['status', 'estimate_hours'],
       chart: {
         chartType: 'bar',
-        xAxisField: 'status',
-        yAxisFields: ['estimate_hours'],
-        aggregation: 'sum',
-        groupByField: 'priority',
         // ADR-0021 dual-form — bind to the task dataset.
         dataset: 'showcase_task_metrics',
         dimensions: ['status', 'priority'],

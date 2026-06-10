@@ -337,9 +337,9 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     id: 'pipeline',
                     title: 'Pipeline',
                     type: 'metric',
-                    object: 'opportunity',
-                    valueField: 'amount',
-                    aggregate: 'sum',
+                    // ADR-0021 single-form: widgets bind a dataset + select values by name.
+                    dataset: 'opportunity_metrics',
+                    values: ['amount_sum'],
                     layout: { x: 0, y: 0, w: 3, h: 2 },
                 }],
             };

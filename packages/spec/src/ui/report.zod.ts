@@ -80,25 +80,13 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => z.object({
   description: I18nLabelSchema.optional(),
   /** Block report type — `joined` is intentionally excluded (no recursion). */
   type: z.enum(['tabular', 'summary', 'matrix']).default('tabular'),
-  /** Object queried by this block. Defaults to the container's objectName. */
-  objectName: z.string().optional(),
-  /** Columns to display / aggregate. Same shape as `Report.columns`. */
-  columns: z.array(ReportColumnSchema),
-  /** Row groupings (same shape as `Report.groupingsDown`). */
-  groupingsDown: z.array(ReportGroupingSchema).optional(),
-  /** Column groupings — only meaningful when `type: matrix`. */
-  groupingsAcross: z.array(ReportGroupingSchema).optional(),
-  /** Block-specific filter, ANDed with the container filter at render time. */
-  filter: FilterConditionSchema.optional(),
   /** Optional inline chart configuration. */
   chart: ReportChartSchema.optional(),
 
   /**
-   * ADR-0021 — bind this block to a semantic-layer `dataset` (the governed
-   * alternative to the block's inline `objectName` + `columns` query), mirroring
-   * the top-level report dual-form. An analytics block (summary/matrix) selects
-   * dataset measures by name; a record-list block stays inline (it becomes a
-   * ListView/embed in the terminal form). Additive / dual-form.
+   * ADR-0021 — the dataset this block binds to (single-form). The block selects
+   * the dataset's measures by name; the legacy inline `objectName` + `columns` +
+   * `groupings` query was removed in the cutover.
    */
   dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021)'),
   /** Dimension names (from the dataset) to group rows by. Dataset-bound only. */
@@ -119,42 +107,25 @@ export const ReportSchema = lazySchema(() => z.object({
   label: I18nLabelSchema.describe('Report label'),
   description: I18nLabelSchema.optional(),
 
-  /**
-   * Data Source — inline single-object query.
-   * Optional since ADR-0021: a report may instead bind to a semantic-layer
-   * `dataset` (see `dataset`/`rows`/`values` below). Exactly one shape is used
-   * per report; the `superRefine` enforces it. Required for the legacy inline
-   * shape (no `dataset`).
-   */
-  objectName: z.string().optional().describe('Primary object (inline-query reports; omit when `dataset` is set)'),
-
   /** Report Configuration */
   type: ReportType.default('tabular').describe('Report format type'),
 
-  columns: z.array(ReportColumnSchema).optional().describe('Columns to display (inline-query reports)'),
-
   /**
-   * ADR-0021 — bind to a semantic-layer `dataset` (the governed alternative to
-   * the inline `objectName` + `columns` query). When set, the report renders
-   * the dataset's named measures grouped by the chosen dimensions — numbers
-   * stay consistent with every other surface that uses the same dataset.
-   * Additive / dual-form: existing inline reports are unchanged.
+   * ADR-0021 — the semantic-layer `dataset` this report binds to. The report
+   * renders the dataset's named measures grouped by the chosen `rows`
+   * dimensions — numbers stay consistent with every other surface using the
+   * same dataset. This is the single author-facing analytics shape (the legacy
+   * inline `objectName` + `columns` + `groupings` query was removed in the
+   * single-form cutover). For a `joined` report, the data lives on `blocks`.
    */
   dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021)'),
-  /** Dimension names (from the dataset) to group rows by. Dataset-bound only. */
-  rows: z.array(z.string()).optional().describe('Dimension names down (dataset-bound)'),
-  /** Measure names (from the dataset) to display. Dataset-bound only. */
-  values: z.array(z.string()).optional().describe('Measure names to show (dataset-bound)'),
-  /** Render-time scope filter, ANDed at query time. Dataset-bound only. */
-  runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter (dataset-bound)'),
+  /** Dimension names (from the dataset) to group rows by (down axis). */
+  rows: z.array(z.string()).optional().describe('Dimension names down'),
+  /** Measure names (from the dataset) to display. */
+  values: z.array(z.string()).optional().describe('Measure names to show'),
+  /** Render-time scope filter, ANDed at query time. */
+  runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter'),
 
-  /** Grouping (for Summary/Matrix) */
-  groupingsDown: z.array(ReportGroupingSchema).optional().describe('Row groupings'),
-  groupingsAcross: z.array(ReportGroupingSchema).optional().describe('Column groupings (Matrix only)'),
-  
-  /** Filtering (MongoDB-style FilterCondition) */
-  filter: FilterConditionSchema.optional().describe('Filter criteria'),
-  
   /** Visualization */
   chart: ReportChartSchema.optional().describe('Embedded chart configuration'),
 
@@ -191,32 +162,19 @@ export const ReportSchema = lazySchema(() => z.object({
   ...MetadataProtectionFields,
 
 }).superRefine((r, ctx) => {
-  // ADR-0021 dual-form: a report is EITHER dataset-bound OR an inline query.
-  if (r.dataset) {
-    if (!r.values || r.values.length === 0) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'a dataset-bound report needs `values` (measure names from the dataset).',
-        path: ['values'],
-      });
+  // ADR-0021 single-form: a report is dataset-bound. A `joined` report carries
+  // its data on `blocks` (each block dataset-bound); every other type needs a
+  // top-level `dataset` + `values`.
+  if (r.type === 'joined') {
+    if (!r.blocks || r.blocks.length === 0) {
+      ctx.addIssue({ code: 'custom', message: 'a `joined` report needs `blocks`.', path: ['blocks'] });
     }
-  } else {
-    // Legacy inline shape — keep requiring objectName + columns so existing
-    // reports stay valid and a half-specified report is rejected.
-    if (!r.objectName) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'report needs `objectName` (or bind a `dataset`).',
-        path: ['objectName'],
-      });
-    }
-    if (!r.columns) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'report needs `columns` (or bind a `dataset` with `values`).',
-        path: ['columns'],
-      });
-    }
+  } else if (!r.dataset || !r.values || r.values.length === 0) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'a report needs `dataset` + `values` (measure names).',
+      path: ['dataset'],
+    });
   }
 }));
 

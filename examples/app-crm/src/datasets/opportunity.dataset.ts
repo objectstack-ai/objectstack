@@ -18,7 +18,9 @@ export const OpportunityDataset = defineDataset({
 
   dimensions: [
     { name: 'stage', label: 'Stage', field: 'stage', type: 'string' },
-    { name: 'close_date', label: 'Close Date', field: 'close_date', type: 'date' },
+    // ADR-0021 single-form: the monthly bucketing the trend widget used to carry
+    // as `categoryGranularity: 'month'` now lives on the dimension itself.
+    { name: 'close_date', label: 'Close Date', field: 'close_date', type: 'date', dateGranularity: 'month' },
   ],
 
   measures: [

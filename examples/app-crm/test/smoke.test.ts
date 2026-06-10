@@ -164,7 +164,9 @@ describe('Pipeline dashboard', () => {
     const w: any = byId.get('pipeline_trend_90d');
     expect(w.compareTo).toBe('previousYear');
     expect(w.type).toBe('line');
-    expect(w.categoryGranularity).toBe('month');
+    // ADR-0021 single-form: the date axis is a dataset dimension (its monthly
+    // bucketing lives on the dataset's close_date dimension, not the widget).
+    expect(w.dimensions).toContain('close_date');
   });
 
   it('omits compareTo on widgets that do not need it (pie, total)', () => {
@@ -178,9 +180,10 @@ describe('Pipeline dashboard', () => {
     expect(w.type).toBe('bar');
   });
 
-  it('widgets bind to the opportunity object', () => {
+  it('widgets bind to the opportunity dataset', () => {
+    // ADR-0021 single-form: widgets reference the semantic dataset, not a raw object.
     for (const w of PipelineDashboard.widgets) {
-      expect((w as any).object).toBe('crm_opportunity');
+      expect((w as any).dataset).toBe('opportunity_metrics');
     }
   });
 

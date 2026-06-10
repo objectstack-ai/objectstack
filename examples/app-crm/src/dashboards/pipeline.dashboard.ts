@@ -34,9 +34,6 @@ export const PipelineDashboard: Dashboard = {
       type: 'metric',
       title: 'Total Pipeline ($)',
       description: 'Sum of opportunity amounts across open stages.',
-      object: 'crm_opportunity',
-      aggregate: 'sum',
-      valueField: 'amount',
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       dataset: 'opportunity_metrics',
       values: ['total_amount'],
@@ -48,9 +45,6 @@ export const PipelineDashboard: Dashboard = {
       type: 'metric',
       title: 'Won This Quarter',
       description: 'Revenue closed-won in the current quarter, compared to the previous quarter.',
-      object: 'crm_opportunity',
-      aggregate: 'sum',
-      valueField: 'amount',
       filter: {
         stage: 'closed_won',
         close_date: {
@@ -69,9 +63,6 @@ export const PipelineDashboard: Dashboard = {
       type: 'metric',
       title: 'Avg Deal Size (YoY)',
       description: 'Average won-deal value this year vs the same window last year.',
-      object: 'crm_opportunity',
-      aggregate: 'avg',
-      valueField: 'amount',
       filter: {
         stage: 'closed_won',
         close_date: {
@@ -92,10 +83,6 @@ export const PipelineDashboard: Dashboard = {
       type: 'line',
       title: 'Pipeline Trend (12 months)',
       description: 'Opportunity count bucketed by close-month for the last year, with a sliding overlay of the prior year for compareTo.',
-      object: 'crm_opportunity',
-      aggregate: 'count',
-      categoryField: 'close_date',
-      categoryGranularity: 'month',
       filter: {
         close_date: { $gte: '{1_years_ago}', $lte: '{today}' },
       },
@@ -110,9 +97,6 @@ export const PipelineDashboard: Dashboard = {
       type: 'bar',
       title: 'Opportunities by Stage',
       description: 'Count grouped by stage with previous-quarter overlay (compareTo).',
-      object: 'crm_opportunity',
-      aggregate: 'count',
-      categoryField: 'stage',
       filter: {
         close_date: {
           $gte: '{current_quarter_start}',
@@ -132,10 +116,6 @@ export const PipelineDashboard: Dashboard = {
       type: 'pie',
       title: 'Open Pipeline by Stage ($)',
       description: 'Open-pipeline revenue split by pipeline stage. Pie/donut/funnel ignore `compareTo`.',
-      object: 'crm_opportunity',
-      aggregate: 'sum',
-      valueField: 'amount',
-      categoryField: 'stage',
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       dataset: 'opportunity_metrics',
       dimensions: ['stage'],

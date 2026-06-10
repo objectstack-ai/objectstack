@@ -303,35 +303,18 @@ export const KanbanConfigSchema = lazySchema(() => z.object({
  */
 export const ListChartConfigSchema = lazySchema(() => z.object({
   chartType: z.enum(['bar', 'line', 'pie', 'area', 'scatter']).default('bar').describe('Chart visualisation type'),
-  // Inline shape — optional since ADR-0021: a charted list view may instead bind
-  // to a semantic-layer `dataset` (see `dataset`/`dimensions`/`values` below).
-  xAxisField: z.string().optional().describe('Field used as the X axis / category dimension (inline)'),
-  yAxisFields: z.array(z.string()).min(1).optional().describe('Field(s) used as the Y axis / measures (inline)'),
-  aggregation: z.enum(['sum', 'avg', 'count', 'min', 'max']).optional().describe('Aggregation function applied to Y axis fields (inline)'),
-  groupByField: z.string().optional().describe('Optional field used to split / stack the chart (inline)'),
-
   /**
-   * ADR-0021 — bind this chart to a semantic-layer `dataset` (the governed
-   * alternative to the inline `xAxisField` + `yAxisFields` + `aggregation`
-   * query), mirroring dashboard widgets. Selects dimensions/measures BY NAME so
-   * the chart's numbers stay consistent with every other surface using the same
-   * dataset. Additive / dual-form: inline charts are unchanged.
+   * ADR-0021 — the semantic-layer `dataset` this chart binds to. Selects
+   * dimensions/measures BY NAME so the chart's numbers stay consistent with
+   * every other surface using the same dataset. This is the single author-facing
+   * shape (the legacy inline `xAxisField` + `yAxisFields` + `aggregation` query
+   * was removed in the cutover).
    */
-  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021)'),
-  /** Dimension names (from the dataset) for X / group / split. Dataset-bound only. */
-  dimensions: z.array(z.string()).optional().describe('Dimension names — X/group/split (dataset-bound)'),
-  /** Measure names (from the dataset) for the value axis. Dataset-bound only. */
-  values: z.array(z.string()).optional().describe('Measure names — Y (dataset-bound)'),
-}).superRefine((c, ctx) => {
-  // ADR-0021 dual-form: a chart is EITHER dataset-bound (needs `values`) OR an
-  // inline query (needs `xAxisField` + `yAxisFields`).
-  if (c.dataset) {
-    if (!c.values || c.values.length === 0) {
-      ctx.addIssue({ code: 'custom', message: 'a dataset-bound chart needs `values` (measure names).', path: ['values'] });
-    }
-  } else if (!c.xAxisField || !c.yAxisFields || c.yAxisFields.length === 0) {
-    ctx.addIssue({ code: 'custom', message: 'an inline chart needs `xAxisField` + `yAxisFields` (or bind a `dataset`).', path: ['xAxisField'] });
-  }
+  dataset: SnakeCaseIdentifierSchema.describe('Dataset name to bind (ADR-0021)'),
+  /** Dimension names (from the dataset) for X / group / split. */
+  dimensions: z.array(z.string()).optional().describe('Dimension names — X/group/split'),
+  /** Measure names (from the dataset) for the value axis. */
+  values: z.array(z.string()).min(1).describe('Measure names — Y (at least one)'),
 }).describe('List chart view configuration'));
 
 /**

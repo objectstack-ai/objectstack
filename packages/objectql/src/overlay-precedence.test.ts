@@ -60,8 +60,11 @@ const validDashboard = {
 const validReport = {
     name: 'monthly_revenue',
     label: 'Monthly Revenue',
-    objectName: 'invoice',
-    columns: [{ field: 'amount', label: 'Amount' }],
+    // ADR-0021 single-form: a report binds a dataset + selects values by name.
+    type: 'summary',
+    dataset: 'invoice_metrics',
+    rows: ['month'],
+    values: ['amount_sum'],
 };
 
 function makeProtocol(opts: { environmentId?: string } = {}) {

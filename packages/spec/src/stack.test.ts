@@ -1277,13 +1277,22 @@ describe('defineStack - Example-Level Strict Validation', () => {
           ],
         },
       ],
+      datasets: [
+        {
+          name: 'todo_task_metrics',
+          label: 'Task Metrics',
+          object: 'todo_task',
+          dimensions: [{ name: 'status', field: 'status', type: 'string' as const }],
+          measures: [{ name: 'task_count', aggregate: 'count' as const }],
+        },
+      ],
       dashboards: [
         {
           name: 'task_overview',
           label: 'Task Overview',
           widgets: [
-            { id: 'total_tasks', title: 'Total Tasks', type: 'metric', object: 'todo_task', aggregate: 'count', layout: { x: 0, y: 0, w: 3, h: 2 } },
-            { id: 'by_status', title: 'By Status', type: 'pie', object: 'todo_task', categoryField: 'status', aggregate: 'count', layout: { x: 3, y: 0, w: 6, h: 4 } },
+            { id: 'total_tasks', title: 'Total Tasks', type: 'metric', dataset: 'todo_task_metrics', values: ['task_count'], layout: { x: 0, y: 0, w: 3, h: 2 } },
+            { id: 'by_status', title: 'By Status', type: 'pie', dataset: 'todo_task_metrics', dimensions: ['status'], values: ['task_count'], layout: { x: 3, y: 0, w: 6, h: 4 } },
           ],
         },
       ],
@@ -1345,17 +1354,23 @@ describe('defineStack - Example-Level Strict Validation', () => {
           ],
         },
       ],
+      datasets: [
+        {
+          name: 'crm_opportunity_metrics',
+          label: 'Opportunity Metrics',
+          object: 'crm_opportunity',
+          dimensions: [{ name: 'stage', field: 'stage', type: 'string' as const }],
+          measures: [{ name: 'amount_sum', aggregate: 'sum' as const, field: 'amount' }],
+        },
+      ],
       reports: [
         {
           name: 'pipeline_report',
           label: 'Pipeline Report',
-          objectName: 'crm_opportunity',
           type: 'summary' as const,
-          columns: [
-            { field: 'name' },
-            { field: 'amount', aggregate: 'sum' as const },
-          ],
-          groupingsDown: [{ field: 'stage' }],
+          dataset: 'crm_opportunity_metrics',
+          rows: ['stage'],
+          values: ['amount_sum'],
         },
       ],
       dashboards: [
@@ -1363,7 +1378,7 @@ describe('defineStack - Example-Level Strict Validation', () => {
           name: 'sales_overview',
           label: 'Sales Overview',
           widgets: [
-            { id: 'pipeline_value', title: 'Pipeline Value', type: 'metric', object: 'crm_opportunity', valueField: 'amount', aggregate: 'sum', layout: { x: 0, y: 0, w: 4, h: 2 } },
+            { id: 'pipeline_value', title: 'Pipeline Value', type: 'metric', dataset: 'crm_opportunity_metrics', values: ['amount_sum'], layout: { x: 0, y: 0, w: 4, h: 2 } },
           ],
         },
       ],

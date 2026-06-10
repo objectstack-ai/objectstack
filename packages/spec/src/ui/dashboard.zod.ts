@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
-import { DateGranularity } from '../data/query.zod';
 import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -70,24 +69,6 @@ export const DashboardHeaderSchema = lazySchema(() => z.object({
 }).describe('Dashboard header configuration'));
 
 /**
- * Widget Measure Schema
- * A single measure definition for multi-measure pivot/matrix widgets.
- */
-export const WidgetMeasureSchema = lazySchema(() => z.object({
-  /** Value field to aggregate */
-  valueField: z.string().describe('Field to aggregate'),
-
-  /** Aggregate function */
-  aggregate: z.enum(['count', 'sum', 'avg', 'min', 'max']).default('count').describe('Aggregate function'),
-
-  /** Display label for the measure */
-  label: I18nLabelSchema.optional().describe('Measure display label'),
-
-  /** Number format string (e.g., "$0,0.00", "0.0%") */
-  format: z.string().optional().describe('Number format string'),
-}).describe('Widget measure definition'));
-
-/**
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
  */
@@ -116,12 +97,8 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
    * `NavigationItem.requiresObject` so cloud-only widgets (e.g. those
    * keyed on `sys_app` / `sys_package_installation`) silently disappear
    * in single-environment runtimes instead of rendering a 404 error.
-   *
-   * Defaults to the widget's `object` field when not explicitly set —
-   * any widget that targets an object will be gated on that object's
-   * registration. Set this to a different value (or empty string to
-   * disable) when the widget should appear even if its `object` is
-   * unavailable.
+   * Set explicitly to the dataset's base object when the widget should be
+   * gated on that object's availability.
    */
   requiresObject: z.string().optional().describe('Hide the widget unless the named object is registered'),
 
@@ -140,11 +117,8 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
   /** Icon for the widget header action button */
   actionIcon: z.string().optional().describe('Icon identifier for the widget action button'),
   
-  /** Data Source Object */
-  object: z.string().optional().describe('Data source object name'),
-  
-  /** Data Filter (MongoDB-style FilterCondition) */
-  filter: FilterConditionSchema.optional().describe('Data filter criteria'),
+  /** Presentation-scope filter (MongoDB-style), ANDed into the dataset query as `runtimeFilter`. */
+  filter: FilterConditionSchema.optional().describe('Presentation-scope filter (runtimeFilter)'),
 
   /**
    * Period-over-period comparison primitive.
@@ -171,46 +145,19 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
     }),
   ]).optional().describe('Period-over-period comparison window'),
 
-  /** Category Field (X-Axis / Group By) */
-  categoryField: z.string().optional().describe('Field for grouping (X-Axis)'),
-
   /**
-   * Date Bucketing Granularity for `categoryField`
-   *
-   * When set and `categoryField` references a date/datetime field, the engine
-   * buckets values into uniform `day` / `week` / `month` / `quarter` / `year`
-   * periods server-side (PostgreSQL `date_trunc`, MySQL `date_format`, SQLite
-   * `strftime`, MongoDB `$dateTrunc`; falls back to in-memory ISO-8601
-   * bucketing otherwise). Without this, raw timestamps are grouped verbatim
-   * which typically yields one bucket per row — making time-series charts
-   * appear flat.
-   *
-   * Mirrors the `dateGranularity` shape of {@link GroupByNodeSchema}.
+   * ADR-0021 — the semantic-layer `dataset` this widget binds to. The widget
+   * selects the dataset's dimensions/measures BY NAME; the dataset owns the base
+   * object, allowed joins, intrinsic filter, dimensions, and certified measures,
+   * so numbers stay consistent across every surface. This is the single
+   * author-facing analytics shape (the legacy inline `object` + `categoryField`
+   * + `valueField` + `aggregate` query was removed in the single-form cutover).
    */
-  categoryGranularity: DateGranularity.optional().describe('Bucket categoryField date values into day/week/month/quarter/year periods'),
-
-  /** Value Field (Y-Axis) */
-  valueField: z.string().optional().describe('Field for values (Y-Axis)'),
-  
-  /** Aggregate operation */
-  aggregate: z.enum(['count', 'sum', 'avg', 'min', 'max']).optional().default('count').describe('Aggregate function'),
-  
-  /** Multi-measure definitions for pivot/matrix widgets */
-  measures: z.array(WidgetMeasureSchema).optional().describe('Multiple measures for pivot/matrix analysis'),
-
-  /**
-   * ADR-0021 — bind this widget to a semantic-layer `dataset` (governed,
-   * consistent metrics) instead of the inline `object` + `categoryField` +
-   * `valueField` + `aggregate` query. A dataset-bound widget selects
-   * dimensions/measures BY NAME from the dataset; numbers stay consistent with
-   * every other surface that uses the same dataset. Additive / dual-form:
-   * inline widgets are unchanged.
-   */
-  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021)'),
-  /** Dimension names (from the dataset) for X / group / split. Dataset-bound only. */
-  dimensions: z.array(z.string()).optional().describe('Dimension names — X/group/split (dataset-bound)'),
-  /** Measure names (from the dataset) for the value axis. Dataset-bound only. */
-  values: z.array(z.string()).optional().describe('Measure names — Y (dataset-bound)'),
+  dataset: SnakeCaseIdentifierSchema.describe('Dataset name to bind (ADR-0021)'),
+  /** Dimension names (from the dataset) for X / group / split. */
+  dimensions: z.array(z.string()).optional().describe('Dimension names — X/group/split'),
+  /** Measure names (from the dataset) for the value axis. */
+  values: z.array(z.string()).min(1).describe('Measure names — Y (at least one)'),
 
   /**
    * Layout Position (React-Grid-Layout style)
@@ -234,15 +181,8 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-}).superRefine((w, ctx) => {
-  // ADR-0021 dual-form: a dataset-bound widget needs at least one measure name.
-  if (w.dataset && (!w.values || w.values.length === 0)) {
-    ctx.addIssue({
-      code: 'custom',
-      message: 'a dataset-bound widget needs `values` (measure names from the dataset).',
-      path: ['values'],
-    });
-  }
+  // ADR-0021 single-form: every widget binds a `dataset` and selects `values`
+  // (both required above) — there is no inline-query shape to disambiguate.
 }));
 
 /**
@@ -386,7 +326,6 @@ export type DashboardInput = z.input<typeof DashboardSchema>;
 export type DashboardWidget = z.infer<typeof DashboardWidgetSchema>;
 export type DashboardHeader = z.infer<typeof DashboardHeaderSchema>;
 export type DashboardHeaderAction = z.infer<typeof DashboardHeaderActionSchema>;
-export type WidgetMeasure = z.infer<typeof WidgetMeasureSchema>;
 export type WidgetColorVariant = z.infer<typeof WidgetColorVariantSchema>;
 export type WidgetActionType = z.infer<typeof WidgetActionTypeSchema>;
 export type GlobalFilter = z.infer<typeof GlobalFilterSchema>;

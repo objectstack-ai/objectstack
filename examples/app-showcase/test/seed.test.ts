@@ -20,7 +20,10 @@ describe('showcase stack', () => {
   it('registers UI, automation, security, and AI metadata', () => {
     expect((stack.views ?? []).length).toBeGreaterThan(0);
     expect((stack.dashboards ?? []).length).toBeGreaterThan(0);
-    expect((stack.reports ?? []).length).toBe(4);
+    // ADR-0021 single-form: the former flat `tabular` TaskListReport was
+    // reclassified as a ListView (a flat list is a row lens, not analytics),
+    // leaving 3 dataset-bound analytics reports.
+    expect((stack.reports ?? []).length).toBe(3);
     expect((stack.flows ?? []).length).toBeGreaterThan(0);
     expect((stack.roles ?? []).length).toBe(3);
     expect((stack.agents ?? []).length).toBe(1);
