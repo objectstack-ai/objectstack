@@ -68,6 +68,17 @@ export const Task = ObjectSchema.create({
     cover: Field.image({ label: 'Cover Image' }),
     labels: { type: 'tags', label: 'Labels' },
     notes: Field.textarea({ label: 'Notes' }),
+    // Written by the Resilient Sync flow's try/catch region
+    // (showcase_resilient_sync) when the outbound push exhausts its retries —
+    // the catch branch flags the failure here for operator follow-up.
+    sync_status: Field.select({
+      label: 'Sync Status',
+      options: [
+        { label: 'Synced', value: 'synced', color: '#10B981' },
+        { label: 'Failed', value: 'failed', color: '#EF4444' },
+      ],
+    }),
+    sync_error: Field.textarea({ label: 'Sync Error' }),
   },
 
   validations: [
