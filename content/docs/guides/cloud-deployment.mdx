@@ -62,20 +62,27 @@ or the host's deployment config.
 
 ## Cloud-managed deployment
 
-The unified path publishes a **versioned package** and installs it into a cloud
-environment in one step:
+Publishing and installing are **separate steps**. The CLI publishes a
+**versioned package** to your organization's catalog — it does not touch any
+environment, and you never pass an environment id:
 
 ```bash
-os cloud login                                # once: stores a cloud token
-os package publish --env env_prod --install   # publish a version + install it
+os cloud login        # once: stores a cloud token
+os package publish     # → sys_package + immutable, checksummed sys_package_version
 ```
 
-This registers a `sys_package` plus an immutable, checksummed
-`sys_package_version`, then records the install against the target environment
-(see the cloud [package](/docs/references/cloud/package) and
-[package-version](/docs/references/cloud/package-version) references). The
-environment kernel is evicted on install, so the new metadata and any sample
-data are live on the next request — no restart.
+See the cloud [package](/docs/references/cloud/package) and
+[package-version](/docs/references/cloud/package-version) references.
+
+Installing then happens **inside the target environment**: sign in to that
+environment's Console → **Marketplace** → pick the package → **Install**. The
+install is authorized by your environment login and applied to that environment
+(metadata + sample data); the kernel is evicted so it is live on the next
+request — no restart, and no environment id to remember.
+
+> **CI shortcut.** A pipeline deploying to a *known* environment can publish and
+> install in one call: `os package publish --env <id> --install`. This is for
+> automation only — interactive installs happen in the environment Marketplace.
 
 > **Legacy env-revision path.** `os publish` posts compiled metadata straight to
 > an environment as a revision, rather than as a versioned package:
