@@ -8,16 +8,16 @@ import {
 
 describe('ChartTypeSchema', () => {
   it('should accept all comparison chart types', () => {
-    const types = ['bar', 'horizontal-bar', 'column', 'grouped-bar', 'stacked-bar'] as const;
-    
+    const types = ['bar', 'horizontal-bar', 'column'] as const;
+
     types.forEach(type => {
       expect(() => ChartTypeSchema.parse(type)).not.toThrow();
     });
   });
 
   it('should accept all trend chart types', () => {
-    const types = ['line', 'area', 'stacked-area', 'step-line'] as const;
-    
+    const types = ['line', 'area'] as const;
+
     types.forEach(type => {
       expect(() => ChartTypeSchema.parse(type)).not.toThrow();
     });
@@ -32,8 +32,8 @@ describe('ChartTypeSchema', () => {
   });
 
   it('should accept all relationship chart types', () => {
-    const types = ['scatter', 'bubble'] as const;
-    
+    const types = ['scatter'] as const;
+
     types.forEach(type => {
       expect(() => ChartTypeSchema.parse(type)).not.toThrow();
     });
@@ -68,6 +68,17 @@ describe('ChartTypeSchema', () => {
       'heatmap', 'waterfall', 'box-plot', 'violin', 'candlestick', 'stock'] as const;
 
     removed.forEach(type => {
+      expect(() => ChartTypeSchema.parse(type)).toThrow();
+    });
+  });
+
+  it('should reject variant types that only render as their base chart', () => {
+    // Removed: each fell back to a base family the renderer already draws, so
+    // advertising them lied about the output (see the taxonomy NOTE in chart.zod).
+    const fallbackOnly = ['grouped-bar', 'stacked-bar', 'bi-polar-bar', 'stacked-area',
+      'step-line', 'spline', 'pyramid', 'bubble'] as const;
+
+    fallbackOnly.forEach(type => {
       expect(() => ChartTypeSchema.parse(type)).toThrow();
     });
   });

@@ -49,20 +49,14 @@ describe('showcase coverage (introspected against the spec)', () => {
   });
 
   it('covers every distinctly-renderable ChartType', () => {
-    // The Chart Gallery demonstrates only chart families the renderer draws
-    // DISTINCTLY — advertising a type that renders as something else (a "sankey"
-    // that draws bars) is worse than not offering it. The families below have no
-    // distinct renderer yet and fall back to a near-relative, so the showcase
-    // intentionally does not duplicate them: grouped/stacked/bi-polar bars (→bar),
-    // stacked-area (→area), step-line/spline (→line), pyramid (→funnel), bubble
-    // (→scatter), and the dial-less performance variants kpi/gauge/solid-gauge/
-    // bullet (→ the same KPI value as `metric`). Follow-up: trim these from
-    // `ChartTypeSchema` so spec ↔ renderer ↔ showcase stay in lockstep.
-    const FALLBACK_ONLY = new Set([
-      'grouped-bar', 'stacked-bar', 'bi-polar-bar', 'stacked-area', 'step-line',
-      'spline', 'pyramid', 'bubble', 'kpi', 'gauge', 'solid-gauge', 'bullet',
-    ]);
-    const expected = enumValues(ui.ChartTypeSchema).filter((t) => !FALLBACK_ONLY.has(t));
+    // The fallback-only VARIANTS (grouped/stacked/bi-polar bar, stacked-area,
+    // step-line, spline, pyramid, bubble) were removed from `ChartTypeSchema`, so
+    // the enum now lists only families that render. The remaining exception is
+    // the performance group: `metric` represents the single-value KPI, and
+    // `kpi`/`gauge`/`solid-gauge`/`bullet` render the SAME value today (no dial),
+    // so the gallery demonstrates `metric` once rather than duplicating them.
+    const SAME_AS_METRIC = new Set(['kpi', 'gauge', 'solid-gauge', 'bullet']);
+    const expected = enumValues(ui.ChartTypeSchema).filter((t) => !SAME_AS_METRIC.has(t));
     const used = new Set<string>();
     for (const w of ChartGalleryDashboard.widgets ?? []) if (w.type) used.add(w.type);
     expectFullCoverage('ChartType', expected, used);

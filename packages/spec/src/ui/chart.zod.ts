@@ -20,32 +20,25 @@ export const ChartTypeSchema = lazySchema(() => z.enum([
   'bar',
   'horizontal-bar',
   'column',
-  'grouped-bar',
-  'stacked-bar',
-  'bi-polar-bar',
-  
+
   // Trend
   'line',
   'area',
-  'stacked-area',
-  'step-line',
-  'spline',
-  
+
   // Distribution
   'pie',
   'donut',
   'funnel',
-  'pyramid',
-  
+
   // Relationship
   'scatter',
-  'bubble',
-  
+
   // Composition
   'treemap',
   'sankey',
 
-  // Performance
+  // Performance (single value — metric/kpi render a number; gauge/solid-gauge/
+  // bullet are honest single-value variants pending a real dial/target renderer)
   'gauge',
   'solid-gauge',
   'metric',
@@ -60,13 +53,22 @@ export const ChartTypeSchema = lazySchema(() => z.enum([
   'pivot',
 ]));
 
-// NOTE: chart families that require data shapes the platform does not model
-// (OHLC for candlestick/stock, per-record distributions for box-plot/violin),
-// geographic data (choropleth/bubble-map/gl-map), or dependencies the default
-// Recharts renderer lacks (sunburst, heatmap, word-cloud, waterfall) were
-// removed from this taxonomy: advertising a chart type the renderer can't draw
-// is worse than not offering it. They can return via an opt-in renderer plugin
-// once there is real demand and a data model to back them.
+// NOTE: the taxonomy lists only chart families the default Recharts renderer
+// draws DISTINCTLY. Two groups are intentionally absent:
+//
+// 1. Families requiring data/dependencies the platform does not model — OHLC
+//    (candlestick/stock), per-record distributions (box-plot/violin), geo
+//    (choropleth/bubble-map/gl-map), or extra renderers (sunburst, heatmap,
+//    word-cloud, waterfall).
+// 2. VARIANTS that only render as their base chart, so advertising them lies
+//    about the output: grouped-bar / stacked-bar / bi-polar-bar (→ bar, no
+//    multi-series grouping/stacking), stacked-area (→ area), step-line / spline
+//    (→ line), pyramid (→ funnel), bubble (→ scatter, no size encoding).
+//
+// Both can return via an opt-in renderer once there is a real renderer and a
+// data model to back them. (`metric`/`kpi` are kept as honest single-value
+// synonyms; `gauge`/`solid-gauge`/`bullet` render a value today and gain a dial
+// when a gauge renderer lands.)
 
 export type ChartType = z.infer<typeof ChartTypeSchema>;
 

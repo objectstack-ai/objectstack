@@ -69,7 +69,7 @@ const result = ChartAnnotation.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'grouped-bar' \| 'stacked-bar' \| 'bi-polar-bar' \| 'line' \| 'area' \| 'stacked-area' \| 'step-line' \| 'spline' \| 'pie' \| 'donut' \| 'funnel' \| 'pyramid' \| 'scatter' \| 'bubble' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | ✅ |  |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | ✅ |  |
 | **title** | `string` | optional | Chart title |
 | **subtitle** | `string` | optional | Chart subtitle |
 | **description** | `string` | optional | Accessibility description |
@@ -109,7 +109,7 @@ const result = ChartAnnotation.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Field name or series identifier |
 | **label** | `string` | optional | Series display label |
-| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'grouped-bar' \| 'stacked-bar' \| 'bi-polar-bar' \| 'line' \| 'area' \| 'stacked-area' \| 'step-line' \| 'spline' \| 'pie' \| 'donut' \| 'funnel' \| 'pyramid' \| 'scatter' \| 'bubble' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | optional | Override chart type for this series |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | optional | Override chart type for this series |
 | **color** | `string` | optional | Series color (hex/rgb/token) |
 | **stack** | `string` | optional | Stack identifier to group series |
 | **yAxis** | `Enum<'left' \| 'right'>` | ✅ | Bind to specific Y-Axis |
@@ -127,20 +127,12 @@ const result = ChartAnnotation.parse(data);
 * `bar`
 * `horizontal-bar`
 * `column`
-* `grouped-bar`
-* `stacked-bar`
-* `bi-polar-bar`
 * `line`
 * `area`
-* `stacked-area`
-* `step-line`
-* `spline`
 * `pie`
 * `donut`
 * `funnel`
-* `pyramid`
 * `scatter`
-* `bubble`
 * `treemap`
 * `sankey`
 * `gauge`
