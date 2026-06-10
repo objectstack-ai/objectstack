@@ -220,4 +220,21 @@ describe('AnalyticsService.queryDataset — label resolution (integration)', () 
       { account: 'Globex', task_count: 2 },
     ]);
   });
+
+  it('enriches measure fields with their display label + format', async () => {
+    const labelledDataset = DatasetSchema.parse({
+      name: 'sales_metrics',
+      label: 'Sales',
+      object: 'task',
+      dimensions: [{ name: 'status', field: 'status', type: 'string' }],
+      measures: [{ name: 'spent_sum', aggregate: 'sum', field: 'spent', label: 'Total Spent', format: '$0,0' }],
+    });
+    const svc = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      executeAggregate: async () => [{ status: 'backlog', spent_sum: 616000 }],
+    });
+    const res = await svc.queryDataset(labelledDataset, { dimensions: ['status'], measures: ['spent_sum'] });
+    const field = res.fields.find((f) => f.name === 'spent_sum');
+    expect(field).toMatchObject({ name: 'spent_sum', label: 'Total Spent', format: '$0,0' });
+  });
 });

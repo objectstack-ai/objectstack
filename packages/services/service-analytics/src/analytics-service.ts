@@ -342,6 +342,20 @@ export class AnalyticsService implements IAnalyticsService {
         }
       }
     }
+
+    // ADR-0021 — enrich measure columns with their display `label` + `format`
+    // so presentations show "Tasks" / "$616,000" instead of the raw measure
+    // name "task_count" / "616000". Carried on the result fields; the renderer
+    // applies the format (it can't be baked into the numeric row value).
+    if (result.fields?.length && dataset.measures?.length) {
+      const measureByName = new Map(dataset.measures.map((m) => [m.name, m]));
+      for (const f of result.fields) {
+        const m = measureByName.get(f.name) ?? measureByName.get(f.name.replace(/__compare$/, ''));
+        if (!m) continue;
+        if (f.label == null && typeof m.label === 'string') f.label = m.label;
+        if (f.format == null && m.format) f.format = m.format;
+      }
+    }
     return result;
   }
 

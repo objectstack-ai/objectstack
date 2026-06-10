@@ -68,6 +68,10 @@ export interface AnalyticsResult {
     fields: Array<{
         name: string;
         type: string;
+        /** Human display label (e.g. measure `label`) — for legends/KPIs. */
+        label?: string;
+        /** Display format hint (e.g. measure `format` like "$0,0", "0.0%"). */
+        format?: string;
     }>;
     /** Generated SQL (if available) */
     sql?: string;
