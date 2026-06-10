@@ -44,34 +44,12 @@ relationship resolution, dependency ordering, and multi-pass insertion.
 ## TypeScript Usage
 
 ```typescript
-import { DatasetLoadResult, ObjectDependencyGraph, ObjectDependencyNode, ReferenceResolution, ReferenceResolutionError, SeedIdentity, SeedLoaderConfig, SeedLoaderRequest, SeedLoaderResult } from '@objectstack/spec/data';
-import type { DatasetLoadResult, ObjectDependencyGraph, ObjectDependencyNode, ReferenceResolution, ReferenceResolutionError, SeedIdentity, SeedLoaderConfig, SeedLoaderRequest, SeedLoaderResult } from '@objectstack/spec/data';
+import { ObjectDependencyGraph, ObjectDependencyNode, ReferenceResolution, ReferenceResolutionError, SeedIdentity, SeedLoadResult, SeedLoaderConfig, SeedLoaderRequest, SeedLoaderResult } from '@objectstack/spec/data';
+import type { ObjectDependencyGraph, ObjectDependencyNode, ReferenceResolution, ReferenceResolutionError, SeedIdentity, SeedLoadResult, SeedLoaderConfig, SeedLoaderRequest, SeedLoaderResult } from '@objectstack/spec/data';
 
 // Validate data
-const result = DatasetLoadResult.parse(data);
+const result = ObjectDependencyGraph.parse(data);
 ```
-
----
-
-## DatasetLoadResult
-
-Result of loading a single dataset
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **object** | `string` | ✅ | Object that was loaded |
-| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | ✅ | Import mode used |
-| **inserted** | `integer` | ✅ | Records inserted |
-| **updated** | `integer` | ✅ | Records updated |
-| **skipped** | `integer` | ✅ | Records skipped |
-| **errored** | `integer` | ✅ | Records with errors |
-| **total** | `integer` | ✅ | Total records in dataset |
-| **referencesResolved** | `integer` | ✅ | References resolved via externalId |
-| **referencesDeferred** | `integer` | ✅ | References deferred to second pass |
-| **errors** | `Object[]` | ✅ | Reference resolution errors |
-
 
 ---
 
@@ -154,6 +132,28 @@ Identity context for resolving os.user / os.org in seed CEL values
 
 ---
 
+## SeedLoadResult
+
+Result of loading a single dataset
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object that was loaded |
+| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | ✅ | Import mode used |
+| **inserted** | `integer` | ✅ | Records inserted |
+| **updated** | `integer` | ✅ | Records updated |
+| **skipped** | `integer` | ✅ | Records skipped |
+| **errored** | `integer` | ✅ | Records with errors |
+| **total** | `integer` | ✅ | Total records in dataset |
+| **referencesResolved** | `integer` | ✅ | References resolved via externalId |
+| **referencesDeferred** | `integer` | ✅ | References deferred to second pass |
+| **errors** | `Object[]` | ✅ | Reference resolution errors |
+
+
+---
+
 ## SeedLoaderConfig
 
 Seed data loader configuration
@@ -183,7 +183,7 @@ Seed loader request with datasets and configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **datasets** | `Object[]` | ✅ | Datasets to load |
+| **seeds** | `Object[]` | ✅ | Seeds to load |
 | **config** | `Object` | ✅ | Loader configuration |
 
 

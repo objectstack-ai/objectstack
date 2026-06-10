@@ -1,0 +1,55 @@
+---
+title: Seed
+description: Seed protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
+
+Seed Import Strategy
+
+Defines how the engine handles existing records when a seed is applied.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/seed.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { Seed, SeedMode } from '@objectstack/spec/data';
+import type { Seed, SeedMode } from '@objectstack/spec/data';
+
+// Validate data
+const result = Seed.parse(data);
+```
+
+---
+
+## Seed
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Target Object Name |
+| **externalId** | `string` | ✅ | Field match for uniqueness check |
+| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | ✅ | Conflict resolution strategy |
+| **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | ✅ | Applicable environments |
+| **records** | `Record<string, any>[]` | ✅ | Data records |
+
+
+---
+
+## SeedMode
+
+### Allowed Values
+
+* `insert`
+* `update`
+* `upsert`
+* `replace`
+* `ignore`
+
+
+---
+
