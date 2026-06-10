@@ -6,6 +6,7 @@ import { AnalyticsService } from '../analytics-service.js';
 import {
   resolveDimensionLabels,
   pickDisplayField,
+  formatDateBucket,
   type DimensionLabelDeps,
   type FieldMetaLite,
 } from '../dimension-labels.js';
@@ -73,10 +74,23 @@ describe('resolveDimensionLabels', () => {
     expect(rows).toEqual([{ account: 'orphan', budget_sum: 1 }]);
   });
 
-  it('is a no-op for date / plain dimensions', async () => {
-    const rows = [{ created_at: '2026-01', task_count: 2 }];
-    await resolveDimensionLabels('task', [{ name: 'created_at', field: 'created_at' }], rows, deps());
-    expect(rows).toEqual([{ created_at: '2026-01', task_count: 2 }]);
+  it('formats a date dimension value to a human bucket label', async () => {
+    // epoch-ms for 2026-04-15T00:00:00Z
+    const ts = Date.UTC(2026, 3, 15);
+    const rows = [{ created_at: ts, task_count: 2 }];
+    await resolveDimensionLabels(
+      'task',
+      [{ name: 'created_at', field: 'created_at', type: 'date', dateGranularity: 'month' }],
+      rows,
+      deps(),
+    );
+    expect(rows).toEqual([{ created_at: '2026-04', task_count: 2 }]);
+  });
+
+  it('is a no-op for a plain string dimension', async () => {
+    const rows = [{ progress: '50', task_count: 2 }];
+    await resolveDimensionLabels('task', [{ name: 'progress', field: 'progress' }], rows, deps());
+    expect(rows).toEqual([{ progress: '50', task_count: 2 }]);
   });
 
   it('does nothing when the object is unknown to the engine', async () => {
@@ -102,6 +116,28 @@ describe('resolveDimensionLabels', () => {
     await resolveDimensionLabels('task', [{ name: 'account', field: 'account' }], rows, d);
     expect(calls).toBe(1);
     expect(rows.map((r) => r.account)).toEqual(['Acme Corp', 'Acme Corp', 'Globex']);
+  });
+});
+
+describe('formatDateBucket', () => {
+  const ts = Date.UTC(2026, 3, 15); // 2026-04-15
+  it('formats per granularity', () => {
+    expect(formatDateBucket(ts, 'year')).toBe('2026');
+    expect(formatDateBucket(ts, 'quarter')).toBe('2026-Q2');
+    expect(formatDateBucket(ts, 'month')).toBe('2026-04');
+    expect(formatDateBucket(ts, 'day')).toBe('2026-04-15');
+    expect(formatDateBucket(ts, undefined)).toBe('2026-04-15');
+  });
+  it('parses epoch-ms numeric strings and ISO strings', () => {
+    expect(formatDateBucket(String(ts), 'month')).toBe('2026-04');
+    expect(formatDateBucket('2026-04-15T10:00:00Z', 'month')).toBe('2026-04');
+  });
+  it('parses epoch-seconds', () => {
+    expect(formatDateBucket(String(Math.floor(ts / 1000)), 'month')).toBe('2026-04');
+  });
+  it('returns the input unchanged when not a parseable date', () => {
+    expect(formatDateBucket('not-a-date', 'month')).toBe('not-a-date');
+    expect(formatDateBucket(null)).toBe(null);
   });
 });
 

@@ -220,7 +220,22 @@ export class DatasetExecutor {
       timezone: opts.selection.timezone ?? 'UTC',
     };
     if (opts.where) q.where = opts.where as Record<string, unknown>;
-    if (opts.selection.timeDimensions) q.timeDimensions = opts.selection.timeDimensions;
+    // Bucket selected date dimensions that declare an explicit `dateGranularity`
+    // (the dataset compiled a single-entry `granularities`). Without this a date
+    // dimension groups by the raw timestamp — one bucket per row, rendering epoch
+    // millis on trend charts. A dimension already carried by `selection.timeDimensions`
+    // (e.g. compareTo) keeps its entry; we never override it.
+    const selTimeDims = opts.selection.timeDimensions ?? [];
+    const selDims = new Set(selTimeDims.map((t) => t.dimension));
+    const explicitTimeDims: Array<{ dimension: string; granularity: string }> = [];
+    for (const name of opts.dimensions) {
+      const cd = compiled.cube.dimensions[name];
+      if (cd?.type === 'time' && cd.granularities?.length === 1 && !selDims.has(name)) {
+        explicitTimeDims.push({ dimension: name, granularity: String(cd.granularities[0]) });
+      }
+    }
+    const mergedTimeDims = [...selTimeDims, ...explicitTimeDims];
+    if (mergedTimeDims.length > 0) q.timeDimensions = mergedTimeDims as AnalyticsQuery['timeDimensions'];
     if (opts.selection.order) q.order = opts.selection.order;
     if (opts.selection.limit != null) q.limit = opts.selection.limit;
     if (opts.selection.offset != null) q.offset = opts.selection.offset;

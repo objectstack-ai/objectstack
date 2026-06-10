@@ -17,7 +17,7 @@ export const ShowcaseTaskDataset = defineDataset({
     { name: 'status', label: 'Status', field: 'status', type: 'string' },
     { name: 'priority', label: 'Priority', field: 'priority', type: 'string' },
     { name: 'progress', label: 'Progress', field: 'progress', type: 'number' },
-    { name: 'created_at', label: 'Created', field: 'created_at', type: 'date' },
+    { name: 'created_at', label: 'Created', field: 'created_at', type: 'date', dateGranularity: 'month' },
   ],
   measures: [
     { name: 'task_count', label: 'Tasks', aggregate: 'count' },

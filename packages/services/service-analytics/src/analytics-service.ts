@@ -333,7 +333,7 @@ export class AnalyticsService implements IAnalyticsService {
       const dims = selection.dimensions
         .map((name) => dataset.dimensions?.find((d) => d.name === name))
         .filter((d): d is NonNullable<typeof d> => !!d?.field)
-        .map((d) => ({ name: d.name, field: d.field }));
+        .map((d) => ({ name: d.name, field: d.field, type: d.type, dateGranularity: d.dateGranularity }));
       if (dims.length) {
         try {
           await resolveDimensionLabels(dataset.object, dims, result.rows, this.labelResolver);
