@@ -316,6 +316,39 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
 | `wait` (timer) | an ISO-8601 duration elapses | **automatically** — a one-shot job resumes the run; after a cold boot the engine re-arms pending timers from the durable store (overdue timers resume immediately) |
 | `wait` (signal) | a named external event | any caller invoking `resume(runId)` |
 
+### Parallel approvals — one aggregating node, not two pauses
+
+"Finance **and** legal must both sign off, concurrently" is **one `approval`
+node** with two approver groups and `behavior: 'unanimous'` — not two parallel
+pauses. On entry the node opens a single `sys_approval_request` whose
+`pending_approvers` holds **both** groups (notified concurrently); it stays
+suspended until **every** group has approved (the aggregation / AND), then
+resumes down `approve`. Any one rejection finalizes immediately down `reject`.
+
+```typescript
+{
+  id: 'dual_signoff',
+  type: 'approval',
+  label: 'Finance + Legal Sign-off',
+  config: {
+    approvers: [
+      { type: 'role', value: 'finance' },
+      { type: 'role', value: 'legal' },
+    ],
+    behavior: 'unanimous',   // 'first_response' = any one decides
+    lockRecord: false,
+  },
+}
+```
+
+This is the **aggregating-node** pattern (Camunda multi-instance / Step Functions
+`Map`): the run keeps a single program counter and pauses once, so it needs no
+concurrent-token machinery. Durable pause **inside** a hand-drawn `parallel`
+branch or `loop` iteration — where two unrelated positions pause independently —
+is a separate, larger capability ([ADR-0037](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0037-token-scope-tree-execution.md)
+Track B); the aggregating node covers the common parallel/batch-approval demand
+without it. Worked example: `showcase_invoice_signoff` in the showcase app.
+
 ### Nested pause — pausing inside a subflow
 
 A pausing node inside a `subflow` suspends the **whole chain as linked runs**:

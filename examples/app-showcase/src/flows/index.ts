@@ -832,10 +832,96 @@ export const ResilientSyncFlow = defineFlow({
   ],
 });
 
+/**
+ * Invoice Dual Sign-off — the worked **parallel-approval** example (ADR-0037
+ * Track A: aggregating approval node, no engine-core change).
+ *
+ * "Finance AND legal must both sign off before an invoice is sent" is expressed
+ * as a **single `approval` node** with two approver groups and
+ * `behavior: 'unanimous'`. On entry the node opens ONE `sys_approval_request`
+ * whose `pending_approvers` holds *both* groups — they are notified
+ * concurrently (parallel). The node stays suspended until **every** group has
+ * approved (the aggregation / AND), then resumes down the `approve` edge; any
+ * rejection resumes down `reject`. One node, one suspend/resume, no token tree —
+ * the multi-instance pattern Camunda and Step Functions use for exactly this.
+ *
+ * Decide via the approvals API (never a raw engine `resume`):
+ *   POST /api/v1/automation/showcase_invoice_signoff/runs/{runId}/...  ← no
+ *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'role:finance' }
+ *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'role:legal' }   ← now it continues
+ */
+export const InvoiceDualSignoffFlow = defineFlow({
+  name: 'showcase_invoice_signoff',
+  label: 'Invoice Dual Sign-off (parallel approval)',
+  description: 'On send, requires finance AND legal to both approve via one aggregating approval node — demonstrates parallel approvals without a token tree (ADR-0037 Track A).',
+  type: 'autolaunched',
+  nodes: [
+    {
+      id: 'start',
+      type: 'start',
+      label: 'On Invoice Sent',
+      config: {
+        objectName: 'showcase_invoice',
+        triggerType: 'record-after-update',
+        condition: 'status == "sent" && previous.status != "sent"',
+      },
+    },
+    {
+      id: 'dual_signoff',
+      type: 'approval',
+      label: 'Finance + Legal Sign-off',
+      config: {
+        // Two approver groups, notified in parallel; `unanimous` waits for both.
+        approvers: [
+          { type: 'role', value: 'finance' },
+          { type: 'role', value: 'legal' },
+        ],
+        behavior: 'unanimous',
+        // The invoice keeps flowing through other automations while it waits.
+        lockRecord: false,
+      },
+    },
+    {
+      id: 'notify_cleared',
+      type: 'notify',
+      label: 'Notify: Cleared',
+      config: {
+        topic: 'invoice.signoff',
+        recipients: ['{record.account.owner}'],
+        channels: ['inbox'],
+        severity: 'info',
+        title: 'Invoice cleared: {record.name}',
+        message: 'Invoice "{record.name}" passed finance + legal sign-off and is on its way.',
+        actionUrl: '/showcase_invoice/{record.id}',
+      },
+    },
+    {
+      id: 'flag_held',
+      type: 'update_record',
+      label: 'Flag: Held',
+      config: {
+        objectName: 'showcase_invoice',
+        filter: { id: '{record.id}' },
+        fields: { status: 'draft' },
+      },
+    },
+    { id: 'end_ok', type: 'end', label: 'Sent' },
+    { id: 'end_held', type: 'end', label: 'Held' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'dual_signoff' },
+    { id: 'e2', source: 'dual_signoff', target: 'notify_cleared', label: 'approve' },
+    { id: 'e3', source: 'dual_signoff', target: 'flag_held', label: 'reject' },
+    { id: 'e4', source: 'notify_cleared', target: 'end_ok' },
+    { id: 'e5', source: 'flag_held', target: 'end_held' },
+  ],
+});
+
 export const allFlows = [
   TaskCompletedFlow,
   ReassignWizardFlow,
   BudgetApprovalFlow,
+  InvoiceDualSignoffFlow,
   TaskCompletedSlackFlow,
   TaskAssignedNotifyFlow,
   ScheduledDigestFlow,
