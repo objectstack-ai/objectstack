@@ -42,6 +42,21 @@ export interface ApprovalRequestRow {
   completed_at?: string;
   created_at?: string;
   updated_at?: string;
+  /**
+   * When the request was opened. Alias of `created_at` — the row is created
+   * at submission time. Kept as its own field so inbox clients have a stable
+   * name that survives any future split between row-creation and submission.
+   */
+  submitted_at?: string;
+  // ── Display enrichment (inbox-facing; resolved by the service) ─────
+  /** Human label of the originating flow (e.g. "Project Budget Approval"). */
+  process_label?: string;
+  /** Human label of the approval step / node (e.g. "Manager Review"). */
+  step_label?: string;
+  /** Display name of the target record (its name/title field), when resolvable. */
+  record_title?: string;
+  /** Display name of the submitter (`sys_user.name`), when resolvable. */
+  submitter_name?: string;
 }
 
 /** Audit row. */
@@ -61,6 +76,27 @@ export interface ApprovalDecisionInput {
   decision: 'approve' | 'reject';
   actorId: string;
   comment?: string;
+}
+
+/** Input for recalling (withdrawing) a pending request. */
+export interface ApprovalRecallInput {
+  /** Must be the request's submitter (or a system context). */
+  actorId: string;
+  comment?: string;
+}
+
+/** Result of a recall. */
+export interface ApprovalRecallResult {
+  request: ApprovalRequestRow;
+  /** The suspended flow run this request gated, if any. */
+  runId?: string | null;
+  /**
+   * True when the owning flow run was resumed (down the `reject` branch with
+   * `output.decision = 'recall'`) so it doesn't stay suspended forever. The
+   * engine has no run-cancel primitive yet; the reject edge is the closest
+   * "did not pass" semantics.
+   */
+  resumed?: boolean;
 }
 
 /** Result of a decision that resumes the owning flow when finalised. */
@@ -109,6 +145,13 @@ export interface IApprovalService {
    * the owning flow run down the matching `approve` / `reject` edge.
    */
   decide(requestId: string, input: ApprovalDecisionInput, context: SharingExecutionContext): Promise<ApprovalDecisionResult>;
+
+  /**
+   * Withdraw a pending request. Only the submitter (or a system context) may
+   * recall. Finalises the request as `recalled` and resumes the owning flow
+   * run down the `reject` branch with `output.decision = 'recall'`.
+   */
+  recall(requestId: string, input: ApprovalRecallInput, context: SharingExecutionContext): Promise<ApprovalRecallResult>;
 
   /** Audit trail for a request. */
   listActions(requestId: string, context: SharingExecutionContext): Promise<ApprovalActionRow[]>;

@@ -10,6 +10,8 @@ import type {
   ApprovalActionRow,
   ApprovalDecisionInput,
   ApprovalDecisionResult,
+  ApprovalRecallInput,
+  ApprovalRecallResult,
   ApprovalStatus,
   SharingExecutionContext,
 } from '@objectstack/spec/contracts';
@@ -69,7 +71,27 @@ function csvSplit(raw: unknown): string[] {
   return String(raw).split(',').map(s => s.trim()).filter(Boolean);
 }
 
+/**
+ * Humanize a machine name for display fallback: strips a `flow:` prefix and
+ * title-cases underscore/dash segments (`flow:manager_review` → "Manager
+ * Review"). Used only when no authored label was snapshotted on the row.
+ */
+function prettifyMachineName(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  const base = String(raw).replace(/^flow:/, '').trim();
+  if (!base) return undefined;
+  return base
+    .split(/[_\-\s]+/)
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 function rowFromRequest(row: any): ApprovalRequestRow {
+  // Authored display labels ride the node-config snapshot (`__flowLabel` /
+  // `__nodeLabel`) so they survive without a schema migration; fall back to a
+  // prettified machine name for rows written before labels were captured.
+  const cfg = parseJson<any>(row.node_config_json, undefined);
   return {
     id: String(row.id),
     organization_id: row.organization_id ?? undefined,
@@ -88,6 +110,10 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     completed_at: row.completed_at ?? undefined,
     created_at: row.created_at ?? undefined,
     updated_at: row.updated_at ?? undefined,
+    // The row is created at submission time; expose the stable inbox-facing name.
+    submitted_at: row.created_at ?? undefined,
+    process_label: cfg?.__flowLabel ?? prettifyMachineName(row.process_name),
+    step_label: cfg?.__nodeLabel ?? prettifyMachineName(row.current_step),
   } as any;
 }
 
@@ -291,6 +317,10 @@ export class ApprovalService implements IApprovalService {
       nodeId: string;
       config: ApprovalNodeConfig;
       flowName?: string;
+      /** Authored flow label, snapshotted for inbox display. */
+      flowLabel?: string;
+      /** Authored node label, snapshotted for inbox display. */
+      nodeLabel?: string;
       submitterId?: string | null;
       record?: any;
       organizationId?: string | null;
@@ -316,6 +346,11 @@ export class ApprovalService implements IApprovalService {
     const now = this.clock.now().toISOString();
     const id = uid('areq');
     const processName = `flow:${input.flowName ?? input.nodeId}`;
+    // Display labels ride the config snapshot (no schema migration needed);
+    // `rowFromRequest` surfaces them as `process_label` / `step_label`.
+    const configSnapshot: any = { ...input.config };
+    if (input.flowLabel) configSnapshot.__flowLabel = input.flowLabel;
+    if (input.nodeLabel) configSnapshot.__nodeLabel = input.nodeLabel;
     const row: any = {
       id,
       process_name: processName,
@@ -329,7 +364,7 @@ export class ApprovalService implements IApprovalService {
       payload_json: input.record != null ? JSON.stringify(input.record) : null,
       flow_run_id: input.runId,
       flow_node_id: input.nodeId,
-      node_config_json: JSON.stringify(input.config),
+      node_config_json: JSON.stringify(configSnapshot),
       organization_id: ctxOrg,
       created_at: now,
       updated_at: now,
@@ -463,6 +498,168 @@ export class ApprovalService implements IApprovalService {
     };
   }
 
+  /**
+   * Withdraw a pending request (submitter only). Finalises the row as
+   * `recalled`, releases the record lock (keyed on pending status), mirrors
+   * the status field when configured, and resumes the owning flow run down
+   * the `reject` branch with `output.decision = 'recall'` — the engine has no
+   * run-cancel primitive, and leaving the run suspended forever would leak it.
+   */
+  async recall(
+    requestId: string,
+    input: ApprovalRecallInput,
+    context: SharingExecutionContext,
+  ): Promise<ApprovalRecallResult> {
+    if (!requestId) throw new Error('VALIDATION_FAILED: requestId is required');
+    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+
+    const rawRows = await this.engine.find('sys_approval_request', {
+      where: { id: requestId }, limit: 1, context: SYSTEM_CTX,
+    });
+    const raw: any = Array.isArray(rawRows) ? rawRows[0] : null;
+    if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+    if (raw.status !== 'pending') throw new Error(`INVALID_STATE: request is ${raw.status}`);
+    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(input.actorId)) {
+      throw new Error(`FORBIDDEN: only the submitter may recall this request`);
+    }
+
+    const config = parseJson<ApprovalNodeConfig>(raw.node_config_json, { approvers: [], behavior: 'first_response' } as any);
+    const org = raw.organization_id ?? null;
+    const nodeId: string | null = raw.flow_node_id ?? raw.current_step ?? null;
+    const runId: string | null = raw.flow_run_id ?? null;
+    const now = this.clock.now().toISOString();
+
+    await this.engine.insert('sys_approval_action', {
+      id: uid('aact'), request_id: requestId, organization_id: org,
+      step_name: nodeId, step_index: 0, action: 'recall',
+      actor_id: input.actorId, comment: input.comment ?? null, created_at: now,
+    }, { context: SYSTEM_CTX });
+
+    await this.engine.update('sys_approval_request', {
+      id: requestId, status: 'recalled', pending_approvers: null, completed_at: now, updated_at: now,
+    }, { context: SYSTEM_CTX });
+    if (config.approvalStatusField) {
+      await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'recalled');
+    }
+
+    let resumed = false;
+    if (runId && typeof this.automation?.resume === 'function') {
+      try {
+        await this.automation.resume(runId, {
+          branchLabel: APPROVAL_BRANCH_LABELS.reject,
+          output: { decision: 'recall', requestId },
+        });
+        resumed = true;
+      } catch (err: any) {
+        this.logger?.warn?.('[approvals] resume after recall failed', {
+          request: requestId, run: runId, error: err?.message ?? String(err),
+        });
+      }
+    }
+
+    const fresh = await this.getRequest(requestId, context);
+    return { request: fresh!, runId, resumed };
+  }
+
+  // ── Display enrichment ───────────────────────────────────────
+
+  /**
+   * Resolve the schema-declared display field for an object, when the engine
+   * exposes schema metadata (`getSchema`). Falls back to common title-ish
+   * field names so plain `ApprovalEngine` fakes still enrich sensibly.
+   */
+  private resolveDisplayField(object: string): string | undefined {
+    try {
+      const schema: any = (this.engine as any).getSchema?.(object);
+      const fields = schema?.fields ?? {};
+      const declared = schema?.displayNameField;
+      if (declared && declared !== 'id' && fields[declared]) return declared;
+      for (const cand of ['name', 'title', 'subject', 'label']) {
+        if (fields[cand]) return cand;
+      }
+    } catch { /* schema unavailable — heuristics below still apply */ }
+    return undefined;
+  }
+
+  private static pickTitle(rec: any, displayField?: string): string | undefined {
+    const candidates = displayField
+      ? [displayField, 'name', 'title', 'subject', 'label']
+      : ['name', 'title', 'subject', 'label'];
+    for (const f of candidates) {
+      const v = rec?.[f];
+      if (v != null && String(v).trim() && f !== 'id') return String(v);
+    }
+    return undefined;
+  }
+
+  /**
+   * Attach inbox display fields (`record_title`, `submitter_name`) to rows.
+   * Batched: one query per distinct target object plus one `sys_user` lookup.
+   * Best-effort — a deleted record falls back to the payload snapshot, and a
+   * lookup failure leaves the field unset rather than failing the list.
+   */
+  private async enrichRows(rows: ApprovalRequestRow[]): Promise<void> {
+    if (!rows.length) return;
+
+    // Record titles, batched per object.
+    const byObject = new Map<string, Set<string>>();
+    for (const r of rows) {
+      if (!r.object_name || !r.record_id) continue;
+      let set = byObject.get(r.object_name);
+      if (!set) { set = new Set(); byObject.set(r.object_name, set); }
+      set.add(r.record_id);
+    }
+    const titles = new Map<string, string>();
+    for (const [object, idSet] of byObject) {
+      const ids = Array.from(idSet);
+      const displayField = this.resolveDisplayField(object);
+      try {
+        const recs = await this.engine.find(object, {
+          where: { id: { $in: ids } }, limit: ids.length, context: SYSTEM_CTX,
+        });
+        for (const rec of (recs ?? []) as any[]) {
+          const title = ApprovalService.pickTitle(rec, displayField);
+          if (rec?.id && title) titles.set(`${object} ${rec.id}`, title);
+        }
+      } catch { /* object may be unregistered — payload fallback below */ }
+    }
+
+    // Submitter display names — submitter_id may be a user id or an email.
+    const submitters = Array.from(new Set(rows.map(r => r.submitter_id).filter(Boolean))) as string[];
+    const names = new Map<string, string>();
+    if (submitters.length) {
+      try {
+        const users = await this.engine.find('sys_user', {
+          where: { id: { $in: submitters } }, fields: ['id', 'name', 'email'],
+          limit: submitters.length, context: SYSTEM_CTX,
+        });
+        for (const u of (users ?? []) as any[]) {
+          if (u?.id && (u.name || u.email)) names.set(String(u.id), String(u.name ?? u.email));
+        }
+      } catch { /* best-effort */ }
+      const unresolvedEmails = submitters.filter(s => !names.has(s) && s.includes('@'));
+      if (unresolvedEmails.length) {
+        try {
+          const users = await this.engine.find('sys_user', {
+            where: { email: { $in: unresolvedEmails } }, fields: ['email', 'name'],
+            limit: unresolvedEmails.length, context: SYSTEM_CTX,
+          });
+          for (const u of (users ?? []) as any[]) {
+            if (u?.email && u.name) names.set(String(u.email), String(u.name));
+          }
+        } catch { /* best-effort */ }
+      }
+    }
+
+    for (const r of rows as any[]) {
+      const title = titles.get(`${r.object_name} ${r.record_id}`)
+        ?? ApprovalService.pickTitle(r.payload, undefined);
+      if (title) r.record_title = title;
+      const name = r.submitter_id ? names.get(String(r.submitter_id)) : undefined;
+      if (name) r.submitter_name = name;
+    }
+  }
+
   // ── Read API ─────────────────────────────────────────────────
 
   async listRequests(
@@ -513,6 +710,7 @@ export class ApprovalService implements IApprovalService {
         });
       }
     }
+    await this.enrichRows(list);
     return list;
   }
 
@@ -524,7 +722,10 @@ export class ApprovalService implements IApprovalService {
     const rows = await this.engine.find('sys_approval_request', {
       where, limit: 1, context: SYSTEM_CTX,
     });
-    return Array.isArray(rows) && rows[0] ? rowFromRequest(rows[0]) : null;
+    if (!Array.isArray(rows) || !rows[0]) return null;
+    const row = rowFromRequest(rows[0]);
+    await this.enrichRows([row]);
+    return row;
   }
 
   async listActions(requestId: string, context: SharingExecutionContext): Promise<ApprovalActionRow[]> {

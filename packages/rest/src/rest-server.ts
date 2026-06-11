@@ -4370,6 +4370,37 @@ export class RestServer {
         decisionRoute('approve');
         decisionRoute('reject');
 
+        // Recall — submitter withdraws a pending request. Mirrors the decision
+        // routes' error mapping; the service enforces submitter-only access.
+        this.routeManager.register({
+            method: 'POST',
+            path: `${dataPath}/approvals/requests/:id/recall`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    const context = await this.resolveExecCtx(environmentId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+                    const svc = await resolveService(environmentId);
+                    if (!svc || typeof svc.recall !== 'function') return respond501(res);
+                    const body = req.body ?? {};
+                    try {
+                        const out = await svc.recall(req.params.id, {
+                            actorId: body.actorId ?? body.actor_id ?? context?.userId,
+                            comment: body.comment,
+                        }, context ?? {});
+                        res.json(out);
+                    } catch (err: any) {
+                        if (handleApprovalError(res, err)) return;
+                        throw err;
+                    }
+                } catch (error: any) {
+                    logError('[REST] recall approval error:', error);
+                    res.status(500).json({ code: 'APPROVAL_RECALL_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                }
+            },
+            metadata: { summary: 'Recall (withdraw) an approval request', tags: ['approvals'] },
+        });
+
         this.routeManager.register({
             method: 'GET',
             path: `${dataPath}/approvals/requests/:id/actions`,

@@ -97,6 +97,12 @@ export function registerApprovalNode(
       if (!object) return { success: false, error: `Approval node '${node.id}': no target object in context` };
       if (!recordId) return { success: false, error: `Approval node '${node.id}': no record id in $record` };
 
+      // Flow identity comes from engine-seeded variables (`$flowName` /
+      // `$flowLabel`) so the request row can carry a human-readable origin;
+      // `context.flowName` is a legacy fallback for direct callers.
+      const flowName = (variables.get('$flowName') as string | undefined) ?? context?.flowName;
+      const flowLabel = variables.get('$flowLabel') as string | undefined;
+
       try {
         const request = await service.openNodeRequest({
           object,
@@ -104,7 +110,9 @@ export function registerApprovalNode(
           runId: String(runId),
           nodeId: node.id,
           config,
-          flowName: context?.flowName,
+          flowName,
+          flowLabel,
+          nodeLabel: typeof node.label === 'string' ? node.label : undefined,
           submitterId: context?.userId ?? null,
           record,
           organizationId: context?.organizationId ?? context?.tenantId ?? null,

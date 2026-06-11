@@ -863,6 +863,11 @@ export class AutomationEngine implements IAutomationService {
         // Expose the run id to executors (ADR-0019): a pausing node (e.g. Approval)
         // reads `$runId` to map its external state back to this run for resume.
         variables.set('$runId', runId);
+        // Expose flow identity to executors so externalized state (e.g. an
+        // approval request row) can carry a human-readable origin. Captured in
+        // the variable snapshot, so still present after a suspend/resume.
+        variables.set('$flowName', flowName);
+        variables.set('$flowLabel', flow.label ?? flowName);
         const startedAt = new Date().toISOString();
         const steps: StepLogEntry[] = [];
 

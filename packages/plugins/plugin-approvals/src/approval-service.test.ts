@@ -290,6 +290,98 @@ describe('ApprovalService (node era)', () => {
   it('getRequest: returns null for an unknown id', async () => {
     expect(await svc.getRequest('nope', SYS)).toBeNull();
   });
+
+  // ── recall ──────────────────────────────────────────────────────
+
+  it('recall: submitter withdraws a pending request', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const out = await svc.recall(req.id, { actorId: 'u1', comment: 'changed my mind' }, CTX);
+    expect(out.request.status).toBe('recalled');
+    expect(out.request.completed_at).toBeTruthy();
+    expect(out.request.pending_approvers).toEqual([]);
+    const actions = await svc.listActions(req.id, SYS);
+    expect(actions.map(a => a.action)).toEqual(['submit', 'recall']);
+    expect(actions[1].comment).toBe('changed my mind');
+  });
+
+  it('recall: blocks a non-submitter in a non-system context', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await expect(svc.recall(req.id, { actorId: 'u9' }, { roles: [], permissions: [] } as any))
+      .rejects.toThrow(/FORBIDDEN/);
+  });
+
+  it('recall: rejects a recall on a non-pending request', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    await expect(svc.recall(req.id, { actorId: 'u1' }, SYS)).rejects.toThrow(/INVALID_STATE/);
+  });
+
+  it('recall: resumes the owning run down the reject branch with decision=recall', async () => {
+    const resumed: any[] = [];
+    svc.attachAutomation({ async resume(runId, signal) { resumed.push({ runId, signal }); } });
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const out = await svc.recall(req.id, { actorId: 'u1' }, CTX);
+    expect(out.resumed).toBe(true);
+    expect(resumed[0]).toMatchObject({
+      runId: 'run_1',
+      signal: { branchLabel: 'reject', output: { decision: 'recall' } },
+    });
+  });
+
+  it('recall: mirrors `recalled` onto the business record when configured', async () => {
+    engine._tables['opportunity'] = [{ id: 'opp1', amount: 100 }];
+    const req = await svc.openNodeRequest(openInput(['u9'], {}, { approvalStatusField: 'approval_status' }), CTX);
+    await svc.recall(req.id, { actorId: 'u1' }, CTX);
+    expect(engine._tables['opportunity'][0].approval_status).toBe('recalled');
+  });
+
+  // ── inbox display fields ────────────────────────────────────────
+
+  it('rows expose submitted_at as an alias of created_at', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    expect(req.submitted_at).toBeTruthy();
+    expect(req.submitted_at).toBe(req.created_at);
+    const listed = await svc.listRequests({ status: 'pending' }, SYS);
+    expect(listed[0].submitted_at).toBe(listed[0].created_at);
+  });
+
+  it('rows carry authored flow/node labels when provided', async () => {
+    const req = await svc.openNodeRequest(
+      openInput(['u9'], { flowLabel: 'Deal Approval', nodeLabel: 'Manager Review' }), CTX,
+    );
+    expect(req.process_label).toBe('Deal Approval');
+    expect(req.step_label).toBe('Manager Review');
+  });
+
+  it('rows fall back to prettified machine names when labels are absent', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    expect(req.process_label).toBe('Deal Approval'); // from `flow:deal_approval`
+    expect(req.step_label).toBe('Approve Step');     // from `approve_step`
+  });
+
+  it('listRequests enriches record_title and submitter_name', async () => {
+    engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
+    engine._tables['sys_user'] = [{ id: 'u1', name: 'Ada Lovelace', email: 'ada@example.com' }];
+    await svc.openNodeRequest(openInput(['u9']), CTX); // submitter_id = u1 (CTX.userId)
+    const rows = await svc.listRequests({ status: 'pending' }, SYS);
+    expect(rows[0].record_title).toBe('Acme Renewal');
+    expect(rows[0].submitter_name).toBe('Ada Lovelace');
+  });
+
+  it('enrichment falls back to the payload snapshot when the record is gone', async () => {
+    await svc.openNodeRequest(
+      openInput(['u9'], { record: { id: 'opp1', name: 'Snapshot Title', amount: 1 } }), CTX,
+    );
+    const rows = await svc.listRequests({ status: 'pending' }, SYS);
+    expect(rows[0].record_title).toBe('Snapshot Title');
+  });
+
+  it('enrichment resolves an email submitter via sys_user.email', async () => {
+    engine._tables['sys_user'] = [{ id: 'u7', name: 'Grace Hopper', email: 'grace@example.com' }];
+    await svc.openNodeRequest(openInput(['u9'], { submitterId: 'grace@example.com' }), CTX);
+    const rows = await svc.listRequests({ status: 'pending' }, SYS);
+    expect(rows[0].submitter_name).toBe('Grace Hopper');
+  });
 });
 
 describe('record-lock hook (node era)', () => {

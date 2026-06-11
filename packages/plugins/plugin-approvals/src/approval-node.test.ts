@@ -122,6 +122,20 @@ describe('Approval node bridge (ADR-0019)', () => {
     expect(suspended[0]).toMatchObject({ nodeId: 'approve_step', correlation: requests[0].id });
   });
 
+  it('carries the flow name + authored labels onto the request row', async () => {
+    registerDecisionFlow(automation, [{ type: 'user', value: 'u1' }]);
+    await automation.execute('deal_approval', {
+      object: 'crm_deal', record: { id: 'd1', amount: 100 }, userId: 'submitter',
+    });
+    const [raw] = await fake.find('sys_approval_request', { where: { status: 'pending' } });
+    // Engine-seeded `$flowName` (not the node id) names the source…
+    expect(raw.process_name).toBe('flow:deal_approval');
+    // …and authored labels ride the config snapshot for inbox display.
+    const req = (await service.listRequests({ status: 'pending' }, { isSystem: true } as any))[0];
+    expect(req.process_label).toBe('Deal Approval');
+    expect(req.step_label).toBe('Manager Approval');
+  });
+
   it('resumes down the approve branch on approval', async () => {
     registerDecisionFlow(automation, [{ type: 'user', value: 'u1' }]);
     const paused = await automation.execute('deal_approval', {
