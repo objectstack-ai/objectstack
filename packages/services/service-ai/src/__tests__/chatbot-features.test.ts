@@ -566,7 +566,7 @@ describe('AgentRuntime', () => {
 
       expect(metadataService.get).toHaveBeenCalledWith('agent', 'data_chat');
       expect(agent?.name).toBe('data_chat');
-      expect(agent?.role).toBe('Business Data Analyst');
+      expect(agent?.role).toBe('Business Application Assistant');
     });
 
     it('should return undefined for unknown agent', async () => {
@@ -587,7 +587,7 @@ describe('AgentRuntime', () => {
       const messages = runtime.buildSystemMessages(DATA_CHAT_AGENT);
       expect(messages).toHaveLength(1);
       expect(messages[0].role).toBe('system');
-      expect(messages[0].content).toContain('helpful data assistant');
+      expect(messages[0].content).toContain('assistant for this business application platform');
     });
 
     it('should include context when provided', () => {
@@ -625,7 +625,7 @@ describe('AgentRuntime', () => {
     it('should derive model config from agent', () => {
       const options = runtime.buildRequestOptions(DATA_CHAT_AGENT, []);
       expect(options.model).toBe('gpt-4');
-      expect(options.temperature).toBe(0.3);
+      expect(options.temperature).toBe(0.2);
       expect(options.maxTokens).toBe(4096);
     });
 
@@ -667,7 +667,7 @@ describe('AgentRuntime', () => {
       ]);
       const agents = await runtime.listAgents();
       expect(agents).toHaveLength(2);
-      expect(agents[0]).toEqual({ name: 'data_chat', label: 'Data Assistant', role: 'Business Data Analyst' });
+      expect(agents[0]).toEqual({ name: 'data_chat', label: 'Assistant', role: 'Business Application Assistant' });
       expect(agents[1]).toEqual({ name: 'metadata_assistant', label: 'Metadata Assistant', role: 'Schema Architect' });
     });
 
@@ -998,14 +998,14 @@ describe('Agent Routes', () => {
 describe('DATA_CHAT_AGENT', () => {
   it('should be a valid agent definition', () => {
     expect(DATA_CHAT_AGENT.name).toBe('data_chat');
-    expect(DATA_CHAT_AGENT.role).toBe('Business Data Analyst');
+    expect(DATA_CHAT_AGENT.role).toBe('Business Application Assistant');
     expect(DATA_CHAT_AGENT.active).toBe(true);
     expect(DATA_CHAT_AGENT.visibility).toBe('global');
   });
 
   it('should reference the data_explorer skill (capability bundle moved to skill metadata)', () => {
     expect(DATA_CHAT_AGENT.tools ?? []).toHaveLength(0);
-    expect(DATA_CHAT_AGENT.skills).toEqual(['data_explorer', 'actions_executor']);
+    expect(DATA_CHAT_AGENT.skills).toEqual(['data_explorer', 'actions_executor', 'metadata_authoring', 'solution_design']);
   });
 
   it('should have guardrails configured', () => {
