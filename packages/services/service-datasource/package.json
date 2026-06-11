@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-datasource",
-  "version": "9.0.0",
+  "version": "9.0.1",
   "license": "Apache-2.0",
   "description": "The datasource service (ADR-0015): external-table federation (introspect/draft/import/validate) + runtime UI datasource lifecycle (list/test/create/update/remove + REST routes). Open-source mechanism; the tier line falls on which ICryptoProvider / driver factory a host injects.",
   "type": "module",

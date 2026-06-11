@@ -1,5 +1,7 @@
 # @objectstack/console
 
+## 9.0.1
+
 ## 9.0.0
 
 ## 8.0.1

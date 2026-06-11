@@ -1,5 +1,13 @@
 # @objectstack/example-crm
 
+## 4.0.41
+
+### Patch Changes
+
+- Updated dependencies [1817845]
+  - @objectstack/spec@9.0.1
+  - @objectstack/runtime@9.0.1
+
 ## 4.0.40
 
 ### Patch Changes

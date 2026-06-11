@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-trigger-record-change",
-  "version": "9.0.0",
+  "version": "9.0.1",
   "license": "Apache-2.0",
   "description": "Record-change flow trigger for ObjectStack — auto-launches flows on object insert/update/delete via ObjectQL lifecycle hooks (ADR-0018)",
   "main": "dist/index.js",

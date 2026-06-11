@@ -1,5 +1,13 @@
 # @objectstack/driver-mongodb
 
+## 9.0.1
+
+### Patch Changes
+
+- Updated dependencies [1817845]
+  - @objectstack/spec@9.0.1
+  - @objectstack/core@9.0.1
+
 ## 9.0.0
 
 ### Patch Changes

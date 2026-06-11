@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-settings",
-  "version": "9.0.0",
+  "version": "9.0.1",
   "license": "Apache-2.0",
   "description": "Settings service for ObjectStack — manifest registry + K/V resolver (OS_* env > Tenant > User > Default) + REST routes. See ADR-0007.",
   "type": "module",
