@@ -163,11 +163,16 @@ export interface IAnalyticsService {
      * @param dataset - The dataset definition (saved or inline draft).
      * @param selection - Dimensions/measures to project + runtime directives.
      * @param context - The request's ExecutionContext (tenant/RLS, see {@link query}).
+     * @param options - ADR-0037 P3: `previewDrafts` evaluates the selection over
+     *   the base object's PENDING seed-draft rows (when one exists) so a draft
+     *   preview charts real numbers before publish. Same principal, reads only;
+     *   implementations without draft support ignore it.
      */
     queryDataset?(
         dataset: Dataset,
         selection: DatasetSelection,
         context?: ExecutionContext,
+        options?: { previewDrafts?: boolean },
     ): Promise<AnalyticsResult>;
 }
 

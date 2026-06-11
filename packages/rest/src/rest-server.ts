@@ -3648,12 +3648,18 @@ export class RestServer {
                         });
                     }
 
+                    // ADR-0037 P3 — draft data preview: the canvas / preview
+                    // pages pass the flag so (a) the dataset lookup sees
+                    // draft-overlaid definitions and (b) the selection runs
+                    // over the pending seed draft's rows when one exists.
+                    const previewDrafts = body.previewDrafts === true || req.query?.preview === 'draft';
+
                     // Resolve the dataset definition: inline draft (Studio
                     // preview) or a saved dataset by name.
                     let dataset = body.dataset;
                     if (!dataset && body.datasetName) {
                         const p = await this.resolveProtocol(environmentId, req);
-                        const items = await (p as any).getMetaItems?.({ type: 'dataset' }).catch(() => null);
+                        const items = await (p as any).getMetaItems?.({ type: 'dataset', previewDrafts }).catch(() => null);
                         const list = Array.isArray(items?.items) ? items.items : (Array.isArray(items) ? items : []);
                         dataset = list.find((d: any) => d?.name === body.datasetName);
                         if (!dataset) {
@@ -3677,7 +3683,12 @@ export class RestServer {
                         });
                     }
 
-                    const result = await svc.queryDataset(dataset, selection, context ?? undefined);
+                    const result = await svc.queryDataset(
+                        dataset,
+                        selection,
+                        context ?? undefined,
+                        previewDrafts ? { previewDrafts: true } : undefined,
+                    );
                     res.json(result);
                 } catch (error: any) {
                     const msg = String(error?.message ?? error ?? '');

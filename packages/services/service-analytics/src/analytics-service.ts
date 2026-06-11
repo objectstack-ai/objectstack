@@ -19,6 +19,7 @@ import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
 import { DatasetExecutor } from './dataset-executor.js';
 import { resolveDimensionLabels, type DimensionLabelDeps } from './dimension-labels.js';
+import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
 
 /**
  * Configuration for AnalyticsService.
@@ -101,6 +102,20 @@ export interface AnalyticsServiceConfig {
    * by the plugin from the `data` engine; omit to keep raw values.
    */
   labelResolver?: DimensionLabelDeps;
+
+  /**
+   * ADR-0037 Phase 3 — draft data preview. Resolve the PENDING `seed` draft
+   * rows for an object (returns null when the object has no pending seed).
+   * When provided and `queryDataset` is called with `previewDrafts`, the
+   * selection is evaluated over these rows in memory instead of the engine —
+   * the Live Canvas charts real numbers from the drafted sample data, and
+   * because publish materializes the SAME seed, the numbers are continuous
+   * across the publish boundary. Reads only; never touches physical tables.
+   */
+  draftRowsResolver?: (
+    objectName: string,
+    context?: ExecutionContext,
+  ) => Promise<Record<string, unknown>[] | null>;
 }
 
 /**
@@ -142,6 +157,8 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly relationshipResolver?: RelationshipResolver;
   /** Optional dimension display-label resolver (select options / lookup names). */
   private readonly labelResolver?: DimensionLabelDeps;
+  /** ADR-0037 P3: pending-seed row resolver for draft data preview. */
+  private readonly draftRowsResolver?: AnalyticsServiceConfig['draftRowsResolver'];
   readonly cubeRegistry: CubeRegistry;
   private readonly logger: Logger;
 
@@ -157,6 +174,7 @@ export class AnalyticsService implements IAnalyticsService {
     this.readScopeProvider = config.getReadScope;
     this.relationshipResolver = config.relationshipResolver;
     this.labelResolver = config.labelResolver;
+    this.draftRowsResolver = config.draftRowsResolver;
 
     // Compile + register pre-defined datasets (ADR-0021).
     if (config.datasets) {
@@ -341,9 +359,37 @@ export class AnalyticsService implements IAnalyticsService {
     dataset: Dataset,
     selection: DatasetSelection,
     context?: ExecutionContext,
+    options?: { previewDrafts?: boolean },
   ): Promise<AnalyticsResult> {
     const compiled = this.registerDataset(dataset);
     this.logger.debug(`[Analytics] queryDataset "${dataset.name}" (object=${dataset.object}, include=${(dataset.include ?? []).join(',') || '—'})`);
+
+    // ── ADR-0037 P3 — draft data preview ────────────────────────────────────
+    // When the request renders the as-if-published world AND the base object
+    // has a PENDING seed draft, evaluate the selection over the seed's rows in
+    // memory (a query-evaluating proxy feeds the unchanged DatasetExecutor, so
+    // measure filters / compareTo / derived measures all behave identically).
+    // No pending seed → fall through to the real engine: published objects
+    // keep charting live data even inside a preview.
+    if (options?.previewDrafts && this.draftRowsResolver) {
+      let seedRows: Record<string, unknown>[] | null = null;
+      try {
+        seedRows = await this.draftRowsResolver(dataset.object, context);
+      } catch (e) {
+        this.logger.warn(`[Analytics] draft preview resolver failed for "${dataset.object}" — falling back to live data: ${String((e as Error)?.message ?? e)}`);
+      }
+      if (seedRows) {
+        this.logger.debug(`[Analytics] queryDataset "${dataset.name}" → preview over ${seedRows.length} drafted seed row(s)`);
+        const previewService = {
+          query: async (q: AnalyticsQuery) => evaluateAnalyticsQueryOverRows(q, compiled.cube, seedRows!),
+        } as IAnalyticsService;
+        const previewResult = await new DatasetExecutor(previewService).execute(compiled, selection, context);
+        // Label resolution is skipped on purpose: drafted seed rows reference
+        // lookups by NAME (the seed convention), which already reads well.
+        return previewResult;
+      }
+    }
+
     const result = await new DatasetExecutor(this).execute(compiled, selection, context);
 
     // ADR-0021 — resolve grouped dimension values to human display labels

@@ -335,6 +335,45 @@ export class AnalyticsServicePlugin implements Plugin {
       },
     };
 
+    // ADR-0037 P3 — draft data preview: resolve the PENDING seed draft's rows
+    // for an object via the kernel protocol (state:'draft' read — a published
+    // seed's rows are already in the real table and must NOT overlay). Lazy
+    // service lookup so plugin order doesn't matter; null ⇒ no pending seed ⇒
+    // queryDataset falls through to live data.
+    const draftRowsResolver = async (objectName: string): Promise<Record<string, unknown>[] | null> => {
+      type ProtocolLike = {
+        getMetaItems?(req: { type: string; previewDrafts?: boolean }): Promise<unknown>;
+        getMetaItem?(req: { type: string; name: string; state?: string }): Promise<unknown>;
+      };
+      let protocol: ProtocolLike | undefined;
+      try {
+        protocol = ctx.getService<ProtocolLike>('protocol');
+      } catch { return null; }
+      if (!protocol?.getMetaItems || !protocol.getMetaItem) return null;
+      const res = await protocol.getMetaItems({ type: 'seed', previewDrafts: true }).catch(() => null);
+      const list = Array.isArray(res)
+        ? res
+        : (res && typeof res === 'object' && Array.isArray((res as { items?: unknown[] }).items)
+          ? (res as { items: unknown[] }).items
+          : []);
+      const rows: Record<string, unknown>[] = [];
+      let pending = false;
+      for (const entry of list) {
+        const body = ((entry as { item?: unknown })?.item ?? entry) as { name?: string; object?: string } | null;
+        if (!body?.name || body.object !== objectName) continue;
+        // Only a PENDING draft row qualifies; getMetaItem({state:'draft'})
+        // throws no_draft when the seed is already published.
+        const draft = await protocol.getMetaItem({ type: 'seed', name: body.name, state: 'draft' }).catch(() => null);
+        const draftBody = (draft as { item?: { records?: unknown[] } } | null)?.item;
+        if (!draftBody) continue;
+        pending = true;
+        for (const r of Array.isArray(draftBody.records) ? draftBody.records : []) {
+          if (r && typeof r === 'object') rows.push(r as Record<string, unknown>);
+        }
+      }
+      return pending ? rows : null;
+    };
+
     const config: AnalyticsServiceConfig = {
       cubes: this.options.cubes,
       logger: ctx.logger,
@@ -346,6 +385,7 @@ export class AnalyticsServicePlugin implements Plugin {
       getAllowedRelationships: this.options.getAllowedRelationships,
       relationshipResolver,
       labelResolver,
+      draftRowsResolver,
     };
 
     if (autoBridgedReadScope) {
