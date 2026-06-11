@@ -945,85 +945,18 @@ export default class Serve extends Command {
         }
       }
 
-      // 5. Runtime-config signal.
+      // 5 / 5b / 5b-ii — REMOVED (ADR-0006 Phase 4, cloud ADR-0007 ⑤).
       //
-      // The built-in `RuntimeConfigPlugin` (auto-registered below at
-      // step 5b-ii) responds to `GET /api/v1/runtime/config` with
-      // `{ singleEnvironment, defaultOrgId, defaultEnvironmentId }` so
-      // external UI consumers can discover the runtime shape. Cloud /
-      // multi-environment hosts ship their own runtime-config plugin
-      // in a separate distribution; if the user config carries one
-      // already we skip injecting the default one further down.
-
-      // 5b. Auto-register MarketplaceProxyPlugin so the runtime console's
-      // marketplace browse UI works in `objectstack dev` without manually
-      // wiring the plugin into every user's objectstack.config.ts.
-      //
-      // The default control-plane URL is the public ObjectStack cloud —
-      // users get a working marketplace out of the box. Override with
-      // OS_CLOUD_URL=<your-cloud>, or opt out with OS_CLOUD_URL=off
-      // / =local for fully air-gapped setups.
-      const hasMarketplaceProxy = plugins.some(
-        (p: any) => p?.name === 'com.objectstack.runtime.marketplace-proxy'
-          || p?.constructor?.name === 'MarketplaceProxyPlugin'
-      );
-      if (!hasMarketplaceProxy) {
-        try {
-          const runtimePkg = '@objectstack/runtime';
-          const { MarketplaceProxyPlugin, MarketplaceInstallLocalPlugin, resolveCloudUrl } = await import(/* webpackIgnore: true */ runtimePkg);
-          const effectiveCloudUrl = (typeof resolveCloudUrl === 'function'
-            ? resolveCloudUrl()
-            : (process.env.OS_CLOUD_URL?.trim() || 'https://cloud.objectos.ai')) as string;
-          if (effectiveCloudUrl) {
-            await kernel.use(new MarketplaceProxyPlugin({ controlPlaneUrl: effectiveCloudUrl }));
-            trackPlugin('MarketplaceProxy');
-            // Pair the catalog proxy with the install-local handler. The two
-            // share the same /api/v1/marketplace prefix; the proxy delegates
-            // /install-local to this plugin (see proxy `next()` check).
-            try {
-              await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: effectiveCloudUrl }));
-              trackPlugin('MarketplaceInstallLocal');
-            } catch (err: any) {
-              console.warn(chalk.yellow(`  ⚠ MarketplaceInstallLocalPlugin auto-inject failed: ${err?.message ?? err}`));
-            }
-            if (!process.env.OS_CLOUD_URL) {
-              console.log(chalk.dim(`  · Marketplace pointed at default cloud (${effectiveCloudUrl}). Override with OS_CLOUD_URL, or disable with OS_CLOUD_URL=off.`));
-            }
-          }
-          // else: user disabled cloud via OS_CLOUD_URL=off/local — skip.
-        } catch (err: any) {
-          console.warn(chalk.yellow(`  ⚠ MarketplaceProxyPlugin auto-inject failed: ${err?.message ?? err}`));
-        }
-      }
-
-      // 5b-ii. Auto-register RuntimeConfigPlugin so the Console SPA (and
-      // any external UI consumer) can fetch `/api/v1/runtime/config` at
-      // boot. Without it the SPA 404s on the endpoint, falls back to
-      // defaults (installLocal:false), and the marketplace Install
-      // button prompts "install to cloud" instead of installing into
-      // the local `objectstack dev` runtime.
-      //
-      // For a vanilla user stack (objectstack dev) this runtime IS the
-      // install target: cloudUrl='' (stay on same origin so the SPA hits
-      // the proxied marketplace) and installLocal=true.
-      const hasRuntimeConfig = plugins.some(
-        (p: any) => p?.name === 'com.objectstack.runtime.runtime-config'
-          || p?.constructor?.name === 'RuntimeConfigPlugin'
-      );
-      if (!hasRuntimeConfig) {
-        try {
-          const runtimePkg = '@objectstack/runtime';
-          const { RuntimeConfigPlugin } = await import(/* webpackIgnore: true */ runtimePkg);
-          await kernel.use(new RuntimeConfigPlugin({
-            controlPlaneUrl: '',
-            singleEnvironment: true,
-            installLocal: true,
-          }));
-          trackPlugin('RuntimeConfig');
-        } catch (err: any) {
-          console.warn(chalk.yellow(`  ⚠ RuntimeConfigPlugin auto-inject failed: ${err?.message ?? err}`));
-        }
-      }
+      // The CLI used to auto-inject MarketplaceProxyPlugin,
+      // MarketplaceInstallLocalPlugin and RuntimeConfigPlugin from
+      // `@objectstack/runtime` here. Those were duplicates of the canonical
+      // cloud implementations and are deleted from the framework in this
+      // phase: marketplace browse/install and the runtime-config endpoint
+      // are cloud-distribution features (`@objectstack/objectos-runtime`),
+      // wired explicitly by hosts that want them (see the cloud repo's
+      // apps/objectos-ee config for the single-env wiring). A vanilla
+      // `objectstack dev` no longer mounts a marketplace; the Console SPA
+      // falls back to its defaults when `/api/v1/runtime/config` is absent.
 
       // 5c. Auto-register PlatformObjectsPlugin so platform-default
       // translation bundles (Setup App + metadata-type configuration
