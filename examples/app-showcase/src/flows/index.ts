@@ -918,6 +918,100 @@ export const InvoiceDualSignoffFlow = defineFlow({
 });
 
 /**
+ * Project Escalation — the worked **composite** example: several constructs
+ * nested in one realistic flow, where every other showcase flow demos one
+ * construct in isolation. When a project's health turns red:
+ *
+ *   decision (critical budget?)
+ *     ├─ critical → parallel { alert owner ∥ alert exec }  →  try/catch {
+ *     │     push to the incident system, catch → log the failure }
+ *     └─ normal  → a single owner notification
+ *   → converge → end
+ *
+ * It exercises construct **interactions** (parallel + try/catch under a decision
+ * branch, converging edges) that single-construct flows don't — and runs
+ * synchronously (no pause), so it completes in one pass and is fully visible in
+ * the Runs panel with nested step folding.
+ */
+export const ProjectEscalationFlow = defineFlow({
+  name: 'showcase_project_escalation',
+  label: 'Project Escalation (composite)',
+  description: 'On health → red, branches on severity then alerts in parallel and pushes to an incident system with try/catch — demonstrates nested construct composition.',
+  type: 'autolaunched',
+  nodes: [
+    {
+      id: 'start',
+      type: 'start',
+      label: 'On Health Red',
+      config: {
+        objectName: 'showcase_project',
+        triggerType: 'record-after-update',
+        condition: 'health == "red" && previous.health != "red"',
+      },
+    },
+    { id: 'triage', type: 'decision', label: 'Critical budget?' },
+    {
+      id: 'alert',
+      type: 'parallel',
+      label: 'Alert in parallel',
+      config: {
+        branches: [
+          {
+            name: 'Owner',
+            nodes: [{ id: 'alert_owner', type: 'script', label: 'Alert Owner', config: { actionType: 'email', inputs: { to: '{record.owner}', subject: '🔴 Critical: {record.name}' } } }],
+            edges: [],
+          },
+          {
+            name: 'Exec',
+            nodes: [{ id: 'alert_exec', type: 'script', label: 'Alert Exec', config: { actionType: 'email', inputs: { to: 'exec@example.com', subject: '🔴 Critical project: {record.name}' } } }],
+            edges: [],
+          },
+        ],
+      },
+    },
+    {
+      id: 'push_incident',
+      type: 'try_catch',
+      label: 'Push to incident system',
+      config: {
+        retry: { maxRetries: 2, retryDelayMs: 500, backoffMultiplier: 2 },
+        errorVariable: '$error',
+        try: {
+          nodes: [{ id: 'push', type: 'http_request', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', body: { project: '{record.id}', severity: 'critical' } } }],
+          edges: [],
+        },
+        catch: {
+          nodes: [{ id: 'log_fail', type: 'notify', label: 'Log push failure', config: { topic: 'project.escalation', recipients: ['admin@objectos.ai'], channels: ['inbox'], severity: 'warning', title: 'Incident push failed: {record.name}', message: 'Could not reach the incident system: {$error.message}' } }],
+          edges: [],
+        },
+      },
+    },
+    {
+      id: 'notify_normal',
+      type: 'notify',
+      label: 'Notify Owner',
+      config: { topic: 'project.escalation', recipients: ['{record.owner}'], channels: ['inbox'], severity: 'info', title: 'Project needs attention: {record.name}', message: 'Health dropped to red — please review.' },
+    },
+    {
+      id: 'converge',
+      type: 'notify',
+      label: 'Escalation Handled',
+      config: { topic: 'project.escalation', recipients: ['{record.owner}'], channels: ['inbox'], severity: 'info', title: 'Escalation handled: {record.name}', message: 'The red-health escalation has been processed.' },
+    },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'triage' },
+    { id: 'e2', source: 'triage', target: 'alert', label: 'critical', condition: 'budget > 200000' },
+    { id: 'e3', source: 'triage', target: 'notify_normal', label: 'normal', condition: 'budget <= 200000' },
+    { id: 'e4', source: 'alert', target: 'push_incident' },
+    { id: 'e5', source: 'push_incident', target: 'converge' },
+    { id: 'e6', source: 'notify_normal', target: 'converge' },
+    { id: 'e7', source: 'converge', target: 'end' },
+  ],
+});
+
+/**
  * One Task Sign-off — a reusable per-item **approval subflow**, invoked once
  * per task by {@link ReleaseSignoffFlow}'s `map` node. The mapped task is
  * exposed to this subflow as its record, so the `approval` node opens against
@@ -1036,4 +1130,5 @@ export const allFlows = [
   BatchRemindersFlow,
   FanOutNotifyFlow,
   ResilientSyncFlow,
+  ProjectEscalationFlow,
 ];
