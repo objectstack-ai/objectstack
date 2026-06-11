@@ -749,4 +749,45 @@ describe('InMemoryDriver', () => {
       expect(second).not.toBe(first);
     });
   });
+
+  describe('aggregate() — QueryAST shape (analytics fallback path)', () => {
+    let driver: InMemoryDriver;
+    const tbl = 'expenses';
+
+    beforeEach(async () => {
+      driver = new InMemoryDriver({});
+      await driver.connect();
+      await driver.create(tbl, { id: '1', category: 'travel', amount: 100 });
+      await driver.create(tbl, { id: '2', category: 'travel', amount: 50 });
+      await driver.create(tbl, { id: '3', category: 'meals', amount: 30 });
+    });
+
+    it('accepts the engine AST ({groupBy, aggregations}) and returns grouped sums', async () => {
+      const rows = await driver.aggregate(tbl, {
+        object: tbl,
+        groupBy: ['category'],
+        aggregations: [{ function: 'sum', field: 'amount', alias: 'amount' }],
+      } as any);
+      const byCat = Object.fromEntries(rows.map((r: any) => [r.category, r.amount]));
+      expect(byCat).toEqual({ travel: 150, meals: 30 });
+    });
+
+    it('AST with no groupBy returns a single total row; where filters first', async () => {
+      const rows = await driver.aggregate(tbl, {
+        object: tbl,
+        where: { category: 'travel' },
+        aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }, { function: 'count', field: '*', alias: 'count' }],
+      } as any);
+      expect(rows).toEqual([{ total: 150, count: 2 }]);
+    });
+
+    it('still accepts a real MongoDB pipeline array (Mingo passthrough)', async () => {
+      const rows = await driver.aggregate(tbl, [
+        { $match: { category: 'travel' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ]);
+      expect((rows[0] as any).total).toBe(150);
+    });
+  });
+
 });

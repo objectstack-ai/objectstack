@@ -625,13 +625,37 @@ export class InMemoryDriver implements IDataDriver {
    *   { $group: { _id: null, avgPrice: { $avg: '$price' } } }
    * ]);
    */
-  async aggregate(object: string, pipeline: Record<string, any>[], options?: DriverOptions): Promise<any[]> {
+  async aggregate(object: string, pipeline: Record<string, any>[] | QueryAST, options?: DriverOptions): Promise<any[]> {
+    // ObjectQL's engine calls driver.aggregate(object, AST) with the SAME
+    // QueryAST shape find() consumes ({ where, groupBy, aggregations }) — not a
+    // MongoDB pipeline. Passing that object into Mingo's Aggregator crashed
+    // with "this[#pipeline].map is not a function" (the analytics fallback path
+    // on in-memory environments). Detect the AST shape and serve it through the
+    // SAME filtering + performAggregation path find() uses; a real pipeline
+    // array keeps the Mingo behavior unchanged.
+    if (!Array.isArray(pipeline)) {
+      const query = pipeline as QueryAST;
+      this.logger.debug('Aggregate operation (QueryAST)', {
+        object,
+        groupBy: (query as any).groupBy,
+        aggregations: (query as any).aggregations?.length ?? 0,
+      });
+      let results = this.getTable(object).map((r) => ({ ...r }));
+      if (query.where) {
+        const mongoQuery = this.convertToMongoQuery(query.where);
+        if (mongoQuery && Object.keys(mongoQuery).length > 0) {
+          results = new Query(mongoQuery).find(results).all() as Record<string, any>[];
+        }
+      }
+      return this.performAggregation(results, query);
+    }
+
     this.logger.debug('Aggregate operation', { object, stageCount: pipeline.length });
-    
+
     const records = this.getTable(object).map(r => ({ ...r }));
     const aggregator = new Aggregator(pipeline);
     const results = aggregator.run(records);
-    
+
     this.logger.debug('Aggregate completed', { object, resultCount: results.length });
     return results;
   }
