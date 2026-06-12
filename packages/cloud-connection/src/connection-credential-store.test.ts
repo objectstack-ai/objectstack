@@ -232,7 +232,9 @@ describe('CloudConnectionPlugin credential behavior', () => {
         expect(res.payload.data).toEqual({ environmentId: null, revoked: true, cleared: true });
         expect((fetchSpy.mock.calls[0]![1] as any).body).toBe('{}');
         expect((fetchSpy.mock.calls[0]![1] as any).headers.Authorization).toBe('Bearer oscc_stored');
-        expect(store.read()).toBeNull();
+        // Credential gone; identity residual kept for the re-bind claim.
+        expect(store.read()?.runtimeToken).toBe('');
+        expect(store.read()?.runtimeId).toBe('rt-1');
     });
 
     it('unbind keeps an identity residual: token cleared, runtimeId survives for the re-bind claim', async () => {
