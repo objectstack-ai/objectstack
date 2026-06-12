@@ -104,6 +104,21 @@ export const viewForm = defineForm({
       fields: [{ field: 'chart', type: 'composite' }],
     },
     {
+      name: 'end_user_controls',
+      label: 'End-user controls',
+      description: 'What end users can do on this view — quick filters, filter tabs, visualization switching (ADR-0047, Airtable Interface parity).',
+      collapsible: true,
+      collapsed: true,
+      fields: [
+        { field: 'userFilters', type: 'composite', helpText: 'Quick-filter bar: element style (dropdown / tabs / toggle) + exposed fields or tab presets' },
+        { field: 'tabs', type: 'repeater', helpText: 'In-view filter tabs — each tab applies its own filter rules' },
+        { field: 'appearance', type: 'composite', helpText: 'allowedVisualizations: which renderers users may switch between' },
+        { field: 'userActions', type: 'composite', helpText: 'Toolbar toggles: sort / search / filter / row height' },
+        { field: 'addRecord', type: 'composite' },
+        { field: 'showRecordCount' },
+      ],
+    },
+    {
       name: 'navigation_sharing',
       label: 'Navigation & sharing',
       description: 'Where this view appears and who can see it.',
