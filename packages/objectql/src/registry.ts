@@ -141,6 +141,23 @@ export interface SchemaRegistryOptions {
    * (useful in tests).
    */
   multiTenant?: boolean;
+
+  /**
+   * Policy for cross-package base-layer metadata collisions (ADR-0048) — two
+   * different code packages registering a bare-named generic item under the
+   * same `(type, name)`.
+   *
+   * - `'error'` (default): throw {@link MetadataCollisionError} at registration
+   *   time, naming both packages and the type/name. Makes the otherwise-silent
+   *   last-write-wins shadowing a loud, actionable failure.
+   * - `'warn'`: log a warning and let the registration proceed. For deliberate
+   *   migrations where a collision is temporarily expected.
+   *
+   * Sourced from `OS_METADATA_COLLISION` (`warn` to downgrade) when not set
+   * explicitly. Legitimate runtime/DB overlays and same-package reloads are
+   * never treated as collisions regardless of this setting.
+   */
+  collisionPolicy?: 'error' | 'warn';
 }
 
 /**
@@ -283,6 +300,63 @@ export function applySystemFields(
   };
 }
 
+/**
+ * The rehydration sentinel stamped on items loaded back from `sys_metadata`
+ * (runtime/DB overlay rows). It is NOT a real owning code package, so it must
+ * never participate in cross-package collision detection (ADR-0048).
+ */
+const SYS_METADATA_OWNER = 'sys_metadata';
+
+/**
+ * True when `pkg` identifies a genuine code package (an artifact owner), as
+ * opposed to absent provenance or the `sys_metadata` runtime-overlay sentinel.
+ * Cross-package collision detection (ADR-0048) only compares real owners so
+ * that legitimate runtime/DB overlays never look like a base-layer collision.
+ */
+function isRealPackage(pkg: unknown): pkg is string {
+  return typeof pkg === 'string' && pkg.length > 0 && pkg !== SYS_METADATA_OWNER;
+}
+
+/**
+ * Raised when two **different** code packages register a generic (non-object)
+ * metadata item under the same `(type, name)` in the code-defined base layer
+ * (ADR-0048).
+ *
+ * The registry key for bare-named UI/automation metadata (`page`, `dashboard`,
+ * `flow`, `app`, `action`, `doc`, …) carries no package coordinate — those
+ * names are only snake_case-validated, never namespace-prefix-validated the way
+ * object names are. So two installed packages that each define e.g. a `page`
+ * named `home` collide on the same logical key, and bare-name read resolution
+ * (`getItem`) would silently return whichever the registry iterates first,
+ * leaving the other package's item unreachable. This error makes that hazard
+ * loud at registration/install time instead of silent at read time.
+ */
+export class MetadataCollisionError extends Error {
+  readonly type: string;
+  readonly name_: string;
+  readonly existingPackageId: string;
+  readonly incomingPackageId: string;
+
+  constructor(type: string, name: string, existingPackageId: string, incomingPackageId: string) {
+    super(
+      `Cross-package metadata collision: ${type}/${name} is registered by ` +
+        `package "${existingPackageId}" and package "${incomingPackageId}". ` +
+        `Bare-named ${type} metadata has no package coordinate in the registry, ` +
+        `so the second registration would silently shadow the first ` +
+        `(last-write-wins at read time). Rename one of them (a namespace prefix ` +
+        `such as "<namespace>_${name}" is recommended), or, if this is a ` +
+        `deliberate migration, set OS_METADATA_COLLISION=warn to downgrade to a ` +
+        `warning. See ADR-0048.`,
+    );
+    this.name = 'MetadataCollisionError';
+    this.type = type;
+    // `name` is the Error message-class name; store the metadata name separately.
+    this.name_ = name;
+    this.existingPackageId = existingPackageId;
+    this.incomingPackageId = incomingPackageId;
+  }
+}
+
 export class SchemaRegistry {
   // ==========================================
   // Logging control
@@ -294,6 +368,9 @@ export class SchemaRegistry {
   /** Whether to auto-inject multi-tenant system fields. */
   private readonly multiTenant: boolean;
 
+  /** Cross-package base-layer collision policy (ADR-0048). */
+  private readonly collisionPolicy: 'error' | 'warn';
+
   constructor(options: SchemaRegistryOptions = {}) {
     if (options.multiTenant !== undefined) {
       this.multiTenant = options.multiTenant;
@@ -302,6 +379,12 @@ export class SchemaRegistry {
       this.multiTenant =
         String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', 'OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false';
     }
+
+    // ADR-0048 — default to a loud error on cross-package collision; allow an
+    // env opt-out for deliberate migrations.
+    this.collisionPolicy =
+      options.collisionPolicy ??
+      ((process.env.OS_METADATA_COLLISION ?? '').toLowerCase() === 'warn' ? 'warn' : 'error');
   }
 
   get logLevel(): RegistryLogLevel { return this._logLevel; }
@@ -738,6 +821,32 @@ export class SchemaRegistry {
       this.log(`[Registry] Overwriting ${type}: ${storageKey}`);
     }
 
+    // ADR-0048 — cross-package base-layer collision. When a code package
+    // registers a bare-named generic item, refuse it loudly if a DIFFERENT
+    // code package already owns the same (type, name). Without this guard the
+    // two items live under distinct composite keys but bare-name resolution
+    // (`getItem`) returns whichever the Map iterates first, silently shadowing
+    // the loser — last-write-wins with no diagnostic.
+    //
+    // What is deliberately NOT a collision (these must pass through):
+    //   - Same package re-registering the same name (idempotent reload):
+    //     `conflictOwner` excludes `packageId` itself.
+    //   - Runtime/DB overlay rows registered under the bare key with no real
+    //     package provenance (or the `sys_metadata` sentinel): that is the
+    //     legitimate ADR-0005 overlay path, already surfaced by the
+    //     artifact-vs-DB warning below.
+    if (isRealPackage(packageId)) {
+      const conflictOwner = this.findOtherPackageOwner(collection, baseName, packageId);
+      if (conflictOwner) {
+        const err = new MetadataCollisionError(type, baseName, conflictOwner, packageId);
+        if (this.collisionPolicy === 'warn') {
+          console.warn(`[Registry] ${err.message}`);
+        } else {
+          throw err;
+        }
+      }
+    }
+
     // Artifact-vs-DB collision warning. When a code package ships an item
     // whose name already exists as a DB-only entry (registered earlier
     // without a packageId — typically rehydrated from sys_metadata by
@@ -761,6 +870,28 @@ export class SchemaRegistry {
 
     collection.set(storageKey, item);
     this.log(`[Registry] Registered ${type}: ${storageKey}`);
+  }
+
+  /**
+   * Find a code package OTHER than `incoming` that already owns `baseName` in
+   * `collection` (ADR-0048 cross-package collision detection). Scans the live
+   * collection — like {@link getItem} / {@link unregisterItem} — so it always
+   * reflects current state with no parallel index to drift across
+   * reset/unregister. Returns the conflicting owner's package id, or undefined
+   * when the name is free or only held by the same package / a runtime overlay.
+   */
+  private findOtherPackageOwner(
+    collection: Map<string, any>,
+    baseName: string,
+    incoming: string,
+  ): string | undefined {
+    for (const [key, item] of collection) {
+      // Same logical name only — the bare key or any `<pkg>:<baseName>` key.
+      if (key !== baseName && !key.endsWith(`:${baseName}`)) continue;
+      const owner = item?._packageId;
+      if (isRealPackage(owner) && owner !== incoming) return owner;
+    }
+    return undefined;
   }
 
   /**
