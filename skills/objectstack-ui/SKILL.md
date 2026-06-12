@@ -236,6 +236,37 @@ Common operators: `equals`, `not_equals`, `contains`, `starts_with`,
 
 > **`$currentUser`** is a runtime variable — the logged-in user's ID.
 
+### End-User Quick Filters (`userFilters`, ADR-0047)
+
+`filter` is the always-on base criteria. For the *end-user-facing* filter bar
+(Airtable "User filters") use `userFilters` — dropdowns, filter tabs, or
+toggles the user combines at runtime:
+
+```typescript
+userFilters: {
+  element: 'dropdown',              // 'dropdown' | 'tabs' | 'toggle'
+  fields: [
+    { field: 'status' },            // options/labels inferred from field def
+    { field: 'priority', showCount: true },
+  ],
+},
+
+// In-view filter tabs (presets on top of the base filter):
+tabs: [
+  { name: 'all', label: 'All', isDefault: true },
+  { name: 'urgent', label: 'Urgent', filter: [{ field: 'priority', operator: 'equals', value: 'urgent' }] },
+],
+
+// Runtime visualization whitelist (Airtable "Appearance → Visualizations"):
+appearance: { allowedVisualizations: ['grid', 'kanban', 'gallery'] },
+```
+
+Rules:
+- Every `field` MUST exist on the source object — reference diagnostics
+  (`_diagnostics`) flag unknown fields; treat `valid: false` as a failed write.
+- Omit `userFilters` entirely when unsure: the renderer auto-derives dropdowns
+  from select/boolean fields. **Omission is correct.**
+
 ### Sorting
 
 ```typescript
@@ -426,6 +457,51 @@ export const PipelineCoverageReport: ReportInput = {
 > **`rows`** are the report's grouping dimensions (selected from the dataset by
 > name). A `summary` groups by them; a `matrix` cross-tabs them. Multi-level
 > grouping = multiple dimension names in the array.
+
+---
+
+## Two Run Modes: Object Nav vs Interface Pages (ADR-0047)
+
+Object list UI has **two run modes**, selected by the navigation item type:
+
+| | Data mode (`type: 'object'`) | Interface mode (`type: 'page'`) |
+|:--|:--|:--|
+| What renders | ALL list views as switcher tabs | One curated page referencing ONE view |
+| User-created views | Allowed | Never |
+| Quick filters | Auto-derived (or view `userFilters`) | Only what the author enabled |
+| Visualization | Switchable (whitelist) | Locked unless whitelisted |
+
+**Decision rule — default to data mode.** Generate ONLY objects + list views +
+navigation pointing at objects. Generate an interface page ONLY on explicit
+signals in the requirement:
+
+- persona split ("sales reps see…", customer portal, 给业务部门的简化界面);
+- capability narrowing ("users must not change views", "only filter by X");
+- curation language (workspace / 工作台 / "Airtable interface-like").
+
+Ambiguity resolves to **no page** — data mode is a functional superset; a
+missing page costs polish, a superfluous page is a permanently-maintained
+duplicate asset.
+
+**The iron rule:** an interface page REFERENCES a view (`interfaceConfig.source`
++ `sourceView`) and adds presentation policy only (`userFilters`,
+`appearance.allowedVisualizations`, `userActions`). It has NO columns/filter/sort
+of its own — never restate what the view already defines.
+
+```typescript
+export const TaskWorkbenchPage: Page = {
+  name: 'task_workbench',
+  type: 'list',
+  object: 'task',
+  interfaceConfig: {
+    source: 'task',
+    sourceView: 'default',                       // inherit columns/filter/sort
+    userFilters: { element: 'dropdown', fields: [{ field: 'status' }] },
+    appearance: { allowedVisualizations: ['grid'] },  // locked
+    userActions: { sort: true, search: true, filter: false },
+  },
+};
+```
 
 ---
 

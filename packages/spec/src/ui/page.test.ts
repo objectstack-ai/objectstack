@@ -1017,7 +1017,7 @@ describe('InterfacePageConfigSchema', () => {
         allowedVisualizations: ['grid', 'gallery', 'kanban'],
       },
       userFilters: {
-        elements: ['grid', 'gallery', 'kanban'],
+        element: 'tabs',
         tabs: [
           { name: 'my_customers', label: 'my customers', isDefault: true },
           { name: 'all_records', label: 'All records' },
@@ -1085,7 +1085,7 @@ describe('PageSchema with interfaceConfig', () => {
           allowedVisualizations: ['grid', 'gallery', 'kanban'],
         },
         userFilters: {
-          elements: ['grid', 'gallery', 'kanban'],
+          element: 'tabs',
           tabs: [
             { name: 'my_customers', label: 'my customers', isDefault: true, pinned: true },
             { name: 'all_records', label: 'All records' },

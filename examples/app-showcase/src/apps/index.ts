@@ -51,6 +51,8 @@ export const ShowcaseApp = App.create({
       children: [
         { id: 'nav_gallery', type: 'page', pageName: 'showcase_component_gallery', label: 'Component Gallery', icon: 'layout-template' },
         { id: 'nav_project_workspace', type: 'page', pageName: 'showcase_project_workspace', label: 'New Project + Tasks', icon: 'folder-plus' },
+        // ADR-0047 interface mode: same object as nav_tasks, curated surface.
+        { id: 'nav_task_workbench', type: 'page', pageName: 'showcase_task_workbench', label: 'Task Workbench', icon: 'sliders-horizontal' },
       ],
     },
   ],

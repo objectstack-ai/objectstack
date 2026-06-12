@@ -224,6 +224,7 @@ export const VisualizationTypeSchema = lazySchema(() => z.enum([
   'timeline',
   'gantt',
   'map',
+  'chart',
 ]).describe('Visualization type that users can switch to'));
 
 /**
@@ -272,6 +273,51 @@ export const ViewTabSchema = lazySchema(() => z.object({
   isDefault: z.boolean().default(false).describe('Set as the default active tab'),
   visible: z.boolean().default(true).describe('Tab visibility'),
 }).describe('Tab configuration for multi-tab view interface'));
+
+/**
+ * User Filter Field Schema (ADR-0047)
+ * One field exposed as a quick-filter control in the end-user filter bar.
+ * Rendering details (widget, options) default to inference from the field
+ * definition on the source object — authors only override when needed.
+ *
+ * @see Airtable Interface → "User filters" panel (Dropdowns element)
+ */
+export const UserFilterFieldSchema = lazySchema(() => z.object({
+  field: z.string().describe('Field name on the source object (must exist — checked by reference diagnostics)'),
+  label: I18nLabelSchema.optional().describe('Display label override (defaults to the field label)'),
+  type: z.enum(['select', 'multi-select', 'boolean', 'date-range', 'text']).optional()
+    .describe('Filter control type. Omit to infer from the field definition'),
+  options: z.array(z.object({
+    value: z.union([z.string(), z.number(), z.boolean()]).describe('Option value'),
+    label: I18nLabelSchema.describe('Option label'),
+    color: z.string().optional().describe('Option color token/hex'),
+  })).optional().describe('Static options. Omit to derive from the field definition (select options / lookup records)'),
+  showCount: z.boolean().optional().describe('Show per-option record counts'),
+  defaultValues: z.array(z.union([z.string(), z.number(), z.boolean()])).optional()
+    .describe('Pre-selected values when the view loads'),
+}).describe('Quick-filter field configuration'));
+
+/**
+ * User Filters Schema (ADR-0047, Airtable Interface parity)
+ * The end-user-facing quick-filter surface above a list. The author picks the
+ * element style and which fields/presets are exposed; end users combine them
+ * at runtime (session-scoped — selections never persist as metadata).
+ *
+ * Distinct from `ListView.filter` (the always-on base criteria) and from the
+ * advanced filter builder (`userActions.filter` toggle).
+ *
+ * @see Airtable Interface → "User filters" panel (Elements: tabs / dropdowns)
+ */
+export const UserFiltersSchema = lazySchema(() => z.object({
+  element: z.enum(['dropdown', 'tabs', 'toggle']).default('dropdown')
+    .describe('Filter control style: dropdown selectors per field, tab presets, or on/off toggles'),
+  fields: z.array(UserFilterFieldSchema).optional()
+    .describe('Fields exposed as quick filters (dropdown/toggle elements)'),
+  tabs: z.array(ViewTabSchema).optional()
+    .describe('Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema'),
+  showAllRecords: z.boolean().optional()
+    .describe('Show an "All records" tab before the presets (tabs element)'),
+}).describe('End-user quick-filter configuration (Airtable "User filters" parity)'));
 
 /**
  * Add Record Configuration Schema (Airtable Interface parity)
@@ -429,7 +475,11 @@ export const ListViewSchema = lazySchema(() => z.object({
   
   /** Search & Filter */
   searchableFields: z.array(z.string()).optional().describe('Fields enabled for search'),
-  filterableFields: z.array(z.string()).optional().describe('Fields enabled for end-user filtering in the top bar'),
+  filterableFields: z.array(z.string()).optional().describe('Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters'),
+
+  /** User Filters (ADR-0047, Airtable Interface parity) */
+  userFilters: UserFiltersSchema.optional()
+    .describe('End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields'),
 
   /** Grid Features */
   resizable: z.boolean().optional().describe('Enable column resizing'),
@@ -1166,4 +1216,6 @@ export type VisualizationType = z.infer<typeof VisualizationTypeSchema>;
 export type UserActionsConfig = z.infer<typeof UserActionsConfigSchema>;
 export type AppearanceConfig = z.infer<typeof AppearanceConfigSchema>;
 export type ViewTab = z.infer<typeof ViewTabSchema>;
+export type UserFilterField = z.infer<typeof UserFilterFieldSchema>;
+export type UserFilters = z.infer<typeof UserFiltersSchema>;
 export type AddRecordConfig = z.infer<typeof AddRecordConfigSchema>;

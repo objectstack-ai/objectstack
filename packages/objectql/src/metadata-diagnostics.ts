@@ -114,3 +114,83 @@ export function decorateMetadataItems<T>(type: string, items: T[]): T[] {
     if (!Array.isArray(items)) return items;
     return items.map((item) => decorateMetadataItem(type, item));
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0047 — reference-integrity diagnostics for list views
+// ---------------------------------------------------------------------------
+
+/** Minimal object-definition shape the reference checker needs. */
+interface ObjectDefLike {
+    fields?: Record<string, { type?: string }> | Array<{ name: string; type?: string }>;
+}
+
+function fieldMap(objectDef: ObjectDefLike): Map<string, { type?: string }> {
+    const map = new Map<string, { type?: string }>();
+    const fields = objectDef?.fields;
+    if (Array.isArray(fields)) {
+        for (const f of fields) if (f?.name) map.set(f.name, f);
+    } else if (fields && typeof fields === 'object') {
+        for (const [name, f] of Object.entries(fields)) map.set(name, f ?? {});
+    }
+    return map;
+}
+
+/**
+ * Cross-document reference checks Zod cannot express: every field a list
+ * view's user-facing filter surface points at must exist on the source
+ * object, and binding-dependent visualizations must have resolvable
+ * bindings (kanban → select-like `groupByField`).
+ *
+ * Pure function — callers (read decoration, the ADR-0033 AI apply loop)
+ * supply the already-resolved object definition. Returns `{ valid: true }`
+ * when every reference resolves; errors use the same wire shape as
+ * {@link computeMetadataDiagnostics} so consumers can merge the two.
+ *
+ * Spec-shape validation stays in `computeMetadataDiagnostics`; this only
+ * covers what a schema alone cannot see.
+ */
+export function computeViewReferenceDiagnostics(
+    view: Record<string, unknown>,
+    objectDef: ObjectDefLike,
+): MetadataDiagnostics {
+    const fields = fieldMap(objectDef);
+    const errors: NonNullable<MetadataDiagnostics['errors']> = [];
+    const requireField = (name: unknown, path: string) => {
+        if (typeof name !== 'string' || !name) return;
+        if (!fields.has(name)) {
+            errors.push({
+                path,
+                message: `Field "${name}" does not exist on the source object`,
+                code: 'reference_not_found',
+            });
+        }
+    };
+
+    const userFilters = view?.userFilters as
+        | { fields?: Array<{ field?: string }>; tabs?: Array<{ filter?: Array<{ field?: string }> }> }
+        | undefined;
+    userFilters?.fields?.forEach((f, i) => requireField(f?.field, `userFilters.fields.${i}.field`));
+    userFilters?.tabs?.forEach((t, i) =>
+        t?.filter?.forEach((r, j) => requireField(r?.field, `userFilters.tabs.${i}.filter.${j}.field`)));
+
+    (view?.tabs as Array<{ filter?: Array<{ field?: string }> }> | undefined)?.forEach((t, i) =>
+        t?.filter?.forEach((r, j) => requireField(r?.field, `tabs.${i}.filter.${j}.field`)));
+
+    (view?.filterableFields as string[] | undefined)?.forEach((f, i) =>
+        requireField(f, `filterableFields.${i}`));
+
+    const kanban = view?.kanban as { groupByField?: string } | undefined;
+    if (kanban?.groupByField) {
+        requireField(kanban.groupByField, 'kanban.groupByField');
+        const def = fields.get(kanban.groupByField);
+        if (def && def.type && !['select', 'multi-select', 'boolean', 'lookup', 'master_detail'].includes(def.type)) {
+            errors.push({
+                path: 'kanban.groupByField',
+                message: `Field "${kanban.groupByField}" (type "${def.type}") cannot group a kanban — use a select-like field`,
+                code: 'invalid_binding',
+            });
+        }
+    }
+
+    return errors.length ? { valid: false, errors } : { valid: true };
+}

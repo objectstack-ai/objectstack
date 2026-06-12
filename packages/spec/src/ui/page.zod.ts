@@ -10,7 +10,7 @@ import { ResponsiveConfigSchema } from './responsive.zod';
 import {
   UserActionsConfigSchema,
   AppearanceConfigSchema,
-  ViewTabSchema,
+  UserFiltersSchema,
   ViewFilterRuleSchema,
   AddRecordConfigSchema,
 } from './view.zod';
@@ -213,20 +213,19 @@ export const RecordReviewConfigSchema = lazySchema(() => z.object({
  * @see Airtable Interface → right panel (Page / Data / Appearance / User filters / User actions / Advanced)
  */
 export const InterfacePageConfigSchema = lazySchema(() => z.object({
-  /** Data binding */
+  /** Data binding (ADR-0047: pages REFERENCE views, never restate them) */
   source: z.string().optional().describe('Source object name for the page'),
+  sourceView: z.string().optional()
+    .describe('Named list view on the source object to inherit columns/filter/sort from (ADR-0047 iron rule: the page adds presentation policy only). Omit to use the object default view'),
   levels: z.number().int().min(1).optional().describe('Number of hierarchy levels to display'),
   filterBy: z.array(ViewFilterRuleSchema).optional().describe('Page-level filter criteria'),
 
-  /** Appearance */
+  /** Appearance — `appearance.allowedVisualizations` is the runtime visualization whitelist */
   appearance: AppearanceConfigSchema.optional().describe('Appearance and visualization configuration'),
 
-  /** User filters */
-  userFilters: z.object({
-    elements: z.array(z.enum(['grid', 'gallery', 'kanban'])).optional()
-      .describe('Visualization element types available in user filter bar'),
-    tabs: z.array(ViewTabSchema).optional().describe('User-configurable tabs'),
-  }).optional().describe('User filter configuration'),
+  /** User filters (ADR-0047) */
+  userFilters: UserFiltersSchema.optional()
+    .describe('End-user quick-filter bar for this page (overrides the source view\'s userFilters)'),
 
   /** User actions */
   userActions: UserActionsConfigSchema.optional().describe('User action toggles'),

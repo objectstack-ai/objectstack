@@ -26,6 +26,7 @@ import {
   UserActionsConfigSchema,
   AppearanceConfigSchema,
   ViewTabSchema,
+  UserFiltersSchema,
   ViewFilterRuleSchema,
   AddRecordConfigSchema,
   type View,
@@ -2095,6 +2096,72 @@ describe('ViewTabSchema', () => {
     expect(() => ViewTabSchema.parse({
       name: 'My Tab',
     })).toThrow();
+  });
+});
+
+describe('UserFiltersSchema (ADR-0047)', () => {
+  it('should default element to dropdown', () => {
+    const uf = UserFiltersSchema.parse({});
+    expect(uf.element).toBe('dropdown');
+  });
+
+  it('should accept dropdown fields with inference defaults', () => {
+    const uf = UserFiltersSchema.parse({
+      element: 'dropdown',
+      fields: [
+        { field: 'industry' },
+        { field: 'rating', label: '评级', showCount: true },
+      ],
+    });
+    expect(uf.fields).toHaveLength(2);
+    expect(uf.fields?.[0].type).toBeUndefined(); // inferred by renderer
+  });
+
+  it('should accept tabs element reusing ViewTabSchema presets', () => {
+    const uf = UserFiltersSchema.parse({
+      element: 'tabs',
+      showAllRecords: true,
+      tabs: [
+        { name: 'tech_companies', label: '科技公司', filter: [{ field: 'industry', operator: 'equals', value: 'technology' }] },
+        { name: 'finance_companies', label: '金融公司', filter: [{ field: 'industry', operator: 'equals', value: 'finance' }], isDefault: true },
+      ],
+    });
+    expect(uf.tabs).toHaveLength(2);
+    expect(uf.tabs?.[1].isDefault).toBe(true);
+  });
+
+  it('should accept static options with values and colors', () => {
+    const uf = UserFiltersSchema.parse({
+      fields: [{
+        field: 'status',
+        type: 'select',
+        options: [
+          { value: 'active', label: 'Active', color: '#22c55e' },
+          { value: 1, label: 'One' },
+          { value: true, label: 'Yes' },
+        ],
+        defaultValues: ['active'],
+      }],
+    });
+    expect(uf.fields?.[0].options).toHaveLength(3);
+    expect(uf.fields?.[0].defaultValues).toEqual(['active']);
+  });
+
+  it('should reject unknown element style', () => {
+    expect(() => UserFiltersSchema.parse({ element: 'sidebar' })).toThrow();
+  });
+
+  it('should attach to ListViewSchema.userFilters', () => {
+    const view = ListViewSchema.parse({
+      type: 'grid',
+      columns: ['name', 'industry'],
+      userFilters: {
+        element: 'dropdown',
+        fields: [{ field: 'industry' }],
+      },
+    });
+    expect(view.userFilters?.element).toBe('dropdown');
+    expect(view.userFilters?.fields?.[0].field).toBe('industry');
   });
 });
 

@@ -25,6 +25,35 @@ export const TaskViews = defineView({
       { field: 'due_date' },
       { field: 'progress' },
     ],
+
+    // ADR-0047 — in-view filter tabs (ViewTab presets). Each tab applies
+    // its own filter rules on top of the view's base criteria; the first
+    // tab is the unfiltered default.
+    tabs: [
+      { name: 'all_tasks', label: 'All', isDefault: true },
+      { name: 'in_progress', label: 'In Progress', filter: [{ field: 'status', operator: 'equals', value: 'in_progress' }] },
+      { name: 'urgent', label: 'Urgent', icon: 'flame', filter: [{ field: 'priority', operator: 'equals', value: 'urgent' }] },
+      { name: 'done', label: 'Done', filter: [{ field: 'status', operator: 'equals', value: 'done' }] },
+    ],
+
+    // ADR-0047 — end-user quick-filter dropdowns (Airtable "User filters").
+    // Options/labels are inferred from the field definitions; `priority`
+    // shows per-option record counts.
+    userFilters: {
+      element: 'dropdown',
+      fields: [
+        { field: 'status' },
+        { field: 'priority', showCount: true },
+        { field: 'done', type: 'boolean' },
+      ],
+    },
+
+    // ADR-0047 — runtime visualization whitelist (Airtable "Appearance →
+    // Visualizations"). Users can flip between these renderers; types
+    // whose bindings don't resolve are hidden by the client regardless.
+    appearance: {
+      allowedVisualizations: ['grid', 'kanban', 'gallery', 'calendar'],
+    },
   },
 
   listViews: {

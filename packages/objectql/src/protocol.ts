@@ -32,6 +32,7 @@ import {
 import { z } from 'zod';
 import {
     computeMetadataDiagnostics,
+    computeViewReferenceDiagnostics,
     decorateMetadataItem,
     decorateMetadataItems,
     type MetadataDiagnostics,
@@ -1568,10 +1569,44 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         // declaration; we must consult the in-memory artifact registry
         // directly and let its protection envelope override.
         const artifactItem = this.lookupArtifactItem(request.type, request.name);
-        const decorated = decorateMetadataItem(
+        let decorated = decorateMetadataItem(
             request.type,
             mergeArtifactProtection(item, artifactItem),
         );
+        // ADR-0047 — list views additionally get reference-integrity
+        // diagnostics (userFilters/tabs fields must exist on the source
+        // object, kanban groupBy must be select-like). Zod cannot see
+        // across documents; merge the cross-document errors into the
+        // same `_diagnostics` envelope. Defensive: a failed lookup must
+        // never break a read.
+        if ((request.type === 'view' || request.type === 'views') && decorated && typeof decorated === 'object') {
+            try {
+                const viewDoc = decorated as Record<string, any>;
+                const sourceObject = viewDoc?.object
+                    ?? viewDoc?.data?.object
+                    ?? viewDoc?.objectName
+                    ?? viewDoc?.list?.data?.object;
+                const objectDef = typeof sourceObject === 'string'
+                    ? this.engine.registry.getObject(sourceObject)
+                    : undefined;
+                if (objectDef) {
+                    const refs = computeViewReferenceDiagnostics(viewDoc, objectDef as any);
+                    if (!refs.valid) {
+                        const prior = viewDoc._diagnostics;
+                        decorated = {
+                            ...viewDoc,
+                            _diagnostics: {
+                                valid: false,
+                                errors: [
+                                    ...(prior && prior.valid === false && Array.isArray(prior.errors) ? prior.errors : []),
+                                    ...(refs.errors ?? []),
+                                ],
+                            },
+                        } as typeof decorated;
+                    }
+                }
+            } catch { /* reference diagnostics are best-effort */ }
+        }
         // ADR-0010 — surface lock/provenance flags so Studio can render
         // the correct affordances without a second round trip.
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
