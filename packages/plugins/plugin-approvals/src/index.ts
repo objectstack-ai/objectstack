@@ -12,6 +12,7 @@
 
 export { SysApprovalRequest } from './sys-approval-request.object.js';
 export { SysApprovalAction } from './sys-approval-action.object.js';
+export { SysApprovalApprover } from './sys-approval-approver.object.js';
 export {
   ApprovalService,
   type ApprovalEngine,

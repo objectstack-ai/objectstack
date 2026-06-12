@@ -27,6 +27,7 @@ describe('ApprovalsServicePlugin schema + nav contribution (ADR-0029 K2.b)', () 
     // Owns the approval objects (moved out of platform-objects).
     expect(manifest.objects.map((o: any) => o.name).sort()).toEqual([
       'sys_approval_action',
+      'sys_approval_approver',
       'sys_approval_request',
       'sys_approval_token',
     ]);

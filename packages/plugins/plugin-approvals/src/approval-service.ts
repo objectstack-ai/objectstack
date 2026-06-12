@@ -491,6 +491,7 @@ export class ApprovalService implements IApprovalService {
       updated_at: now,
     };
     await this.engine.insert('sys_approval_request', row, { context: SYSTEM_CTX });
+    await this.syncApproverIndex(id, approvers, ctxOrg, now);
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: id, organization_id: ctxOrg,
       step_name: input.nodeId, step_index: 0, action: 'submit',
@@ -564,6 +565,7 @@ export class ApprovalService implements IApprovalService {
         await this.engine.update('sys_approval_request', {
           id: requestId, pending_approvers: stillPending.join(','), updated_at: now,
         }, { context: SYSTEM_CTX });
+        await this.syncApproverIndex(requestId, stillPending, org, now);
         const fresh = await this.getRequest(requestId, context);
         return { request: fresh!, runId, nodeId, finalized: false, decision: input.decision };
       }
@@ -573,6 +575,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.update('sys_approval_request', {
       id: requestId, status: finalStatus, pending_approvers: null, completed_at: now, updated_at: now,
     }, { context: SYSTEM_CTX });
+    await this.syncApproverIndex(requestId, [], org, now);
     if (config.approvalStatusField) {
       await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, finalStatus);
     }
@@ -671,6 +674,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.update('sys_approval_request', {
       id: requestId, status: 'recalled', pending_approvers: null, completed_at: now, updated_at: now,
     }, { context: SYSTEM_CTX });
+    await this.syncApproverIndex(requestId, [], org, now);
     if (config.approvalStatusField) {
       await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'recalled');
     }
@@ -770,6 +774,7 @@ export class ApprovalService implements IApprovalService {
       await this.engine.update('sys_approval_request', {
         id: requestId, status: 'rejected', pending_approvers: null, completed_at: now, updated_at: now,
       }, { context: SYSTEM_CTX });
+      await this.syncApproverIndex(requestId, [], org, now);
       if (config.approvalStatusField) {
         await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'rejected');
       }
@@ -807,6 +812,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.update('sys_approval_request', {
       id: requestId, status: 'returned', pending_approvers: null, completed_at: now, updated_at: now,
     }, { context: SYSTEM_CTX });
+    await this.syncApproverIndex(requestId, [], org, now);
     if (config.approvalStatusField) {
       await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'returned');
     }
@@ -1001,6 +1007,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.update('sys_approval_request', {
       id: requestId, pending_approvers: next.join(','), updated_at: now,
     }, { context: SYSTEM_CTX });
+    await this.syncApproverIndex(requestId, next, raw.organization_id ?? null, now);
 
     await this.notify({
       topic: 'approval.reassigned',
@@ -1353,6 +1360,7 @@ export class ApprovalService implements IApprovalService {
       await this.engine.update('sys_approval_request', {
         id: raw.id, pending_approvers: escalateTo, updated_at: now,
       }, { context: SYSTEM_CTX });
+      await this.syncApproverIndex(raw.id, [escalateTo], raw.organization_id ?? null, now);
       await this.notify({
         topic: 'approval.escalated',
         audience: [escalateTo],
@@ -1594,6 +1602,106 @@ export class ApprovalService implements IApprovalService {
     }
   }
 
+  // ── Pending-approver index (issue #1745) ─────────────────────
+
+  /**
+   * Mirror one request's `pending_approvers` CSV into the normalized
+   * `sys_approval_approver` index. Called by every write path that changes
+   * the approver set; an empty `approvers` clears the request's rows (the
+   * request left `pending`). Diff-based so reassign/unanimous churn doesn't
+   * rewrite untouched rows.
+   */
+  private async syncApproverIndex(
+    requestId: string,
+    approvers: string[],
+    org: string | null,
+    now: string,
+  ): Promise<void> {
+    const desired = new Set(approvers.map(a => String(a).trim()).filter(Boolean));
+    const existing = await this.engine.find('sys_approval_approver', {
+      where: { request_id: requestId }, limit: 500, context: SYSTEM_CTX,
+    });
+    const rows: any[] = Array.isArray(existing) ? existing : [];
+    for (const row of rows) {
+      if (desired.has(String(row.approver))) desired.delete(String(row.approver));
+      else await this.engine.delete('sys_approval_approver', { where: { id: row.id }, context: SYSTEM_CTX });
+    }
+    for (const approver of desired) {
+      await this.engine.insert('sys_approval_approver', {
+        id: uid('aapr'), request_id: requestId, approver,
+        organization_id: org, created_at: now,
+      }, { context: SYSTEM_CTX });
+    }
+  }
+
+  /**
+   * Rebuild the whole `sys_approval_approver` index from the CSV source of
+   * truth. Idempotent; run at plugin start so rows written before the index
+   * existed (or drifted past a crashed sync) become queryable. Cost tracks
+   * the number of *pending* requests, not the request history.
+   */
+  async rebuildApproverIndex(): Promise<{ requests: number; inserted: number; deleted: number }> {
+    // Desired state: every pending request's CSV entries.
+    const desired = new Map<string, { approvers: Set<string>; org: string | null }>();
+    const PAGE = 500;
+    for (let offset = 0; ; offset += PAGE) {
+      const batch = await this.engine.find('sys_approval_request', {
+        where: { status: 'pending' },
+        fields: ['id', 'pending_approvers', 'organization_id'],
+        limit: PAGE, offset, context: SYSTEM_CTX,
+      });
+      const rows: any[] = Array.isArray(batch) ? batch : [];
+      for (const r of rows) {
+        desired.set(String(r.id), {
+          approvers: new Set(csvSplit(r.pending_approvers)),
+          org: r.organization_id ?? null,
+        });
+      }
+      if (rows.length < PAGE) break;
+    }
+
+    // Current state: read the whole index first (bounded by the live work
+    // queue), THEN mutate — deleting while paginating would shift the cursor.
+    const indexRows: any[] = [];
+    for (let offset = 0; ; offset += PAGE) {
+      const batch = await this.engine.find('sys_approval_approver', {
+        orderBy: [{ field: 'created_at', order: 'asc' }],
+        limit: PAGE, offset, context: SYSTEM_CTX,
+      });
+      const rows: any[] = Array.isArray(batch) ? batch : [];
+      indexRows.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+    let inserted = 0; let deleted = 0;
+    const seen = new Map<string, Set<string>>();
+    for (const row of indexRows) {
+      const reqId = String(row.request_id);
+      const want = desired.get(reqId);
+      const have = seen.get(reqId) ?? seen.set(reqId, new Set()).get(reqId)!;
+      // Orphan (request no longer pending), stale entry, or duplicate → drop.
+      if (!want || !want.approvers.has(String(row.approver)) || have.has(String(row.approver))) {
+        await this.engine.delete('sys_approval_approver', { where: { id: row.id }, context: SYSTEM_CTX });
+        deleted++;
+        continue;
+      }
+      have.add(String(row.approver));
+    }
+
+    const now = this.clock.now().toISOString();
+    for (const [reqId, want] of desired) {
+      const have = seen.get(reqId);
+      for (const approver of want.approvers) {
+        if (have?.has(approver)) continue;
+        await this.engine.insert('sys_approval_approver', {
+          id: uid('aapr'), request_id: reqId, approver,
+          organization_id: want.org, created_at: now,
+        }, { context: SYSTEM_CTX });
+        inserted++;
+      }
+    }
+    return { requests: desired.size, inserted, deleted };
+  }
+
   // ── Read API ─────────────────────────────────────────────────
 
   /** Filter type accepted by {@link listRequests} / {@link countRequests}. */
@@ -1606,7 +1714,7 @@ export class ApprovalService implements IApprovalService {
       q?: string;
     } | undefined,
     context: SharingExecutionContext,
-  ): { where: any; statusPostFilter?: ApprovalStatus[] } {
+  ): { where: any; tenantOrg: string | null } {
     const f: any = {};
     if (filter?.object) f.object_name = filter.object;
     if (filter?.recordId) f.record_id = filter.recordId;
@@ -1615,9 +1723,9 @@ export class ApprovalService implements IApprovalService {
     // (organizationId / tenantId), scope the query to that tenant. SYSTEM
     // callers (no tenant) see all rows. This prevents the bespoke endpoint
     // from leaking other-tenant rows since we deliberately query with
-    // SYSTEM_CTX to bypass RLS on the engine (we need CSV substring match
-    // on pending_approvers which RLS can't model cleanly).
-    const tenantOrg = (context as any)?.organizationId ?? (context as any)?.tenantId;
+    // SYSTEM_CTX to bypass RLS on the engine (the approver-visibility rule
+    // spans three identity forms, which RLS can't model cleanly).
+    const tenantOrg = (context as any)?.organizationId ?? (context as any)?.tenantId ?? null;
     if (tenantOrg) f.organization_id = tenantOrg;
     // Free-text search, pushed down: `payload_json` carries the record
     // snapshot, so record titles match without any join. `$contains` is the
@@ -1632,11 +1740,49 @@ export class ApprovalService implements IApprovalService {
         { payload_json: { $contains: q } },
       ];
     }
-    // Status: when array, post-filter; when single, push into engine filter.
-    let statusPostFilter: ApprovalStatus[] | undefined;
-    if (Array.isArray(filter?.status)) statusPostFilter = filter!.status as ApprovalStatus[];
-    else if (filter?.status) f.status = filter.status;
-    return { where: f, statusPostFilter };
+    // Status pushes down whole: `$in` for arrays (all bundled drivers
+    // support it), equality for a single value.
+    if (Array.isArray(filter?.status)) {
+      const statuses = (filter!.status as ApprovalStatus[]).filter(Boolean);
+      if (statuses.length === 1) f.status = statuses[0];
+      else if (statuses.length > 1) f.status = { $in: statuses };
+    } else if (filter?.status) {
+      f.status = filter.status;
+    }
+    return { where: f, tenantOrg };
+  }
+
+  /** Window the approver-index probe — pending queues live far below this. */
+  private static readonly APPROVER_INDEX_CAP = 10_000;
+
+  /**
+   * Resolve an approver filter to matching request ids via the normalized
+   * `sys_approval_approver` index — the indexed replacement for the old
+   * in-memory CSV scan, and what makes approver-filtered pagination correct
+   * past any scan window (issue #1745). A request matches when ANY of the
+   * caller's identities (user id / email / role:<r>) holds a pending slot.
+   * Returns null when the filter is absent (callers skip the id constraint).
+   */
+  private async approverRequestIds(
+    targets: string[],
+    tenantOrg: string | null,
+  ): Promise<string[] | null> {
+    if (!targets.length) return null;
+    const where: any = targets.length === 1
+      ? { approver: targets[0] }
+      : { approver: { $in: targets } };
+    if (tenantOrg) where.organization_id = tenantOrg;
+    const rows = await this.engine.find('sys_approval_approver', {
+      where, fields: ['request_id'],
+      limit: ApprovalService.APPROVER_INDEX_CAP, context: SYSTEM_CTX,
+    });
+    const list: any[] = Array.isArray(rows) ? rows : [];
+    if (list.length >= ApprovalService.APPROVER_INDEX_CAP) {
+      this.logger?.warn?.('[approvals] approver index probe hit its window — results may be truncated', {
+        cap: ApprovalService.APPROVER_INDEX_CAP, targets: targets.length,
+      });
+    }
+    return [...new Set<string>(list.map(r => String(r.request_id)))];
   }
 
   async listRequests(
@@ -1652,45 +1798,35 @@ export class ApprovalService implements IApprovalService {
     } | undefined,
     context: SharingExecutionContext,
   ): Promise<ApprovalRequestRow[]> {
-    const { where, statusPostFilter } = this.buildRequestWhere(filter, context);
+    const { where, tenantOrg } = this.buildRequestWhere(filter, context);
     const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
       .map(t => String(t).trim())
       .filter(Boolean);
 
-    // The page window pushes into the engine only when nothing post-filters
-    // in memory; an approver/status-array query still scans the (bounded)
-    // candidate set and windows after filtering — correct for personal
-    // queues, and the documented residual limit for org-wide approver
-    // queries (issue #1745's join-table follow-up).
-    const pushWindow = approverTargets.length === 0 && !statusPostFilter
-      && (filter?.limit != null || filter?.offset != null);
+    // Every filter now pushes into the engine (issue #1745): approver via
+    // the normalized index, status arrays via $in — so the page window is
+    // always engine-side and correct at any table size.
+    const ids = await this.approverRequestIds(approverTargets, tenantOrg);
+    if (ids) {
+      if (ids.length === 0) return [];
+      where.id = ids.length === 1 ? ids[0] : { $in: ids };
+    }
+
     const findOpts: any = {
       where,
       orderBy: [{ field: 'created_at', order: 'desc' }],
       context: SYSTEM_CTX,
     };
-    if (pushWindow) {
+    if (filter?.limit != null || filter?.offset != null) {
       findOpts.limit = Math.min(Math.max(filter?.limit ?? 50, 1), 200);
       if (filter?.offset) findOpts.offset = Math.max(filter.offset, 0);
     } else {
+      // Unpaginated callers keep the legacy bounded window.
       findOpts.limit = 500;
     }
 
     const rows = await this.engine.find('sys_approval_request', findOpts);
-    let list = Array.isArray(rows) ? rows.map(rowFromRequest) : [];
-    if (statusPostFilter) list = list.filter(r => statusPostFilter.includes(r.status));
-    if (approverTargets.length) {
-      // A request matches when ANY of the caller's identities (user id /
-      // email / role:<r>) is a pending approver — exact CSV-entry match.
-      list = list.filter(r => {
-        const pending = r.pending_approvers ?? [];
-        return approverTargets.some(t => pending.includes(t));
-      });
-    }
-    if (!pushWindow && (filter?.limit != null || filter?.offset != null)) {
-      const start = Math.max(filter?.offset ?? 0, 0);
-      list = list.slice(start, start + Math.min(Math.max(filter?.limit ?? 50, 1), 200));
-    }
+    const list = Array.isArray(rows) ? rows.map(rowFromRequest) : [];
     await this.enrichRows(list);
     return list;
   }
@@ -1699,33 +1835,31 @@ export class ApprovalService implements IApprovalService {
     filter: Parameters<IApprovalService['listRequests']>[0],
     context: SharingExecutionContext,
   ): Promise<number> {
-    const { where, statusPostFilter } = this.buildRequestWhere(filter, context);
+    const { where, tenantOrg } = this.buildRequestWhere(filter, context);
     const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
       .map(t => String(t).trim())
       .filter(Boolean);
 
-    // Fully pushable → engine count; post-filtered → bounded scan count.
-    if (approverTargets.length === 0 && !statusPostFilter) {
-      const countFn = (this.engine as any).count;
-      if (typeof countFn === 'function') {
-        try {
-          const n = await countFn.call(this.engine, 'sys_approval_request', { where, context: SYSTEM_CTX });
-          if (typeof n === 'number') return n;
-        } catch { /* fall through to scan */ }
-      }
+    const ids = await this.approverRequestIds(approverTargets, tenantOrg);
+    if (ids) {
+      if (ids.length === 0) return 0;
+      where.id = ids.length === 1 ? ids[0] : { $in: ids };
     }
+
+    const countFn = (this.engine as any).count;
+    if (typeof countFn === 'function') {
+      try {
+        const n = await countFn.call(this.engine, 'sys_approval_request', { where, context: SYSTEM_CTX });
+        if (typeof n === 'number') return n;
+      } catch { /* fall through to scan */ }
+    }
+    // Engine without count(): bounded scan. The approver-filtered case is
+    // exact (the id set bounds it); the unfiltered case keeps the legacy
+    // 500 window.
     const rows = await this.engine.find('sys_approval_request', {
-      where, fields: ['id', 'status', 'pending_approvers'], limit: 500, context: SYSTEM_CTX,
+      where, fields: ['id'], limit: ids ? Math.max(500, ids.length) : 500, context: SYSTEM_CTX,
     });
-    let list: any[] = Array.isArray(rows) ? rows : [];
-    if (statusPostFilter) list = list.filter(r => statusPostFilter.includes(r.status));
-    if (approverTargets.length) {
-      list = list.filter(r => {
-        const pending = csvSplit(r.pending_approvers);
-        return approverTargets.some(t => pending.includes(t));
-      });
-    }
-    return list.length;
+    return Array.isArray(rows) ? rows.length : 0;
   }
 
   async getRequest(requestId: string, context: SharingExecutionContext): Promise<ApprovalRequestRow | null> {

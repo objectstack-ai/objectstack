@@ -611,7 +611,7 @@ describe('ApprovalService (node era)', () => {
     expect(await svc.countRequests({ q: 'Deal 2' }, SYS)).toBe(1);
   });
 
-  it('listRequests: approver queries window in memory AFTER exact-match filtering', async () => {
+  it('listRequests: approver queries resolve via the index and window engine-side', async () => {
     await openMany(4); // approver u9 on all
     await svc.openNodeRequest(openInput(['someone-else'], {
       recordId: 'oppX', record: { id: 'oppX', name: 'Other' },
@@ -620,6 +620,122 @@ describe('ApprovalService (node era)', () => {
     expect(page).toHaveLength(2);
     expect(page.every(r => r.pending_approvers?.includes('u9'))).toBe(true);
     expect(await svc.countRequests({ approverId: 'u9' }, SYS)).toBe(4);
+  });
+
+  it('listRequests/countRequests: status arrays push down as $in', async () => {
+    await openMany(3);
+    const all = await svc.listRequests({ status: 'pending' }, SYS);
+    await svc.decideNode(all[0].id, { decision: 'approve', actorId: 'u9' }, SYS);
+    await svc.decideNode(all[1].id, { decision: 'reject', actorId: 'u9' }, SYS);
+    const done = await svc.listRequests({ status: ['approved', 'rejected'] }, SYS);
+    expect(done.map(r => r.status).sort()).toEqual(['approved', 'rejected']);
+    expect(await svc.countRequests({ status: ['approved', 'rejected'] }, SYS)).toBe(2);
+    expect(await svc.countRequests({ status: ['recalled'] }, SYS)).toBe(0);
+  });
+
+  // ── pending-approver index (#1745 join table) ───────────────────
+
+  const indexRows = () => (engine._tables['sys_approval_approver'] ?? [])
+    .map(r => ({ request_id: r.request_id, approver: r.approver }));
+
+  it('openNodeRequest mirrors every approver identity into the index', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9', 'ada@example.com', 'role:finance']), CTX);
+    expect(indexRows()).toEqual([
+      { request_id: req.id, approver: 'u9' },
+      { request_id: req.id, approver: 'ada@example.com' },
+      { request_id: req.id, approver: 'role:finance' },
+    ]);
+  });
+
+  it('decide and recall clear the request\'s index rows', async () => {
+    const a = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await svc.decideNode(a.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    expect(indexRows()).toHaveLength(0);
+
+    const b = await svc.openNodeRequest(openInput(['u9'], { recordId: 'opp2', record: { id: 'opp2' } }), CTX);
+    await svc.recall(b.id, { actorId: 'u1' }, CTX);
+    expect(indexRows()).toHaveLength(0);
+  });
+
+  it('unanimous partial approval shrinks the index to the still-pending set', async () => {
+    const req = await svc.openNodeRequest(openInput(['u1', 'u2'], {}, { behavior: 'unanimous' }), CTX);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u1' }, SYS);
+    expect(indexRows()).toEqual([{ request_id: req.id, approver: 'u2' }]);
+  });
+
+  it('reassign and SLA-reassign rewrite the index rows', async () => {
+    const req = await svc.openNodeRequest(
+      openInput(['u9', 'u2'], {}, { escalation: { timeoutHours: 1, action: 'reassign', escalateTo: 'boss', notifySubmitter: false } }), CTX,
+    );
+    await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, SYS);
+    expect(indexRows().map(r => r.approver).sort()).toEqual(['u2', 'u7']);
+
+    makeOverdue(req.id);
+    await svc.runEscalations();
+    expect(indexRows()).toEqual([{ request_id: req.id, approver: 'boss' }]);
+  });
+
+  it('approver-filtered pages stay correct past the old 500-row scan window', async () => {
+    // 30 u9 requests are the OLDEST rows, buried under 510 newer non-matching
+    // ones — the pre-#1745 bounded scan (limit 500, newest-first) could never
+    // reach them. Seeded directly: 540 openNodeRequest round-trips are noise.
+    const reqs = (engine._tables['sys_approval_request'] ??= []);
+    const idx = (engine._tables['sys_approval_approver'] ??= []);
+    const ts = (i: number) => new Date(baseTime + i * 1000).toISOString();
+    for (let i = 0; i < 30; i++) {
+      reqs.push({
+        id: `match_${i}`, process_name: 'flow:f', object_name: 'o', record_id: `m${i}`,
+        status: 'pending', pending_approvers: 'u9', created_at: ts(i), updated_at: ts(i),
+      });
+      idx.push({ id: `aapr_m${i}`, request_id: `match_${i}`, approver: 'u9', organization_id: null, created_at: ts(i) });
+    }
+    for (let i = 0; i < 510; i++) {
+      reqs.push({
+        id: `noise_${i}`, process_name: 'flow:f', object_name: 'o', record_id: `n${i}`,
+        status: 'pending', pending_approvers: 'someone-else', created_at: ts(100 + i), updated_at: ts(100 + i),
+      });
+      idx.push({ id: `aapr_n${i}`, request_id: `noise_${i}`, approver: 'someone-else', organization_id: null, created_at: ts(100 + i) });
+    }
+
+    expect(await svc.countRequests({ approverId: 'u9' }, SYS)).toBe(30);
+    const page = await svc.listRequests({ approverId: 'u9', limit: 10, offset: 20 }, SYS);
+    // Newest-first within the matches: offset 20 of 30 → match_9 … match_0.
+    expect(page.map(r => r.id)).toEqual(Array.from({ length: 10 }, (_, k) => `match_${9 - k}`));
+    expect(page.every(r => r.pending_approvers?.includes('u9'))).toBe(true);
+  });
+
+  it('rebuildApproverIndex backfills legacy rows, drops orphans + stale entries, and is idempotent', async () => {
+    const reqs = (engine._tables['sys_approval_request'] ??= []);
+    const idx = (engine._tables['sys_approval_approver'] ??= []);
+    const ts = new Date(baseTime).toISOString();
+    // Legacy pending row written before the index existed.
+    reqs.push({
+      id: 'legacy_1', process_name: 'flow:f', object_name: 'o', record_id: 'r1',
+      status: 'pending', pending_approvers: 'u1,u2', created_at: ts, updated_at: ts,
+    });
+    // Completed row whose index rows were never cleaned (orphan).
+    reqs.push({
+      id: 'done_1', process_name: 'flow:f', object_name: 'o', record_id: 'r2',
+      status: 'approved', pending_approvers: null, created_at: ts, updated_at: ts,
+    });
+    idx.push({ id: 'aapr_orphan', request_id: 'done_1', approver: 'u3', organization_id: null, created_at: ts });
+    // Pending row whose index drifted (holds an approver no longer in the CSV).
+    reqs.push({
+      id: 'drift_1', process_name: 'flow:f', object_name: 'o', record_id: 'r3',
+      status: 'pending', pending_approvers: 'u5', created_at: ts, updated_at: ts,
+    });
+    idx.push({ id: 'aapr_stale', request_id: 'drift_1', approver: 'u4', organization_id: null, created_at: ts });
+
+    const out = await svc.rebuildApproverIndex();
+    expect(out).toEqual({ requests: 2, inserted: 3, deleted: 2 }); // +u1 +u2 +u5 / -orphan -stale
+    expect(indexRows().sort((a, b) => a.approver.localeCompare(b.approver))).toEqual([
+      { request_id: 'legacy_1', approver: 'u1' },
+      { request_id: 'legacy_1', approver: 'u2' },
+      { request_id: 'drift_1', approver: 'u5' },
+    ]);
+
+    const again = await svc.rebuildApproverIndex();
+    expect(again).toEqual({ requests: 2, inserted: 0, deleted: 0 });
   });
 
   // ── SLA escalation (ADR-0042) ───────────────────────────────────

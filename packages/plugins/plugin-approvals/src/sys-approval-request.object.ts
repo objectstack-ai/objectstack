@@ -220,9 +220,11 @@ export const SysApprovalRequest = ObjectSchema.create({
     // guard on submit and on edit-while-locked checks.
     { fields: ['object_name', 'record_id'] },
     { fields: ['status', 'object_name'] },
-    // "My approvals" inbox — pending_approvers is a CSV string so this
-    // index only helps with status pre-filtering; the engine does a
-    // post-filter substring match per row.
+    // Status-windowed listings (escalation sweep, "All" tab ordering).
+    // "My approvals" matching no longer scans this table: the service keeps
+    // a normalized per-approver index in `sys_approval_approver` (#1745) and
+    // resolves approver filters there; `pending_approvers` stays the
+    // human-readable CSV source of truth only.
     { fields: ['status', 'updated_at'] },
     { fields: ['submitter_id', 'status'] },
   ],

@@ -3,6 +3,7 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
+import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalToken } from './sys-approval-token.object.js';
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import {
@@ -69,7 +70,7 @@ export class ApprovalsServicePlugin implements Plugin {
       scope: 'system',
       defaultDatasource: 'cloud',
       namespace: 'sys',
-      objects: [SysApprovalRequest, SysApprovalAction, SysApprovalToken],
+      objects: [SysApprovalRequest, SysApprovalAction, SysApprovalApprover, SysApprovalToken],
       // ADR-0029 D7 — contribute the Approvals entries into the Setup app's
       // `group_approvals` slot. This plugin owns these objects (K2.b), so it
       // ships their menu too; when the plugin isn't installed the slot is empty.
@@ -199,12 +200,31 @@ export class ApprovalsServicePlugin implements Plugin {
       } catch { /* http server not installed */ }
     };
 
+    // Pending-approver index backfill (issue #1745): rebuild the normalized
+    // sys_approval_approver rows from the pending_approvers CSV so requests
+    // written before the index existed (or drifted past a crashed sync) are
+    // queryable. Idempotent; cost tracks the live pending queue.
+    const backfillApproverIndex = async () => {
+      try {
+        const svc = this.service;
+        if (!svc) return;
+        const out = await svc.rebuildApproverIndex();
+        if (out.inserted > 0 || out.deleted > 0) {
+          ctx.logger.info('ApprovalsServicePlugin: approver index rebuilt', out);
+        }
+      } catch (err: any) {
+        ctx.logger.warn?.('[approvals] approver index backfill failed', { error: err?.message });
+      }
+    };
+
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', wireEscalationClock);
       (ctx as any).hook('kernel:ready', mountActionPages);
+      (ctx as any).hook('kernel:ready', backfillApproverIndex);
     } else {
       await wireEscalationClock();
       await mountActionPages();
+      await backfillApproverIndex();
     }
 
     // ADR-0019: contribute the `approval` node to the flow engine when one is
