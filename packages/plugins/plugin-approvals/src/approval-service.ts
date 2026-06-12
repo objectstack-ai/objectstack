@@ -13,6 +13,10 @@ import type {
   ApprovalDecisionResult,
   ApprovalRecallInput,
   ApprovalRecallResult,
+  ApprovalSendBackInput,
+  ApprovalSendBackResult,
+  ApprovalResubmitInput,
+  ApprovalResubmitResult,
   ApprovalStatus,
   SharingExecutionContext,
 } from '@objectstack/spec/contracts';
@@ -50,6 +54,12 @@ export interface ApprovalResumeSurface {
   resume?(runId: string, signal?: { output?: Record<string, unknown>; branchLabel?: string }): Promise<unknown>;
   /** Flow definition lookup, used to derive step-progress display data. */
   getFlow?(name: string): Promise<any | null>;
+  /**
+   * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
+   * during a revision window — the run is paused at the revise wait node,
+   * which has no reject edge to resume down.
+   */
+  cancelRun?(runId: string, reason?: string): Promise<unknown>;
 }
 
 /**
@@ -153,6 +163,8 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     process_label: cfg?.__flowLabel ?? prettifyMachineName(row.process_name),
     step_label: cfg?.__nodeLabel ?? prettifyMachineName(row.current_step),
     sla_due_at: slaDueAt(row.created_at, cfg),
+    // ADR-0044 revision round (rides the config snapshot; absent ⇒ round 1).
+    round: typeof cfg?.__round === 'number' ? cfg.__round : undefined,
   } as any;
 }
 
@@ -450,6 +462,16 @@ export class ApprovalService implements IApprovalService {
     const configSnapshot: any = { ...input.config };
     if (input.flowLabel) configSnapshot.__flowLabel = input.flowLabel;
     if (input.nodeLabel) configSnapshot.__nodeLabel = input.nodeLabel;
+    // ADR-0044 round numbering: rounds of a revise loop share the run — count
+    // this (run, node)'s prior requests; the new one is round N+1. Stamped on
+    // the snapshot (precedent: __flowLabel), so no schema migration.
+    try {
+      const prior = await this.engine.find('sys_approval_request', {
+        where: { flow_run_id: input.runId, flow_node_id: input.nodeId }, limit: 500, context: SYSTEM_CTX,
+      });
+      const n = Array.isArray(prior) ? prior.length : 0;
+      if (n > 0) configSnapshot.__round = n + 1;
+    } catch { /* round display is best-effort */ }
     const row: any = {
       id,
       process_name: processName,
@@ -601,8 +623,14 @@ export class ApprovalService implements IApprovalService {
    * Withdraw a pending request (submitter only). Finalises the row as
    * `recalled`, releases the record lock (keyed on pending status), mirrors
    * the status field when configured, and resumes the owning flow run down
-   * the `reject` branch with `output.decision = 'recall'` — the engine has no
-   * run-cancel primitive, and leaving the run suspended forever would leak it.
+   * the `reject` branch with `output.decision = 'recall'` — leaving the run
+   * suspended forever would leak it.
+   *
+   * ADR-0044: also valid on the LATEST `returned` request of its run — the
+   * submitter abandons the revision window instead of resubmitting. The run
+   * is then paused at the revise wait node (no reject edge), so it is
+   * terminally cancelled via {@link ApprovalResumeSurface.cancelRun} rather
+   * than resumed.
    */
   async recall(
     requestId: string,
@@ -617,10 +645,16 @@ export class ApprovalService implements IApprovalService {
     });
     const raw: any = Array.isArray(rawRows) ? rawRows[0] : null;
     if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
-    if (raw.status !== 'pending') throw new Error(`INVALID_STATE: request is ${raw.status}`);
+    const inReviseWindow = raw.status === 'returned';
+    if (raw.status !== 'pending' && !inReviseWindow) {
+      throw new Error(`INVALID_STATE: request is ${raw.status}`);
+    }
     if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(input.actorId)) {
       throw new Error(`FORBIDDEN: only the submitter may recall this request`);
     }
+    // A returned request is only recallable while it is still the run's live
+    // frontier — a resubmitted (or later-node) request supersedes it.
+    if (inReviseWindow) await this.assertLatestForRun(raw);
 
     const config = parseJson<ApprovalNodeConfig>(raw.node_config_json, { approvers: [], behavior: 'first_response' } as any);
     const org = raw.organization_id ?? null;
@@ -642,7 +676,19 @@ export class ApprovalService implements IApprovalService {
     }
 
     let resumed = false;
-    if (runId && typeof this.automation?.resume === 'function') {
+    if (inReviseWindow) {
+      // ADR-0044: the run is paused at the revise wait node, which has no
+      // reject out-edge to resume down — terminally cancel it instead.
+      if (runId && typeof this.automation?.cancelRun === 'function') {
+        try {
+          await this.automation.cancelRun(runId, `approval request ${requestId} recalled during revision`);
+        } catch (err: any) {
+          this.logger?.warn?.('[approvals] cancelRun after revise-window recall failed', {
+            request: requestId, run: runId, error: err?.message ?? String(err),
+          });
+        }
+      }
+    } else if (runId && typeof this.automation?.resume === 'function') {
       try {
         await this.automation.resume(runId, {
           branchLabel: APPROVAL_BRANCH_LABELS.reject,
@@ -658,6 +704,260 @@ export class ApprovalService implements IApprovalService {
 
     const fresh = await this.getRequest(requestId, context);
     return { request: fresh!, runId, resumed };
+  }
+
+  // ── Send back for revision / resubmit (ADR-0044) ─────────────
+
+  /**
+   * ADR-0044 send back for revision. Finalises the pending request as
+   * `returned` (a third terminal state — approver-initiated rework, distinct
+   * from submitter-initiated `recalled`) and resumes the owning flow run down
+   * its `revise` edge to a wait point: the record lock (keyed on `pending`)
+   * releases, the submitter reworks the data, then {@link resubmit}s.
+   *
+   * Requires the approval node to declare a `revise` out-edge — validated
+   * BEFORE any mutation, because resuming with an unmatched `branchLabel`
+   * falls back to *all* out-edges. Past the node's `maxRevisions` budget the
+   * request auto-rejects instead (resumes down `reject` with
+   * `output.autoRejected = true`) so instances cannot orbit forever.
+   */
+  async sendBack(
+    requestId: string,
+    input: ApprovalSendBackInput,
+    context: SharingExecutionContext,
+  ): Promise<ApprovalSendBackResult> {
+    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+    const raw = await this.loadPendingRow(requestId);
+    const pending = csvSplit(raw.pending_approvers);
+    if (!context.isSystem && !pending.includes(input.actorId)) {
+      throw new Error(`FORBIDDEN: actor '${input.actorId}' is not a pending approver`);
+    }
+
+    const config = parseJson<ApprovalNodeConfig>(raw.node_config_json, { approvers: [], behavior: 'first_response' } as any);
+    const org = raw.organization_id ?? null;
+    const nodeId: string | null = raw.flow_node_id ?? raw.current_step ?? null;
+    const runId: string | null = raw.flow_run_id ?? null;
+
+    await this.assertReviseEdge(raw, nodeId);
+
+    const now = this.clock.now().toISOString();
+    const maxRevisions = typeof (config as any).maxRevisions === 'number' ? (config as any).maxRevisions : 3;
+    let priorSendBacks = 0;
+    if (runId && nodeId) {
+      const siblings = await this.engine.find('sys_approval_request', {
+        where: { flow_run_id: runId, flow_node_id: nodeId, status: 'returned' }, limit: 500, context: SYSTEM_CTX,
+      });
+      priorSendBacks = Array.isArray(siblings) ? siblings.length : 0;
+    }
+
+    // Audit the revise intent first (audit-first, like decideNode) — on the
+    // auto-reject path the trail then reads `revise → reject`, preserving
+    // what the approver actually asked for.
+    await this.engine.insert('sys_approval_action', {
+      id: uid('aact'), request_id: requestId, organization_id: org,
+      step_name: nodeId, step_index: 0, action: 'revise',
+      actor_id: input.actorId, comment: input.comment ?? null, created_at: now,
+    }, { context: SYSTEM_CTX });
+
+    if (priorSendBacks >= maxRevisions) {
+      // Revision budget exhausted — auto-reject (ADR-0044 loop guard).
+      await this.engine.insert('sys_approval_action', {
+        id: uid('aact'), request_id: requestId, organization_id: org,
+        step_name: nodeId, step_index: 0, action: 'reject',
+        actor_id: input.actorId,
+        comment: `Auto-rejected: revision limit (${maxRevisions}) exceeded`, created_at: now,
+      }, { context: SYSTEM_CTX });
+      await this.engine.update('sys_approval_request', {
+        id: requestId, status: 'rejected', pending_approvers: null, completed_at: now, updated_at: now,
+      }, { context: SYSTEM_CTX });
+      if (config.approvalStatusField) {
+        await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'rejected');
+      }
+      let resumed = false;
+      if (runId && typeof this.automation?.resume === 'function') {
+        try {
+          await this.automation.resume(runId, {
+            branchLabel: APPROVAL_BRANCH_LABELS.reject,
+            output: { decision: 'reject', autoRejected: true, requestId },
+          });
+          resumed = true;
+        } catch (err: any) {
+          this.logger?.warn?.('[approvals] resume after auto-reject failed', {
+            request: requestId, run: runId, error: err?.message ?? String(err),
+          });
+        }
+      }
+      if (raw.submitter_id) {
+        await this.notify({
+          topic: 'approval.returned',
+          audience: [String(raw.submitter_id)],
+          actorId: input.actorId,
+          source: { object: 'sys_approval_request', id: requestId },
+          payload: {
+            title: 'Approval auto-rejected',
+            message: `Your ${raw.object_name}/${raw.record_id} exceeded the revision limit (${maxRevisions}) and was rejected.`,
+            actionUrl: '/system/approvals',
+          },
+        });
+      }
+      const fresh = await this.getRequest(requestId, context);
+      return { request: fresh!, runId, resumed, autoRejected: true };
+    }
+
+    await this.engine.update('sys_approval_request', {
+      id: requestId, status: 'returned', pending_approvers: null, completed_at: now, updated_at: now,
+    }, { context: SYSTEM_CTX });
+    if (config.approvalStatusField) {
+      await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'returned');
+    }
+
+    let resumed = false;
+    if (runId && typeof this.automation?.resume === 'function') {
+      try {
+        await this.automation.resume(runId, {
+          branchLabel: APPROVAL_BRANCH_LABELS.revise,
+          output: { decision: 'revise', requestId },
+        });
+        resumed = true;
+      } catch (err: any) {
+        this.logger?.warn?.('[approvals] resume after send-back failed', {
+          request: requestId, run: runId, error: err?.message ?? String(err),
+        });
+      }
+    }
+
+    if (raw.submitter_id) {
+      await this.notify({
+        topic: 'approval.returned',
+        audience: [String(raw.submitter_id)],
+        actorId: input.actorId,
+        source: { object: 'sys_approval_request', id: requestId },
+        payload: {
+          title: 'Sent back for revision',
+          message: input.comment?.trim() || `Your ${raw.object_name}/${raw.record_id} needs rework before it can be approved.`,
+          actionUrl: '/system/approvals',
+        },
+      });
+    }
+
+    const fresh = await this.getRequest(requestId, context);
+    return { request: fresh!, runId, resumed };
+  }
+
+  /**
+   * ADR-0044 resubmit after rework. Valid on the LATEST `returned` request of
+   * its run, submitter-only. Audits `resubmit` on the returned (round-N)
+   * request and resumes the run from the revise wait node; traversal walks
+   * the declared back-edge into the approval node, whose executor opens the
+   * round-N+1 request — fresh approver slate, record re-locks.
+   */
+  async resubmit(
+    requestId: string,
+    input: ApprovalResubmitInput,
+    context: SharingExecutionContext,
+  ): Promise<ApprovalResubmitResult> {
+    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+    const rawRows = await this.engine.find('sys_approval_request', {
+      where: { id: requestId }, limit: 1, context: SYSTEM_CTX,
+    });
+    const raw: any = Array.isArray(rawRows) ? rawRows[0] : null;
+    if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+    if (raw.status !== 'returned') {
+      throw new Error(`INVALID_STATE: request is ${raw.status} (resubmit applies to returned requests)`);
+    }
+    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(input.actorId)) {
+      throw new Error('FORBIDDEN: only the submitter may resubmit');
+    }
+    await this.assertLatestForRun(raw);
+
+    // A colliding pending request on the same record (e.g. a record-change
+    // trigger re-fired off an edit made inside the revise window) would make
+    // the approval node's re-entry fail AFTER the engine consumed the
+    // suspension — permanently killing the run. Refuse up front instead; the
+    // submitter resolves the collision (recall the other request) first.
+    const colliding = await this.engine.find('sys_approval_request', {
+      where: { object_name: raw.object_name, record_id: raw.record_id, status: 'pending' },
+      limit: 1, context: SYSTEM_CTX,
+    });
+    if (Array.isArray(colliding) && colliding[0]) {
+      throw new Error(
+        `DUPLICATE_REQUEST: another approval request is already pending on ${raw.object_name}/${raw.record_id} — resolve it before resubmitting`,
+      );
+    }
+
+    const org = raw.organization_id ?? null;
+    const nodeId: string | null = raw.flow_node_id ?? raw.current_step ?? null;
+    const runId: string | null = raw.flow_run_id ?? null;
+    const now = this.clock.now().toISOString();
+
+    await this.engine.insert('sys_approval_action', {
+      id: uid('aact'), request_id: requestId, organization_id: org,
+      step_name: nodeId, step_index: 0, action: 'resubmit',
+      actor_id: input.actorId, comment: input.comment ?? null, created_at: now,
+    }, { context: SYSTEM_CTX });
+
+    // The next round only exists if this resume lands — surface `resumed`
+    // honestly so a stuck run is visible instead of silently swallowed.
+    let resumed = false;
+    if (runId && typeof this.automation?.resume === 'function') {
+      try {
+        await this.automation.resume(runId, {
+          branchLabel: APPROVAL_BRANCH_LABELS.resubmit,
+          output: { resubmitted: true, requestId },
+        });
+        resumed = true;
+      } catch (err: any) {
+        this.logger?.warn?.('[approvals] resume after resubmit failed', {
+          request: requestId, run: runId, error: err?.message ?? String(err),
+        });
+      }
+    }
+
+    const fresh = await this.getRequest(requestId, context);
+    return { request: fresh!, runId, resumed };
+  }
+
+  /**
+   * ADR-0044 guard: the flow's approval node must declare a `revise`
+   * out-edge before send-back is allowed — the engine's branch-label fallback
+   * (no matching label ⇒ ALL out-edges) must never be reachable from a user
+   * action.
+   */
+  private async assertReviseEdge(raw: any, nodeId: string | null): Promise<void> {
+    const processName = String(raw.process_name ?? '');
+    const flowName = processName.startsWith('flow:') ? processName.slice('flow:'.length) : undefined;
+    if (!flowName || !nodeId || typeof this.automation?.getFlow !== 'function') {
+      throw new Error('VALIDATION_FAILED: send-back requires the owning flow definition (automation engine unavailable)');
+    }
+    const flow: any = await this.automation.getFlow(flowName);
+    const hasRevise = Array.isArray(flow?.edges)
+      && flow.edges.some((e: any) => e?.source === nodeId && e?.label === APPROVAL_BRANCH_LABELS.revise);
+    if (!hasRevise) {
+      throw new Error(
+        `VALIDATION_FAILED: approval node '${nodeId}' has no '${APPROVAL_BRANCH_LABELS.revise}' out-edge — ` +
+        'the flow does not support send-back for revision',
+      );
+    }
+  }
+
+  /**
+   * ADR-0044 guard: a `returned` request is only actionable (resubmit /
+   * recall) while it is still the newest request on its run — a later round
+   * or a later node's request supersedes it.
+   */
+  private async assertLatestForRun(raw: any): Promise<void> {
+    const runId = raw.flow_run_id;
+    if (!runId) return;
+    // SortNode's key is `order` (spec/data/query.zod.ts) — `direction` would
+    // silently default to ascending and return the OLDEST row.
+    const rows = await this.engine.find('sys_approval_request', {
+      where: { flow_run_id: runId },
+      orderBy: [{ field: 'created_at', order: 'desc' }], limit: 1, context: SYSTEM_CTX,
+    });
+    const latest: any = Array.isArray(rows) ? rows[0] : null;
+    if (latest && String(latest.id) !== String(raw.id)) {
+      throw new Error('INVALID_STATE: a newer approval request supersedes this one');
+    }
   }
 
   // ── Thread interactions (no flow movement) ───────────────────
@@ -736,7 +1036,7 @@ export class ApprovalService implements IApprovalService {
 
     const acts = await this.engine.find('sys_approval_action', {
       where: { request_id: requestId, action: 'remind' },
-      orderBy: [{ field: 'created_at', direction: 'desc' }], limit: 1, context: SYSTEM_CTX,
+      orderBy: [{ field: 'created_at', order: 'desc' }], limit: 1, context: SYSTEM_CTX,
     });
     const last: any = Array.isArray(acts) ? acts[0] : null;
     const now = this.clock.now();
@@ -1366,7 +1666,7 @@ export class ApprovalService implements IApprovalService {
       && (filter?.limit != null || filter?.offset != null);
     const findOpts: any = {
       where,
-      orderBy: [{ field: 'created_at', direction: 'desc' }],
+      orderBy: [{ field: 'created_at', order: 'desc' }],
       context: SYSTEM_CTX,
     };
     if (pushWindow) {
@@ -1493,7 +1793,7 @@ export class ApprovalService implements IApprovalService {
     const rows = await this.engine.find('sys_approval_action', {
       where: { request_id: requestId },
       limit: 500,
-      orderBy: [{ field: 'created_at', direction: 'asc' }],
+      orderBy: [{ field: 'created_at', order: 'asc' }],
       context: SYSTEM_CTX,
     });
     const actions = Array.isArray(rows) ? rows.map(rowFromAction) : [];

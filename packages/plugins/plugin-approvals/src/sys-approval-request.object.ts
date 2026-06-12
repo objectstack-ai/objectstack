@@ -127,7 +127,9 @@ export const SysApprovalRequest = ObjectSchema.create({
     }),
 
     status: Field.select(
-      ['pending', 'approved', 'rejected', 'recalled'],
+      // Keep in sync with `ApprovalStatus` (spec/contracts). `returned` =
+      // sent back for revision (ADR-0044) — terminal for this round.
+      ['pending', 'approved', 'rejected', 'recalled', 'returned'],
       {
         label: 'Status',
         required: true,

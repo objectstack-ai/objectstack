@@ -311,6 +311,14 @@ export interface SuspendedRunStore {
 }
 
 export class AutomationEngine implements IAutomationService {
+    /**
+     * ADR-0044: maximum times a single node may be (re-)entered at the top
+     * level of one run before the engine aborts it as a runaway back-edge
+     * loop. Generous on purpose — the product guard (`maxRevisions`) sits
+     * orders of magnitude lower.
+     */
+    static readonly MAX_NODE_REENTRIES = 100;
+
     private flows = new Map<string, FlowParsed>();
     private flowEnabled = new Map<string, boolean>();
     private flowVersionHistory = new Map<string, Array<{ version: number; definition: FlowParsed; createdAt: string }>>();
@@ -1339,6 +1347,47 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Cancel a suspended run (ADR-0044): consume its continuation and record a
+     * terminal `cancelled` log so it stops surfacing as resumable. The
+     * engine-level primitive behind "the submitter abandoned the revision
+     * window" — recalling there leaves the run paused at a wait node with no
+     * reject edge to resume down, so the run must end, not continue. Returns
+     * `false` when no suspended run exists under the id (already terminal /
+     * unknown), which callers treat as idempotent success.
+     */
+    async cancelRun(runId: string, reason?: string): Promise<boolean> {
+        let run = this.suspendedRuns.get(runId) ?? null;
+        if (!run && this.store) {
+            try {
+                run = await this.store.load(runId);
+            } catch (err) {
+                this.logger.warn(
+                    `[automation] cancelRun: failed to load suspended run '${runId}' from durable store: ${(err as Error).message}`,
+                );
+            }
+        }
+        if (!run) return false;
+        await this.forgetSuspendedRun(runId);
+        this.recordLog({
+            id: run.runId,
+            flowName: run.flowName,
+            flowVersion: run.flowVersion,
+            status: 'cancelled',
+            startedAt: run.startedAt,
+            completedAt: new Date().toISOString(),
+            durationMs: Date.now() - run.startTime,
+            trigger: {
+                type: run.context?.event ?? 'manual',
+                userId: run.context?.userId,
+                object: run.context?.object,
+            },
+            steps: run.steps,
+            error: reason,
+        });
+        return true;
+    }
+
+    /**
      * Walk a failed run's `$parentRunId` chain and fail each suspended
      * ancestor (see {@link failSuspendedRun}). Bounded so a corrupt context
      * can't loop forever.
@@ -1489,6 +1538,13 @@ export class AutomationEngine implements IAutomationService {
      * Detect cycles in the flow graph (DAG validation).
      * Uses DFS with coloring (white/gray/black) to detect back edges.
      * Throws an error with cycle details if a cycle is found.
+     *
+     * ADR-0044: edges explicitly typed `back` (declared back-edges — e.g. a
+     * revise/rework loop re-entering an approval node) are excluded from the
+     * analysis: the graph **minus `back` edges** must be a DAG. An unmarked
+     * cycle is still rejected — authors opt in edge by edge. At run time a
+     * `back` edge traverses like any default edge; the re-entry runaway guard
+     * lives in {@link executeNode}.
      */
     private detectCycles(flow: FlowParsed): void {
         const WHITE = 0, GRAY = 1, BLACK = 2;
@@ -1502,6 +1558,7 @@ export class AutomationEngine implements IAutomationService {
             adj.set(node.id, []);
         }
         for (const edge of flow.edges) {
+            if (edge.type === 'back') continue; // ADR-0044 declared back-edge
             const targets = adj.get(edge.source);
             if (targets) targets.push(edge.target);
         }
@@ -1534,7 +1591,10 @@ export class AutomationEngine implements IAutomationService {
             if (color.get(node.id) === WHITE) {
                 const cycle = dfs(node.id);
                 if (cycle) {
-                    throw new Error(`Flow contains a cycle: ${cycle.join(' → ')}. Only DAG flows are allowed.`);
+                    throw new Error(
+                        `Flow contains a cycle: ${cycle.join(' → ')}. Only DAG flows are allowed — ` +
+                        `to author an intentional rework loop, mark the cycle-closing edge with type: 'back' (ADR-0044).`,
+                    );
                 }
             }
         }
@@ -1587,6 +1647,23 @@ export class AutomationEngine implements IAutomationService {
         steps: StepLogEntry[],
     ): Promise<void> {
         if (node.type === 'end') return;
+
+        // ADR-0044 runaway guard: declared back-edges make re-entering a node
+        // legal, so a misauthored unconditional loop could otherwise spin
+        // forever. Count this node's prior *top-level* visits in the run's step
+        // log (region body steps carry `parentNodeId` and are excluded — a
+        // 200-iteration `loop` region is legitimate) and fail the run loudly
+        // past the cap. Product-level guards (e.g. an approval node's
+        // `maxRevisions`) terminate far earlier; this is the engine backstop.
+        const priorVisits = steps.reduce(
+            (n, s) => (s.nodeId === node.id && s.parentNodeId === undefined ? n + 1 : n), 0,
+        );
+        if (priorVisits >= AutomationEngine.MAX_NODE_REENTRIES) {
+            throw new Error(
+                `Node '${node.id}' was entered ${priorVisits} times in one run — aborting as a runaway loop ` +
+                `(back-edge cycles must terminate; see ADR-0044)`,
+            );
+        }
 
         const stepStart = Date.now();
         const stepStartedAt = new Date().toISOString();

@@ -18,8 +18,17 @@
 
 import type { SharingExecutionContext } from './sharing-service.js';
 
-/** Lifecycle state of an approval request. */
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'recalled';
+/**
+ * Lifecycle state of an approval request.
+ *
+ * `returned` (ADR-0044): the approver sent the request back for revision —
+ * terminal for THIS request/round; the flow walks the `revise` edge to a wait
+ * point, and a later resubmit opens a fresh `pending` request (next round).
+ * Distinct from `recalled` (submitter-initiated withdrawal).
+ *
+ * Dual-source: keep in sync with the `sys_approval_request` status select.
+ */
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'recalled' | 'returned';
 
 /** Live request row. */
 export interface ApprovalRequestRow {
@@ -82,6 +91,12 @@ export interface ApprovalRequestRow {
    * attached). `state` is relative to this request's node.
    */
   flow_steps?: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
+  /**
+   * ADR-0044 revision round of this request on its (run, node): 1 (or absent)
+   * for the first round, 2 after one send-back-and-resubmit, … Carried in the
+   * `node_config_json` snapshot (`__round`), so no schema migration.
+   */
+  round?: number;
 }
 
 /** Kinds of entries on a request's audit trail. */
@@ -98,7 +113,11 @@ export type ApprovalActionKind =
   /** An approver asked the submitter for more information (request stays pending). */
   | 'request_info'
   /** A free-form reply on the thread (submitter or approver). */
-  | 'comment';
+  | 'comment'
+  /** ADR-0044: an approver sent the request back for revision (request finalizes `returned`). */
+  | 'revise'
+  /** ADR-0044: the submitter resubmitted after rework (the next round's request opens with its own `submit`). */
+  | 'resubmit';
 
 /** Audit row. */
 export interface ApprovalActionRow {
@@ -139,6 +158,45 @@ export interface ApprovalRecallResult {
    * engine has no run-cancel primitive yet; the reject edge is the closest
    * "did not pass" semantics.
    */
+  resumed?: boolean;
+}
+
+/** Input for sending a pending request back for revision (ADR-0044). */
+export interface ApprovalSendBackInput {
+  /** Must be a pending approver on the request (or a system context). */
+  actorId: string;
+  /** Why the material needs rework — shown to the submitter. */
+  comment?: string;
+}
+
+/** Result of a send-back (ADR-0044). */
+export interface ApprovalSendBackResult {
+  request: ApprovalRequestRow;
+  /** The suspended flow run this request gated, if any. */
+  runId?: string | null;
+  /** True when the owning flow run was resumed (down `revise`, or `reject` on auto-reject). */
+  resumed?: boolean;
+  /**
+   * True when the send-back exceeded the node's `maxRevisions` budget and the
+   * request was auto-rejected instead (resumed down `reject` with
+   * `output.autoRejected = true`).
+   */
+  autoRejected?: boolean;
+}
+
+/** Input for resubmitting a returned request after rework (ADR-0044). */
+export interface ApprovalResubmitInput {
+  /** Must be the request's submitter (or a system context). */
+  actorId: string;
+  comment?: string;
+}
+
+/** Result of a resubmit (ADR-0044). */
+export interface ApprovalResubmitResult {
+  /** The round-N request the resubmit was recorded on (stays `returned`). */
+  request: ApprovalRequestRow;
+  runId?: string | null;
+  /** True when the owning flow run was resumed (it re-enters the approval node and opens round N+1). */
   resumed?: boolean;
 }
 
@@ -216,8 +274,40 @@ export interface IApprovalService {
    * Withdraw a pending request. Only the submitter (or a system context) may
    * recall. Finalises the request as `recalled` and resumes the owning flow
    * run down the `reject` branch with `output.decision = 'recall'`.
+   *
+   * ADR-0044: also valid on the LATEST `returned` request of its (run, node)
+   * — the submitter abandons the revision window instead of resubmitting; the
+   * request flips `returned → recalled` and the run resumes down `reject` the
+   * same way.
    */
   recall(requestId: string, input: ApprovalRecallInput, context: SharingExecutionContext): Promise<ApprovalRecallResult>;
+
+  /**
+   * ADR-0044 send back for revision. Finalises the pending request as
+   * `returned` and resumes the owning flow run down its `revise` edge to a
+   * wait point (record unlocks; the submitter reworks the data and
+   * {@link resubmit}s). Requires the approval node to declare a `revise`
+   * out-edge; past the node's `maxRevisions` budget the request auto-rejects
+   * instead. Audited as `revise`.
+   */
+  sendBack(
+    requestId: string,
+    input: ApprovalSendBackInput,
+    context: SharingExecutionContext,
+  ): Promise<ApprovalSendBackResult>;
+
+  /**
+   * ADR-0044 resubmit after rework. Valid on the LATEST `returned` request of
+   * its (run, node), submitter-only. Resumes the suspended run from the wait
+   * point; traversal re-enters the approval node via the declared back-edge
+   * and opens the next round's request (fresh approver slate, record
+   * re-locks). Audited as `resubmit` on the returned request.
+   */
+  resubmit(
+    requestId: string,
+    input: ApprovalResubmitInput,
+    context: SharingExecutionContext,
+  ): Promise<ApprovalResubmitResult>;
 
   /**
    * Hand a pending-approver slot to someone else. The actor must currently

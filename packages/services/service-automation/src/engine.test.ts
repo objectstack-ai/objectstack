@@ -1518,6 +1518,132 @@ describe('AutomationEngine - DAG Cycle Detection', () => {
     });
 });
 
+// ─── Back-edge Re-entry Tests (ADR-0044) ─────────────────────────────
+
+describe('AutomationEngine - Back-edge re-entry (ADR-0044)', () => {
+    let engine: AutomationEngine;
+
+    beforeEach(() => {
+        engine = new AutomationEngine(createTestLogger());
+    });
+
+    /** A self-looping counter flow: `inc` re-enters itself over a declared back-edge until the cap. */
+    const counterFlow = (cap: number) => ({
+        name: 'counter_flow',
+        label: 'Counter Flow',
+        type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'inc', type: 'inc', label: 'Increment' },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'inc' },
+            { id: 'e_back', source: 'inc', target: 'inc', type: 'back', condition: `inc.count < ${cap}` },
+            { id: 'e_done', source: 'inc', target: 'end', condition: `inc.count >= ${cap}` },
+        ],
+    });
+
+    const registerIncExecutor = () => {
+        let count = 0;
+        engine.registerNodeExecutor({
+            type: 'inc',
+            async execute() {
+                count += 1;
+                return { success: true, output: { count } };
+            },
+        });
+        return () => count;
+    };
+
+    it('accepts a cycle whose closing edge is typed back', () => {
+        registerIncExecutor();
+        expect(() => engine.registerFlow('counter_flow', counterFlow(3))).not.toThrow();
+    });
+
+    it('still rejects an unmarked cycle alongside a declared back-edge', () => {
+        expect(() => engine.registerFlow('mixed_cycles', {
+            name: 'mixed_cycles',
+            label: 'Mixed Cycles',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'a', type: 'assignment', label: 'A' },
+                { id: 'b', type: 'assignment', label: 'B' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'a' },
+                { id: 'e2', source: 'a', target: 'b' },
+                // declared rework loop — fine on its own…
+                { id: 'e3', source: 'b', target: 'a', type: 'back' },
+                // …but this second, unmarked cycle must still be rejected
+                { id: 'e4', source: 'b', target: 'b' },
+            ],
+        })).toThrow(/cycle/i);
+    });
+
+    it('re-enters a node over the back-edge, overwriting its outputs (latest round wins)', async () => {
+        const getCount = registerIncExecutor();
+        engine.registerFlow('counter_flow', counterFlow(3));
+
+        const result = await engine.execute('counter_flow', {});
+
+        expect(result.success).toBe(true);
+        expect(getCount()).toBe(3);
+        // Every visit is its own step entry — observability shows each round.
+        const run = (await engine.listRuns('counter_flow'))[0];
+        expect(run.steps.filter(s => s.nodeId === 'inc')).toHaveLength(3);
+    });
+
+    it('aborts a runaway back-edge loop at the re-entry cap', async () => {
+        registerIncExecutor();
+        engine.registerFlow('counter_flow', counterFlow(1_000_000));
+
+        const result = await engine.execute('counter_flow', {});
+
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/runaway/i);
+        expect(result.error).toContain(String(AutomationEngine.MAX_NODE_REENTRIES));
+    });
+
+    it('cancelRun consumes a suspended run and records a terminal cancelled log', async () => {
+        engine.registerNodeExecutor({
+            type: 'pause',
+            async execute() { return { success: true, suspend: true, correlation: 'test-pause' }; },
+        });
+        engine.registerFlow('pausing_flow', {
+            name: 'pausing_flow',
+            label: 'Pausing Flow',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'hold', type: 'pause', label: 'Hold' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'hold' },
+                { id: 'e2', source: 'hold', target: 'end' },
+            ],
+        });
+
+        const paused = await engine.execute('pausing_flow', {});
+        expect(paused.status).toBe('paused');
+        const runId = paused.runId!;
+
+        expect(await engine.cancelRun(runId, 'abandoned by submitter')).toBe(true);
+        expect(engine.listSuspendedRuns()).toHaveLength(0);
+        // listRuns returns newest-first; the paused entry precedes the cancelled one.
+        const log = (await engine.listRuns('pausing_flow'))[0];
+        expect(log?.status).toBe('cancelled');
+        expect(log?.error).toBe('abandoned by submitter');
+
+        // The continuation is consumed: resume now fails, and cancel is idempotent.
+        const resumed = await engine.resume(runId);
+        expect(resumed.success).toBe(false);
+        expect(await engine.cancelRun(runId)).toBe(false);
+    });
+});
+
 // ─── Node Timeout Tests ──────────────────────────────────────────────
 
 describe('AutomationEngine - Node Timeout', () => {

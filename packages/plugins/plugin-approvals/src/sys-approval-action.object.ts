@@ -88,9 +88,11 @@ export const SysApprovalAction = ObjectSchema.create({
     }),
 
     action: Field.select(
-      // Keep in sync with `ApprovalActionKind` (spec/contracts). The last four
-      // are thread interactions — they never move the flow.
-      ['submit', 'approve', 'reject', 'recall', 'escalate', 'reassign', 'remind', 'request_info', 'comment'],
+      // Keep in sync with `ApprovalActionKind` (spec/contracts). reassign /
+      // remind / request_info / comment are thread interactions — they never
+      // move the flow. revise / resubmit (ADR-0044) DO move it: send back for
+      // revision and the later resubmission.
+      ['submit', 'approve', 'reject', 'recall', 'escalate', 'reassign', 'remind', 'request_info', 'comment', 'revise', 'resubmit'],
       {
         label: 'Action',
         required: true,

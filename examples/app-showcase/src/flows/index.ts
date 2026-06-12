@@ -147,6 +147,13 @@ export const TaskAssignedNotifyFlow = defineFlow({
  * approval and resumes down the matching `approve` / `reject` edge. The
  * executive step only runs for budgets above $500k — that gate is a decision
  * node on the manager step's approve edge.
+ *
+ * The manager step also demos ADR-0044 **send back for revision**: its
+ * `revise` edge walks to a signal `wait` node where the record unlocks for
+ * rework, and the submitter's resubmit re-enters the approval node over the
+ * declared back-edge (round 2, fresh approver slate). `maxRevisions: 2` keeps
+ * the loop guarded — a third send-back auto-rejects. The executive step has
+ * NO revise edge on purpose: send-back there is rejected with a clear error.
  */
 export const BudgetApprovalFlow = defineFlow({
   name: 'showcase_budget_approval',
@@ -176,7 +183,17 @@ export const BudgetApprovalFlow = defineFlow({
         approvers: [{ type: 'role', value: 'manager' }],
         behavior: 'first_response',
         lockRecord: true,
+        // ADR-0044: at most two send-backs; the third auto-rejects.
+        maxRevisions: 2,
       },
+    },
+    {
+      // ADR-0044 revise window: the run parks here while the submitter reworks
+      // the (now unlocked) record; their resubmit resumes it over the back-edge.
+      id: 'wait_revision',
+      type: 'wait',
+      label: 'Awaiting Revision',
+      config: { eventType: 'signal', signalName: 'budget_revision' },
     },
     {
       id: 'needs_exec',
@@ -209,6 +226,12 @@ export const BudgetApprovalFlow = defineFlow({
     { id: 'e5', source: 'needs_exec', target: 'approved', label: 'false', condition: 'budget <= 500000' },
     { id: 'e6', source: 'exec_review', target: 'approved', label: 'approve' },
     { id: 'e7', source: 'exec_review', target: 'rejected', label: 'reject' },
+    // ADR-0044 send-back-for-revision loop on the manager step: revise walks
+    // to the wait node; the resubmit edge is the declared back-edge closing
+    // the cycle (type 'back' — excluded from DAG validation, traversed
+    // normally), re-entering the approval node as round 2.
+    { id: 'e8', source: 'manager_review', target: 'wait_revision', label: 'revise' },
+    { id: 'e9', source: 'wait_revision', target: 'manager_review', label: 'resubmit', type: 'back' },
   ],
 });
 

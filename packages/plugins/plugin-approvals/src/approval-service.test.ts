@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ApprovalService } from './approval-service.js';
+import { ApprovalService, REMIND_COOLDOWN_MS } from './approval-service.js';
 import { bindApprovalLockHook, unbindAllHooks } from './lifecycle-hooks.js';
 
 interface FakeRow { [k: string]: any }
@@ -51,12 +51,16 @@ function makeFakeEngine() {
     async find(object: string, options?: any) {
       const rows = ensure(object).filter(r => matches(r, options?.filter ?? options?.where));
       if (options?.orderBy?.[0]) {
-        const { field, direction } = options.orderBy[0];
+        // Canonical SortNode key only (spec/data/query.zod.ts): a sloppy
+        // `direction:` key must fall through to the schema default (asc),
+        // exactly like the real engine — that's how the remind() cool-down
+        // regression stayed invisible when this mock honored both keys.
+        const { field, order } = options.orderBy[0];
         rows.sort((a, b) => {
           const av = a[field]; const bv = b[field];
           if (av === bv) return 0;
           const cmp = av > bv ? 1 : -1;
-          return direction === 'desc' ? -cmp : cmp;
+          return order === 'desc' ? -cmp : cmp;
         });
       }
       const start = options?.offset ?? 0;
@@ -454,6 +458,27 @@ describe('ApprovalService (node era)', () => {
     expect(actions.at(-1)?.action).toBe('remind');
     // The fake clock steps 1s per call — well inside the 4h cool-down.
     await expect(svc.remind(req.id, { actorId: 'u1' }, CTX)).rejects.toThrow(/THROTTLED/);
+  });
+
+  it('remind: cool-down measures from the NEWEST reminder, not the first', async () => {
+    // Regression: the throttle query sorted with the non-canonical
+    // `direction: 'desc'` key, which SortNode strips — so it sorted asc and
+    // compared against the FIRST reminder ever sent. Once 4h passed after
+    // reminder #1, every later remind() sailed through unthrottled.
+    let nowMs = baseTime;
+    const localSvc = new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(nowMs += 1000) },
+    });
+    const req = await localSvc.openNodeRequest(openInput(['u9']), CTX);
+    await localSvc.remind(req.id, { actorId: 'u1' }, CTX);
+    // Jump past the cool-down: a second reminder is legitimately allowed.
+    nowMs += REMIND_COOLDOWN_MS;
+    await localSvc.remind(req.id, { actorId: 'u1' }, CTX);
+    // Immediately after reminder #2 the throttle must bite again — with the
+    // wrong sort key it compared against reminder #1 (now >4h old) and let
+    // unlimited reminders through.
+    await expect(localSvc.remind(req.id, { actorId: 'u1' }, CTX)).rejects.toThrow(/THROTTLED/);
   });
 
   it('remind: only the submitter may nudge', async () => {

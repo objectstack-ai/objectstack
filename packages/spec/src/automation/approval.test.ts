@@ -24,8 +24,15 @@ describe('ApproverType', () => {
 describe('Approval node constants (ADR-0019)', () => {
   it('exposes the canonical node type and decision branch labels', () => {
     expect(APPROVAL_NODE_TYPE).toBe('approval');
+    // The decision surface stays approve|reject — send-back (ADR-0044) is a
+    // separate service verb, not a third decision.
     expect(ApprovalDecision.options).toEqual(['approve', 'reject']);
-    expect(APPROVAL_BRANCH_LABELS).toEqual({ approve: 'approve', reject: 'reject' });
+    expect(APPROVAL_BRANCH_LABELS).toEqual({
+      approve: 'approve',
+      reject: 'reject',
+      revise: 'revise',
+      resubmit: 'resubmit',
+    });
   });
 });
 
@@ -49,6 +56,15 @@ describe('ApprovalNodeConfigSchema', () => {
     expect(result.behavior).toBe('first_response');
     expect(result.lockRecord).toBe(true);
     expect(result.escalation).toBeUndefined();
+    // ADR-0044: revision budget defaults to 3 send-backs.
+    expect(result.maxRevisions).toBe(3);
+  });
+
+  it('accepts an explicit maxRevisions and rejects negatives (ADR-0044)', () => {
+    expect(ApprovalNodeConfigSchema.parse({ ...minimal, maxRevisions: 0 }).maxRevisions).toBe(0);
+    expect(ApprovalNodeConfigSchema.parse({ ...minimal, maxRevisions: 5 }).maxRevisions).toBe(5);
+    expect(() => ApprovalNodeConfigSchema.parse({ ...minimal, maxRevisions: -1 })).toThrow();
+    expect(() => ApprovalNodeConfigSchema.parse({ ...minimal, maxRevisions: 1.5 })).toThrow();
   });
 
   it('accepts a full node config with escalation', () => {

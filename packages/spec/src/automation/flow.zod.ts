@@ -180,8 +180,13 @@ export const FlowEdgeSchema = lazySchema(() => z.object({
   /** Condition for this path (only for decision/branch nodes) */
   condition: ExpressionInputSchema.optional().describe('Predicate (CEL) returning boolean used for branching.'),
   
-  type: z.enum(['default', 'fault', 'conditional']).default('default')
-    .describe('Connection type: default (normal flow), fault (error path), or conditional (expression-guarded)'),
+  type: z.enum(['default', 'fault', 'conditional', 'back'])
+    .default('default')
+    .describe(
+      'Connection type: default (normal flow), fault (error path), conditional (expression-guarded), '
+      + 'or back (ADR-0044 declared back-edge — traversed normally at run time, but excluded from DAG '
+      + 'cycle validation so a revise/rework loop can re-enter an earlier node)',
+    ),
   label: z.string().optional().describe('Label on the connector'),
 
   /**

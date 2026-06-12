@@ -56,6 +56,18 @@ export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
 export const APPROVAL_BRANCH_LABELS = {
   approve: 'approve',
   reject: 'reject',
+  /**
+   * ADR-0044 send-back-for-revision: the request finalizes `returned` and the
+   * flow walks this edge to a wait point where the submitter reworks the
+   * record; a later resubmit re-enters the approval node via a declared
+   * back-edge (round N+1).
+   */
+  revise: 'revise',
+  /**
+   * ADR-0044: informational label a resubmit resume passes so the wait node's
+   * out-edge selection is explicit when authors label the back-edge.
+   */
+  resubmit: 'resubmit',
 } as const;
 
 /** A single approver assignment on an Approval node. */
@@ -156,6 +168,16 @@ export const ApprovalNodeConfigSchema = lazySchema(() => z.object({
 
   /** Optional per-node SLA escalation. */
   escalation: ApprovalEscalationSchema.optional().describe('Per-node SLA escalation'),
+
+  /**
+   * ADR-0044: maximum send-backs-for-revision per (run, node). A send-back
+   * that would exceed the budget auto-rejects instead (the run resumes down
+   * the `reject` edge with `output.autoRejected = true`), so instances cannot
+   * orbit the revise loop forever. `0` disables send-back (always
+   * auto-rejects). Only meaningful when the node has a `revise` out-edge.
+   */
+  maxRevisions: z.number().int().min(0).default(3)
+    .describe('Max send-backs for revision before auto-reject (0 = send-back disabled)'),
 }));
 export type ApprovalNodeConfig = z.infer<typeof ApprovalNodeConfigSchema>;
 
