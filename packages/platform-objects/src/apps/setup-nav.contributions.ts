@@ -26,6 +26,9 @@ import type { NavigationContribution } from '@objectstack/spec/ui';
 
 const BASE_PRIORITY = 100;
 
+// Marketplace entries (browse / installed) moved to
+// @objectstack/cloud-connection's marketplace plugins (cloud ADR-0009:
+// the nav lives and dies with the capability — no plugin, no entry).
 export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
   {
     app: 'setup',
@@ -40,8 +43,6 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     group: 'group_apps',
     priority: BASE_PRIORITY,
     items: [
-      { id: 'nav_marketplace_browse', type: 'url', label: 'Browse Marketplace', url: '/apps/setup/system/marketplace', icon: 'store' },
-      { id: 'nav_marketplace_installed', type: 'url', label: 'Installed Apps', url: '/apps/setup/system/marketplace/installed', icon: 'package-check', requiresObject: 'sys_package_installation' },
     ],
   },
   {

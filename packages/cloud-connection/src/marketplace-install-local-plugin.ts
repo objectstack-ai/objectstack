@@ -47,6 +47,7 @@ import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { LocalManifestSource, type InstalledManifestEntry } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
+import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -88,6 +89,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
     start = async (ctx: PluginContext): Promise<void> => {
         ctx.hook('kernel:ready', async () => {
+            // Plugin-owned Setup nav (cloud ADR-0009): "Installed Apps"
+            // ships WITH the local-install capability.
+            try {
+                const manifest = ctx.getService<{ register(m: any): void }>('manifest');
+                manifest?.register?.(MARKETPLACE_INSTALLED_UI_BUNDLE);
+            } catch { /* no manifest service */ }
+
             // 1. Rehydrate previously installed packages so they survive restart.
             await this.rehydrate(ctx);
 

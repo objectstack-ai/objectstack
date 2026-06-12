@@ -49,3 +49,4 @@ export type { RuntimeConfigPluginConfig, RuntimeConfigPlanFeatures } from './run
 export { ConnectionCredentialStore, DEFAULT_CONNECTION_CREDENTIAL_PATH } from './connection-credential-store.js';
 export type { StoredConnectionCredential } from './connection-credential-store.js';
 export { CloudConnectionSettingsPage, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
+export { MARKETPLACE_BROWSE_UI_BUNDLE, MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';

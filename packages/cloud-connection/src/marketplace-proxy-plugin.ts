@@ -27,6 +27,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveCloudUrl } from './cloud-url.js';
+import { MARKETPLACE_BROWSE_UI_BUNDLE } from './marketplace-ui.js';
 import {
     resolveMarketplacePublicBaseUrl,
     publicMarketplaceKeyForApiPath,
@@ -171,6 +172,15 @@ export class MarketplaceProxyPlugin implements Plugin {
 
     start = async (ctx: PluginContext): Promise<void> => {
         ctx.hook('kernel:ready', async () => {
+            // Plugin-owned Setup nav (cloud ADR-0009): the "Browse
+            // Marketplace" entry ships WITH the browse capability — no
+            // proxy mounted, no entry. Best-effort: headless kernels
+            // simply have no Setup surface.
+            try {
+                const manifest = ctx.getService<{ register(m: any): void }>('manifest');
+                manifest?.register?.(MARKETPLACE_BROWSE_UI_BUNDLE);
+            } catch { /* no manifest service */ }
+
             let httpServer: any;
             try {
                 httpServer = ctx.getService('http-server');
