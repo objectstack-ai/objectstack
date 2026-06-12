@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - packages/plugins/*
+  - packages/triggers/*
   - packages/services/*
   - packages/adapters/*
   - packages/connectors/*
