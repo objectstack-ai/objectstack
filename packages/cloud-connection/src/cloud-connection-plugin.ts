@@ -147,7 +147,12 @@ export class CloudConnectionPlugin implements Plugin {
 
             const resolveEnvironmentId = async (c: any): Promise<string | undefined> => {
                 const fixed = (this.cfg.environmentId ?? process.env.OS_ENVIRONMENT_ID ?? '').trim();
-                if (fixed) return fixed;
+                // The CLI's local-dev defaults ('env_local' / 'proj_local')
+                // identify the LOCAL kernel, not a cloud environment — never
+                // present them to the control plane as one (they would 404
+                // the bind and resurrect the phantom-environment confusion
+                // ADR runtime-identity-binding removes).
+                if (fixed && fixed !== 'env_local' && fixed !== 'proj_local') return fixed;
                 if (this.cfg.singleEnvironment) {
                     // A completed bind persisted the environment id — a
                     // self-hosted runtime needs no OS_ENVIRONMENT_ID after it.

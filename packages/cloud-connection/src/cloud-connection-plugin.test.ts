@@ -220,6 +220,19 @@ describe('single-environment mode (host auth, fixed env id)', () => {
         expect(res.payload.data.total).toBe(1);
     });
 
+    it("ignores the CLI's local sentinel env ids (env_local / proj_local)", async () => {
+        process.env.OS_ENVIRONMENT_ID = 'env_local';
+        const rawApp = makeRawApp();
+        const { ctx, fireKernelReady } = makeCtx({ rawApp });
+        await new CloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: 'http://cloud.test' }).start(ctx as any);
+        await fireKernelReady();
+        const res = await rawApp.routes.get('GET /api/v1/cloud-connection/status')!(makeC('http://localhost:3000/x'));
+        expect(res.status).toBe(200);
+        // Treated as "no cloud environment", not presented to the control plane.
+        expect(res.payload.data.environmentId).toBeNull();
+        expect(res.payload.data.bound).toBe(false);
+    });
+
     it('falls back to OS_ENVIRONMENT_ID when no config id is given', async () => {
         process.env.OS_ENVIRONMENT_ID = 'env-from-env-var';
         const rawApp = makeRawApp();
