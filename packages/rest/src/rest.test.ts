@@ -499,6 +499,67 @@ describe('RestServer', () => {
     });
   });
 
+  describe('meta routes preview=draft forwarding (ADR-0033/0037)', () => {
+    function getMetaRoute(rest: any, method: string, path: string) {
+      return rest
+        .getRoutes()
+        .find((r: any) => r.method === method && r.path === path);
+    }
+    const mockRes = () => ({
+      json: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      header: vi.fn(),
+      send: vi.fn(),
+    });
+
+    it('GET /meta/:type forwards previewDrafts to protocol.getMetaItems', async () => {
+      const rest = new RestServer(server as any, protocol as any);
+      rest.registerRoutes();
+      const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type');
+      expect(route).toBeDefined();
+
+      await route!.handler(
+        { params: { type: 'app' }, query: { preview: 'draft' }, headers: {} },
+        mockRes(),
+      );
+      expect(protocol.getMetaItems).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'app', previewDrafts: true }),
+      );
+    });
+
+    it('GET /meta/:type omits previewDrafts without the flag', async () => {
+      const rest = new RestServer(server as any, protocol as any);
+      rest.registerRoutes();
+      const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type');
+
+      await route!.handler(
+        { params: { type: 'app' }, query: {}, headers: {} },
+        mockRes(),
+      );
+      const arg = protocol.getMetaItems.mock.calls.at(-1)![0];
+      expect(arg).not.toHaveProperty('previewDrafts');
+    });
+
+    it('GET /meta/:type/:name forwards previewDrafts and bypasses the cached path', async () => {
+      // A cached protocol would normally win; preview must skip it (ETags are
+      // keyed on the published checksum).
+      protocol.getMetaItemCached = vi.fn();
+      const rest = new RestServer(server as any, protocol as any);
+      rest.registerRoutes();
+      const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type/:name');
+      expect(route).toBeDefined();
+
+      await route!.handler(
+        { params: { type: 'object', name: 'lead' }, query: { preview: 'draft' }, headers: {} },
+        mockRes(),
+      );
+      expect(protocol.getMetaItemCached).not.toHaveBeenCalled();
+      expect(protocol.getMetaItem).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'object', name: 'lead', previewDrafts: true }),
+      );
+    });
+  });
+
   describe('findData handler expand/populate forwarding', () => {
     function getListRoute(rest: any) {
       const routes = rest.getRoutes();

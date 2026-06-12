@@ -1749,9 +1749,18 @@ export class RestServer {
                         const packageId = req.query?.package || undefined;
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
+                        // ADR-0033/0037 draft-overlay preview: `?preview=draft`
+                        // overlays pending drafts on the active list, exactly as
+                        // the runtime dispatcher's /metadata/:type route does —
+                        // the console's draft preview (Live Canvas) reads THIS
+                        // route, so dropping the flag here silently renders the
+                        // published-only world.
+                        const previewDrafts = typeof req.query?.preview === 'string'
+                            && req.query.preview.toLowerCase() === 'draft';
                         const items = await p.getMetaItems({
                             type: req.params.type,
                             packageId,
+                            ...(previewDrafts ? { previewDrafts: true } : {}),
                             ...(environmentId ? { environmentId } : {}),
                         } as any);
 
@@ -1897,7 +1906,14 @@ export class RestServer {
                         const isAppType = req.params.type === 'app';
                         const isDraftRead = typeof req.query?.state === 'string'
                             && req.query.state.toLowerCase() === 'draft';
-                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDraftRead) {
+                        // ADR-0033/0037 — `?preview=draft` overlays a pending
+                        // draft on the active item (draft wins, falls back to
+                        // active). Must also bypass the cache: ETags are keyed
+                        // on the published checksum, so a cached 304 would pin
+                        // the preview to the stale published world.
+                        const previewDrafts = typeof req.query?.preview === 'string'
+                            && req.query.preview.toLowerCase() === 'draft';
+                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDraftRead && !previewDrafts) {
                             const cacheRequest = {
                                 ifNoneMatch: req.headers['if-none-match'] as string,
                                 ifModifiedSince: req.headers['if-modified-since'] as string,
@@ -1955,6 +1971,7 @@ export class RestServer {
                                 name: req.params.name,
                                 packageId,
                                 ...(stateParam === 'draft' ? { state: 'draft' } : {}),
+                                ...(previewDrafts ? { previewDrafts: true } : {}),
                             } as any);
 
                             // Same per-user RBAC filtering as the list endpoint:
