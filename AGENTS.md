@@ -25,7 +25,7 @@ pnpm docs:dev         # docs site
 
 `--fresh`: ephemeral tempdir (auto-deleted on exit) + `--seed-admin` (POSTs sign-up, prints creds — default `admin@objectos.ai` / `admin123`, override via `--admin-email`/`--admin-password`). The seeded admin is auto-promoted to **platform admin** (the system seed identity `usr_system` is skipped), so Setup/Studio are reachable on first login.
 
-Rules: never run two backends on port 3000; for backend tasks pick a random port and tear it down; always use a `pnpm dev`/`dev:crm`/`dev:showcase` script (flags after `--` are forwarded), not raw `pnpm --filter`.
+Rules: never run two backends on port 3000; for backend tasks pick a random port and tear it down; **never kill a server you didn't start** (other agents/the user may be using it — see Multi-agent discipline §8); always use a `pnpm dev`/`dev:crm`/`dev:showcase` script (flags after `--` are forwarded), not raw `pnpm --filter`.
 
 ```bash
 pnpm dev:crm -- --fresh -p 38421   # start; debug via curl
@@ -91,6 +91,12 @@ is expected, not a bug. Operate defensively:
    Auto-merge can land a still-red PR onto shared `main` and break it for every
    parallel agent (see #1475). Merge serially; rebase other open branches before
    merging the next one.
+8. **Testing needs a server? Start your own temporary one — never stop someone
+   else's.** A running dev server you didn't start probably belongs to another
+   agent or the user; killing it (or its port) breaks their in-flight work. Spin
+   up your own instance on a random high port (`pnpm dev -- --fresh -p <random>`)
+   and **shut it down yourself when the task is done**
+   (`kill $(lsof -ti tcp:<port>)`). Don't leave orphan servers behind.
 
 ---
 
