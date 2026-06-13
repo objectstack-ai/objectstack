@@ -12,12 +12,13 @@ import { lazySchema } from '../shared/lazy-schema';
  * build time; TS-first stacks may also declare items inline via
  * `defineStack({ docs: [...] })`.
  *
- * Identity model: `name` = filename stem and MUST carry the package
- * namespace prefix (`crm_lead_guide.md` → `crm_lead_guide`). Unlike object
- * names (validated in the kernel because they map to physical table
- * names), doc-name prefixing is a *logical* uniqueness requirement — the
- * metadata registry key carries no package coordinate — so it is enforced
- * by build/publish lint, not by this schema.
+ * Identity model: `name` = filename stem (lowercase snake_case). A namespace
+ * prefix (`crm_lead_guide`) is a *recommended convention*, no longer required:
+ * per ADR-0048, single-doc resolution is package-scoped (`getItem('doc', name,
+ * packageId)` via `?package=` on the detail route), so two packages may ship a
+ * doc with the same bare name and each resolves within its own package — just
+ * like `page`/`dashboard`/`report`. The prefix stays useful for readable,
+ * globally-unique filenames but is not load-bearing for uniqueness.
  *
  * Docs are inert data: the kernel registers them without parsing
  * `content`, and they participate in no runtime behavior. Renderers
@@ -26,13 +27,14 @@ import { lazySchema } from '../shared/lazy-schema';
  */
 export const DocSchema = lazySchema(() => z.object({
   /**
-   * Unique doc name; equals the source filename stem. Namespace-prefixed
-   * (e.g. `crm_lead_guide`) — see ADR-0046 §3.2 for the enforcement
-   * posture (build/publish lint, not kernel rejection).
+   * Doc name; equals the source filename stem. Lowercase snake_case. A
+   * namespace prefix (e.g. `crm_lead_guide`) is recommended for readable,
+   * globally-unique filenames but NOT required — single-doc resolution is
+   * package-scoped (ADR-0048), so bare names are unique within their package.
    */
   name: z.string()
     .regex(/^[a-z][a-z0-9_]*$/, 'name must be lowercase snake_case')
-    .describe('Unique doc name (= filename stem, namespace-prefixed snake_case)'),
+    .describe('Doc name (= filename stem, snake_case; namespace prefix recommended, not required)'),
 
   /**
    * Display title. The CLI derives it from frontmatter `title:` or the

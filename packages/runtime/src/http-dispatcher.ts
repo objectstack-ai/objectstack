@@ -1173,7 +1173,9 @@ export class HttpDispatcher {
                 const metaSvc = await this.resolveService('metadata', _context.environmentId);
                 if (metaSvc && typeof (metaSvc as any).getItem === 'function') {
                     try {
-                        const data = await (metaSvc as any).getItem(singularType, name);
+                        // ADR-0048 — thread `?package=` so single-item resolution is
+                        // package-scoped (prefer-local), matching list resolution.
+                        const data = await (metaSvc as any).getItem(singularType, name, packageId);
                         if (data) return { handled: true, response: this.success(data) };
                     } catch { /* not found */ }
                 }
