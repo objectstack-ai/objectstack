@@ -95,6 +95,61 @@ describe('query_data — federated query timeout (P4)', () => {
     expect(out.records[0].id).toBe('o1');
   });
 
+  it('falls back to the current object when keyword retrieval finds nothing', async () => {
+    const currentObject = {
+      name: 'showcase_task',
+      label: 'Task',
+      fields: { id: { type: 'text' }, subject: { type: 'text' } },
+    };
+    let findObject: string | undefined;
+    const ctx: QueryDataToolContext = {
+      ai: {
+        generateObject: async () => ({
+          object: {
+            objectName: 'showcase_task',
+            whereJson: null,
+            fields: null,
+            orderBy: null,
+            limit: null,
+          } satisfies QueryPlan,
+        }),
+      } as never,
+      metadata: {
+        // Catalogue is non-empty, but a Chinese request tokenises to terms
+        // that don't match the English name/label → zero keyword hits.
+        listObjects: async () => [currentObject],
+        getObject: async (name: string) => (name === 'showcase_task' ? currentObject : undefined),
+      } as never,
+      dataEngine: {
+        find: async (objectName: string) => {
+          findObject = objectName;
+          return [{ id: 't1', subject: 'Build the thing' }];
+        },
+      } as never,
+    };
+    const handler = createQueryDataHandler(ctx);
+    const out = JSON.parse(
+      (await handler({ request: '分析这个对象的数据' }, { currentObjectName: 'showcase_task' } as never)) as string,
+    );
+    expect(out.error).toBeUndefined();
+    expect(findObject).toBe('showcase_task');
+    expect(out.count).toBe(1);
+  });
+
+  it('still errors when retrieval is empty and no current object is supplied', async () => {
+    const ctx: QueryDataToolContext = {
+      ai: { generateObject: async () => ({ object: {} as QueryPlan }) } as never,
+      metadata: {
+        listObjects: async () => [{ name: 'account', label: 'Account', fields: {} }],
+        getObject: async () => undefined,
+      } as never,
+      dataEngine: { find: async () => [] } as never,
+    };
+    const handler = createQueryDataHandler(ctx);
+    const out = JSON.parse((await handler({ request: '分析这个对象' })) as string);
+    expect(out.error).toMatch(/No matching objects in metadata/);
+  });
+
   it('does not wrap managed (non-external) objects in a timeout', async () => {
     const managedObject = {
       name: 'task',

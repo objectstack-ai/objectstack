@@ -120,6 +120,7 @@ function mockAgentRuntime(): AgentRuntime {
     })),
     resolveActiveSkills: vi.fn(async () => []),
     buildSystemMessages: vi.fn(() => [{ role: 'system', content: 'sys' }]),
+    buildContextSchemaMessages: vi.fn(async () => []),
     buildRequestOptions: vi.fn(() => ({})),
     listAgents: vi.fn(async () => []),
   } as unknown as AgentRuntime;

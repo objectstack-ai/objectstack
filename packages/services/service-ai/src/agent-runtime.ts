@@ -9,6 +9,7 @@ import type {
 import type { Agent, Skill } from '@objectstack/spec/ai';
 import { AgentSchema } from '@objectstack/spec/ai';
 import { SkillRegistry, type SkillContext } from './skill-registry.js';
+import { SchemaRetriever, type ObjectShape } from './schema-retriever.js';
 import { DEFAULT_DATA_AGENT_NAME } from './agents/index.js';
 
 /**
@@ -189,6 +190,49 @@ export class AgentRuntime {
     }
 
     return [{ role: 'system' as const, content: parts.join('\n') }];
+  }
+
+  /**
+   * Build an extra system message carrying the schema of the object the user
+   * is currently viewing ({@link AgentChatContext.objectName}).
+   *
+   * `buildSystemMessages` only states the object's *name*; it can't fetch the
+   * schema because it is synchronous. This async companion looks the object up
+   * and renders a compact field snippet so the agent can answer "analyse /
+   * describe this object" questions with ZERO tool calls — important on the
+   * open-framework deployment where `describe_object` isn't registered, and
+   * for non-English prompts that the keyword-based {@link SchemaRetriever}
+   * can't otherwise resolve to an English-named object.
+   *
+   * Returns an empty array when there is no current object or it can't be
+   * resolved — callers append the result, so a miss simply injects nothing.
+   */
+  async buildContextSchemaMessages(context?: AgentChatContext): Promise<ModelMessage[]> {
+    const objectName = context?.objectName;
+    if (!objectName) return [];
+
+    let raw: unknown;
+    try {
+      raw = await this.metadataService.getObject(objectName);
+    } catch {
+      return [];
+    }
+    if (!raw || typeof raw !== 'object' || !(raw as ObjectShape).name) return [];
+
+    const snippet = SchemaRetriever.renderSnippet([{ object: raw as ObjectShape, score: 1 }]);
+    if (!snippet) return [];
+
+    return [
+      {
+        role: 'system' as const,
+        content:
+          `The user is currently viewing the "${objectName}" object. When they refer to ` +
+          '"this object", "the current object", or its label without naming another one, ' +
+          `assume they mean "${objectName}". Use the schema below to answer questions about ` +
+          'its structure directly, and as the target object name for data-query tools.\n\n' +
+          snippet,
+      },
+    ];
   }
 
   /**

@@ -402,6 +402,16 @@ export interface ToolExecutionContext {
     messageId?: string;
     /** Active environment (multi-tenant project) id, if known. */
     environmentId?: string;
+    /**
+     * Object the user is currently viewing in the UI (e.g. the list/detail
+     * page they have open). Built-in data tools use this as a fallback target
+     * when the user refers to "this object" / "the current object" and the
+     * free-text request doesn't name one explicitly — so a question phrased in
+     * any language still resolves to the right object without a keyword match.
+     */
+    currentObjectName?: string;
+    /** View the user is currently viewing, if known. */
+    currentViewName?: string;
     /** Distributed-trace id for cross-service correlation. */
     traceId?: string;
     /**

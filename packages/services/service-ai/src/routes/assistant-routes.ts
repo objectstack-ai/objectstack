@@ -197,6 +197,9 @@ export function buildAssistantRoutes(
           }
 
           const systemMessages = agentRuntime.buildSystemMessages(agent, context, activeSkills);
+          // Inject the current object's schema so "describe this object" works
+          // without a lookup tool and regardless of prompt language.
+          systemMessages.push(...(await agentRuntime.buildContextSchemaMessages(context)));
           const agentOptions = agentRuntime.buildRequestOptions(
             agent,
             aiService.toolRegistry.getAll(),
@@ -237,6 +240,10 @@ export function buildAssistantRoutes(
                     typeof body.conversationId === 'string' ? body.conversationId : undefined,
                   environmentId:
                     typeof context.environmentId === 'string' ? context.environmentId : undefined,
+                  currentObjectName:
+                    typeof context.objectName === 'string' ? context.objectName : undefined,
+                  currentViewName:
+                    typeof context.viewName === 'string' ? context.viewName : undefined,
                 }
               : undefined,
           };

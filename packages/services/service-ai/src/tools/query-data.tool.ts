@@ -9,7 +9,7 @@ import type {
   ModelMessage,
 } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { SchemaRetriever } from '../schema-retriever.js';
+import { SchemaRetriever, type SchemaHit } from '../schema-retriever.js';
 import type { ToolHandler, ToolRegistry, ToolExecutionContext } from './tool-registry.js';
 
 /** See `data-tools.ts#buildEngineContext` — duplicated here to keep
@@ -161,6 +161,35 @@ export function createQueryDataHandler(ctx: QueryDataToolContext): ToolHandler {
   const maxLimit = ctx.maxLimit ?? 100;
   const externalTimeoutFallback = ctx.externalQueryTimeoutMs ?? 30_000;
 
+  /** Load a single object definition by exact name, mirroring the dual-source
+   *  lookup (MetadataManager → ObjectQL SchemaRegistry via protocol) so the
+   *  current-object fallback can see system objects too. Never throws. */
+  const loadObjectByName = async (name: string): Promise<SchemaHit['object'] | undefined> => {
+    try {
+      const direct = await ctx.metadata.getObject?.(name);
+      if (direct && typeof direct === 'object' && (direct as { name?: string }).name) {
+        return direct as SchemaHit['object'];
+      }
+    } catch {
+      // fall through to protocol enumeration
+    }
+    if (ctx.protocol?.getMetaItems) {
+      try {
+        const all = await ctx.protocol.getMetaItems({ type: 'object' });
+        const arr = Array.isArray(all)
+          ? all
+          : (all && typeof all === 'object' && Array.isArray((all as { items?: unknown }).items)
+            ? (all as { items: unknown[] }).items
+            : []);
+        const found = (arr as Array<{ name?: string }>).find(o => o?.name === name);
+        if (found) return found as SchemaHit['object'];
+      } catch {
+        // ignore — caller treats undefined as "not found"
+      }
+    }
+    return undefined;
+  };
+
   /** Resolve a federated object's per-query timeout (datasource-declared,
    *  else the tool fallback). Never throws — degrades to the fallback. */
   const resolveExternalTimeout = async (datasource: string): Promise<number> => {
@@ -190,7 +219,14 @@ export function createQueryDataHandler(ctx: QueryDataToolContext): ToolHandler {
     }
 
     // 1. Schema retrieval
-    const hits = await retriever.retrieve(request);
+    let hits = await retriever.retrieve(request);
+    // Fallback: when keyword retrieval finds nothing (e.g. a non-English
+    // request, or one that says "this object" without naming it), target the
+    // object the user is currently viewing if the UI supplied one.
+    if (hits.length === 0 && execCtx?.currentObjectName) {
+      const current = await loadObjectByName(execCtx.currentObjectName);
+      if (current) hits = [{ object: current, score: 1 }];
+    }
     if (hits.length === 0) {
       return JSON.stringify({
         error:

@@ -639,6 +639,38 @@ describe('AgentRuntime', () => {
     });
   });
 
+  describe('buildContextSchemaMessages', () => {
+    it('injects the current object schema so "this object" resolves without a tool', async () => {
+      (metadataService.getObject as any).mockResolvedValue({
+        name: 'showcase_task',
+        label: 'Task',
+        fields: { id: { type: 'text' }, subject: { type: 'text', label: 'Subject' } },
+      });
+      const messages = await runtime.buildContextSchemaMessages({ objectName: 'showcase_task' });
+      expect(metadataService.getObject).toHaveBeenCalledWith('showcase_task');
+      expect(messages).toHaveLength(1);
+      expect(messages[0].role).toBe('system');
+      expect(messages[0].content).toContain('currently viewing the "showcase_task" object');
+      expect(messages[0].content).toContain('### showcase_task');
+      expect(messages[0].content).toContain('subject: text');
+    });
+
+    it('returns nothing when no object is in context', async () => {
+      expect(await runtime.buildContextSchemaMessages(undefined)).toEqual([]);
+      expect(await runtime.buildContextSchemaMessages({})).toEqual([]);
+    });
+
+    it('returns nothing when the object cannot be resolved', async () => {
+      (metadataService.getObject as any).mockResolvedValue(undefined);
+      expect(await runtime.buildContextSchemaMessages({ objectName: 'nope' })).toEqual([]);
+    });
+
+    it('degrades gracefully when metadata lookup throws', async () => {
+      (metadataService.getObject as any).mockRejectedValue(new Error('boom'));
+      expect(await runtime.buildContextSchemaMessages({ objectName: 'showcase_task' })).toEqual([]);
+    });
+  });
+
   describe('buildRequestOptions', () => {
     it('should derive model config from agent', () => {
       const options = runtime.buildRequestOptions(DATA_CHAT_AGENT, []);

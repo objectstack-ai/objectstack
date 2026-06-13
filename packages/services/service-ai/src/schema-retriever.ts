@@ -181,12 +181,33 @@ export interface FieldShape {
 
 // ── internal helpers ──────────────────────────────────────────────
 
-/** Lower-case alphanumeric tokens of length ≥ 2 (English stop-words excluded). */
+/**
+ * Tokenise a query into match terms.
+ *
+ * Latin/digit runs split on any non-alphanumeric (including underscores) so
+ * `todo_task` tokenises to ['todo', 'task'] and matches snake_case names.
+ *
+ * CJK text carries no word boundaries, so a `[a-z0-9]+` scan drops it entirely
+ * — a question like "分析任务对象" would yield zero terms and surface a
+ * misleading "no matching objects". To keep CJK queries scoreable against
+ * CJK object/field labels, every ideograph is emitted as a single-char term
+ * plus each adjacent bigram (so "任务" matches a label containing "任务").
+ */
 function tokenise(query: string): string[] {
-  // Split on any non-alphanumeric (including underscores) so `todo_task`
-  // tokenises to ['todo', 'task'] and matches snake_case object names.
-  const raw = query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
-  return raw.filter(t => t.length >= 2 && !STOPWORDS.has(t));
+  const lower = query.toLowerCase();
+  const latin = (lower.match(/[a-z0-9]+/g) ?? []).filter(
+    t => t.length >= 2 && !STOPWORDS.has(t),
+  );
+  const tokens = [...latin];
+  // CJK Unified Ideographs (+ Ext-A, compatibility) and Japanese kana.
+  const cjkRuns = lower.match(/[぀-ヿ㐀-䶿一-鿿豈-﫿]+/g) ?? [];
+  for (const run of cjkRuns) {
+    for (let i = 0; i < run.length; i++) {
+      tokens.push(run[i]);
+      if (i + 1 < run.length) tokens.push(run.slice(i, i + 2));
+    }
+  }
+  return tokens;
 }
 
 const STOPWORDS = new Set([

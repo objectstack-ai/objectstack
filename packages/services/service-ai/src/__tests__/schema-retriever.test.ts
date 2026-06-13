@@ -68,6 +68,18 @@ describe('SchemaRetriever', () => {
     expect(hits).toEqual([]);
   });
 
+  it('tokenises CJK queries so a Chinese label still matches', async () => {
+    const cjkTask: ObjectShape = {
+      name: 'showcase_task',
+      label: '任务',
+      pluralLabel: '任务',
+      fields: { id: { type: 'text' }, 标题: { type: 'text', label: '标题' } },
+    };
+    const r = new SchemaRetriever(mockMetadata([cjkTask, accountObject]));
+    const hits = await r.retrieve('帮我分析任务对象');
+    expect(hits[0]?.object.name).toBe('showcase_task');
+  });
+
   it('respects limit option', async () => {
     const r = new SchemaRetriever(
       mockMetadata([taskObject, accountObject, unrelatedObject]),

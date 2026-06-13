@@ -189,6 +189,11 @@ export function buildAgentRoutes(
           // Build system messages from agent instructions + UI context + skills
           const systemMessages = agentRuntime.buildSystemMessages(agent, chatContext, activeSkills);
 
+          // Inject the schema of the object the user is currently viewing so
+          // "analyse / describe this object" works without a lookup tool and
+          // regardless of the prompt's language.
+          systemMessages.push(...(await agentRuntime.buildContextSchemaMessages(chatContext)));
+
           // Resolve agent model/tools + skill tools → request options
           const agentOptions = agentRuntime.buildRequestOptions(
             agent,
@@ -234,6 +239,13 @@ export function buildAgentRoutes(
                     typeof chatContext?.environmentId === 'string'
                       ? chatContext.environmentId
                       : undefined,
+                  // The object/view the user has open — lets built-in data
+                  // tools fall back to "this object" when the request doesn't
+                  // name one (ADR-aligned with the schema injection above).
+                  currentObjectName:
+                    typeof chatContext?.objectName === 'string' ? chatContext.objectName : undefined,
+                  currentViewName:
+                    typeof chatContext?.viewName === 'string' ? chatContext.viewName : undefined,
                 }
               : undefined,
           };
