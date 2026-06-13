@@ -199,15 +199,20 @@ export const SysMetadataObject = ObjectSchema.create({
   },
 
   indexes: [
-    // ADR-0005 (revised 2026-05): overlay uniqueness is scoped by
-    // (type, name, organization_id), restricted to active rows so resets
-    // / archived versions don't collide. environment_id is deprecated and
-    // not part of the discriminator. The runtime layer (protocol.ts
-    // ensureOverlayIndex) issues a DROP-then-CREATE migration to
-    // replace any pre-existing legacy composite index in-place.
+    // ADR-0005 (revised 2026-05) + ADR-0048: overlay uniqueness is scoped by
+    // (type, name, organization_id, package_id), restricted to active rows so
+    // resets / archived versions don't collide. `package_id` is part of the
+    // discriminator so two installed packages shipping the same `type`/`name`
+    // each get their OWN customization row (a package-less / global overlay
+    // uses NULL). environment_id is deprecated and not part of the
+    // discriminator. The runtime layer (protocol.ts ensureOverlayIndex) issues
+    // a DROP-then-CREATE migration that uses `COALESCE(package_id,'')` so the
+    // package-less rows stay unique among themselves (SQLite treats NULLs as
+    // distinct in a plain unique index); this declaration is the fallback shape
+    // for drivers without the runtime migration.
     {
       name: 'idx_sys_metadata_overlay_active',
-      fields: ['type', 'name', 'organization_id'],
+      fields: ['type', 'name', 'organization_id', 'package_id'],
       unique: true,
       partial: "state = 'active'",
     },

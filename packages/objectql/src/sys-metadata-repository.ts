@@ -250,11 +250,17 @@ export class SysMetadataRepository implements MetadataRepository {
    * live published row (`'active'`). Pass `'draft'` to read the pending
    * unpublished revision (if any).
    */
-  async get(ref: MetaRef, opts?: { state?: OverlayState }): Promise<MetadataItem | null> {
+  async get(
+    ref: MetaRef,
+    opts?: { state?: OverlayState; packageId?: string | null },
+  ): Promise<MetadataItem | null> {
     this.assertOpen();
     const state = opts?.state ?? 'active';
+    // ADR-0048 — when a package scope is supplied, resolve the row owned by
+    // that package (used by saveMetaItem to read the correct parent-version
+    // lineage before an upsert). Omitted → legacy "any package" match.
     const row = await this.engine.findOne('sys_metadata', {
-      where: this.whereFor(ref, state),
+      where: this.whereFor(ref, state, opts && 'packageId' in opts ? (opts.packageId ?? null) : undefined),
     });
     if (!row) return null;
     return this.rowToItem(ref, row);
@@ -314,8 +320,11 @@ export class SysMetadataRepository implements MetadataRepository {
     // Run all reads + writes inside one transaction so the optimistic
     // lock, the parent-row mutation, and the history append are atomic.
     const result = await this.withTxn(async (ctx) => {
+      // ADR-0048 — scope the existing-row lookup to the requested package so a
+      // save for package B does not find (and overwrite) package A's same-name
+      // overlay. A package-less save (packageId null) targets the global row.
       const existing = await this.engine.findOne('sys_metadata', {
-        where: this.whereFor(ref, state),
+        where: this.whereFor(ref, state, opts.packageId ?? null),
         context: ctx,
       });
       const existingHash: string | null = existing?.checksum ?? null;
@@ -903,13 +912,22 @@ export class SysMetadataRepository implements MetadataRepository {
   private whereFor(
     ref: Pick<MetaRef, 'type' | 'name'>,
     state: OverlayState = 'active',
+    packageId?: string | null,
   ): Record<string, unknown> {
-    return {
+    const where: Record<string, unknown> = {
       type: ref.type,
       name: ref.name,
       organization_id: this.organizationId,
       state,
     };
+    // ADR-0048 — when the caller scopes by package, the overlay row is keyed by
+    // `(org, type, name, package_id)` so two installed packages shipping the
+    // same name each get their OWN customization row (a package-less / global
+    // overlay uses `package_id IS NULL`). When `packageId` is omitted (legacy
+    // callers — delete/promote/restore), the package dimension is left out so
+    // the query keeps its historical "match any package" behaviour.
+    if (packageId !== undefined) where.package_id = packageId; // string → eq; null → IS NULL
+    return where;
   }
 
   private fullRef(ref: Pick<MetaRef, 'type' | 'name'>): MetaRef {

@@ -750,20 +750,25 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     throw new Error('driver has neither raw nor execute');
                 }
             };
-            // ADR-0005 (revised 2026-05): per-env DBs replace the old
+            // ADR-0005 (revised 2026-05) + ADR-0048: per-env DBs replace the old
             // "per-project" isolation, so `environment_id` is no longer a
             // discriminator. Overlay uniqueness is `(type, name,
-            // organization_id)` filtered to active rows. Drop the legacy
-            // composite index first so the new partial UNIQUE can claim
-            // the same name — DROP INDEX IF EXISTS is idempotent.
+            // organization_id, COALESCE(package_id,''))` filtered to active
+            // rows — `package_id` is in the key so two installed packages
+            // shipping the same name each get their own overlay, while
+            // `COALESCE(...,'')` keeps the package-less (global) rows unique
+            // among themselves (a plain unique index would treat NULLs as
+            // distinct and allow duplicate globals). Drop the legacy composite
+            // index first so the new partial UNIQUE can claim the same name —
+            // DROP INDEX IF EXISTS is idempotent.
             try { await exec("DROP INDEX IF EXISTS idx_sys_metadata_overlay_active"); } catch { /* best-effort */ }
             const partialSql =
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active " +
-                "ON sys_metadata (type, name, organization_id) " +
+                "ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) " +
                 "WHERE state = 'active'";
             const fallbackSql =
                 "CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active " +
-                "ON sys_metadata (type, name, organization_id)";
+                "ON sys_metadata (type, name, organization_id, package_id)";
             try {
                 await exec(partialSql);
             } catch (err: any) {
@@ -779,12 +784,14 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             }
             // Mirror the same partial-UNIQUE for draft rows so a second
             // simultaneous draft cannot be inserted for the same
-            // (type,name,org). The unique-active index above already
+            // (type,name,org,package). The unique-active index above already
             // guards published rows; the two never collide because the
-            // `state` predicate disambiguates them.
+            // `state` predicate disambiguates them. DROP first so an existing
+            // legacy 3-column draft index is replaced in-place (ADR-0048).
+            try { await exec("DROP INDEX IF EXISTS idx_sys_metadata_overlay_draft"); } catch { /* best-effort */ }
             const draftPartialSql =
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_draft " +
-                "ON sys_metadata (type, name, organization_id) " +
+                "ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) " +
                 "WHERE state = 'draft'";
             try {
                 await exec(draftPartialSql);
@@ -794,7 +801,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     try {
                         await exec(
                             "CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_draft " +
-                            "ON sys_metadata (type, name, organization_id)",
+                            "ON sys_metadata (type, name, organization_id, package_id)",
                         );
                     } catch {
                         // ignore — best effort
@@ -1428,6 +1435,11 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                                 where: { ...base, package_id: request.packageId },
                             });
                             if (scoped) return scoped;
+                            // ADR-0048 — global (package-less) draft only, never
+                            // another package's draft.
+                            return await this.engine.findOne('sys_metadata', {
+                                where: { ...base, package_id: null },
+                            });
                         }
                         return await this.engine.findOne('sys_metadata', { where: base });
                     };
@@ -1476,7 +1488,15 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                             where: { ...base, package_id: request.packageId },
                         });
                         if (scoped) return scoped;
+                        // ADR-0048 — no package-owned overlay; fall back to the
+                        // GLOBAL (package-less) overlay only. Must NOT match a
+                        // different package's row, or a collision would serve
+                        // package B's customization for a package A read.
+                        return await this.engine.findOne('sys_metadata', {
+                            where: { ...base, package_id: null },
+                        });
                     }
+                    // No package context (legacy/runtime reader) — match any.
                     return await this.engine.findOne('sys_metadata', { where: base });
                 };
                 const rec = await lookup(request.type);
@@ -1748,6 +1768,11 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                             where: { ...base, package_id: request.packageId },
                         });
                         if (scoped) return scoped;
+                        // ADR-0048 — fall back to the GLOBAL (package-less)
+                        // overlay only, never another package's row.
+                        return await this.engine.findOne('sys_metadata', {
+                            where: { ...base, package_id: null },
+                        });
                     }
                     return await this.engine.findOne('sys_metadata', { where: base });
                 };
@@ -3722,8 +3747,13 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                 // Parent is scoped to the lifecycle we're about to write:
                 // a draft's parent is the current draft hash (or null
                 // for the first draft); a publish's parent is the
-                // current published hash.
-                const current = await repo.get(ref, { state: mode === 'draft' ? 'draft' : 'active' });
+                // current published hash. ADR-0048 — scope to the same
+                // package the upsert targets so a collision's other-package
+                // row is never read as this item's parent.
+                const current = await repo.get(ref, {
+                    state: mode === 'draft' ? 'draft' : 'active',
+                    packageId: request.packageId ?? null,
+                });
                 parentVersion = current?.hash ?? null;
             }
             try {

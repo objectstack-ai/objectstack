@@ -60,7 +60,9 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 organizationId: 'org_alpha',
             });
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', name: 'test_app', organization_id: 'org_alpha', state: 'active' },
+                // ADR-0048 — a package-less save scopes the upsert lookup to the
+                // GLOBAL row (package_id IS NULL), not any package's row.
+                where: { type: 'app', name: 'test_app', organization_id: 'org_alpha', state: 'active', package_id: null },
             });
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 organization_id: 'org_alpha',
@@ -241,7 +243,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp });
 
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', name: 'test_app', organization_id: null, state: 'active' }
+                // ADR-0048 — package-less save scopes the lookup to the global row.
+                where: { type: 'app', name: 'test_app', organization_id: null, state: 'active', package_id: null }
             });
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 name: 'test_app',
@@ -249,6 +252,25 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 state: 'active',
                 version: 1,
                 metadata: JSON.stringify(sampleApp),
+            }), expect.anything());
+        });
+
+        it('scopes the upsert lookup to the requested package (ADR-0048 #1824)', async () => {
+            // A save bound to package B must look up B's own row, not match (and
+            // overwrite) package A's same-name overlay — that is what lets two
+            // installed packages keep independent customizations.
+            mockEngine.findOne.mockResolvedValue(null);
+
+            await protocol.saveMetaItem({
+                type: 'app', name: 'test_app', item: sampleApp,
+                organizationId: 'org_alpha', packageId: 'com.acme.beta',
+            });
+
+            expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
+                where: { type: 'app', name: 'test_app', organization_id: 'org_alpha', state: 'active', package_id: 'com.acme.beta' },
+            });
+            expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
+                package_id: 'com.acme.beta',
             }), expect.anything());
         });
 
