@@ -40,6 +40,21 @@ export const pageForm = defineForm({
       ],
     },
     {
+      label: 'Interface (list pages)',
+      description: 'ADR-0047 interface mode: bind a source view and curate the end-user surface — quick filters, locked visualizations, toolbar actions (Airtable Interfaces parity).',
+      collapsible: true,
+      collapsed: true,
+      visibleOn: "data.type == 'list'",
+      fields: [
+        {
+          field: 'interfaceConfig',
+          type: 'composite',
+          helpText:
+            'source/sourceView bind the object view (columns, base filter and sort are inherited — the iron rule); userFilters picks the element style (dropdown / tabs / toggle) and exposed fields; appearance.allowedVisualizations whitelists renderers (one entry = locked); userActions toggles the toolbar.',
+        },
+      ],
+    },
+    {
       label: 'Advanced',
       description: 'Activation, audience, and accessibility.',
       collapsible: true,
