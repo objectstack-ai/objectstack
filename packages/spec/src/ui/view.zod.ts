@@ -309,8 +309,13 @@ export const UserFilterFieldSchema = lazySchema(() => z.object({
  * @see Airtable Interface → "User filters" panel (Elements: tabs / dropdowns)
  */
 export const UserFiltersSchema = lazySchema(() => z.object({
+  // `toggle` is DEPRECATED (ADR-0047 §3.4a): it overlaps `tabs` (presets) and
+  // `dropdown` (per-field values) without adding expressive power, needs
+  // per-field defaultValues to be useful, and authoring tooling no longer
+  // offers it (None / Tabs / Dropdown only). Kept in the enum so existing
+  // configs keep rendering; do not author new `toggle` filters.
   element: z.enum(['dropdown', 'tabs', 'toggle']).default('dropdown')
-    .describe('Filter control style: dropdown selectors per field, tab presets, or on/off toggles'),
+    .describe('Filter control style: "dropdown" (per-field value selectors) or "tabs" (named presets). "toggle" is deprecated.'),
   fields: z.array(UserFilterFieldSchema).optional()
     .describe('Fields exposed as quick filters (dropdown/toggle elements)'),
   tabs: z.array(ViewTabSchema).optional()

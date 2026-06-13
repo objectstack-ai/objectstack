@@ -52,9 +52,10 @@ export const pageForm = defineForm({
           helpText:
             'source/sourceView bind the object view (columns, base filter and sort are inherited — the iron rule); appearance.allowedVisualizations whitelists renderers (one entry = locked); userActions toggles the toolbar.',
           // Explicit sub-fields so `userFilters` can use the dedicated
-          // filter-mode selector (None / Tabs / Dropdown / Toggle, ADR-0047).
+          // filter-mode selector (None / Tabs / Dropdown, ADR-0047 §3.4a).
           // None maps to ABSENCE of userFilters — the protocol stores
           // "no filter bar" as omission, not a literal element: 'none'.
+          // (`element: 'toggle'` stays valid but deprecated — not offered.)
           // Keep this list in sync with InterfacePageConfigSchema.
           fields: [
             { field: 'source' },
@@ -65,7 +66,7 @@ export const pageForm = defineForm({
             {
               field: 'userFilters',
               widget: 'filter-mode',
-              helpText: 'End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field) / Toggle. None removes the config.',
+              helpText: 'End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field). None removes the config.',
             },
             { field: 'userActions', type: 'composite' },
             { field: 'addRecord', type: 'composite' },
