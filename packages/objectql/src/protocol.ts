@@ -1386,9 +1386,15 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             items: decorateMetadataItems(
                 request.type,
                 (items as any[]).map((it) => {
+                    // ADR-0048 — scope the artifact lookup to THIS item's owning
+                    // package so a same-name collision grafts each item's own
+                    // protection envelope, not the first-registered package's.
+                    // (`requested` packageId, when the whole list is scoped,
+                    // takes priority; else the item's own `_packageId`.)
                     const a = this.lookupArtifactItem(
                         request.type,
                         (it as any)?.name,
+                        packageId ?? ((it as any)?._packageId as string | undefined),
                     );
                     return mergeArtifactProtection(it, a) as any;
                 }),
@@ -1583,7 +1589,10 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         // persisted overlay copy that pre-dates the artifact's `_lock`
         // declaration; we must consult the in-memory artifact registry
         // directly and let its protection envelope override.
-        const artifactItem = this.lookupArtifactItem(request.type, request.name);
+        // ADR-0048 — scope the artifact lookup to the requested package so a
+        // same-name collision grafts the OWNING package's protection envelope
+        // (`_packageId`/`_lock`), not whichever package registered first.
+        const artifactItem = this.lookupArtifactItem(request.type, request.name, request.packageId);
         let decorated = decorateMetadataItem(
             request.type,
             mergeArtifactProtection(item, artifactItem),

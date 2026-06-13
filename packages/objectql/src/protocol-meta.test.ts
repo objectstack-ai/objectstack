@@ -815,6 +815,25 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(userPage._provenance).toBeUndefined();
         });
 
+        it('keeps each colliding item\'s own _packageId on the list (ADR-0048)', async () => {
+            // Two installed packages ship `page/home`. The list decorate step
+            // grafts artifact protection per item; that lookup must be scoped to
+            // EACH item's owning package, or both rows inherit the first-match
+            // package's `_packageId` and the frontend prefer-local (which filters
+            // by `_packageId`) can no longer tell them apart.
+            registry.registerItem('page', { name: 'home', label: 'Acme Home' }, 'name', 'com.acme.crm');
+            registry.registerItem('page', { name: 'home', label: 'Globex Home' }, 'name', 'com.globex.crm');
+            mockEngine.find.mockResolvedValue([]);
+
+            const result = await protocol.getMetaItems({ type: 'page' });
+            const homes = result.items.filter((i: any) => i.name === 'home');
+
+            expect(homes).toHaveLength(2);
+            const byPkg = Object.fromEntries(homes.map((h: any) => [h._packageId, h.label]));
+            expect(byPkg['com.acme.crm']).toBe('Acme Home');
+            expect(byPkg['com.globex.crm']).toBe('Globex Home');
+        });
+
         it('should fall back to DB when registry is empty for type', async () => {
             mockEngine.find.mockResolvedValue([
                 {

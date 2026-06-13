@@ -933,6 +933,13 @@ export class SchemaRegistry {
 
     const collection = this.metadata.get(type);
     if (!collection) return undefined;
+    // A bare-key entry (a runtime/DB overlay rehydrated by restoreMetadataFromDb)
+    // intentionally shadows the packaged composite item — ADR-0005 overlay
+    // precedence (a customization wins over its package default). This is
+    // checked before prefer-local so that precedence holds; note an env-wide
+    // (package-less) overlay of a name that collides across packages is
+    // inherently ambiguous by schema (sys_metadata is unique on type+name+org,
+    // not package) and resolves to the single overlay row.
     const direct = collection.get(name);
     if (direct) return direct as T;
 
