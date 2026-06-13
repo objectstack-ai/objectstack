@@ -153,6 +153,35 @@ have; we do not rely on lint to forbid what the type can simply not express.
 | User-created views | Allowed, governed by permissions + view `sharing` | Never |
 | Filter state | Session-scoped (URL-param sync is a later, orthogonal step) | Session-scoped |
 
+### 3.4a "No filter bar" is omission, not a literal `element: 'none'`
+
+Airtable's User-filters control is a single tri-state selector
+(**None / Tabs / Dropdown**). We deliberately do **not** mirror that as a
+literal enum value. The `userFilters.element` enum stays
+`dropdown | tabs | toggle`; **"none" is the ABSENCE of `userFilters`**.
+
+Rationale (declarative-metadata hygiene):
+
+- **Consistency.** Every optional capability in the protocol is "off = key
+  absent" (`kanban`, `grouping`, …). A literal `element: 'none'` would be the
+  one special case authors and tooling must learn.
+- **No dead config.** `element: 'none'` would leave an object whose `fields` /
+  `tabs` are orphaned — undefined semantics for validation, overlay merge, and
+  AI generation. Omission has one unambiguous meaning.
+- **Cleaner diffs / overlays.** Disabling the bar is a key deletion (ADR-0005
+  overlay semantics), not a value mutation dragging stale sub-config along.
+- **Orthogonal axes.** "Is there a filter bar?" (presence) and "what style?"
+  (`element`) are independent; one enum would couple them, and we carry four
+  styles (`+toggle`) to Airtable's three.
+
+**Storage and authoring UI are separate layers.** The Studio editor exposes a
+first-class **None / Tabs / Dropdown / Toggle** segmented selector (the
+`filter-mode` widget) — selecting *None* writes `onChange(undefined)`, removing
+the key. Authors get Airtable's explicit affordance; the protocol stays clean.
+
+If a "disable but remember the configured fields/tabs" need ever arises, the
+right shape is a separate `enabled: false` flag — never `element: 'none'`.
+
 ### 3.5 AI authoring rules (inherits ADR-0033's draft gate)
 
 1. **Default output**: objects + list views + navigation → objects. *No pages.*
