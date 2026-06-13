@@ -160,6 +160,34 @@ export class AgentRuntime {
       if (block) parts.push(block);
     }
 
+    // Authoring (build) register availability. The unified `data_chat` persona
+    // (ADR-0040) advertises that it can BUILD or CHANGE the application, but
+    // that capability is supplied ENTIRELY by the cloud AI Studio plugin's
+    // `metadata_authoring` / `solution_design` skills (and their tools). On the
+    // open single-env framework those skills are not registered, so the
+    // authoring tools never resolve — yet the LLM, still reading the "you can
+    // build" persona, will role-play designing a whole system (emitting design
+    // docs it has no tools to execute). When the build register is absent,
+    // constrain the assistant to data/query and have it decline build requests
+    // instead of pretending. Keyed off actual skill presence so cloud/EE
+    // (AI Studio loaded) keeps the full build UX with no extra wiring.
+    const buildRegisterActive = !!activeSkills?.some(
+      (s) => s.name === 'metadata_authoring' || s.name === 'solution_design',
+    );
+    if (!buildRegisterActive) {
+      parts.push(
+        '\n--- Capabilities in this deployment ---\n' +
+          'Application BUILDING / AUTHORING is NOT available here. You can ONLY answer questions ' +
+          "about the user's existing data (query, list, count, aggregate, search) and run actions " +
+          'the application already exposes. You CANNOT create, change, or design objects, fields, ' +
+          'views, dashboards, pages, or whole apps — and you have no tools to do so. If the user ' +
+          'asks you to build, create, develop, or modify the application itself, do NOT design or ' +
+          'outline a system and do NOT pretend to build one: briefly say that AI app-building is ' +
+          'not available in this edition, then offer to help explore or report on existing data ' +
+          "instead. Answer in the user's language.",
+      );
+    }
+
     return [{ role: 'system' as const, content: parts.join('\n') }];
   }
 

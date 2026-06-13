@@ -619,6 +619,24 @@ describe('AgentRuntime', () => {
         expect(messages[0].content).not.toContain('publish AUTOMATICALLY');
       }
     });
+
+    it('constrains to data-only when the authoring (build) skills are absent', () => {
+      // Open single-env framework: no AI Studio plugin → no authoring skills.
+      const messages = runtime.buildSystemMessages(DATA_CHAT_AGENT, undefined, [
+        { name: 'data_explorer', label: 'Data Explorer', tools: [] } as never,
+      ]);
+      expect(messages[0].content).toContain('BUILDING / AUTHORING is NOT available');
+      expect(messages[0].content).toContain('do NOT design or');
+    });
+
+    it('drops the data-only constraint when an authoring skill is active', () => {
+      // Cloud / EE: AI Studio plugin registered metadata_authoring → full build UX.
+      const messages = runtime.buildSystemMessages(DATA_CHAT_AGENT, undefined, [
+        { name: 'data_explorer', label: 'Data Explorer', tools: [] } as never,
+        { name: 'metadata_authoring', label: 'Metadata Authoring', tools: [] } as never,
+      ]);
+      expect(messages[0].content).not.toContain('BUILDING / AUTHORING is NOT available');
+    });
   });
 
   describe('buildRequestOptions', () => {
