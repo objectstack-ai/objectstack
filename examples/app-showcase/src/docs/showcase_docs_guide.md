@@ -1,5 +1,6 @@
 ---
 title: Documentation Guide
+description: The authoring rules every package doc must follow — flat directory, namespace prefix, links, and the Markdown subset.
 ---
 
 # Writing package docs

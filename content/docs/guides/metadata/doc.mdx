@@ -31,11 +31,13 @@ stable (a link resolves by basename, never by path).
 
 ### Frontmatter
 
-A leading YAML frontmatter block is optional. Only `title` is read:
+A leading YAML frontmatter block is optional. `title` and `description`
+are read:
 
 ```md
 ---
 title: User Guide
+description: How to create, organize, and complete records in CRM.
 ---
 
 # Getting started with CRM
@@ -43,7 +45,9 @@ title: User Guide
 ```
 
 The display title resolves in order: frontmatter `title:` → the first
-`#` heading → the doc `name`.
+`#` heading → the doc `name`. The optional `description` is a one-line
+summary the docs portal renders under the title (it travels in the doc
+list, so the portal shows summaries without fetching each body).
 
 ## Doc Properties
 
@@ -53,6 +57,7 @@ When a `*.md` file is collected, it becomes a `doc` item with this shape:
 | :--- | :--- | :--- | :--- |
 | `name` | `string` | ✅ | Machine name (`snake_case`), from the filename stem. Must match `^[a-z][a-z0-9_]*$` and be **namespace-prefixed** |
 | `label` | `string` | — | Display title (from frontmatter `title`) |
+| `description` | `string` | — | One-line summary for listings (from frontmatter `description`) |
 | `content` | `string` | ✅ | The Markdown body |
 
 You can also declare a doc programmatically with `DocSchema` in a stack

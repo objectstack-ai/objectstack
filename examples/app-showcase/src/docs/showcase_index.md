@@ -1,3 +1,8 @@
+---
+title: Showcase
+description: Overview of the showcase package and the docs-as-metadata feature it demonstrates.
+---
+
 # Showcase
 
 The living conformance fixture for the ObjectStack protocol: every field

@@ -29,6 +29,7 @@ import path from 'path';
 export interface DocItem {
   name: string;
   label?: string;
+  description?: string;
   content: string;
 }
 
@@ -41,19 +42,31 @@ export interface DocIssue {
 
 const DOC_NAME_RE = /^[a-z][a-z0-9_]*$/;
 
-/** Strip a leading `---` frontmatter block; extract a `title:` if present. */
-function parseFrontmatter(raw: string): { title?: string; body: string } {
+/** Extract a single-line scalar `key: value` from a frontmatter block. */
+function frontmatterScalar(block: string, key: string): string | undefined {
+  const re = new RegExp(`^${key}\\s*:`, 'i');
+  const line = block.split(/\r?\n/).find((l) => re.test(l));
+  if (!line) return undefined;
+  const value = line.replace(re, '').trim().replace(/^['"]|['"]$/g, '');
+  return value || undefined;
+}
+
+/**
+ * Strip a leading `---` frontmatter block; extract `title:` and
+ * `description:` if present (both optional, single-line scalars).
+ */
+function parseFrontmatter(raw: string): { title?: string; description?: string; body: string } {
   if (!raw.startsWith('---\n') && !raw.startsWith('---\r\n')) return { body: raw };
   const end = raw.indexOf('\n---', 3);
   if (end === -1) return { body: raw };
   const block = raw.slice(raw.indexOf('\n') + 1, end);
   const bodyStart = raw.indexOf('\n', end + 1);
   const body = bodyStart === -1 ? '' : raw.slice(bodyStart + 1);
-  const titleLine = block.split(/\r?\n/).find((l) => /^title\s*:/.test(l));
-  const title = titleLine
-    ? titleLine.replace(/^title\s*:\s*/, '').trim().replace(/^['"]|['"]$/g, '')
-    : undefined;
-  return { title: title || undefined, body };
+  return {
+    title: frontmatterScalar(block, 'title'),
+    description: frontmatterScalar(block, 'description'),
+    body,
+  };
 }
 
 /** Remove fenced code blocks and inline code spans before content scans. */
@@ -105,8 +118,13 @@ export function collectDocsFromSrc(configPath: string): { docs: DocItem[]; issue
     }
 
     const raw = fs.readFileSync(path.join(docsDir, entry.name), 'utf-8');
-    const { title, body } = parseFrontmatter(raw);
-    docs.push({ name: stem, label: title ?? firstHeading(body), content: body });
+    const { title, description, body } = parseFrontmatter(raw);
+    docs.push({
+      name: stem,
+      label: title ?? firstHeading(body),
+      ...(description ? { description } : {}),
+      content: body,
+    });
   }
   return { docs, issues };
 }

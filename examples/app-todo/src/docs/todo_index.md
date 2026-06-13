@@ -1,3 +1,8 @@
+---
+title: Todo App
+description: A minimal task-management app that demonstrates the ObjectStack metadata protocol end to end.
+---
+
 # Todo App
 
 A minimal task-management app demonstrating the ObjectStack metadata

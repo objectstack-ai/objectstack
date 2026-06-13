@@ -107,6 +107,8 @@ export const DocSchema = z.object({
     .describe('Unique doc name; MUST carry the package namespace prefix (enforced by build/publish lint)'),
   label: z.string().optional()
     .describe('Display title; defaults to the first `#` heading, then the name'),
+  description: z.string().optional()
+    .describe('One-line summary for listings (frontmatter `description:`); travels in the list response'),
   content: z.string().describe('Raw Markdown (CommonMark + GFM)'),
 });
 ```
@@ -144,6 +146,8 @@ unbounded, and manifest-size pressure lands here first.
   legacy, so day-one lint costs nothing — the same reasoning as the
   image ban.
 - `label` = frontmatter `title:` if present, else first `#` heading.
+- `description` = frontmatter `description:` if present (optional one-line
+  summary; the docs portal renders it under the title).
 - `content` = the file body (frontmatter stripped).
 - **Subdirectories under `src/docs/` are a build error**, not silently
   flattened — flatness is the contract that keeps references stable.
@@ -240,3 +244,30 @@ maintained, so it cannot rot.
 
 P0 conventions are isomorphic to the P1 schema by construction: when the
 compiler lands, pilot content migrates with zero edits.
+
+### P3 design note — tags / categorization (deferred, not bolted on early)
+
+Tags, categories, and ordering are **navigation-model** concerns and stay
+in P3 by design — adding them before there is enough doc volume to need
+filtering buys an i18n-bearing protocol field with no payoff. When they
+land, design the discovery surface (tags + category + search + cross-package
+aggregation) as one thing, not field-by-field. The agreed shape for tags:
+
+- **A tag is a stable key, never a display string.** Display always resolves
+  through the platform's existing label-key → i18n mechanism, exactly like
+  every other label. Free-form display strings fail twice: cross-package
+  fragmentation (`setup` vs `getting-started` vs `quickstart`) and no i18n
+  owner. Keying fixes both.
+- **Layered vocabulary, not closed-vs-open.** The protocol blesses a *small
+  core* of cross-cutting "purpose" tags (`getting-started`, `guide`,
+  `reference`, `tutorial`, `api`, `migration`, `troubleshooting`) — central
+  i18n, eligible for dedicated UI. Packages extend with **namespace-prefixed**
+  tags (`crm_*`, same rule as doc names) for domain topics, shipping their
+  translations in the package i18n bundle (same path as object/field labels).
+- Pure closed enum is too rigid (packages can't express domain topics); pure
+  open free-form is too fragmented and has no i18n home. The layered
+  key-based model is the resolution.
+
+The current addition — `description` — deliberately stops short of this: it is
+a per-doc summary, not a taxonomy, so it carries no i18n-keying or
+cross-package-coherence burden.

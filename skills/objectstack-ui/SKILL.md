@@ -645,6 +645,8 @@ src/docs/
    a bare `user_guide` would collide across packages and fail at install
    (ADR-0048).
 3. **Title** resolves: frontmatter `title:` → first `#` heading → `name`.
+   Optional frontmatter `description:` is a one-line summary the docs portal
+   shows under the title — add it on index/overview docs.
 4. **Pure Markdown.** CommonMark + GFM only, plus heading anchors, fenced
    code highlighting, and GitHub alerts (`> [!NOTE]`, `> [!WARNING]`, …).
    **MDX and image references are rejected at build time** — docs are
@@ -685,6 +687,7 @@ package) is a later, additive concern — author-side, nothing to model now.
 ```md
 ---
 title: CRM Overview
+description: Accounts, contacts, and opportunities — start here.
 ---
 
 # CRM

@@ -42,6 +42,16 @@ export const DocSchema = lazySchema(() => z.object({
     .describe('Display title; defaults to the first `#` heading, then the name'),
 
   /**
+   * One-line summary for listings (the docs portal renders it under the
+   * title). The CLI reads it from frontmatter `description:`. Optional and
+   * short by convention — it travels in the list response (unlike
+   * `content`, which the REST list omits by default), so a portal can show
+   * summaries without fetching each doc's body.
+   */
+  description: z.string().optional()
+    .describe('One-line summary for listings; from frontmatter `description:`'),
+
+  /**
    * Raw Markdown body (CommonMark + GFM), frontmatter stripped.
    * MDX and image references are banned in v1 (ADR-0046 §3.4) —
    * enforced by lint, not here: the kernel load path must stay

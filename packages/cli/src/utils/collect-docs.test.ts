@@ -38,6 +38,18 @@ describe('collectDocsFromSrc (ADR-0046 §3.2)', () => {
     expect(guide.content).not.toContain('title:'); // frontmatter stripped
   });
 
+  it('reads optional frontmatter `description:` (and omits it when absent)', () => {
+    write('crm_index.md', '---\ntitle: CRM\ndescription: Start here.\n---\n\n# CRM\n\nBody.');
+    write('crm_plain.md', '# Plain\n\nNo frontmatter.');
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(issues).toHaveLength(0);
+    const index = docs.find((d) => d.name === 'crm_index')!;
+    expect(index.description).toBe('Start here.');
+    expect(index.content).not.toContain('description:'); // frontmatter stripped
+    const plain = docs.find((d) => d.name === 'crm_plain')!;
+    expect(plain.description).toBeUndefined(); // absent → omitted, not ''
+  });
+
   it('errors on subdirectories — flatness is the contract', () => {
     fs.mkdirSync(path.join(docsDir, 'user'));
     write('crm_index.md', '# x');

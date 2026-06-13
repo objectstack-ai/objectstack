@@ -1,5 +1,6 @@
 ---
 title: User Guide
+description: How to create, organize, and complete tasks in the Todo app.
 ---
 
 # Working with Tasks
