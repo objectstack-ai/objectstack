@@ -49,6 +49,27 @@ describe('SqlDriver (SQLite Integration)', () => {
     expect(results.map((r: any) => r.name)).toEqual(['Alice', 'Charlie']);
   });
 
+  it('returns rows when $select names an unknown column (retries with SELECT *)', async () => {
+    // A generic list view auto-requests view-binding fields (status, due_date,
+    // image, ...) the object may not have. The unknown column must NOT zero
+    // the whole result — the real rows still come back, minus the phantom field.
+    const results = await driver.find('users', {
+      fields: ['id', 'name', 'status', 'due_date', 'image'],
+      orderBy: [{ field: 'name', order: 'asc' }],
+    });
+
+    expect(results.length).toBe(4);
+    expect(results.map((r: any) => r.name)).toEqual(['Alice', 'Bob', 'Charlie', 'Dave']);
+    // The phantom columns are simply absent (the table never had them).
+    expect((results[0] as any).status).toBeUndefined();
+  });
+
+  it('still surfaces non-column errors (e.g. unknown table) instead of empty', async () => {
+    await expect(
+      driver.find('no_such_table', { fields: ['id'] }),
+    ).rejects.toThrow();
+  });
+
   it('should apply simple AND/OR logic', async () => {
     const results = await driver.find('users', {
       where: {

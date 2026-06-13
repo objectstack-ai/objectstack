@@ -362,8 +362,34 @@ export class SqlDriver implements IDataDriver {
   // ===================================
 
   async find(object: string, query: QueryAST, options?: DriverOptions): Promise<any[]> {
-    const builder = this.getBuilder(object, options);
-    this.applyTenantScope(builder, object, options);
+    // Build everything EXCEPT the SELECT list, so the unknown-column retry
+    // below can rebuild without re-deriving where/order/pagination.
+    const buildBase = () => {
+      const b = this.getBuilder(object, options);
+      this.applyTenantScope(b, object, options);
+
+      // WHERE
+      if (query.where) {
+        this.applyFilters(b, query.where);
+      }
+
+      // ORDER BY
+      if (query.orderBy && Array.isArray(query.orderBy)) {
+        for (const item of query.orderBy) {
+          if (item.field) {
+            b.orderBy(this.mapSortField(item.field), item.order || 'asc');
+          }
+        }
+      }
+
+      // PAGINATION
+      if (query.offset !== undefined) b.offset(query.offset);
+      if (query.limit !== undefined) b.limit(query.limit);
+
+      return b;
+    };
+
+    const builder = buildBase();
 
     // SELECT
     if (query.fields) {
@@ -372,36 +398,39 @@ export class SqlDriver implements IDataDriver {
       builder.select('*');
     }
 
-    // WHERE
-    if (query.where) {
-      this.applyFilters(builder, query.where);
-    }
-
-    // ORDER BY
-    if (query.orderBy && Array.isArray(query.orderBy)) {
-      for (const item of query.orderBy) {
-        if (item.field) {
-          builder.orderBy(this.mapSortField(item.field), item.order || 'asc');
-        }
-      }
-    }
-
-    // PAGINATION
-    if (query.offset !== undefined) builder.offset(query.offset);
-    if (query.limit !== undefined) builder.limit(query.limit);
-
     let results: any[];
     try {
       results = await builder;
     } catch (error: any) {
-      if (
+      const isUnknownColumn =
         error.message &&
         (error.message.includes('no such column') ||
-          (error.message.includes('column') && error.message.includes('does not exist')))
-      ) {
-        return [];
+          (error.message.includes('column') && error.message.includes('does not exist')));
+      if (isUnknownColumn) {
+        // A `$select` projection naming a column the table lacks (e.g. a
+        // generic list view auto-requesting `status`/`due_date`/`image` on an
+        // object without them) makes the WHOLE query fail. Swallowing that
+        // into an empty result — the old behavior — reads to the UI as "no
+        // records exist" even though rows are there: a silent data-loss
+        // footgun. When the failure came from the projection, retry once
+        // selecting all columns so the real rows still come back; the unknown
+        // field is simply absent from each row (it never existed). The
+        // engine's unknown-field filter is the first line of defense, but it
+        // only fires when the object's schema is populated in the registry —
+        // this driver backstop holds even when it isn't (notably the cloud
+        // multi-tenant runtime, where the projection otherwise zeroes the list).
+        if (query.fields) {
+          try {
+            results = await buildBase().select('*');
+          } catch {
+            return [];
+          }
+        } else {
+          return [];
+        }
+      } else {
+        throw error;
       }
-      throw error;
     }
 
     if (!Array.isArray(results)) {
