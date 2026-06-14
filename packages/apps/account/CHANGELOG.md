@@ -1,5 +1,17 @@
 # @objectstack/account
 
+## 9.5.0
+
+### Patch Changes
+
+- Updated dependencies [d08551c]
+- Updated dependencies [5be7102]
+- Updated dependencies [707aeed]
+- Updated dependencies [7a103d4]
+- Updated dependencies [4b01250]
+  - @objectstack/spec@9.5.0
+  - @objectstack/platform-objects@9.5.0
+
 ## 9.4.0
 
 ### Minor Changes

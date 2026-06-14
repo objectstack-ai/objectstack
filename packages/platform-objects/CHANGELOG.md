@@ -1,5 +1,20 @@
 # @objectstack/platform-objects
 
+## 9.5.0
+
+### Patch Changes
+
+- 5be7102: i18n(metadata-forms): correct stale page-`type` help text across locales
+
+  The page `type` field help text still described page types as "record, home, app, dashboard …" — listing `dashboard` (and implying grid/kanban/calendar) as page types, which is wrong after the ADR-0047 page-type cleanup: those are visualizations configured under Interface, not page kinds. Updated en / zh-CN / ja-JP / es-ES to "page kind — list / record / home / app / utility; visualizations live under Interface". Also fixed the stale zh-CN `kind` help text (it described "record / list / detail" instead of the record-page override mode).
+
+- Updated dependencies [d08551c]
+- Updated dependencies [707aeed]
+- Updated dependencies [7a103d4]
+- Updated dependencies [4b01250]
+  - @objectstack/spec@9.5.0
+  - @objectstack/metadata-core@9.5.0
+
 ## 9.4.0
 
 ### Patch Changes

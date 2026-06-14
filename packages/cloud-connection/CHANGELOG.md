@@ -1,5 +1,24 @@
 # @objectstack/cloud-connection
 
+## 9.5.0
+
+### Minor Changes
+
+- 08a11f7: RuntimeConfigPlugin: make the per-request `features` seam open-ended and plan-agnostic (open-core boundary, cloud ADR-0012).
+
+  The framework now transports an opaque feature map: a host's policy hook may return ANY boolean feature keys and they pass through to the SPA verbatim — the framework no longer enumerates a distribution's commercial feature catalog. Adds `resolveFeatures` (plan-agnostic) and `RuntimeFeatureOverrides`; deprecates `resolvePlanFeatures` / `RuntimeConfigPlanFeatures` (still honoured for backward compatibility).
+
+### Patch Changes
+
+- Updated dependencies [d08551c]
+- Updated dependencies [707aeed]
+- Updated dependencies [7a103d4]
+- Updated dependencies [4b01250]
+  - @objectstack/spec@9.5.0
+  - @objectstack/core@9.5.0
+  - @objectstack/runtime@9.5.0
+  - @objectstack/types@9.5.0
+
 ## 9.4.0
 
 ### Patch Changes

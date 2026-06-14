@@ -1,5 +1,16 @@
 # @objectstack/driver-sql
 
+## 9.5.0
+
+### Patch Changes
+
+- Updated dependencies [d08551c]
+- Updated dependencies [707aeed]
+- Updated dependencies [7a103d4]
+- Updated dependencies [4b01250]
+  - @objectstack/spec@9.5.0
+  - @objectstack/core@9.5.0
+
 ## 9.4.0
 
 ### Patch Changes
