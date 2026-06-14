@@ -37,7 +37,9 @@ export const pageForm = defineForm({
           ],
           helpText: 'Page kind. "List / Interface" binds a source view into a curated surface — how it looks (grid / kanban / calendar / …) is a visualization set under Interface, not a page type.',
         },
-        { field: 'template', colSpan: 2, helpText: 'Layout template (e.g., "header-sidebar-main")' },
+        // A list/interface page renders via InterfaceListPage and ignores the
+        // region template, so hide it there (same rationale as Data Context / Layout).
+        { field: 'template', colSpan: 2, visibleOn: "data.type != 'list'", helpText: 'Layout template (e.g., "header-sidebar-main")' },
         { field: 'description', widget: 'textarea', colSpan: 2, helpText: 'Page description for navigation' },
       ],
     },
@@ -86,7 +88,9 @@ export const pageForm = defineForm({
           // Keep this list in sync with InterfacePageConfigSchema.
           fields: [
             { field: 'source', widget: 'ref:object', helpText: 'Object this list reads from' },
-            { field: 'sourceView', helpText: 'Named list view to inherit columns/filter/sort from (blank = object default)' },
+            // Pick from the source object's views instead of typing a name.
+            // `dependsOn: 'source'` tells the picker which object's views to list.
+            { field: 'sourceView', widget: 'view-ref', dependsOn: 'source', helpText: 'Named list view to inherit columns/filter/sort from (blank = object default)' },
             { field: 'appearance', type: 'composite', helpText: 'Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility' },
             {
               field: 'userFilters',
