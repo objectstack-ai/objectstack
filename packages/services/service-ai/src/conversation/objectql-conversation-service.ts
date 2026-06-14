@@ -59,6 +59,16 @@ const MESSAGE_ORDER = [
  * Production environments should use this implementation to ensure
  * conversation history survives service restarts.
  */
+/**
+ * A short, single-line title derived from a user message: collapse whitespace
+ * and cap the length. Pure + deterministic (no model call).
+ */
+function firstMessageTitle(text: string, maxLength = 60): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat.length <= maxLength) return flat;
+  return `${flat.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
 export class ObjectQLConversationService implements IAIConversationService {
   private readonly engine: IDataEngine;
 
@@ -237,10 +247,22 @@ export class ObjectQLConversationService implements IAIConversationService {
       created_at: now,
     });
 
-    // Update conversation timestamp
-    await this.engine.update(CONVERSATIONS_OBJECT, { id: conversationId, updated_at: now }, {
-      where: { id: conversationId },
-    });
+    // Auto-title from the first user message. The sidebar lists conversations
+    // straight off the `ai_conversations` rows, so an untitled conversation
+    // shows a generic label — a wall of identical rows once a user has a few.
+    // The LLM auto-titler may be disabled or run a beat later; this gives every
+    // conversation a readable label the instant its first user turn lands,
+    // deterministically and with no extra model call. A nicer LLM title (when
+    // enabled) simply overwrites it.
+    const titleUpdate =
+      message.role === 'user' && !row.title && contentStr
+        ? { title: firstMessageTitle(contentStr) }
+        : {};
+    await this.engine.update(
+      CONVERSATIONS_OBJECT,
+      { id: conversationId, updated_at: now, ...titleUpdate },
+      { where: { id: conversationId } },
+    );
 
     // Return the full updated conversation
     return (await this.get(conversationId))!;

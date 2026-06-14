@@ -251,6 +251,33 @@ describe('ObjectQLConversationService', () => {
     expect(updated.updatedAt >= conv.updatedAt).toBe(true);
   });
 
+  it('auto-titles an untitled conversation from its first user message', async () => {
+    const conv = await service.create(); // no title
+    expect(conv.title).toBeUndefined();
+    const updated = await service.addMessage(conv.id, { role: 'user', content: 'Build me a ticketing system' });
+    expect(updated.title).toBe('Build me a ticketing system');
+  });
+
+  it('does not overwrite an existing title, and only a USER first turn seeds it', async () => {
+    const titled = await service.create({ title: 'My title' });
+    const afterUser = await service.addMessage(titled.id, { role: 'user', content: 'hello' });
+    expect(afterUser.title).toBe('My title'); // kept
+
+    const fresh = await service.create();
+    const afterAssistant = await service.addMessage(fresh.id, { role: 'assistant', content: 'hi there' });
+    expect(afterAssistant.title).toBeUndefined(); // assistant turn does not seed a title
+  });
+
+  it('collapses whitespace and truncates a long first message into the title', async () => {
+    const conv = await service.create();
+    const long = 'design   an\n  employee onboarding system with departments tasks members and a dashboard and reports';
+    const updated = await service.addMessage(conv.id, { role: 'user', content: long });
+    expect(updated.title!.length).toBeLessThanOrEqual(60);
+    expect(updated.title).not.toContain('\n');
+    expect(updated.title).toMatch(/^design an employee onboarding/);
+    expect(updated.title!.endsWith('…')).toBe(true);
+  });
+
   it('should add a tool message with toolCallId', async () => {
     const conv = await service.create();
     const msg: ModelMessage = {
