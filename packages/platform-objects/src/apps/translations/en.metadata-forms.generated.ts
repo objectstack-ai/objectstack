@@ -680,7 +680,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       type: {
         label: "Type",
-        helpText: "Page type (record, home, app, dashboard, etc.)"
+        helpText: "Page kind — list / record / home / app / utility. How a list page looks (grid / kanban / calendar) is a visualization set under Interface, not a page type."
       },
       template: {
         label: "Template",

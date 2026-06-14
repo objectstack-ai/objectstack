@@ -680,7 +680,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       type: {
         label: "类型",
-        helpText: "页面类型（record、home、app、dashboard 等）"
+        helpText: "页面种类 — list / record / home / app / utility。列表页的展现形式（grid / kanban / calendar）是在 Interface 中设置的可视化，不是页面类型。"
       },
       template: {
         label: "模板",
@@ -708,7 +708,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       kind: {
         label: "模式",
-        helpText: "页面种类分组（如 record / list / detail）"
+        helpText: "页面覆盖模式：完整（full）或插槽式（slotted），仅用于记录页。"
       },
       assignedProfiles: {
         label: "指定配置文件",

@@ -680,7 +680,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       type: {
         label: "型",
-        helpText: "ページ種別（record, home, app, dashboard など）"
+        helpText: "ページの種類 — list / record / home / app / utility。リストページの見せ方（grid / kanban / calendar）はページタイプではなく、Interface で設定するビジュアライゼーションです。"
       },
       template: {
         label: "テンプレート",

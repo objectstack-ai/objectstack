@@ -680,7 +680,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       type: {
         label: "Tipo",
-        helpText: "Tipo de página (record, home, app, dashboard, etc.)"
+        helpText: "Tipo de página: list / record / home / app / utility. Cómo se ve una página de lista (grid / kanban / calendar) es una visualización configurada en Interface, no un tipo de página."
       },
       template: {
         label: "Plantilla",
