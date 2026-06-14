@@ -17,6 +17,8 @@
 
 import { SETUP_APP, SETUP_NAV_CONTRIBUTIONS } from '@objectstack/platform-objects/apps';
 
+import { SETUP_OVERVIEW_DOC } from './setup-overview.doc.js';
+
 export const SETUP_APP_PACKAGE_ID = 'com.objectstack.setup';
 export const SETUP_APP_NAMESPACE = 'setup';
 export const SETUP_APP_VERSION = '9.3.0';
@@ -56,6 +58,8 @@ export class SetupAppPlugin {
       ...setupAppManifestHeader,
       apps: [SETUP_APP],
       navigationContributions: SETUP_NAV_CONTRIBUTIONS,
+      // ADR-0046 package docs — grouped under "Setup" at /_console/docs.
+      docs: [SETUP_OVERVIEW_DOC],
     });
   }
 }
@@ -66,3 +70,4 @@ export function createSetupAppPlugin(): SetupAppPlugin {
 }
 
 export { SETUP_APP, SETUP_NAV_CONTRIBUTIONS };
+export { SETUP_OVERVIEW_DOC };

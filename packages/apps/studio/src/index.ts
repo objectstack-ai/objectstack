@@ -21,6 +21,8 @@
 
 import { STUDIO_APP } from '@objectstack/platform-objects/apps';
 
+import { STUDIO_OVERVIEW_DOC } from './studio-overview.doc.js';
+
 export const STUDIO_APP_PACKAGE_ID = 'com.objectstack.studio';
 export const STUDIO_APP_NAMESPACE = 'studio';
 export const STUDIO_APP_VERSION = '9.3.0';
@@ -59,7 +61,12 @@ export class StudioAppPlugin {
   async start(ctx: any): Promise<void> {
     const manifest = ctx?.getService?.('manifest');
     if (!manifest || typeof manifest.register !== 'function') return;
-    manifest.register({ ...studioAppManifestHeader, apps: [STUDIO_APP] });
+    manifest.register({
+      ...studioAppManifestHeader,
+      apps: [STUDIO_APP],
+      // ADR-0046 package docs — grouped under "Studio" at /_console/docs.
+      docs: [STUDIO_OVERVIEW_DOC],
+    });
   }
 }
 
@@ -69,3 +76,4 @@ export function createStudioAppPlugin(): StudioAppPlugin {
 }
 
 export { STUDIO_APP };
+export { STUDIO_OVERVIEW_DOC };
