@@ -168,6 +168,39 @@ export interface RegisteredConnector {
 }
 
 /**
+ * Context handed to a named handler function invoked from a `script` node
+ * (#1870). Mirrors {@link ConnectorActionContext} but carries the node's mapped
+ * `input` so the function reads its arguments without reaching into the raw
+ * variable map. The function's return value becomes the node output.
+ */
+export interface FlowFunctionContext {
+    /** Inputs mapped from the node's `config.inputs` (already in scope). */
+    readonly input: Record<string, unknown>;
+    /** Live flow variable map — read prior-node output / write results. */
+    readonly variables: Map<string, unknown>;
+    /** The flow execution / trigger context. */
+    readonly automation: AutomationContext;
+    readonly logger: Logger;
+}
+
+/**
+ * A named handler function callable from a `script` node. Returns the node's
+ * output (any JSON-serializable value); returning `undefined` yields an empty
+ * output. Authored packages contribute these via `defineStack({ functions })`,
+ * which the host bridges in through {@link AutomationEngine.setFunctionResolver}.
+ */
+export type FlowFunctionHandler = (ctx: FlowFunctionContext) => unknown | Promise<unknown>;
+
+/**
+ * Resolves a function name to its handler. Injected by the host (the automation
+ * plugin bridges it to ObjectQL's `resolveFunction`, fed by `bundle.functions`),
+ * so the engine stays decoupled from any specific function registry. Returns
+ * `undefined` for an unknown name, letting the `script` node fail the step
+ * loudly instead of silently no-op'ing (#1870).
+ */
+export type FlowFunctionResolver = (name: string) => FlowFunctionHandler | undefined;
+
+/**
  * A designer-facing view of one connector action — identity + its JSON-Schema
  * input/output. The runtime handler is intentionally omitted; this is metadata.
  */
@@ -353,6 +386,8 @@ export class AutomationEngine implements IAutomationService {
     private boundFlowTriggers = new Map<string, string>();
     /** Connectors registered by integration plugins, keyed by connector name (ADR-0018 §Addendum). */
     private connectors = new Map<string, RegisteredConnector>();
+    /** Bridge to the host function registry for `script`-node calls (#1870), if wired. */
+    private functionResolver: FlowFunctionResolver | null = null;
     private executionLogs: ExecutionLogEntry[] = [];
     private readonly maxLogSize: number;
     private logger: Logger;
@@ -695,6 +730,26 @@ export class AutomationEngine implements IAutomationService {
      */
     resolveConnectorAction(connectorId: string, actionId: string): ConnectorActionHandler | undefined {
         return this.connectors.get(connectorId)?.handlers[actionId];
+    }
+
+    /**
+     * Wire the engine to the host's named-function registry (#1870). The
+     * automation plugin calls this in `start()` with a resolver backed by
+     * ObjectQL's `resolveFunction` (populated from `bundle.functions` /
+     * `defineStack({ functions })`), so a `script` node can invoke an
+     * authored function by name. Passing `null` detaches the bridge.
+     */
+    setFunctionResolver(resolver: FlowFunctionResolver | null): void {
+        this.functionResolver = resolver;
+    }
+
+    /**
+     * Resolve a named function for a `script` node. Returns `undefined` when no
+     * resolver is wired or the name is unregistered — the node then fails the
+     * step with a clear error rather than silently no-op'ing.
+     */
+    resolveFunction(name: string): FlowFunctionHandler | undefined {
+        return this.functionResolver?.(name) ?? undefined;
     }
 
     /** Get all registered connector names. */

@@ -154,6 +154,30 @@ export class AutomationServicePlugin implements Plugin {
             }
         }
 
+        // #1870 — bridge `script`-node function calls to the host function
+        // registry. ObjectQL holds the name→handler map populated from
+        // `bundle.functions` / `defineStack({ functions })` (the same registry
+        // hooks/actions resolve through). Wiring it here lets a `script` node
+        // invoke an authored function by name; an unresolved name fails the step
+        // loudly. Best-effort: without ObjectQL, function-calling script nodes
+        // fail with a clear "no function registered" error when executed.
+        try {
+            const fnRegistry = ctx.getService<{
+                resolveFunction?: (name: string) => ((c: unknown) => unknown) | undefined;
+            }>('objectql');
+            if (fnRegistry && typeof fnRegistry.resolveFunction === 'function') {
+                this.engine.setFunctionResolver((name) => {
+                    const fn = fnRegistry.resolveFunction!(name);
+                    return typeof fn === 'function'
+                        ? (fnCtx) => (fn as (c: unknown) => unknown)(fnCtx)
+                        : undefined;
+                });
+                ctx.logger.debug('[Automation] script-node function registry bridged to objectql.resolveFunction');
+            }
+        } catch {
+            ctx.logger.debug('[Automation] objectql not present — script-node function calls will fail loudly when used');
+        }
+
         // Pull flow definitions from the ObjectQL schema registry. AppPlugin.init()
         // calls manifest.register(payload), which routes to ql.registerApp() and
         // stores each inline flow under type 'flow'. By the time start() runs,

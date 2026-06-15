@@ -16,10 +16,22 @@ import type { AutomationEngine } from '../engine.js';
  *   as bare flow variables). A field-less screen — or one with
  *   `waitForInput === false` — stays a server pass-through (input vars, if any,
  *   are already injected from `context.params`).
- * - 'script' nodes dispatch by `config.actionType`. Currently only 'email'
- *   has a (logger-backed) implementation; unknown action types still succeed
- *   so flows can continue and downstream nodes can react.
+ * - 'script' nodes name a callable to run (#1870):
+ *     - `config.actionType` selecting a built-in side-effect ('email', 'slack',
+ *       logger-backed), or
+ *     - `config.function` (or a bare `actionType` that matches no built-in)
+ *       naming a registered function — resolved via `engine.resolveFunction()`,
+ *       which the host bridges to `bundle.functions` / `defineStack({ functions })`.
+ *   A target that resolves to neither fails the step LOUDLY rather than the old
+ *   silent "no-op handler" success, so an unwired callable can't quietly skip.
  */
+
+/**
+ * Built-in `script` side-effect action types with a (logger-backed) handler.
+ * Anything else is treated as a registered-function name (#1870).
+ */
+const SCRIPT_BUILTIN_ACTION_TYPES = new Set(['email', 'slack']);
+
 export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext): void {
     // screen — server-side pass-through (input vars already injected by engine).
     engine.registerNodeExecutor({
@@ -71,26 +83,62 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         description: 'Run a custom script action.',
         icon: 'code', category: 'logic', source: 'builtin',
       }),
-      async execute(node, _variables, _context) {
+      async execute(node, variables, context) {
         const cfg = (node.config ?? {}) as Record<string, unknown>;
-        const actionType = (cfg.actionType as string | undefined) ?? 'noop';
-        if (actionType === 'email') {
+        const fnName = typeof cfg.function === 'string' && cfg.function.trim() ? cfg.function.trim() : undefined;
+        const actionType = typeof cfg.actionType === 'string' && cfg.actionType.trim() ? cfg.actionType.trim() : undefined;
+
+        // Built-in side-effect actions keep their logger-backed behavior — but
+        // only when an explicit `function` isn't set (that always wins).
+        if (!fnName && actionType && SCRIPT_BUILTIN_ACTION_TYPES.has(actionType)) {
           ctx.logger.info(
-            `[Script:email] template=${String(cfg.template)} ` +
+            `[Script:${actionType}] template=${String(cfg.template)} ` +
               `recipients=${JSON.stringify(cfg.recipients)} ` +
               `vars=${JSON.stringify(cfg.variables)}`,
           );
           return {
             success: true,
-            output: {
-              actionType,
-              template: cfg.template,
-              recipients: cfg.recipients,
-            },
+            output: { actionType, template: cfg.template, recipients: cfg.recipients },
           };
         }
-        ctx.logger.info(`[Script:${actionType}] node=${node.id} executed (no-op handler)`);
-        return { success: true, output: { actionType } };
+
+        // Otherwise the node names a function to invoke. `function` is canonical;
+        // a bare `actionType` that matched no built-in is accepted as a shorthand
+        // function name (so templates that point a node straight at e.g.
+        // `helpdesk.aiTriageStub` resolve).
+        const target = fnName ?? actionType;
+        if (!target) {
+          // Defense in depth: registerFlow already rejects this structurally
+          // (#1870), so reaching here means a node bypassed registration.
+          return {
+            success: false,
+            error:
+              `script node '${node.id}': declares neither \`actionType\` nor \`function\` — nothing to run.`,
+          };
+        }
+
+        const handler = engine.resolveFunction(target);
+        if (!handler) {
+          return {
+            success: false,
+            error:
+              `script node '${node.id}': '${target}' is not a built-in action ` +
+              `(${[...SCRIPT_BUILTIN_ACTION_TYPES].join(', ')}) and no function named '${target}' is registered. ` +
+              `Register it via \`defineStack({ functions: { '${target}': fn } })\`, or fix the name (#1870).`,
+          };
+        }
+
+        // Map declared inputs (`config.inputs` | `config.input`) to the function.
+        const input = (cfg.inputs ?? cfg.input ?? {}) as Record<string, unknown>;
+        try {
+          const result = await handler({ input, variables, automation: context, logger: ctx.logger });
+          return { success: true, output: { function: target, result } };
+        } catch (err) {
+          return {
+            success: false,
+            error: `script function '${target}' (node '${node.id}') failed: ${(err as Error).message}`,
+          };
+        }
       },
     });
 

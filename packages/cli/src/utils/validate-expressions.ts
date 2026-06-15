@@ -78,6 +78,25 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     for (const node of nodes) {
       const cfg = (node.config ?? {}) as AnyRec;
       check(`flow '${flowName}' · node '${node.id}' (${node.type}) condition`, cfg.condition, objectName);
+      // #1870 — a `script` node must declare a callable target (`actionType` or
+      // `function`). A node with neither is a silent no-op that otherwise passes
+      // build. (Function *existence* isn't checkable here — functions are code,
+      // not serialized into the artifact — so this is a structural check; the
+      // runtime verifies the named function is actually registered.)
+      if (node.type === 'script') {
+        const fn = typeof cfg.function === 'string' ? cfg.function.trim() : '';
+        const action = typeof cfg.actionType === 'string' ? cfg.actionType.trim() : '';
+        if (!fn && !action) {
+          issues.push({
+            where: `flow '${flowName}' · node '${node.id}' (script) callable`,
+            message:
+              `script node declares neither \`actionType\` nor \`function\` — it would do nothing at runtime. ` +
+              `Name a built-in action (e.g. \`actionType: 'email'\`) or a registered function ` +
+              `(\`function: 'my_fn'\`, registered via \`defineStack({ functions })\`).`,
+            source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
+          });
+        }
+      }
     }
     for (const edge of edges) {
       check(`flow '${flowName}' · edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition, objectName);

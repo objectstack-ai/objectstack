@@ -32,7 +32,10 @@ export const FlowNodeAction = z.enum([
   'http',               // Outbound HTTP callout (ADR-0018 M3) — canonical; outbox-backed when durable
   'http_request',       // Deprecated alias of `http` (ADR-0018 M3)
   'notify',             // Outbound notification (ADR-0012) — dispatched via the messaging service
-  'script',             // Custom Script (JS/TS)
+  'script',             // Custom action: a built-in side-effect (`config.actionType: 'email'|'slack'`)
+                        //   or a registered function (`config.function: 'name'` + `config.inputs`),
+                        //   resolved from `defineStack({ functions })`. An empty script node is
+                        //   rejected at build/registration and fails loudly at run time (#1870).
   'screen',             // Screen / User-Input Element
   'wait',               // Delay/Sleep
   'subflow',            // Call another flow

@@ -66,4 +66,36 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     expect(issues).toHaveLength(1);
     expect(issues[0].where).toContain("validation 'r1'");
   });
+
+  // #1870 — a `script` node that names no callable is a silent no-op.
+  it('flags a script node that declares neither actionType nor function (#1870)', () => {
+    const issues = validateStackExpressions({
+      flows: [{
+        name: 'helpdesk_flow',
+        nodes: [
+          { id: 'start', type: 'start', config: {} },
+          { id: 'triage', type: 'script', config: { actionType: undefined } },
+        ],
+        edges: [],
+      }],
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0].where).toContain("node 'triage' (script) callable");
+    expect(issues[0].message).toMatch(/neither .*actionType.* nor .*function/);
+  });
+
+  it('accepts a script node that names a built-in action or a function (#1870)', () => {
+    const issues = validateStackExpressions({
+      flows: [{
+        name: 'helpdesk_flow',
+        nodes: [
+          { id: 'start', type: 'start', config: {} },
+          { id: 'mail', type: 'script', config: { actionType: 'email' } },
+          { id: 'triage', type: 'script', config: { function: 'helpdesk.aiTriageStub' } },
+        ],
+        edges: [],
+      }],
+    });
+    expect(issues).toHaveLength(0);
+  });
 });
