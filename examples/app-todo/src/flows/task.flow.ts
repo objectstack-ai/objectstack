@@ -194,7 +194,7 @@ export const QuickAddTaskFlow: Flow = {
         message: 'Task "{subject}" created successfully!',
         buttons: [
           { label: 'Create Another', action: 'restart' },
-          { label: 'View Task', action: 'navigate', target: '/task/{newTaskId}' },
+          { label: 'View Task', action: 'navigate', target: '/task/{newTaskId.id}' },
           { label: 'Done', action: 'finish' },
         ],
       },

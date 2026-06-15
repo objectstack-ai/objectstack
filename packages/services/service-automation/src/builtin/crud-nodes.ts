@@ -90,15 +90,28 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const data = getData();
                 if (!data) {
                     ctx.logger.warn(`[create_record] no data engine; skipping ${objectName}`);
-                    if (outputVariable) variables.set(outputVariable, `mock-${objectName}-${Date.now()}`);
-                    return { success: true, output: { id: `mock-${objectName}-${Date.now()}`, object: objectName } };
+                    const mockId = `mock-${objectName}-${Date.now()}`;
+                    if (outputVariable) variables.set(outputVariable, { id: mockId });
+                    return { success: true, output: { id: mockId, object: objectName } };
                 }
 
                 try {
                     const created = await data.insert(objectName, fields);
-                    const insertedId = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
-                    if (outputVariable) variables.set(outputVariable, insertedId);
-                    return { success: true, output: { id: insertedId, record: created, object: objectName } };
+                    const createdRecord = Array.isArray(created) ? created[0] : created;
+                    const insertedId =
+                        createdRecord && typeof createdRecord === 'object'
+                            ? (createdRecord as Record<string, unknown>).id
+                            : createdRecord;
+                    if (outputVariable) {
+                        // #1873 — expose the created RECORD so later nodes can reference
+                        // `{var.id}` (and other fields), not just the bare id string. When the
+                        // driver returns a bare id, wrap it as `{ id }` so `{var.id}` still works.
+                        variables.set(
+                            outputVariable,
+                            createdRecord && typeof createdRecord === 'object' ? createdRecord : { id: insertedId },
+                        );
+                    }
+                    return { success: true, output: { id: insertedId, record: createdRecord, object: objectName } };
                 } catch (err) {
                     return { success: false, error: `create_record(${objectName}) failed: ${(err as Error).message}` };
                 }
