@@ -247,7 +247,11 @@ export const FlowSchema = lazySchema(() => z.object({
   
   /** Execution Config */
   active: z.boolean().default(false).describe('Is active (Deprecated: use status)'),
-  runAs: z.enum(['system', 'user']).default('user').describe('Execution context'),
+  // ⚠️ EXPERIMENTAL — NOT ENFORCED (ADR-0049, #1888). The service-automation
+  // engine ignores `runAs`: a flow declaring `runAs: system` does not elevate,
+  // and `user` does not de-elevate — steps run as the triggering context's
+  // identity regardless. Identity switching is tracked by #1888 (M2).
+  runAs: z.enum(['system', 'user']).default('user').describe('[EXPERIMENTAL — not enforced] Execution context'),
 
   /** Error Handling Strategy */
   errorHandling: z.object({

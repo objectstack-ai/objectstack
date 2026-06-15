@@ -46,9 +46,18 @@ export const AuditPolicySchema = lazySchema(() => z.object({
 /**
  * Security Policy Schema
  * "The Cloud Compliance Contract"
+ *
+ * ⚠️ EXPERIMENTAL — NOT ENFORCED (ADR-0049, #1882).
+ * This schema is currently a no-op: it is not registered as a metadata type and
+ * has no runtime consumer. Password complexity, session idle/absolute timeout,
+ * `forceMfa`, the IP allow-list (`trustedRanges`/`vpnRequired`) and audit
+ * retention/redaction are all parsed but enforced by nothing — `better-auth`
+ * runs hardcoded defaults regardless. Authoring a policy here does NOT change
+ * behaviour. Treat as a forward-looking contract only; do not rely on it for
+ * compliance. Enforcement (or removal) is tracked by #1882 for M2.
  */
 export const PolicySchema = lazySchema(() => z.object({
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Policy Name'),
+  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('[EXPERIMENTAL — not enforced] Policy Name'),
   
   password: PasswordPolicySchema.optional(),
   network: NetworkPolicySchema.optional(),

@@ -93,6 +93,14 @@ export const OwnerSharingRuleSchema = lazySchema(() => BaseSharingRuleSchema.ext
 
 /**
  * Master Sharing Rule Schema
+ *
+ * ⚠️ EXPERIMENTAL — NOT ENFORCED as authored (ADR-0049, #1887).
+ * The live engine enforces a divergent runtime model (`sys_sharing_rule`: JSON
+ * `criteria_json`, recipient enum `user`/`team`/`department`/`role`/`queue`).
+ * This spec's CEL `condition` is never compiled (unparsable CEL degrades to
+ * "match nothing"), and recipients such as `role_and_subordinates`/`guest` have
+ * no runtime mapping. Authoring a rule via this schema does NOT grant access —
+ * use `sys_sharing_rule` directly until reconciliation. Tracked by #1887 (M2).
  */
 export const SharingRuleSchema = lazySchema(() => z.discriminatedUnion('type', [
   CriteriaSharingRuleSchema,
