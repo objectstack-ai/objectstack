@@ -53,6 +53,7 @@ import { WebhookSchema } from './automation/webhook.zod';
 // System Protocol (additional)
 import { EmailTemplateDefinitionSchema } from './system/email-template.zod';
 import { DocSchema } from './system/doc.zod';
+import { BookSchema } from './system/book.zod';
 
 // Integration Protocol
 import { ConnectorSchema } from './integration/connector.zod';
@@ -226,6 +227,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   jobs: z.array(JobSchema).optional().describe('Background / Scheduled Jobs (run by IJobService on cron/interval/once schedules)'),
   emailTemplates: z.array(EmailTemplateDefinitionSchema).optional().describe('Email Templates resolved by IEmailService.sendTemplate({ template, locale })'),
   docs: z.array(DocSchema).optional().describe('Package documentation — flat Markdown items compiled from src/docs/*.md (ADR-0046)'),
+  books: z.array(BookSchema).optional().describe('Documentation navigation spines — ordered groups with derived membership (ADR-0046 §6)'),
 
   /**
    * ObjectGuard: Security Layer

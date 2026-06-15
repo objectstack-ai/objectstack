@@ -97,6 +97,11 @@ data-plane request:
 5. Configured default environment
 6. Single unambiguous environment
 
+This resolution order is implemented by the cloud host distribution's
+kernel-resolver (`@objectstack/objectos-runtime`). The open-source dispatcher
+(`packages/runtime/src/http-dispatcher.ts`) only provides the seam: when no
+resolver is injected it serves every request from a single default kernel.
+
 Control-plane routes under `/api/v1/cloud/environments/...` are management
 calls, not data-plane calls.
 
@@ -108,8 +113,8 @@ calls, not data-plane calls.
 |:---|:---|
 | `packages/cli/src/commands/publish.ts` | CLI publish command and endpoint construction. |
 | `packages/cli/src/commands/rollback.ts` | CLI revision activation command. |
-| `packages/runtime/src/cloud/environment-registry.ts` | Runtime seam for id/hostname environment resolution. |
-| `packages/runtime/src/cloud/runtime-config-plugin.ts` | Console runtime-config for active/default environment state. |
+| `packages/runtime/src/http-dispatcher.ts` | Kernel-resolution seam for per-request environment resolution. The concrete id/hostname registry ships in the host distribution `@objectstack/objectos-runtime` (not part of this open-source repo). |
+| `packages/cloud-connection/src/runtime-config-plugin.ts` | Console runtime-config for active/default environment state. |
 | `packages/spec/src/system/environment-artifact.zod.ts` | Normative artifact envelope schema. |
 
 ---

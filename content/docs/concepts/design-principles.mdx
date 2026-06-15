@@ -77,8 +77,8 @@ We cleanly separate the **Definition** from the **Execution**.
 
 | Layer | Responsibility | Example |
 | :--- | :--- | :--- |
-| **Protocol (Mechanism)** | Defines the capabilities. | `allowRead: string` (A slot for a formula) |
-| **App (Policy)** | Defines the business logic. | `allowRead: "$user.role == 'admin'"` |
+| **Protocol (Mechanism)** | Defines the capabilities. | `condition: Expression` (a CEL predicate slot for sharing rules) |
+| **App (Policy)** | Defines the business logic. | `condition: P\`record.department == "Sales"\`` |
 | **Engine (Execution)** | Enforces the logic. | Compiles formula to SQL `WHERE` clause. |
 
 **Policies are metadata, not code.** Permission rules, validation predicates, sharing conditions, and flow guards are all expressed as analyzable CEL/Zod metadata — the same engine evaluates them for human users, REST callers, and AI agent tools, and every decision is traceable to a versioned artifact.
@@ -160,4 +160,4 @@ By adhering to these values, we build software that is **resilient to change**, 
 
 - [Architecture](/docs/concepts/architecture) - See how these principles shape the system
 - [Glossary](/docs/concepts/terminology) - Understand key terms
-- [Core Concepts](/docs/core-concepts) - Learn about metadata-driven development
+- [Core Concepts](/docs/getting-started/core-concepts) - Learn about metadata-driven development

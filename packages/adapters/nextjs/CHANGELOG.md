@@ -1,5 +1,11 @@
 # @objectstack/nextjs
 
+## 9.5.1
+
+### Patch Changes
+
+- @objectstack/runtime@9.5.1
+
 ## 9.5.0
 
 ### Patch Changes

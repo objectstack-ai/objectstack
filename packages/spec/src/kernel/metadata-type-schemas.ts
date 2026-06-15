@@ -49,6 +49,7 @@ import { JobSchema } from '../system/job.zod';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import { AppTranslationBundleSchema } from '../system/translation.zod';
 import { DocSchema } from '../system/doc.zod';
+import { BookSchema } from '../system/book.zod';
 
 import { PermissionSetSchema } from '../security/permission.zod';
 import { RoleSchema } from '../identity/role.zod';
@@ -97,6 +98,7 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   translation: AppTranslationBundleSchema,
   email_template: EmailTemplateDefinitionSchema,
   doc: DocSchema, // ADR-0046: flat Markdown package documentation
+  book: BookSchema as unknown as z.ZodType, // ADR-0046 §6: documentation navigation spine
   // `router` / `function` / `service` are code-only (allowRuntimeCreate: false).
 
   // Security Protocol

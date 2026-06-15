@@ -5,15 +5,17 @@ description: How ObjectStack reliably ships outbound HTTP notifications — from
 
 # Webhook Delivery
 
-> **Status:** Accepted · **Audience:** Plugin authors, runtime engineers,
+> **Status:** Shipped · **Audience:** Plugin authors, runtime engineers,
 > integration partners
 >
 > **TL;DR** — Webhooks are the lingua franca of SaaS integration. ObjectStack
-> already defines a `Webhook` config schema; this document defines the
-> **delivery runtime** that turns config into actual HTTP requests reaching
-> external systems — durably, with signatures, with retries, and safely
-> across a cluster. Builds directly on the cluster primitives from
-> `cluster-semantics.mdx`.
+> defines a `Webhook` config schema; the **delivery runtime** that turns config
+> into actual HTTP requests is provided by `@objectstack/service-messaging`'s
+> shared outbound-HTTP outbox (`sys_http_delivery`). The
+> `plugin-webhooks` plugin owns only the `sys_webhook` configuration object and
+> an auto-enqueuer that fans record events onto that outbox; signing, retries,
+> dispatch, and idempotency are inherited from the messaging substrate
+> (ADR-0018 M3). This page documents the shipped behaviour.
 
 ## 1. Why this document exists
 
@@ -66,62 +68,82 @@ the standard object/view machinery.
 
 ## 3. Data model
 
-Two persisted objects underpin the runtime. Both are defined as
-ObjectStack `defineObject()` schemas so they participate in CRUD,
-permissions, audit, and Studio UI without bespoke code.
+Two persisted objects underpin the runtime, owned by different packages.
+`sys_webhook` (the configuration record) lives in `plugin-webhooks`;
+`sys_http_delivery` (the durable outbox) lives in
+`@objectstack/service-messaging` and is shared with the Flow `http` node.
+Both are defined as `ObjectSchema.create()` schemas so they participate in
+CRUD, permissions, audit, and Studio UI without bespoke code.
 
 ### 3.1 `sys_webhook`
 
-The subscription record. One row per "I want to receive events of type X
-at URL Y". Replaces the in-memory `WebhookSchema` for runtime use; the
-static config schema remains for `defineStack({ integrations })`-style
-declarative wiring.
+The subscription record. One row per "I want webhook X to fire for object Y".
+The full transport configuration (headers, secret, timeout, method) is carried
+in `definition_json`, a serialised `Webhook` JSON (canonical schema:
+`WebhookSchema` in `@objectstack/spec/automation/webhook`).
 
-| Field              | Type                  | Notes                                                      |
-|--------------------|-----------------------|------------------------------------------------------------|
-| `id`               | uuid                  | Primary key.                                               |
-| `owner_org_id`     | string                | Tenant / org owning the subscription. Required.            |
-| `name`             | snake_case identifier | Human-friendly name for the subscription.                  |
-| `url`              | URL                   | Destination. Validated against egress allowlist on save.   |
-| `events`           | string[]              | Event-type globs: `account.*`, `*.created`, `*`.           |
-| `object_filter`    | string[] ?            | Optional object-name allowlist (`['account','contact']`).  |
-| `headers`          | record\<string,string\> ? | Custom headers (no `authorization` — use `secret`).        |
-| `secret_encrypted` | string                | Encrypted shared secret. Never returned via API in clear.  |
-| `secret_hint`      | string                | Last 4 chars of secret for UI display (`whsec_…1234`).     |
-| `retry_policy`     | json                  | `{ maxAttempts, initialDelayMs, maxDelayMs, backoff }`.    |
-| `timeout_ms`       | int                   | Per-attempt timeout. Default 30s.                          |
-| `enabled`          | boolean               | Soft toggle; disables delivery without losing history.     |
-| `created_by`       | string                | User id of creator.                                        |
-| `created_at`       | timestamp             | Standard audit columns.                                    |
-| `updated_at`       | timestamp             |                                                            |
+| Field             | Type      | Notes                                                                              |
+|-------------------|-----------|------------------------------------------------------------------------------------|
+| `id`              | text      | Primary key.                                                                       |
+| `name`            | text      | Unique snake_case name — referenced in logs and audit.                             |
+| `label`           | text      | Optional display label.                                                            |
+| `object_name`     | text      | Short object name whose events fire this webhook (blank = manual / API-triggered). |
+| `triggers`        | text      | Comma-separated event list: `create,update,delete,undelete,api`.                   |
+| `url`             | text      | External endpoint that receives the POST.                                          |
+| `method`          | text      | HTTP method. Default `POST`.                                                        |
+| `description`     | textarea  | Free-text description.                                                              |
+| `active`          | boolean   | Inactive webhooks are skipped by the dispatcher. Default `true`.                    |
+| `definition_json` | textarea  | Serialised `Webhook` JSON (`@objectstack/spec/automation/webhook`) — carries the full headers / auth / retry / payload config, including the signing `secret`, custom `headers`, and `timeoutMs`. |
+| `created_at`      | datetime  | Standard audit columns.                                                            |
+| `updated_at`      | datetime  |                                                                                    |
 
-### 3.2 `sys_webhook_delivery`
+Matching at runtime is purely `object_name` + the comma-separated `triggers`
+list; the headers, signing secret, and per-attempt timeout are parsed out of
+`definition_json` when an event is enqueued. There is no per-row org/tenant
+column, no `events[]` glob field, no stored `retry_policy`, and no
+`secret_hint` — see §6 for the actual signing model and §11 for the (single)
+retry budget.
 
-The outbox + audit. One row per attempt-cycle. Persisted **before** any
-HTTP call; updated after each attempt. This table is the durability
-boundary — if it has a `pending` row, the dispatcher will eventually
-deliver it.
+### 3.2 `sys_http_delivery`
 
-| Field            | Type                  | Notes                                                  |
-|------------------|-----------------------|--------------------------------------------------------|
-| `id`             | uuid                  | Primary key. Also used as the receiver-side idempotency key. |
-| `webhook_id`     | uuid                  | FK → `sys_webhook`.                                    |
-| `event_id`       | string                | Origin event id (correlation across deliveries).       |
-| `event_type`     | string                | E.g. `account.updated`.                                |
-| `payload`        | json                  | The full payload that will be POSTed.                  |
-| `status`         | enum                  | `pending` / `in_flight` / `success` / `failed` / `dead`. |
-| `attempts`       | int                   | Count of HTTP requests issued.                         |
-| `claimed_by`     | string ?              | Node id holding the row (NULL when not in flight).     |
-| `claimed_at`     | timestamp ?           | When the claim was taken.                              |
-| `next_retry_at`  | timestamp ?           | When the next retry is eligible. NULL once dead.       |
-| `last_attempted_at` | timestamp ?        | Most recent attempt start.                             |
-| `response_code`  | int ?                 | Last HTTP status code received.                        |
-| `response_headers` | json ?              | Truncated to first ~4 KB.                              |
-| `response_body`  | text ?                | Truncated to first ~16 KB.                             |
-| `duration_ms`    | int ?                 | Last attempt round-trip.                               |
-| `error`          | text ?                | Last transport-level error (DNS, connect, timeout).    |
-| `created_at`     | timestamp             |                                                        |
-| `updated_at`     | timestamp             |                                                        |
+The outbox + audit. One row per delivery. Persisted **before** any HTTP
+call; updated after each attempt. This table is the durability boundary —
+if it has a `pending` row, the dispatcher will eventually deliver it.
+
+It is **not** webhook-specific: `sys_http_delivery` is owned by
+`@objectstack/service-messaging` (ADR-0018 M3) and shared by the Flow `http`
+node executor and webhook fan-out, so both inherit retry / idempotency /
+dead-letter from one substrate. Webhook deliveries are the rows with
+`source = 'webhook'`. It generalises the old design's per-webhook table:
+`webhook_id` → `ref_id`, `event_id` → `dedup_key`, `event_type` → `label`,
+`secret` → `signing_secret`. Rows are managed by the platform and not directly
+writable.
+
+| Field             | Type     | Notes                                                                        |
+|-------------------|----------|-----------------------------------------------------------------------------|
+| `id`              | text     | Primary key. Also doubles as the receiver-side idempotency key.             |
+| `source`          | text     | Provenance domain, e.g. `webhook` \| `flow`. `UNIQUE(source, dedup_key)`.   |
+| `ref_id`          | text     | Partition / ordering anchor within source (for webhooks, the webhook id).    |
+| `dedup_key`       | text     | `UNIQUE(source, dedup_key)` for at-most-once enqueue.                        |
+| `label`           | text     | Diagnostic label / event type — surfaced on `X-Objectstack-Event`.          |
+| `url`             | text     | Target URL, snapshotted at enqueue so config edits do not rewrite live rows. |
+| `method`          | text     | HTTP method.                                                                 |
+| `headers_json`    | textarea | Custom headers, serialised.                                                  |
+| `signing_secret`  | text     | HMAC secret used for the signature header (see §6).                          |
+| `timeout_ms`      | number   | Per-attempt timeout.                                                         |
+| `payload_json`    | textarea | The full payload that will be POSTed.                                        |
+| `partition_key`   | number   | `hash(ref_id) mod partitionCount`, precomputed for cheap `WHERE`.           |
+| `status`          | text     | `pending` / `in_flight` / `success` / `failed` / `dead`.                     |
+| `attempts`        | number   | Count of HTTP requests issued.                                              |
+| `claimed_by`      | text     | Node id holding the row.                                                     |
+| `claimed_at`      | number   | When the claim was taken (epoch ms).                                         |
+| `next_retry_at`   | number   | When the next retry is eligible (epoch ms).                                  |
+| `last_attempted_at` | number | Most recent attempt start (epoch ms).                                        |
+| `response_code`   | number   | Last HTTP status code received.                                              |
+| `response_body`   | textarea | Truncated to the first 16 KB.                                                |
+| `error`           | textarea | Last transport-level error (DNS, connect, timeout).                         |
+| `created_at`      | number   | Epoch ms.                                                                   |
+| `updated_at`      | number   | Epoch ms.                                                                   |
 
 > **Why store full payload?** Receivers may be down for hours; we must
 > retry the *exact* bytes we promised to send. Recomputing payload from
@@ -144,13 +166,13 @@ Five stages, each implemented as a thin layer over an existing primitive.
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ 3. Persist INSERT sys_webhook_delivery (status=pending)         │
+│ 3. Persist INSERT sys_http_delivery (status=pending)            │
 │            ── this is the durability boundary ──                │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ 4. Dispatch  worker claims with                                 │
-│              SELECT … FOR UPDATE SKIP LOCKED LIMIT N;           │
+│ 4. Dispatch  worker holds a per-partition cluster lock, then    │
+│              atomic UPDATE pending→in_flight claims a batch;     │
 │              issues POST; writes back result                    │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
@@ -180,55 +202,55 @@ running on every node is fine because the INSERT in stage 3 is keyed by
 
 For each incoming event the subscriber:
 
-1. Loads `sys_webhook` rows where `enabled = true` AND
-   `(events globs match event_type)` AND
-   `(object_filter is NULL OR object_filter contains event.object)`.
-2. For each match, builds the canonical payload (§5).
-3. Inserts a `sys_webhook_delivery` row.
+1. Loads `sys_webhook` rows where `active = true` AND `object_name`
+   matches the event's object AND the event's action is in the row's
+   comma-separated `triggers`.
+2. For each match, builds the payload (§5).
+3. Enqueues a `sys_http_delivery` row (`source = 'webhook'`).
 
 ### 4.3 Stage 3 — Persist
 
-A single `INSERT … ON CONFLICT DO NOTHING` per match. The
-`(event_id, webhook_id)` uniqueness constraint absorbs duplicate event
-deliveries from `at-least-once` semantics. After this stage the event
-producer is no longer involved; the rest is the dispatcher's problem.
+A single enqueue per match. The `(source, dedup_key)` uniqueness
+constraint — where `dedup_key` is `<webhookId>:<object>:<recordId>:<action>:<ts>`
+— absorbs duplicate event deliveries from `at-least-once` semantics. After this
+stage the event producer is no longer involved; the rest is the dispatcher's
+problem.
 
 ### 4.4 Stage 4 — Dispatcher worker
 
-The dispatcher is a `cluster`-scoped service with
-`leaderStrategy: 'partitioned'`. Each node owns a hash-partition of
-`webhook_id`s, so the same webhook's deliveries always land on the same
-node — useful for per-receiver rate limiting and connection reuse.
+`HttpDispatcher` (in `@objectstack/service-messaging`) ticks on a timer and,
+for each partition, attempts to acquire a **per-partition cluster lock**
+(`http.dispatcher.partition.<index>`). Partition affinity is on the delivery's
+`ref_id` (the webhook id), so the same webhook's deliveries always land on the
+same partition — useful for in-order delivery and connection reuse. On a
+single-node runtime the lock is an always-grant stub.
 
-Loop body, run every 250ms on each node:
+Within a held partition, the lock-holder claims a batch with an **atomic
+conditional UPDATE** rather than `SELECT … FOR UPDATE SKIP LOCKED`:
 
 ```sql
-UPDATE sys_webhook_delivery
-SET status = 'in_flight',
-    claimed_by = $node_id,
-    claimed_at = now(),
-    attempts = attempts + 1,
-    last_attempted_at = now()
-WHERE id IN (
-  SELECT id FROM sys_webhook_delivery
-  WHERE status = 'pending'
-    AND (next_retry_at IS NULL OR next_retry_at <= now())
-    AND hashtext(webhook_id::text) % $partition_count = $partition_index
-  ORDER BY next_retry_at NULLS FIRST
-  LIMIT $batch_size
-  FOR UPDATE SKIP LOCKED
-)
-RETURNING *;
+-- 1. select candidate ids for this partition
+SELECT id FROM sys_http_delivery
+WHERE status = 'pending'
+  AND partition_key = $partition_index
+  AND (next_retry_at IS NULL OR next_retry_at <= $now)
+ORDER BY next_retry_at
+LIMIT $batch_size;
+
+-- 2. atomic claim: only rows still pending flip to in_flight
+UPDATE sys_http_delivery
+SET status = 'in_flight', claimed_by = $node_id, claimed_at = $now
+WHERE id IN (...) AND status = 'pending';
 ```
 
-`FOR UPDATE SKIP LOCKED` is the single mechanism that prevents two
-nodes from delivering the same row. It is provided by Postgres natively
-and emulated in the SQL driver layer for other engines.
+The `WHERE … AND status = 'pending'` predicate on the UPDATE is the
+exactly-once claim: two workers racing on the same row cannot both flip it.
+The held partition lock keeps the race window small in the first place.
 
-After each HTTP attempt the row is updated with the result. If the
-request succeeded (2xx), `status = 'success'`. Otherwise `status` returns
-to `pending` (with bumped `next_retry_at`) or, if `attempts >=
-retry_policy.maxAttempts`, becomes `dead`.
+After each HTTP attempt the row is updated with the result. If the request
+succeeded (2xx), `status = 'success'`. Otherwise `status` returns to `pending`
+(with bumped `attempts` and `next_retry_at`) or, once the retry budget is
+exhausted, becomes `dead`.
 
 ### 4.5 Stage 5 — Retry backoff
 
@@ -255,147 +277,99 @@ same time.
 
 ## 5. Payload format
 
-Stable across versions. Receivers parse it once and never need to change
-their parser when we add new event types.
+The POST body is the realtime event payload with a small fixed prefix merged
+on top:
 
 ```json
 {
-  "id": "evt_01HXXXXXXXXXXXXXX",
-  "type": "account.updated",
-  "created": 1730000000,
-  "api_version": "2026-05-23",
   "object": "account",
-  "tenant_id": "tnt_abc",
-  "data": {
-    "current":  { "id": "acc_123", "name": "Acme Inc.", ... },
-    "previous": { "id": "acc_123", "name": "Acme Co.",  ... }
-  },
-  "actor": {
-    "type": "user",
-    "id":   "usr_456",
-    "label":"Jane Doe"
-  },
-  "context": {
-    "request_id":  "req_789",
-    "correlation_id": "corr_abc",
-    "project_id":  "proj_xyz",
-    "environment": "production"
-  }
+  "recordId": "acc_123",
+  "action": "updated",
+  "timestamp": 1730000000000
+  // ...remaining fields from the originating event payload
 }
 ```
 
 Notes:
 
-- **`id`** — globally unique event id. Also the `sys_webhook_delivery.id`
-  for this attempt; receivers use it as their idempotency key.
-- **`type`** — dotted `{object}.{operation}`. Stable enum; new types are
-  additive.
-- **`api_version`** — calendar versioning (`YYYY-MM-DD`). Webhook
-  subscriptions can pin a version so payload-shape changes are opt-in,
-  not forced.
-- **`data.previous`** — present on `updated` events; `null` elsewhere.
-- **`actor`** — distinguishes user-initiated changes from system /
-  flow / agent / API-key origins.
-- **`context.request_id`** — links the webhook back to the originating
-  REST call in audit logs and traces.
+- **`object`** — short object name the event came from.
+- **`recordId`** — id of the affected record.
+- **`action`** — `created` / `updated` / `deleted` / `undeleted`.
+- **`timestamp`** — event timestamp (epoch ms).
+- Any additional fields the event carried (e.g. record snapshot data) are
+  spread in after these four.
+
+Idempotency and event correlation are carried in **headers**, not the body.
+Every attempt sends:
+
+| Header                    | Meaning                                                          |
+|---------------------------|-----------------------------------------------------------------|
+| `X-Objectstack-Delivery`  | The `sys_http_delivery` row id — use as the idempotency key.     |
+| `X-Objectstack-Attempt`   | 1-based attempt number for this delivery.                        |
+| `X-Objectstack-Event`     | The event type / label (when present).                           |
+| `X-Objectstack-Signature` | HMAC signature (see §6), when a signing secret is configured.    |
+
+Requests also set `Content-Type: application/json` and
+`User-Agent: ObjectStack-Http/1.0`.
 
 ## 6. Signing & verification
 
-Adapted from Stripe's signing scheme. Industry standard, well-documented
-on the receiver side, includes replay protection.
+GitHub-style HMAC over the raw request body. When the webhook's
+`definition_json` carries a `secret`, every outbound request is signed.
 
 ### 6.1 Outbound header
 
 ```
-X-ObjectStack-Signature:
-  t=1730000000,
-  v1=5257a869e7ecebeda32affa62cdca3fa51cad7e77a0e56ff536d0ce8e108d8bd
+X-Objectstack-Signature: sha256=5257a869e7ecebeda32affa62cdca3fa51cad7e77a0e56ff536d0ce8e108d8bd
 ```
 
-Where:
-
-- `t` is the Unix timestamp (seconds) when the signature was generated.
-- `v1` is `HEX( HMAC-SHA256( webhook.secret, "{t}.{request_body}" ) )`.
-
-The `v` prefix (here `v1`) is a version marker — future signature
-schemes (e.g. SHA-3, Ed25519) ship as `v2=…`, `v3=…` and may be sent
-alongside `v1` during transitions.
+Where the hex value is `HMAC-SHA256( secret, raw_request_body )`. There is no
+timestamp, no `{t}.{body}` concatenation, no version (`v1`) prefix, and no
+replay window — the signature covers the body bytes only.
 
 ### 6.2 Receiver-side verification
 
 Receivers MUST:
 
-1. Read `t` and `v1` from the header.
-2. Reject the request if `abs(now - t) > 300` (5 minutes — replay window).
-3. Recompute `HMAC-SHA256(secret, "{t}.{raw_body}")` over the raw request
-   body bytes (no JSON re-encode — whitespace matters).
-4. Compare with `v1` in **constant time** (e.g. `hmac.compare_digest`).
-5. Reject if not equal.
+1. Read the `sha256=<hex>` value from `X-Objectstack-Signature`.
+2. Recompute `HMAC-SHA256(secret, raw_body)` over the raw request body bytes
+   (no JSON re-encode — whitespace matters).
+3. Compare in **constant time** (e.g. `hmac.compare_digest`).
+4. Reject if not equal.
 
-A reference verifier in TypeScript, Python, and Go ships in the
-documentation site under `guides/webhook-receivers/`.
+Use the `X-Objectstack-Delivery` header (the delivery row id) as the
+idempotency key when deduplicating retries.
 
-### 6.3 Secret rotation
+## 7. Egress safety
 
-`POST /api/v1/webhooks/:id/rotate` generates a new secret, returns it
-**once** in the response, and stores both old and new for a 24-hour
-grace period. During grace, outbound requests are signed with the new
-secret but the API returns the old secret's `secret_hint` so customers
-can identify which secret was active when a delivery was made.
+> **Not yet implemented.** URL blocklisting (localhost / RFC 1918 / link-local /
+> cloud-metadata rejection, `allowPrivate`, https-only enforcement) and
+> DNS-rebinding re-validation are **not** part of the shipped runtime. The
+> sender POSTs to the configured URL with no SSRF filtering. Treat webhook URL
+> configuration as a privileged operation and gate it with RBAC accordingly;
+> network-level egress filtering is future work.
 
-## 7. Egress safety (SSRF defence)
+### 7.1 Response body capping
 
-Webhooks are a textbook SSRF vector: an internal user can point a webhook
-at `http://169.254.169.254/latest/meta-data/` and exfiltrate cloud
-credentials through the response body in `sys_webhook_delivery`. The
-runtime defends in three layers.
-
-### 7.1 URL validation at save time
-
-`sys_webhook.url` is validated against a blocklist on insert/update:
-
-- Reject `localhost`, `127.0.0.0/8`, `::1`.
-- Reject RFC 1918 private ranges (`10.0.0.0/8`, `172.16.0.0/12`,
-  `192.168.0.0/16`) unless `cluster.egress.allowPrivate = true`.
-- Reject link-local (`169.254.0.0/16`) and cloud-metadata IPs
-  (`169.254.169.254` AWS/Azure/GCP, `100.100.100.200` Alibaba) **always**.
-- Reject schemes other than `https://` in production; `http://` allowed
-  only when `runtime.mode === 'development'`.
-
-### 7.2 DNS-time re-validation
-
-DNS responses are re-checked at request time, not just at save time, to
-defeat DNS rebinding attacks. Resolved IPs that fall in a blocked range
-abort the request with `status = failed, error = 'dns_rebound'`.
-
-### 7.3 Response body capping
-
-`response_body` is truncated to 16 KB before persistence. This bounds
-the worst-case exfiltration even if the URL slips through validation —
-an attacker cannot pull megabytes of internal data through a single
-delivery row.
+The recorded `response_body` is truncated to 16 KB before persistence. This is
+the one egress safeguard that is implemented today: it bounds the worst-case
+exfiltration through a single delivery row even if a hostile URL is configured.
 
 ## 8. REST surface
 
-All endpoints under `/api/v1/webhooks/`. CRUD comes for free from the
-`sys_webhook` object; the table below lists the dispatcher-specific
-extensions.
+CRUD for `sys_webhook` (and read access to `sys_http_delivery`) comes for free
+from the generic object/REST surface — there is no bespoke webhook CRUD router.
+The plugin mounts exactly **one** custom endpoint:
 
-| Method | Path                                          | Purpose                                                |
-|--------|-----------------------------------------------|--------------------------------------------------------|
-| GET    | `/webhooks`                                   | List subscriptions for the current org.                |
-| POST   | `/webhooks`                                   | Create. Server generates `secret`, returns it **once**. |
-| GET    | `/webhooks/:id`                               | Read. `secret` is never returned — only `secret_hint`. |
-| PATCH  | `/webhooks/:id`                               | Update url / events / filters / retry policy.          |
-| DELETE | `/webhooks/:id`                               | Delete. Pending deliveries are cancelled.              |
-| POST   | `/webhooks/:id/test`                          | Send a synthetic payload to verify connectivity.       |
-| POST   | `/webhooks/:id/rotate`                        | Rotate the signing secret (24h grace).                 |
-| GET    | `/webhooks/:id/deliveries`                    | Paginated delivery history with filters.               |
-| GET    | `/webhooks/:id/deliveries/:delivery_id`       | Full request/response for one attempt-cycle.           |
-| POST   | `/webhooks/:id/deliveries/:delivery_id/redeliver` | Re-queue a previously failed/dead delivery.        |
+| Method | Path                        | Body              | Purpose                                          |
+|--------|-----------------------------|-------------------|--------------------------------------------------|
+| POST   | `/api/v1/webhooks/redeliver` | `{ deliveryId }`  | Re-queue a previously failed/dead delivery.      |
 
-The CRUD endpoints are auto-generated from the `sys_webhook` object
-schema; only the last five require custom handlers in `plugin-webhooks`.
+It delegates to `messaging.redeliverHttp(deliveryId)` and is guarded by the
+better-auth session (any authenticated user). Responses: `200` on success,
+`401` unauthenticated, `400` missing/invalid body, `404` `not_found`, `409`
+`not_eligible`. There are no `/webhooks/:id/test`, `/rotate`,
+`/deliveries`, or per-delivery redeliver routes.
 
 ## 9. Concurrency & rate-limiting
 
@@ -411,35 +385,31 @@ receivers from being driven into 429s by our bulk traffic.
 
 ## 10. Observability
 
-Three views into the runtime:
+1. **`sys_http_delivery` table** — the source of truth. It ships standard
+   ObjectStack list views (`Recent`, `Failures`, `Pending`) showing source,
+   url, status, attempts, response code, and timestamps; Studio surfaces these
+   under the **HTTP Deliveries** nav. The `X-Objectstack-Signature` header
+   (note the lowercase `s` in `stack`), `X-Objectstack-Delivery`,
+   `X-Objectstack-Event`, and `X-Objectstack-Attempt` headers correlate a
+   received request back to its row.
+2. **`onAttempt` hook** — `HttpDispatcher` fires an `onAttempt(delivery,
+   success)` callback after every attempt, the one programmatic
+   observability hook. Wire it to whatever metrics/tracing backend your
+   deployment uses.
 
-1. **`sys_webhook_delivery` table** — the source of truth. Standard
-   ObjectStack list/detail views show status, latency, response, retry
-   schedule. Studio surfaces this under the webhook's detail page.
-2. **OpenTelemetry spans** — every dispatch attempt opens a span with
-   `webhook.id`, `webhook.event_type`, `webhook.attempt`,
-   `http.url`, `http.status_code`. Spans link to the parent request via
-   `context.correlation_id` so a webhook delivery can be traced back to
-   the user click that produced the event.
-3. **Prometheus metrics** — exposed by the dispatcher:
-   - `webhook_deliveries_total{status}` counter
-   - `webhook_delivery_duration_ms` histogram
-   - `webhook_queue_depth{partition}` gauge
-   - `webhook_dead_total{webhook_id}` counter (alertable)
+> **Future work.** Built-in OpenTelemetry spans and Prometheus metrics are
+> not yet emitted; the `onAttempt` hook is the integration point until they
+> are.
 
 ## 11. Multi-tenancy
 
-Every `sys_webhook` row is owned by an `owner_org_id`. The protocol
-enforces:
-
-- **Read isolation** — users can only see webhooks belonging to orgs
-  they have membership in. Enforced by the standard RBAC layer.
-- **Egress isolation** — when `cluster.tenantIsolation = 'channel-prefix'`,
-  dispatcher partitioning includes `(org_id, webhook_id)` so one tenant's
-  bulk import cannot starve another tenant's webhook throughput on the
-  same node.
-- **Quota** — `sys_webhook.retry_policy.maxAttempts` is capped by the
-  tenant plan; free plans get `maxAttempts ≤ 3`, paid plans up to 12.
+> **Not yet implemented.** `sys_webhook` has no `owner_org_id` column, there is
+> no `retry_policy` field, and dispatcher partitioning is on `ref_id` (the
+> webhook id) only — there is no `(org_id, webhook_id)` partitioning or
+> per-tenant egress isolation. The retry budget is a single fixed 7-step
+> schedule (§4.5), not a per-plan quota. Per-tenant webhook ownership and
+> isolation are future work; until then, isolate access at the RBAC layer on
+> `sys_webhook`.
 
 ## 12. Failure modes & guarantees
 
@@ -448,8 +418,8 @@ A precise table of what the runtime promises and what it does not.
 | Failure                                  | Guarantee                                                   |
 |------------------------------------------|-------------------------------------------------------------|
 | Producer node crashes mid-emit           | Event durably in transport bus (at-least-once), redelivered on producer restart. |
-| Subscriber node crashes after persist    | Row exists in `sys_webhook_delivery`, another node picks it up. |
-| Dispatcher node crashes mid-HTTP         | Row stays `in_flight` with `claimed_by`; reaper re-pends it after `claim_ttl` (default 60s). |
+| Subscriber node crashes after persist    | Row exists in `sys_http_delivery`, another node picks it up. |
+| Dispatcher node crashes mid-HTTP         | Row stays `in_flight` with `claimed_by`; it reverts to `pending` after the claim TTL and is re-posted. The TTL derives from the dispatcher tick (`intervalMs`, default 500ms): `lockTtlMs = 5 × intervalMs`, `claimTtlMs = 2 × lockTtlMs` (so ~5s at defaults), all configurable via `HttpDispatcherOptions`. |
 | Receiver returns 5xx                     | Retry per backoff schedule until `maxAttempts`.             |
 | Receiver returns 4xx                     | Treated as terminal — no retry, status `dead` immediately. Exception: 408 / 429 are retried. |
 | Receiver returns 2xx                     | `status = success`, no more attempts.                       |
@@ -457,48 +427,47 @@ A precise table of what the runtime promises and what it does not.
 | Timeout (per-attempt)                    | Treated as 5xx — retry per backoff.                         |
 | Network partition between dispatcher and DB | Worker pauses; row stays `pending`. On reconnect, normal claim resumes. |
 | Two events for the same record arrive out of order | `partitionKey` ordering at the event bus prevents this. Receiver still sees deliveries in emit order. |
-| Duplicate delivery (at-least-once)       | Receiver gets the same `evt_…` id twice. Must dedupe — we provide the key, can't enforce. |
+| Duplicate delivery (at-least-once)       | Receiver gets the same `X-Objectstack-Delivery` id twice. Must dedupe on that header — we provide the key, can't enforce. |
 
 ## 13. Plugin location & layering
 
 ```
 packages/plugins/plugin-webhooks/
 ├── src/
-│   ├── plugin.ts              # lifecycle hooks (onEnable wires subscriber + dispatcher)
-│   ├── objects/
-│   │   ├── sys_webhook.ts            # defineObject() — schema, RBAC, indexes
-│   │   └── sys_webhook_delivery.ts   # defineObject() — schema, RBAC, indexes
-│   ├── subscriber.ts          # EventBus subscriber → INSERT pending rows
-│   ├── dispatcher.ts          # cluster-scoped service, partitioned, drains queue
-│   ├── signer.ts              # HMAC-SHA256 signing, version v1
-│   ├── egress.ts              # URL validation + DNS re-check + cap
-│   ├── reaper.ts              # cluster-singleton leader-elected: reclaim stuck in_flight rows
-│   └── rest/
-│       ├── test.ts            # POST /webhooks/:id/test
-│       ├── rotate.ts          # POST /webhooks/:id/rotate
-│       ├── deliveries.ts      # GET /webhooks/:id/deliveries
-│       └── redeliver.ts       # POST /webhooks/:id/deliveries/:did/redeliver
+│   ├── webhook-outbox-plugin.ts  # plugin: registers sys_webhook + nav,
+│   │                             #   starts the auto-enqueuer, mounts redeliver
+│   ├── sys-webhook.object.ts     # ObjectSchema.create() — sys_webhook config
+│   ├── auto-enqueuer.ts          # realtime data.record.* → enqueue onto outbox
+│   └── schema.ts                 # shared types
 └── test/
     └── …
 ```
 
+The delivery runtime — `sys_http_delivery`, `HttpDispatcher`, the HTTP sender,
+signing, retry classification — lives in `@objectstack/service-messaging`, not
+in this plugin. `plugin-webhooks` owns only the `sys_webhook` configuration
+object and the auto-enqueuer that fans record events onto the shared outbox.
+
 The plugin depends on:
 
-- `@objectstack/spec` for `WebhookSchema` (existing) and cluster
-  primitives (new in `cluster-semantics.mdx`).
-- `service-cluster` for `pubsub` / `lock` / `kv`.
-- `service-queue` (optional) — if present, the dispatcher delegates queue
-  storage to it; if absent, it uses the `sys_webhook_delivery` table
-  directly with `FOR UPDATE SKIP LOCKED`.
+- `@objectstack/core`
+- `@objectstack/service-messaging` (declared as plugin dependency
+  `com.objectstack.service.messaging`) — provides the outbox object and
+  dispatcher.
+- `@objectstack/spec` for `WebhookSchema`.
+
+There is no dependency on `service-cluster` or `service-queue`; cross-node
+coordination is the dispatcher's per-partition cluster lock inside
+service-messaging.
 
 ## 14. Industry alignment
 
 Every design choice matches one or more established systems:
 
-- **Stripe webhooks** — signing scheme (`t=…,v1=…`), 5-minute replay
-  window, retry schedule shape, signed-secret rotation.
-- **GitHub webhooks** — event-type globs, redelivery UI, per-delivery
-  detail page with request/response bytes.
+- **Stripe webhooks** — retry schedule shape (1s → 24h, ~1.5-day window) with
+  jitter.
+- **GitHub webhooks** — `X-…-Signature: sha256=<hmac-over-raw-body>` signing
+  scheme, redelivery, per-delivery detail with request/response bytes.
 - **Shopify webhooks** — HMAC-SHA256 header, `X-Shopify-Topic` event
   hint (we use `type` in payload instead — simpler).
 - **AWS EventBridge / SQS** — at-least-once durability, dead-letter
@@ -510,30 +479,41 @@ Every design choice matches one or more established systems:
 
 Three phases. Each phase delivers visible user value.
 
+> **How it actually shipped.** The implementation did **not** introduce new
+> `system/*` Zod schemas. There is no `system/webhook-delivery.zod.ts` and no
+> `SysWebhookSchema` / `SysWebhookDeliverySchema` /
+> `WebhookSignatureHeaderSchema` / `WebhookEventPayloadSchema`. Instead it
+> reused the existing `WebhookSchema` (and `WebhookReceiverSchema`) in
+> `automation/webhook.zod.ts`, defined `sys_webhook` as an
+> `ObjectSchema.create()` in the plugin, and reused
+> service-messaging's `sys_http_delivery` outbox for deliveries (ADR-0018 M3).
+> The phase list below is the original plan; read it as design intent, not the
+> current artifact layout.
+
 ### Phase 1 — Spec (~1 day)
 
-1. `system/webhook-delivery.zod.ts` (new) — `SysWebhookSchema`,
-   `SysWebhookDeliverySchema`, `WebhookSignatureHeaderSchema`,
-   `WebhookEventPayloadSchema`. These are persistence schemas distinct
-   from the existing `automation/webhook.zod.ts` config schema.
-2. Documentation cross-links between the two ("static config" vs
-   "runtime subscription").
+1. Persistence + config schemas. (As shipped: `sys_webhook` is an
+   `ObjectSchema`, deliveries reuse `sys_http_delivery`, and the config schema
+   is the existing `WebhookSchema`.)
+2. Documentation cross-links between "static config" and "runtime
+   subscription".
 
-### Phase 2 — Plugin skeleton + memory dispatcher (~2 days)
+### Phase 2 — Plugin skeleton + dispatcher (~2 days)
 
-- `plugin-webhooks` package with the object definitions wired.
-- In-process dispatcher using `service-cluster` memory driver.
-- Sign + verify + egress safety + retry backoff working.
-- Manual `POST /webhooks/:id/test` proves the path end-to-end.
+- `plugin-webhooks` package with `sys_webhook` wired and the auto-enqueuer
+  fanning record events onto the shared outbox.
+- Signing + retry backoff working through service-messaging's HTTP sender.
 
 ### Phase 3 — Production dispatcher (~2 days)
 
-- `FOR UPDATE SKIP LOCKED` claim loop (Postgres driver).
-- Reaper for stuck `in_flight` rows.
-- Partitioned cluster scope.
-- Prometheus metrics + OTel spans.
-- Studio UI: deliveries list, detail drawer, redeliver button (reuses
+- Atomic conditional-UPDATE claim loop under a per-partition cluster lock
+  (as shipped; the original plan called for `FOR UPDATE SKIP LOCKED`).
+- Stuck `in_flight` rows revert after the claim TTL.
+- Partitioned dispatch on `ref_id`.
+- Studio UI: HTTP Deliveries list views + redeliver endpoint (reuses
   existing object/view machinery — zero custom React).
+- *Future:* built-in Prometheus metrics + OTel spans (today only the
+  `onAttempt` hook).
 
 ### Phase 4 — Hardening (opportunistic)
 

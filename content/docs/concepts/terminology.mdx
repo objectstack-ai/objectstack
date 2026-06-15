@@ -108,7 +108,7 @@ The fundamental unit of data modeling in ObjectStack. Roughly equivalent to a "T
 
 ### Driver
 An adapter plugin in the Data Protocol runtime stack that allows the Data Layer to communicate with a specific underlying storage engine.
-* *Example:* `@objectstack/driver-sql` (Postgres / MySQL / SQLite via Knex), `@objectstack/driver-mongodb`, `@objectstack/driver-turso`.
+* *Example:* `@objectstack/driver-sql` (Postgres / MySQL / SQLite via Knex), `@objectstack/driver-mongodb`. `@objectstack/driver-turso` (edge SQLite) ships with ObjectStack Cloud rather than the open-source framework.
 
 ### AST (Abstract Syntax Tree)
 The intermediate representation of a query or schema. The Data Protocol parses a JSON request into an AST before the Driver translates it into SQL/NoSQL queries. This allows for security validation and optimization before execution.
@@ -145,8 +145,8 @@ A map within the UI Runtime that links a string identifier (e.g., `"chart.bar"`)
 
 ## Governance
 
-### Space (Workspace)
-A logical isolation unit in the Cloud Protocol for multi-tenancy. A single ObjectStack instance can host multiple Spaces. Data is physically segregated by tenant isolation strategies.
+### Tenant (Space / Workspace)
+A logical isolation unit in the Cloud Protocol for multi-tenancy, modeled by the `tenant` schema (`cloud/tenant.zod.ts`). A single ObjectStack instance can host multiple tenants. Data is segregated by tenant isolation strategies. "Space" and "Workspace" are informal aliases for the same concept.
 
 ### FLS (Field-Level Security)
 A granular permission model (Security Protocol) where access control is applied to individual fields (columns), not just the whole object (row).

@@ -62,6 +62,21 @@ export const DocSchema = lazySchema(() => z.object({
   content: z.string().describe('Raw Markdown content (CommonMark + GFM)'),
 
   /**
+   * Optional sort key within a book group (ADR-0046 §6.2.1). A scalar, so it
+   * three-way-merges cleanly under overlay — unlike a central nav array. Absent
+   * ⇒ sorts after ordered siblings, then alphabetically by label.
+   */
+  order: z.number().optional().describe('Sort key within a book group (ADR-0046 §6)'),
+
+  /**
+   * Optional explicit placement: the `key` of the `book` group this doc belongs
+   * to, used only when no group `include` rule expresses the membership.
+   * Naming-by-convention (`crm_guide_*` caught by `include: "crm_guide_*"`)
+   * usually makes this unnecessary.
+   */
+  group: z.string().optional().describe('Explicit book-group key (ADR-0046 §6); rules usually suffice'),
+
+  /**
    * Per-locale content variants (ADR-0046 i18n addendum). Compiled from
    * sibling `<name>.<locale>.md` files; the base `<name>.md` is the default
    * and the fallback. The REST layer resolves the request locale, returns a

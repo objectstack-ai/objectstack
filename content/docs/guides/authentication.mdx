@@ -34,7 +34,6 @@ The `@objectstack/plugin-auth` package provides enterprise-grade authentication 
 - ✅ **Password Reset** - Email-based password reset flow
 - ✅ **Email Verification** - Email verification workflow
 - ⚙️ **2FA backend** - better-auth two-factor plugin wiring is available for custom UIs
-- ✅ **Passkeys** - WebAuthn/Passkey support
 - ✅ **Magic Links** - Passwordless authentication
 - ✅ **Organizations** - Multi-tenant support
 - ✅ **ObjectQL Integration** - Native ObjectStack data persistence (no ORM required)
@@ -50,23 +49,25 @@ The plugin uses a **direct forwarding** architecture where all authentication re
 
 ### CLI device flow
 
-`os auth login` uses a browser-based device flow in interactive terminals. The
-CLI requests a one-time code from `POST /api/v1/auth/device/request`, opens the
-Studio approval page at `/_studio/auth/device?code=...`, and polls
-`GET /api/v1/auth/device/token` until the user approves access. Device codes
-expire after five minutes.
+`os login` uses a browser-based device flow in interactive terminals. The
+CLI requests a one-time code from `POST /api/v1/auth/device/code`, opens the
+Console approval page at `/_console/auth/device?user_code=...`, and polls
+`POST /api/v1/auth/device/token` until the user approves access. Device codes
+expire after the server-configured TTL (the CLI assumes a 10-minute / 600s
+default). The device flow requires `plugins: { deviceAuthorization: true }` in
+your `AuthPlugin` configuration.
 
 The email/password path is still supported for CI and non-interactive shells:
 
 ```bash
-os auth login --email user@example.com --password secret
+os login --email user@example.com --password secret
 ```
 
 New accounts can be created with:
 
 ```bash
-os auth register
-os auth register --email user@example.com --name "Jane Doe" --password secret
+os register
+os register --email user@example.com --name "Jane Doe" --password secret
 ```
 
 ---
@@ -111,10 +112,18 @@ Add the plugin to your kernel configuration:
 
 ```typescript
 import { ObjectKernel } from '@objectstack/core';
+import { ObjectQLPlugin } from '@objectstack/objectql';
+import { DriverPlugin } from '@objectstack/runtime';
+import { InMemoryDriver } from '@objectstack/driver-memory';
 import { AuthPlugin } from '@objectstack/plugin-auth';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 
 const kernel = new ObjectKernel();
+
+// AuthPlugin depends on the ObjectQL engine for data persistence,
+// so register ObjectQLPlugin and a driver first.
+await kernel.use(new ObjectQLPlugin());
+await kernel.use(new DriverPlugin(new InMemoryDriver(), 'memory'));
 
 // HTTP server (optional — auth works without it in MSW/mock mode)
 await kernel.use(new HonoServerPlugin({
@@ -123,7 +132,7 @@ await kernel.use(new HonoServerPlugin({
 
 // Authentication plugin
 await kernel.use(new AuthPlugin({
-  secret: process.env.AUTH_SECRET,
+  secret: process.env.OS_AUTH_SECRET,
   baseUrl: 'http://localhost:3000',
 }));
 
@@ -207,7 +216,7 @@ console.log('Current user:', session.data.user);
 
 ```typescript
 // Direct API call
-const response = await fetch('http://localhost:3000/api/v1/auth/forget-password', {
+const response = await fetch('http://localhost:3000/api/v1/auth/request-password-reset', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -262,28 +271,51 @@ Enable OAuth providers in your plugin configuration:
 new AuthPlugin({
   secret: process.env.OS_AUTH_SECRET,
   baseUrl: 'http://localhost:3000',
-  providers: [
-    {
-      id: 'google',
+  // socialProviders is a record keyed by provider id (forwarded to better-auth).
+  socialProviders: {
+    google: {
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     },
-    {
-      id: 'github',
+    github: {
       clientId: process.env.GITHUB_CLIENT_ID!,
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-    }
-  ]
+    },
+  },
 })
 ```
+
+> **Note:** Use the `socialProviders` record above. The legacy `providers: [...]`
+> array still type-checks but is **not** wired up at runtime — only `socialProviders`
+> is forwarded to better-auth, so a `providers` array produces no working OAuth.
+
+#### Zero-config Google (env only)
+
+You can enable Google sign-in without any code by setting `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` (and leaving `OS_AUTH_GOOGLE_ENABLED` unset or not `false`).
+The plugin auto-registers Google as a social provider from these environment
+variables. Use the explicit `socialProviders` record for other providers or to
+override the env-derived configuration.
 
 ### OAuth Flow
 
 #### 1. Initiate OAuth Login
 
 ```typescript
-// Redirect user to OAuth provider
-window.location.href = 'http://localhost:3000/api/v1/auth/authorize/google';
+// Recommended: use the client SDK, which posts to /sign-in/social and redirects.
+await client.auth.signInWithProvider('google');
+
+// Equivalent direct API call: POST /sign-in/social returns a redirect URL.
+const response = await fetch('http://localhost:3000/api/v1/auth/sign-in/social', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    provider: 'google',
+    callbackURL: window.location.origin + '/login',
+  }),
+});
+const data = await response.json();
+window.location.href = data.url ?? data.data.url;
 ```
 
 #### 2. Handle Callback
@@ -309,7 +341,7 @@ For custom account UIs, enable the backend plugin in configuration:
 
 ```typescript
 new AuthPlugin({
-  secret: process.env.AUTH_SECRET,
+  secret: process.env.OS_AUTH_SECRET,
   baseUrl: 'http://localhost:3000',
   plugins: {
     twoFactor: true,  // Enable backend two-factor endpoints
@@ -349,38 +381,10 @@ const response = await fetch('http://localhost:3000/api/v1/auth/two-factor/verif
 
 ### Passkeys (WebAuthn)
 
-Enable passkey support:
-
-```typescript
-new AuthPlugin({
-  secret: process.env.AUTH_SECRET,
-  baseUrl: 'http://localhost:3000',
-  plugins: {
-    passkeys: true,  // Enable passkey support
-  }
-})
-```
-
-#### Register a Passkey
-
-```typescript
-const response = await fetch('http://localhost:3000/api/v1/auth/passkey/register', {
-  method: 'POST',
-  headers: { 
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${accessToken}`
-  }
-});
-```
-
-#### Authenticate with Passkey
-
-```typescript
-const response = await fetch('http://localhost:3000/api/v1/auth/passkey/authenticate', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' }
-});
-```
+> **Not yet implemented.** Passkey/WebAuthn support is not currently wired into
+> `AuthPlugin`. The `plugins: { passkeys: true }` flag is accepted but no
+> passkey plugin is registered, so `/passkey/*` endpoints are not available.
+> This section will be updated once passkey support ships.
 
 ### Magic Links
 
@@ -388,7 +392,7 @@ Enable passwordless magic link authentication:
 
 ```typescript
 new AuthPlugin({
-  secret: process.env.AUTH_SECRET,
+  secret: process.env.OS_AUTH_SECRET,
   baseUrl: 'http://localhost:3000',
   plugins: {
     magicLink: true,  // Enable magic links
@@ -421,7 +425,7 @@ Enable organization/team support:
 
 ```typescript
 new AuthPlugin({
-  secret: process.env.AUTH_SECRET,
+  secret: process.env.OS_AUTH_SECRET,
   baseUrl: 'http://localhost:3000',
   plugins: {
     organization: true,  // Enable organizations
@@ -517,7 +521,7 @@ All endpoints are available under `/api/v1/auth/*`:
 
 #### Password Management
 
-- `POST /api/v1/auth/forget-password` - Request password reset email
+- `POST /api/v1/auth/request-password-reset` - Request password reset email
 - `POST /api/v1/auth/reset-password` - Reset password with token
 
 #### Email Verification
@@ -527,18 +531,13 @@ All endpoints are available under `/api/v1/auth/*`:
 
 #### OAuth
 
-- `GET /api/v1/auth/authorize/[provider]` - Start OAuth flow
+- `POST /api/v1/auth/sign-in/social` - Start OAuth flow (body `{ provider, callbackURL }`; returns a redirect URL)
 - `GET /api/v1/auth/callback/[provider]` - OAuth callback handler
 
 #### Two-Factor Authentication
 
 - `POST /api/v1/auth/two-factor/enable` - Start 2FA enrollment for the current user
 - `POST /api/v1/auth/two-factor/verify-totp` - Verify a TOTP code
-
-#### Passkeys
-
-- `POST /api/v1/auth/passkey/register` - Register a passkey
-- `POST /api/v1/auth/passkey/authenticate` - Authenticate with passkey
 
 #### Magic Links
 
@@ -553,7 +552,7 @@ For complete API documentation, see the [Better-Auth API Reference](https://www.
 
 ### Security
 
-1. **Use Strong Secrets**: Generate a strong random secret for `AUTH_SECRET` (minimum 32 characters)
+1. **Use Strong Secrets**: Generate a strong random secret for `OS_AUTH_SECRET` (minimum 32 characters)
    ```bash
    # Generate a secure secret
    openssl rand -base64 32
@@ -578,7 +577,7 @@ For complete API documentation, see the [Better-Auth API Reference](https://www.
 4. **Session Expiry**: Configure appropriate session expiry times
    ```typescript
    new AuthPlugin({
-     secret: process.env.AUTH_SECRET,
+     secret: process.env.OS_AUTH_SECRET,
      baseUrl: 'http://localhost:3000',
      session: {
        expiresIn: 60 * 60 * 24 * 7,  // 7 days
@@ -671,7 +670,7 @@ await kernel.use(new AuthPlugin({
 await kernel.bootstrap();
 ```
 
-> ⚠️ **Warning:** The secret above is for **local development only**. In production, always use a strong random secret from an environment variable (`process.env.AUTH_SECRET`).
+> ⚠️ **Warning:** The secret above is for **local development only**. In production, always use a strong random secret from an environment variable (`process.env.OS_AUTH_SECRET`).
 
 ### Mock Fallback Endpoints
 
@@ -722,6 +721,6 @@ await kernel.bootstrap();
 
 Complete working examples are available in the repository:
 
-- [Basic Auth Example](https://github.com/objectstack-ai/spec/tree/main/packages/plugins/plugin-auth/examples/basic-usage.ts)
-- [Todo App with Auth](https://github.com/objectstack-ai/spec/tree/main/examples/app-todo)
+- [Basic Auth Example](https://github.com/objectstack-ai/framework/tree/main/packages/plugins/plugin-auth/examples/basic-usage.ts)
+- [Todo App with Auth](https://github.com/objectstack-ai/framework/tree/main/examples/app-todo)
 - [CRM App with Auth](https://github.com/objectstack-ai/hotcrm)

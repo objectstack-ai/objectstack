@@ -105,6 +105,7 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'service',     // Service definitions
   'email_template', // Outbound email templates (EmailTemplateSchema)
   'doc',         // Package documentation — flat Markdown items (DocSchema, ADR-0046)
+  'book',        // Documentation navigation spine (BookSchema, ADR-0046 §6)
 
   // Security Protocol
   'permission',  // Permission sets (PermissionSetSchema)
@@ -666,6 +667,10 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   // (ADR-0033). Collected from flat `src/docs/*.md` by the CLI; the kernel
   // never parses `content`. loadOrder is last: nothing references docs.
   { type: 'doc', label: 'Documentation', description: 'Package documentation — flat Markdown items (ADR-0046)', filePatterns: ['**/docs/*.md'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
+  // Navigation spine over docs (ADR-0046 §6): ordered groups, membership derived
+  // by rule. Render-time like view/dashboard ⇒ overlay-allowed so Studio can
+  // drag-edit; runtime-creatable for AI/authors. loadOrder last (references docs).
+  { type: 'book', label: 'Documentation Book', description: 'Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
 
   // Security Protocol
   { type: 'permission', label: 'Permission Set', filePatterns: ['**/*.permission.ts', '**/*.permission.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 15, domain: 'security' },

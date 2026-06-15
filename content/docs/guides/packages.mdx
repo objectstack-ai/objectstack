@@ -26,12 +26,14 @@ ObjectStack is organized into **70 package manifests** across multiple categorie
 **The Constitution** — Protocol schemas, types, and constants for the entire ObjectStack ecosystem.
 
 - **Purpose**: Zod-first schema definitions for all 15 protocol domains
-- **Exports**: Data, UI, System, Automation, AI, API, Identity, Security, Kernel, Cloud, QA, Contracts, Integration, Studio, Shared namespaces, plus builder functions (`defineStack`, `defineView`, `defineApp`, `defineFlow`, `defineAgent`, `defineTool`, `defineSkill`) and `ObjectSchema.create()` for objects.
+- **Exports**: Builder functions (`defineStack`, `defineView`, `defineApp`, `defineFlow`, `defineAgent`, `defineTool`, `defineSkill`) plus `ObjectSchema.create()` for objects. Protocol namespaces (Data, UI, System, Automation, AI, API, Identity, Security, Kernel, Cloud, QA, Contracts, Integration, Studio, Shared) are not re-exported from the top-level entry for tree-shaking reasons — import them from subpaths such as `@objectstack/spec/data` and `@objectstack/spec/ui`.
 - **When to use**: Import types, schemas, and builder functions when authoring metadata.
 - **Documentation**: [Protocol Reference](/docs/references)
 
 ```typescript
-import { Data, UI, defineStack, defineView } from '@objectstack/spec';
+import { defineStack, defineView } from '@objectstack/spec';
+import * as Data from '@objectstack/spec/data';
+import * as UI from '@objectstack/spec/ui';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 ```
 
@@ -99,7 +101,6 @@ const kernel = new ObjectKernel();
 
 - **Purpose**: Standard system tables and their metadata, so apps don't redefine identity, audit, or approvals
 - **When to use**: Always — bundled into the runtime
-- **README**: [View README](/packages/platform-objects/README.md)
 
 ---
 
@@ -116,7 +117,7 @@ const kernel = new ObjectKernel();
 
 ```typescript
 import { ObjectStackClient } from '@objectstack/client';
-const client = new ObjectStackClient({ baseURL: 'https://api.example.com' });
+const client = new ObjectStackClient({ baseUrl: 'https://api.example.com' });
 ```
 
 ### @objectstack/client-react
@@ -124,7 +125,7 @@ const client = new ObjectStackClient({ baseURL: 'https://api.example.com' });
 **React Hooks & Bindings** — React hooks for ObjectStack.
 
 - **Purpose**: React hooks for queries, mutations, real-time subscriptions
-- **Exports**: `useQuery`, `useMutation`, `useRealtime`, `useAuth`, etc.
+- **Exports**: `useQuery`, `useMutation`, `useRealtimeConnection`, `useView`, `useObject`, `useMetadata`, etc.
 - **When to use**: React applications
 - **README**: [View README](/packages/client-react/README.md)
 
@@ -165,21 +166,18 @@ const driver = new SqlDriver({
 });
 ```
 
-### @objectstack/driver-turso
+### @objectstack/driver-sqlite-wasm
 
-**Turso/libSQL Driver** — Edge-first SQLite with embedded replicas.
+**WASM SQLite Driver** — Edge/browser-friendly SQLite via sql.js (WebAssembly).
 
-- **Purpose**: Edge-native SQLite with local-first architecture and multi-tenancy
-- **Modes**: Remote (edge), Embedded Replica (local-first), Local (dev)
-- **When to use**: Vercel Edge, Cloudflare Workers, global low-latency deployments
-- **README**: [View README](/packages/plugins/driver-turso/README.md)
+- **Purpose**: SQLite running entirely in WebAssembly (no native bindings), with optional `fs`-backed persistence
+- **Modes**: In-memory (`:memory:`) or a file path persisted via the `persist` option
+- **When to use**: Environments without native SQLite, edge/browser runtimes, lightweight local-first storage
+- **README**: [View README](/packages/plugins/driver-sqlite-wasm/README.md)
 
 ```typescript
-import { TursoDriver } from '@objectstack/driver-turso';
-const driver = new TursoDriver({
-  url: 'libsql://mydb-username.turso.io',
-  authToken: process.env.TURSO_AUTH_TOKEN,
-});
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+const driver = new SqliteWasmDriver({ filename: ':memory:' });
 ```
 
 ### @objectstack/driver-mongodb
@@ -319,7 +317,7 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 **Organization Scoping Plugin** — Multi-org (a.k.a. "soft" multi-tenant) row-level scoping built on top of `plugin-security`.
 
 - **Features**: `organization_id` auto-stamp on insert, per-org seed-data replay, default-org bootstrap, orphan-row claim hook
-- **When to use**: Multi-organization SaaS where every row is scoped to an `sys_organization`. Enable by setting `OS_MULTI_TENANT=true` (registered automatically before `plugin-security`)
+- **When to use**: Multi-organization SaaS where every row is scoped to an `sys_organization`. Enable by setting `OS_MULTI_ORG_ENABLED=true` (the legacy `OS_MULTI_TENANT` still works as a deprecated alias); registered automatically before `plugin-security`
 - **README**: [View README](/packages/plugins/plugin-org-scoping/README.md)
 
 ### @objectstack/plugin-audit
@@ -368,7 +366,6 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 - **Features**: Approver resolution (user/role/team/department/manager/field/queue), `first_response` / `unanimous`, record lock, status mirror, per-node SLA escalation, audit trail
 - **When to use**: Any flow that needs human sign-off (expense, quote, contract, …) — add an `approval` node and branch on `approve` / `reject`
-- **README**: [View README](/packages/plugins/plugin-approvals/README.md)
 
 ### @objectstack/plugin-sharing
 
@@ -376,7 +373,6 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 - **Features**: Manual shares, sharing rules, team-based access, `sys_record_share`
 - **When to use**: Teams that need to grant per-record access beyond RBAC
-- **README**: [View README](/packages/plugins/plugin-sharing/README.md)
 
 ### @objectstack/plugin-email
 
@@ -384,7 +380,6 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 - **Features**: Provider adapters, MJML templates, delivery tracking
 - **When to use**: Transactional and workflow-driven email
-- **README**: [View README](/packages/plugins/plugin-email/README.md)
 
 ### @objectstack/plugin-webhooks
 
@@ -392,7 +387,6 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 - **Features**: Subscriptions, retries, signed payloads, delivery logs
 - **When to use**: Integrating ObjectStack events with external systems
-- **README**: [View README](/packages/plugins/plugin-webhooks/README.md)
 
 ### @objectstack/plugin-reports
 
@@ -400,7 +394,6 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 - **Features**: Tabular/aggregate reports, scheduled delivery, exports
 - **When to use**: Operational reporting on top of business objects
-- **README**: [View README](/packages/plugins/plugin-reports/README.md)
 
 ---
 
@@ -465,19 +458,19 @@ ObjectStack integrates with popular web frameworks via adapters. All adapters ex
 
 **CLI Tool** — Command-line interface for ObjectStack.
 
-- **Commands**: `serve`, `studio`, `doctor`, `migrate`, `deploy`
+- **Commands**: `serve`, `dev`, `start`, `doctor`, `compile`, `build`, `validate`, `generate`, `package`, `meta`, … (binary is `os` / `objectstack`)
 - **When to use**: Development, deployment, project management
 - **README**: [View README](/packages/cli/README.md)
 
 ```bash
-npx @objectstack/cli serve --dev
+npx os serve --dev
 ```
 
 ### @objectstack/create-objectstack
 
 **Project Scaffolding** — Create new ObjectStack projects.
 
-- **Templates**: Minimal, CRM, Todo, E-commerce
+- **Templates**: `blank` (default, bundled), plus remote templates `todo`, `compliance`, `content`, `contracts`, `procurement`
 - **When to use**: Start a new ObjectStack project
 - **README**: [View README](/packages/create-objectstack/README.md)
 
@@ -521,11 +514,11 @@ The snippets below illustrate which **runtime** packages you typically reach for
 ```typescript
 // Host bootstrap (pseudocode — exact shape depends on adapter)
 import { ObjectKernel } from '@objectstack/core';
-import { createDriverPlugin } from '@objectstack/driver-turso';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { createServiceAiPlugin } from '@objectstack/service-ai';
 
 const kernel = new ObjectKernel();
-await kernel.use(createDriverPlugin({ /* libSQL config */ }));
+await kernel.use(new SqliteWasmDriver({ filename: ':memory:' }));
 await kernel.use(createServiceAiPlugin({ /* model providers */ }));
 await kernel.bootstrap();
 ```

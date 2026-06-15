@@ -1,5 +1,15 @@
 # @objectstack/cloud-connection
 
+## 9.5.1
+
+### Patch Changes
+
+- Updated dependencies [ee72aae]
+  - @objectstack/spec@9.5.1
+  - @objectstack/core@9.5.1
+  - @objectstack/runtime@9.5.1
+  - @objectstack/types@9.5.1
+
 ## 9.5.0
 
 ### Minor Changes

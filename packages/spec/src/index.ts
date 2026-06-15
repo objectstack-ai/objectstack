@@ -76,6 +76,7 @@ export type { ExpandedViewItem } from './ui/view.zod';
 export { defineApp } from './ui/app.zod';
 export { defineFlow } from './automation/flow.zod';
 export { defineJob } from './system/job.zod';
+export { defineBook } from './system/book.zod';
 export { defineAgent } from './ai/agent.zod';
 export { defineTool } from './ai/tool.zod';
 export { defineSkill } from './ai/skill.zod';

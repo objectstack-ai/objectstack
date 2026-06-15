@@ -38,19 +38,26 @@ Scaffolding with `npm create objectstack@latest` runs this step automatically.
 
 ### Define your first object
 
-The scaffolded project includes a sample object. Open `src/objects/my_app.ts`:
+The scaffolded project includes a sample object. Open `src/objects/my_app_item.ts`:
 
 ```typescript
-import { ObjectSchema, Field } from '@objectstack/spec/data';
+import * as Data from '@objectstack/spec/data';
 
-const myApp = ObjectSchema.create({
-  name: 'my_app',
-  label: 'My App',
-  ownership: 'own',
+const myAppItem: Data.Object = {
+  name: 'my_app_item',
+  label: 'My App Item',
   fields: {
-    name: Field.text({ label: 'Name', required: true }),
-    description: Field.textarea({ label: 'Description' }),
-    status: Field.select({
+    name: {
+      type: 'text',
+      label: 'Name',
+      required: true,
+    },
+    description: {
+      type: 'textarea',
+      label: 'Description',
+    },
+    status: {
+      type: 'select',
       label: 'Status',
       options: [
         { label: 'Draft', value: 'draft' },
@@ -58,11 +65,11 @@ const myApp = ObjectSchema.create({
         { label: 'Archived', value: 'archived' },
       ],
       defaultValue: 'draft',
-    }),
+    },
   },
-});
+};
 
-export default myApp;
+export default myAppItem;
 ```
 
 <Callout type="info">
@@ -72,15 +79,15 @@ This is the same metadata that powers the REST API, Studio editors, and the MCP 
 ### Launch the Studio
 
 ```bash
-os studio
+os dev --ui
 ```
 
-Open [http://localhost:3000/_studio/](http://localhost:3000/_studio/) to browse your objects, test the REST API, and inspect metadata. The server automatically provides:
+Open [http://localhost:3000/_console/](http://localhost:3000/_console/) to browse your objects, test the REST API, and inspect metadata. The server automatically provides:
 
 - **ObjectQL Engine** &mdash; Query layer with CRUD operations
 - **InMemory Driver** &mdash; Zero-config data storage for development
-- **Hono HTTP Server** &mdash; REST API at `/api/v1/{object}`
-- **Console UI** &mdash; Admin interface at `/_studio/`
+- **Hono HTTP Server** &mdash; REST API at `/api/v1/data/{object}`
+- **Console UI** &mdash; Admin interface at `/_console/`
 
 ### Add more metadata
 
@@ -147,7 +154,7 @@ my-app/
 ├── src/
 │   ├── objects/              # Data models (required)
 │   │   ├── index.ts          # Barrel export
-│   │   └── my_app.ts         # Object definition
+│   │   └── my_app_item.ts    # Object definition
 │   ├── actions/              # Buttons, batch operations
 │   ├── flows/                # Automation logic
 │   ├── apps/                 # Navigation definitions
@@ -157,11 +164,11 @@ my-app/
 └── test/                     # Tests
 ```
 
-**File naming conventions:**
+**File naming conventions** (recommended, not enforced — `os g <type> <name>` always emits `{name}.ts`, so rename as you prefer):
 - **Object files:** `{name}.object.ts` or `{name}.ts` (one object per file)
 - **Action files:** `{name}.actions.ts`
 - **Flow files:** `{name}.flow.ts`
-- **Barrel exports:** Each directory has an `index.ts` that re-exports everything
+- **Barrel exports:** Each directory has an `index.ts` that re-exports everything. Metadata is wired into your app through these barrel imports in `objectstack.config.ts` — there is no filename-suffix discovery.
 
 ## Key Concepts
 

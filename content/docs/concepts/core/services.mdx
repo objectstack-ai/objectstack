@@ -9,7 +9,7 @@ ObjectStack uses a lightweight **Service Locator pattern** for Dependency Inject
 
 ## Concepts
 
-- **Service Name**: A unique string identifier (e.g., `http-server`, `database`, `auth-provider`).
+- **Service Name**: A unique string identifier (e.g., `http-server`, `data`, `auth`).
 - **Service Implementation**: Any JavaScript object, class instance, or function.
 - **Service Contract**: A TypeScript interface that defines the expected API surface.
 
@@ -25,8 +25,9 @@ export const myPlugin: Plugin = {
   
   async init(ctx) {
     // Register a service with a concrete implementation
+    const settings = ctx.getService('settings');
     ctx.registerService('cache', new RedisCacheProvider({
-      url: ctx.config.get('redis.url'),
+      url: settings.get('redis.url'),
     }));
   },
 };
@@ -34,35 +35,45 @@ export const myPlugin: Plugin = {
 
 ### Factory Registration (Lazy)
 
-Use a factory function when the service requires async initialization:
+Use `registerServiceFactory` when the service requires async initialization.
+`registerService` stores a concrete instance as-is, so passing it a function
+would just register the function object. The factory receives the plugin
+context (and an optional scope id) and is wrapped in lifecycle management:
 
 ```typescript
-ctx.registerService('database', async () => {
-  const pool = await createPool(ctx.config.get('database'));
+import { ServiceLifecycle } from '@objectstack/core';
+
+ctx.registerServiceFactory('data', async (ctx) => {
+  const settings = ctx.getService('settings');
+  const pool = await createPool(settings.get('database'));
   return new PostgresDriver(pool);
-});
+}, ServiceLifecycle.SINGLETON);
 ```
 
-The factory is called once on first access and the result is cached.
+The lifecycle defaults to `ServiceLifecycle.SINGLETON`, so the factory runs once
+on first access and the instance is cached. Use `ServiceLifecycle.SCOPED` for a
+per-scope (e.g. per-project) instance, or `ServiceLifecycle.TRANSIENT` to create
+a fresh instance on every access.
 
 ## Consuming Services
 
 ```typescript
-// Synchronous retrieval (if already initialized)
+// Synchronous retrieval (if already registered)
 const http = ctx.getService<IHttpServer>('http-server');
-http.get('/hello', (c) => c.text('Hello'));
+http.get('/hello', (req, res) => res.send('Hello'));
 
-// Async retrieval (for factory-registered services)
-const db = await ctx.getServiceAsync<IDatabaseDriver>('database');
-const users = await db.query('user', { filters: [['active', '=', true]] });
+// Async retrieval (for factory- or scope-registered services)
+const db = await ctx.getServiceScoped<IDataEngine>('data', scopeId);
+const users = await db.find('user', { where: { active: true } });
 ```
 
 ### Optional Services
 
-Check if a service exists before using it:
+`ctx.getService` throws when a service is not registered. To probe optionally,
+check the registry map with `ctx.getServices()`:
 
 ```typescript
-if (ctx.hasService('analytics')) {
+if (ctx.getServices().has('analytics')) {
   const analytics = ctx.getService<IAnalytics>('analytics');
   analytics.track('page_view', { url: '/dashboard' });
 }
@@ -75,13 +86,14 @@ The core ecosystem defines several standard service contracts:
 | Service Name | Interface | Provider Example |
 | :--- | :--- | :--- |
 | `http-server` | `IHttpServer` | `plugin-hono-server`, `adapter-nextjs` |
-| `database` | `IDatabaseDriver` | `driver-sql` (pg/mysql/sqlite), `driver-mongodb`, `driver-turso` |
+| `data` | `IDataEngine` | `@objectstack/objectql` (drivers implement `IDataDriver`) |
 | `auth` | `IAuthService` | `plugin-auth` |
-| `protocol` | `IProtocolEngine` | `@objectstack/objectql` |
-| `api-registry` | `IApiRegistry` | `@objectstack/core` |
-| `cache` | `ICacheProvider` | Redis, Memcached, or in-memory |
-| `logger` | `ILogger` | `@objectstack/core` (built-in) |
-| `event-bus` | `IEventBus` | `@objectstack/core` (built-in) |
+| `api-registry` | `ApiRegistry` | `@objectstack/core` |
+| `cache` | `ICacheService` | Redis, Memcached, or in-memory |
+
+The logger is not a registered service — it is exposed directly as `ctx.logger`
+(the `Logger` contract). Inter-plugin events also do not go through a service:
+use `ctx.hook(name, handler)` and `ctx.trigger(name, ...args)` instead.
 
 ## Replacing Core Services
 
@@ -91,15 +103,17 @@ Swap any core component by providing an alternative plugin:
 // Replace the default HTTP server with a custom one
 export const customHttpPlugin: Plugin = {
   name: 'custom-http',
-  provides: ['http-server'], // Declares what this plugin provides
-  
+
   async init(ctx) {
-    ctx.registerService('http-server', new FastifyServer());
+    ctx.replaceService('http-server', new FastifyServer());
   },
 };
 ```
 
-The Kernel ensures only one plugin provides each service name. If multiple plugins declare the same service, the last-registered one wins (or an error is thrown in strict mode).
+`registerService` always throws if the name is already registered — there is no
+strict-mode toggle and no last-registered-wins behavior. To swap an existing
+core service, use `ctx.replaceService(name, implementation)`, which replaces the
+current instance and throws if the service does not yet exist.
 
 ## Service Lifecycle
 
@@ -107,20 +121,24 @@ Services follow the plugin lifecycle:
 
 1. **`init`** — Register services
 2. **`start`** — Services are now available to all plugins
-3. **`stop`** — Clean up resources (close connections, flush buffers)
+3. **`destroy`** — Clean up resources (close connections, flush buffers)
 
 ```typescript
 export const dbPlugin: Plugin = {
   name: 'database',
-  
+
   async init(ctx) {
-    const pool = await createPool(ctx.config.get('database'));
-    ctx.registerService('database', new PostgresDriver(pool));
+    const settings = ctx.getService('settings');
+    const pool = await createPool(settings.get('database'));
+    ctx.registerService('data', new PostgresDriver(pool));
+    this.db = pool;
   },
-  
-  async stop(ctx) {
-    const db = ctx.getService<PostgresDriver>('database');
-    await db.close(); // Clean shutdown
+
+  async destroy() {
+    await this.db.close(); // Clean shutdown
   },
 };
 ```
+
+The `Plugin` interface defines `init`, `start?`, and `destroy?` — there is no
+`stop` hook, and `destroy()` takes no arguments.

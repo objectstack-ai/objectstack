@@ -1922,6 +1922,74 @@ export class RestServer {
                 },
             });
 
+            // ADR-0046 §6 — GET /meta/book/:name/tree
+            // Resolve a book spine against the docs that exist *now* into a
+            // rendered tree (membership is DERIVED, never stored — §6.2.1). An
+            // unknown name is treated as a package id and resolved against the
+            // implicit per-package book (§6.4). Anonymous requests only see a
+            // book whose `audience` is `public` (§6.7 read-layer gating).
+            this.routeManager.register({
+                method: 'GET',
+                path: `${metaPath}/book/:name/tree`,
+                handler: async (req: any, res: any) => {
+                    try {
+                        const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        const prot = await this.resolveProtocol(environmentId, req);
+                        const locale = this.extractLocale(req);
+                        const packageId = req.query?.package || undefined;
+                        const { resolveBookTree, deriveImplicitPackageBook, isPublicAudience, resolveDocLocale } =
+                            await import('@objectstack/spec/system');
+
+                        const norm = (raw: any): any[] =>
+                            Array.isArray(raw) ? raw : (raw && Array.isArray(raw.items) ? raw.items : []);
+
+                        const books = norm(await prot.getMetaItems({
+                            type: 'book',
+                            ...(packageId ? { packageId } : {}),
+                            ...(environmentId ? { environmentId } : {}),
+                        } as any));
+                        let book = books.find((b: any) => b && b.name === req.params.name);
+                        if (!book) {
+                            // Unknown name → the implicit per-package book (§6.4).
+                            book = deriveImplicitPackageBook(req.params.name, req.params.name);
+                        }
+
+                        // §6.7 — anonymous callers only get `public` books.
+                        const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                        if (!ctx?.userId && !isPublicAudience((book as any).audience)) {
+                            sendError(res, { code: 'unauthorized', message: 'This documentation requires sign-in', status: 401 });
+                            return;
+                        }
+
+                        const docs = norm(await prot.getMetaItems({
+                            type: 'doc',
+                            ...(packageId ? { packageId } : {}),
+                            ...(environmentId ? { environmentId } : {}),
+                        } as any))
+                            .map((d: any) => (d && typeof d === 'object' ? resolveDocLocale(d, locale) : d))
+                            .map((d: any) => ({
+                                name: d.name,
+                                label: d.label,
+                                description: d.description,
+                                order: d.order,
+                                group: d.group,
+                                tags: d.tags,
+                                packageId: d._packageId,
+                            }));
+
+                        const tree = resolveBookTree(book as any, docs, (book as any)._packageId);
+                        res.json(tree);
+                    } catch (error: any) {
+                        logError("[REST] Unhandled error:", error);
+                        sendError(res, error);
+                    }
+                },
+                metadata: {
+                    summary: 'Resolve a documentation book spine into its rendered tree (ADR-0046 §6)',
+                    tags: ['metadata'],
+                },
+            });
+
             this.routeManager.register({
                 method: 'GET',
                 path: `${metaPath}/:type/:name`,

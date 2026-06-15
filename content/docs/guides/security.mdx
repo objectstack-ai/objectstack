@@ -56,54 +56,50 @@ Profiles define a user's baseline permissions.
 
 ### Profile Structure
 
-```typescript
-import type { Profile } from '@objectstack/spec/security';
+A profile is modelled as a `PermissionSet` with `isProfile: true` (see
+`packages/spec/src/security/permission.zod.ts`). There is no distinct
+`Profile` type — author it as a `*.profile.ts` metadata entry validated by
+`PermissionSetSchema`.
 
-export const SalesRepProfile: Profile = {
+```typescript
+import type { PermissionSet } from '@objectstack/spec/security';
+
+export const SalesRepProfile: PermissionSet = {
   name: 'sales_rep',
   label: 'Sales Representative',
-  description: 'Standard sales rep permissions',
-  
-  // Object-level permissions
-  objectPermissions: {
+  isProfile: true,
+
+  // Object-level permissions: <object> -> permissions
+  objects: {
     account: {
-      create: true,
-      read: true,
-      update: true,
-      delete: false,
-      viewAll: false,    // See all records regardless of owner
-      modifyAll: false,  // Edit all records regardless of owner
+      allowCreate: true,
+      allowRead: true,
+      allowEdit: true,
+      allowDelete: false,
+      viewAllRecords: false,   // See all records regardless of owner
+      modifyAllRecords: false, // Edit all records regardless of owner
     },
     opportunity: {
-      create: true,
-      read: true,
-      update: true,
-      delete: false,
-      viewAll: false,
-      modifyAll: false,
+      allowCreate: true,
+      allowRead: true,
+      allowEdit: true,
+      allowDelete: false,
+      viewAllRecords: false,
+      modifyAllRecords: false,
     },
   },
-  
-  // Field-level permissions
-  fieldPermissions: {
-    account: {
-      annual_revenue: { read: true, update: false },
-      description: { read: true, update: true },
-    },
+
+  // Field-level security: <object>.<field> -> permissions
+  fields: {
+    'account.annual_revenue': { readable: true, editable: false },
+    'account.description': { readable: true, editable: true },
   },
-  
-  // Tab visibility
-  tabVisibility: {
-    account: 'default',     // Default tab
-    lead: 'default',
-    opportunity: 'default',
-    case: 'hidden',         // Not visible
-    product: 'available',   // Available but not default
-  },
-  
-  // Application access
-  applicationVisibility: {
-    crm_example: true,
+
+  // Tab/app visibility: <app or tab name> -> visibility
+  tabPermissions: {
+    app_crm: 'default_on',  // Shown by default
+    app_admin: 'hidden',    // Not visible
+    app_sales: 'visible',   // Available
   },
 };
 ```
@@ -112,32 +108,34 @@ export const SalesRepProfile: Profile = {
 
 | Permission | Description |
 |------------|-------------|
-| `create` | Create new records |
-| `read` | View records they own or have access to |
-| `update` | Edit records they own or have access to |
-| `delete` | Delete records they own or have access to |
-| `viewAll` | View ALL records regardless of ownership |
-| `modifyAll` | Edit ALL records regardless of ownership |
+| `allowCreate` | Create new records |
+| `allowRead` | View records they own or have access to |
+| `allowEdit` | Edit records they own or have access to |
+| `allowDelete` | Delete records they own or have access to |
+| `allowTransfer` | Change record ownership |
+| `allowRestore` | Restore soft-deleted records from trash (undelete) |
+| `allowPurge` | Permanently delete records (hard delete / GDPR) |
+| `viewAllRecords` | View ALL records regardless of ownership |
+| `modifyAllRecords` | Edit ALL records regardless of ownership |
 
 ### Standard Profiles
 
 #### Sales Representative
 
 ```typescript
-export const SalesRepProfile: Profile = {
+export const SalesRepProfile: PermissionSet = {
   name: 'sales_rep',
-  objectPermissions: {
-    lead: { create: true, read: true, update: true, delete: false },
-    account: { create: true, read: true, update: true, delete: false },
-    contact: { create: true, read: true, update: true, delete: false },
-    opportunity: { create: true, read: true, update: true, delete: false },
-    quote: { create: true, read: true, update: true, delete: false },
-    product: { create: false, read: true, update: false, delete: false },
+  isProfile: true,
+  objects: {
+    lead: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
+    account: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
+    contact: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
+    opportunity: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
+    quote: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
+    product: { allowCreate: false, allowRead: true, allowEdit: false, allowDelete: false },
   },
-  fieldPermissions: {
-    account: {
-      annual_revenue: { read: true, update: false }, // Read-only
-    },
+  fields: {
+    'account.annual_revenue': { readable: true, editable: false }, // Read-only
   },
 };
 ```
@@ -145,16 +143,17 @@ export const SalesRepProfile: Profile = {
 #### Sales Manager
 
 ```typescript
-export const SalesManagerProfile: Profile = {
+export const SalesManagerProfile: PermissionSet = {
   name: 'sales_manager',
-  objectPermissions: {
-    lead: { 
-      create: true, read: true, update: true, delete: true,
-      viewAll: true, modifyAll: true 
+  isProfile: true,
+  objects: {
+    lead: {
+      allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true,
+      viewAllRecords: true, modifyAllRecords: true
     },
-    account: { 
-      create: true, read: true, update: true, delete: true,
-      viewAll: true, modifyAll: true 
+    account: {
+      allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true,
+      viewAllRecords: true, modifyAllRecords: true
     },
     // ... full access to sales objects
   },
@@ -164,19 +163,18 @@ export const SalesManagerProfile: Profile = {
 #### Service Agent
 
 ```typescript
-export const ServiceAgentProfile: Profile = {
+export const ServiceAgentProfile: PermissionSet = {
   name: 'service_agent',
-  objectPermissions: {
-    case: { create: true, read: true, update: true, delete: false },
-    task: { create: true, read: true, update: true, delete: true },
-    account: { create: false, read: true, update: false, delete: false },
-    contact: { create: false, read: true, update: true, delete: false },
+  isProfile: true,
+  objects: {
+    case: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
+    task: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true },
+    account: { allowCreate: false, allowRead: true, allowEdit: false, allowDelete: false },
+    contact: { allowCreate: false, allowRead: true, allowEdit: true, allowDelete: false },
   },
-  fieldPermissions: {
-    case: {
-      is_sla_violated: { read: true, update: false },
-      resolution_time_hours: { read: true, update: false },
-    },
+  fields: {
+    'case.is_sla_violated': { readable: true, editable: false },
+    'case.resolution_time_hours': { readable: true, editable: false },
   },
 };
 ```
@@ -193,40 +191,31 @@ import type { PermissionSet } from '@objectstack/spec/security';
 export const AdvancedReportingPermissionSet: PermissionSet = {
   name: 'advanced_reporting',
   label: 'Advanced Reporting',
-  description: 'Additional permissions for advanced reporting',
-  
-  objectPermissions: {
+
+  objects: {
     opportunity: {
-      viewAll: true,  // Override profile restriction
+      viewAllRecords: true,  // Override profile restriction
     },
     account: {
-      viewAll: true,
+      viewAllRecords: true,
     },
   },
-  
-  fieldPermissions: {
-    opportunity: {
-      amount: { read: true },
-      probability: { read: true },
-    },
+
+  fields: {
+    'opportunity.amount': { readable: true },
+    'opportunity.probability': { readable: true },
   },
-  
-  systemPermissions: {
-    runReports: true,
-    exportReports: true,
-    createDashboards: true,
-  },
+
+  // System permissions are a flat array of capability strings
+  systemPermissions: ['run_reports', 'export_reports', 'create_dashboards'],
 };
 
 export const BulkDataPermissionSet: PermissionSet = {
   name: 'bulk_data_access',
   label: 'Bulk Data Access',
-  description: 'Permissions for bulk data operations',
-  
-  systemPermissions: {
-    bulkApiEnabled: true,
-    viewAllData: true,
-  },
+
+  objects: {},
+  systemPermissions: ['bulk_api', 'view_all_data'],
 };
 ```
 
@@ -234,14 +223,14 @@ export const BulkDataPermissionSet: PermissionSet = {
 
 The framework ships four canonical permission sets that are auto-seeded on
 boot by `plugin-security` (see
-`packages/platform-objects/src/security/default-permission-sets.ts`). Use
+`packages/plugins/plugin-security/src/objects/default-permission-sets.ts`). Use
 these as the baseline for any new org — tier custom sets on top rather
 than redefining the basics.
 
 | Name | Scope | What it unlocks | Notes |
 |:--|:--|:--|:--|
 | `admin_full_access` | Platform (no RLS) | All objects, all system permissions, Studio + Setup, cross-org reads | Reserved for platform operators. Auto-granted to the bootstrap admin (`bootstrapPlatformAdmin`) — the **first registered human**. The non-loginable seed-data identity `usr_system` (role `system`, provisioned before the first sign-up to own seeded rows) is deliberately skipped, so the real admin wins the promotion. |
-| `organization_admin` | Per-org (`tenant_isolation` RLS, only active when [`plugin-org-scoping`](#objectstackplugin-org-scoping) is loaded) | Wildcard CRUD inside the org, `manage_org_users`, Setup app shell (only org-scoped entries visible), invite members, manage roles assignment | **Read-only** on `sys_role`, `sys_permission_set`, `sys_role_permission_set`, `sys_user_permission_set`, `sys_user_role` to prevent self-elevation. Does **not** see Studio. |
+| `organization_admin` | Per-org (`tenant_isolation` RLS, only active when `@objectstack/plugin-org-scoping` is loaded) | Wildcard CRUD inside the org, `manage_org_users`, Setup app shell (only org-scoped entries visible), invite members, manage roles assignment | **Read-only** on `sys_role`, `sys_permission_set`, `sys_role_permission_set`, `sys_user_permission_set`, `sys_user_role` to prevent self-elevation. Does **not** see Studio. |
 | `member_default` | Per-org | Standard end-user CRUD on org records | Default profile for invited members. |
 | `viewer_readonly` | Per-org | Read access only | For auditors / read-only stakeholders. |
 
@@ -251,7 +240,7 @@ than redefining the basics.
 > mode `plugin-security` detects the missing `org-scoping` service and
 > strips the wildcard policy so reads / writes aren't accidentally
 > filtered by an unset `current_user.organization_id`. See the
-> [Org-Scoping Plugin README](/packages/plugins/plugin-org-scoping/README.md)
+> [Org-Scoping Plugin README](https://github.com/objectstack-ai/framework/blob/main/packages/plugins/plugin-org-scoping/README.md)
 > for boot order and per-org seed-replay details.
 
 #### Auto-grant for organization admins
@@ -277,19 +266,27 @@ remain gated by `setup.access` so org admins can manage them.
 
 ### Assigning Permission Sets
 
+Permission-set grants are plain data rows, not helper-function calls. Assign a
+set to a user by inserting a `sys_user_permission_set` row, or to a role by
+inserting a `sys_role_permission_set` row:
+
 ```typescript
-// Assign to user
-await assignPermissionSet({
-  userId: 'user123',
-  permissionSetName: 'advanced_reporting',
+// Grant a permission set to a single user
+await objectql.object('sys_user_permission_set').insert({
+  user_id: 'user123',
+  permission_set: 'advanced_reporting',
 });
 
-// Assign to multiple users
-await assignPermissionSetToGroup({
-  permissionSetName: 'bulk_data_access',
-  userGroup: 'data_analysts',
+// Grant a permission set to everyone in a role
+await objectql.object('sys_role_permission_set').insert({
+  role: 'data_analysts',
+  permission_set: 'bulk_data_access',
 });
 ```
+
+Org-admin grants are reconciled automatically by a `plugin-security` lifecycle
+hook (see [Auto-grant for organization admins](#auto-grant-for-organization-admins))
+— you do not insert those rows by hand.
 
 ---
 
@@ -297,54 +294,28 @@ await assignPermissionSetToGroup({
 
 Roles control record-level access through a hierarchy.
 
+The hierarchy is derived from the `parent` link on each role — there is no
+`RoleHierarchy` container schema. Author roles as individual `*.role.ts`
+entries (each matching `RoleSchema`), using `parent` to point at the role they
+report to:
+
 ```typescript
-export const RoleHierarchy = {
-  name: 'crm_role_hierarchy',
-  label: 'CRM Role Hierarchy',
-  
-  roles: [
-    // Top level
-    {
-      name: 'executive',
-      label: 'Executive',
-      parentRole: null,
-    },
-    
-    // Sales hierarchy
-    {
-      name: 'sales_director',
-      label: 'Sales Director',
-      parentRole: 'executive',
-    },
-    {
-      name: 'sales_manager',
-      label: 'Sales Manager',
-      parentRole: 'sales_director',
-    },
-    {
-      name: 'sales_rep',
-      label: 'Sales Representative',
-      parentRole: 'sales_manager',
-    },
-    
-    // Service hierarchy
-    {
-      name: 'service_director',
-      label: 'Service Director',
-      parentRole: 'executive',
-    },
-    {
-      name: 'service_manager',
-      label: 'Service Manager',
-      parentRole: 'service_director',
-    },
-    {
-      name: 'service_agent',
-      label: 'Service Agent',
-      parentRole: 'service_manager',
-    },
-  ],
-};
+import type { Role } from '@objectstack/spec/identity';
+
+export const roles: Role[] = [
+  // Top level
+  { name: 'executive', label: 'Executive' },
+
+  // Sales hierarchy
+  { name: 'sales_director', label: 'Sales Director', parent: 'executive' },
+  { name: 'sales_manager', label: 'Sales Manager', parent: 'sales_director' },
+  { name: 'sales_rep', label: 'Sales Representative', parent: 'sales_manager' },
+
+  // Service hierarchy
+  { name: 'service_director', label: 'Service Director', parent: 'executive' },
+  { name: 'service_manager', label: 'Service Manager', parent: 'service_director' },
+  { name: 'service_agent', label: 'Service Agent', parent: 'service_manager' },
+];
 ```
 
 ### How Role Hierarchy Works
@@ -376,32 +347,17 @@ Sharing rules extend access beyond the role hierarchy.
 
 Set baseline access for all users:
 
+Each object's OWD is a single value from the `OWDModel` enum (`private`,
+`public_read`, `public_read_write`, `controlled_by_parent`):
+
 ```typescript
 export const OrganizationDefaults = {
-  lead: {
-    internalAccess: 'private',      // Users see only their own records
-    externalAccess: 'private',
-  },
-  account: {
-    internalAccess: 'private',
-    externalAccess: 'private',
-  },
-  contact: {
-    internalAccess: 'controlled_by_parent', // Access controlled by Account
-    externalAccess: 'private',
-  },
-  opportunity: {
-    internalAccess: 'private',
-    externalAccess: 'private',
-  },
-  campaign: {
-    internalAccess: 'public_read_only', // All users can read
-    externalAccess: 'private',
-  },
-  product: {
-    internalAccess: 'public_read_only',
-    externalAccess: 'private',
-  },
+  lead: 'private',                    // Users see only their own records
+  account: 'private',
+  contact: 'controlled_by_parent',   // Access controlled by parent (Account)
+  opportunity: 'private',
+  campaign: 'public_read',           // All users can read
+  product: 'public_read',
 };
 ```
 
@@ -410,7 +366,7 @@ export const OrganizationDefaults = {
 | Level | Description |
 |-------|-------------|
 | `private` | Owner only (+ role hierarchy) |
-| `public_read_only` | All users can read |
+| `public_read` | All users can read |
 | `public_read_write` | All users can read and edit |
 | `controlled_by_parent` | Controlled by parent object |
 
@@ -419,32 +375,25 @@ export const OrganizationDefaults = {
 Share records based on field criteria:
 
 ```typescript
+import type { SharingRule } from '@objectstack/spec/security';
+
 export const AccountTeamSharingRule: SharingRule = {
   name: 'account_team_sharing',
   label: 'Share Active Customers with Sales Team',
-  objectName: 'account',
-  type: 'criteria_based',
-  
-  // Criteria: Which records to share
-  criteria: {
-    type: { $eq: 'customer' },
-    is_active: { $eq: true },
-  },
-  
-  // Who to share with
+  type: 'criteria',
+  object: 'account',
+
+  // Predicate (CEL): which records to share
+  condition: P`record.type == "customer" && record.is_active == true`,
+
+  // Who to share with (a single recipient: user, group, role, etc.)
   sharedWith: {
     type: 'role',
-    roles: ['sales_manager', 'sales_director'],
+    value: 'sales_manager',
   },
-  
-  // Access level granted
-  accessLevel: 'read_write',
-  
-  // Also share related records
-  includeRelatedObjects: [
-    { objectName: 'contact', accessLevel: 'read_only' },
-    { objectName: 'opportunity', accessLevel: 'read_only' },
-  ],
+
+  // Access level granted: read | edit | full
+  accessLevel: 'edit',
 };
 ```
 
@@ -455,53 +404,24 @@ Share based on record owner characteristics:
 ```typescript
 export const OpportunityOwnerSharingRule: SharingRule = {
   name: 'opportunity_owner_sharing',
-  label: 'Share Opportunities within Same Territory',
-  objectName: 'opportunity',
-  type: 'owner_based',
-  
-  // Share records owned by users in these roles
+  label: 'Share Sales Rep Opportunities with Managers',
+  type: 'owner',
+  object: 'opportunity',
+
+  // Share records owned by this group/role
   ownedBy: {
     type: 'role',
-    roles: ['sales_rep'],
+    value: 'sales_rep',
   },
-  
-  // Share with users in these roles
+
+  // Share with this recipient
   sharedWith: {
     type: 'role',
-    roles: ['sales_rep'],
-    sameTerritory: true, // Only same territory
+    value: 'sales_manager',
   },
-  
-  accessLevel: 'read_only',
+
+  accessLevel: 'read',
 };
-```
-
-### Territory-Based Sharing
-
-Share based on geographic territories:
-
-```typescript
-export const TerritorySharingRules = [
-  {
-    name: 'north_america_territory',
-    label: 'North America Territory',
-    objectName: 'account',
-    type: 'territory_based',
-    
-    criteria: {
-      billing_address: {
-        country: { $in: ['US', 'CA', 'MX'] },
-      },
-    },
-    
-    sharedWith: {
-      type: 'territory',
-      territory: 'north_america',
-    },
-    
-    accessLevel: 'read_write',
-  },
-];
 ```
 
 ### Analytics and Dataset Read Scope
@@ -527,27 +447,17 @@ Control visibility and editability of specific fields.
 
 ### Field Permissions in Profiles
 
+Field permissions are keyed `<object>.<field>` and use `readable` / `editable`:
+
 ```typescript
-fieldPermissions: {
-  account: {
-    // Field-level permissions
-    annual_revenue: { 
-      read: true,      // Can view
-      update: false    // Cannot edit
-    },
-    description: { 
-      read: true, 
-      update: true 
-    },
-    ssn: {
-      read: false,     // Hidden field
-      update: false
-    },
-  },
-  opportunity: {
-    amount: { read: true, update: true },
-    probability: { read: true, update: false },
-  },
+fields: {
+  // Read-only: visible but not editable
+  'account.annual_revenue': { readable: true, editable: false },
+  'account.description': { readable: true, editable: true },
+  // Hidden: not visible at all
+  'account.ssn': { readable: false, editable: false },
+  'opportunity.amount': { readable: true, editable: true },
+  'opportunity.probability': { readable: true, editable: false },
 }
 ```
 
@@ -555,13 +465,13 @@ fieldPermissions: {
 
 ```typescript
 // Hidden: Field not visible at all
-{ read: false, update: false }
+{ readable: false, editable: false }
 
 // Read-Only: Field visible but not editable
-{ read: true, update: false }
+{ readable: true, editable: false }
 
 // Editable: Field visible and editable
-{ read: true, update: true }
+{ readable: true, editable: true }
 ```
 
 ### Server-side enforcement (fail-closed)
@@ -715,51 +625,50 @@ writes.
 Complete security setup for a sales team:
 
 ```typescript
-// 1. Organization-Wide Defaults
-OrganizationDefaults = {
-  account: { internalAccess: 'private' },
-  opportunity: { internalAccess: 'private' },
-  contact: { internalAccess: 'controlled_by_parent' },
+// 1. Organization-Wide Defaults (one OWDModel value per object)
+const OrganizationDefaults = {
+  account: 'private',
+  opportunity: 'private',
+  contact: 'controlled_by_parent',
 };
 
-// 2. Role Hierarchy
-RoleHierarchy = {
-  roles: [
-    { name: 'sales_vp', parentRole: null },
-    { name: 'sales_manager', parentRole: 'sales_vp' },
-    { name: 'sales_rep', parentRole: 'sales_manager' },
-  ],
-};
+// 2. Role Hierarchy (flat roles linked by `parent`)
+const roles = [
+  { name: 'sales_vp', label: 'Sales VP' },
+  { name: 'sales_manager', label: 'Sales Manager', parent: 'sales_vp' },
+  { name: 'sales_rep', label: 'Sales Rep', parent: 'sales_manager' },
+];
 
-// 3. Profiles
-SalesRepProfile = {
-  objectPermissions: {
-    account: { create: true, read: true, update: true, delete: false },
-    opportunity: { create: true, read: true, update: true, delete: false },
+// 3. Profile (a PermissionSet with isProfile: true)
+const SalesRepProfile = {
+  name: 'sales_rep',
+  isProfile: true,
+  objects: {
+    account: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
+    opportunity: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
   },
-  fieldPermissions: {
-    account: {
-      annual_revenue: { read: true, update: false }, // Read-only
-    },
+  fields: {
+    'account.annual_revenue': { readable: true, editable: false }, // Read-only
   },
 };
 
-// 4. Sharing Rules
-AccountSharingRule = {
-  // Share high-value accounts with all sales reps
-  criteria: { annual_revenue: { $gte: 1000000 } },
-  sharedWith: { type: 'role', roles: ['sales_rep'] },
-  accessLevel: 'read_only',
+// 4. Sharing Rule (criteria type with a CEL condition)
+const AccountSharingRule = {
+  name: 'high_value_accounts',
+  type: 'criteria',
+  object: 'account',
+  // Share high-value accounts with sales reps
+  condition: P`record.annual_revenue >= 1000000`,
+  sharedWith: { type: 'role', value: 'sales_rep' },
+  accessLevel: 'read',
 };
 
-// 5. Permission Set
-AdvancedReportingPermissionSet = {
+// 5. Permission Set (systemPermissions is a string array)
+const AdvancedReportingPermissionSet = {
+  name: 'advanced_reporting',
+  objects: {},
   // For sales analysts
-  systemPermissions: {
-    runReports: true,
-    exportReports: true,
-    viewAllData: true,
-  },
+  systemPermissions: ['run_reports', 'export_reports', 'view_all_data'],
 };
 ```
 

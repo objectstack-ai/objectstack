@@ -11,7 +11,7 @@ Complete guide to implementing business rules, validations, and automated proces
 
 1. [Validation Rules](#validation-rules)
 2. [Flows](#flows)
-3. [Triggers](#triggers)
+3. [Hooks](#hooks)
 4. [Approval Nodes](#approval-nodes)
 5. [Formula Logic](#formula-logic)
 6. [Best Practices](#best-practices)
@@ -24,7 +24,10 @@ Validation rules ensure data quality by preventing invalid data from being saved
 
 ### Script Validation
 
-Use JavaScript-like expressions to validate data:
+Validation conditions are **CEL** expressions evaluated against the record. The
+rule **fails** when the condition is `TRUE`, so phrase the condition as the
+*invalid* case. Use lowercase CEL stdlib functions (`today()`, `now()`,
+`isBlank()`, …) and `==`/`!=` for comparisons:
 
 ```typescript
 validations: [
@@ -33,41 +36,40 @@ validations: [
     type: 'script',
     severity: 'error',
     message: 'Close Date must be in the future',
-    condition: 'close_date <= TODAY()',
+    condition: 'record.close_date <= today()',
   },
-  
+
   {
     name: 'discount_limit',
     type: 'script',
     severity: 'warning',
     message: 'Discount exceeds 20%',
-    condition: 'discount > 20',
+    condition: 'record.discount > 20',
   },
 ]
 ```
 
-### Unique Validation
+### Unique Constraints
 
-Ensure field values are unique across records:
+There is no `unique` validation rule type. Uniqueness is enforced with a unique
+index (or field-level `unique: true`), not a validation rule:
 
 ```typescript
-{
-  name: 'email_unique',
-  type: 'unique',
-  severity: 'error',
-  message: 'Email address must be unique',
-  fields: ['email'],
-  caseSensitive: false,
-}
+// Field-level uniqueness
+Field.text({
+  label: 'Email',
+  unique: true,
+})
 
-// Compound unique constraint
-{
-  name: 'account_product_unique',
-  type: 'unique',
-  severity: 'error',
-  message: 'Product already exists for this account',
-  fields: ['account', 'product'],
-}
+// Single-field unique index
+indexes: [
+  { fields: ['email'], unique: true },
+]
+
+// Compound unique index
+indexes: [
+  { fields: ['account', 'product'], unique: true },
+]
 ```
 
 ### Required Field Validation
@@ -86,23 +88,34 @@ Field.text({
   type: 'script',
   severity: 'error',
   message: 'Contact is required for customer accounts',
-  condition: 'type = "customer" AND ISBLANK(primary_contact)',
+  condition: 'record.type == "customer" && isBlank(record.primary_contact)',
 }
 ```
 
-### Validation Functions
+### CEL Functions and Operators
+
+Conditions and formulas use CEL. Logic is expressed with operators (`&&`, `||`,
+`!`, `==`, `!=`, ternary `cond ? a : b`) rather than function calls. The current
+record is `record`; the pre-change snapshot is `previous`. The CEL stdlib
+functions available include:
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `ISBLANK(field)` | Check if field is empty | `ISBLANK(phone)` |
-| `ISCHANGED(field)` | Check if field changed | `ISCHANGED(stage)` |
-| `ISNEW()` | Check if record is new | `ISNEW()` |
-| `PRIORVALUE(field)` | Get previous value | `PRIORVALUE(status)` |
-| `AND(expr1, expr2)` | Logical AND | `AND(is_active, amount > 0)` |
-| `OR(expr1, expr2)` | Logical OR | `OR(status="new", status="pending")` |
-| `NOT(expr)` | Logical NOT | `NOT(is_deleted)` |
-| `TODAY()` | Current date | `TODAY()` |
-| `NOW()` | Current datetime | `NOW()` |
+| `isBlank(x)` | True if null/empty/whitespace | `isBlank(record.phone)` |
+| `isEmpty(x)` | True if empty collection/string | `isEmpty(record.tags)` |
+| `coalesce(a, b, …)` | First non-blank value | `coalesce(record.nickname, record.name)` |
+| `today()` | Current date | `record.close_date <= today()` |
+| `now()` | Current datetime | `record.due_at < now()` |
+| `daysBetween(a, b)` | Whole days between two dates | `daysBetween(record.end_date, today())` |
+| `upper(s)` / `lower(s)` | Case conversion | `upper(record.sku)` |
+| `trim(s)` | Strip whitespace | `trim(record.name)` |
+| `contains(s, sub)` / `startsWith` / `endsWith` | Substring checks | `contains(record.email, "@")` |
+| `matches(s, regex)` | Regex test | `matches(record.email, "^[^@]+@[^@]+$")` |
+| `len(x)` / `size(x)` | Length / size | `len(record.code) == 6` |
+| `min(a, b)` / `max(a, b)` / `abs(x)` / `round(x)` | Numerics | `max(record.amount, 0)` |
+
+To compare against a field's previous value, reference `previous.<field>`
+(e.g. `record.stage != previous.stage`).
 
 ---
 
@@ -123,13 +136,17 @@ export const hotLeadFollowUp: Flow = {
   label: 'Hot Lead Follow Up',
   type: 'record_change',
   status: 'active',
-  trigger: {
-    objectName: 'lead',
-    operations: ['create'],
-    condition: "record.rating == 'hot'",
-  },
   nodes: [
-    { id: 'start', type: 'start', label: 'Start' },
+    {
+      id: 'start',
+      type: 'start',
+      label: 'Start',
+      config: {
+        triggerType: 'record-after-create',
+        objectName: 'lead',
+        condition: "record.rating == 'hot'",
+      },
+    },
     {
       id: 'create_task',
       type: 'create_record',
@@ -168,15 +185,18 @@ export const hotLeadFollowUp: Flow = {
 export const contractExpirationCheck: Flow = {
   name: 'contract_expiration_check',
   label: 'Contract Expiration Check',
-  type: 'scheduled',
+  type: 'schedule',
   status: 'active',
-  schedule: {
-    type: 'cron',
-    expression: '0 0 * * *',
-    timezone: 'UTC',
-  },
   nodes: [
-    { id: 'start', type: 'start', label: 'Start' },
+    {
+      id: 'start',
+      type: 'start',
+      label: 'Start',
+      config: {
+        triggerType: 'schedule',
+        schedule: { type: 'cron', expression: '0 0 * * *', timezone: 'UTC' },
+      },
+    },
     { id: 'find_expiring', type: 'get_record', label: 'Find Expiring Contracts' },
     { id: 'notify_owners', type: 'notify', label: 'Notify Owners' },
     { id: 'end', type: 'end', label: 'End' },
@@ -193,10 +213,14 @@ export const contractExpirationCheck: Flow = {
 
 | Node | Use case |
 |------|----------|
+| `start`, `end` | Flow entry (carries the trigger config) and exit |
 | `decision` | Branch based on CEL predicates |
 | `assignment` | Set variables |
+| `script` | Run an inline expression / function |
+| `loop`, `map` | Iterate over a collection |
 | `create_record`, `update_record`, `delete_record`, `get_record` | CRUD |
-| `http` | Outbound HTTP call |
+| `http` | Outbound HTTP call (`http_request` is a deprecated alias) |
+| `connector_action` | Invoke a registered connector action |
 | `notify` | In-app/email-style notification dispatch |
 | `wait`, `screen`, `approval` | Durable pauses |
 | `subflow` | Invoke another flow |
@@ -204,98 +228,91 @@ export const contractExpirationCheck: Flow = {
 
 ---
 
-## Triggers
+## Hooks
 
-Advanced event-driven automation with custom logic.
+Hooks are the data-layer "logic layer": they run custom code at interception
+points in the ObjectQL execution pipeline (before/after insert, update, delete,
+find, etc.). The construct is `Hook`, imported from `@objectstack/spec/data`.
 
-### Before Trigger
+A hook targets one or more `object`s and subscribes to one or more lifecycle
+`events`. Each event is a combined timing+action enum value, e.g.
+`beforeInsert`, `beforeUpdate`, `afterUpdate`, `afterDelete` (read-side events
+such as `beforeFind`/`afterFind` are also available).
 
-Modify records before they're saved:
+### Before Hook
+
+Mutate the incoming record before it is saved. The pending record lives on
+`ctx.input` (`ctx.input.doc` for insert/update):
 
 ```typescript
-import { Trigger } from '@objectstack/spec/data';
+import { Hook } from '@objectstack/spec/data';
 
-export const AccountBeforeTrigger: Trigger = {
-  name: 'account_before_insert_update',
-  objectName: 'account',
-  timing: 'before',
-  operations: ['insert', 'update'],
-  
-  handler: async (context) => {
-    for (const record of context.records) {
-      // Normalize phone numbers
-      if (record.phone) {
-        record.phone = normalizePhone(record.phone);
-      }
-      
-      // Auto-populate from website
-      if (!record.industry && record.website) {
-        record.industry = await lookupIndustry(record.website);
-      }
+export const AccountBeforeWrite: Hook = {
+  name: 'account_before_write',
+  object: 'account',
+  events: ['beforeInsert', 'beforeUpdate'],
+
+  handler: async (ctx) => {
+    const record = ctx.input.doc as Record<string, any>;
+
+    // Normalize phone numbers
+    if (record.phone) {
+      record.phone = normalizePhone(record.phone);
+    }
+
+    // Auto-populate from website
+    if (!record.industry && record.website) {
+      record.industry = await lookupIndustry(record.website);
     }
   },
 };
 ```
 
-### After Trigger
+### After Hook
 
-Perform actions after records are saved:
+React after a record is persisted. Use `ctx.previous` for the pre-change
+snapshot and `ctx.api.object('x')` for cross-object writes:
 
 ```typescript
-export const OpportunityAfterTrigger: Trigger = {
+export const OpportunityAfterUpdate: Hook = {
   name: 'opportunity_after_update',
-  objectName: 'opportunity',
-  timing: 'after',
-  operations: ['update'],
-  
-  handler: async (context) => {
-    const wonOpps = context.records.filter(
-      r => r.stage === 'closed_won' && 
-           context.oldRecords[r.id].stage !== 'closed_won'
-    );
-    
-    for (const opp of wonOpps) {
-      // Create contract
-      await context.create('contract', {
+  object: 'opportunity',
+  events: ['afterUpdate'],
+
+  handler: async (ctx) => {
+    const opp = ctx.result as Record<string, any>;
+    const wasWon = ctx.previous?.stage === 'closed_won';
+
+    if (opp.stage === 'closed_won' && !wasWon) {
+      // Create a contract via the scoped cross-object API
+      await ctx.api.object('contract').insert({
         account: opp.account,
         opportunity: opp.id,
         contract_value: opp.amount,
         start_date: new Date(),
       });
-      
-      // Send notification
-      await context.sendEmail({
-        to: opp.owner.email,
-        template: 'opportunity_won',
-        data: { opportunity: opp },
-      });
     }
   },
 };
 ```
 
-### Trigger Context
+### Hook Context
 
-Available in trigger handlers:
+`handler` receives a `HookContext` with these fields:
 
 ```typescript
-context = {
-  records: Record[],        // New records
-  oldRecords: Map<id, Record>, // Original records (update/delete)
-  operation: 'insert' | 'update' | 'delete',
-  timing: 'before' | 'after',
-  user: User,              // Current user
-  
-  // Operations
-  create(objectName, data),
-  update(objectName, id, data),
-  delete(objectName, id),
-  query(objectName, filter),
-  
-  // Utilities
-  sendEmail(options),
-  callAPI(url, options),
-  log(message),
+ctx = {
+  id,           // tracing id
+  object,       // target object name
+  event,        // e.g. 'beforeInsert' | 'afterUpdate'
+  input,        // mutable input (e.g. input.doc for insert/update)
+  result,       // mutable operation result (after* events)
+  previous,     // record state before the operation (update/delete)
+  session,      // { userId, tenantId, roles, accessToken, isSystem }
+  user,         // { id, name, email } convenience shortcut
+  transaction,  // active transaction handle, if any
+  ql,           // ObjectQL engine reference
+  api,          // scoped cross-object access: ctx.api.object('x')
 }
 ```
 
@@ -314,20 +331,24 @@ export const opportunityApproval: Flow = {
   label: 'Opportunity Approval',
   type: 'record_change',
   status: 'active',
-  trigger: {
-    objectName: 'opportunity',
-    operations: ['update'],
-    condition: "record.amount >= 50000 && record.stage == 'proposal'",
-  },
   nodes: [
-    { id: 'start', type: 'start', label: 'Start' },
+    {
+      id: 'start',
+      type: 'start',
+      label: 'Start',
+      config: {
+        triggerType: 'record-after-update',
+        objectName: 'opportunity',
+        condition: "record.amount >= 50000 && record.stage == 'proposal'",
+      },
+    },
     {
       id: 'manager_approval',
       type: 'approval',
       label: 'Manager Approval',
       config: {
         approvers: [{ type: 'user', value: '${record.owner_manager_id}' }],
-        behavior: 'all',
+        behavior: 'unanimous',
         approvalStatusField: 'approval_status',
         lockRecord: true,
       },
@@ -338,8 +359,8 @@ export const opportunityApproval: Flow = {
   ],
   edges: [
     { id: 'e1', source: 'start', target: 'manager_approval' },
-    { id: 'approved', source: 'manager_approval', target: 'mark_approved', condition: "approval.status == 'approved'" },
-    { id: 'rejected', source: 'manager_approval', target: 'mark_rejected', condition: "approval.status == 'rejected'" },
+    { id: 'approved', source: 'manager_approval', target: 'mark_approved', label: 'approve' },
+    { id: 'rejected', source: 'manager_approval', target: 'mark_rejected', label: 'reject' },
     { id: 'e4', source: 'mark_approved', target: 'end' },
     { id: 'e5', source: 'mark_rejected', target: 'end' },
   ],
@@ -358,17 +379,18 @@ Complex calculations and logic in formula fields.
 
 ### Conditional Logic
 
+Formula fields are CEL. Use ternary `cond ? a : b` for conditionals and
+`&&`/`||`/`!` for boolean logic. Reference fields via `record.<field>`:
+
 ```typescript
 // Tiered pricing
 Field.formula({
   label: 'Discount Tier',
   type: 'text',
   formula: `
-    IF(amount > 1000000, "Platinum",
-      IF(amount > 500000, "Gold",
-        IF(amount > 100000, "Silver", "Bronze")
-      )
-    )
+    record.amount > 1000000 ? "Platinum" :
+    record.amount > 500000 ? "Gold" :
+    record.amount > 100000 ? "Silver" : "Bronze"
   `,
 })
 
@@ -377,9 +399,8 @@ Field.formula({
   label: 'Health Score',
   type: 'text',
   formula: `
-    IF(AND(is_active, days_since_contact < 30), "Healthy",
-      IF(days_since_contact < 90, "At Risk", "Critical")
-    )
+    record.is_active && record.days_since_contact < 30 ? "Healthy" :
+    record.days_since_contact < 90 ? "At Risk" : "Critical"
   `,
 })
 ```
@@ -391,21 +412,21 @@ Field.formula({
 Field.formula({
   label: 'Days to Close',
   type: 'number',
-  formula: 'DAYS_DIFF(close_date, TODAY())',
+  formula: 'daysBetween(record.close_date, today())',
 })
 
 // Contract end in 30 days
 Field.formula({
   label: 'Expiring Soon',
   type: 'boolean',
-  formula: 'AND(status = "active", DAYS_DIFF(end_date, TODAY()) <= 30)',
+  formula: 'record.status == "active" && daysBetween(record.end_date, today()) <= 30',
 })
 
-// Age in months
+// Age in days
 Field.formula({
-  label: 'Age (Months)',
+  label: 'Age (Days)',
   type: 'number',
-  formula: 'MONTH_DIFF(TODAY(), created_date)',
+  formula: 'daysBetween(today(), record.created_date)',
 })
 ```
 
@@ -416,7 +437,7 @@ Field.formula({
 Field.formula({
   label: 'Gross Margin %',
   type: 'percent',
-  formula: 'IF(revenue > 0, ((revenue - cost) / revenue) * 100, 0)',
+  formula: 'record.revenue > 0 ? ((record.revenue - record.cost) / record.revenue) * 100 : 0',
   scale: 2,
 })
 
@@ -424,7 +445,7 @@ Field.formula({
 Field.formula({
   label: 'Weighted Amount',
   type: 'currency',
-  formula: 'amount * (probability / 100)',
+  formula: 'record.amount * (record.probability / 100)',
   scale: 2,
 })
 
@@ -432,7 +453,7 @@ Field.formula({
 Field.formula({
   label: 'Total with Tax',
   type: 'currency',
-  formula: 'subtotal * 1.0825', // 8.25% tax
+  formula: 'record.subtotal * 1.0825', // 8.25% tax
   scale: 2,
 })
 ```
@@ -444,21 +465,21 @@ Field.formula({
 Field.formula({
   label: 'Full Name',
   type: 'text',
-  formula: 'CONCAT(first_name, " ", last_name)',
-})
-
-// Email domain
-Field.formula({
-  label: 'Email Domain',
-  type: 'text',
-  formula: 'SPLIT(email, "@")[1]',
+  formula: 'record.first_name + " " + record.last_name',
 })
 
 // Uppercase
 Field.formula({
   label: 'Code',
   type: 'text',
-  formula: 'UPPER(sku)',
+  formula: 'upper(record.sku)',
+})
+
+// Has a company email
+Field.formula({
+  label: 'Internal',
+  type: 'boolean',
+  formula: 'endsWith(lower(record.email), "@example.com")',
 })
 ```
 
@@ -494,20 +515,19 @@ Field.formula({
 - Use triggers when a declarative flow is enough
 - Mix unrelated concerns in one flow
 
-### 3. Triggers
+### 3. Hooks
 
 ✅ **DO:**
-- Bulkify all trigger logic
-- Use before triggers for field updates
-- Use after triggers for related records
+- Use before hooks to enrich/normalize the incoming record
+- Use after hooks for related-record side effects
+- Use `ctx.api.object('x')` for cross-object access so writes stay in scope
 - Handle errors gracefully
-- Add logging for debugging
 
 ❌ **DON'T:**
 - Query in loops
-- Create in loops
-- Perform complex calculations in triggers
-- Ignore governor limits
+- Trigger unbounded cascades of writes
+- Perform heavy/long-running work inline in a hook
+- Mutate `ctx.result` in before hooks (it is only populated for after hooks)
 
 ### 4. Approval Nodes
 
@@ -552,7 +572,7 @@ validations: [
     type: 'script',
     severity: 'error',
     message: 'Invalid email address',
-    condition: 'email != null AND !REGEX(email, "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$")',
+    condition: 'record.email != null && !matches(record.email, "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$")',
   },
 ],
 
@@ -563,13 +583,17 @@ flows: [
     label: 'Assign Hot Leads',
     type: 'record_change',
     status: 'active',
-    trigger: {
-      objectName: 'lead',
-      operations: ['create'],
-      condition: "record.rating == 'hot' && record.lead_source == 'web'",
-    },
     nodes: [
-      { id: 'start', type: 'start', label: 'Start' },
+      {
+        id: 'start',
+        type: 'start',
+        label: 'Start',
+        config: {
+          triggerType: 'record-after-create',
+          objectName: 'lead',
+          condition: "record.rating == 'hot' && record.lead_source == 'web'",
+        },
+      },
       { id: 'assign_owner', type: 'assignment', label: 'Assign Owner' },
       { id: 'create_task', type: 'create_record', label: 'Create Follow-up Task' },
       { id: 'end', type: 'end', label: 'End' },
@@ -587,10 +611,10 @@ Field.formula({
   label: 'Lead Score',
   type: 'number',
   formula: `
-    (IF(rating = "hot", 30, IF(rating = "warm", 20, 10))) +
-    (IF(annual_revenue > 1000000, 25, 0)) +
-    (IF(number_of_employees > 500, 20, 0)) +
-    (IF(industry IN ("technology", "finance"), 15, 0))
+    (record.rating == "hot" ? 30 : record.rating == "warm" ? 20 : 10) +
+    (record.annual_revenue > 1000000 ? 25 : 0) +
+    (record.number_of_employees > 500 ? 20 : 0) +
+    (record.industry in ["technology", "finance"] ? 15 : 0)
   `,
 })
 ```
@@ -605,12 +629,10 @@ validations: [
     type: 'script',
     severity: 'error',
     message: 'Cannot skip stages',
+    // Fails when the stage changed to a value not allowed from the previous one.
     condition: `
-      AND(
-        ISCHANGED(stage),
-        NOT(ISNEW()),
-        NOT(VALID_TRANSITION(PRIORVALUE(stage), stage))
-      )
+      record.stage != previous.stage &&
+      !(record.stage in validTransitions[previous.stage])
     `,
   },
 ],
@@ -622,13 +644,17 @@ flows: [
     label: 'Update Probability',
     type: 'record_change',
     status: 'active',
-    trigger: {
-      objectName: 'opportunity',
-      operations: ['update'],
-      condition: 'record.stage != previous.stage',
-    },
     nodes: [
-      { id: 'start', type: 'start', label: 'Start' },
+      {
+        id: 'start',
+        type: 'start',
+        label: 'Start',
+        config: {
+          triggerType: 'record-after-update',
+          objectName: 'opportunity',
+          condition: 'record.stage != previous.stage',
+        },
+      },
       { id: 'update_probability', type: 'update_record', label: 'Update Probability' },
       { id: 'end', type: 'end', label: 'End' },
     ],

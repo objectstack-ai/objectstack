@@ -1,18 +1,21 @@
 {
   "title": "Automation Protocol",
   "pages": [
-    "approval",
-    "bpmn-interop",
-    "connector",
-    "etl",
-    "execution",
+    "---Flows & Execution---",
     "flow",
-    "job",
+    "execution",
     "node-executor",
-    "offline",
     "state-machine",
-    "sync",
+    "bpmn-interop",
+    "---Triggers & Jobs---",
     "trigger-registry",
-    "webhook"
+    "job",
+    "webhook",
+    "offline",
+    "---Workflows & Integration---",
+    "approval",
+    "etl",
+    "sync",
+    "connector"
   ]
 }

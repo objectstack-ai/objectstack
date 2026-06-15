@@ -11,7 +11,7 @@ piece of metadata needs to compute a value or evaluate a condition:
 - **Formula fields** (`type: 'formula'`)
 - **Predicates** — validation `condition`, sharing `condition`, field
   conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`),
-  conditional visibility (`visibleOn`), action `disabled`, view filter
+  view section/column visibility (`visibleOn`), action `disabled`, view filter
   `criteria`, hook `condition`, flow decisions
 - **Dynamic seed values** — fixtures whose value depends on the install-time
   clock or identity context
@@ -89,8 +89,8 @@ export const Invoice = ObjectSchema.create({
   titleFormat: tmpl`Invoice {{record.invoice_no}} – {{record.customer.name}}`,
   fields: {
     total: Field.formula({
-      result_type: 'currency',
-      formula: F`record.subtotal + record.subtotal * record.tax_rate`,
+      type: 'currency',
+      expression: F`record.subtotal + record.subtotal * record.tax_rate`,
     }),
     po_number: Field.text({
       requiredWhen: P`record.amount > 10000`,
@@ -142,10 +142,12 @@ All functions are pure given a pinned `now`, which is what makes
 |:---|:---|:---|
 | `now()` | timestamp | Pinned wall-clock at evaluation start |
 | `today()` | timestamp | `now()` truncated to UTC start-of-day |
-| `daysFromNow(n)` | timestamp | `today() + n` days |
-| `daysAgo(n)` | timestamp | `today() - n` days |
+| `daysFromNow(n)` | timestamp | `now() + n` days (preserves wall-clock time, not start-of-day) |
+| `daysAgo(n)` | timestamp | `now() - n` days |
 | `isBlank(v)` | bool | True for `null`, `undefined`, `''`, `[]` |
 | `coalesce(v, fallback)` | dyn | `v` when non-null, else `fallback` |
+| `trim(v)` | string | `v` with leading/trailing whitespace removed |
+| `joinNonEmpty(list, sep)` | string | `list` joined by `sep`, skipping blank entries |
 
 Add new helpers in
 [`packages/formula/src/stdlib.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/formula/src/stdlib.ts).
@@ -162,7 +164,7 @@ Keep them pure, dependency-free, and AI-readable.
 | `input` | hook payload | hooks |
 | `os.user` | install / request user | seed, predicates with identity |
 | `os.org` | active organization | seed, predicates |
-| `os.env` | install env (`production`, `staging`, …) | seed, predicates |
+| `os.env` | install env (`prod`, `dev`, `test`) | seed, predicates |
 
 ---
 
@@ -174,15 +176,13 @@ Keep them pure, dependency-free, and AI-readable.
 {
   name: 'full_name',
   type: 'formula',
-  formula: F`coalesce(record.salutation, '') + ' '
-            + coalesce(record.first_name, '') + ' '
-            + coalesce(record.last_name, '')`,
-  result_type: 'text',
+  expression: F`joinNonEmpty([record.salutation, record.first_name, record.last_name], ' ')`,
 }
 ```
 
-CEL throws on `null + string`, so wrap every nullable operand in
-`coalesce(..., '')`.
+`joinNonEmpty` skips blank parts, so you avoid the verbose triple-coalesce.
+Building the string by hand with `+` would also work, but CEL throws on
+`null + string`, so each nullable operand must be wrapped in `coalesce(..., '')`.
 
 ### Conditional formula
 
@@ -190,10 +190,9 @@ CEL throws on `null + string`, so wrap every nullable operand in
 {
   name: 'roi',
   type: 'formula',
-  formula: F`coalesce(record.actual_cost, 0) > 0
+  expression: F`coalesce(record.actual_cost, 0) > 0
              ? ((coalesce(record.actual_revenue, 0) - record.actual_cost) * 100.0) / record.actual_cost
              : 0.0`,
-  result_type: 'percent',
 }
 ```
 
@@ -203,7 +202,7 @@ CEL throws on `null + string`, so wrap every nullable operand in
 {
   name: 'rating',
   type: 'picklist',
-  visibleOn: P`record.status == 'qualified'`,
+  visibleWhen: P`record.status == 'qualified'`,
 }
 
 Field.text({
@@ -246,20 +245,25 @@ clock at install time.
 ```ts
 {
   name: 'amount_positive',
-  type: 'expression',
-  condition: P`record.amount > 0`,
-  errorMessage: 'Amount must be positive.',
+  type: 'script',
+  condition: P`record.amount <= 0`,
+  message: 'Amount must be positive.',
 }
 ```
+
+The generic CEL rule is `type: 'script'`. For `script` rules, the `condition`
+is the **failure** predicate — when it evaluates TRUE the validation fails, so
+invert the test (here `amount <= 0` rejects non-positive amounts).
 
 ### Hook condition
 
 ```ts
 {
   name: 'notify_on_escalation',
-  on: 'after_update',
+  object: 'case',
+  events: ['afterUpdate'],
   condition: P`previous.status != 'escalated' && record.status == 'escalated'`,
-  handler: 'notifyOpsTeam',
+  body: { language: 'js', source: 'await ctx.notifyOpsTeam(record)' },
 }
 ```
 
@@ -320,8 +324,9 @@ The low-level engine never throws — `evaluate()` returns `{ ok: false, error }
 But **call sites must not silently swallow that** (ADR-0032): `objectstack build`
 **fails** on an invalid expression (with a located, schema-aware message), and at
 runtime the flow/rule engines **throw** a loud, attributed error instead of
-treating a bad expression as `false`/`null`. The `validate_expression` agent tool
-runs this same validator so you can check an expression before saving.
+treating a bad expression as `false`/`null`. The same `validateExpression`
+validator backs `objectstack build` and metadata registration (and a planned
+`validate_expression` agent tool), so an expression is checked before it ships.
 
 ---
 

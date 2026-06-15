@@ -79,6 +79,12 @@ export const ObjectTranslationDataSchema = lazySchema(() => z.object({
     label: z.string().optional().describe('Translated action label'),
     confirmText: z.string().optional().describe('Translated confirmation prompt'),
     successMessage: z.string().optional().describe('Translated success toast/message'),
+    params: z.record(z.string(), z.object({
+      label: z.string().optional().describe('Translated action parameter label'),
+      helpText: z.string().optional().describe('Translated action parameter help/hint text'),
+      placeholder: z.string().optional().describe('Translated action parameter placeholder'),
+      options: z.record(z.string(), z.string()).optional().describe('Param select option value to translated label'),
+    })).optional().describe('Action parameter translations keyed by parameter name'),
   })).optional().describe('Action translations keyed by action name'),
 
   /**
@@ -145,6 +151,12 @@ export const TranslationDataSchema = lazySchema(() => z.object({
     label: z.string().optional().describe('Translated action label'),
     confirmText: z.string().optional().describe('Translated confirmation prompt'),
     successMessage: z.string().optional().describe('Translated success toast/message'),
+    params: z.record(z.string(), z.object({
+      label: z.string().optional().describe('Translated action parameter label'),
+      helpText: z.string().optional().describe('Translated action parameter help/hint text'),
+      placeholder: z.string().optional().describe('Translated action parameter placeholder'),
+      options: z.record(z.string(), z.string()).optional().describe('Param select option value to translated label'),
+    })).optional().describe('Action parameter translations keyed by parameter name'),
   })).optional().describe('Global action translations keyed by action name'),
 
   /**
@@ -466,6 +478,12 @@ export const ObjectTranslationNodeSchema = lazySchema(() => z.object({
   _actions: z.record(z.string(), z.object({
     label: z.string().optional().describe('Translated action label'),
     confirmMessage: z.string().optional().describe('Translated confirmation message'),
+    params: z.record(z.string(), z.object({
+      label: z.string().optional().describe('Translated action parameter label'),
+      helpText: z.string().optional().describe('Translated action parameter help/hint text'),
+      placeholder: z.string().optional().describe('Translated action parameter placeholder'),
+      options: z.record(z.string(), z.string()).optional().describe('Param select option value to translated label'),
+    })).optional().describe('Action parameter translations keyed by parameter name'),
   })).optional().describe('Action translations keyed by action name'),
 
   /** Notification message translations keyed by notification name */

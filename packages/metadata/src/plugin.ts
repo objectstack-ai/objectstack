@@ -72,6 +72,7 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     connectors: 'connector',
     emailTemplates: 'email_template',
     docs: 'doc',
+    books: 'book',
     data: 'dataset',
 };
 

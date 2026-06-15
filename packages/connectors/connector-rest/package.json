@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/connector-rest",
-  "version": "9.5.0",
+  "version": "9.5.1",
   "license": "Apache-2.0",
   "description": "Generic REST connector for ObjectStack — the reference concrete connector that registers a `request` action on the automation engine's connector registry (ADR-0018 §Addendum).",
   "main": "dist/index.js",

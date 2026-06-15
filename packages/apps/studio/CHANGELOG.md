@@ -1,5 +1,13 @@
 # @objectstack/studio
 
+## 9.5.1
+
+### Patch Changes
+
+- Updated dependencies [ee72aae]
+  - @objectstack/spec@9.5.1
+  - @objectstack/platform-objects@9.5.1
+
 ## 9.5.0
 
 ### Minor Changes

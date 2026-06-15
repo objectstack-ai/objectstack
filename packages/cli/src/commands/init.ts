@@ -150,7 +150,6 @@ export default defineStack({
 const ${toCamelCase(namespace)}Item: Data.Object = {
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
-  ownership: 'own',
   fields: {
     name: {
       type: 'text',
@@ -223,7 +222,6 @@ export default defineStack({
 const ${toCamelCase(namespace)}Item: Data.Object = {
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
-  ownership: 'own',
   fields: {
     name: {
       type: 'text',

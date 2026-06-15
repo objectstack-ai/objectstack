@@ -83,7 +83,7 @@ ObjectStack enforces **Separation of Concerns** through protocol boundaries:
 ### Example: Defining a Customer Object
 
 ```typescript
-// packages/crm/src/objects/customer.object.ts
+// src/objects/customer.object.ts
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Customer = ObjectSchema.create({
@@ -143,64 +143,59 @@ That's the job of the other layers.
 ### Example: Permission Rules
 
 ```typescript
-// packages/crm/src/permissions/customer.permission.ts
-import { Permission } from '@objectstack/spec';
+// src/permissions/sales_rep.permission.ts
+import type { PermissionSet } from '@objectstack/spec';
 
-export const CustomerPermission = Permission({
-  object: 'customer',
-  rules: [
-    {
-      profile: 'sales_rep',
-      crud: {
-        create: true,
-        read: true,
-        update: true,
-        delete: false, // Only managers can delete
-      },
-      fieldPermissions: {
-        annual_revenue: { read: true, edit: false }, // Read-only
-      },
+// A permission set (here used as a profile) keyed by object and field.
+export const SalesRepPermission: PermissionSet = {
+  name: 'sales_rep',
+  label: 'Sales Rep',
+  isProfile: true,
+  objects: {
+    customer: {
+      allowCreate: true,
+      allowRead: true,
+      allowEdit: true,
+      allowDelete: false, // Only managers can delete
     },
-    {
-      profile: 'sales_manager',
-      crud: {
-        create: true,
-        read: true,
-        update: true,
-        delete: true,
-      },
-    },
-  ],
-});
+  },
+  fields: {
+    // <object>.<field> -> field-level security
+    'customer.annual_revenue': { readable: true, editable: false }, // Read-only
+  },
+};
 ```
 
 ### Example: Workflow Automation
 
 ```typescript
-// packages/crm/src/workflows/customer.workflow.ts
-import { Workflow } from '@objectstack/spec';
+// src/flows/high_value_customer.flow.ts
+import { defineFlow } from '@objectstack/spec';
 
-export const CustomerWorkflow = Workflow({
-  object: 'customer',
-  trigger: 'after_create',
-  conditions: [
-    { field: 'annual_revenue', operator: 'greaterThan', value: 1000000 },
+// Automation is authored as a Flow: a graph of nodes connected by edges.
+// A record_change flow runs when records of its target object change; branch
+// edges carry CEL conditions evaluated against the changed record.
+export const HighValueCustomerFlow = defineFlow({
+  name: 'high_value_customer',
+  label: 'High-Value Customer Alert',
+  type: 'record_change',
+  status: 'active',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Customer created' },
+    { id: 'assign', type: 'update_record', label: 'Assign owner' },
+    { id: 'notify', type: 'send_email', label: 'Alert leadership' },
+    { id: 'end', type: 'end', label: 'End' },
   ],
-  actions: [
-    {
-      type: 'assign_owner',
-      params: { owner: 'enterprise_sales_team' },
-    },
-    {
-      type: 'send_email',
-      params: {
-        template: 'high_value_customer_alert',
-        to: 'sales-leadership@company.com',
-      },
-    },
+  edges: [
+    // Only continue when annual revenue exceeds $1M.
+    { id: 'e1', source: 'start', target: 'assign', condition: 'record.annual_revenue > 1000000' },
+    { id: 'e2', source: 'assign', target: 'notify' },
+    { id: 'e3', source: 'notify', target: 'end' },
   ],
 });
 ```
+
+See the [Automation Protocol](/docs/protocol/objectos) for the full Flow node and edge reference.
 
 ObjectOS **orchestrates** these rules at runtime, independent of the data structure or UI.
 
@@ -220,63 +215,50 @@ ObjectOS **orchestrates** these rules at runtime, independent of the data struct
 ### Example: List View
 
 ```typescript
-// packages/crm/src/views/customer_list.view.ts
-import { ListView } from '@objectstack/spec';
+// src/views/customer.view.ts
+import { defineView } from '@objectstack/spec';
 
-export const CustomerListView = ListView({
-  object: 'customer',
-  label: 'All Customers',
-  type: 'grid',
-  columns: [
-    { field: 'name', width: 200 },
-    { field: 'industry', width: 150 },
-    { field: 'annual_revenue', width: 150 },
-    { field: 'primary_contact', width: 180 },
-  ],
-  filters: [
-    { field: 'industry', operator: 'equals' },
-    { field: 'annual_revenue', operator: 'greaterThan' },
-  ],
-  defaultSort: { field: 'name', direction: 'asc' },
+// A view is authored with defineView({ list, form }); the list/form configs
+// are nested, and the data source declares which object the view reads.
+export const CustomerView = defineView({
+  list: {
+    type: 'grid',
+    data: { provider: 'object', object: 'customer' },
+    columns: [
+      { field: 'name' },
+      { field: 'industry' },
+      { field: 'annual_revenue' },
+      { field: 'primary_contact' },
+    ],
+    filterableFields: ['industry', 'annual_revenue'],
+    sort: [{ field: 'name', order: 'asc' }],
+  },
 });
 ```
 
 ### Example: Form View
 
 ```typescript
-// packages/crm/src/views/customer_form.view.ts
-import { FormView } from '@objectstack/spec';
+// src/views/customer.view.ts
+import { defineView } from '@objectstack/spec';
 
-export const CustomerFormView = FormView({
-  object: 'customer',
-  label: 'Customer Details',
-  type: 'tabbed',
-  tabs: [
-    {
-      label: 'Overview',
-      sections: [
-        {
-          label: 'Company Information',
-          fields: ['name', 'industry', 'annual_revenue'],
-        },
-        {
-          label: 'Contact',
-          fields: ['primary_contact'],
-        },
-      ],
-    },
-    {
-      label: 'Related Records',
-      sections: [
-        {
-          label: 'Opportunities',
-          component: 'related_list',
-          object: 'opportunity',
-          filter: { customer: '$recordId' },
-        },
-      ],
-    },
-  ],
+// The same defineView container also carries the form layout. A form is a
+// list of sections, each holding fields.
+export const CustomerView = defineView({
+  form: {
+    type: 'simple',
+    data: { provider: 'object', object: 'customer' },
+    sections: [
+      {
+        label: 'Company Information',
+        fields: ['name', 'industry', 'annual_revenue'],
+      },
+      {
+        label: 'Contact',
+        fields: ['primary_contact'],
+      },
+    ],
+  },
 });
 ```
 
@@ -289,6 +271,13 @@ The UI doesn't "know" the field types. It asks ObjectQL for the schema and rende
 ## How They Work Together
 
 Let's trace a **real-world scenario**: A sales rep creates a new high-value customer.
+
+<Callout type="info">
+The TypeScript in Steps 2–6 below is **conceptual pseudo-code** illustrating the
+flow of control between layers. Calls like `Auth.getCurrentUser()`,
+`Permission.check()`, `ObjectQL.getSchema()`, and `Workflow.getTriggersFor()` are
+not real exported APIs — they stand in for the kernel's internal orchestration.
+</Callout>
 
 ### Step 1: User Action (ObjectUI)
 
@@ -431,15 +420,23 @@ export const Opportunity = ObjectSchema.create({
 ### 2. ObjectOS: Define Business Rules
 
 ```typescript
-export const OpportunityWorkflow = Workflow({
-  object: 'opportunity',
-  trigger: 'field_update',
-  conditions: [
-    { field: 'stage', operator: 'equals', value: 'closed_won' },
+import { defineFlow } from '@objectstack/spec';
+
+export const OpportunityWonFlow = defineFlow({
+  name: 'opportunity_won',
+  label: 'Opportunity Closed Won',
+  type: 'record_change',
+  status: 'active',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Stage changed' },
+    { id: 'invoice', type: 'create_record', label: 'Create invoice' },
+    { id: 'notify', type: 'send_email', label: 'Notify sales team' },
+    { id: 'end', type: 'end', label: 'End' },
   ],
-  actions: [
-    { type: 'create_invoice', params: { object: 'invoice' } },
-    { type: 'send_notification', params: { to: 'sales_team' } },
+  edges: [
+    { id: 'e1', source: 'start', target: 'invoice', condition: "record.stage == 'closed_won'" },
+    { id: 'e2', source: 'invoice', target: 'notify' },
+    { id: 'e3', source: 'notify', target: 'end' },
   ],
 });
 ```
@@ -447,16 +444,23 @@ export const OpportunityWorkflow = Workflow({
 ### 3. ObjectUI: Define the Kanban View
 
 ```typescript
-export const OpportunityKanban = ListView({
-  object: 'opportunity',
-  type: 'kanban',
-  groupBy: 'stage',
-  columns: [
-    { field: 'title' },
-    { field: 'amount' },
-    { field: 'customer' },
-  ],
-  enableDragDrop: true,
+import { defineView } from '@objectstack/spec';
+
+export const OpportunityKanbanView = defineView({
+  list: {
+    type: 'kanban',
+    data: { provider: 'object', object: 'opportunity' },
+    columns: [
+      { field: 'title' },
+      { field: 'amount' },
+      { field: 'customer' },
+    ],
+    // Kanban-specific config: group columns by the stage field.
+    kanban: {
+      groupByField: 'stage',
+      summarizeField: 'amount',
+    },
+  },
 });
 ```
 

@@ -1021,15 +1021,16 @@ export class AuthManager {
           }
         };
 
-        const promote = (await isPlatformAdmin()) || (await isActiveOrgAdmin());
+        const platformAdmin = await isPlatformAdmin();
+        const promote = platformAdmin || (await isActiveOrgAdmin());
         const storedRole = typeof (user as any).role === 'string' ? (user as any).role : '';
         const roles = storedRole
           .split(',')
           .map((s: string) => s.trim())
           .filter(Boolean);
         if (promote && !roles.includes('admin')) roles.push('admin');
-        if (!promote) return { user: { ...user, roles }, session };
-        return { user: { ...user, role: 'admin', roles }, session };
+        if (!promote) return { user: { ...user, roles, isPlatformAdmin: platformAdmin }, session };
+        return { user: { ...user, role: 'admin', roles, isPlatformAdmin: platformAdmin }, session };
       }));
     }
 

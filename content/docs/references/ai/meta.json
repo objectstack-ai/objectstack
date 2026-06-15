@@ -1,16 +1,19 @@
 {
   "title": "AI Protocol",
   "pages": [
+    "---Agents & Tools---",
     "agent",
-    "conversation",
-    "embedding",
-    "knowledge-document",
-    "knowledge-source",
-    "mcp",
-    "model-registry",
-    "skill",
-    "solution-blueprint",
     "tool",
+    "skill",
+    "conversation",
+    "mcp",
+    "---Knowledge & Embeddings---",
+    "knowledge-source",
+    "knowledge-document",
+    "embedding",
+    "---Models & Solutions---",
+    "model-registry",
+    "solution-blueprint",
     "usage"
   ]
 }

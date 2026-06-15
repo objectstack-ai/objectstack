@@ -29,6 +29,7 @@ export * from './migration.zod';
 // Security & Compliance
 export * from './auth-config.zod';
 export * from './doc.zod';
+export * from './book.zod';
 export * from './email-config.zod';
 export * from './email-template.zod';
 export * from './email-template.form';

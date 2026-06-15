@@ -1,5 +1,13 @@
 # @objectstack/platform-objects
 
+## 9.5.1
+
+### Patch Changes
+
+- Updated dependencies [ee72aae]
+  - @objectstack/spec@9.5.1
+  - @objectstack/metadata-core@9.5.1
+
 ## 9.5.0
 
 ### Patch Changes

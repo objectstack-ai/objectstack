@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-feed",
-  "version": "9.5.0",
+  "version": "9.5.1",
   "license": "Apache-2.0",
   "description": "Feed/Chatter Service for ObjectStack — implements IFeedService with in-memory adapter for comments, reactions, field changes, and record subscriptions",
   "type": "module",

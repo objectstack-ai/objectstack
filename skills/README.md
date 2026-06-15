@@ -24,7 +24,7 @@ authoritative Zod sources in `node_modules/@objectstack/spec/src/...`.
 | [AI](./objectstack-ai/SKILL.md) | `ai` | Design ObjectStack AI agents, tools, skills, conversations, model registry entries, and MCP integrations. |
 | [API](./objectstack-api/SKILL.md) | `api` | Design the server-side API surface that an ObjectStack runtime exposes — REST/GraphQL endpoints, auth providers, realtime channels, error envelopes, batch/versioning contracts. |
 | [i18n](./objectstack-i18n/SKILL.md) | `i18n` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the per-locale source layout. |
-| [Formula](./objectstack-formula/SKILL.md) | `expression` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. Use whenever the user is writing an `F`, `P`, or `cel` tagged-template literal, or asks "how do I express X as a formula / predicate". Do not use for SQL fragments (driver-native), cron schedules (cron dialect), or L2 hook bodies (those belong in objectstack-data). |
+| [Formula](./objectstack-formula/SKILL.md) | `expression` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. |
 
 <!-- END GENERATED: skills -->
 
