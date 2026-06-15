@@ -6,6 +6,13 @@ Primary AI instruction file for this repo. Read natively by Claude Code, GitHub 
 
 ---
 
+## Communication
+
+- **与维护者沟通时一律使用中文**(对话回复、PR/issue 讨论中的解释性文字)。
+- 代码、标识符、提交信息(commit messages)、ADR/文档正文等仓库产物保持现有语言惯例(以英文为主),不要因本条而改写。
+
+---
+
 ## Build & Test
 
 ```bash
