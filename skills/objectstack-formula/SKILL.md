@@ -138,6 +138,13 @@ Registered automatically. Source:
 If you need a helper that doesn't exist, prefer adding it to the stdlib
 (small, pure, dependency-free) over inlining a complex CEL expression.
 
+> **Only the stdlib above + CEL built-ins (`has`, `size`, `contains`,
+> `startsWith`, `endsWith`, `matches`, `min`, `max`, …) are callable.** An
+> UNKNOWN function — `PRIOR()`, a legacy `ISBLANK()`, a typo'd `isBlnk()` — now
+> **fails `objectstack build`** with a "no matching overload" type error (#1877),
+> rather than silently no-op'ing the predicate at run time. Use `previous.x`
+> (not `PRIOR()`), `isBlank()` (not `ISBLANK()`).
+
 ---
 
 ## Mandatory patterns for AI emission

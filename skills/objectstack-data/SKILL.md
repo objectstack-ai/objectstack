@@ -295,14 +295,26 @@ See [rules/field-types.md](./rules/field-types.md) for full reference.
 |:--------|:---------------|
 | One-to-Many (independent) | `lookup` field on child |
 | One-to-Many (owned) | `master_detail` field on child |
-| Many-to-Many | Junction object with two `lookup` fields |
+| Many-to-Many (simple) | multi-value `lookup` (`multiple: true`) — an **array column** of ids |
+| Many-to-Many (with attributes) | Junction object with two `lookup` fields |
 | Hierarchical | `tree` field (self-reference) |
 
 See [rules/relationships.md](./rules/relationships.md) for detailed examples.
 
+> **`multiple: true` lookup ≠ junction object.** A multi-value lookup
+> (`{ type: 'lookup', reference: 'x', multiple: true }`) is stored and read as an
+> **array of ids** on the record — reference elements positionally
+> (`{record.tags.0}` in flow values). It is NOT a junction table. Reach for a
+> **junction object** (two lookups) only when the relationship itself carries
+> attributes (role, added_at, …). (#1872)
+
 ### Validation Patterns
 
 **⚠️ Script validation is inverted:** Validation **fails** when expression is `true`.
+
+> On **insert**, an optional field omitted from the payload reads as `null` in a
+> validation predicate — so `record.due_date == null` matches an omitted field the
+> same as an explicit `null` (#1871). (On update, the prior record supplies it.)
 
 Common validation types:
 - `script` — Formula expression (inverted logic)
