@@ -125,4 +125,29 @@ it('resolves config.functionName as an alias for function (#1870 DX)', async () 
         expect(r.success).toBe(false);
         expect(r.error).toMatch(/invoke_function.*requires.*function/i);
     });
+    it('exposes the function result via outputVariable for downstream nodes (pure-function pattern)', async () => {
+        const seen: Array<Record<string, unknown>> = [];
+        engine.setFunctionResolver((name) => {
+            if (name === 'compute') return () => ({ ai_category: 'billing', ai_confidence: 0.9 });
+            if (name === 'consume') return ((c: any) => { seen.push(c.input); return null; });
+            return undefined;
+        });
+        engine.registerFlow('chain', {
+            name: 'chain', label: 'Chain', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'mk', type: 'script', label: 'compute', config: { function: 'compute', outputVariable: 'aiResult' } },
+                { id: 'use', type: 'script', label: 'consume', config: { function: 'consume', inputs: { cat: '{aiResult.ai_category}', conf: '{aiResult.ai_confidence}' } } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'mk' },
+                { id: 'e2', source: 'mk', target: 'use' },
+                { id: 'e3', source: 'use', target: 'end' },
+            ],
+        } as any);
+        const r = await engine.execute('chain', {} as any);
+        expect(r.success).toBe(true);
+        expect(seen).toEqual([{ cat: 'billing', conf: 0.9 }]);
+    });
 });

@@ -3,6 +3,7 @@
 import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
+import { interpolate } from './template.js';
 
 /**
  * Screen / Script built-in nodes — 'screen' and 'script' executors.
@@ -147,10 +148,19 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           };
         }
 
-        // Map declared inputs (`config.inputs` | `config.input`) to the function.
-        const input = (cfg.inputs ?? cfg.input ?? {}) as Record<string, unknown>;
+        // Map declared inputs (`config.inputs` | `config.input`) to the function,
+        // interpolating `{var}` references against the live flow variables (so a
+        // function can consume a prior node's output, e.g. `{aiResult.id}`).
+        const input = interpolate(cfg.inputs ?? cfg.input ?? {}, variables, context) as Record<string, unknown>;
+        const outputVariable =
+          typeof cfg.outputVariable === 'string' && cfg.outputVariable.trim() ? cfg.outputVariable.trim() : undefined;
         try {
           const result = await handler({ input, variables, automation: context, logger: ctx.logger });
+          // Pure-function pattern: the function RETURNS its result; `outputVariable`
+          // exposes it as a flow variable so a later declarative node persists it
+          // (e.g. `update_record fields: { ai_category: '{aiResult.ai_category}' }`).
+          // Data I/O stays on the flow graph — the function itself does no writes.
+          if (outputVariable) variables.set(outputVariable, result);
           return { success: true, output: { function: target, result } };
         } catch (err) {
           return {

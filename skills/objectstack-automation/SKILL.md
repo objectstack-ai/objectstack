@@ -548,6 +548,30 @@ them right the first time:
    Inline `config.script` JS is **not executed** by the built-in runtime (no
    server-side sandbox) — move logic into a registered `function`.
 
+   **A flow `function` is a PURE compute step — it does NOT read/write the
+   database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
+   exposes that value as a flow variable, and a later **declarative** node persists
+   it. Keep data effects on the flow graph (visible, governed, build-checkable):
+
+   ```ts
+   // ❌ DON'T: expect the function to update the record itself (it has no data API)
+   // ✅ DO: function returns values → outputVariable → update_record persists
+   { id: 'ai', type: 'script', config: {
+       function: 'helpdesk.aiTriageStub',     // returns { ai_category, ai_sentiment, … }
+       inputs: { ticketId: '{record.id}' },   // inputs are interpolated
+       outputVariable: 'ai',
+   } },
+   { id: 'apply', type: 'update_record', config: {
+       objectName: 'helpdesk_ticket',
+       filter: { id: '{record.id}' },
+       fields: { ai_category: '{ai.ai_category}', ai_sentiment: '{ai.ai_sentiment}' },
+   } },
+   ```
+
+   `defineStack({ functions: { 'helpdesk.aiTriageStub': (ctx) => ({ ai_category: 'other', … }) } })`.
+   If you genuinely need data-lifecycle **side effects** (read/write other records),
+   that's an L2 **hook** (objectstack-data) — hooks get `ctx.api`; flow functions don't.
+
 10. **Conditions are bare CEL — only the stdlib is callable.** `now()`,
     `today()`, `daysFromNow(n)`, `daysAgo(n)`, `isBlank(v)`, `coalesce(a, b)`,
     `trim(s)`, plus CEL built-ins (`has`, `size`, `contains`, `startsWith`, …).
