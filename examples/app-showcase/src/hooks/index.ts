@@ -47,7 +47,7 @@ export const AuditTaskCompletionHook = {
   condition: "record.done == true",
   body: {
     language: 'js' as const,
-    source: "var r = ctx.result || ctx.input || {}; if (ctx.log) ctx.log('task completed: ' + (r.title || r.id || 'unknown'));",
+    source: "var r = ctx.result || ctx.input || {}; if (typeof ctx.log === 'function') ctx.log('task completed: ' + (r.title || r.id || 'unknown'));",
     capabilities: ['log'] as ('log')[],
   },
   async: true,
@@ -66,7 +66,7 @@ export const WarnOverBudgetHook = {
   condition: "record.spent > record.budget",
   body: {
     language: 'js' as const,
-    source: "var r = ctx.result || ctx.input || {}; if (ctx.log) ctx.log('project over budget: ' + (r.name || r.id || 'unknown') + ' (' + r.spent + ' / ' + r.budget + ')');",
+    source: "var r = ctx.result || ctx.input || {}; if (typeof ctx.log === 'function') ctx.log('project over budget: ' + (r.name || r.id || 'unknown') + ' (' + r.spent + ' / ' + r.budget + ')');",
     capabilities: ['log'] as ('log')[],
   },
   async: true,
