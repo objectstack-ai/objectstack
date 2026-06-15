@@ -132,9 +132,13 @@ This ensures ObjectStack apps can run on Node.js + PostgreSQL today, Python + SQ
 
 | Layer | Responsibility | Example |
 | :--- | :--- | :--- |
-| **Protocol** | Defines capabilities | `allowRead: string` (a slot for a formula) |
-| **App** | Defines business logic | `allowRead: "$user.role == 'admin'"` |
-| **Engine** | Enforces the logic | Compiles formula to SQL `WHERE` clause |
+| **Protocol** | Defines capabilities | A row-level-security policy slot (`operation` + `using` clause) |
+| **App** | Defines business logic | `{ operation: 'select', using: "role = 'admin'" }` |
+| **Engine** | Enforces the logic | Compiles the `using` condition into a SQL `WHERE` clause |
+
+<Callout type="info">
+CRUD permissions (`allowRead`, `allowEdit`, …) are simple booleans — they grant or deny an operation. Record-level *conditional* access is a separate mechanism: [Row-Level Security](/docs/getting-started/architecture) policies, whose `using` clause is a SQL-like (PostgreSQL-compatible) predicate over context variables such as `current_user.role` and `current_user.id`.
+</Callout>
 
 ### Single Source of Truth
 
@@ -153,7 +157,7 @@ AI agents should not bypass the application model by calling raw SQL, scraping U
 
 ```
 Traditional AI app: Database schema -> App code -> Custom query -> Hand-written MCP tool
-ObjectStack: Zod metadata -> Environment Artifact -> ObjectStack runtime -> API / UI / MCP tools
+ObjectStack: Zod metadata -> Metadata registry -> ObjectStack runtime -> API / UI / MCP tools
 ```
 
 ---

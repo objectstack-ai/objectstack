@@ -8,8 +8,8 @@ description: Step-by-step guide to creating, testing, and publishing ObjectStack
 This guide walks you through creating an ObjectStack plugin from scratch — from project setup to testing and registration.
 
 <Callout type="info">
-**Source:** `packages/spec/src/kernel/plugin.zod.ts`  
-**Import:** `import { PluginManifestSchema, PluginHookSchema } from '@objectstack/spec/kernel'`
+**Source:** `packages/core/src/types.ts` (the runtime `Plugin` interface)  
+**Import:** `import type { Plugin, PluginContext } from '@objectstack/core'`
 </Callout>
 
 ---
@@ -54,48 +54,39 @@ Create `tsconfig.json`:
 
 ---
 
-## Step 2: Define the Plugin Manifest
+## Step 2: Define the Package Manifest
 
-Create `src/manifest.ts`:
+A plugin package describes itself with a manifest validated by `ManifestSchema`. Create `src/manifest.ts`:
 
 ```typescript
-import { defineStudioPlugin } from '@objectstack/spec';
+import { ManifestSchema } from '@objectstack/spec/kernel';
 
-export const manifest = defineStudioPlugin({
-  name: 'hello_world',
-  label: 'Hello World Plugin',
+export const manifest = ManifestSchema.parse({
+  name: 'objectstack-plugin-hello',
   version: '1.0.0',
   description: 'A simple example plugin that adds a greeting service.',
-  author: {
-    name: 'Your Name',
-    email: 'you@example.com'
-  },
-  compatibility: {
-    minVersion: '3.0.0'
-  },
-  permissions: [
-    'object:read',
-    'object:write'
-  ],
-  services: ['greeting'],
-  hooks: ['before_record_create']
+  type: 'plugin',
 });
 ```
+
+<Callout type="info">
+A runtime plugin's behaviour (services, hooks, objects) is declared in code via the `Plugin` interface — see Step 3. The manifest only describes package metadata.
+</Callout>
 
 ---
 
 ## Step 3: Implement the Plugin
 
-Create `src/index.ts`:
+Create `src/index.ts`. A runtime plugin implements the `Plugin` interface: services are registered inside `init(ctx)` via `ctx.registerService`, and lifecycle hooks are wired with `ctx.hook(...)`.
 
 ```typescript
-import type { PluginManifest } from '@objectstack/spec/kernel';
+import type { Plugin, PluginContext } from '@objectstack/core';
 
 export interface GreetingService {
   greet(name: string): string;
 }
 
-export function createHelloPlugin() {
+export function createHelloPlugin(): Plugin {
   const greetingService: GreetingService = {
     greet(name: string): string {
       return `Hello, ${name}! Welcome to ObjectStack.`;
@@ -104,23 +95,21 @@ export function createHelloPlugin() {
 
   return {
     name: 'hello_world',
+    version: '1.0.0',
 
-    // Register services with the kernel
-    onRegister(kernel: { registerService: (name: string, service: unknown) => void }) {
-      kernel.registerService('greeting', greetingService);
-    },
+    init(ctx: PluginContext) {
+      // Register services so other plugins can consume them
+      ctx.registerService('greeting', greetingService);
 
-    // Hook into record lifecycle
-    hooks: {
-      before_record_create(context: { object: string; data: Record<string, unknown> }) {
+      // Hook into record lifecycle
+      ctx.hook('data:beforeInsert', (context: { object: string; data: Record<string, unknown> }) => {
         if (context.object === 'contact' && context.data.first_name) {
           // Auto-generate a greeting field
           context.data.welcome_message = greetingService.greet(
             context.data.first_name as string
           );
         }
-        return context;
-      }
+      });
     }
   };
 }
@@ -138,16 +127,16 @@ import { ObjectSchema } from '@objectstack/spec/data';
 export const greetingLogObject = ObjectSchema.create({
   name: 'greeting_log',
   label: 'Greeting Log',
-  fields: [
-    { name: 'recipient', label: 'Recipient', type: 'text', required: true },
-    { name: 'message', label: 'Message', type: 'text', required: true },
-    { name: 'sent_at', label: 'Sent At', type: 'datetime' },
-    { name: 'channel', label: 'Channel', type: 'select', options: [
+  fields: {
+    recipient: { label: 'Recipient', type: 'text', required: true },
+    message: { label: 'Message', type: 'text', required: true },
+    sent_at: { label: 'Sent At', type: 'datetime' },
+    channel: { label: 'Channel', type: 'select', options: [
       { label: 'Email', value: 'email' },
       { label: 'SMS', value: 'sms' },
       { label: 'In-App', value: 'in_app', default: true }
     ]}
-  ]
+  }
 });
 ```
 
@@ -159,48 +148,52 @@ Create `src/index.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
+import type { PluginContext } from '@objectstack/core';
 import { createHelloPlugin } from './index';
 
-describe('HelloPlugin', () => {
-  const plugin = createHelloPlugin();
+// Minimal fake PluginContext that captures registered services and hooks.
+function createFakeContext() {
+  const services: Record<string, unknown> = {};
+  const hooks: Record<string, (...args: any[]) => void> = {};
+  const ctx = {
+    registerService: (name: string, service: unknown) => { services[name] = service; },
+    hook: (name: string, handler: (...args: any[]) => void) => { hooks[name] = handler; },
+  } as unknown as PluginContext;
+  return { ctx, services, hooks };
+}
 
+describe('HelloPlugin', () => {
   it('should have the correct name', () => {
-    expect(plugin.name).toBe('hello_world');
+    expect(createHelloPlugin().name).toBe('hello_world');
   });
 
   it('should register the greeting service', () => {
-    const services: Record<string, unknown> = {};
-    plugin.onRegister({
-      registerService: (name, service) => { services[name] = service; }
-    });
+    const { ctx, services } = createFakeContext();
+    createHelloPlugin().init(ctx);
     expect(services).toHaveProperty('greeting');
   });
 
   it('should greet by name', () => {
-    const services: Record<string, unknown> = {};
-    plugin.onRegister({
-      registerService: (name, service) => { services[name] = service; }
-    });
+    const { ctx, services } = createFakeContext();
+    createHelloPlugin().init(ctx);
     const greeting = services.greeting as { greet: (name: string) => string };
     expect(greeting.greet('Alice')).toBe('Hello, Alice! Welcome to ObjectStack.');
   });
 
   it('should add welcome message on contact create', () => {
-    const context = {
-      object: 'contact',
-      data: { first_name: 'Bob' } as Record<string, unknown>
-    };
-    const result = plugin.hooks.before_record_create(context);
-    expect(result.data.welcome_message).toBe('Hello, Bob! Welcome to ObjectStack.');
+    const { ctx, hooks } = createFakeContext();
+    createHelloPlugin().init(ctx);
+    const context = { object: 'contact', data: { first_name: 'Bob' } as Record<string, unknown> };
+    hooks['data:beforeInsert'](context);
+    expect(context.data.welcome_message).toBe('Hello, Bob! Welcome to ObjectStack.');
   });
 
   it('should not modify non-contact objects', () => {
-    const context = {
-      object: 'task',
-      data: { title: 'Test' } as Record<string, unknown>
-    };
-    const result = plugin.hooks.before_record_create(context);
-    expect(result.data).not.toHaveProperty('welcome_message');
+    const { ctx, hooks } = createFakeContext();
+    createHelloPlugin().init(ctx);
+    const context = { object: 'task', data: { title: 'Test' } as Record<string, unknown> };
+    hooks['data:beforeInsert'](context);
+    expect(context.data).not.toHaveProperty('welcome_message');
   });
 });
 ```
@@ -228,6 +221,8 @@ export default defineStack({
   ]
 });
 ```
+
+The kernel loads plugins in dependency order, calling each plugin's `init(ctx)` first (where services and hooks are registered) and then `start(ctx)` once all plugins have initialized.
 
 ---
 
@@ -274,7 +269,7 @@ function handlePluginError(error: unknown): EnhancedApiError {
 
 ### Testing Checklist
 
-- [ ] Manifest validates against `PluginManifestSchema`
+- [ ] Manifest validates against `ManifestSchema`
 - [ ] Services register correctly
 - [ ] Hooks fire on expected events
 - [ ] Custom objects validate against `ObjectSchema`
@@ -306,8 +301,7 @@ For plugins that extend the **ObjectStack Studio IDE**, use `defineStudioPlugin`
 
 <Callout type="info">
 **Source:** `packages/spec/src/studio/plugin.zod.ts`  
-**Import:** `import { defineStudioPlugin } from '@objectstack/spec/studio'`  
-**Alt Import:** `import { Studio } from '@objectstack/spec'`
+**Import:** `import { defineStudioPlugin } from '@objectstack/spec/studio'`
 </Callout>
 
 ### Basic Studio Plugin
@@ -448,6 +442,6 @@ Metadata viewers declare which modes they support:
 
 ## Next Steps
 
-- [Common Patterns](/guides/common-patterns) — See how plugins fit into the application architecture
+- [Common Patterns](/docs/guides/common-patterns) — See how plugins fit into the application architecture
 - [Error Catalog](/docs/guides/cheatsheets/error-catalog) — Return proper error codes from your plugin
 - [Field Type Gallery](/docs/guides/cheatsheets/field-type-gallery) — Define custom objects with the right field types

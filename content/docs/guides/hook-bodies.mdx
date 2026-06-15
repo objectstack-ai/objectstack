@@ -15,16 +15,20 @@ A third "compiled module" form (L3) was considered and explicitly **disabled** �
 ## TL;DR
 
 ```ts
-// Authoring (TS source — packages/myapp/src/objects/account.hook.ts)
-export const beforeInsert = defineHook({
-  name: 'normalize_account',
-  object: 'account',
-  events: ['beforeInsert'],
-  handler: async (ctx) => {
-    if (ctx.input.website) {
-      ctx.input.website = ctx.input.website.toLowerCase();
-    }
-  },
+// Authoring (TS source — packages/myapp/objectstack.config.ts)
+export default defineStack({
+  hooks: [
+    {
+      name: 'normalize_account',
+      object: 'account',
+      events: ['beforeInsert'],
+      handler: async (ctx) => {
+        if (ctx.input.website) {
+          ctx.input.website = ctx.input.website.toLowerCase();
+        }
+      },
+    },
+  ],
 });
 ```
 
@@ -42,7 +46,7 @@ export const beforeInsert = defineHook({
 }
 ```
 
-The CLI builder extracts the function body, AST-checks it, and emits the metadata above. No `runtimeModule`, no `bundle.functions[normalize_account]` — the artifact is self-contained.
+The CLI builder stringifies the inline handler, runs a regex allow-list over the source, and emits the metadata above. No `runtimeModule`, no `bundle.functions[normalize_account]` — the artifact is self-contained.
 
 ## Why metadata-only?
 
@@ -97,7 +101,7 @@ The script sees only what the surrounding `ctx` object exposes:
 | `ctx.crypto.randomUUID()` | UUID generation. | `crypto.uuid` |
 | `ctx.crypto.hash(algo, data)` | Sha-256/512 etc. | `crypto.hash` |
 | `ctx.log.{info,warn,error}` | Structured logging. | `log` |
-| `ctx.connector(name).<method>(...)` | Outbound HTTP / SaaS calls. | (separate Connector spec) |
+| `ctx.connector(name).<method>(...)` _(planned)_ | Outbound HTTP / SaaS calls. **Not yet wired into the sandbox** — ships with the separate Connector spec. | (separate Connector spec) |
 
 ### What the sandbox forbids
 
@@ -138,15 +142,15 @@ If you have a body that genuinely cannot be expressed in L1+L2 (typically: it ne
 
 ## Build pipeline
 
-`objectstack build` walks `*.hook.ts` and `*.action.ts` in your package:
+`objectstack build` (an alias for `objectstack compile`) loads your `defineStack({...})` config and lowers every inline hook/action handler. It does **not** glob `*.hook.ts` / `*.action.ts` source files off disk — the body source comes from the live function objects in the loaded config:
 
-1. Parse with the TypeScript compiler API.
-2. Find each handler arrow / function expression.
-3. AST allow-list check the body (see "What the sandbox forbids" above).
-4. **Pass:** emit `body: { language: 'js', source: <printed body>, capabilities: <inferred> }`.
-5. **Fail:** the build aborts with a precise diagnostic — for example: `account.hook.ts:42 — fetch() is not allowed in hook bodies. Define a Connector recipe instead.`
+1. Load the `defineStack` config and normalise its shape.
+2. For each inline handler, take its source via `String(fn)` (the callable is already loaded by tsx/esbuild).
+3. Run a regex allow-list over the stringified body (see "What the sandbox forbids" above).
+4. **Pass:** emit `body: { language: 'js', source: <body>, capabilities: <inferred> }`.
+5. **Forbidden token (default):** extraction fails, a `bodyExtractionWarning` is recorded, and the callable still ships via the back-compat handler-ref bundle — the build does **not** abort. Pass `objectstack compile --strict-body` to turn extraction warnings into a hard build failure (exit 1) with a per-callable diagnostic, e.g. `hook 'normalize_account': fetch() is not allowed in hook bodies — declare a Connector recipe instead.`
 
-Capabilities are inferred from the AST (e.g. `ctx.api.object(...).insert(...)` ⇒ `api.write`). You can override with a directive comment when the inference is wrong.
+Capabilities are inferred by matching known patterns in the body source (e.g. `ctx.api.object(...).insert(...)` ⇒ `api.write`). A fuller AST-based analysis is planned for a later version. You can override with a directive comment when the inference is wrong.
 
 ## Migration
 

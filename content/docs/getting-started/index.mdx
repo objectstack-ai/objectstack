@@ -47,7 +47,7 @@ Think of ObjectStack as:
 
 - **Kubernetes** for business applications - Declarative configuration over imperative code
 - **Terraform** for data modeling - Infrastructure as code, but for data
-- **GraphQL + React Server Components** - Schema-driven data + UI rendering combined
+- **GraphQL + React Server Components** - Schema-driven data + UI rendering combined (REST ships today; GraphQL is exposed via the `IGraphQLService` contract)
 - **MCP for business systems** - Structured, permission-aware tools generated from metadata
 
 ## Key Features
@@ -81,7 +81,7 @@ Think of ObjectStack as:
 | Traditional Approach | ObjectStack Approach |
 | :--- | :--- |
 | Write SQL migrations manually | Schema changes sync automatically |
-| Build CRUD APIs by hand | REST/GraphQL generated from schema |
+| Build CRUD APIs by hand | REST generated from schema (GraphQL via the `IGraphQLService` contract) |
 | Manually define agent tools | MCP/tool surfaces generated from metadata |
 | Duplicate validation logic 3x | Define once, enforce everywhere |
 | Lock into one database vendor | Swap databases without code changes |
@@ -108,11 +108,11 @@ Before you start, make sure you have the following installed:
 | Tool | Minimum Version | Check Command |
 |:---|:---|:---|
 | **Node.js** | 18.0.0+ | `node --version` |
-| **pnpm** | 8.0.0+ | `pnpm --version` |
-| **TypeScript** | 5.3.0+ | `npx tsc --version` |
+| **pnpm** | 8.0.0+ (repo pins 10.x) | `pnpm --version` |
+| **TypeScript** | 5.3.0+ (project targets 6.x) | `npx tsc --version` |
 
 <Callout type="info">
-**Why pnpm?** ObjectStack uses pnpm workspaces for monorepo management. Install it with `npm install -g pnpm` or `corepack enable`.
+**Why pnpm?** ObjectStack uses pnpm workspaces for monorepo management. Install it with `npm install -g pnpm` or `corepack enable` (corepack will pull the pinned pnpm 10.x from the repo's `packageManager` field).
 </Callout>
 
 ## Common Setup Issues
@@ -126,17 +126,18 @@ corepack enable
 ```
 
 ### TypeScript version mismatch
-ObjectStack requires TypeScript 5.3+. Update with:
+ObjectStack works with TypeScript 5.3+, but the project itself is built and tested against TypeScript 6.x. Update with:
 ```bash
-pnpm add -D typescript@latest
+pnpm add -D typescript@^6
 ```
 
 ### Port 3000 already in use
+`objectstack dev` (what `pnpm dev` runs) automatically shifts to the next free port when 3000 is busy, so you usually don't need to do anything. To pin an explicit port instead:
 ```bash
 # Find the process using port 3000
 lsof -i :3000
-# Kill it or use a different port
-PORT=3001 pnpm dev
+# Use an explicit port (OS_PORT; PORT is the legacy alias)
+OS_PORT=3001 pnpm dev
 ```
 
 For more troubleshooting, see the [Troubleshooting & FAQ](/docs/guides/troubleshooting) guide.

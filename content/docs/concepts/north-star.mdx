@@ -59,8 +59,10 @@ development live outside this repo.
 
 ## Environment Artifact
 
-`os compile` produces a deployable environment artifact. The envelope is defined
-by `EnvironmentArtifactSchema` in
+`os compile` produces the local runtime bundle (`dist/objectstack.json`,
+validated against `ObjectStackDefinitionSchema`). When published to Cloud it is
+wrapped in the immutable environment artifact envelope defined by
+`EnvironmentArtifactSchema` in
 `packages/spec/src/system/environment-artifact.zod.ts`.
 
 The artifact contains:

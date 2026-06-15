@@ -27,13 +27,26 @@ Enable scoped route registration in `objectstack.config.ts`:
 ```typescript
 import { defineStack } from '@objectstack/spec';
 
-export default defineStack({
+const stack = defineStack({
+  // ...your manifest, objects, apis, etc.
+});
+
+export default {
+  ...stack,
   api: {
     enableProjectScoping: true,
     projectResolution: 'auto',
   },
-});
+};
 ```
+
+<Callout type="warn">
+`defineStack` validates against a schema that has no top-level `api` field, so
+unknown keys are stripped — passing `api` *inside* `defineStack({ ... })` is
+silently dropped and scoping stays disabled. Attach the `api` block to the
+exported config object instead, as shown above. The CLI reads it from the
+exported config (`config.api`) when registering the REST and dispatcher plugins.
+</Callout>
 
 The option names are historical for compatibility with existing config files;
 the route, header, env var, and request context all use `environment`.
@@ -80,8 +93,11 @@ That sends `X-Environment-Id: env_prod` on unscoped requests.
 
 ## Resolution order
 
-`HttpDispatcher.resolveEnvironmentContext` resolves the environment in this
-order:
+The open-source `HttpDispatcher` only parses the scoped URL for an
+environment-id hint (`extractEnvironmentIdFromPath`) and forwards it via
+`prepareResolverHints`. Actual resolution is owned by the host's
+`KernelResolver` (`resolveKernel`, per ADR-0006 Phase 5), which resolves the
+environment in this order:
 
 1. `:environmentId` from `/api/v1/environments/:environmentId/...`
 2. Hostname through the configured environment registry

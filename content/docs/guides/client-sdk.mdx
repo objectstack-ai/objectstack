@@ -17,7 +17,7 @@ The `@objectstack/client` is the official TypeScript client for ObjectStack. It 
 - **Batch Operations**: Efficient bulk create/update/upsert/delete with transaction support
 - **Query Builder**: Programmatic query construction with `createQuery()` and `createFilter()`
 - **Standardized Errors**: Machine-readable error codes with retry guidance
-- **100% Protocol Compliant**: Implements all 15 API namespaces defined in `@objectstack/spec`
+- **Protocol Compliant**: Implements the core API namespaces defined in `@objectstack/spec`, plus additional namespaces (approvals, feed, organizations, projects/environments)
 
 ## Installation
 
@@ -75,7 +75,7 @@ async function main() {
 
 When you call `client.connect()`, the client:
 
-1. Fetches `/.well-known/objectstack` (or falls back to `/api/v1`)
+1. Probes `/api/v1/discovery` first, then falls back to `{origin}/.well-known/objectstack`
 2. Parses the discovery response including `routes`, `features`, and `services`
 3. Configures all API route paths dynamically
 
@@ -105,7 +105,7 @@ if (discovery.services?.auth?.enabled) {
 
 ## Protocol Coverage
 
-The `@objectstack/client` SDK aims to implement the ObjectStack API protocol specification. It covers all 15 API namespaces defined in `@objectstack/spec`:
+The `@objectstack/client` SDK aims to implement the ObjectStack API protocol specification. The core namespaces are listed below; the client also exposes additional namespaces (`approvals`, `feed`, `organizations`, `projects`/environments) — see [`index.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/client/src/index.ts) for the full surface:
 
 | Namespace | Status | Methods | Purpose |
 |:----------|:------:|:--------|:--------|
@@ -123,10 +123,10 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | **i18n** | ✅ | 3 | Internationalization |
 | **notifications** | 🟡 | 7 | Legacy notification helpers; receipt/inbox cut-over pending |
 | **realtime** | ✅ | 6 | WebSocket subscriptions |
-| **ai** | ✅ | 4 | AI services (NLQ, chat, insights) |
+| **ai** | ✅ | 3 | AI services (NLQ, suggest, insights) |
 
 <Callout type="info">
-**Protocol compliance & verification**: See [`CLIENT_SPEC_COMPLIANCE.md`](https://github.com/objectstack-ai/spec/blob/main/packages/client/CLIENT_SPEC_COMPLIANCE.md) for detailed method-by-method verification and [`CLIENT_SERVER_INTEGRATION_TESTS.md`](https://github.com/objectstack-ai/spec/blob/main/packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md) for comprehensive integration test specifications.
+**Protocol compliance & verification**: See [`CLIENT_SPEC_COMPLIANCE.md`](https://github.com/objectstack-ai/framework/blob/main/packages/client/CLIENT_SPEC_COMPLIANCE.md) for detailed method-by-method verification and [`CLIENT_SERVER_INTEGRATION_TESTS.md`](https://github.com/objectstack-ai/framework/blob/main/packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md) for comprehensive integration test specifications.
 </Callout>
 
 ---
@@ -136,8 +136,8 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 ### `client.meta` — Metadata
 
 ```typescript
-// Get object schema
-const accountSchema = await client.meta.getObject('account');
+// Get object schema (getItem('object', name) returns the object definition)
+const accountSchema = await client.meta.getItem('object', 'account');
 console.log(accountSchema.fields);
 
 // List all metadata types
@@ -262,8 +262,14 @@ await client.permissions.getEffectivePermissions();
 await client.workflow.getConfig('approval');
 await client.workflow.getState('approval', recordId);
 await client.workflow.transition({ object: 'approval', recordId, transition: 'submit' });
-await client.workflow.approve({ object: 'approval', recordId });
-await client.workflow.reject({ object: 'approval', recordId, reason: 'Incomplete' });
+
+// Approvals — request-based decision API (ADR-0019)
+// Approval is a flow node, not a workflow step: decisions are keyed by request id.
+await client.approvals.listRequests({ status: 'pending' }); // "my approvals" inbox
+await client.approvals.getRequest(requestId);
+await client.approvals.approve(requestId, { comment: 'Looks good' });
+await client.approvals.reject(requestId, { comment: 'Incomplete' });
+await client.approvals.listActions(requestId); // audit trail
 
 // Realtime — WebSocket subscriptions
 await client.realtime.connect({ protocol: 'websocket' });
@@ -288,9 +294,10 @@ await client.notifications.markAllRead();
 
 // AI — AI-powered features
 await client.ai.nlq({ query: 'Show me all active accounts' });
-await client.ai.chat({ message: 'Summarize this environment', context: environmentId });
 await client.ai.suggest({ object: 'account', field: 'industry' });
 await client.ai.insights({ object: 'sales', recordId: dealId });
+// Note: conversational chat is no longer on the client — use the Vercel AI SDK
+// (`useChat()` from `@ai-sdk/react`) directly against your chat endpoint.
 
 // i18n — Internationalization
 await client.i18n.getLocales();
@@ -435,6 +442,10 @@ interface ClientConfig {
   logger?: Logger;
   /** Enable debug logging */
   debug?: boolean;
+  /** Active project/environment id — injects an `X-Environment-Id` header for multi-tenant routing */
+  environmentId?: string;
+  /** Active UI locale (BCP-47, e.g. `'zh-CN'`) — injects an `Accept-Language` header; sync via `setLocale()` */
+  locale?: string;
 }
 ```
 
@@ -520,7 +531,7 @@ cd packages/client
 pnpm test:integration
 ```
 
-Integration tests verify end-to-end communication with a live ObjectStack server across all 15 API namespaces.
+Integration tests verify end-to-end communication with a live ObjectStack server across the client's API namespaces.
 
 <Callout type="info">
 **Test coverage**: Integration test specifications cover discovery/connection, authentication, metadata operations, CRUD operations (basic, batch, advanced queries), permissions, workflow, realtime, notifications, AI services, i18n, analytics, packages, views, storage, and automation.
@@ -532,9 +543,9 @@ Integration tests verify end-to-end communication with a live ObjectStack server
 
 For detailed information about the client's protocol implementation:
 
-- **[Protocol Compliance Matrix](https://github.com/objectstack-ai/spec/blob/main/packages/client/CLIENT_SPEC_COMPLIANCE.md)** — Method-by-method verification of all API methods across 15 namespaces
-- **[Integration Test Specifications](https://github.com/objectstack-ai/spec/blob/main/packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md)** — Comprehensive test cases for client-server communication
-- **[Quick Reference Guide](https://github.com/objectstack-ai/spec/blob/main/packages/client/QUICK_REFERENCE.md)** — Developer navigation and API reference
+- **[Protocol Compliance Matrix](https://github.com/objectstack-ai/framework/blob/main/packages/client/CLIENT_SPEC_COMPLIANCE.md)** — Method-by-method verification of all API methods across 15 namespaces
+- **[Integration Test Specifications](https://github.com/objectstack-ai/framework/blob/main/packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md)** — Comprehensive test cases for client-server communication
+- **[Package README](https://github.com/objectstack-ai/framework/blob/main/packages/client/README.md)** — Developer navigation and API reference
 
 ---
 

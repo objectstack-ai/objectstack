@@ -1,11 +1,11 @@
 ---
 title: Adding a Metadata Type
-description: How to register a new metadata type so it shows up in the Setup app's Metadata Admin with full CRUD, overlay diffing, and (optionally) a custom editor.
+description: How to register a new metadata type so it shows up in the Studio app's Metadata Admin with full CRUD, overlay diffing, and (optionally) a custom editor.
 ---
 
 # Adding a Metadata Type
 
-The **Metadata Admin** engine (Setup app → *All Metadata Types*) automatically
+The **Metadata Admin** engine (Studio app → *All Metadata Types*) automatically
 renders a directory tile, list page, schema-driven form, layered diff view,
 quick-find palette, and version history for **every** type registered in the
 metadata plugin registry. To plug in a new type you usually only need two
@@ -14,50 +14,69 @@ files; a third file is required only if you want a bespoke editor.
 ## TL;DR
 
 ```
-1. Add an entry to DEFAULT_METADATA_TYPE_REGISTRY    (packages/spec)
+1. Register the type entry: built-in -> DEFAULT_METADATA_TYPE_REGISTRY;
+   plugin -> additionalTypes on MetadataPluginConfig  (packages/spec)
 2. Define a Zod schema for the type                  (packages/spec/src/<domain>/)
 3. (Optional) Register a custom editor               (objectui/.../builtinComponents.tsx)
 ```
 
-That's it — no UI code required for the 80% case. The engine introspects the
-registry entry to pick an icon, a domain group, whether to allow runtime
-overrides, and the JSON schema used to generate the form.
+That's it — no UI code required for the 80% case. The engine reads the
+registry entry to pick a domain group and whether to allow runtime
+overrides, and resolves the type's Zod schema (via `getMetadataTypeSchema`)
+to generate the form.
 
 ---
 
 ## 1. Register the type
 
-The single source of truth is the `DEFAULT_METADATA_TYPE_REGISTRY` in
-`packages/spec/src/kernel/metadata-plugin.zod.ts`. Each entry follows
-`MetadataTypeEntrySchema`:
+The single source of truth for built-in types is the
+`DEFAULT_METADATA_TYPE_REGISTRY` in
+`packages/spec/src/kernel/metadata-plugin.zod.ts`. Each entry is validated by
+`MetadataTypeRegistryEntrySchema`:
 
 ```ts
 {
   type: 'my_widget',          // canonical metadata type name (singular, snake_case)
   label: 'My Widget',         // display label (English)
-  domain: 'ui',               // one of: data | ui | automation | ai | api | identity | security | system | platform | other
-  icon: 'Box',                // lucide-react icon name
   description: 'Widgets shown on the home dashboard.',
-  schema: MyWidgetJsonSchema, // JSON Schema generated from your Zod (see step 2)
-  allowOrgOverride: true,     // false = compile-time only, true = runtime overlays allowed
-  allowRuntimeCreate: true,   // allow admin to create new instances at runtime
+  domain: 'ui',               // one of: data | ui | automation | system | security | ai
+  filePatterns: ['**/*.my-widget.ts', '**/*.my-widget.yml'], // required: globs used to discover files of this type
   supportsOverlay: true,      // false = no 3-state diff in the editor
+  allowOrgOverride: true,     // false = compile-time only, true = runtime overlays accepted via the metadata API
+  allowRuntimeCreate: true,   // allow admin to create new instances at runtime
 }
 ```
 
+> The registry entry has **no** `icon` or `schema` field — the form is
+> generated from the type's Zod schema (step 2), not from anything stored on
+> the entry. `filePatterns` is **required**; omitting it fails validation.
+
 > **Naming rule (Prime Directive #3):** the `type` field is **singular**
-> (`widget`, not `widgets`). REST endpoints below add the plural automatically
-> (`/api/v1/meta/widgets`).
+> (`my_widget`, not `my_widgets`). REST routes use the canonical type name
+> verbatim as the `:type` path param (`/api/v1/meta/my_widget`) — there is no
+> automatic pluralization.
 
 The `allowOrgOverride` flag is the **only** place that controls whether the
 overlay store accepts writes for this type. The runtime env-var
-`OBJECTSTACK_METADATA_WRITABLE=foo,bar` flips the flag on at boot for the
-listed types — useful for opt-in writable behaviour in production.
+`OS_METADATA_WRITABLE=foo,bar` (legacy alias: `OBJECTSTACK_METADATA_WRITABLE`)
+flips the flag on at runtime for the listed types — useful for opt-in writable
+behaviour in production. The allow-list is parsed and cached lazily on first
+use, not pinned at process start.
+
+### Built-in vs plugin-contributed types
+
+`DEFAULT_METADATA_TYPE_REGISTRY` is the core built-in array — edit it (and
+`BUILTIN_METADATA_TYPE_SCHEMAS`, step 2) only for types that ship with the
+platform. A third-party package contributes its own types instead through
+the **`additionalTypes`** array on `MetadataPluginConfig`, and registers the
+matching Zod schema with `registerMetadataTypeSchema(type, schema)` from its
+`onInstall` hook so the `/api/v1/meta/types/:type` endpoint emits a real JSON
+Schema. The registry entry shape is the same in both cases.
 
 ## 2. Define the Zod schema
 
-Place the schema under the appropriate domain folder, mirroring the
-namespace it belongs to (e.g. `packages/spec/src/ui/my-widget.zod.ts`):
+Place the schema under the matching domain folder
+(e.g. `packages/spec/src/ui/my-widget.zod.ts`):
 
 ```ts
 import { z } from 'zod';
@@ -76,14 +95,31 @@ export const MyWidgetSchema = z.object({
 export type MyWidget = z.infer<typeof MyWidgetSchema>;
 ```
 
-Then export the JSON Schema for the registry:
+Then wire the Zod schema so the engine can resolve it for this type. The
+registry entry does **not** carry a JSON Schema — instead the engine looks the
+type up via `getMetadataTypeSchema(type)` and derives the JSON Schema the
+editor consumes from the registered Zod schema.
 
-```ts
-import { zodToJsonSchema } from 'zod-to-json-schema';
-export const MyWidgetJsonSchema = zodToJsonSchema(MyWidgetSchema, { name: 'MyWidget' });
-```
+- **Built-in types:** add the entry to `BUILTIN_METADATA_TYPE_SCHEMAS` in
+  `packages/spec/src/kernel/metadata-type-schemas.ts`:
 
-The Metadata Admin **SchemaForm** consumes this JSON Schema and produces:
+  ```ts
+  const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = {
+    // …
+    my_widget: MyWidgetSchema,
+  };
+  ```
+
+- **Plugin-contributed types:** call `registerMetadataTypeSchema` from your
+  plugin's `onInstall` hook (see *Plugin lifecycle*, below):
+
+  ```ts
+  import { registerMetadataTypeSchema } from '@objectstack/spec';
+  registerMetadataTypeSchema('my_widget', MyWidgetSchema);
+  ```
+
+The Metadata Admin **SchemaForm** consumes the JSON Schema derived from this
+Zod schema and produces:
 
 - A field per top-level property
 - Inline validation matching the Zod constraints (min/max/regex/enum)
@@ -137,18 +173,35 @@ Common designer prop shapes already supported:
 
 ## Routing
 
-No routing changes are required. The Setup app already includes:
+No routing changes are required. The Studio app already includes the
+directory entry in its navigation:
 
 ```ts
-// setup.app.ts
-nav: [
-  { type: 'component', componentRef: 'metadata:directory', label: 'Data Model' },
+// studio.app.ts
+navigation: [
+  {
+    id: 'group_overview',
+    type: 'group',
+    label: 'Overview',
+    children: [
+      {
+        id: 'nav_metadata_directory',
+        type: 'component',
+        label: 'All Metadata Types',
+        componentRef: 'metadata:directory',
+        icon: 'layers',
+      },
+      // …
+    ],
+  },
+  // …
 ]
 ```
 
 The directory page enumerates every registered type. The
-`metadata:resource` route handles list/edit/create/history for whatever
-`?type=<name>` is selected.
+`metadata:resource` component handles list/edit/create/history for whatever
+type is selected, addressed via `params: { type, package }` rather than a
+query string.
 
 ## i18n
 
@@ -164,15 +217,15 @@ If you omit them, the directory falls back to the registry `label`.
 
 ## Checklist
 
-- [ ] Registry entry added (`type`, `label`, `domain`, `icon`, `schema`, flags)
+- [ ] Registry entry added (`type`, `label`, `domain`, required `filePatterns`, flags) — for plugins, via `additionalTypes` on `MetadataPluginConfig`
 - [ ] Zod schema authored under `packages/spec/src/<domain>/<name>.zod.ts`
-- [ ] JSON Schema exported and referenced from the registry entry
+- [ ] Zod schema wired up: built-in → `BUILTIN_METADATA_TYPE_SCHEMAS`; plugin → `registerMetadataTypeSchema()` in `onInstall`
 - [ ] (Optional) Custom editor registered in `builtinComponents.tsx`
 - [ ] (Optional) i18n labels added to `metadata-admin/i18n.ts`
 - [ ] `pnpm test` passes (framework) and `pnpm --filter @object-ui/app-shell build` passes (objectui)
 
 ## Related
 
-- [`/api/v1/meta/types`](./api-reference.mdx) — the REST endpoint that powers the directory
+- [`GET /api/v1/meta`](./api-reference.mdx) — lists every registered metadata type; per-type items at `GET /api/v1/meta/:type`, history at `GET /api/v1/meta/:type/:name/history`
 - [Object & Field design](./data-modeling.mdx) — the canonical example of a writable metadata type
 - [Plugin lifecycle](./plugin-development.mdx) — how third-party packages contribute types

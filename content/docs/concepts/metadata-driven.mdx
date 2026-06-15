@@ -106,9 +106,10 @@ In metadata-driven development, we embrace three core truths:
 The UI doesn't "build" a form; it **projects** the Object schema into visual components.
 
 ```typescript
-// The schema IS the form
-const TaskForm = <FormView object="task" />
-// No manual JSX needed
+// Conceptual: the schema IS the form. The runtime renders a view
+// definition (a FormView metadata object) — there is no FormView
+// React component to import; you declare the view, not the JSX.
+const taskForm = { type: 'form', object: 'task' }
 ```
 
 ### 2. The API is a Consequence
@@ -120,11 +121,11 @@ You don't write controllers or routes. ObjectOS *generates* the entire API graph
 
 ```bash
 # Automatically available after defining the object:
-GET    /api/v1/task
-POST   /api/v1/task
-GET    /api/v1/task/:id
-PATCH  /api/v1/task/:id
-DELETE /api/v1/task/:id
+GET    /api/v1/data/task
+POST   /api/v1/data/task
+GET    /api/v1/data/task/:id
+PATCH  /api/v1/data/task/:id
+DELETE /api/v1/data/task/:id
 ```
 
 ### 3. The Schema is the Application
@@ -230,7 +231,7 @@ export const Task = ObjectSchema.create({
       ],
     }),
     
-    assignee: Field.lookup('user', {
+    assignee: Field.lookup('sys_user', {
       label: 'Assignee',
     }),
   },
@@ -239,6 +240,8 @@ export const Task = ObjectSchema.create({
 // That's it. Full CRUD, REST endpoints, typed SDK, MCP tools,
 // validation, and permission scaffolding are ready.
 ```
+
+> **📘 Note**: Built-in platform objects carry system prefixes — the standard user object is `sys_user`, not `user`. Use `Field.lookup('sys_user', ...)` to reference it. Names like `task` or `account` in these examples are illustrative custom objects.
 
 ### 5. Agent-Ready by Construction
 
@@ -364,9 +367,9 @@ export const TodoTask = ObjectSchema.create({
 });
 ```
 
-### 3. Select Field Options Must Use Label/Value Objects
+### 3. Prefer Explicit Label/Value Objects for Select Options
 
-**✅ Correct:**
+**✅ Recommended:**
 ```typescript
 status: Field.select({
   label: 'Status',
@@ -378,20 +381,22 @@ status: Field.select({
 }),
 ```
 
-**❌ Incorrect:**
+**✅ Also valid (auto-normalized):**
 ```typescript
 status: Field.select({
-  options: ['open', 'in_progress', 'closed'], // Wrong!
+  options: ['Open', 'In Progress', 'Closed'],
 }),
+// Helper converts each string to a lowercase snake_case value:
+// [{ label: 'Open', value: 'open' }, { label: 'In Progress', value: 'in_progress' }, ...]
 ```
 
-**Why?** Option values are machine identifiers stored in the database and must be lowercase to avoid case-sensitivity issues in queries.
+**Why?** Option values are machine identifiers stored in the database, so they must be lowercase to avoid case-sensitivity issues in queries. `Field.select()` accepts plain string arrays and auto-normalizes them to lowercase snake_case `{ label, value }` pairs for you. Use explicit `{ label, value }` objects when the display label must differ from the stored value (or to set `default: true`).
 
 ### 4. Lookup Fields Must Specify Target Object
 
 **✅ Correct:**
 ```typescript
-owner: Field.lookup('user', {
+owner: Field.lookup('sys_user', {
   label: 'Owner',
   required: true,
 }),
@@ -488,7 +493,7 @@ export const ExampleObject = ObjectSchema.create({
     }),
     
     // Lookup field
-    owner: Field.lookup('user', {
+    owner: Field.lookup('sys_user', {
       label: 'Owner',
       required: true,
     }),
@@ -514,7 +519,7 @@ export const ExampleObject = ObjectSchema.create({
 
 ## Next Steps
 
-- [Metadata Lifecycle & HMR](/concepts/metadata-lifecycle) - How writes propagate through the Repository / Change Log / Cache / Registry
-- [The Stack](/docs/core-concepts/the-stack) - How the three protocols work together
-- [Object Model](/docs/core-concepts/object-model) - Deep dive into the universal object model
-- [ObjectQL Protocol](/docs/protocols/objectql) - Learn the data protocol specification
+- [Metadata Lifecycle & HMR](/docs/concepts/metadata-lifecycle) - How writes propagate through the Repository / Change Log / Cache / Registry
+- [Architecture](/docs/concepts/architecture) - How the three protocols work together
+- [Core Concepts](/docs/concepts/core) - Deep dive into the kernel, services, and object model
+- [ObjectQL Protocol](/docs/protocol/objectql) - Learn the data protocol specification

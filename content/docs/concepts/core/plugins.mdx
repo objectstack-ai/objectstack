@@ -11,38 +11,48 @@ Plugins are the building blocks of ObjectStack. A plugin is a plain JavaScript/T
 
 ```typescript
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { z } from 'zod';
 
 export class MyPlugin implements Plugin {
     // Identity
     name = 'com.example.myplugin';
     version = '1.0.0';
-    description = 'An example plugin';
-    
-    // Dependencies (Optional)
-    dependencies = {
-        '@objectstack/runtime': '^1.0.0'
-    };
 
-    // Configuration Schema (Optional Zod Schema)
+    // Dependencies (Optional)
+    // An array of *plugin names* the kernel must initialize before this one.
+    // This controls init ordering — it is NOT an npm-style version map.
+    dependencies = ['com.objectstack.engine.objectql'];
+
+    // Configuration Schema (Optional)
+    // Read by the plugin loader to validate config; it lives on the plugin
+    // metadata rather than the base `Plugin` interface.
     configSchema = z.object({
         apiKey: z.string()
     });
 
     /**
-     * Initialization Phase
+     * Init Phase (REQUIRED)
      * Use this to register services, listeners, or other early setup.
      */
-    async onInit(ctx: PluginContext) {
+    async init(ctx: PluginContext) {
         // Register a service
-        ctx.services.register('myService', new MyService());
+        ctx.registerService('myService', new MyService());
     }
 
     /**
-     * Start Phase
-     * The system is fully initialized. Use this to start servers or background jobs.
+     * Start Phase (Optional)
+     * All plugins are initialized. Use this to start servers or background jobs.
      */
-    async onStart(ctx: PluginContext) {
+    async start(ctx: PluginContext) {
         console.log('MyPlugin started!');
+    }
+
+    /**
+     * Destroy Phase (Optional)
+     * Called during kernel shutdown — clean up resources here.
+     */
+    async destroy() {
+        console.log('MyPlugin stopped!');
     }
 }
 ```
@@ -93,12 +103,12 @@ ObjectStack uses `type` discrimination to optimize runtime behavior, allowing th
 *   **Use Cases:** RAG Pipelines, Autonomous Agents.
 *   **Behavior:** Extensions for the AI Gateway.
 
-## RuntimePlugin Interface Reference
+## Plugin Interface Reference
 
-The `RuntimePlugin` interface defines the contract that all functionality modules must implement.
+The `Plugin` interface (exported from `@objectstack/core`) defines the contract that all functionality modules must implement.
 
 ```typescript
-export interface RuntimePlugin {
+export interface Plugin {
     /**
      * Plugin Unique Identifier
      * Recommended format: com.organization.plugin-name
@@ -106,39 +116,46 @@ export interface RuntimePlugin {
     name: string;
 
     /**
-     * Plugin Version
-     * Must follow Semantic Versioning (SemVer)
+     * Plugin Version (Optional)
      */
     version?: string;
 
     /**
-     * Description
-     * Brief explanation of the plugin's purpose.
+     * Plugin Type (Optional)
+     * One of: standard, ui, driver, server, app, theme, agent.
+     * @default 'standard'
      */
-    description?: string;
+    type?: string;
 
     /**
-     * Initialization Hook
-     * Called during Kernel bootstrap. Use this to:
+     * Dependencies (Optional)
+     * List of other plugin names that this plugin depends on.
+     * The kernel ensures these plugins are initialized before this one.
+     */
+    dependencies?: string[];
+
+    /**
+     * Init Phase (REQUIRED)
+     * Called when the kernel is initializing. Use this to:
      * - Register Services
      * - Register Event Listeners
      * - Extend Metadata
      */
-    onInit?: (context: PluginContext) => Promise<void>;
+    init(ctx: PluginContext): Promise<void> | void;
 
     /**
-     * Start Hook
+     * Start Phase (Optional)
      * Called after all plugins are initialized. Use this to:
      * - Start HTTP servers
      * - Connect to databases
      * - Start background workers
      */
-    onStart?: (context: PluginContext) => Promise<void>;
+    start?(ctx: PluginContext): Promise<void> | void;
 
     /**
-     * Stop Hook
-     * Called during Kernel shutdown. cleanup resources here.
+     * Destroy Phase (Optional)
+     * Called during kernel shutdown. Clean up resources here.
      */
-    onStop?: (context: PluginContext) => Promise<void>;
+    destroy?(): Promise<void> | void;
 }
 ```

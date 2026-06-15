@@ -86,7 +86,8 @@ os init my-app --no-install       # Skip dependency installation
 
 **Options:**
 - `-t, --template <template>` — Template: `app` (default), `plugin`, `empty`
-- `--no-install` — Skip automatic `pnpm install`
+- `--no-install` — Skip automatic dependency installation
+- `-p, --package-manager <npm|pnpm|yarn|bun>` — Package manager to use (auto-detected from the environment)
 
 **Templates:**
 
@@ -173,8 +174,8 @@ only gate the **automatic** registration of optional plugins.
 | Preset | Tiers | Auto-loaded optional plugins |
 |:---|:---|:---|
 | `minimal` | `core` | none |
-| `default` *(default)* | `core`, `i18n`, `ui`, `auth` | i18n service, Studio UI, Auth + Security + Audit |
-| `full` | `core`, `i18n`, `ui`, `ai`, `auth` | adds the AI service tier |
+| `default` *(default)* | `core`, `i18n`, `ui`, `ai`, `auth` | i18n service, Studio UI, AI service, Auth + Security + Audit |
+| `full` | `core`, `i18n`, `ui`, `ai`, `auth` | currently an alias of `default` — same tiers, no additional plugins |
 
 The `auth` tier requires `AUTH_SECRET` to be set; otherwise `AuthPlugin`
 is skipped with a yellow warning and the `/api/v1/auth/*` endpoints will
@@ -230,7 +231,7 @@ Boots a production server **directly from a compiled `objectstack.json` artifact
 command: hand a server one JSON file (or a URL pointing at one) and it runs.
 
 ```bash
-# Quick start — load ./dist/objectstack.json with sqlite at .objectstack/data/standalone.db
+# Quick start — load ./dist/objectstack.json with sqlite at file:<home>/data/objectstack.db
 os start
 
 # Pick everything via flags (no env vars needed)
@@ -267,7 +268,7 @@ os start
 | `--auth-secret <secret>` | `AUTH_SECRET` | Secret for `@objectstack/plugin-auth`; without it `/api/v1/auth/*` is skipped (server still runs) |
 | `--environment-id <id>` | `OS_ENVIRONMENT_ID` | Environment identifier (default `env_local`) |
 | `-p, --port <port>` | `PORT` / `OS_PORT` | Listen port (default `3000`). **Production fails loudly if the port is busy** — see note below. |
-| `--ui` | — | Mount the Console portal at `/_console/`. `os dev` mounts it by default; `os start` can mount it for production administration when explicitly enabled. |
+| `--ui` / `--no-ui` | — | Mount the Console portal at `/_console/`. Enabled by default (so you can install marketplace apps); pass `--no-ui` to disable it. |
 
 > **Port conflicts: production never auto-shifts.** Unlike `os dev` (which
 > hops to the next free port for local convenience), `os start` exits with an
@@ -278,7 +279,7 @@ os start
 | `-v, --verbose` | — | Verbose output |
 
 **Resolution priority (artifact):** `--artifact` > `OS_ARTIFACT_PATH` > `<cwd>/dist/objectstack.json`.
-**Resolution priority (database):** `--database` > `OS_DATABASE_URL` > `TURSO_DATABASE_URL` > `file:.objectstack/data/standalone.db`.
+**Resolution priority (database):** `--database` > `OS_DATABASE_URL` > `DATABASE_URL` (legacy) > `file:<home>/data/objectstack.db`.
 
 **What it boots:**
 - Reads the artifact's `manifest`, `objects`, `views`, `flows`, …
@@ -360,7 +361,7 @@ os validate path/to/config   # Validate specific file
 
 **Warnings checked:**
 - Missing `manifest.id` (required for deployment)
-- Invalid `manifest.scope` (must be `cloud`, `system`, or `project`)
+- Missing `manifest.namespace` (required for multi-app hosting)
 - No objects defined
 - No apps or plugins defined
 
@@ -488,50 +489,50 @@ os doctor -v        # Show fix suggestions for warnings
 
 | Command | Description |
 |---------|-------------|
-| `os auth register` | Create an account and store local credentials |
-| `os auth login` | Sign in and store credentials in `~/.objectstack/credentials.json` |
-| `os auth whoami` | Show the current authenticated user |
-| `os auth logout` | Revoke the server session and clear local credentials |
+| `os register` | Create an account and store local credentials |
+| `os login` | Sign in and store credentials in `~/.objectstack/credentials.json` |
+| `os whoami` | Show the current authenticated user |
+| `os logout` | Revoke the server session and clear local credentials |
 
-#### `os auth register`
+#### `os register`
 
 Creates a user account and stores the returned token locally.
 
 ```bash
-os auth register
-os auth register --email user@example.com --name "Jane Doe" --password secret
-os auth register --url https://api.example.com
+os register
+os register --email user@example.com --name "Jane Doe" --password secret
+os register --url https://api.example.com
 ```
 
-#### `os auth login`
+#### `os login`
 
 In an interactive terminal, login uses a browser-based device flow by default:
 the CLI prints a one-time verification URL, opens the browser, and polls until
 you approve access in Studio.
 
 ```bash
-os auth login
-os auth login --url https://api.example.com
-os auth login --no-browser
+os login
+os login --url https://api.example.com
+os login --no-browser
 ```
 
-If a valid token already exists, `os auth login` exits successfully with
-"Already logged in as `<email>`". Use `os auth logout` to switch users, or pass
+If a valid token already exists, `os login` exits successfully with
+"Already logged in as `<email>`". Use `os logout` to switch users, or pass
 `--force` to re-authenticate.
 
 For CI and other non-interactive contexts, pass email/password directly:
 
 ```bash
-os auth login --email user@example.com --password secret
+os login --email user@example.com --password secret
 ```
 
-#### `os auth logout`
+#### `os logout`
 
 Logout calls `POST /api/v1/auth/sign-out` before deleting local credentials, so
 the server-side session is revoked as well.
 
 ```bash
-os auth logout
+os logout
 ```
 
 ### Cloud Environments

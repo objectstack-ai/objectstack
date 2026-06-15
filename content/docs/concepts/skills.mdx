@@ -60,12 +60,13 @@ Traditional AI code assistants generate generic code. They don't understand:
 
 ## Skill Architecture
 
-Each skill can use up to a **three-layer structure** inspired by [shadcn/ui](https://ui.shadcn.com/). Only `SKILL.md` is required; richer skills add the other two:
+Each skill ships `SKILL.md` plus a generated `references/` index, and richer skills layer optional `rules/` and `evals/` directories on top — up to four distinct parts. Only `SKILL.md` is required:
 
 | Layer | File | Required | Purpose |
 | :--- | :--- | :--- | :--- |
 | **Overview** | `SKILL.md` | Yes | High-level guide with decision trees and quick-start examples |
-| **Rules** | `rules/*.md` | Optional | Detailed implementation rules with ✅ correct / ❌ incorrect code examples |
+| **References** | `references/_index.md` | Generated | Pointers into the published `@objectstack/spec` Zod sources (present in every skill except Formula) |
+| **Rules** | `rules/*.md` | Optional | Detailed implementation rules with ✅ correct / ❌ incorrect code examples (today: Data, Platform, Query) |
 | **Evaluations** | `evals/*.md` | Optional | Test cases to validate AI assistant understanding |
 
 ### SKILL.md — The Entry Point
@@ -178,7 +179,7 @@ with name, email, industry, and annual_revenue fields.
 
 ### With Claude Code
 
-Claude Code reads `CLAUDE.md` at the repo root, which references all skills:
+Claude Code reads `AGENTS.md` at the repo root, which references all skills:
 
 ```
 Read skills/objectstack-query/SKILL.md and help me build a query

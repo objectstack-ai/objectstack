@@ -134,8 +134,10 @@ deliverySemantics: 'best-effort' | 'at-least-once' | 'exactly-once'
   duplicates are possible during retry. Use for: webhook outbox, audit
   shipping, async job enqueue.
 - **`exactly-once`** — Reserved keyword; **not implemented in v1**. The
-  protocol accepts it so future runtimes can add it without a breaking
-  change. Today the runtime rejects it at startup with a clear error.
+  protocol accepts the enum value so future runtimes can add it without a
+  breaking change. Startup rejection of this value is *intended* behaviour
+  but is **not yet implemented** — the bus does not currently inspect or
+  reject it.
 
 ### 4.3 Partition key — what ordering does the bus preserve?
 
@@ -155,9 +157,11 @@ out of emit order.
 
 ```ts
 eventBus.emit('account.updated', payload, {
-  scope: 'cluster',
-  deliverySemantics: 'at-least-once',
-  partitionKey: payload.id,
+  cluster: {
+    scope: 'cluster',
+    deliverySemantics: 'at-least-once',
+    partitionKey: payload.id,
+  },
 })
 ```
 
@@ -197,21 +201,44 @@ leaderStrategy: 'leader-elected' | 'partitioned' | 'idempotent-broadcast'
   and the work itself is idempotent (writes use UPSERT, side effects are
   keyed). Use for: cache invalidation handlers, projection rebuilders.
 
+These annotations are **nested** under a `cluster` key on the service
+registration (`ServiceMetadata.cluster` / `ServiceFactoryRegistration.cluster`
+= `ServiceClusterAnnotations`), not declared as flat top-level fields:
+
+```ts
+{
+  name: 'cron-scheduler',
+  cluster: {
+    clusterScope: 'cluster',
+    leaderStrategy: 'leader-elected',
+    // clusterId: 'scheduler',  // optional — share one leadership lock
+    //   across physically different services (e.g. safe rolling upgrades);
+    //   defaults to the service name.
+  },
+}
+```
+
 > **Default rationale.** `node` is the only safe default. A plugin author
 > who forgets to declare scope gets the single-machine behaviour, which is
 > always correct; opting up to `cluster` is an explicit decision.
 
-### 5.1 What the runtime gives you for free
+### 5.1 What the runtime will give you for free
 
-When a service declares `clusterScope: 'cluster'`, the runtime automatically:
+> **Status: not yet implemented (Phase 4).** The schema accepts
+> `clusterScope` / `leaderStrategy` annotations today, but no runtime code
+> yet consumes them or performs leader election. The behaviour below is the
+> intended contract once Phase 4 (see §10) lands.
 
-1. Wraps `onEnable` so the work only starts after lock acquisition (for
+When a service declares `clusterScope: 'cluster'`, the runtime will
+automatically:
+
+1. Wrap `onEnable` so the work only starts after lock acquisition (for
    `leader-elected`).
-2. Refreshes the lock TTL via heartbeat while the node is healthy.
-3. Releases the lock on `onDisable` or graceful shutdown.
-4. Emits `cluster:leader-changed` events so dependent services can react.
+2. Refresh the lock TTL via heartbeat while the node is healthy.
+3. Release the lock on `onDisable` or graceful shutdown.
+4. Emit a leadership-change event so dependent services can react.
 
-A plugin author writing a cron scheduler does **not** write any lock code —
+A plugin author writing a cron scheduler will **not** write any lock code —
 they declare scope and strategy, and the runtime does the rest.
 
 ## 6. Metadata versioning and cache coherence
@@ -224,14 +251,18 @@ current protocol lacks: a **monotonic version per item** and a
 
 ### 6.1 Monotonic version
 
-Every persisted metadata record gains a `version: bigint` column that
-increments on every write (already present in
-`system/metadata-persistence.zod.ts` as `version: number` for optimistic
-concurrency — this ADR formalises and widens it to `bigint` so caches can
-compare freshness across long-running clusters without overflow).
+A `version` column is already present on every persisted metadata record in
+`system/metadata-persistence.zod.ts` (`version: z.number()`, used today for
+optimistic concurrency). This ADR proposes formalising it as a monotonic
+per-item version and **widening it to `bigint`** so caches can compare
+freshness across long-running clusters without overflow.
 
-Caches store `{value, version}`. On any incoming change notification the
-cache compares the incoming version with the stored one:
+> **Status: planned.** The column is still `version: number` in the schema;
+> the widening and the cache-comparison contract below describe the target
+> design, not current runtime behaviour.
+
+Once wired, caches store `{value, version}`. On any incoming change
+notification the cache compares the incoming version with the stored one:
 
 - Incoming version `>` stored → invalidate (apply new value or evict)
 - Incoming version `≤` stored → ignore (out-of-order notification, already
@@ -240,35 +271,57 @@ cache compares the incoming version with the stored one:
 This eliminates a whole class of bugs where a slow-arriving "old"
 invalidation evicts a "newer" value the node has already learned about.
 
-### 6.2 The `metadata:changed` event
+### 6.2 The metadata change event
 
-Whenever a metadata record is written (create / update / delete / publish),
-the persistence layer **must** emit:
+**Current behaviour.** Cross-node metadata invalidation already works, but
+it does **not** go through `eventBus.emit`. The metadata manager fans out
+over the cluster PubSub channel `metadata.changed` (note: dot, not colon)
+with the payload shape `ClusterMetadataChangedPayload`:
 
 ```ts
-eventBus.emit('metadata:changed', {
+// packages/metadata/src/metadata-manager.ts
+ctx.cluster.pubsub.publish('metadata.changed', {
+  originNode,        // used for loopback suppression
+  type,              // 'object' | 'view' | 'dashboard' | …
+  event,             // the local watch event, replayed verbatim on peers
+})
+```
+
+Peers suppress their own messages by `originNode` and replay the watch
+event locally — there is currently **no** `version` / `name` / `tenantId` /
+`operation` field and **no** version comparison.
+
+**Target spec (planned).** The richer, version-stamped payload below is
+defined as `MetadataChangedEventPayloadSchema` in `kernel/cluster.zod.ts`
+but is **not yet wired** into the runtime:
+
+```ts
+// MetadataChangedEventPayloadSchema — target shape, not yet emitted
+{
   type: 'object' | 'view' | 'flow' | …,
   name: '<machine-name>',
   tenantId?: '<tenant>',
   version: <new-version>,
   operation: 'create' | 'update' | 'delete' | 'publish',
-}, {
-  scope: 'cluster',
-  deliverySemantics: 'at-least-once',
-  partitionKey: `${type}:${name}`,
-})
+}
 ```
 
-The partition key guarantees that two rapid updates to the same item are
-applied to every node's cache in the order they occurred. The `at-least-
-once` guarantee means a node briefly partitioned from the bus will catch
-up on reconnect (the transport replays from the last acknowledged offset).
+When wired with `scope: 'cluster'` + `deliverySemantics: 'at-least-once'`
+and a `partitionKey` of `` `${type}:${name}` ``, the partition key would
+guarantee that two rapid updates to the same item are applied to every
+node's cache in order, and the at-least-once guarantee would let a briefly
+partitioned node catch up on reconnect.
 
 ### 6.3 Reader contract
 
-All metadata readers (registry, loader, query engine) must:
+> **Status: planned.** Today readers are invalidated by the `metadata.changed`
+> PubSub fan-out described in §6.2, which replays watch events verbatim
+> without version comparison. The contract below is the target design that
+> goes with the version-stamped payload.
 
-1. Subscribe to `metadata:changed` on startup.
+All metadata readers (registry, loader, query engine) should:
+
+1. Subscribe to the metadata change channel on startup.
 2. Compare incoming `version` with cached `version` before evicting.
 3. Treat missing `version` as `0` (legacy compatibility).
 
@@ -305,18 +358,27 @@ Ask: **if I deploy 5 nodes, should there be 5 of these or 1?**
 
 ### 7.3 "I want to read metadata in a long-lived cache"
 
-You don't write a cache. You ask the kernel for one:
+There is **no** `ctx.cluster.cache(...)` factory. The cluster service
+exposes only the four primitives (`ctx.cluster.{pubsub, lock, kv, counter}`,
+see §3) — caches are *derived* from `KV + PubSub` by `service-cache`, they
+are not a built-in cluster method.
+
+To keep an in-process metadata cache coherent today, subscribe to the
+metadata change channel via PubSub and invalidate on each notification:
 
 ```ts
-const cache = ctx.cluster.cache<ObjectMetadata>({
-  key: m => `obj:${m.name}`,
-  version: m => m.version,
-  invalidateOn: { type: 'object' },
+ctx.cluster.pubsub.subscribe('metadata.changed', (payload) => {
+  // payload: { originNode?, type, event }
+  if (payload.type === 'object') {
+    myObjectCache.invalidate(payload.event)
+  }
 })
 ```
 
-The runtime wires `metadata:changed` subscription, version comparison, and
-the underlying KV automatically. No `if (cluster)` branches in your code.
+A higher-level cache factory (with automatic version comparison) is part of
+the Phase 4 / §6 target design but is **not yet implemented**. No
+`if (cluster)` branches are needed either way — the `memory` driver makes
+the subscribe call a no-op-equivalent local fan-out on a single node.
 
 ### 7.4 What you must never do
 
@@ -349,15 +411,17 @@ defineStack({
     lockTtlMs: 15000,                      // 3× heartbeat is the safe ratio
 
     tenantIsolation: 'channel-prefix',     // 'channel-prefix' | 'none'
+    // driverOptions: { /* opaque, driver-specific options */ },
   },
 })
 ```
 
 Every cluster primitive selects its implementation from `cluster.driver`.
-When the field is absent, the kernel uses the in-memory driver and a
-single-line warning is logged in `production` mode: *"running in single-
-node cluster mode; horizontal scale will be incorrect until cluster.driver
-is configured."*
+When the field is absent, the kernel silently auto-registers the in-memory,
+single-node driver. Emitting a production warning in this case (so operators
+notice that horizontal scale will be incorrect until `cluster.driver` is
+configured) is *intended* but **not yet implemented** — no such warning is
+logged today.
 
 ### 8.1 Driver matrix
 
@@ -455,8 +519,9 @@ a new implementation that calls `registerClusterDriver()`.
 
 ## 11. Non-goals (v1)
 
-- **Exactly-once delivery** — accepted as a keyword in the protocol,
-  rejected at runtime startup. Implementing it correctly requires
+- **Exactly-once delivery** — accepted as a keyword in the protocol;
+  startup rejection of the value is intended but not yet implemented.
+  Implementing it correctly requires
   distributed transactions or idempotency tokens that are out of scope
   for v1.
 - **Cross-region replication** — single-region clusters only. Multi-region

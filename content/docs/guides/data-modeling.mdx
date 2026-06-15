@@ -38,7 +38,7 @@ export const MyObject = ObjectSchema.create({
   description: 'Description...',   // Help text
   
   // Display configuration
-  titleFormat: '{field1} - {field2}',
+  titleFormat: '{{record.field1}} - {{record.field2}}',
   compactLayout: ['field1', 'field2', 'field3'],
   
   // Fields definition
@@ -54,7 +54,6 @@ export const MyObject = ObjectSchema.create({
   
   // Business rules
   validations: [...],
-  workflows: [...],
 });
 ```
 
@@ -67,7 +66,7 @@ export const MyObject = ObjectSchema.create({
 | `pluralLabel` | string | Plural display name | `'Accounts'` |
 | `icon` | string | Icon identifier | `'building'` |
 | `description` | string | Help text | `'Companies...'` |
-| `titleFormat` | string | Record title template | `'{name} - {id}'` |
+| `titleFormat` | string | Record title template (`{{record.field}}` interpolation) | `'{{record.name}} - {{record.id}}'` |
 | `compactLayout` | string[] | Quick view fields | `['name', 'status']` |
 
 ### Enable Features
@@ -158,20 +157,20 @@ Field.percent({
 Field.date({
   label: 'Close Date',
   required: true,
-  defaultValue: 'TODAY()',
+  // Dynamic defaults must be a CEL expression envelope; a bare string
+  // like 'TODAY()' would be stored verbatim.
+  defaultValue: { dialect: 'cel', source: 'today()' },
 })
 
 // Date and time
 Field.datetime({
   label: 'Last Modified',
   readonly: true,
-  defaultValue: 'NOW()',
+  defaultValue: { dialect: 'cel', source: 'now()' },
 })
 
-// Time only
-Field.time({
-  label: 'Business Hours Start',
-})
+// Time only (no `Field.time` helper — use the generic form)
+{ type: 'time', label: 'Business Hours Start' }
 ```
 
 ### Boolean Field
@@ -219,9 +218,9 @@ Field.autonumber({
   format: 'ACC-{0000}',      // ACC-0001, ACC-0002, ...
 })
 
-// Other formats:
-// 'INV-{YYYY}-{0000}'       // INV-2024-0001
-// '{YYYY}{MM}{DD}-{000}'    // 20240115-001
+// The format string supports a single zero-pad token, e.g.:
+// 'INV-{000}'   // INV-001, INV-002, ...
+// Date tokens like {YYYY}/{MM}/{DD} are not interpolated.
 ```
 
 ### Lookup Fields
@@ -235,13 +234,10 @@ Field.lookup('account', {
   required: true,
 })
 
-// Lookup with filters
+// Lookup with filters (array of filter strings)
 Field.lookup('contact', {
   label: 'Primary Contact',
-  referenceFilters: {
-    account: '{account}',         // Same account only
-    is_active: true,
-  }
+  referenceFilters: ['account = {account}', 'is_active = true'],
 })
 ```
 
@@ -345,10 +341,7 @@ Reference records that meet criteria:
 ```typescript
 contact: Field.lookup('contact', {
   label: 'Contact',
-  referenceFilters: {
-    account: '{account}',       // Filter by parent account
-    is_active: true,
-  }
+  referenceFilters: ['account = {account}', 'is_active = true'],
 })
 ```
 
@@ -377,7 +370,9 @@ Child records automatically appear in related lists when a lookup points to the 
 
 ### Script Validations
 
-Custom JavaScript-like expressions:
+`condition` is a CEL predicate that runs against the record. **When the
+predicate evaluates to `TRUE`, validation fails** and the configured message is
+raised. Reference fields as `record.<field>`.
 
 ```typescript
 validations: [
@@ -386,31 +381,31 @@ validations: [
     type: 'script',
     severity: 'error',
     message: 'Annual Revenue must be positive',
-    condition: 'annual_revenue < 0',
+    condition: 'record.annual_revenue < 0',
   },
   {
     name: 'close_date_future',
     type: 'script',
     severity: 'warning',
     message: 'Close Date should be in the future',
-    condition: 'close_date < TODAY()',
+    condition: 'record.close_date < today()',
   },
 ]
 ```
 
-### Unique Validations
+### Unique Constraints
 
-Ensure field values are unique:
+There is no `unique` validation type. Enforce uniqueness with a unique index or
+a field-level `unique` flag:
 
 ```typescript
-{
-  name: 'email_unique',
-  type: 'unique',
-  severity: 'error',
-  message: 'Email must be unique',
-  fields: ['email'],
-  caseSensitive: false,
-}
+// Unique index
+indexes: [
+  { fields: ['email'], unique: true },
+]
+
+// or field-level
+Field.email({ label: 'Email', unique: true })
 ```
 
 ### Required Field Validations
@@ -436,50 +431,51 @@ Field.text({
 
 Calculate values automatically:
 
+Formula expressions are written in **CEL** and reference fields as
+`record.<field>`. The calculation goes in the `expression` property (not
+`formula`); the field type is already `formula`, so don't pass `type`.
+
 ```typescript
 // Simple calculation
 Field.formula({
   label: 'Total Price',
-  type: 'currency',
-  formula: 'subtotal - discount + tax',
+  expression: 'record.subtotal - record.discount + record.tax',
   scale: 2,
 })
 
-// Conditional logic
+// Conditional logic (CEL ternary)
 Field.formula({
   label: 'Priority Level',
-  type: 'text',
-  formula: 'IF(amount > 100000, "High", IF(amount > 50000, "Medium", "Low"))',
+  expression: 'record.amount > 100000 ? "High" : (record.amount > 50000 ? "Medium" : "Low")',
 })
 
 // Date calculation
 Field.formula({
   label: 'Days to Close',
-  type: 'number',
-  formula: 'DAYS_DIFF(close_date, TODAY())',
+  expression: 'record.close_date < today() ? 1 : 0',
 })
 
 // Percentage calculation
 Field.formula({
   label: 'Response Rate',
-  type: 'percent',
-  formula: 'IF(num_sent > 0, (num_responses / num_sent) * 100, 0)',
+  expression: 'record.num_sent > 0 ? (record.num_responses / record.num_sent) * 100 : 0',
   scale: 2,
 })
 ```
 
-### Common Formula Functions
+### Common CEL Operators & Functions
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `IF(condition, true_value, false_value)` | Conditional | `IF(amount > 1000, "High", "Low")` |
-| `AND(expr1, expr2, ...)` | Logical AND | `AND(is_active, amount > 0)` |
-| `OR(expr1, expr2, ...)` | Logical OR | `OR(status = "new", status = "pending")` |
-| `NOT(expr)` | Logical NOT | `NOT(is_deleted)` |
-| `ISBLANK(field)` | Check if blank | `ISBLANK(phone)` |
-| `TODAY()` | Current date | `TODAY()` |
-| `NOW()` | Current datetime | `NOW()` |
-| `DAYS_DIFF(date1, date2)` | Days between dates | `DAYS_DIFF(end_date, start_date)` |
+| Construct | Description | Example |
+|-----------|-------------|---------|
+| `cond ? a : b` | Conditional (ternary) | `record.amount > 1000 ? "High" : "Low"` |
+| `&&` | Logical AND | `record.is_active && record.amount > 0` |
+| `\|\|` | Logical OR | `record.status == "new" \|\| record.status == "pending"` |
+| `!` | Logical NOT | `!record.is_deleted` |
+| `isBlank(value)` | Check if blank | `isBlank(record.phone)` |
+| `coalesce(a, b)` | First non-null value | `coalesce(record.nickname, record.name)` |
+| `today()` | Current date | `today()` |
+| `now()` | Current datetime | `now()` |
+| `daysFromNow(n)` / `daysAgo(n)` | Date offset | `daysFromNow(30)` |
 
 ---
 

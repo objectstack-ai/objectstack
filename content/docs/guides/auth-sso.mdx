@@ -5,10 +5,12 @@ description: Enable Google sign-in in open source, and extend auth providers thr
 
 # Social & Enterprise SSO
 
-ObjectStack open source ships one built-in social sign-in implementation:
+ObjectStack open source ships two built-in social sign-in implementations, both wired by `os serve` from deployment env vars:
 
 - **Google OAuth**: configure in Setup → Authentication, or from
   `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` deployment env vars
+- **GitHub OAuth**: configure from `GITHUB_CLIENT_ID` and
+  `GITHUB_CLIENT_SECRET` deployment env vars
 
 Additional providers should be contributed by product or enterprise packages through
 the `auth:configure` hook. Those packages can add better-auth `socialProviders`
@@ -43,13 +45,7 @@ GOOGLE_CLIENT_SECRET=your-google-client-secret
 # OS_AUTH_GOOGLE_ENABLED=false
 ```
 
-## Extension Packages
-
-The providers below are examples for enterprise or product packages, not built-in
-open-source settings. A package can register them by listening to `auth:configure`
-and mutating the draft auth config.
-
-### GitHub Example
+### GitHub
 
 1. Go to [GitHub Developer Settings](https://github.com/settings/developers) → **OAuth Apps** → **New OAuth App**.
 2. Set **Authorization callback URL**:
@@ -58,10 +54,23 @@ and mutating the draft auth config.
    ```
 3. Copy the **Client ID** and generate a **Client Secret**.
 
+Provide them as deployment environment variables:
+
 ```bash
 GITHUB_CLIENT_ID=your-github-client-id
 GITHUB_CLIENT_SECRET=your-github-client-secret
 ```
+
+## Extension Packages
+
+The providers below are examples for enterprise or product packages, not built-in
+open-source settings. A package can register them by listening to `auth:configure`
+and mutating the draft auth config.
+
+The env-var names shown below (e.g. `MICROSOFT_CLIENT_ID`, `APPLE_CLIENT_ID`) are
+illustrative for an extension package's own reader code — unlike `GOOGLE_*` and
+`GITHUB_*`, the framework does **not** read them out of the box, so an extension
+must wire them in its `auth:configure` handler.
 
 ### Microsoft (Azure AD / Entra ID)
 
@@ -197,7 +206,7 @@ Restart the server (`pnpm dev`), then:
 curl http://localhost:3000/api/v1/auth/config
 ```
 
-Expected response:
+Expected response (abbreviated — `getPublicConfig()` also returns `disableSignUp`/`requireEmailVerification` on `emailPassword` and additional `features` keys such as `multiOrgEnabled`, `oidcProvider`, `deviceAuthorization`, and `admin`):
 
 ```json
 {
@@ -234,7 +243,7 @@ The Studio `/login` and `/register` pages will now show a button for each enable
 
 ## Notes
 
-- `AUTH_SECRET` must be set to a random string of at least 32 characters in production.
-- `NEXT_PUBLIC_BASE_URL` / `VERCEL_URL` must match the domain registered with each provider.
+- `OS_AUTH_SECRET` must be set to a random string in production (a long random value of 32+ characters is recommended). `AUTH_SECRET` and `BETTER_AUTH_SECRET` are accepted as deprecated legacy aliases and emit a deprecation warning. If no secret is set, the auth plugin is skipped in production.
+- `OS_AUTH_URL` (or `OS_BASE_URL` as a fallback) must match the domain registered with each provider; it determines the base URL used to build OAuth callback URLs.
 - Never commit client secrets to source control — use a secrets manager in production.
 - The redirect URI registered with each provider must match exactly: `https://<your-domain>/api/v1/auth/callback/<provider-id>`.

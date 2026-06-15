@@ -10,7 +10,7 @@ To navigate the ObjectStack ecosystem effectively, it is helpful to understand t
 ## The Ecosystem
 
 ### ObjectStack
-The umbrella term for the entire suite of protocols and reference implementations. It is organized into **15 protocol namespaces** grouped into three architectural layers.
+The umbrella term for the entire suite of protocols and reference implementations. It is organized into **15 protocol namespaces** (enumerated below).
 
 ### Protocol Namespace
 A logical grouping of related schemas and types defined with Zod. ObjectStack has 15 protocol namespaces: Data, UI, System, Automation, AI, API, Identity, Security, Kernel, Cloud, QA, Contracts, Integration, Studio, and Shared.
@@ -94,7 +94,8 @@ The fundamental unit of data modeling in ObjectStack. Roughly equivalent to a "T
 
 ### Driver
 An adapter plugin in the Data Protocol runtime stack that allows the Data Layer to communicate with a specific underlying storage engine.
-* *Example:* `@objectstack/driver-sql` (Postgres / MySQL / SQLite via Knex), `@objectstack/driver-mongodb`, `@objectstack/driver-turso`.
+* *Example (this repo):* `@objectstack/driver-sql` (Postgres / MySQL / SQLite via Knex), `@objectstack/driver-mongodb`, `@objectstack/driver-memory` (in-memory, for testing), `@objectstack/driver-sqlite-wasm`.
+* *Cloud distribution:* `@objectstack/driver-turso` (edge-first SQLite) ships separately, not in this repository.
 
 ### AST (Abstract Syntax Tree)
 The intermediate representation of a query or schema. The Data Protocol parses a JSON request into an AST before the Driver translates it into SQL/NoSQL queries. This allows for security validation and optimization before execution.

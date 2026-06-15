@@ -5,7 +5,7 @@ description: "Complete guide to leveraging AI agents, RAG pipelines, and intelli
 
 # AI Capabilities Guide
 
-Complete guide to leveraging AI agents, RAG pipelines, and intelligent automation in ObjectStack.
+Complete guide to leveraging AI agents, knowledge retrieval, and intelligent automation in ObjectStack.
 
 ## Table of Contents
 
@@ -13,10 +13,8 @@ Complete guide to leveraging AI agents, RAG pipelines, and intelligent automatio
 2. [AI Agents](#ai-agents)
 3. [Actions as Tools (explicit opt-in)](#actions-as-tools-explicit-opt-in)
    - [Human-In-The-Loop approval](#human-in-the-loop-approval)
-4. [RAG Pipelines](#rag-pipelines)
-5. [Natural Language Queries](#natural-language-queries)
-6. [Predictive Analytics](#predictive-analytics)
-7. [Best Practices](#best-practices)
+4. [Knowledge Protocol (RAG via adapter plugins)](#knowledge-protocol-rag-via-adapter-plugins)
+5. [Best Practices](#best-practices)
 
 ---
 
@@ -26,22 +24,17 @@ ObjectStack provides a comprehensive AI platform:
 
 ```
 ┌─────────────────────────────────────┐
-│        AI Orchestration             │ ← Coordinate AI workflows
+│        AI Agents                    │ ← Persona + skills/tools
+│        Skills & Tools               │ ← Actions/Flows exposed to the LLM
 ├─────────────────────────────────────┤
-│        AI Agents                    │ ← Autonomous actors
-│  - Assistants                       │
-│  - Workers                          │
-│  - Analysts                         │
-├─────────────────────────────────────┤
-│        RAG Pipelines                │ ← Knowledge retrieval
-│  - Vector Search                    │
-│  - Semantic Chunking                │
-│  - Reranking                        │
+│        Knowledge Protocol           │ ← search_knowledge via adapters
+│  - memory / ragflow / custom        │
+│  - Permission-aware retrieval       │
 ├─────────────────────────────────────┤
 │        Model Registry               │ ← LLM management
-│  - OpenAI, Anthropic, etc.         │
-│  - Model routing                    │
-│  - Cost tracking                    │
+│  - openai, azure_openai,            │
+│    anthropic, local                 │
+│  - Token accounting / cost          │
 └─────────────────────────────────────┘
 ```
 
@@ -51,29 +44,45 @@ ObjectStack provides a comprehensive AI platform:
 
 AI agents are autonomous actors that perform tasks on behalf of users.
 
-### Agent Types
+### How agents are shaped
 
-| Type | Description | Use Cases |
-|------|-------------|-----------|
-| **Assistant** | Interactive helpers | Chatbots, Q&A, recommendations |
-| **Worker** | Background processors | Data enrichment, automation |
-| **Analyst** | Data analysts | Insights, forecasting, reporting |
-| **Creator** | Content generators | Emails, documents, designs |
+An agent is plain metadata validated by `AgentSchema` and created with the
+`defineAgent()` factory. The key fields are:
+
+| Field | Meaning |
+|------|---------|
+| `role` | Free-text **persona** string (e.g. `"Senior Support Engineer"`) — not an enum |
+| `instructions` | System prompt / prime directives |
+| `model` | Provider + model config (`provider`: `openai` \| `azure_openai` \| `anthropic` \| `local`) |
+| `skills` | Skill names to attach (the primary Agent → Skill → Tool capability model) |
+| `tools` | Direct tool **references** `{ type, name, description }` — `type` is `action` \| `flow` \| `query` \| `vector_search`; `name` points at an existing Action/Flow/query |
+| `knowledge` | RAG access: `{ topics: string[], indexes: string[] }` |
+
+There is no `type` field and no fixed agent "type" taxonomy — the way an agent
+behaves comes from its persona, instructions, skills, and tools. Likewise there
+are no `triggers` or `schedule` fields on an agent; drive agents from
+[Flows/Workflows](./automation) or invoke them via the chat endpoint when you
+need event- or time-based behaviour.
+
+<Callout type="info">
+Agent tools are **references** to existing Actions, Flows, or queries — you do
+not define ad-hoc tool names with inline parameter schemas here. See
+[Actions as Tools](#actions-as-tools-explicit-opt-in) for how an Action becomes
+LLM-callable.
+</Callout>
 
 ### Sales Assistant Agent
 
 ```typescript
-import type { Agent } from '@objectstack/spec/ai';
+import { defineAgent } from '@objectstack/spec/ai';
 
-export const SalesAssistantAgent: Agent = {
+export const SalesAssistantAgent = defineAgent({
   name: 'sales_assistant',
   label: 'Sales Assistant',
-  description: 'AI agent to help sales reps with lead qualification',
-  
-  role: 'assistant',
-  
+  role: 'Sales Development Assistant',
+
   instructions: `You are a sales assistant AI.
-  
+
 Your responsibilities:
 1. Qualify incoming leads (BANT criteria)
 2. Suggest next best actions
@@ -88,82 +97,32 @@ Always be professional and data-driven.`,
     temperature: 0.7,
     maxTokens: 2000,
   },
-  
-  // Tools the agent can use
+
+  // References to Actions/Flows exposed as tools (see "Actions as Tools").
   tools: [
-    {
-      name: 'analyze_lead',
-      description: 'Analyze a lead and provide qualification score',
-      parameters: {
-        lead_id: 'string',
-      },
-    },
-    {
-      name: 'suggest_next_action',
-      description: 'Suggest next best action for an opportunity',
-      parameters: {
-        opportunity_id: 'string',
-      },
-    },
-    {
-      name: 'generate_email',
-      description: 'Generate a personalized email template',
-      parameters: {
-        recipient_id: 'string',
-        context: 'string',
-        tone: 'string',
-      },
-    },
+    { type: 'flow', name: 'analyze_lead', description: 'Analyze a lead and provide a qualification score' },
+    { type: 'flow', name: 'suggest_next_action', description: 'Suggest the next best action for an opportunity' },
+    { type: 'action', name: 'generate_email', description: 'Generate a personalized email template' },
   ],
-  
-  // Knowledge sources
+
+  // RAG access: topics to recruit knowledge from + vector store indexes.
   knowledge: {
-    sources: [
-      {
-        type: 'object',
-        objectName: 'lead',
-        fields: ['*'],
-      },
-      {
-        type: 'object',
-        objectName: 'opportunity',
-        fields: ['*'],
-      },
-      {
-        type: 'document',
-        path: '/knowledge/sales-playbook.md',
-      },
-    ],
+    topics: ['sales-playbook', 'leads', 'opportunities'],
+    indexes: ['sales_docs'],
   },
-  
-  // When to trigger the agent
-  triggers: [
-    {
-      type: 'object_create',
-      objectName: 'lead',
-      condition: 'rating = "hot"',
-    },
-    {
-      type: 'object_update',
-      objectName: 'opportunity',
-      condition: 'ISCHANGED(stage)',
-    },
-  ],
-};
+});
 ```
 
 ### Customer Service Agent
 
 ```typescript
-export const ServiceAgent: Agent = {
+export const ServiceAgent = defineAgent({
   name: 'service_agent',
   label: 'Customer Service Agent',
-  description: 'AI agent to assist with support cases',
-  
-  role: 'assistant',
-  
+  role: 'Customer Service Specialist',
+
   instructions: `You are a customer service AI agent.
-  
+
 Your responsibilities:
 1. Triage incoming cases
 2. Suggest relevant knowledge articles
@@ -178,67 +137,30 @@ Always be empathetic and solution-focused.`,
     temperature: 0.5,
     maxTokens: 1500,
   },
-  
+
+  // `search_knowledge` is provided by the Knowledge Protocol tool, not declared inline.
   tools: [
-    {
-      name: 'triage_case',
-      description: 'Analyze case and assign priority',
-      parameters: {
-        case_id: 'string',
-      },
-    },
-    {
-      name: 'search_knowledge',
-      description: 'Search knowledge base for solutions',
-      parameters: {
-        query: 'string',
-      },
-    },
-    {
-      name: 'generate_response',
-      description: 'Generate customer response',
-      parameters: {
-        case_id: 'string',
-        tone: 'string',
-      },
-    },
+    { type: 'flow', name: 'triage_case', description: 'Analyze a case and assign priority' },
+    { type: 'action', name: 'generate_response', description: 'Generate a customer response' },
   ],
-  
+
   knowledge: {
-    sources: [
-      {
-        type: 'object',
-        objectName: 'case',
-        fields: ['*'],
-      },
-      {
-        type: 'document',
-        path: '/knowledge/support-kb/**/*.md',
-      },
-    ],
+    topics: ['support-kb', 'cases'],
+    indexes: ['support_docs'],
   },
-  
-  triggers: [
-    {
-      type: 'object_create',
-      objectName: 'case',
-    },
-  ],
-};
+});
 ```
 
-### Lead Enrichment Agent (Worker)
+### Lead Enrichment Agent
 
 ```typescript
-export const LeadEnrichmentAgent: Agent = {
+export const LeadEnrichmentAgent = defineAgent({
   name: 'lead_enrichment',
   label: 'Lead Enrichment Agent',
-  description: 'Automatically enrich lead data',
-  
-  role: 'worker',
-  
+  role: 'Data Enrichment Worker',
+
   instructions: `You enrich lead records with additional data.
-  
+
 Tasks:
 1. Look up company information
 2. Enrich contact details
@@ -253,60 +175,35 @@ Use reputable data sources.`,
     temperature: 0.3,
     maxTokens: 1000,
   },
-  
+
   tools: [
-    {
-      name: 'lookup_company',
-      description: 'Look up company information',
-      parameters: {
-        company_name: 'string',
-        domain: 'string',
-      },
-    },
-    {
-      name: 'enrich_contact',
-      description: 'Enrich contact information',
-      parameters: {
-        email: 'string',
-      },
-    },
+    { type: 'flow', name: 'lookup_company', description: 'Look up company information' },
+    { type: 'flow', name: 'enrich_contact', description: 'Enrich contact information' },
   ],
-  
-  triggers: [
-    {
-      type: 'object_create',
-      objectName: 'lead',
-    },
-  ],
-  
-  schedule: {
-    type: 'cron',
-    expression: '0 */4 * * *', // Every 4 hours
-    timezone: 'UTC',
-  },
-};
+});
 ```
 
-### Revenue Intelligence Agent (Analyst)
+To run enrichment when a lead is created or on a schedule, trigger this agent
+from a [Flow or Workflow](./automation) — agents themselves carry no
+`triggers`/`schedule` fields.
+
+### Revenue Intelligence Agent
 
 ```typescript
-export const RevenueIntelligenceAgent: Agent = {
+export const RevenueIntelligenceAgent = defineAgent({
   name: 'revenue_intelligence',
   label: 'Revenue Intelligence Agent',
-  description: 'Analyze pipeline and provide insights',
-  
-  role: 'analyst',
-  
+  role: 'Revenue Operations Analyst',
+
   instructions: `You analyze sales data and provide insights.
-  
+
 Responsibilities:
 1. Analyze pipeline health
 2. Identify at-risk deals
-3. Forecast revenue
-4. Detect anomalies
-5. Generate executive summaries
+3. Summarize trends
+4. Generate executive summaries
 
-Use statistical analysis and ML.`,
+Use the data tools to query records and aggregate metrics.`,
 
   model: {
     provider: 'openai',
@@ -314,46 +211,18 @@ Use statistical analysis and ML.`,
     temperature: 0.2,
     maxTokens: 3000,
   },
-  
+
+  // Built-in data tools (query_records / get_record / aggregate_data) are
+  // available to agents automatically once registered — see "Actions as Tools".
   tools: [
-    {
-      name: 'analyze_pipeline',
-      description: 'Analyze sales pipeline health',
-      parameters: {
-        user_id: 'string',
-        time_period: 'string',
-      },
-    },
-    {
-      name: 'forecast_revenue',
-      description: 'Generate revenue forecast',
-      parameters: {
-        time_period: 'string',
-        method: 'string',
-      },
-    },
+    { type: 'flow', name: 'analyze_pipeline', description: 'Analyze sales pipeline health' },
   ],
-  
+
   knowledge: {
-    sources: [
-      {
-        type: 'object',
-        objectName: 'opportunity',
-        fields: ['*'],
-      },
-      {
-        type: 'analytics',
-        dashboardName: 'sales_dashboard',
-      },
-    ],
+    topics: ['opportunities', 'pipeline'],
+    indexes: ['sales_docs'],
   },
-  
-  schedule: {
-    type: 'cron',
-    expression: '0 8 * * 1', // Monday at 8am
-    timezone: 'America/Los_Angeles',
-  },
-};
+});
 ```
 
 ---
@@ -558,11 +427,13 @@ Omit `toolExecutionContext` to keep the previous system-level behaviour
 
 ### LLM-generated conversation titles
 
-Whenever the assistant has produced its **second** message in a
-conversation that still has no title, the AI service fires a short,
-out-of-band LLM call (`≤ 20 characters`, single-line, no quotes) to
-summarise what the user is asking about and writes the result back to
-`ai_conversations.title`. The summarise call:
+Auto-titling is **opt-in** (disabled by default; enable it via the `ai`
+settings namespace from Console → Settings → AI). Once enabled, after a
+conversation has at least one user + assistant exchange (≥ 2 messages) and
+still has no title, the AI service fires a short, out-of-band LLM call
+(default cap **16 characters**, single-line, no quotes) to summarise what the
+user is asking about and writes the result back to `ai_conversations.title`.
+The summarise call:
 
 - Reuses the **active chat provider** (so it works with any
   `provider/model` you configured via Console → Settings → AI), and
@@ -639,347 +510,26 @@ Mature OSS (RAGFlow, LlamaIndex, Dify) already nail chunking, embedding, hybrid 
 
 ---
 
-## RAG Pipelines
-
-Retrieval-Augmented Generation (RAG) provides AI with access to your knowledge base.
-
-### Sales Knowledge RAG
-
-```typescript
-import type { RagPipeline } from '@objectstack/spec/ai';
-
-export const SalesKnowledgeRAG: RagPipeline = {
-  name: 'sales_knowledge',
-  label: 'Sales Knowledge Pipeline',
-  description: 'Sales playbook and best practices',
-  
-  // Define indexes
-  indexes: [
-    {
-      name: 'sales_playbook_index',
-      type: 'vector',
-      
-      // Data sources
-      sources: [
-        {
-          type: 'document',
-          path: '/knowledge/sales/**/*.md',
-          watch: true, // Auto-update on changes
-        },
-        {
-          type: 'document',
-          path: '/knowledge/products/**/*.pdf',
-          watch: true,
-        },
-        {
-          type: 'object',
-          objectName: 'opportunity',
-          fields: ['name', 'description', 'stage', 'amount'],
-          filter: {
-            stage: 'closed_won',
-            close_date: { $gte: '{last_12_months}' },
-          },
-        },
-      ],
-      
-      // Embedding model
-      embedding: {
-        provider: 'openai',
-        model: 'text-embedding-3-large',
-        dimensions: 1536,
-      },
-      
-      // Chunking strategy
-      chunking: {
-        strategy: 'semantic',
-        chunkSize: 1000,
-        chunkOverlap: 200,
-      },
-      
-      // Metadata extraction
-      metadata: {
-        extractors: [
-          {
-            type: 'title',
-            source: 'filename',
-          },
-          {
-            type: 'date',
-            source: 'modified_date',
-          },
-        ],
-      },
-    },
-  ],
-  
-  // Retrieval strategy
-  retrieval: {
-    strategy: 'hybrid',
-    
-    vectorSearch: {
-      topK: 10,
-      scoreThreshold: 0.7,
-      algorithm: 'cosine',
-    },
-    
-    keywordSearch: {
-      enabled: true,
-      weight: 0.3,
-    },
-    
-    reranking: {
-      enabled: true,
-      model: 'cohere-rerank',
-      topK: 5,
-    },
-  },
-  
-  // Generation
-  generation: {
-    model: {
-      provider: 'openai',
-      model: 'gpt-4',
-      temperature: 0.7,
-      maxTokens: 2000,
-    },
-    
-    promptTemplate: `You are a sales expert. Use the context to answer.
-
-Context:
-{context}
-
-Question: {question}
-
-Answer based on the context. If uncertain, say so.`,
-  },
-  
-  // Caching
-  caching: {
-    enabled: true,
-    ttl: 3600, // 1 hour
-  },
-};
-```
-
-### Support Knowledge RAG
-
-```typescript
-export const SupportKnowledgeRAG: RagPipeline = {
-  name: 'support_knowledge',
-  label: 'Support Knowledge Pipeline',
-  description: 'Customer support knowledge base',
-  
-  indexes: [
-    {
-      name: 'support_kb_index',
-      type: 'vector',
-      
-      sources: [
-        {
-          type: 'document',
-          path: '/knowledge/support/**/*.md',
-          watch: true,
-        },
-        {
-          type: 'object',
-          objectName: 'case',
-          fields: ['subject', 'description', 'resolution'],
-          filter: {
-            is_closed: true,
-            resolution: { $ne: null },
-          },
-        },
-      ],
-      
-      embedding: {
-        provider: 'openai',
-        model: 'text-embedding-3-small',
-        dimensions: 768,
-      },
-      
-      chunking: {
-        strategy: 'fixed',
-        chunkSize: 512,
-        chunkOverlap: 100,
-      },
-    },
-  ],
-  
-  retrieval: {
-    strategy: 'vector_only',
-    
-    vectorSearch: {
-      topK: 5,
-      scoreThreshold: 0.75,
-      algorithm: 'cosine',
-    },
-  },
-  
-  generation: {
-    model: {
-      provider: 'openai',
-      model: 'gpt-4',
-      temperature: 0.3,
-      maxTokens: 1500,
-    },
-    
-    promptTemplate: `You are a support specialist. Help resolve customer issues.
-
-Knowledge Base:
-{context}
-
-Issue: {question}
-
-Provide a clear, step-by-step solution.`,
-  },
-};
-```
-
----
-
 ## Natural Language Queries
 
-Allow users to query data using natural language.
-
-### NLQ Configuration
-
-```typescript
-import type { NLQConfig } from '@objectstack/spec/ai';
-
-export const CrmNLQConfig: NLQConfig = {
-  name: 'crm_nlq',
-  label: 'CRM Natural Language Queries',
-  
-  // Objects available for querying
-  objects: [
-    'account',
-    'contact',
-    'lead',
-    'opportunity',
-    'case',
-  ],
-  
-  // LLM for query translation
-  model: {
-    provider: 'openai',
-    model: 'gpt-4',
-    temperature: 0,
-  },
-  
-  // Example queries for training
-  examples: [
-    {
-      query: 'Show me all high-value opportunities closing this quarter',
-      soql: 'SELECT Name, Amount, CloseDate FROM Opportunity WHERE Amount > 100000 AND CloseDate >= THIS_QUARTER',
-    },
-    {
-      query: 'Which accounts have the most open cases?',
-      soql: 'SELECT Account.Name, COUNT(Id) FROM Case WHERE IsClosed = false GROUP BY Account.Name ORDER BY COUNT(Id) DESC',
-    },
-  ],
-};
-```
-
-### Using NLQ
+Agents query your data through the built-in **data tools** —
+`query_records`, `get_record`, and `aggregate_data` — which the LLM calls with
+structured arguments. These run as ordinary [ObjectQL](./objectql) queries over
+your objects (ObjectStack uses ObjectQL, not SOQL), and they execute under the
+caller's `ExecutionContext`, so row-level security applies exactly as it does
+for the REST API.
 
 ```typescript
-// User asks in natural language
-const query = "Show me my top 10 opportunities by amount";
+import { registerDataTools } from '@objectstack/service-ai';
 
-// AI translates to SOQL
-const soql = await nlq.translate(query);
-// Result: SELECT Name, Amount FROM Opportunity WHERE OwnerId = '{userId}' ORDER BY Amount DESC LIMIT 10
-
-// Execute query
-const results = await execute(soql);
+ctx.hook('ai:ready', async (ai) => {
+  registerDataTools(ai.toolRegistry, { dataEngine: ctx.getService('data') });
+});
 ```
 
----
-
-## Predictive Analytics
-
-Use machine learning for predictions and recommendations.
-
-### Lead Scoring
-
-```typescript
-import type { PredictiveModel } from '@objectstack/spec/ai';
-
-export const LeadScoringModel: PredictiveModel = {
-  name: 'lead_scoring',
-  label: 'Lead Scoring Model',
-  description: 'Predict lead conversion probability',
-  
-  type: 'classification',
-  
-  trainingData: {
-    objectName: 'lead',
-    features: [
-      'annual_revenue',
-      'number_of_employees',
-      'industry',
-      'lead_source',
-      'rating',
-    ],
-    label: 'is_converted',
-    filter: {
-      created_date: { $gte: '{last_12_months}' },
-    },
-  },
-  
-  model: {
-    algorithm: 'gradient_boosting',
-    hyperparameters: {
-      n_estimators: 100,
-      learning_rate: 0.1,
-      max_depth: 5,
-    },
-  },
-  
-  deployment: {
-    mode: 'realtime',
-    trigger: 'on_create',
-    outputField: 'conversion_score',
-  },
-};
-```
-
-### Revenue Forecasting
-
-```typescript
-export const RevenueForecastModel: PredictiveModel = {
-  name: 'revenue_forecast',
-  label: 'Revenue Forecasting Model',
-  description: 'Forecast monthly revenue',
-  
-  type: 'regression',
-  
-  trainingData: {
-    objectName: 'opportunity',
-    features: [
-      'amount',
-      'probability',
-      'stage',
-      'age_days',
-      'account.annual_revenue',
-    ],
-    label: 'close_date',
-    filter: {
-      stage: { $in: ['closed_won', 'closed_lost'] },
-    },
-  },
-  
-  model: {
-    algorithm: 'time_series',
-    method: 'prophet',
-  },
-  
-  deployment: {
-    mode: 'batch',
-    schedule: '0 0 1 * *', // Monthly
-  },
-};
-```
+There is no separate natural-language-to-query metadata type to author — the
+model is prompted with the available objects and translates the user's question
+into `query_records` / `aggregate_data` calls at runtime.
 
 ---
 
@@ -1000,20 +550,18 @@ export const RevenueForecastModel: PredictiveModel = {
 - Deploy without testing
 - Ignore cost implications
 
-### 2. RAG Pipeline Design
+### 2. Knowledge & Data Access
 
 ✅ **DO:**
-- Use semantic chunking for better context
-- Implement hybrid search (vector + keyword)
-- Enable reranking for accuracy
-- Cache frequently accessed content
-- Monitor retrieval quality
+- Declare knowledge sources via the Knowledge Protocol and pick the adapter (`memory`, `ragflow`, custom) that fits your data
+- Rely on the built-in data tools (`query_records` / `get_record` / `aggregate_data`) for live record access
+- Let permission-aware retrieval and RLS scope what each user's agent can see
+- Keep indexed objects in sync via the protocol's event sync
 
 ❌ **DON'T:**
-- Chunk too large or too small
-- Rely solely on vector search
-- Skip metadata extraction
-- Forget to update indexes
+- Reinvent a vector DB — let the adapter engine handle chunking/embedding/rerank
+- Bypass `ExecutionContext`, which would leak rows past row-level security
+- Expose objects to agents that the calling user can't read
 
 ### 3. Prompt Engineering
 
@@ -1066,40 +614,44 @@ export const RevenueForecastModel: PredictiveModel = {
 
 ### Complete Sales AI Workflow
 
+Agents are metadata, not classes — there are no `.enrich()` / `.predict()` /
+`.query()` methods to call. You invoke an agent over HTTP (the REST chat
+endpoint) or, server-side, via `aiService.chatWithTools(...)`. Enrichment,
+scoring, and email drafting are implemented as **Actions/Flows exposed as
+tools**, and the LLM calls them while reasoning over the conversation.
+
 ```typescript
-// 1. Lead comes in
-LeadEnrichmentAgent.enrich(lead);
-
-// 2. AI scores the lead
-score = LeadScoringModel.predict(lead);
-lead.conversion_score = score;
-
-// 3. If hot, sales assistant qualifies
-if (score > 80) {
-  analysis = SalesAssistantAgent.analyze(lead);
-  task = createTask({
-    subject: `Follow up on hot lead: ${lead.name}`,
-    priority: 'high',
-    assignedTo: lead.owner,
-  });
-}
-
-// 4. Sales rep asks for help
-response = SalesKnowledgeRAG.query({
-  question: "What's our pitch for fintech companies?",
-  context: { industry: 'finance' },
+// Invoke an agent over the REST chat endpoint.
+// POST /api/v1/ai/agents/:agentName/chat
+const res = await fetch('/api/v1/ai/agents/sales_assistant/chat', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  body: JSON.stringify({
+    message: `A hot lead just came in (id ${lead.id}). Qualify it, suggest the
+              next best action, and draft a professional intro email.`,
+  }),
 });
-
-// 5. Generate personalized email
-email = SalesAssistantAgent.generateEmail({
-  recipient: lead,
-  context: analysis,
-  tone: 'professional',
-});
-
-// 6. Track in pipeline
-RevenueIntelligenceAgent.analyzePipeline();
+const { reply } = await res.json();
+// The agent calls its `analyze_lead` / `suggest_next_action` / `generate_email`
+// tools (the Actions/Flows you wired) and returns its summary in `reply`.
 ```
+
+Server-side, the same flow runs through `chatWithTools`, threading the
+end-user's `ExecutionContext` so tool calls respect row-level security:
+
+```typescript
+const reply = await aiService.chatWithTools(messages, tools, {
+  toolExecutionContext: {
+    actor: { id: currentUser.id, name: currentUser.displayName, roles: currentUser.roles, permissions: currentUser.permissions },
+    conversationId,
+    environmentId,
+  },
+});
+```
+
+To run any of this on lead creation or on a schedule, drive the agent from a
+[Flow or Workflow](./automation) rather than expecting trigger/schedule fields
+on the agent itself.
 
 ---
 

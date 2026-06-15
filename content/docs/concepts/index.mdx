@@ -120,6 +120,10 @@ export const Customer = ObjectSchema.create({
 });
 ```
 
+<Callout type="info">
+The object names on this page (`customer`, `opportunity`, `contact`) are illustrative. In a real package, object names carry their domain/package prefix directly in the name (e.g. `crm_customer`, `sys_user`) — there is no separate `namespace` field.
+</Callout>
+
 This definition is **pure metadata**. It doesn't know:
 - Who can see this data
 - How to render a form
@@ -142,62 +146,70 @@ That's the job of the other layers.
 
 ### Example: Permission Rules
 
-```typescript
-// packages/crm/src/permissions/customer.permission.ts
-import { Permission } from '@objectstack/spec';
+Access control is declared as **permission set** metadata (the `PermissionSet` shape from `@objectstack/spec`). A permission set maps each object to its CRUD/lifecycle flags and, optionally, per-field read/edit flags keyed by `<object>.<field>`:
 
-export const CustomerPermission = Permission({
-  object: 'customer',
-  rules: [
-    {
-      profile: 'sales_rep',
-      crud: {
-        create: true,
-        read: true,
-        update: true,
-        delete: false, // Only managers can delete
-      },
-      fieldPermissions: {
-        annual_revenue: { read: true, edit: false }, // Read-only
-      },
+```typescript
+// packages/crm/src/permissions/sales_rep.permission.ts
+import type { PermissionSet } from '@objectstack/spec';
+
+export const salesRep: PermissionSet = {
+  name: 'sales_rep',
+  label: 'Sales Rep',
+  isProfile: true,
+  objects: {
+    customer: {
+      allowCreate: true,
+      allowRead: true,
+      allowEdit: true,
+      allowDelete: false, // Only managers can delete
     },
-    {
-      profile: 'sales_manager',
-      crud: {
-        create: true,
-        read: true,
-        update: true,
-        delete: true,
-      },
+  },
+  fields: {
+    'customer.annual_revenue': { readable: true, editable: false }, // Read-only
+  },
+};
+
+// packages/crm/src/permissions/sales_manager.permission.ts
+export const salesManager: PermissionSet = {
+  name: 'sales_manager',
+  label: 'Sales Manager',
+  isProfile: true,
+  objects: {
+    customer: {
+      allowCreate: true,
+      allowRead: true,
+      allowEdit: true,
+      allowDelete: true,
     },
-  ],
-});
+  },
+};
 ```
 
-### Example: Workflow Automation
+### Example: Flow Automation
+
+Business logic is authored as a **Flow** — a graph of nodes and edges — via `defineFlow`. A `record_change` flow runs when a record is written; a `decision` node branches on a bare CEL condition (reference fields directly, e.g. `record.annual_revenue`, and do **not** wrap them in `{…}`):
 
 ```typescript
-// packages/crm/src/workflows/customer.workflow.ts
-import { Workflow } from '@objectstack/spec';
+// packages/crm/src/flows/high_value_customer.flow.ts
+import { defineFlow } from '@objectstack/spec';
 
-export const CustomerWorkflow = Workflow({
-  object: 'customer',
-  trigger: 'after_create',
-  conditions: [
-    { field: 'annual_revenue', operator: 'greaterThan', value: 1000000 },
+export const highValueCustomerFlow = defineFlow({
+  name: 'high_value_customer',
+  label: 'High-Value Customer Alert',
+  type: 'record_change',
+  status: 'active',
+  nodes: [
+    { id: 'start', type: 'start', label: 'On Create' },
+    { id: 'check', type: 'decision', label: 'Is High Value?' },
+    { id: 'assign', type: 'update_record', label: 'Assign Enterprise Team' },
+    { id: 'notify', type: 'notify', label: 'Email Leadership' },
+    { id: 'end', type: 'end', label: 'End' },
   ],
-  actions: [
-    {
-      type: 'assign_owner',
-      params: { owner: 'enterprise_sales_team' },
-    },
-    {
-      type: 'send_email',
-      params: {
-        template: 'high_value_customer_alert',
-        to: 'sales-leadership@company.com',
-      },
-    },
+  edges: [
+    { id: 'e1', source: 'start', target: 'check' },
+    { id: 'e2', source: 'check', target: 'assign', condition: 'record.annual_revenue > 1000000' },
+    { id: 'e3', source: 'assign', target: 'notify' },
+    { id: 'e4', source: 'notify', target: 'end' },
   ],
 });
 ```
@@ -219,64 +231,50 @@ ObjectOS **orchestrates** these rules at runtime, independent of the data struct
 
 ### Example: List View
 
-```typescript
-// packages/crm/src/views/customer_list.view.ts
-import { ListView } from '@objectstack/spec';
+Views are authored with `defineView`, which aggregates an object's `list` and `form` views into one document. A list view binds to its data source (`provider: 'object'`), names its columns, and declares any default sort:
 
-export const CustomerListView = ListView({
-  object: 'customer',
-  label: 'All Customers',
-  type: 'grid',
-  columns: [
-    { field: 'name', width: 200 },
-    { field: 'industry', width: 150 },
-    { field: 'annual_revenue', width: 150 },
-    { field: 'primary_contact', width: 180 },
-  ],
-  filters: [
-    { field: 'industry', operator: 'equals' },
-    { field: 'annual_revenue', operator: 'greaterThan' },
-  ],
-  defaultSort: { field: 'name', direction: 'asc' },
+```typescript
+// packages/crm/src/views/customer.view.ts
+import { defineView } from '@objectstack/spec';
+
+export const customerViews = defineView({
+  list: {
+    label: 'All Customers',
+    type: 'grid',
+    data: { provider: 'object', object: 'customer' },
+    columns: ['name', 'industry', 'annual_revenue', 'primary_contact'],
+    filter: [
+      { field: 'annual_revenue', operator: 'greaterThan', value: 0 },
+    ],
+    sort: [{ field: 'name', order: 'asc' }],
+  },
 });
 ```
 
 ### Example: Form View
 
-```typescript
-// packages/crm/src/views/customer_form.view.ts
-import { FormView } from '@objectstack/spec';
+The same `defineView` document carries the `form` view. A form is laid out as **sections** of fields (each section can span 1-4 columns):
 
-export const CustomerFormView = FormView({
-  object: 'customer',
-  label: 'Customer Details',
-  type: 'tabbed',
-  tabs: [
-    {
-      label: 'Overview',
-      sections: [
-        {
-          label: 'Company Information',
-          fields: ['name', 'industry', 'annual_revenue'],
-        },
-        {
-          label: 'Contact',
-          fields: ['primary_contact'],
-        },
-      ],
-    },
-    {
-      label: 'Related Records',
-      sections: [
-        {
-          label: 'Opportunities',
-          component: 'related_list',
-          object: 'opportunity',
-          filter: { customer: '$recordId' },
-        },
-      ],
-    },
-  ],
+```typescript
+// packages/crm/src/views/customer.view.ts
+import { defineView } from '@objectstack/spec';
+
+export const customerViews = defineView({
+  form: {
+    type: 'simple',
+    data: { provider: 'object', object: 'customer' },
+    sections: [
+      {
+        label: 'Company Information',
+        columns: 2,
+        fields: ['name', 'industry', 'annual_revenue'],
+      },
+      {
+        label: 'Contact',
+        fields: ['primary_contact'],
+      },
+    ],
+  },
 });
 ```
 
@@ -289,6 +287,10 @@ The UI doesn't "know" the field types. It asks ObjectQL for the schema and rende
 ## How They Work Together
 
 Let's trace a **real-world scenario**: A sales rep creates a new high-value customer.
+
+<Callout type="info">
+The runtime snippets in Steps 3-6 below are **conceptual pseudo-code** — names like `Auth.getCurrentUser()`, `Permission.check()`, `ObjectQL.getSchema()`, and `Workflow.getTriggersFor()` illustrate *what each layer does at runtime*; they are not importable APIs from `@objectstack/spec`. The schema, view, permission-set, and flow snippets elsewhere on this page are the real authoring surface.
+</Callout>
 
 ### Step 1: User Action (ObjectUI)
 
@@ -431,15 +433,25 @@ export const Opportunity = ObjectSchema.create({
 ### 2. ObjectOS: Define Business Rules
 
 ```typescript
-export const OpportunityWorkflow = Workflow({
-  object: 'opportunity',
-  trigger: 'field_update',
-  conditions: [
-    { field: 'stage', operator: 'equals', value: 'closed_won' },
+import { defineFlow } from '@objectstack/spec';
+
+export const opportunityWonFlow = defineFlow({
+  name: 'opportunity_won',
+  label: 'Opportunity Won',
+  type: 'record_change',
+  status: 'active',
+  nodes: [
+    { id: 'start', type: 'start', label: 'On Change' },
+    { id: 'check', type: 'decision', label: 'Closed Won?' },
+    { id: 'invoice', type: 'create_record', label: 'Create Invoice' },
+    { id: 'notify', type: 'notify', label: 'Notify Sales Team' },
+    { id: 'end', type: 'end', label: 'End' },
   ],
-  actions: [
-    { type: 'create_invoice', params: { object: 'invoice' } },
-    { type: 'send_notification', params: { to: 'sales_team' } },
+  edges: [
+    { id: 'e1', source: 'start', target: 'check' },
+    { id: 'e2', source: 'check', target: 'invoice', condition: "record.stage == 'closed_won'" },
+    { id: 'e3', source: 'invoice', target: 'notify' },
+    { id: 'e4', source: 'notify', target: 'end' },
   ],
 });
 ```
@@ -447,16 +459,19 @@ export const OpportunityWorkflow = Workflow({
 ### 3. ObjectUI: Define the Kanban View
 
 ```typescript
-export const OpportunityKanban = ListView({
-  object: 'opportunity',
-  type: 'kanban',
-  groupBy: 'stage',
-  columns: [
-    { field: 'title' },
-    { field: 'amount' },
-    { field: 'customer' },
-  ],
-  enableDragDrop: true,
+import { defineView } from '@objectstack/spec';
+
+export const opportunityViews = defineView({
+  list: {
+    type: 'kanban',
+    data: { provider: 'object', object: 'opportunity' },
+    columns: ['title', 'amount', 'customer'],
+    kanban: {
+      groupByField: 'stage',
+      summarizeField: 'amount',
+      columns: ['title', 'amount', 'customer'],
+    },
+  },
 });
 ```
 
@@ -546,7 +561,7 @@ The three protocols are **loosely coupled** but **tightly integrated**:
 
 ## Next Steps
 
-- [ObjectQL: Data Protocol]((/docs/protocol/objectql)) - Full data protocol specification
+- [ObjectQL: Data Protocol](/docs/protocol/objectql) - Full data protocol specification
 - [ObjectUI: UI Protocol](/docs/protocol/objectui) - Full view protocol specification
 - [ObjectOS: System Protocol](/docs/protocol/objectos) - Full control protocol specification
 - [Developer Guide](/docs/getting-started/quick-start) - Build your first ObjectStack application

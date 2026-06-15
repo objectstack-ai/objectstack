@@ -70,7 +70,7 @@ Returns the full discovery manifest.
 Alias for the discovery endpoint used by auto-discovery in the client SDK.
 
 <Callout type="info">
-**Service Status Values**: `available` (fully operational), `degraded` (partial functionality), `unavailable` (not installed), `stub` (placeholder that throws errors)
+**Service Status Values**: `available` (fully operational), `registered` (route declared but handler unverified — may return 501), `degraded` (partial functionality), `unavailable` (not installed), `stub` (placeholder that throws errors)
 </Callout>
 
 ---
@@ -219,13 +219,13 @@ Execute a batch operation (create / update / upsert / delete) on multiple record
 }
 ```
 
-**Response**: `BatchUpdateResponse` with `succeeded`, `failed`, `errors`, and optionally `records`.
+**Response**: `BatchUpdateResponse` with `succeeded`, `failed`, `total`, and a per-record `results` array. Each entry in `results` has `id`, `success`, an optional `errors` array, and optional `data` (the full record, present when `returnRecords` is `true`).
 
 ### `POST /data/:object/createMany`
 
 Batch create multiple records.
 
-**Body**: `{ records: [{ name: "A" }, { name: "B" }] }`  
+**Body**: a bare array of records — `[{ name: "A" }, { name: "B" }]`. The REST handler reads the request body directly as the records array, so do **not** wrap it in `{ records: [...] }`.  
 **Response**: `{ object: "account", records: [...], count: 2 }`
 
 ### `POST /data/:object/updateMany`
@@ -265,21 +265,30 @@ Execute an analytics query.
   "cube": "account",
   "measures": ["revenue.sum", "count"],
   "dimensions": ["industry"],
-  "filters": [{ "member": "status", "operator": "equals", "values": ["active"] }],
+  "where": { "status": "active" },
   "limit": 100
 }
 ```
 
-**Response**:
+<Callout type="info">
+Filtering uses the canonical Query DSL `where` object (the same MongoDB-style `FilterCondition` accepted by `find()`), not a `filters` array.
+</Callout>
+
+**Response**: the runtime dispatcher wraps the `AnalyticsResult` as `{ success: true, data: { rows, fields, sql?, totals? } }`:
 ```json
 {
-  "data": [
-    { "industry": "Technology", "revenue.sum": 150000, "count": 5 },
-    { "industry": "Healthcare", "revenue.sum": 80000, "count": 3 }
-  ],
-  "annotation": {
-    "measures": { "revenue.sum": { "title": "Revenue Sum", "type": "number" } },
-    "dimensions": { "industry": { "title": "Industry", "type": "string" } }
+  "success": true,
+  "data": {
+    "rows": [
+      { "industry": "Technology", "revenue.sum": 150000, "count": 5 },
+      { "industry": "Healthcare", "revenue.sum": 80000, "count": 3 }
+    ],
+    "fields": [
+      { "name": "industry", "type": "string", "label": "Industry" },
+      { "name": "revenue.sum", "type": "number", "label": "Revenue Sum", "format": "$0,0" },
+      { "name": "count", "type": "number", "label": "Count" }
+    ],
+    "sql": "SELECT ..."
   }
 }
 ```
@@ -361,7 +370,7 @@ The following endpoints become available when the corresponding plugin is instal
 
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
-| POST | `/automation/trigger` | Trigger an automation flow |
+| POST | `/automation/trigger/:name` | Trigger an automation flow by name |
 
 ### Views (`/ui`) — Plugin Required
 
@@ -388,13 +397,13 @@ The following endpoints become available when the corresponding plugin is instal
 
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
-| GET | `/notifications` | List notifications |
-| POST | `/notifications/read` | Mark as read |
-| POST | `/notifications/read-all` | Mark all as read |
-| POST | `/notifications/devices` | Register device |
-| DELETE | `/notifications/devices/:id` | Unregister device |
-| GET | `/notifications/preferences` | Get preferences |
-| PATCH | `/notifications/preferences` | Update preferences |
+| GET | `/notifications` | List notifications (inbox) |
+| POST | `/notifications/read` | Mark notifications as read (body: `{ ids: string[] }`) |
+| POST | `/notifications/read/all` | Mark all as read |
+
+<Callout type="info">
+The core dispatcher implements only the list / read / read-all routes above. Device-registration and preference endpoints are provided by specific notification plugins, if any.
+</Callout>
 
 ### AI (`/ai`) — Plugin Required
 
@@ -410,8 +419,8 @@ The following endpoints become available when the corresponding plugin is instal
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
 | GET | `/i18n/locales` | List available locales |
-| GET | `/i18n/translations?locale=:locale` | Get translation bundle |
-| GET | `/i18n/labels/:object?locale=:locale` | Get field labels |
+| GET | `/i18n/translations/:locale` | Get translation bundle |
+| GET | `/i18n/labels/:object/:locale` | Get field labels |
 
 ### GraphQL (`/graphql`) — Plugin Required
 
@@ -424,41 +433,48 @@ The following endpoints become available when the corresponding plugin is instal
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
 | POST | `/storage/upload` | Upload a file |
-| GET | `/storage/:id` | Download a file |
-| DELETE | `/storage/:id` | Delete a file |
+| GET | `/storage/file/:id` | Download a file |
 
 ---
 
 ## Error Handling
 
-All error responses follow a standardized format:
+Error responses depend on which HTTP server is in front of the kernel. There are two wire formats in use today.
+
+**Kernel REST server** (`@objectstack/rest`) emits a string `error` message plus a SCREAMING_SNAKE `code`:
 
 ```json
 {
+  "error": "Record not found: account/123",
+  "code": "RECORD_NOT_FOUND"
+}
+```
+
+Validation failures additionally include an `issues` array. Common codes emitted by the kernel REST server:
+
+| Code | HTTP | Description |
+|:-----|:-----|:------------|
+| `VALIDATION_FAILED` | 400 | Input validation failed (includes `issues`) |
+| `PERMISSION_DENIED` | 403 | Insufficient permissions |
+| `RECORD_NOT_FOUND` | 404 | Resource does not exist |
+| `CONCURRENT_UPDATE` | 409 | Record was modified by another user |
+
+**Runtime dispatcher** (`@objectstack/runtime`) wraps errors in the `{ success: false, ... }` envelope, where `code` is the numeric HTTP status:
+
+```json
+{
+  "success": false,
   "error": {
-    "code": "resource_not_found",
     "message": "Record not found: account/123",
-    "httpStatus": 404,
-    "category": "request",
-    "retryable": false,
+    "code": 404,
     "details": {}
   }
 }
 ```
 
-### Error Codes
-
-| Code | HTTP | Category | Retryable | Description |
-|:-----|:-----|:---------|:----------|:------------|
-| `validation_error` | 400 | validation | No | Input validation failed |
-| `invalid_query` | 400 | validation | No | Malformed query |
-| `unauthenticated` | 401 | auth | No | Authentication required |
-| `permission_denied` | 403 | auth | No | Insufficient permissions |
-| `resource_not_found` | 404 | request | No | Resource does not exist |
-| `conflict` | 409 | request | No | Resource conflict (e.g. duplicate) |
-| `rate_limit_exceeded` | 429 | rate_limit | Yes | Too many requests |
-| `internal_error` | 500 | server | Yes | Server error |
-| `service_unavailable` | 503 | server | Yes | Service temporarily unavailable |
+<Callout type="info">
+The richer `ErrorResponseSchema` in `@objectstack/spec/api` (with `category`, `retryable`, etc.) is the aspirational spec envelope, not the current wire format. Its `category` values are drawn from the `ErrorCategory` enum: `validation`, `authentication`, `authorization`, `not_found`, `conflict`, `rate_limit`, `server`, `external`, `maintenance`.
+</Callout>
 
 ---
 
@@ -481,7 +497,7 @@ const request = FindDataRequestSchema.parse({ object: 'account', query: { ... } 
 const response: FindDataResponse = await protocol.findData(request);
 ```
 
-See the [Protocol Reference](../references/api/protocol) for the complete list of 57 protocol methods and their Zod schemas.
+See the [Protocol Reference](../references/api/protocol) for the full list of protocol methods and their Zod schemas.
 
 ---
 

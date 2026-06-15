@@ -7,7 +7,7 @@ import { CheckSquare, Building2, BarChart3, Server } from 'lucide-react';
 
 # Example Apps
 
-The monorepo includes 2 ready-to-run examples that progressively demonstrate ObjectStack features — from a simple Todo app to a reusable BI plugin template. For a full enterprise reference, see the [HotCRM repository](https://github.com/objectstack-ai/hotcrm).
+The monorepo ships three ready-to-run examples in `examples/` that progressively demonstrate ObjectStack features — from a simple Todo app to a full CRM and a kitchen-sink reference. For a larger external enterprise reference, see the [HotCRM repository](https://github.com/objectstack-ai/hotcrm).
 
 <Cards>
   <Card
@@ -17,14 +17,13 @@ The monorepo includes 2 ready-to-run examples that progressively demonstrate Obj
   />
   <Card
     icon={<Building2 />}
-    title="HotCRM (external)"
-    href="https://github.com/objectstack-ai/hotcrm"
-    description="Full-featured CRM: 10+ objects, AI agents, flows, security, sharing rules."
+    title="app-crm"
+    description="A full CRM example (in-repo): multiple objects, views, apps, and seed data."
   />
   <Card
     icon={<BarChart3 />}
-    title="plugin-bi"
-    description="A reusable plugin template. Shows how to package metadata for distribution."
+    title="app-showcase"
+    description="The kitchen-sink reference. Exercises most metadata types in one app."
   />
 </Cards>
 
@@ -41,13 +40,13 @@ The monorepo includes 2 ready-to-run examples that progressively demonstrate Obj
 The fastest way to explore all examples at once:
 
 ```bash
-git clone https://github.com/nickstenning/spec.git
-cd spec
+git clone https://github.com/objectstack-ai/framework.git
+cd framework
 pnpm install
-pnpm studio
+pnpm dev:showcase   # or: pnpm dev:todo / pnpm dev:crm
 ```
 
-Open [http://localhost:3000/_studio/](http://localhost:3000/_studio/) — the root `objectstack.config.ts` aggregates Todo + CRM + BI into one dev workspace.
+Each script starts one example's dev server. `pnpm dev` is an alias for `pnpm dev:showcase`.
 
 ---
 
@@ -64,17 +63,22 @@ examples/app-todo/
 ├── objectstack.config.ts      # App manifest + metadata wiring
 ├── src/
 │   ├── objects/
-│   │   └── task.object.ts     # Task object: 10 fields, validations, indexes
+│   │   └── task.object.ts     # todo_task object: fields, validations, indexes
 │   ├── actions/
 │   │   └── task.actions.ts    # Complete, Start, Defer, Delete batch
 │   ├── apps/
 │   │   └── todo.app.ts        # Navigation: Tasks, Analytics
+│   ├── views/                 # List / form views
 │   ├── dashboards/
 │   │   └── task.dashboard.ts  # Widget grid: stats, charts, lists
 │   ├── reports/
 │   │   └── task.report.ts     # Tabular + summary reports
-│   └── flows/
-│       └── task.flow.ts       # Auto-assignment automation
+│   ├── datasets/              # Saved query datasets for charts
+│   ├── flows/
+│   │   └── task.flow.ts       # Auto-assignment automation
+│   ├── translations/          # Locale bundles
+│   └── data/
+│       └── index.ts           # Seed data via defineSeed()
 ```
 
 ### Key Concepts Demonstrated
@@ -82,7 +86,7 @@ examples/app-todo/
 | Concept | File | What You'll Learn |
 |:--------|:-----|:------------------|
 | Object & Fields | `task.object.ts` | `Field.text()`, `Field.select()`, field options, indexes |
-| Seed Data | `objectstack.config.ts` | `data` array with upsert mode, 8 sample records |
+| Seed Data | `src/data/index.ts` | `defineSeed()` with upsert mode, 8 sample records |
 | Actions | `task.actions.ts` | Script actions, modal actions with params |
 | App Navigation | `todo.app.ts` | Navigation groups, object links, dashboard links |
 | Automation | `task.flow.ts` | Autolaunched flow with record-triggered logic |
@@ -98,8 +102,8 @@ pnpm dev
 </Tab>
 <Tab value="From Root">
 ```bash
-# Already included in root objectstack.config.ts
-pnpm studio
+# From the monorepo root
+pnpm dev:todo
 ```
 </Tab>
 </Tabs>
@@ -112,7 +116,7 @@ pnpm studio
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Task = ObjectSchema.create({
-  name: 'task',
+  name: 'todo_task',
   label: 'Task',
   pluralLabel: 'Tasks',
   icon: 'check-square',
@@ -123,27 +127,26 @@ export const Task = ObjectSchema.create({
       required: true,
       searchable: true,
     }),
-    status: {
-      type: 'select',
+    status: Field.select({
       label: 'Status',
       required: true,
       options: [
-        { label: 'Not Started', value: 'not_started', default: true },
-        { label: 'In Progress', value: 'in_progress' },
-        { label: 'Completed', value: 'completed' },
+        { label: 'Not Started', value: 'not_started', color: '#808080', default: true },
+        { label: 'In Progress', value: 'in_progress', color: '#3B82F6' },
+        { label: 'Completed', value: 'completed', color: '#10B981' },
       ],
-    },
+    }),
     due_date: Field.date({ label: 'Due Date' }),
-    priority: {
-      type: 'select',
+    priority: Field.select({
       label: 'Priority',
+      required: true,
       options: [
-        { label: 'Low', value: 'low' },
-        { label: 'Normal', value: 'normal' },
-        { label: 'High', value: 'high' },
-        { label: 'Urgent', value: 'urgent' },
+        { label: 'Low', value: 'low', color: '#60A5FA', default: true },
+        { label: 'Normal', value: 'normal', color: '#10B981' },
+        { label: 'High', value: 'high', color: '#F59E0B' },
+        { label: 'Urgent', value: 'urgent', color: '#EF4444' },
       ],
-    },
+    }),
   },
 });
 ```
@@ -155,6 +158,7 @@ import { defineStack } from '@objectstack/spec';
 import * as objects from './src/objects';
 import * as actions from './src/actions';
 import * as apps from './src/apps';
+import { TodoSeedData } from './src/data';
 
 export default defineStack({
   manifest: {
@@ -169,20 +173,31 @@ export default defineStack({
   actions: Object.values(actions),
   apps: Object.values(apps),
 
-  // Seed data loaded at startup
-  data: [{
-    object: 'task',
-    mode: 'upsert',
-    externalId: 'subject',
-    records: [
-      { subject: 'Learn ObjectStack', status: 'completed', priority: 'high' },
-      { subject: 'Build a cool app', status: 'in_progress', priority: 'normal' },
-    ],
-  }],
+  // Seed data authored with defineSeed() in src/data/
+  data: TodoSeedData,
 });
 ```
 
-**3. The server auto-detects** what you need: ObjectQL engine → InMemory driver → Hono HTTP server → REST API at `/api/v1/task`.
+Seed data is authored separately with `defineSeed()` and wired in via the `data`
+key. For example, `src/data/index.ts`:
+
+```typescript
+import { defineSeed } from '@objectstack/spec/data';
+import { Task } from '../objects/task.object';
+
+const tasks = defineSeed(Task, {
+  mode: 'upsert',
+  externalId: 'subject',
+  records: [
+    { subject: 'Learn ObjectStack', status: 'completed', priority: 'high' },
+    { subject: 'Build a cool app', status: 'in_progress', priority: 'normal' },
+  ],
+});
+
+export const TodoSeedData = [tasks];
+```
+
+**3. The server auto-detects** what you need: ObjectQL engine → InMemory driver → Hono HTTP server → REST API at `/api/v1/todo_task`.
 
 ---
 
@@ -245,36 +260,22 @@ os compile       # Build to dist/objectstack.json
 
 ---
 
-## plugin-bi — Reusable Plugin
+## app-showcase — Kitchen-Sink Reference
 
-**Path:** `examples/plugin-bi/`
+**Path:** `examples/app-showcase/`
 
-A minimal plugin template showing how to package metadata for distribution. Plugins use `type: 'plugin'` in their manifest and can be composed into any host app.
+A kitchen-sink workspace built for demonstration and debugging. It exercises
+nearly every metadata type, view type, and chart type in a single app — objects,
+views, apps, pages, dashboards, reports, datasets, flows, jobs, agents, security
+profiles, translations, themes, webhooks, and more. Use it as a living reference
+when you want to see how a particular metadata type is authored.
 
-```typescript
-// examples/plugin-bi/objectstack.config.ts
-import { defineStack } from '@objectstack/spec';
-
-export default defineStack({
-  manifest: {
-    id: 'com.example.bi',
-    namespace: 'bi',
-    version: '1.0.0',
-    type: 'plugin',        // ← Plugin, not app
-    name: 'BI Plugin',
-    description: 'Business Intelligence dashboards and analytics',
-  },
-  objects: [],
-  dashboards: [],
-});
+```bash
+cd examples/app-showcase
+pnpm dev
 ```
 
-**Key difference from apps:** Plugins don't run standalone — they're loaded by a host app via `AppPlugin`:
-
-```typescript
-import BiPlugin from '../plugin-bi/objectstack.config';
-new AppPlugin(BiPlugin)  // Load into host
-```
+It is also the target of `pnpm dev` / `pnpm dev:showcase` from the monorepo root.
 
 ---
 
@@ -284,23 +285,15 @@ Compose apps and plugins in `objectstack.config.ts`, compile them into one
 artifact, then boot that artifact with the CLI.
 
 ```typescript
-import { defineStack } from '@objectstack/spec';
-import CrmApp from 'hotcrm/objectstack.config';  // from https://github.com/objectstack-ai/hotcrm
+import { composeStacks } from '@objectstack/spec';
+import CrmApp from '../examples/app-crm/objectstack.config';
 import TodoApp from '../examples/app-todo/objectstack.config';
-import BiPlugin from '../examples/plugin-bi/objectstack.config';
 
-export default defineStack({
-  manifest: {
-    id: 'com.objectstack.server',
-    version: '1.0.0',
-    type: 'app',
-  },
-  imports: [
-    CrmApp,
-    TodoApp,
-    BiPlugin,
-  ],
-});
+// composeStacks merges objects, apps, and other metadata from each stack.
+// The combined manifest is selected per the `manifest` option; the first
+// stack's manifest is used by default. Duplicate object names throw unless
+// you pass an `objectConflict` strategy ('override' | 'merge').
+export default composeStacks([CrmApp, TodoApp]);
 ```
 
 ### Short Names Are Canonical
@@ -309,11 +302,10 @@ Each app declares a `namespace` in its manifest, but **the short object name is 
 
 | App | Namespace | Object name | Physical table |
 |:----|:----------|:------------|:---------------|
-| Todo | `todo` | `task` | `task` |
-| CRM | `crm` | `account` | `account` |
-| BI | `bi` | `report` | `report` |
+| Todo | `todo` | `todo_task` | `todo_task` |
+| CRM | `crm` | `crm_account` | `crm_account` |
 
-If two packages contribute objects with the same short name, the registry logs a warning. Resolve the collision by renaming one object's short `name` (for example, `crm_account`) rather than using FQN strings in user code.
+If two packages contribute objects with the same short name, the registry logs a warning. Resolve the collision by giving one object a package-prefixed short `name` (the convention the examples follow, e.g. `crm_account`, `todo_task`) rather than using FQN strings in user code.
 
 ### Run It
 
@@ -326,7 +318,8 @@ OS_ARTIFACT_PATH=./dist/objectstack.json os start
 
 ## Project Structure Conventions
 
-All examples follow the same pattern. When you run `os init`, you get this structure:
+All examples follow the same pattern. The recommended project layout — used by
+every example in `examples/` — looks like this:
 
 ```
 my-app/
@@ -343,14 +336,21 @@ my-app/
 │   ├── dashboards/           # Analytics dashboards (optional)
 │   ├── reports/              # Report definitions (optional)
 │   ├── agents/               # AI agents (optional)
-│   └── rag/                  # RAG pipelines (optional)
+│   └── data/                 # Seed data via defineSeed() (optional)
 └── test/                     # Tests
 ```
+
+<Callout type="info">
+  `os init` scaffolds a minimal starter, not this full tree. It emits
+  `objectstack.config.ts` plus a single object under
+  `src/objects/{namespace}_item.ts` (e.g. `my_app_item.ts`) with a matching
+  barrel `src/objects/index.ts`. Add the other directories above as your app grows.
+</Callout>
 
 **Naming conventions:**
 - **Directories:** plural (`objects/`, `actions/`, `flows/`)
 - **Files:** `{name}.object.ts`, `{name}.actions.ts`, `{name}.flow.ts`
-- **Object names:** `snake_case` short names (`task`, `sales_order`, `account`)
+- **Object names:** `snake_case` short names with a package prefix (`todo_task`, `crm_account`)
 - **Config keys:** `camelCase` (`maxLength`, `defaultValue`, `pluralLabel`)
 
 ## What's Next

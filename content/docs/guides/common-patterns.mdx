@@ -77,7 +77,7 @@ export default defineStack({
 
 ## 2. Master-Detail Relationship
 
-Create a parent-child relationship where child records are cascaded on delete.
+Create a parent-child relationship between a master and its detail records. Note that `master_detail` defaults to `deleteBehavior: 'set_null'`; set `deleteBehavior: 'cascade'` explicitly if you want child records deleted with the parent.
 
 ```typescript
 {
@@ -113,6 +113,7 @@ Create a parent-child relationship where child records are cascaded on delete.
           label: 'Order',
           type: 'master_detail',
           reference: 'order',
+          deleteBehavior: 'cascade',
           inlineEdit: true,
           inlineAmountField: 'line_total',
         },
@@ -135,26 +136,17 @@ Create a list view with pre-configured filters and column display.
 ```typescript
 import { defineView } from '@objectstack/spec';
 
-export const taskBoard = defineView({
-  name: 'open_tasks',
-  label: 'Open Tasks',
-  object: 'task',
-  type: 'list',
-  listType: 'grid',
-  columns: [
-    { field: 'title', width: 300 },
-    { field: 'status', width: 120 },
-    { field: 'priority', width: 100 },
-    { field: 'assigned_to', width: 150 },
-    { field: 'due_date', width: 120 }
-  ],
-  defaultFilters: {
-    status: { $ne: 'closed' }
-  },
-  defaultSort: [
-    { field: 'priority', order: 'desc' },
-    { field: 'due_date', order: 'asc' }
-  ]
+export const taskViews = defineView({
+  list: {
+    type: 'grid',
+    data: { provider: 'object', object: 'task' },
+    columns: ['title', 'status', 'priority', 'assigned_to', 'due_date'],
+    filter: [['status', '!=', 'closed']],
+    sort: [
+      { field: 'priority', order: 'desc' },
+      { field: 'due_date', order: 'asc' }
+    ]
+  }
 });
 ```
 
@@ -167,17 +159,15 @@ Display records as a kanban board grouped by a status field.
 ```typescript
 import { defineView } from '@objectstack/spec';
 
-export const kanban = defineView({
-  name: 'task_board',
-  label: 'Task Board',
-  object: 'task',
-  type: 'list',
-  listType: 'kanban',
-  kanbanConfig: {
-    groupByField: 'status',
-    cardTitle: 'title',
-    cardSubtitle: 'assigned_to',
-    showCount: true
+export const taskBoard = defineView({
+  list: {
+    type: 'kanban',
+    data: { provider: 'object', object: 'task' },
+    columns: ['title', 'assigned_to'],
+    kanban: {
+      groupByField: 'status',
+      columns: ['title', 'assigned_to']
+    }
   }
 });
 ```
@@ -197,26 +187,30 @@ export const crm = defineApp({
   description: 'Customer Relationship Management',
   navigation: [
     {
+      id: 'nav_contacts',
       type: 'object',
-      object: 'contact',
+      objectName: 'contact',
       label: 'Contacts',
       icon: 'users'
     },
     {
+      id: 'nav_deals',
       type: 'object',
-      object: 'deal',
+      objectName: 'deal',
       label: 'Deals',
       icon: 'dollar-sign'
     },
     {
+      id: 'nav_activities',
       type: 'object',
-      object: 'activity',
+      objectName: 'activity',
       label: 'Activities',
       icon: 'activity'
     },
     {
+      id: 'nav_dashboard',
       type: 'dashboard',
-      dashboard: 'sales_dashboard',
+      dashboardName: 'sales_dashboard',
       label: 'Dashboard',
       icon: 'bar-chart'
     }
@@ -236,27 +230,26 @@ import { defineFlow } from '@objectstack/spec';
 export const assignmentNotification = defineFlow({
   name: 'task_assignment_notification',
   label: 'Task Assignment Notification',
-  type: 'autolaunched',
-  trigger: {
-    type: 'record_change',
-    object: 'task',
-    event: 'after_update',
-    conditions: {
-      field: 'assigned_to',
-      changed: true
-    }
-  },
-  steps: [
+  type: 'record_change',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
     {
-      type: 'action',
-      name: 'send_notification',
-      action: 'send_email',
+      id: 'notify',
+      type: 'notify',
+      label: 'Notify Assignee',
       config: {
-        to: '{{record.assigned_to.email}}',
-        subject: 'Task Assigned: {{record.title}}',
-        body: 'You have been assigned to task "{{record.title}}".'
+        // String fields use single-brace {…} templates, not {{…}}
+        to: '{record.assigned_to.email}',
+        subject: 'Task Assigned: {record.title}',
+        body: 'You have been assigned to task "{record.title}".'
       }
-    }
+    },
+    { id: 'end', type: 'end', label: 'End' }
+  ],
+  edges: [
+    // Edge conditions are bare CEL (ADR-0032) — no {…} braces.
+    { id: 'e1', source: 'start', target: 'notify', condition: 'record.assigned_to != previous.assigned_to' },
+    { id: 'e2', source: 'notify', target: 'end' }
   ]
 });
 ```
@@ -292,21 +285,22 @@ Define a multi-step approval flow for records.
   flows: [{
     name: 'expense_approval',
     label: 'Expense Approval',
-    type: 'autolaunched',
-    trigger: {
-      type: 'record_change',
-      object: 'expense_report',
-      event: 'after_update'
-    },
-    steps: [
-      {
-        type: 'decision',
-        name: 'check_amount',
-        conditions: [
-          { name: 'auto_approve', condition: '{{record.amount}} < 100' },
-          { name: 'needs_approval', condition: '{{record.amount}} >= 100' }
-        ]
-      }
+    type: 'record_change',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'check_amount', type: 'decision', label: 'Check Amount' },
+      { id: 'auto_approve', type: 'update_record', label: 'Auto Approve' },
+      { id: 'request_approval', type: 'notify', label: 'Request Approval' },
+      { id: 'end', type: 'end', label: 'End' }
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'check_amount' },
+      // Branch conditions are bare CEL (ADR-0032) — reference fields directly,
+      // no {…} template braces.
+      { id: 'e2', source: 'check_amount', target: 'auto_approve', condition: 'record.amount < 100' },
+      { id: 'e3', source: 'check_amount', target: 'request_approval', condition: 'record.amount >= 100' },
+      { id: 'e4', source: 'auto_approve', target: 'end' },
+      { id: 'e5', source: 'request_approval', target: 'end' }
     ]
   }]
 }
@@ -324,30 +318,33 @@ import { defineAgent } from '@objectstack/spec';
 export const supportAgent = defineAgent({
   name: 'support_agent',
   label: 'Customer Support Agent',
-  role: 'assistant',
-  model: 'gpt-4o',
+  role: 'Customer Support Agent',
+  model: {
+    provider: 'openai',
+    model: 'gpt-4o',
+    temperature: 0.3,
+    maxTokens: 2048
+  },
   instructions: `You are a helpful customer support agent. 
     You can search for customer records, look up order status, 
     and create support tickets. Always be polite and professional.`,
   tools: [
     {
-      type: 'object_query',
-      object: 'contact',
+      type: 'query',
+      name: 'contact',
       description: 'Search customer records'
     },
     {
-      type: 'object_query',
-      object: 'order',
+      type: 'query',
+      name: 'order',
       description: 'Look up order status'
     },
     {
-      type: 'object_create',
-      object: 'support_ticket',
+      type: 'action',
+      name: 'create_support_ticket',
       description: 'Create a support ticket'
     }
-  ],
-  temperature: 0.3,
-  maxTokens: 2048
+  ]
 });
 ```
 
@@ -379,25 +376,18 @@ const page3 = { ...page1, offset: 50 };
 ### Cursor-Based (Scalable)
 
 ```typescript
-// First page
+// First page — no cursor yet
 const firstPage = {
   object: 'activity',
   fields: ['id', 'type', 'description', 'created_at'],
   orderBy: [{ field: 'created_at', order: 'desc' }],
-  limit: 50,
-  keyset: {
-    field: 'id',
-    order: 'desc'
-  }
+  limit: 50
 };
 
-// Next page (using cursor from previous response)
+// Next page — pass the opaque cursor token returned with the previous response
 const nextPage = {
   ...firstPage,
-  keyset: {
-    ...firstPage.keyset,
-    after: 'last_id_from_previous_page'
-  }
+  cursor: { /* opaque cursor token from the previous response */ }
 };
 ```
 
@@ -420,21 +410,30 @@ Restrict field visibility and editability based on user profiles.
       salary: { label: 'Salary', type: 'currency',
         hidden: true,  // Hidden from default views
         encryptionConfig: {
+          enabled: true,
           algorithm: 'aes-256-gcm',
-          keyRotation: true
+          scope: 'field',
+          keyManagement: {
+            provider: 'local',
+            rotationPolicy: { enabled: true, frequencyDays: 90 }
+          }
         }
       },
       ssn: { label: 'SSN', type: 'text',
         hidden: true,
         maskingRule: {
+          field: 'ssn',
           strategy: 'partial',
-          visibleChars: 4,
-          maskChar: '*',
-          position: 'end'
+          pattern: '\\d{4}$'
         },
         encryptionConfig: {
+          enabled: true,
           algorithm: 'aes-256-gcm',
-          keyRotation: true
+          scope: 'field',
+          keyManagement: {
+            provider: 'local',
+            rotationPolicy: { enabled: true, frequencyDays: 90 }
+          }
         }
       },
     }

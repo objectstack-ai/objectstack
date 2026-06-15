@@ -5,7 +5,7 @@ description: Complete reference of all ObjectStack packages in the monorepo
 
 # Package Reference
 
-ObjectStack is distributed as a monorepo containing **70 package manifests** organized into core runtime, client SDKs, framework adapters, drivers, plugins, and platform services.
+ObjectStack is distributed as a monorepo containing **~75 package manifests** organized into core runtime, client SDKs, framework adapters, drivers, plugins, connectors, triggers, and platform services.
 
 > **Note for AI Agents**: Each package's `README.md` contains a specific architectural role and usage rules section.
 
@@ -13,14 +13,17 @@ ObjectStack is distributed as a monorepo containing **70 package manifests** org
 
 | Category | Count | Description |
 | :--- | :---: | :--- |
-| Core runtime | 9 | `spec`, `core`, `runtime`, `types`, `metadata`, `objectql`, `rest`, `formula`, `platform-objects` |
+| Core runtime | 11 | `spec`, `core`, `runtime`, `types`, `metadata`, `metadata-core`, `metadata-fs`, `objectql`, `rest`, `formula`, `platform-objects` |
 | Client / DX | 5 | `client`, `client-react`, `cli`, `create-objectstack`, `vscode-objectstack` |
 | Framework adapters | 7 | Express, Fastify, Hono, NestJS, Next.js, Nuxt, SvelteKit |
 | Drivers | 4 | `driver-memory`, `driver-sql`, `driver-sqlite-wasm`, `driver-mongodb` |
-| Plugins | 22 | Auth, security, audit, approvals, sharing, email, webhooks, reports, Hono/MCP servers, MSW/dev, triggers, knowledge, and embedders |
+| Plugins | 18 | Auth, security, audit, org-scoping, approvals, sharing, email, webhooks, reports, Hono/MCP servers, MSW/dev, record-change & schedule triggers, knowledge, and embedders |
+| Connectors | 4 | `connector-rest`, `connector-mcp`, `connector-openapi`, `connector-slack` |
+| Triggers | 3 | `trigger-api`, `trigger-record-change`, `trigger-schedule` |
 | Platform services | 17 | AI, Analytics, Automation, Cache, Cluster, Datasource, Feed, I18n, Job, Knowledge, Messaging, Package, Queue, Realtime, Settings, Storage |
+| Other | ~6 | `mcp`, `console`, `cloud-connection`, `observability`, app templates, and tooling |
 
-**Total: 70 package manifests**
+**Total: ~75 package manifests.** Counts drift as packages are added — run `find packages -name package.json -not -path '*/node_modules/*'` for the exact current set.
 
 ---
 
@@ -32,20 +35,25 @@ ObjectStack is distributed as a monorepo containing **70 package manifests** org
 
 **Purpose:** The foundational package containing all protocol definitions and schemas. This is the "DNA" of ObjectStack.
 
-**Key Exports:**
-- `Data` - Data protocol schemas (Field, Object, Query, etc.)
-- `UI` - UI protocol schemas (View, App, Dashboard, etc.)
-- `System` - System protocol schemas (Manifest, Plugin, Events, etc.)
-- `AI` - AI protocol schemas (Agent, RAG Pipeline, etc.)
-- `API` - API protocol schemas (Contract, Endpoint, etc.)
-- `Automation` - Automation protocol schemas (Flow, Workflow, etc.)
-- `Auth` - Authentication protocol schemas
-- `Permission` - Permission protocol schemas
-- `Hub` - Hub protocol schemas
-- `Integration` - Integration protocol schemas
-- `Shared` - Shared utilities and identifiers
+**Protocol Domains (subpath imports):**
 
-**Protocol Count:** 175 Zod schemas
+The package does **not** export schemas from the root; import the domain you need via its subpath, e.g. `import * as Data from '@objectstack/spec/data'`.
+
+- `@objectstack/spec/data` - Data protocol schemas (Field, Object, Query, etc.)
+- `@objectstack/spec/ui` - UI protocol schemas (View, App, Dashboard, etc.)
+- `@objectstack/spec/system` - System protocol schemas (Manifest, Plugin, Events, Auth config, etc.)
+- `@objectstack/spec/identity` - Identity & authentication schemas
+- `@objectstack/spec/security` - Permission and security schemas
+- `@objectstack/spec/ai` - AI protocol schemas (Agent, RAG Pipeline, etc.)
+- `@objectstack/spec/api` - API protocol schemas (Contract, Endpoint, etc.)
+- `@objectstack/spec/automation` - Automation protocol schemas (Flow, Workflow, etc.)
+- `@objectstack/spec/integration` - Integration protocol schemas
+- `@objectstack/spec/contracts` - Service contract interfaces
+- `@objectstack/spec/kernel` - Kernel protocol schemas
+- `@objectstack/spec/shared` - Shared utilities and identifiers
+- Additional subpaths: `studio`, `cloud`, `qa`
+
+**Protocol Count:** Hundreds of Zod schemas across these domains — the set grows over time, so refer to the [Protocol Reference](/docs/references) for the current catalog.
 
 **Learn more:** [Protocol Reference](/docs/references)
 
@@ -217,7 +225,12 @@ ObjectStack is distributed as a monorepo containing **70 package manifests** org
 | Development | `init`, `dev`, `serve` |
 | Build & Validate | `compile`, `validate`, `info` |
 | Scaffolding | `generate` (alias: `g`), `create` |
-| Quality | `test`, `doctor` |
+| Quality | `test`, `doctor`, `lint` |
+| Publishing & Registry | `build`, `publish`, `register`, `rollback`, `login`, `logout`, `whoami` |
+| Inspection | `diff`, `explain` |
+| Command groups | `cloud`, `data`, `datasource`, `environments`, `i18n`, `meta`, `package`, `plugin` |
+
+> This is a representative list; run `os --help` for the authoritative set of commands and subcommands.
 
 **Key Features:**
 - **Project Initialization**: `os init` creates projects from templates (app, plugin, empty)
@@ -254,7 +267,9 @@ ObjectStack is distributed as a monorepo containing **70 package manifests** org
 - **MetadataManager**: Orchestrates loading, saving, watching, caching metadata
 - **MetadataPlugin**: Kernel plugin adapter for metadata system
 - **Loaders**:
-  - `FilesystemLoader` - Loads metadata from disk (rootDir)
+  - `MemoryLoader` - In-memory metadata source
+  - `RemoteLoader` - Loads metadata from a remote endpoint
+  - `DatabaseLoader` - Loads metadata persisted in the database
 - **Serializers**:
   - `JSONSerializer` - `.json` files
   - `YAMLSerializer` - `.yaml` files  
@@ -270,6 +285,30 @@ ObjectStack is distributed as a monorepo containing **70 package manifests** org
 - Managing metadata lifecycle
 
 **Implementation Status:** ✅ **FULLY IMPLEMENTED** - Production ready
+
+---
+
+### @objectstack/metadata-core
+
+**Description:** Metadata Repository contracts (ADR-0008) — types, canonicalization, errors, and the `MetadataRepository` interface.
+
+**Purpose:** The shared contract layer the metadata system and its storage backends implement.
+
+**Use Cases:** Building custom metadata repositories, integrating with the metadata system.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
+
+---
+
+### @objectstack/metadata-fs
+
+**Description:** `FileSystemRepository` — a Node-only `MetadataRepository` implementation backed by JSON files and a JSONL change log (ADR-0008).
+
+**Purpose:** Persists metadata on the filesystem with an append-only change history.
+
+**Use Cases:** Local development, file-based metadata storage, change auditing.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
 
 ---
 
@@ -412,18 +451,17 @@ Framework adapters that bridge ObjectStack's unified `HttpDispatcher` to specifi
 **Purpose:** A reference in-memory database driver used for testing and development.
 
 **Key Features:**
-- **CRUD Operations**: create, read, update, delete, find
-- **Pagination Support**: Offset-based pagination
+- **CRUD & Bulk Operations**: create, read, update, delete, find, plus bulk insert/update/delete
+- **Mingo Query Engine**: MongoDB-compatible filtering, projection, and distinct values
+- **Aggregation Pipeline**: `$match`, `$group`, `$sort`, `$project`, `$unwind`, and an `IAnalyticsService` implementation (`memory-analytics`)
+- **Sorting & Pagination**: `orderBy` sorting with offset-based pagination
+- **Snapshot Transactions**: `beginTransaction` / `commit` / `rollback` (capability flag `transactions: true`)
 - **Health Checks**: Built-in health monitoring
 - **Array & JSON Fields**: Support for complex field types
-- **Simple Implementation**: No external dependencies
 
 **Limitations:**
-- ⚠️ No transaction support
-- ⚠️ No advanced filtering (basic only)
-- ⚠️ No aggregations
-- ⚠️ No sorting
-- ⚠️ No window functions or subqueries
+- ⚠️ Non-persistent — all data is held in memory and lost on restart
+- ⚠️ No savepoints within a transaction (`savepoints: false`)
 
 **Use Cases:**
 - Testing ObjectStack applications
@@ -433,7 +471,7 @@ Framework adapters that bridge ObjectStack's unified `HttpDispatcher` to specifi
 
 **Status:** ✅ Reference implementation for driver developers
 
-**Implementation Status:** ⚠️ **PARTIALLY IMPLEMENTED** - Basic CRUD only, suitable for testing
+**Implementation Status:** ✅ **FULLY IMPLEMENTED** (in-memory) - Mingo-backed filtering, aggregation, sorting, and snapshot transactions; non-persistent
 
 ---
 
@@ -494,12 +532,14 @@ Framework adapters that bridge ObjectStack's unified `HttpDispatcher` to specifi
 **Purpose:** Provides authentication and identity management services for ObjectStack applications with better-auth integration.
 
 **Key Features:**
+- **better-auth Integration**: Wires better-auth's server-side authentication pipeline (sign-up/sign-in, sessions, tokens)
 - **Plugin Lifecycle**: Full init/start/destroy lifecycle implementation
 - **Service Registration**: Registers `auth` service in ObjectKernel
-- **HTTP Route Scaffolding**: `/api/v1/auth/*` endpoints via IHttpServer
+- **HTTP Routes**: `/api/v1/auth/*` endpoints via IHttpServer, plus a `/set-initial-password` route
 - **Configuration Support**: Uses `AuthConfig` schema from `@objectstack/spec/system`
 - **OAuth Provider Support**: Configuration for Google, GitHub, Microsoft, etc.
-- **ObjectQL Database**: Uses ObjectQL for data persistence (no ORM required)
+- **ObjectQL Adapter**: Persists users/sessions through ObjectQL (no separate ORM required)
+- **Password Hashing**: Cryptographic password hashing via `@noble/hashes`
 - **Advanced Features**: Organization/team support, 2FA, passkeys, magic links
 
 **API Routes:**
@@ -514,9 +554,7 @@ Framework adapters that bridge ObjectStack's unified `HttpDispatcher` to specifi
 - OAuth social login integration
 - Secure session management
 
-**Status:** 🟡 **IN DEVELOPMENT** - Structure complete, authentication logic planned
-
-**Implementation Status:** ⚠️ **PARTIALLY IMPLEMENTED** - Plugin structure and routes scaffolded, authentication logic to be added with better-auth integration
+**Implementation Status:** ✅ **FULLY IMPLEMENTED** - Shipped better-auth integration with an ObjectQL persistence adapter, password hashing, and session/token management
 
 **Learn more:** [Auth Config Reference](/docs/references/system/auth-config)
 
@@ -547,6 +585,30 @@ Framework adapters that bridge ObjectStack's unified `HttpDispatcher` to specifi
 - Compliance requirements (field masking for sensitive data)
 
 **Implementation Status:** ✅ **FULLY IMPLEMENTED** - Production ready
+
+---
+
+### @objectstack/plugin-audit
+
+**Description:** Audit Plugin for ObjectStack — system audit log object and audit trail.
+
+**Key Features:** Records create/update/delete activity into a system audit-log object for compliance and forensics.
+
+**Use Cases:** Compliance audit trails, change tracking, security investigations.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
+
+---
+
+### @objectstack/plugin-org-scoping
+
+**Description:** Organization-Scoping Plugin for ObjectStack — row-level organization isolation.
+
+**Key Features:** Per-org row-level isolation, per-org seed replay, default-org bootstrap.
+
+**Use Cases:** Multi-tenant data isolation, organization-scoped applications.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
 
 ---
 
@@ -691,7 +753,97 @@ Framework adapters that bridge ObjectStack's unified `HttpDispatcher` to specifi
 
 ---
 
+## Connectors
+
+Connectors register concrete `request`/action handlers on the automation engine's connector registry, letting flows call external systems (ADR-0018 Addendum, ADR-0022/0023/0024).
+
+### @objectstack/connector-rest
+
+**Description:** Generic REST connector — the reference concrete connector that registers a `request` action on the connector registry.
+
+**Use Cases:** Calling arbitrary REST APIs from flows.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
+
+---
+
+### @objectstack/connector-openapi
+
+**Description:** OpenAPI 3.x connector generator — turns a declarative OpenAPI document into connector actions, with a self-contained static-auth HTTP transport.
+
+**Use Cases:** Integrating any OpenAPI-described service as flow actions.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
+
+---
+
+### @objectstack/connector-mcp
+
+**Description:** Model Context Protocol (MCP) connector — turns any MCP server's tools into a connector's actions on the automation engine.
+
+**Use Cases:** Exposing MCP-server tools to flows and agents.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
+
+---
+
+### @objectstack/connector-slack
+
+**Description:** Slack Web API connector — registers `chat.postMessage` / `chat.update` / `call` actions on the connector registry.
+
+**Use Cases:** Posting Slack messages and triggering Slack calls from flows.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
+
+---
+
+## Triggers
+
+Trigger packages auto-launch flows in response to events (ADR-0018, ADR-0041).
+
+### @objectstack/trigger-record-change
+
+**Description:** Record-change flow trigger — auto-launches flows on object insert/update/delete via ObjectQL lifecycle hooks.
+
+**Use Cases:** Event-driven automation reacting to data changes.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
+
+---
+
+### @objectstack/trigger-schedule
+
+**Description:** Schedule flow trigger — auto-launches flows on a cron/interval/once schedule via the `IJobService`.
+
+**Use Cases:** Scheduled and recurring automation.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
+
+---
+
+### @objectstack/trigger-api
+
+**Description:** Inbound HTTP/webhook flow trigger — per-flow HMAC-verified endpoints with queue-backed ingestion.
+
+**Use Cases:** Launching flows from external webhooks and inbound HTTP calls.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
+
+---
+
 ## Tools
+
+### @objectstack/mcp
+
+**Description:** ObjectStack as an MCP server — exposes your app's objects (and AI tools) over the Model Context Protocol (stdio + Streamable HTTP).
+
+**Purpose:** Lets MCP clients (and AI agents) discover and operate on ObjectStack data and tools.
+
+**Use Cases:** Exposing an ObjectStack app to AI assistants and MCP-aware tooling.
+
+**Implementation Status:** ✅ **IMPLEMENTED**
+
+---
 
 ### @objectstack/rest
 
@@ -829,7 +981,7 @@ pnpm add -g @objectstack/cli
 
 All packages in the monorepo are versioned together and released simultaneously to ensure compatibility.
 
-**Current Version:** Check [CHANGELOG.md](https://github.com/objectstack-ai/spec/blob/main/CHANGELOG.md)
+**Current Version:** Check [CHANGELOG.md](https://github.com/objectstack-ai/framework/blob/main/CHANGELOG.md)
 
 **Compatibility Matrix:**
 
@@ -845,15 +997,15 @@ All packages in the monorepo are versioned together and released simultaneously 
   <Card 
     href="/docs/references" 
     title="Protocol Reference"
-    description="Explore the 175 protocol schemas"
+    description="Explore the protocol schemas"
   />
   <Card 
-    href="/docs/developers" 
-    title="Developer Guide"
+    href="/docs/guides" 
+    title="Guides"
     description="Build with ObjectStack packages"
   />
   <Card 
-    href="https://github.com/objectstack-ai/spec" 
+    href="https://github.com/objectstack-ai/framework" 
     title="GitHub Repository"
     description="View source code and contribute"
   />

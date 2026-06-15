@@ -1,11 +1,11 @@
 ---
 title: Seed Data & Fixtures
-description: Populate ObjectStack objects with bootstrap data, reference records, and demo fixtures using defineDataset()
+description: Populate ObjectStack objects with bootstrap data, reference records, and demo fixtures using defineSeed()
 ---
 
 # Seed Data & Fixtures
 
-`defineDataset()` is the canonical way to define seed data in ObjectStack. It provides
+`defineSeed()` is the canonical way to define seed data in ObjectStack. It provides
 compile-time type safety by inferring valid field keys directly from your object
 definition, so typos in record field names are caught before the code runs.
 
@@ -20,10 +20,10 @@ Use seed data for:
 ## Quick Start
 
 ```typescript
-import { defineDataset } from '@objectstack/spec/data';
+import { defineSeed } from '@objectstack/spec/data';
 import { Account } from './objects/account.object';
 
-export const accountsSeed = defineDataset(Account, {
+export const accountsSeed = defineSeed(Account, {
   externalId: 'name',      // field used as the upsert / idempotency key
   mode: 'upsert',          // create if new, update if found
   env: ['dev', 'test'],    // only load in dev and test environments
@@ -48,6 +48,13 @@ The first argument is the **object definition** (the exported constant from your
 object file), not a string. This lets TypeScript validate every field name in
 `records` against the object's `fields` map at compile time.
 
+<Callout type="warn">
+  Import `defineSeed` from `@objectstack/spec/data`. Do not confuse it with
+  `defineDataset` (from `@objectstack/spec/ui`), which is the unrelated ADR-0021
+  analytics-dataset helper — it takes a single config object and is **not** a seed
+  factory.
+</Callout>
+
 ---
 
 ## Import Modes
@@ -66,7 +73,7 @@ record (matched by `externalId`).
 ### `upsert` — Recommended Default
 
 ```typescript
-defineDataset(Currency, {
+defineSeed(Currency, {
   externalId: 'code',
   mode: 'upsert',
   records: [
@@ -80,7 +87,7 @@ defineDataset(Currency, {
 ### `ignore` — Bootstrap Without Overwriting
 
 ```typescript
-defineDataset(SystemRole, {
+defineSeed(SystemRole, {
   externalId: 'code',
   mode: 'ignore',
   records: [
@@ -95,7 +102,7 @@ defineDataset(SystemRole, {
 ```typescript
 // ⚠️ Deletes ALL records in the object before inserting.
 // Only use for cache or lookup tables with no user-generated data.
-defineDataset(ExchangeRateCache, {
+defineSeed(ExchangeRateCache, {
   externalId: 'key',
   mode: 'replace',
   env: ['dev'],
@@ -115,7 +122,7 @@ default is `['prod', 'dev', 'test']` — all environments.
 
 ```typescript
 // Reference data — safe for all environments (default)
-defineDataset(Country, {
+defineSeed(Country, {
   // env omitted → defaults to ['prod', 'dev', 'test']
   records: [
     { code: 'US', name: 'United States' },
@@ -124,7 +131,7 @@ defineDataset(Country, {
 });
 
 // Demo data — never reaches production
-defineDataset(Account, {
+defineSeed(Account, {
   env: ['dev', 'test'],
   records: [
     { name: 'Demo Corp', type: 'customer' },
@@ -132,7 +139,7 @@ defineDataset(Account, {
 });
 
 // Automated test fixtures — CI/CD only
-defineDataset(TestUser, {
+defineSeed(TestUser, {
   env: ['test'],
   records: [
     { email: 'ci-admin@example.com', role: 'admin' },
@@ -144,14 +151,14 @@ defineDataset(TestUser, {
 
 ## Type Safety
 
-`defineDataset()` infers valid field keys from the object definition you pass as the
+`defineSeed()` infers valid field keys from the object definition you pass as the
 first argument. If you reference a field that does not exist on the object, TypeScript
 reports an error immediately.
 
 ```typescript
 import { Account } from './objects/account.object';
 
-defineDataset(Account, {
+defineSeed(Account, {
   records: [
     {
       name: 'Test Corp',
@@ -164,8 +171,8 @@ defineDataset(Account, {
 });
 ```
 
-This is a major advantage over writing plain JSON — always use `defineDataset()`
-over the raw `DatasetSchema.parse()` call.
+This is a major advantage over writing plain JSON — always use `defineSeed()`
+over the raw `SeedSchema.parse()` call.
 
 ---
 
@@ -177,7 +184,7 @@ runner resolves natural keys to database IDs automatically at load time.
 
 ```typescript
 // Step 1 — seed the parent object first
-const accountsSeed = defineDataset(Account, {
+const accountsSeed = defineSeed(Account, {
   externalId: 'name',
   records: [
     { name: 'Acme Corporation', type: 'customer' },
@@ -185,7 +192,7 @@ const accountsSeed = defineDataset(Account, {
 });
 
 // Step 2 — seed the child object, referencing the parent by natural key
-const contactsSeed = defineDataset(Contact, {
+const contactsSeed = defineSeed(Contact, {
   externalId: 'email',
   records: [
     {
@@ -211,9 +218,10 @@ or identity-derived seed values — a literal `new Date()` would ship the packag
 author's clock to every customer and break build determinism.
 
 ```typescript
-import { defineDataset, cel } from '@objectstack/spec';
+import { defineSeed } from '@objectstack/spec/data';
+import { cel } from '@objectstack/spec';
 
-defineDataset(Opportunity, {
+defineSeed(Opportunity, {
   records: [{
     name:            'Acme Q3 Renewal',
     close_date:      cel`daysFromNow(45)`,
@@ -238,7 +246,7 @@ This is the single canonical convention; there is no `currentUser()`, `@admin`,
 or similar special syntax.
 
 ```typescript
-defineDataset(Project, {
+defineSeed(Project, {
   externalId: 'code',
   records: [{
     code:     'bootstrap',
@@ -358,10 +366,10 @@ re-exports and orders them keeps the entry point clean.
 
 ---
 
-## `defineDataset()` API Reference
+## `defineSeed()` API Reference
 
 ```typescript
-function defineDataset<
+function defineSeed<
   const TObj extends { name: string; fields: Record<string, unknown> }
 >(
   objectDef: TObj,
@@ -371,10 +379,10 @@ function defineDataset<
     env?: Array<'prod' | 'dev' | 'test'>;  // default: ['prod','dev','test']
     records: Array<Partial<Record<keyof TObj['fields'], unknown>>>;
   }
-): Dataset
+): Seed
 ```
 
-The returned `Dataset` object is a plain serialisable value — pass it to your
+The returned `Seed` object is a plain serialisable value — pass it to your
 stack's seed runner or store it in an export array.
 
 ---

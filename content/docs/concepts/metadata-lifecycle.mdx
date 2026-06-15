@@ -20,13 +20,13 @@ This page documents the metadata data path introduced by [ADR-0008](/adr/0008-me
    │                  Studio UI                  │
    │      (useMetadataHmr / HmrStatusBadge)      │
    └────────────────────┬────────────────────────┘
-                        │ SSE  /api/metadata/hmr
+                        │ SSE  /api/v1/dev/metadata-events
                         ▼
    ┌─────────────────────────────────────────────┐
    │           MetadataManager (bridge)          │
    │   forwards Repository events → SSE channel  │
    └────────────────────┬────────────────────────┘
-                        │ MetadataEvent{seq, op, ref, ...}
+                        │ ChangeEvent{kind, metadataType, name, seq?}
                         ▼
    ┌─────────────────────────────────────────────┐
    │            LayeredRepository                │
@@ -49,7 +49,7 @@ Reads walk top-to-bottom: the first non-null layer wins. Writes always route to 
 
 | Primitive | Package | Purpose |
 | :--- | :--- | :--- |
-| **Repository** | `@objectstack/metadata-core` | CRUD + watch interface over a single metadata source. Implementations: `InMemoryRepository`, `FileSystemRepository`, `SysMetadataRepository`, `LayeredRepository`. |
+| **Repository** | `@objectstack/metadata-core` | CRUD + watch interface over a single metadata source. `InMemoryRepository` and `LayeredRepository` ship from `@objectstack/metadata-core`; `FileSystemRepository` from `@objectstack/metadata-fs`; `SysMetadataRepository` from `@objectstack/objectql`. |
 | **Change Log** | `@objectstack/metadata-core` | Append-only log of every mutation, tagged with a monotonic `seq`. Watchers can replay from any `since`. |
 | **Cache** | `@objectstack/metadata` | In-memory snapshot of the registry, keyed by `MetaRef`. Invalidated by change-log events. |
 | **Registry** | `@objectstack/metadata` | Typed registry the Kernel and plugins query. Built from the cache. |
@@ -69,7 +69,7 @@ When a user edits a view in Studio:
    - Verifies `parentVersion` matches the current head (`ConflictError` on mismatch).
    - Writes the new row + appends a change-log entry with the next `seq`.
    - Emits a `MetadataEvent { op: 'create' | 'update' | 'delete', ref, seq, source }`.
-5. The `MetadataManager` bridge forwards the event over the SSE channel `/api/metadata/hmr` with the `seq` attached.
+5. The `MetadataManager` bridge forwards the event over the SSE channel `/api/v1/dev/metadata-events`. The wire payload is **not** the internal `MetadataEvent` — it is a `ChangeEvent { kind: 'metadata-change', type, metadataType, name, path?, timestamp, seq? }` (emitted as `event: metadata-change`). `seq` is the canonical repository sequence and is **absent** for FS-watcher (chokidar) dev events.
 6. The Studio's `useMetadataHmr` hook receives the event, updates `lastSeq`, and triggers a refetch of the affected view.
 
 The `seq` is the single source of truth for ordering. The Studio status badge (`HmrStatusBadge`) shows `Repo seq: #N` in its tooltip.
@@ -83,12 +83,12 @@ In shared-database multi-tenancy, **most metadata types must not be per-org cust
 | Type | `allowOrgOverride` | Rationale |
 | :--- | :---: | :--- |
 | `view`, `dashboard`, `report`, `email_template` | ✅ | Pure rendering. Per-org customization is safe. |
+| `flow`, `agent` | ✅ | Per-org overlays are allowed for automation and agent definitions. |
+| `permission`, `role`, `profile` | ✅ | Per-org overlays are allowed; tenant-level controls layer on top. |
 | `object`, `field` | ❌ | Defines the table schema. Overriding would break existing data. |
-| `flow`, `workflow`, `agent` | ❌ | Stateful execution; per-org overrides need a separate execution-scoping mechanism. |
-| `permission`, `role`, `profile` | ❌ | Security; tenant-level controls already exist via role assignments. |
 | `datasource` | ❌ | Connection strings; multi-tenant isolation is enforced at a higher layer. |
 
-The runtime gate is implemented in `OVERLAY_ALLOWED_TYPES` (derived from the registry) and enforced by `SysMetadataRepository.put()`. Denied types return `403 not_overridable`.
+There is no `workflow` metadata type (per [ADR-0020](/adr/0020-state-machine-converge-and-enforce), record state machines are a `state_machine` validation). The runtime gate is implemented in `OVERLAY_ALLOWED_TYPES` (derived from the registry) and enforced by `SysMetadataRepository.put()`. Denied types return `403 not_overridable`.
 
 See [ADR-0005](/adr/0005-metadata-customization-overlay) for the full design and amendments.
 
@@ -105,7 +105,7 @@ The hash is `sha256:` + 64-hex of a canonical (sorted-keys, no-undefined) JSON s
 ## HMR end-to-end (latency & ordering)
 
 - **Latency.** A typical write-to-render round-trip is **&lt; 100ms** on localhost (REST `PUT` → DB write → SSE flush → Studio refetch → React re-render).
-- **Ordering.** The `seq` is monotonic per repository. If the Studio tab disconnects and reconnects, it can resume from `lastSeq` to replay missed events. (Replay is implemented by `InMemoryRepository`/`SysMetadataRepository`; the SSE bridge passes `since` as a query param.)
+- **Ordering.** The `seq` is monotonic per repository. The repository-level `watch()` API supports replay from a `since` cursor, but the dev HMR SSE endpoint does **not** replay on reconnect — it registers a fresh listener, emits a `ready` event, and then streams only live events. A tab that disconnects and reconnects will miss any events that occurred while it was offline; it should refetch the affected metadata on reconnect.
 - **Multi-tab.** Each tab has its own `seq` counter. Out-of-order delivery between tabs is impossible because they share the server change log.
 
 ---
@@ -126,13 +126,13 @@ The hash is `sha256:` + 64-hex of a canonical (sorted-keys, no-undefined) JSON s
 | :--- | :--- |
 | `InMemoryRepository`, `FileSystemRepository`, `LayeredRepository` | ✅ Shipped (`@objectstack/metadata-core`) |
 | Change log + `seq` (per-org, monotonic) | ✅ Shipped |
-| SSE bridge (`/api/metadata/hmr` with `seq`) | ✅ Shipped |
+| SSE bridge (`/api/v1/dev/metadata-events`, `event: metadata-change`) | ✅ Shipped |
 | Studio `useMetadataHmr` + `HmrStatusBadge` | ✅ Shipped |
 | Console dev-mode HMR reloader (`MetadataHmrReloader`) | ✅ Shipped |
 | `SysMetadataRepository` (overlay over `sys_metadata`) | ✅ Shipped (`@objectstack/objectql`) |
 | `LayeredRepository(SysMeta + artifact)` composition | ✅ Shipped |
 | `protocol.ts:saveMetaItem` routed through `SysMetadataRepository.put` | ✅ Shipped (PR-10d.6, flag removed) |
-| `sys_metadata_history` table (durable, org-keyed change log) | ⏳ M1 |
+| `sys_metadata_history` table (durable, org-keyed change log) | ✅ Shipped (`@objectstack/objectql`) |
 | Cache + Registry refactor against `MetadataRepository` | ⏳ Post-M0 |
 
 > **Cross-replica overlay sync is out of scope.** Single-instance deployments
@@ -150,8 +150,8 @@ The hash is `sha256:` + 64-hex of a canonical (sorted-keys, no-undefined) JSON s
 | Where the metadata came from | Lands in `sys_metadata`? | Lands in history? |
 |:---|:---|:---|
 | `defineView(...)` / `defineFlow(...)` / any source file → compiled into `dist/objectstack.json` | ❌ Never. Loaded into the in-memory registry on boot; refreshed via HMR in dev. | ❌ The artifact's own version history *is* Git. The metadata layer does not duplicate it. |
-| Editing a `.json` under `.objectstack/metadata/<type>/<name>.json` (FS overlay) | ❌ FS layer is independent of DB. | ✅ Appended to `.objectstack/.log/main.jsonl` by `FileSystemRepository`. |
-| Studio inline edit, or `PUT /api/v1/metadata/...` (REST) on an `allowOrgOverride: true` type | ✅ Written by `SysMetadataRepository.put()` as an **overlay row** scoped to `organization_id`. | ⚠️ M0: in-process watch broadcast only — no durable history table yet. M1: appended to `sys_metadata_history` with a Postgres `SERIAL seq` (single-instance scope; no cross-replica push). |
+| Editing a `.json` under `<root>/<type>/<name>.json` (FS overlay, e.g. `<root>/view/case_grid.json`) | ❌ FS layer is independent of DB. | ✅ Appended to the change log at `<root>/.objectstack/.log/main.jsonl` by `FileSystemRepository`. |
+| Studio inline edit, or `PUT /api/v1/metadata/...` (REST) on an `allowOrgOverride: true` type | ✅ Written by `SysMetadataRepository.put()` as an **overlay row** scoped to `organization_id`. | ✅ Appended to `sys_metadata_history` (per-org `event_seq`) in the **same transaction** as the `sys_metadata` write (single-instance scope; no cross-replica push). |
 | Deploying a new build (new `dist/objectstack.json`) | ❌ The artifact is loaded into memory, not synced into `sys_metadata`. | ❌ Use Git tags / your deployment platform's release log; that's where artifact "version history" lives. |
 
 ### Why artifact never enters the database

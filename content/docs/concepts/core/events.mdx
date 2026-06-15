@@ -5,111 +5,114 @@ description: System-wide event bus for loose coupling between plugins
 
 # Events & Hooks
 
-The Kernel provides a high-performance, typed Event Bus for loose coupling between plugins and the core system.
+ObjectStack has **two distinct hook systems**. They look similar but use different APIs, payloads, ordering, and error semantics — pick the right one for the job:
 
-## Lifecycle Events
+- **Kernel lifecycle hooks** — `ctx.hook(name, handler)` / `ctx.trigger(name, ...args)` on the `PluginContext`. Used for system bootstrap events and custom plugin-to-plugin events, matched by **exact name**.
+- **Data lifecycle hooks** — object-level hooks (`beforeInsert`, `afterUpdate`, …) registered via object `Hook` metadata or `engine.registerHook()`. They receive a single `HookContext` and run on record mutations.
 
-Emitted by the Kernel during the bootstrap process:
+## Kernel Lifecycle Hooks
+
+### Lifecycle Events
+
+Triggered by the Kernel during bootstrap and shutdown:
 
 | Event | Description |
 | :--- | :--- |
-| `kernel:init` | The kernel has started initialization. |
 | `kernel:ready` | All plugins have successfully started. System is live. |
+| `kernel:listening` | Fired after every `kernel:ready` handler has completed (e.g. the HTTP server is accepting connections). |
 | `kernel:shutdown` | Shutdown signal received. Plugins should clean up resources. |
-| `kernel:error` | A fatal error occurred during startup or runtime. |
 
-## Data Events
-
-The Data Engine emits events for record mutations. Every mutation triggers a `before` and `after` hook.
-
-| Event | Payload | Cancelable |
-| :--- | :--- | :---: |
-| `data:beforeCreate` | `{ object, record }` | ✅ |
-| `data:afterCreate` | `{ object, record, id }` | ❌ |
-| `data:beforeUpdate` | `{ object, id, changes, previous }` | ✅ |
-| `data:afterUpdate` | `{ object, id, record }` | ❌ |
-| `data:beforeDelete` | `{ object, id }` | ✅ |
-| `data:afterDelete` | `{ object, id }` | ❌ |
-
-<Callout type="info">
-**Cancelable** events can be aborted by throwing an error in the hook handler. This prevents the operation from proceeding.
-</Callout>
-
-## Usage
-
-### Listening to Events
+### Listening to Kernel Events
 
 ```typescript
-// Lifecycle hook — runs once when system is ready
 ctx.hook('kernel:ready', async () => {
   ctx.logger.info('System is ready! Sending startup notification...');
 });
-
-// Data hook — runs on every record creation
-ctx.hook('data:beforeCreate', async ({ object, record }) => {
-  if (object === 'order' && record.amount > 10000) {
-    ctx.logger.warn('Large order detected!');
-    // Optionally enrich the record
-    record.requires_approval = true;
-  }
-});
 ```
+
+`ctx.hook(name, handler)` takes exactly two arguments — there is no options/priority parameter. Kernel hooks run in **registration order**, and `ctx.trigger()` awaits each handler sequentially.
 
 ### Emitting Custom Events
 
-Plugins can emit their own namespaced events for inter-plugin communication:
+Plugins can trigger their own namespaced events for inter-plugin communication. Use `ctx.trigger()` (it is async and returns a `Promise`); handlers receive the positional arguments you pass to `trigger()`:
 
 ```typescript
-// Emit a custom business event
-ctx.emit('order:shipped', { orderId: '123', carrier: 'fedex' });
+// Trigger a custom business event (await it — trigger returns a Promise)
+await ctx.trigger('order:shipped', { orderId: '123', carrier: 'fedex' });
 
-// Another plugin listens
+// Another plugin listens — the handler receives the same positional args
 ctx.hook('order:shipped', async ({ orderId, carrier }) => {
   await sendTrackingEmail(orderId, carrier);
 });
 ```
 
-### Wildcard Listeners
+<Callout type="warn">
+Kernel hooks are matched by **exact name** — there is no wildcard or namespace-glob support. A handler registered under `'order:*'` will never fire for `'order:shipped'`.
+</Callout>
 
-Use wildcards to listen to all events in a namespace:
+## Data Lifecycle Hooks
+
+The Data Engine runs hooks around record reads and mutations. Write operations fire `before*` and `after*` events:
+
+| Event | When |
+| :--- | :--- |
+| `beforeInsert` / `afterInsert` | Around record creation. |
+| `beforeUpdate` / `afterUpdate` | Around record update. |
+| `beforeDelete` / `afterDelete` | Around record deletion. |
+
+Read and bulk variants (`beforeFind`/`afterFind`, `beforeCount`, `beforeAggregate`, `beforeUpdateMany`, `beforeDeleteMany`, …) also exist.
+
+### The HookContext
+
+Every data hook is a single-argument handler `(ctx: HookContext) => void | Promise<void>`. The context exposes:
+
+| Field | Description |
+| :--- | :--- |
+| `ctx.object` | Target object name (immutable). |
+| `ctx.event` | Current lifecycle event, e.g. `'beforeInsert'` (immutable). |
+| `ctx.input` | **Mutable** input. Shapes: insert `{ doc }`, update `{ id, doc }`, delete `{ id }`. Modify this to change the operation. |
+| `ctx.result` | Operation result, available in `after*` events (mutable). |
+| `ctx.previous` | Record state before the operation (update/delete). |
+| `ctx.session` | Auth/tenancy info (`userId`, `tenantId`, `roles`, …). |
+| `ctx.api` | Scoped cross-object data access. |
+
+### Registering Data Hooks
 
 ```typescript
-// Listen to all data events
-ctx.hook('data:*', async (event) => {
-  ctx.logger.debug(`Data event: ${event.type}`, event.payload);
-});
+// Enrich a record before it is created
+engine.registerHook('beforeInsert', async (ctx) => {
+  if (ctx.object === 'order' && ctx.input.doc.amount > 10000) {
+    ctx.logger?.warn?.('Large order detected!');
+    ctx.input.doc.requires_approval = true;
+  }
+}, { object: 'order' });
+
+// React after a record is created
+engine.registerHook('afterInsert', async (ctx) => {
+  await notifyWebhook(ctx.object, ctx.input.doc.id);
+}, { object: 'order' });
 ```
 
-### Error Handling in Hooks
+### Error Handling
 
-Errors in `before` hooks cancel the operation. Errors in `after` hooks are logged but don't roll back:
+What happens when a data hook throws is governed by the hook's **`onError`** policy (`'abort'` | `'log'`, default `'abort'`):
+
+- `onError: 'abort'` (default) — the error rolls back the transaction (when the hook is blocking), cancelling the operation.
+- `onError: 'log'` — the error is logged and execution continues; the operation is **not** cancelled.
 
 ```typescript
-ctx.hook('data:beforeCreate', async ({ object, record }) => {
-  if (object === 'invoice' && !record.customer_id) {
-    throw new Error('Invoice must have a customer'); // Cancels the create
+engine.registerHook('beforeInsert', async (ctx) => {
+  if (ctx.object === 'invoice' && !ctx.input.doc.customer_id) {
+    throw new Error('Invoice must have a customer'); // Aborts the insert (default onError)
   }
 });
-
-ctx.hook('data:afterCreate', async ({ object, id }) => {
-  // This runs after the record is saved
-  // Errors here are logged but don't affect the saved record
-  await notifyWebhook(object, id);
-});
 ```
 
-## Event Ordering
+### Ordering
 
-Hooks execute in plugin registration order. Use `priority` to control execution:
+Data hooks accept a `priority` option (**default `100`**). They are sorted so that **lower priority values run first**:
 
 ```typescript
-ctx.hook('data:beforeCreate', async (event) => {
-  // Validation runs first
-}, { priority: 100 });
-
-ctx.hook('data:beforeCreate', async (event) => {
-  // Enrichment runs after validation
-}, { priority: 50 });
+engine.registerHook('beforeInsert', validate,  { priority: 50 });  // runs first
+engine.registerHook('beforeInsert', enrich,    { priority: 100 }); // runs after
 ```
-
-Higher priority values execute first (default: `0`).

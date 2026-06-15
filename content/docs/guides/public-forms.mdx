@@ -15,7 +15,7 @@ ObjectStack Forms are Airtable-style **metadata-driven** forms with two render m
 Both modes:
 
 - Use the same `FormView` Zod schema (`@objectstack/spec/ui`)
-- Render through the same `<FormPage>` React component in `apps/console`
+- Render through the same `FormPage` renderer shipped by the ObjectUI console (a separate package/repo)
 - Honor `?prefill_<field>=<value>` URL params
 - Honor `submitBehavior` (thank-you / redirect / continue / next-record)
 
@@ -93,13 +93,13 @@ The submit handler attaches `permissions: ['guest_portal']` to the anonymous exe
 
 ```ts
 // hotcrm/src/profiles/guest-portal.profile.ts
-import { defineProfile } from '@objectstack/spec/security';
+import { PermissionSetSchema } from '@objectstack/spec/security';
 
-export default defineProfile({
+export default PermissionSetSchema.parse({
   name: 'guest_portal',
   label: 'Public Form Submitters',
-  description: 'INSERT-only on Web-to-Lead / Web-to-Case targets.',
-  objectPermissions: {
+  isProfile: true,
+  objects: {
     lead: { allowCreate: true },  // no read/edit/delete
     case: { allowCreate: true },
   },
@@ -125,15 +125,16 @@ const leadGuestDefaults: Hook = {
   handler: async (ctx: HookContext) => {
     const isGuest = !ctx.previous && !ctx.user?.id;
     if (!isGuest) return;
-    const { input } = ctx;
-    if (!input.lead_source) input.lead_source = 'web';
-    if (!input.status)      input.status      = 'new';
-    delete (input as Record<string, unknown>).owner;
-    delete (input as Record<string, unknown>).is_converted;
-    delete (input as Record<string, unknown>).converted_account;
-    delete (input as Record<string, unknown>).converted_contact;
-    delete (input as Record<string, unknown>).converted_opportunity;
-    delete (input as Record<string, unknown>).converted_date;
+    // For inserts the incoming record lives at ctx.input.data, not on ctx.input itself.
+    const rec = ctx.input.data as Record<string, unknown>;
+    if (!rec.lead_source) rec.lead_source = 'web';
+    if (!rec.status)      rec.status      = 'new';
+    delete rec.owner;
+    delete rec.is_converted;
+    delete rec.converted_account;
+    delete rec.converted_contact;
+    delete rec.converted_opportunity;
+    delete rec.converted_date;
   },
 };
 
@@ -157,7 +158,7 @@ Returns the form spec + a restricted object schema for the whitelisted fields:
 {
   "slug": "contact-us",
   "object": "lead",
-  "label": "Tell us about yourself",
+  "label": null,
   "form": { "type": "simple", "sections": [/* … */], "sharing": {/* … */} },
   "objectSchema": {
     "name": "lead",
@@ -166,6 +167,8 @@ Returns the form spec + a restricted object schema for the whitelisted fields:
   }
 }
 ```
+
+The top-level `label` is `view.label ?? form.label` — it is **not** taken from a section label. The Section-1 example sets neither, so it comes back `null`; add a `label` to the form view if you want a value here.
 
 `objectSchema.fields` contains **only** the fields referenced by the form, so a public client can render labels, types, and select options without an auth-protected meta lookup.
 
@@ -184,7 +187,7 @@ curl -X POST http://localhost:3000/api/v1/forms/contact-us/submit \
   }'
 ```
 
-Response on success:
+Response on success (HTTP `201 Created`):
 
 ```json
 { "object": "lead", "id": "r7p8cUZoBJbFWudt", "record": {
@@ -200,10 +203,13 @@ Errors:
 
 | Status | Code | When |
 |---|---|---|
-| `400 INVALID_REQUEST` | empty body / missing slug |
+| `400 INVALID_REQUEST` | missing / blank slug (an empty body is coerced to `{}` and surfaces as `VALIDATION_FAILED` below, not here) |
 | `400 VALIDATION_FAILED` | object schema validators fail (`required`, `format`, `length`, …) |
+| `403 PERMISSION_DENIED` | the resolved profile does not allow create on the target object |
 | `404 FORM_NOT_FOUND` | slug not registered on any `sharing.allowAnonymous: true` view |
-| `5xx FORM_SUBMIT_FAILED` | driver / hook threw |
+| `5xx` (generic) | driver / hook threw — submit errors are mapped by `mapDataError`; there is no dedicated `FORM_SUBMIT_FAILED` code |
+
+The companion `GET /api/v1/forms/:slug` route returns `500 FORM_RESOLVE_FAILED` if form resolution itself throws.
 
 ### Auth model
 
@@ -232,9 +238,9 @@ async function submit(slug: string, payload: Record<string, unknown>) {
 }
 ```
 
-The ObjectUI console ships a unified `FormPage` renderer at `/console/f/:slug` (public) and `/console/forms/:name` (internal) that does exactly this.
+The ObjectUI console (a separate package/repo) ships a unified `FormPage` renderer at `/console/f/:slug` (public) and `/console/forms/:name` (internal) that does exactly this.
 
-## 7. Internal forms (`/console/forms/:name`)
+## 6. Internal forms (`/console/forms/:name`)
 
 Sometimes you want the same FormView metadata to power an authed operator flow — "new lead", "new ticket", a queue triage screen. Set the FormView up normally (no `sharing.allowAnonymous`) and navigate to `/console/forms/<view_name>`:
 
@@ -272,7 +278,7 @@ Operators hit `/console/forms/quick_create`. The renderer:
 
 Permissions are enforced server-side just like every other authed write — no `guest_portal` profile required.
 
-## 8. URL prefill
+## 7. URL prefill
 
 Both modes accept `?prefill_<field_name>=<value>` query params. Use this to seed forms from email links, CRM segments, or campaign pages:
 
@@ -283,7 +289,7 @@ Both modes accept `?prefill_<field_name>=<value>` query params. Use this to seed
 
 The renderer maps each `prefill_<name>` param to the corresponding form field. Values are still subject to validation and (for public mode) the server-side whitelist — prefill is a UX shortcut, not a permissions bypass.
 
-## 9. `submitBehavior` — what happens after submit
+## 8. `submitBehavior` — what happens after submit
 
 Add a `submitBehavior` discriminated union to a FormView to control the post-submit experience:
 
@@ -320,15 +326,15 @@ formViews: {
 | `continue` | Re-read prefill values and reset state — user can submit another response without reload. |
 | `next-record` | Stub for queue contexts; falls back to thank-you when no queue is wired. |
 
-## 10. `type: 'form'` action — declarative form launchers
+## 9. `type: 'form'` action — declarative form launchers
 
 App actions can declare `type: 'form'` to open a FormView without resorting to free-form URLs. The `target` is the FormView name; the runtime navigates to `/console/forms/:name`.
 
 ```ts
 // hotcrm/src/actions/new-lead.action.ts
-import { defineAction } from '@objectstack/spec';
+import { Action } from '@objectstack/spec/ui';
 
-export default defineAction({
+export default Action.create({
   name: 'new_lead',
   label: 'New Lead',
   type: 'form',
@@ -338,13 +344,15 @@ export default defineAction({
 
 Compared to `{ type: 'url', target: '/console/forms/quick_create' }`, the `'form'` variant is portable across runtimes — Studio/console/native shells can route it through their own form renderer instead of a raw navigation.
 
-## 11. `defaultDetailForm` — bind a FormView to record detail
+## 10. `defaultDetailForm` — bind a FormView to record detail
 
 Set `defaultDetailForm` on an object schema to pin the FormView used by the record-detail / edit screen. This is the Airtable Interface-form binding pattern.
 
 ```ts
 // hotcrm/src/objects/lead.object.ts
-export default defineObject({
+import { ObjectSchema } from '@objectstack/spec/data';
+
+export default ObjectSchema.create({
   name: 'lead',
   label: 'Lead',
   defaultDetailForm: 'quick_create', // → views.formViews.quick_create
@@ -360,7 +368,7 @@ Resolution order at runtime:
 
 The same FormView can therefore drive **three** experiences — public collection, internal quick-create, and record-detail editing — without duplicating layout metadata.
 
-## 12. Security checklist (public mode)
+## 11. Security checklist (public mode)
 
 - [x] **Whitelist enforced server-side** — clients cannot widen the field set by hand-crafting JSON.
 - [x] **Hook strips server-controlled fields** — `owner`, `status`, `internal_notes`, `is_*` flags, conversion fields are removed even if they survive the whitelist.
@@ -372,6 +380,6 @@ The same FormView can therefore drive **three** experiences — public collectio
 ## See also
 
 - [`skills/objectstack-ui/SKILL.md`](https://github.com/objectstack-ai/framework/tree/main/skills/objectstack-ui) — full FormView schema reference.
-- [`skills/objectstack-schema/SKILL.md`](https://github.com/objectstack-ai/framework/tree/main/skills/objectstack-schema) — hook + profile authoring patterns.
+- [`skills/objectstack-data/SKILL.md`](https://github.com/objectstack-ai/framework/tree/main/skills/objectstack-data) — object, hook + permission-set authoring patterns.
 - [Hook & Action Bodies](./hook-bodies) — what runs in the sandbox vs. the host.
 - [Security](./security) — RBAC, profiles, and the `anonymous` execution context.

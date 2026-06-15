@@ -92,8 +92,19 @@ interface PluginContext {
   /** Register a service for other plugins to consume */
   registerService(name: string, service: any): void;
 
+  /** Register a lifecycle-managed service factory (e.g. SCOPED per-project services) */
+  registerServiceFactory(
+    name: string,
+    factory: (ctx: PluginContext, scopeId?: string) => any,
+    lifecycle?: ServiceLifecycle,
+    dependencies?: string[],
+  ): void;
+
   /** Get a service registered by another plugin */
   getService<T>(name: string): T;
+
+  /** Get a per-scope service instance (e.g. per-project / per-environment) */
+  getServiceScoped<T>(name: string, scopeId: string): Promise<T>;
 
   /** Replace an existing service implementation */
   replaceService<T>(name: string, implementation: T): void;
@@ -192,9 +203,11 @@ export const myFeaturePlugin: Plugin = {
     const myService = { greet: (name: string) => `Hello, ${name}!` };
     ctx.registerService('my-feature', myService);
 
-    // Listen for hooks from other plugins
-    ctx.hook('data:afterInsert', async (object, record) => {
-      ctx.logger.info(`Record inserted into ${object}`, { record });
+    // Listen for kernel hooks (e.g. run logic once the system is operational).
+    // Note: object lifecycle hooks like beforeInsert/afterInsert are defined on
+    // the object itself (L2 hooks), not subscribed via ctx.hook.
+    ctx.hook('kernel:ready', async () => {
+      ctx.logger.info('Kernel is ready');
     });
   },
 
@@ -236,7 +249,7 @@ Plugins are configured in `objectstack.config.ts`:
 
 ```typescript
 import { defineStack } from '@objectstack/spec';
-import authPlugin from '@objectstack/plugin-auth';
+import { AuthPlugin } from '@objectstack/plugin-auth';
 import myPlugin from './src/plugins/my-plugin';
 
 export default defineStack({
@@ -252,7 +265,7 @@ export default defineStack({
 
   // Production plugins
   plugins: [
-    authPlugin,
+    new AuthPlugin(),
     myPlugin,
   ],
 
@@ -284,12 +297,16 @@ plugins — there is no dedicated CLI subcommand for this in v1.
 
 ```typescript
 import { defineStack } from '@objectstack/spec';
-import authPlugin from '@objectstack/plugin-auth';
+import { AuthPlugin } from '@objectstack/plugin-auth';
 
 export default defineStack({
   manifest: { /* ... */ },
   plugins: [
-    authPlugin({ providers: ['github'] }),
+    new AuthPlugin({
+      socialProviders: {
+        github: { clientId: '...', clientSecret: '...' },
+      },
+    }),
     // add more plugins here
   ],
   devPlugins: [
@@ -317,7 +334,7 @@ ObjectStack ships with several official plugins:
 Authentication and identity management powered by better-auth.
 - OAuth, 2FA, passkeys, magic links
 - Session management
-- Depends on: `com.objectstack.server.hono`
+- Depends on: `com.objectstack.engine.objectql`
 
 ### `@objectstack/plugin-hono-server`
 HTTP server integration using [Hono](https://hono.dev).
@@ -356,7 +373,7 @@ This means a minimal config like this already works:
 
 ```typescript
 export default defineStack({
-  manifest: { name: 'demo', version: '1.0.0' },
+  manifest: { id: 'com.example.demo', type: 'app', name: 'demo', version: '1.0.0' },
   objects: [myObject],
 });
 ```
@@ -422,7 +439,7 @@ const securePlugin: PluginMetadata = {
     apiKey: z.string().min(1),
     region: z.enum(['us', 'eu', 'ap']),
   }),
-  signature: 'sha256:abc123...',
+  signature: 'ed25519:key-1:<base64url-signature>',
   
   async init(ctx) { /* ... */ },
 };
@@ -448,143 +465,60 @@ const slowPlugin: PluginMetadata = {
 
 Plugins can extend the ObjectStack CLI (`os`) with custom commands. This enables third-party packages — such as marketplace tools, deployment utilities, or domain-specific workflows — to register new top-level subcommands.
 
-#### How It Works
+The CLI is built on [oclif](https://oclif.io). Command extension is handled entirely by oclif's plugin system: a plugin ships oclif `Command` classes, declares oclif config in its `package.json`, and is installed into the CLI with `os plugins install <package>`. The host project's `objectstack.config.ts` does **not** determine CLI command availability.
 
+#### Step 1: Add oclif Config to `package.json`
+
+The plugin package declares its CLI commands location and oclif metadata:
+
+```json
+{
+  "name": "@acme/plugin-marketplace",
+  "version": "1.0.0",
+  "type": "module",
+  "files": ["dist"],
+  "oclif": {
+    "commands": {
+      "strategy": "pattern",
+      "target": "./dist/commands"
+    }
+  }
+}
 ```
-┌──────────────────────────────────────────────────────────┐
-│                     os (CLI)                             │
-│  ┌────────────┐ ┌────────────┐ ┌─────────────────────┐  │
-│  │ Built-in   │ │ Built-in   │ │  Plugin Commands    │  │
-│  │ init, dev  │ │ plugin,    │ │  marketplace,       │  │
-│  │ compile .. │ │ generate   │ │  deploy, ...        │  │
-│  └────────────┘ └────────────┘ └─────────────────────┘  │
-│                                       ▲                  │
-│                                       │                  │
-│                    loadPluginCommands()                   │
-│                    reads objectstack.config.ts            │
-│                    discovers contributes.commands         │
-│                    dynamically imports modules            │
-└──────────────────────────────────────────────────────────┘
-```
 
-1. The plugin declares `contributes.commands` in its manifest.
-2. The CLI scans installed plugins at startup via `loadPluginCommands()`.
-3. Each plugin module is dynamically imported and its exported Commander.js `Command` instances are registered.
+#### Step 2: Implement oclif Command Classes
 
-#### Step 1: Declare Commands in the Manifest
-
-Add a `contributes.commands` section to the plugin's manifest:
+Place command classes under `src/commands/` (compiled to `dist/commands/`). The file path determines the command name — `commands/marketplace/search.ts` becomes `os marketplace:search`.
 
 ```typescript
-// objectstack.config.ts (plugin package)
-import { defineStack } from '@objectstack/spec';
+// src/commands/marketplace/search.ts
+import { Args, Command, Flags } from '@oclif/core';
 
-export default defineStack({
-  manifest: {
-    id: 'com.acme.marketplace',
-    namespace: 'marketplace',
-    version: '1.0.0',
-    type: 'plugin',
-    name: 'Marketplace Plugin',
-    contributes: {
-      commands: [
-        {
-          name: 'marketplace',
-          description: 'Manage marketplace applications',
-          module: './dist/cli.js',  // optional, defaults to package main
-        },
-      ],
-    },
-  },
-});
-```
+export default class MarketplaceSearch extends Command {
+  static description = 'Search marketplace apps';
 
-Each command entry has:
+  static args = {
+    query: Args.string({ description: 'Search query', required: true }),
+  };
 
-| Property | Type | Required | Description |
-|:---------|:-----|:---------|:------------|
-| `name` | `string` | ✅ | CLI command name (lowercase, hyphens allowed) |
-| `description` | `string` | optional | Help text shown in `os --help` |
-| `module` | `string` | optional | Module path exporting Commander.js commands |
+  static flags = {
+    limit: Flags.integer({ char: 'l', description: 'Max results', default: 10 }),
+  };
 
-#### Step 2: Implement the CLI Module
-
-Create a module that exports Commander.js `Command` instances. The CLI supports three export forms:
-
-```typescript
-// src/cli.ts
-import { Command } from 'commander';
-
-// ── Subcommands ──────────────────────────────────────────
-
-const publishCommand = new Command('publish')
-  .description('Publish an app to the marketplace')
-  .argument('<package>', 'Package to publish')
-  .option('--public', 'Make publicly visible')
-  .action(async (pkg: string, options: { public?: boolean }) => {
-    console.log(`Publishing ${pkg}...`);
-    // ... publish logic
-  });
-
-const searchCommand = new Command('search')
-  .description('Search marketplace apps')
-  .argument('<query>', 'Search query')
-  .option('-l, --limit <n>', 'Max results', '10')
-  .action(async (query: string, options: { limit: string }) => {
-    console.log(`Searching for "${query}"...`);
+  async run(): Promise<void> {
+    const { args, flags } = await this.parse(MarketplaceSearch);
+    this.log(`Searching for "${args.query}" (limit ${flags.limit})...`);
     // ... search logic
-  });
-
-const installCommand = new Command('install')
-  .description('Install an app from the marketplace')
-  .argument('<app>', 'App identifier')
-  .action(async (app: string) => {
-    console.log(`Installing ${app}...`);
-    // ... install logic
-  });
-
-// ── Main Command ─────────────────────────────────────────
-
-const marketplaceCommand = new Command('marketplace')
-  .description('Manage marketplace applications')
-  .addCommand(publishCommand)
-  .addCommand(searchCommand)
-  .addCommand(installCommand);
-
-// Export as named array (recommended)
-export const commands = [marketplaceCommand];
-
-// Alternative: export default (single command or array)
-// export default marketplaceCommand;
-// export default [marketplaceCommand, anotherCommand];
+  }
+}
 ```
 
-#### Step 3: Register the Plugin
+#### Step 3: Install the Plugin into the CLI
 
-Add the plugin to the host project's `objectstack.config.ts`:
-
-```typescript
-// Host project objectstack.config.ts
-import { defineStack } from '@objectstack/spec';
-import marketplacePlugin from '@acme/plugin-marketplace';
-
-export default defineStack({
-  manifest: {
-    id: 'com.example.my-app',
-    version: '1.0.0',
-    type: 'app',
-    name: 'My App',
-  },
-  plugins: [
-    marketplacePlugin,
-  ],
-});
-```
-
-Or install the package and add it to the `plugins` array yourself:
+Users add the plugin to their `os` installation with oclif's plugin manager:
 
 ```bash
-pnpm add @acme/plugin-marketplace
+os plugins install @acme/plugin-marketplace
 ```
 
 #### Using the Extended CLI
@@ -596,89 +530,14 @@ Once installed, the new commands appear in `os --help` and can be invoked direct
 os --help
 
 # Use marketplace commands
-os marketplace search "crm"
-os marketplace install com.acme.crm
-os marketplace publish ./dist --public
+os marketplace:search "crm"
 ```
 
-#### Complete Example: Deployment Plugin
-
-Here's a full example of a deployment CLI plugin:
-
-```typescript
-// @acme/plugin-deploy/src/cli.ts
-import { Command } from 'commander';
-
-const deployCommand = new Command('deploy')
-  .description('Deploy ObjectStack app to cloud')
-  .addCommand(
-    new Command('staging')
-      .description('Deploy to staging environment')
-      .option('--skip-tests', 'Skip pre-deploy tests')
-      .action(async (options) => {
-        console.log('Deploying to staging...');
-        if (!options.skipTests) {
-          console.log('Running tests first...');
-        }
-        // deploy logic
-      })
-  )
-  .addCommand(
-    new Command('production')
-      .description('Deploy to production')
-      .option('--confirm', 'Skip confirmation prompt')
-      .action(async (options) => {
-        if (!options.confirm) {
-          // prompt for confirmation
-        }
-        console.log('Deploying to production...');
-      })
-  )
-  .addCommand(
-    new Command('status')
-      .description('Check deployment status')
-      .action(async () => {
-        console.log('Checking deployment status...');
-      })
-  );
-
-export const commands = [deployCommand];
-```
-
-```typescript
-// @acme/plugin-deploy/objectstack.config.ts
-import { defineStack } from '@objectstack/spec';
-
-export default defineStack({
-  manifest: {
-    id: 'com.acme.deploy',
-    version: '1.0.0',
-    type: 'plugin',
-    name: 'Deploy Plugin',
-    contributes: {
-      commands: [
-        {
-          name: 'deploy',
-          description: 'Deploy ObjectStack app to cloud',
-          module: './dist/cli.js',
-        },
-      ],
-    },
-  },
-});
-```
-
-Usage:
+To remove a plugin command, uninstall it:
 
 ```bash
-os deploy staging --skip-tests
-os deploy production --confirm
-os deploy status
+os plugins uninstall @acme/plugin-marketplace
 ```
-
-<Callout type="info">
-**Graceful Degradation**: If a plugin command fails to load (e.g., missing dependency), the CLI logs a warning in `DEBUG` mode and continues with built-in commands. Plugin commands never block the CLI.
-</Callout>
 
 ---
 
@@ -695,7 +554,7 @@ plugin-my-feature/
 ├── CHANGELOG.md
 └── src/
     ├── index.ts               # Entry point (required)
-    ├── cli.ts                 # CLI commands (optional, for contributes.commands)
+    ├── commands/               # oclif CLI commands (optional, for CLI extension)
     ├── my_feature/             # Domain folder (snake_case)
     │   ├── feature.object.ts   # Business object
     │   ├── feature.view.ts     # View definition

@@ -5,7 +5,7 @@ description: Deploy ObjectStack applications to Vercel — Server mode (recommen
 
 # Deploy to Vercel
 
-ObjectStack supports two deployment modes on Vercel. **Server mode is recommended** for production and is the default for ObjectStack Studio.
+ObjectStack supports two deployment modes on Vercel. **Server mode is recommended** for production. The published ObjectStack Studio/console ships as a static Vite SPA that points at a separate ObjectStack server (via `VITE_SERVER_URL`) — see the note under Option B.
 
 | Mode | Runtime | Vercel Feature | Use Case |
 | :--- | :--- | :--- | :--- |
@@ -142,7 +142,7 @@ export default defineConfig({
   "outputDirectory": "dist",
   "build": {
     "env": {
-      "VITE_RUNTIME_MODE": "msw"
+      "VITE_USE_MOCK_SERVER": "true"
     }
   },
   "rewrites": [
@@ -168,7 +168,7 @@ If your project lives in a monorepo (e.g. pnpm workspaces + Turborepo), update t
   "outputDirectory": "dist",
   "build": {
     "env": {
-      "VITE_RUNTIME_MODE": "msw"
+      "VITE_USE_MOCK_SERVER": "true"
     }
   },
   "rewrites": [
@@ -266,7 +266,11 @@ export { handler as GET, handler as POST, handler as PATCH, handler as DELETE };
 
 ### Option B: Hono + `@objectstack/hono` (Vite SPA)
 
-This is what ObjectStack Studio uses. The Vite SPA is served as static assets, and a Hono-based serverless function handles `/api/*` requests.
+This is a valid self-contained pattern when you want to ship a Vite SPA *and* its API from a single Vercel project: the SPA is served as static assets, and a Hono-based serverless function handles `/api/*` requests.
+
+<Callout type="info">
+The published ObjectStack Studio/console (`@object-ui/console`) does **not** use this topology. It deploys as a pure static SPA with no `api/` function — it is meant to be embedded in, or pointed at, a separate ObjectStack server via `VITE_SERVER_URL`. For that separate server, prefer the CLI (`objectstack serve`) over a hand-rolled Hono function.
+</Callout>
 
 **1. Create the kernel singleton** (`api/_kernel.ts` — prefixed with `_` to prevent Vercel from creating a route):
 
@@ -328,7 +332,7 @@ export default handle(app);
   "outputDirectory": "dist",
   "build": {
     "env": {
-      "VITE_RUNTIME_MODE": "server",
+      "VITE_USE_MOCK_SERVER": "false",
       "VITE_SERVER_URL": ""
     }
   },
@@ -353,7 +357,7 @@ Configure these in Vercel Project Settings → Environment Variables:
 
 | Variable | Description |
 | :--- | :--- |
-| `VITE_RUNTIME_MODE` | `msw` (in-browser) or `server` (real backend) |
+| `VITE_USE_MOCK_SERVER` | `true` = in-browser MSW kernel; `false` = real backend. A **build-time** flag baked into the SPA bundle. |
 | `VITE_SERVER_URL` | Backend API URL (empty for same-origin) |
 
 ### Cloud control plane
@@ -366,7 +370,7 @@ storage for artifacts.
 
 | Variable | Required | Description |
 | :--- | :--- | :--- |
-| `AUTH_SECRET` | yes | ≥ 32 chars |
+| `OS_AUTH_SECRET` | yes | ≥ 32 chars (`AUTH_SECRET` is accepted as a deprecated alias) |
 | `OS_CONTROL_DATABASE_URL` | yes | `libsql://…` (Turso) — control plane DB |
 | `OS_CONTROL_DATABASE_AUTH_TOKEN` | yes | Turso token (or `TURSO_AUTH_TOKEN`) |
 | `OS_STORAGE_ADAPTER` | yes | `s3` (must, on Vercel) |
@@ -387,20 +391,14 @@ storage for artifacts.
 
 ---
 
-## Runtime Mode Switching
+## Choosing the Mode
 
-ObjectStack Studio supports switching between MSW and Server mode at runtime using a URL parameter:
+The mode is selected at **build time** via the `VITE_USE_MOCK_SERVER` flag, which is baked into the SPA bundle:
 
-```
-https://myapp.vercel.app?mode=msw     → In-browser kernel
-https://myapp.vercel.app?mode=server  → Real backend
-```
+- `VITE_USE_MOCK_SERVER=true` → the in-browser MSW kernel (static demo).
+- `VITE_USE_MOCK_SERVER=false` → the SPA talks to a real backend at `VITE_SERVER_URL` (empty = same-origin).
 
-This is controlled by the config module which checks (in priority order):
-1. `?mode=` URL parameter
-2. `VITE_RUNTIME_MODE` environment variable
-3. Embedded detection (`/_studio/` path)
-4. Default: `msw`
+Because the flag is compiled into the bundle, there is no runtime `?mode=` URL switch — to change modes you must rebuild with the desired value.
 
 ---
 
@@ -409,8 +407,8 @@ This is controlled by the config module which checks (in priority order):
 ### Server Mode (Recommended)
 
 - [ ] `api/index.ts` Hono entrypoint exists with `handle(app)` export
-- [ ] `api/_kernel.ts` boots the kernel with the correct driver and broker shim
-- [ ] `vercel.json` sets `VITE_RUNTIME_MODE=server` and `VITE_SERVER_URL=` (empty)
+- [ ] `api/_kernel.ts` boots the kernel with the correct driver
+- [ ] `vercel.json` sets `VITE_USE_MOCK_SERVER=false` and `VITE_SERVER_URL=` (empty)
 - [ ] Rewrite rule routes `/api/*` to `/api` and excludes `/api/` from SPA rewrite
 - [ ] `DATABASE_URL` is configured in Vercel environment variables (for production drivers)
 - [ ] CORS is configured if frontend and API are on different origins
@@ -419,7 +417,7 @@ This is controlled by the config module which checks (in priority order):
 
 - [ ] `msw init public --save` has been run (Service Worker in `public/`)
 - [ ] `vercel.json` specifies `"framework": "vite"` and SPA rewrites
-- [ ] `VITE_RUNTIME_MODE=msw` is set in build environment
+- [ ] `VITE_USE_MOCK_SERVER=true` is set in build environment
 - [ ] Seed data is defined in `objectstack.config.ts` (`data` array)
 
 ---
