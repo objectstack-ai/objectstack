@@ -15,6 +15,7 @@ export const HoursByStatusReport: Report = {
   label: 'Hours by Status (Summary)',
   description: 'Estimated hours grouped by task status.',
   type: 'summary',
+  drilldown: true,
   // ADR-0021 Phase 2 — dataset binding (dual-form).
   dataset: 'showcase_task_metrics',
   rows: ['status'],
@@ -27,6 +28,7 @@ export const StatusPriorityMatrixReport: Report = {
   label: 'Status × Priority (Matrix)',
   description: 'Task counts cross-tabulated by status and priority.',
   type: 'matrix',
+  drilldown: true,
   // ADR-0021 D2 — true pivot: `rows` down × `columns` across, measures in cells.
   dataset: 'showcase_task_metrics',
   rows: ['status'],
@@ -40,6 +42,7 @@ export const TaskOverviewReport: Report = {
   label: 'Task Overview (Joined)',
   description: 'Multiple task sub-reports stacked into one joined view.',
   type: 'joined',
+  drilldown: true,
   blocks: [
     {
       // Analytics block → dataset-bound (dual-form); reconciled by the harness.

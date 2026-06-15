@@ -20,6 +20,7 @@ export const ProjectDetailPage: Page = {
   type: 'record',
   object: 'showcase_project',
   kind: 'slotted',
+  template: 'default',
   isDefault: true,
   regions: [],
   slots: {

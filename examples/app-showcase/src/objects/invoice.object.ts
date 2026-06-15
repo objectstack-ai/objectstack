@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { cel, P } from '@objectstack/spec';
 
 /**
  * Product — a small price-book / catalog. The invoice line's `product` lookup
@@ -60,7 +61,7 @@ export const Invoice = ObjectSchema.create({
     // the same predicate over the merged record — one rule, both ends agree.
     issued_on: Field.date({
       label: 'Issued On',
-      requiredWhen: "record.status in ['sent', 'paid']",
+      requiredWhen: P`record.status in ['sent', 'paid']`,
     }),
     // Conditional rule (B2): once an invoice is Paid, its tax rate is locked.
     // `readonlyWhen` makes the client render the field read-only, and the
@@ -73,7 +74,7 @@ export const Invoice = ObjectSchema.create({
       min: 0,
       max: 100,
       defaultValue: 0,
-      readonlyWhen: "record.status == 'paid'",
+      readonlyWhen: P`record.status == 'paid'`,
     }),
     // Conditional rule (B2): "Paid On" is only meaningful — and only shown —
     // once the invoice is Paid, and then it is required. `visibleWhen` is a
@@ -81,8 +82,8 @@ export const Invoice = ObjectSchema.create({
     // `requiredWhen` half is enforced on both ends.
     paid_on: Field.date({
       label: 'Paid On',
-      visibleWhen: "record.status == 'paid'",
-      requiredWhen: "record.status == 'paid'",
+      visibleWhen: P`record.status == 'paid'`,
+      requiredWhen: P`record.status == 'paid'`,
     }),
     // Roll-up: recomputed server-side as line items are inserted/updated/deleted
     // (child FK auto-detected: showcase_invoice_line.invoice). This is the line
@@ -123,7 +124,7 @@ export const InvoiceLine = ObjectSchema.create({
     product: Field.lookup('showcase_product', {
       label: 'Product',
       required: true,
-      readonlyWhen: "parent.status == 'paid'",
+      readonlyWhen: P`parent.status == 'paid'`,
     }),
     // Conditional rule (B2 in grids): a bulk line (large quantity) must carry a
     // description note. `requiredWhen` here is ROW-scoped — it references the
@@ -134,20 +135,20 @@ export const InvoiceLine = ObjectSchema.create({
     description: Field.text({
       label: 'Description',
       maxLength: 200,
-      requiredWhen: 'record.quantity >= 100',
+      requiredWhen: P`record.quantity >= 100`,
     }),
     quantity: Field.number({
       label: 'Qty',
       required: true,
       min: 0,
       defaultValue: 1,
-      readonlyWhen: "parent.status == 'paid'",
+      readonlyWhen: P`parent.status == 'paid'`,
     }),
     unit_price: Field.currency({
       label: 'Unit Price',
       scale: 2,
       min: 0,
-      readonlyWhen: "parent.status == 'paid'",
+      readonlyWhen: P`parent.status == 'paid'`,
     }),
     // Amount = Qty × Unit Price. Kept as a *stored* currency column (so the
     // parent Invoice.total summary can roll it up — summary aggregation reads
@@ -160,7 +161,7 @@ export const InvoiceLine = ObjectSchema.create({
       label: 'Amount',
       scale: 2,
       min: 0,
-      expression: 'record.quantity * record.unit_price',
+      expression: cel`record.quantity * record.unit_price`,
     }),
   },
 });

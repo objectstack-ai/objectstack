@@ -16,6 +16,7 @@ export const ProjectWorkspacePage: Page = {
   type: 'app',
   template: 'default',
   kind: 'full',
+  isDefault: false,
   regions: [
     {
       name: 'header',
