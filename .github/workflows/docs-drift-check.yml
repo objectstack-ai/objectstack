@@ -1,0 +1,80 @@
+name: Docs Drift Check
+
+# When a PR changes packages/** code, flag the hand-written docs that reference the
+# affected packages so they can be re-verified for implementation accuracy before the
+# drift lands on main. Advisory only — posts a PR comment, never fails the build.
+# The actual LLM audit is run on-demand / on a schedule via the `docs-accuracy-audit`
+# workflow, scoped to exactly the docs this check lists.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'packages/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  docs-drift:
+    name: Flag docs affected by code changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - name: Compute affected docs
+        id: affected
+        run: |
+          node scripts/docs-audit/affected-docs.mjs --json "origin/${{ github.base_ref }}" > affected.json
+          cat affected.json
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('affected.json', 'utf8'));
+            const baseRef = context.payload.pull_request.base.ref;
+            const docs = data.docs || [];
+            const pkgs = (data.changedPackages || []).map(p => p.name || p.dir);
+            const marker = '<!-- docs-drift-check -->';
+            let body;
+            if (docs.length === 0) {
+              body = `${marker}\n### 📓 Docs Drift Check\nNo hand-written docs reference the ${pkgs.length} changed package(s). ✅`;
+            } else {
+              const detail = (data.detail || []).reduce((m, d) => (m[d.doc] = d.via, m), {});
+              const list = docs.map(d => `- \`${d}\`${detail[d] ? `  _(via ${detail[d].join(', ')})_` : ''}`).join('\n');
+              body = [
+                marker,
+                '### 📓 Docs Drift Check',
+                `This PR changes **${pkgs.length}** package(s): ${pkgs.map(p => `\`${p}\``).join(', ')}.`,
+                '',
+                `**${docs.length}** hand-written doc(s) reference the affected code and may need an implementation-accuracy re-verification:`,
+                '',
+                list,
+                '',
+                '> Advisory only. To re-verify, run the `docs-accuracy-audit` workflow scoped to these files:',
+                '> `node scripts/docs-audit/affected-docs.mjs origin/' + baseRef + '` → pass the list as `args.docs`.',
+              ].join('\n');
+            }
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+            }
