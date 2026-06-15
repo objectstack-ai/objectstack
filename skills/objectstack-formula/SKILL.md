@@ -4,7 +4,7 @@ description: >
   Author CEL expressions used across ObjectStack — formula fields,
   field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`),
   validation / sharing / visibility predicates, flow conditions, and dynamic
-  seed values. Use whenever the user is writing an `F`, `P`, or `cel`
+  seed values. Use when the user is writing an `F`, `P`, or `cel`
   tagged-template literal, or asks "how do I express X as a formula /
   predicate". Do not use for SQL fragments (driver-native), cron schedules
   (cron dialect), or L2 hook bodies (those belong in objectstack-data).
