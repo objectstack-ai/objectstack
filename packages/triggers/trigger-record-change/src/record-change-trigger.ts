@@ -155,21 +155,32 @@ export class RecordChangeTrigger implements FlowTrigger {
      * (with the `__previous` stash audit also uses as a fallback).
      */
     private buildContext(binding: FlowTriggerBinding, ctx: HookContext): AutomationContext {
-        const input = (ctx.input ?? {}) as { doc?: Record<string, unknown>; id?: unknown };
+        // objectql lifecycle hooks carry the written row under `input.data` (insert /
+        // update payload); `id` is on update. (`doc` kept only as a defensive alias.)
+        const input = (ctx.input ?? {}) as { data?: Record<string, unknown>; doc?: Record<string, unknown>; id?: unknown };
         const after = ctx.result as Record<string, unknown> | undefined;
         const previous =
             (ctx.previous as Record<string, unknown> | undefined) ??
             ((ctx as unknown as { __previous?: Record<string, unknown> }).__previous ?? undefined);
 
-        const record: Record<string, unknown> =
-            after && typeof after === 'object'
-                ? after
+        const inputDoc =
+            input.data && typeof input.data === 'object'
+                ? input.data
                 : input.doc && typeof input.doc === 'object'
                   ? input.doc
-                  : previous && typeof previous === 'object'
-                    ? previous
-                    : {};
+                  : undefined;
+        const record: Record<string, unknown> =
+            after && typeof after === 'object'
+                ? // #1872 — overlay the after-row on the input doc so fields the
+                  // driver did not echo back (notably `multiple: true` lookups,
+                  // stored as an array column) stay visible to the flow's start
+                  // condition and `{record.<field>}` interpolation. The after-row
+                  // wins for every field it DOES return (id, DB-computed values).
+                  { ...(inputDoc ?? {}), ...after }
+                : inputDoc ?? (previous && typeof previous === 'object' ? previous : {});
 
+        // eslint-disable-next-line no-console
+        console.log('[dbg-bc] ctx.input=', JSON.stringify(ctx.input), 'after=', JSON.stringify(after), 'record=', JSON.stringify(record));
         const session = (ctx.session ?? {}) as { userId?: string };
 
         return {
