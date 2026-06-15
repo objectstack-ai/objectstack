@@ -104,7 +104,7 @@ export const Lead = ObjectSchema.create({
       name: 'lead_score_range',
       label: 'Lead Score 0–100',
       description: 'Lead score must be between 0 and 100.',
-      condition: P`lead_score != null && (lead_score < 0 || lead_score > 100)`,
+      condition: P`record.lead_score != null && (record.lead_score < 0 || record.lead_score > 100)`,
       message: 'Lead score must be between 0 and 100.',
     },
   ],

@@ -41,6 +41,71 @@ function buildEnv(now: () => Date): Environment {
   return registerStdLib(env, now);
 }
 
+/**
+ * Namespace roots that a `record`-scoped CEL site may legitimately reference.
+ * Declared as `map` (dyn values) so member access (`record.foo`) and any
+ * arithmetic/comparison on it defers to runtime — the strict env faults ONLY on
+ * an *undeclared* top-level identifier, i.e. a bare field reference. Generous on
+ * purpose: an unknown root is a missed catch, a missing root is a false positive
+ * that would break the build, so we err toward declaring more.
+ */
+const SCOPE_ROOTS = [
+  'record', 'previous', 'input', 'output', 'os', 'vars', 'variables',
+  'automation', 'context', 'args', 'item', 'env', 'user', 'step', 'result',
+  'trigger', 'event', 'payload', 'data', 'params', 'config', 'settings',
+] as const;
+
+/**
+ * A `record`-scoped environment (`unlistedVariablesAreDyn: false`) for detecting
+ * bare field references. It reuses the real stdlib so function calls don't fault;
+ * only undeclared *variables* do. Built once — `parse`/`check` do not mutate it.
+ */
+let scopedEnv: Environment | undefined;
+function getScopedEnv(): Environment {
+  if (scopedEnv) return scopedEnv;
+  const env = new Environment({
+    unlistedVariablesAreDyn: false,
+    enableOptionalTypes: true,
+    limits: DEFAULT_LIMITS,
+  });
+  registerStdLib(env, () => new Date(0));
+  for (const root of SCOPE_ROOTS) {
+    try { env.registerVariable(root, 'map'); } catch { /* duplicate — ignore */ }
+  }
+  scopedEnv = env;
+  return env;
+}
+
+/**
+ * In a `record`-scoped CEL site — a `Field.formula` or an object validation
+ * predicate — the evaluation scope binds only the `record`/`previous`/… *namespaces*
+ * (no field flattening). A bare top-level identifier like `amount` or `status`
+ * therefore resolves to nothing and the expression silently evaluates to `null`
+ * / never fires (#1928, the class behind #1927's broken formulas). Returns the
+ * first such bare reference, or `null`.
+ *
+ * Acts ONLY on cel-js's `Unknown variable: X` fault, so it cannot false-positive
+ * on arithmetic/comparison overloads — and it must NOT be applied to flow /
+ * automation conditions, where the record's fields ARE flattened to top-level
+ * and bare references are correct.
+ */
+export function detectBareReference(source: string): string | null {
+  if (typeof source !== 'string' || !source.trim()) return null;
+  try {
+    const result = getScopedEnv().parse(source).check?.() as
+      | { valid: boolean; error?: { message?: string } }
+      | undefined;
+    if (result && result.valid === false) {
+      const m = /Unknown variable:\s*([A-Za-z_$][\w$]*)/.exec(result.error?.message ?? '');
+      if (m) return m[1];
+    }
+  } catch {
+    // Parse/other faults are the syntax checker's job (celEngine.compile); this
+    // helper only reports the undeclared-variable case.
+  }
+  return null;
+}
+
 /** Coerce cel-js's BigInt-flavored return into spec-friendly JS values. */
 function coerce(value: unknown): unknown {
   if (typeof value === 'bigint') {

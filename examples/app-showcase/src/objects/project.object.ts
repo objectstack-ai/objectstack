@@ -51,7 +51,7 @@ export const Project = ObjectSchema.create({
     spent: Field.currency({ label: 'Spent', scale: 2, min: 0, defaultValue: 0 }),
     budget_remaining: Field.formula({
       label: 'Budget Remaining',
-      expression: cel`(budget == null ? 0 : budget) - (spent == null ? 0 : spent)`,
+      expression: cel`(record.budget == null ? 0 : record.budget) - (record.spent == null ? 0 : record.spent)`,
     }),
     start_date: Field.date({ label: 'Start Date' }),
     end_date: Field.date({ label: 'Target End Date' }),
