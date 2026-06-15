@@ -7,6 +7,7 @@
  *
  *   {variable}                → variables.get('variable')
  *   {variable.path.segment}   → walks dotted path on the resolved value
+ *   {list.0} / {rec.items.2}   → numeric segments index into arrays
  *   {$User.Id}                → reads from context.userId
  *   {$User.Email}             → reads from context.user?.email
  *   {NOW()}                   → ISO timestamp at evaluation time
@@ -78,7 +79,9 @@ function resolveToken(token: string, variables: VariableMap, context: Automation
     }
 
     // Direct variable / dotted path lookup (fast path, no arithmetic).
-    if (/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(trimmed)) {
+    // Path segments after the head may be identifiers OR array indices (`\d+`),
+    // so `{list.0}` / `{record.target_channels.0}` resolve into arrays (#1872).
+    if (/^[A-Za-z_$][\w$]*(?:\.(?:[A-Za-z_$][\w$]*|\d+))*$/.test(trimmed)) {
         const segments = trimmed.split('.');
         const head = segments[0];
         if (variables.has(head)) {
