@@ -24,7 +24,7 @@
     "nanoid": "^5.1.11"
   },
   "optionalDependencies": {
-    "better-sqlite3": "^12.10.0"
+    "better-sqlite3": "^12.10.1"
   },
   "peerDependencies": {
     "mysql2": "^3.0.0",
@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^12.10.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
   },

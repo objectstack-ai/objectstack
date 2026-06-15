@@ -18,14 +18,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@better-auth/core": "^1.6.15",
-    "@better-auth/oauth-provider": "^1.6.15",
+    "@better-auth/core": "^1.6.18",
+    "@better-auth/oauth-provider": "^1.6.18",
     "@noble/hashes": "^2.2.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "better-auth": "^1.6.15"
+    "better-auth": "^1.6.18"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",

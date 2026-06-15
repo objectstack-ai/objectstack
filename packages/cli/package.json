@@ -39,10 +39,10 @@
     "topicSeparator": " "
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.81",
-    "@ai-sdk/gateway": "^3.0.126",
-    "@ai-sdk/google": "^3.0.80",
-    "@ai-sdk/openai": "^3.0.68",
+    "@ai-sdk/anthropic": "^3.0.84",
+    "@ai-sdk/gateway": "^3.0.131",
+    "@ai-sdk/google": "^3.0.82",
+    "@ai-sdk/openai": "^3.0.71",
     "@objectstack/account": "workspace:*",
     "@objectstack/client": "workspace:*",
     "@objectstack/console": "workspace:*",
@@ -93,7 +93,7 @@
     "chalk": "^5.6.2",
     "chokidar": "^5.0.0",
     "dotenv-flow": "^4.1.0",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.1",
     "ts-morph": "^28.0.0",
     "tsx": "^4.22.4",
     "yaml": "^2.9.0",
