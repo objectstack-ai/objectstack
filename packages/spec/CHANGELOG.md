@@ -1,5 +1,12 @@
 # @objectstack/spec
 
+## 9.8.0
+
+### Minor Changes
+
+- 97c55b3: chore(spec): prune 15 dead field display-config properties (ADR-0049 / dead-surface plan). Removes `FieldSchema` enhanced-type _display_ knobs that had no runtime reader and no renderer consumer (dead in both layers per the field liveness audit): code `theme`/`lineNumbers`, rating `allowHalf`, location `displayMap`/`allowGeocoding`, address `addressFormat`, color `colorFormat`/`allowAlpha`/`presetColors`, slider `showValue`/`marks`, barcode/qr `barcodeFormat`/`qrErrorCorrection`/`displayValue`/`allowScanning`. The wired knobs (`language`, `maxRating`, `step`) and the functional nested configs (`currencyConfig`/`vectorConfig`/`fileAttachmentConfig`) are kept. Field _types_ are unchanged; only unused optional config props are removed. Narrows the false spec surface (narrow-and-true).
+- 1b1f490: chore(spec): prune 7 dead field governance/compliance properties (dead-surface plan, P0/P2). Removes `FieldSchema` props that implied data-protection/governance behavior but had no runtime consumer — false promises (the real at-rest channel is `type: 'secret'`): `encryptionConfig`, `maskingRule`, `auditTrail`, `cached`, `dataQuality`, `writeRequiresMasterRead`, `trackFeedHistory`. Also drops the now-unused `EncryptionConfigSchema`/`MaskingRuleSchema` imports. Kept `caseSensitive` and `dependencies` (potentially functional — conservative). Field types unchanged.
+
 ## 9.7.0
 
 ## 9.6.0

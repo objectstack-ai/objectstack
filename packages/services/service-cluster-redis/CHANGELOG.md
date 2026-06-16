@@ -1,5 +1,14 @@
 # @objectstack/service-cluster-redis
 
+## 9.8.0
+
+### Patch Changes
+
+- Updated dependencies [97c55b3]
+- Updated dependencies [1b1f490]
+  - @objectstack/spec@9.8.0
+  - @objectstack/service-cluster@9.8.0
+
 ## 9.7.0
 
 ### Patch Changes

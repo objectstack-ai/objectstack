@@ -1,5 +1,11 @@
 # @objectstack/metadata-fs
 
+## 9.8.0
+
+### Patch Changes
+
+- @objectstack/metadata-core@9.8.0
+
 ## 9.7.0
 
 ### Patch Changes

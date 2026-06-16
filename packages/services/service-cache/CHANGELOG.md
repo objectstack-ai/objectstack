@@ -1,5 +1,15 @@
 # @objectstack/service-cache
 
+## 9.8.0
+
+### Patch Changes
+
+- Updated dependencies [97c55b3]
+- Updated dependencies [1b1f490]
+  - @objectstack/spec@9.8.0
+  - @objectstack/core@9.8.0
+  - @objectstack/observability@9.8.0
+
 ## 9.7.0
 
 ### Patch Changes

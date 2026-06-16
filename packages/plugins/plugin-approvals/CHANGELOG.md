@@ -1,5 +1,18 @@
 # @objectstack/plugin-approvals
 
+## 9.8.0
+
+### Patch Changes
+
+- Updated dependencies [c17d2c8]
+- Updated dependencies [97c55b3]
+- Updated dependencies [1b1f490]
+  - @objectstack/formula@9.8.0
+  - @objectstack/spec@9.8.0
+  - @objectstack/core@9.8.0
+  - @objectstack/metadata-core@9.8.0
+  - @objectstack/platform-objects@9.8.0
+
 ## 9.7.0
 
 ### Patch Changes
