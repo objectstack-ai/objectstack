@@ -22,6 +22,16 @@ function startOfDayUtc(d: Date): Date {
   return out;
 }
 
+/** Coerce a CEL value (Date | ISO string | epoch number) to a Date. */
+function toDate(v: unknown): Date {
+  if (v instanceof Date) return v;
+  if (typeof v === 'number' || typeof v === 'bigint') return new Date(Number(v));
+  return new Date(String(v));
+}
+
+/** One UTC day in milliseconds. */
+const MS_PER_DAY = 86_400_000;
+
 /** Add `n` days to a Date in UTC; returns a new Date. */
 function addDaysUtc(d: Date, n: number): Date {
   const out = new Date(d.getTime());
@@ -101,7 +111,56 @@ export function registerStdLib(
         }
         return parts.join(separator);
       },
+    )
+    // ── Dates ────────────────────────────────────────────────────────────
+    // Whole days from `a` to `b` (negative if `b` is before `a`). The common
+    // shape is `daysBetween(today(), record.due)` for "days remaining". Args are
+    // coerced (Date | ISO string | epoch) so a `Field.date` that arrives as a
+    // string still works without the caller hydrating it.
+    .registerFunction(
+      'daysBetween(dyn, dyn): int',
+      (a: unknown, b: unknown) =>
+        BigInt(Math.round((toDate(b).getTime() - toDate(a).getTime()) / MS_PER_DAY)),
+    )
+    // Parse an ISO date / date-time string to a Timestamp. `date` and `datetime`
+    // are aliases — both accept either form (the field's own type decides the
+    // intent); kept distinct because authors reach for whichever reads clearer.
+    .registerFunction('date(dyn): google.protobuf.Timestamp', (s: unknown) => toDate(s))
+    .registerFunction('datetime(dyn): google.protobuf.Timestamp', (s: unknown) => toDate(s))
+    // ── Numbers ──────────────────────────────────────────────────────────
+    .registerFunction('abs(dyn): double', (x: unknown) => Math.abs(Number(x)))
+    .registerFunction('round(dyn): int', (x: unknown) => BigInt(Math.round(Number(x))))
+    // min/max return the smaller/larger operand verbatim (type preserved) rather
+    // than a coerced copy, so `min(record.a, record.b)` keeps int-ness when both
+    // are ints. Comparison is numeric.
+    .registerFunction('min(dyn, dyn): dyn', (a: unknown, b: unknown) => (Number(a) <= Number(b) ? a : b))
+    .registerFunction('max(dyn, dyn): dyn', (a: unknown, b: unknown) => (Number(a) >= Number(b) ? a : b))
+    // ── Strings ──────────────────────────────────────────────────────────
+    // Free-function forms of the common string ops. CEL also exposes some as
+    // receiver methods (`s.contains(x)`), but the authoring catalog advertises
+    // the bare-call form, so register it to match what authors are told to use.
+    .registerFunction('upper(dyn): string', (s: unknown) => String(s ?? '').toUpperCase())
+    .registerFunction('lower(dyn): string', (s: unknown) => String(s ?? '').toLowerCase())
+    .registerFunction('contains(dyn, dyn): bool', (s: unknown, sub: unknown) => String(s ?? '').includes(String(sub ?? '')))
+    .registerFunction('startsWith(dyn, dyn): bool', (s: unknown, p: unknown) => String(s ?? '').startsWith(String(p ?? '')))
+    .registerFunction('endsWith(dyn, dyn): bool', (s: unknown, p: unknown) => String(s ?? '').endsWith(String(p ?? '')))
+    .registerFunction('matches(dyn, dyn): bool', (s: unknown, re: unknown) => new RegExp(String(re ?? '')).test(String(s ?? '')))
+    // ── Collections ──────────────────────────────────────────────────────
+    // `len` mirrors CEL's built-in `size()` for strings/lists/maps; `isEmpty` is
+    // the inverse-of-non-empty companion to `isBlank` (true for null, '', []).
+    .registerFunction('len(dyn): int', (v: unknown) => BigInt(lengthOf(v)))
+    .registerFunction(
+      'isEmpty(dyn): bool',
+      (v: unknown) => v === null || v === undefined || lengthOf(v) === 0,
     );
+}
+
+/** Length of a string / list / map (0 for scalars and null). */
+function lengthOf(v: unknown): number {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === 'string' || Array.isArray(v)) return v.length;
+  if (typeof v === 'object') return Object.keys(v as Record<string, unknown>).length;
+  return 0;
 }
 
 /**

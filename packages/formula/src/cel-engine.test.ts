@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { celEngine } from './cel-engine';
+import { CEL_STDLIB_FUNCTIONS } from './validate';
 import type { Expression } from '@objectstack/spec';
 
 const cel = (source: string): Expression => ({ dialect: 'cel', source });
@@ -294,6 +295,79 @@ describe('celEngine', () => {
         record: { end_date: '2026-06-20' },
       });
       expect(r).toEqual({ ok: true, value: true });
+    });
+  });
+
+  // #1928 follow-up — the authoring catalog (`introspectScope`) advertised 25
+  // functions but only 8 were registered; 14 faulted at runtime. These cover the
+  // newly-registered stdlib, plus a drift-guard that every advertised function resolves.
+  describe('stdlib catalog (registered functions)', () => {
+    const now = new Date('2026-06-16T00:00:00Z');
+
+    it('daysBetween counts whole days (negative when reversed)', () => {
+      expect(celEngine.evaluate(cel('daysBetween(today(), daysFromNow(7))'), { now }))
+        .toEqual({ ok: true, value: 7 });
+      expect(celEngine.evaluate(cel('daysBetween(today(), daysAgo(3))'), { now }))
+        .toEqual({ ok: true, value: -3 });
+    });
+
+    it('daysBetween coerces a date-string field arg (no manual hydration)', () => {
+      const r = celEngine.evaluate(cel('daysBetween(today(), record.due)'), {
+        now, record: { due: '2026-06-26' },
+      });
+      expect(r).toEqual({ ok: true, value: 10 });
+    });
+
+    it('date / datetime parse ISO strings to a timestamp', () => {
+      const r = celEngine.evaluate(cel('date("2026-03-15") < datetime("2026-03-16T08:00:00Z")'), {});
+      expect(r).toEqual({ ok: true, value: true });
+    });
+
+    it('abs / round / min / max', () => {
+      expect(celEngine.evaluate(cel('abs(record.x)'), { record: { x: -3.5 } })).toEqual({ ok: true, value: 3.5 });
+      expect(celEngine.evaluate(cel('round(2.6)'), {})).toEqual({ ok: true, value: 3 });
+      expect(celEngine.evaluate(cel('min(record.a, record.b)'), { record: { a: 3, b: 7 } })).toEqual({ ok: true, value: 3 });
+      expect(celEngine.evaluate(cel('max(record.a, record.b)'), { record: { a: 3, b: 7 } })).toEqual({ ok: true, value: 7 });
+    });
+
+    it('string ops: upper / lower / contains / startsWith / endsWith / matches', () => {
+      expect(celEngine.evaluate(cel('upper(record.s)'), { record: { s: 'hi' } })).toEqual({ ok: true, value: 'HI' });
+      expect(celEngine.evaluate(cel('lower("HI")'), {})).toEqual({ ok: true, value: 'hi' });
+      expect(celEngine.evaluate(cel('contains(record.s, "ell")'), { record: { s: 'hello' } })).toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(cel('startsWith("hello", "he")'), {})).toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(cel('endsWith("hello", "lo")'), {})).toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(cel('matches("a1", "a.")'), {})).toEqual({ ok: true, value: true });
+    });
+
+    it('len / isEmpty over strings and lists', () => {
+      expect(celEngine.evaluate(cel('len(record.items)'), { record: { items: [1, 2, 3] } })).toEqual({ ok: true, value: 3 });
+      expect(celEngine.evaluate(cel('isEmpty("")'), {})).toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(cel('isEmpty(record.items)'), { record: { items: [] } })).toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(cel('isEmpty(record.items)'), { record: { items: [1] } })).toEqual({ ok: true, value: false });
+    });
+
+    // Drift guard: introspectScope promises these to authors; every one must resolve.
+    it('every advertised CEL_STDLIB_FUNCTIONS entry resolves at runtime', () => {
+      const call: Record<string, string> = {
+        now: 'now()', today: 'today()', daysFromNow: 'daysFromNow(30)', daysAgo: 'daysAgo(7)',
+        daysBetween: 'daysBetween(today(), daysFromNow(7))', date: 'date("2026-03-15")',
+        datetime: 'datetime("2026-03-15T08:00:00Z")', abs: 'abs(-3.5)', round: 'round(2.6)',
+        min: 'min(1, 2)', max: 'max(1, 2)', upper: 'upper("hi")', lower: 'lower("HI")',
+        trim: 'trim(" x ")', contains: 'contains("hello", "ell")', startsWith: 'startsWith("hi", "h")',
+        endsWith: 'endsWith("hi", "i")', matches: 'matches("a1", "a.")', joinNonEmpty: 'joinNonEmpty(["a", "b"], "-")',
+        isBlank: 'isBlank("")', isEmpty: 'isEmpty([])', coalesce: 'coalesce(null, "x")', len: 'len("ab")',
+        size: 'size([1, 2])', has: 'has(record.a)', int: 'int("3")', string: 'string(3)',
+        bool: 'bool("true")', double: 'double("3.5")', timestamp: 'timestamp("2026-01-01T00:00:00Z")',
+        duration: 'duration("3600s")',
+      };
+      const unresolved: string[] = [];
+      for (const fn of CEL_STDLIB_FUNCTIONS) {
+        const src = call[fn];
+        expect(src, `no probe call defined for advertised function \`${fn}\``).toBeTruthy();
+        const r = celEngine.evaluate(cel(src), { now, record: { a: 1 } });
+        if (!r.ok) unresolved.push(`${fn}: ${r.error.message.split('\n')[0]}`);
+      }
+      expect(unresolved, `advertised functions that fault at runtime:\n${unresolved.join('\n')}`).toEqual([]);
     });
   });
 });

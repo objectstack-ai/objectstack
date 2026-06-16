@@ -256,10 +256,21 @@ export function introspectScope(role: FieldRole, schema?: ExprSchemaHint): {
   };
 }
 
-/** Public catalog of CEL stdlib functions available in expressions. */
+/**
+ * Public catalog of CEL functions available in expressions — what `introspectScope`
+ * advertises to authors (incl. AI). Every entry MUST actually resolve at runtime:
+ * either registered in `registerStdLib` or a verified cel-js built-in. Drifting this
+ * list ahead of the runtime tells the author to call functions that fault (#1928).
+ */
 export const CEL_STDLIB_FUNCTIONS: string[] = [
-  'now', 'today', 'daysFromNow', 'daysBetween', 'date', 'datetime', 'timestamp',
-  'isBlank', 'isEmpty', 'coalesce', 'len', 'size', 'int', 'float', 'string', 'bool',
-  'upper', 'lower', 'trim', 'contains', 'startsWith', 'endsWith', 'matches',
-  'has', 'min', 'max', 'abs', 'round',
+  // Dates (registered stdlib)
+  'now', 'today', 'daysFromNow', 'daysAgo', 'daysBetween', 'date', 'datetime',
+  // Numbers (registered stdlib)
+  'abs', 'round', 'min', 'max',
+  // Strings (registered stdlib)
+  'upper', 'lower', 'trim', 'contains', 'startsWith', 'endsWith', 'matches', 'joinNonEmpty',
+  // Collections / null-ish (registered stdlib)
+  'isBlank', 'isEmpty', 'coalesce', 'len',
+  // cel-js built-ins (verified to resolve)
+  'size', 'has', 'int', 'string', 'bool', 'double', 'timestamp', 'duration',
 ];
