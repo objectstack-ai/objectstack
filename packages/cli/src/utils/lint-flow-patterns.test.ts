@@ -4,9 +4,23 @@ import { describe, it, expect } from 'vitest';
 import {
   lintFlowPatterns,
   FLOW_TIME_RELATIVE_ANTIPATTERN,
+  FLOW_DATE_EQUALITY_FILTER,
   FLOW_DOUBLE_BRACE_INTERP,
   FLOW_BARE_DOLLAR_REF,
 } from './lint-flow-patterns.js';
+
+const CEL = (source: string) => ({ dialect: 'cel', source });
+/** A scheduled flow with a get_record node carrying `filter`. */
+const filterFlow = (filter: unknown) => ({
+  flows: [{
+    name: 'expiry_alert',
+    nodes: [
+      { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
+      { id: 'query', type: 'get_record', config: { objectName: 'contract', filter } },
+    ],
+    edges: [],
+  }],
+});
 
 const flow = (condition: unknown, triggerType = 'record-after-update') => ({
   flows: [{
@@ -46,6 +60,52 @@ describe('lintFlowPatterns — time-relative anti-pattern (#1874)', () => {
     });
     it('no condition', () => {
       expect(lintFlowPatterns(flow(undefined))).toHaveLength(0);
+    });
+  });
+});
+
+describe('lintFlowPatterns — date-equality in query filter (#1874)', () => {
+  it('flags a field bound directly to a time value (implicit equality)', () => {
+    const fnds = lintFlowPatterns(filterFlow({ expires_at: CEL('daysFromNow(30)') }));
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].rule).toBe(FLOW_DATE_EQUALITY_FILTER);
+    expect(fnds[0].hint).toMatch(/\$gte.*daysFromNow\(N\).*\$lt/);
+  });
+
+  it('flags `$in` against time values (the original renewal_alert bug)', () => {
+    const fnds = lintFlowPatterns(filterFlow({
+      status: 'active',
+      end_date: { $in: [CEL('daysFromNow(60)'), CEL('daysFromNow(30)'), CEL('daysFromNow(7)')] },
+    }));
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].rule).toBe(FLOW_DATE_EQUALITY_FILTER);
+  });
+
+  it('flags `$eq` against a time value', () => {
+    expect(lintFlowPatterns(filterFlow({ d: { $eq: CEL('today()') } }))).toHaveLength(1);
+  });
+
+  describe('does NOT flag (false-positive guards)', () => {
+    it('a one-day window (the correct fix)', () => {
+      expect(lintFlowPatterns(filterFlow({
+        end_date: { $gte: CEL('daysFromNow(7)'), $lt: CEL('daysFromNow(8)') },
+      }))).toHaveLength(0);
+    });
+    it('multi-tier windows wrapped in $or', () => {
+      expect(lintFlowPatterns(filterFlow({
+        status: 'active',
+        $or: [
+          { end_date: { $gte: CEL('daysFromNow(7)'), $lt: CEL('daysFromNow(8)') } },
+          { end_date: { $gte: CEL('daysFromNow(30)'), $lt: CEL('daysFromNow(31)') } },
+        ],
+      }))).toHaveLength(0);
+    });
+    it('a plain range like `due_date < today()` (overdue query)', () => {
+      expect(lintFlowPatterns(filterFlow({ status: 'open', due_date: { $lt: CEL('today()') } }))).toHaveLength(0);
+    });
+    it('equality against a non-time value (status, interpolated id)', () => {
+      expect(lintFlowPatterns(filterFlow({ status: 'active', id: '{record.id}' }))).toHaveLength(0);
+      expect(lintFlowPatterns(filterFlow({ amount: { $eq: CEL('record.threshold') } }))).toHaveLength(0);
     });
   });
 });

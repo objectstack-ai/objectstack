@@ -38,6 +38,7 @@ function conditionSource(raw: unknown): string {
 }
 
 const TIME_FNS = 'daysFromNow|daysAgo|today|now|date|datetime';
+const TIME_FN_RE = new RegExp(`\\b(?:${TIME_FNS})\\s*\\(`);
 // A time function adjacent to an equality operator, either side:
 //   `end_date == daysFromNow(60)`  /  `today() != record.start`
 const DATE_EQ = new RegExp(
@@ -45,8 +46,73 @@ const DATE_EQ = new RegExp(
 );
 
 export const FLOW_TIME_RELATIVE_ANTIPATTERN = 'flow-time-relative-antipattern';
+export const FLOW_DATE_EQUALITY_FILTER = 'flow-date-equality-filter';
 export const FLOW_DOUBLE_BRACE_INTERP = 'flow-double-brace-interpolation';
 export const FLOW_BARE_DOLLAR_REF = 'flow-bare-dollar-reference';
+
+/** If `v` is a CEL expression whose source calls a time function, return that source. */
+function celTimeSource(v: unknown): string | null {
+  if (v && typeof v === 'object' && (v as AnyRec).dialect === 'cel') {
+    const src = (v as AnyRec).source;
+    if (typeof src === 'string' && TIME_FN_RE.test(src)) return src;
+  }
+  return null;
+}
+
+/** Range operators — the building block of the CORRECT time-window pattern, never flagged. */
+const RANGE_OPS = new Set(['$gte', '$gt', '$lte', '$lt', '$ne']);
+
+/**
+ * Walk a get_record/query `filter` for the date-EQUALITY footgun: a field bound
+ * directly (`field: daysFromNow(N)`) or via `$eq` / `$in` to a time-function value.
+ * A `Field.date` is stored with a time component, so two independently-computed
+ * timestamps never compare equal — the query silently returns nothing (#1928 /
+ * templates #1874). Range operators (`$gte`/`$lt` day windows) are the correct
+ * shape and are never flagged.
+ */
+function scanFilterForDateEquality(
+  filter: unknown,
+  where: string,
+  findings: FlowLintFinding[],
+): void {
+  if (!filter || typeof filter !== 'object' || Array.isArray(filter)) return;
+  for (const [key, val] of Object.entries(filter as AnyRec)) {
+    if (key === '$or' || key === '$and') {
+      if (Array.isArray(val)) for (const sub of val) scanFilterForDateEquality(sub, where, findings);
+      continue;
+    }
+    // `key` is a field name; `val` is its constraint.
+    const direct = celTimeSource(val); // `field: daysFromNow(N)` → implicit equality
+    let hit: { op: string; src: string } | null = direct ? { op: '==', src: direct } : null;
+    if (!hit && val && typeof val === 'object' && (val as AnyRec).dialect !== 'cel') {
+      for (const [op, operand] of Object.entries(val as AnyRec)) {
+        if (RANGE_OPS.has(op)) continue; // correct pattern — leave it
+        if (op === '$eq') {
+          const s = celTimeSource(operand);
+          if (s) { hit = { op: '$eq', src: s }; break; }
+        } else if (op === '$in' && Array.isArray(operand)) {
+          for (const item of operand) {
+            const s = celTimeSource(item);
+            if (s) { hit = { op: '$in', src: s }; break; }
+          }
+          if (hit) break;
+        }
+      }
+    }
+    if (hit) {
+      findings.push({
+        where,
+        message:
+          `filter matches \`${key}\` by ${hit.op} against a time value (\`${hit.src}\`) — a date field carries a ` +
+          `time component, so exact equality against \`${hit.src}\` (re-computed each run) silently matches nothing.`,
+        hint:
+          `Use a one-day window instead: \`${key}: { $gte: daysFromNow(N), $lt: daysFromNow(N+1) }\` ` +
+          `(wrap multiple tiers in \`$or\`). The abutting windows tile the timeline so each row matches exactly once. (#1874)`,
+        rule: FLOW_DATE_EQUALITY_FILTER,
+      });
+    }
+  }
+}
 
 // Flow node VALUES interpolate with SINGLE braces (`{var}` / `{rec.field}` /
 // `{$User.Id}`). Two wrong-syntax mistakes AI/human authors carry over from the
@@ -106,9 +172,16 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
     //     node values use SINGLE braces; double-brace `{{ }}` and bare `$ref.x`
     //     are carried over from the formula template dialect / other platforms.
     for (const node of nodes) {
+      const nodeWhere = `flow '${flowName}' · node '${node.id}' (${node.type})`;
+
+      // (a2) #1874 — date-EQUALITY (`==`/`$eq`/`$in`) against a time value in a
+      //      query filter. A scheduled flow that filters this way silently matches
+      //      nothing; the robust shape is a `$gte`/`$lt` day window.
+      const cfg = (node.config ?? {}) as AnyRec;
+      if (cfg.filter) scanFilterForDateEquality(cfg.filter, `${nodeWhere} filter`, findings);
+
       const strings: string[] = [];
       collectTemplateStrings(node.config, undefined, strings);
-      const nodeWhere = `flow '${flowName}' · node '${node.id}' (${node.type})`;
       for (const str of strings) {
         if (DOUBLE_BRACE.test(str)) {
           findings.push({
