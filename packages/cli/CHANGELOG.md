@@ -1,5 +1,92 @@
 # @objectstack/cli
 
+## 9.8.0
+
+### Minor Changes
+
+- 37f6bd8: feat(cli): two new flow authoring anti-pattern lints — date-equality filters (#1874) and phantom aggregation (#1870)
+
+  Extends the build-time flow anti-pattern lint (advisory warnings, never fail the build):
+
+  - **flow-date-equality-filter (#1874)**: a get_record/query filter that binds a
+    field directly, or via `$eq`/`$in`, to a time-function value
+    (`daysFromNow`/`today`/`now`/…). A `Field.date` stores a time component, so an
+    exact match against a re-computed timestamp silently returns nothing. Range
+    operators (`$gte`/`$lt` day windows) are the correct shape and are exempt.
+  - **flow-phantom-aggregation (#1870)**: a node config key naming a capability the
+    automation engine does not have (`aggregations`/`aggregate`/`groupBy`/`rollup`/
+    `having`). There is no aggregate node, so the key is silently ignored and the
+    node computes nothing. Points the author to `Field.summary` / `Field.formula`.
+
+### Patch Changes
+
+- fcd3471: fix(build): collect per-doc `order:` and `group:` frontmatter so book sorting/placement works
+
+  The doc collector (`collectDocsFromSrc`) parsed only `title:`/`description:` from
+  each `src/docs/*.md` frontmatter, so the `order` and `group` fields defined on the
+  `Doc` schema (ADR-0046 §6) were never populated on the compiled `doc` item. The
+  book resolver (`resolveBookTree`) already sorts group members by `doc.order` then
+  label and honors explicit `doc.group` placement — but with the collection half
+  silently dropping both fields, frontmatter-driven sorting/placement never reached
+  the artifact.
+
+  `parseFrontmatter` now also reads `order:` (parsed to a number; ignored when
+  non-numeric) and `group:` (string), threading them onto the collected doc when
+  present. Absent leaves both undefined so the schema/resolver defaults apply. Also
+  corrects the `order` JSDoc in `doc.zod.ts` to match the resolver, which treats an
+  absent `order` as `0` (not "after ordered siblings").
+
+- Updated dependencies [c17d2c8]
+- Updated dependencies [7fe0b91]
+- Updated dependencies [76ac582]
+- Updated dependencies [97c55b3]
+- Updated dependencies [1b1f490]
+- Updated dependencies [884bf2f]
+  - @objectstack/formula@9.8.0
+  - @objectstack/rest@9.8.0
+  - @objectstack/objectql@9.8.0
+  - @objectstack/spec@9.8.0
+  - @objectstack/plugin-approvals@9.8.0
+  - @objectstack/runtime@9.8.0
+  - @objectstack/service-ai@9.8.0
+  - @objectstack/service-automation@9.8.0
+  - @objectstack/client@9.8.0
+  - @objectstack/plugin-sharing@9.8.0
+  - @objectstack/trigger-record-change@9.8.0
+  - @objectstack/account@9.8.0
+  - @objectstack/setup@9.8.0
+  - @objectstack/studio@9.8.0
+  - @objectstack/core@9.8.0
+  - @objectstack/mcp@9.8.0
+  - @objectstack/observability@9.8.0
+  - @objectstack/platform-objects@9.8.0
+  - @objectstack/driver-memory@9.8.0
+  - @objectstack/driver-mongodb@9.8.0
+  - @objectstack/driver-sql@9.8.0
+  - @objectstack/driver-sqlite-wasm@9.8.0
+  - @objectstack/plugin-audit@9.8.0
+  - @objectstack/plugin-auth@9.8.0
+  - @objectstack/plugin-email@9.8.0
+  - @objectstack/plugin-hono-server@9.8.0
+  - @objectstack/plugin-org-scoping@9.8.0
+  - @objectstack/plugin-reports@9.8.0
+  - @objectstack/plugin-security@9.8.0
+  - @objectstack/plugin-webhooks@9.8.0
+  - @objectstack/service-analytics@9.8.0
+  - @objectstack/service-cache@9.8.0
+  - @objectstack/service-datasource@9.8.0
+  - @objectstack/service-job@9.8.0
+  - @objectstack/service-messaging@9.8.0
+  - @objectstack/service-package@9.8.0
+  - @objectstack/service-queue@9.8.0
+  - @objectstack/service-realtime@9.8.0
+  - @objectstack/service-settings@9.8.0
+  - @objectstack/service-storage@9.8.0
+  - @objectstack/trigger-api@9.8.0
+  - @objectstack/trigger-schedule@9.8.0
+  - @objectstack/types@9.8.0
+  - @objectstack/console@9.8.0
+
 ## 9.7.0
 
 ### Minor Changes

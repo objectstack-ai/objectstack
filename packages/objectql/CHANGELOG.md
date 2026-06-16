@@ -1,5 +1,40 @@
 # @objectstack/objectql
 
+## 9.8.0
+
+### Minor Changes
+
+- 76ac582: engine: accept execution context via the trailing `options` argument on the read
+  methods (`find` / `findOne` / `count` / `aggregate`), aligning them with the
+  write methods (`insert` / `update`).
+
+  Previously reads took context only inside the query (`query.context`) while
+  writes took it in a trailing `options.context`. The same `{ context }` object was
+  therefore correct as the 3rd argument to `insert` but **silently dropped** as the
+  3rd argument to `find` — a recurring footgun where an intended `isSystem` bypass
+  just vanished (e.g. control-plane reads returning empty once org-scoping hooks
+  were added). Now "execution context goes in the trailing `options` argument" is a
+  single rule across reads and writes. `query.context` remains fully supported; when
+  both are supplied, `options.context` wins.
+
+- 884bf2f: feat: record clone — wire the `object.enable.clone` capability to a real runtime (previously a parsed-but-dead flag).
+
+  - **objectql**: new `protocol.cloneData({ object, id, overrides?, context? })` — reads the source record, drops engine-owned columns (`id` + audit `created_at`/`created_by`/`updated_at`/`updated_by`, plus `system`-flagged, `autonumber`, `formula` and `summary` fields) so the insert path re-derives them, applies caller `overrides` last, and inserts the copy. Shallow by design (duplicates the record's own fields, not its child records). Gated by `schema.enable.clone`: default-on, an explicit `enable.clone === false` throws `403 CLONE_DISABLED`.
+  - **rest**: new `POST /api/v1/data/:object/:id/clone` (201 → `{ object, id, sourceId, record }`). Optional body `{ overrides }` (or a bare field map) overrides copied values, e.g. a new `name` or a cleared unique field. Honors the same auth + `enable.apiEnabled`/`apiMethods` gates as the rest of the data surface; `enable.clone === false` → 403.
+
+  Reclassifies `object.enable.clone` `dead → live` in the spec liveness ledger.
+
+### Patch Changes
+
+- Updated dependencies [c17d2c8]
+- Updated dependencies [97c55b3]
+- Updated dependencies [1b1f490]
+  - @objectstack/formula@9.8.0
+  - @objectstack/spec@9.8.0
+  - @objectstack/core@9.8.0
+  - @objectstack/metadata-core@9.8.0
+  - @objectstack/types@9.8.0
+
 ## 9.7.0
 
 ### Patch Changes
