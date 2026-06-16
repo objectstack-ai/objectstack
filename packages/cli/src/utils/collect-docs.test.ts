@@ -4,7 +4,69 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { collectDocsFromSrc, lintDocs, collectAndLintDocs, type DocItem } from './collect-docs.js';
+import { collectDocsFromSrc, lintDocs, collectAndLintDocs, lintMetadataEmbeds, type DocItem } from './collect-docs.js';
+
+// ── ADR-0051: ```metadata embed lint (body shape + reference liveness) ──────
+describe('lintMetadataEmbeds (ADR-0051)', () => {
+  const FENCE = '```';
+  const embed = (body: string) => [`${FENCE}metadata`, body, FENCE].join('\n');
+  const STACK = {
+    manifest: { namespace: 'crm' },
+    objects: [{ name: 'crm_lead', validations: [{ type: 'state_machine', name: 'crm_lead_stage' }] }],
+    flows: [{ name: 'crm_onboard' }],
+    permissions: [{ name: 'crm_rep' }],
+  };
+  const lintOne = (content: string) => lintMetadataEmbeds([{ name: 'crm_guide', content } as DocItem], STACK);
+
+  it('passes valid state_machine / flow / permission embeds', () => {
+    const content = [
+      embed('type: state_machine\nobject: crm_lead\nname: crm_lead_stage'),
+      embed('type: flow\nname: crm_onboard'),
+      embed('type: permission\nname: crm_rep'),
+    ].join('\n\n');
+    expect(lintOne(content)).toHaveLength(0);
+  });
+
+  it('flags an unknown type with a did-you-mean', () => {
+    const issues = lintOne(embed('type: state_machien\nobject: crm_lead\nname: crm_lead_stage'));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].rule).toBe('docs/metadata-embed');
+    expect(issues[0].message).toMatch(/did you mean .?state_machine/);
+  });
+
+  it('flags a missing name and a missing object', () => {
+    expect(lintOne(embed('type: flow'))[0].message).toMatch(/missing `name`/);
+    expect(lintOne(embed('type: state_machine\nname: crm_lead_stage'))[0].message).toMatch(/missing `object`/);
+  });
+
+  it('flags a dead object reference with a did-you-mean', () => {
+    const issues = lintOne(embed('type: state_machine\nobject: crm_leed\nname: crm_lead_stage'));
+    expect(issues[0].rule).toBe('docs/metadata-embed-ref');
+    expect(issues[0].message).toMatch(/crm_leed.*did you mean .?crm_lead/);
+  });
+
+  it('flags a state_machine rule name absent on a real object', () => {
+    const issues = lintOne(embed('type: state_machine\nobject: crm_lead\nname: crm_lead_stge'));
+    expect(issues[0].rule).toBe('docs/metadata-embed-ref');
+    expect(issues[0].message).toMatch(/did you mean .?crm_lead_stage/);
+  });
+
+  it('flags dead flow and permission references', () => {
+    expect(lintOne(embed('type: flow\nname: nope'))[0].rule).toBe('docs/metadata-embed-ref');
+    expect(lintOne(embed('type: permission\nname: nope'))[0].rule).toBe('docs/metadata-embed-ref');
+  });
+
+  it('ignores non-metadata fenced blocks', () => {
+    expect(lintOne('```ts\nconst x = 1\n```\n\n```mermaid\nA-->B\n```')).toHaveLength(0);
+  });
+
+  it('checks embeds inside locale variants', () => {
+    const doc: DocItem = { name: 'crm_guide', content: 'ok', translations: { zh: { content: embed('type: flow\nname: nope') } } };
+    const issues = lintMetadataEmbeds([doc], STACK);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].path).toMatch(/zh/);
+  });
+});
 
 let tmp: string;
 let configPath: string;

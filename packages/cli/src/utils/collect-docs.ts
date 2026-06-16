@@ -332,6 +332,153 @@ export function lintDocs(docs: DocItem[], namespace: string | undefined): DocIss
   return issues;
 }
 
+// ── Inline metadata views (ADR-0051): ```metadata fences ────────────────────
+
+type AnyRec = Record<string, unknown>;
+
+const METADATA_EMBED_TYPES = ['state_machine', 'flow', 'permission'] as const;
+
+/** Parse a flat `key: value` ```metadata fence body (data, not code). Mirrors
+ *  the objectui-side parser so build-time validation matches render-time. */
+function parseMetadataFenceBody(src: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of src.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const i = line.indexOf(':');
+    if (i < 1) continue;
+    const key = line.slice(0, i).trim();
+    let value = line.slice(i + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (key) out[key] = value;
+  }
+  return out;
+}
+
+/** Extract each ```metadata fenced block's raw body from Markdown. NOTE: the
+ *  other content scans use stripCode(), which DELETES fenced blocks — so this
+ *  walks the raw lines instead. */
+function extractMetadataFences(content: string): string[] {
+  const bodies: string[] = [];
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*```\s*metadata\b/.test(lines[i])) {
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) body.push(lines[i++]);
+      bodies.push(body.join('\n'));
+    }
+  }
+  return bodies;
+}
+
+function levenshtein(a: string, b: string): number {
+  const dp: number[] = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = dp[j];
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+}
+
+/** Closest candidate within a small edit distance, for did-you-mean hints. */
+function nearest(name: string, candidates: string[]): string | undefined {
+  let best: string | undefined;
+  let bestD = Infinity;
+  for (const c of candidates) {
+    const d = levenshtein(name, c);
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return best !== undefined && bestD <= Math.max(2, Math.floor(name.length / 3)) ? best : undefined;
+}
+
+/**
+ * Lint ```metadata embeds (ADR-0051): body shape + reference liveness against
+ * the package's OWN metadata. A broken embed degrades to a placeholder at
+ * render time (never crashes), but a dead same-package reference is a build
+ * error here — the same posture as `docs/broken-link`. Cross-package embeds
+ * are out of v1 scope, so every reference must resolve within this stack.
+ */
+export function lintMetadataEmbeds(docs: DocItem[], stack: Record<string, unknown>): DocIssue[] {
+  const issues: DocIssue[] = [];
+  const objects = Array.isArray(stack.objects) ? (stack.objects as AnyRec[]) : [];
+  const flows = Array.isArray(stack.flows) ? (stack.flows as AnyRec[]) : [];
+  const permissions = Array.isArray(stack.permissions) ? (stack.permissions as AnyRec[]) : [];
+  const objByName = new Map(objects.map((o) => [String(o?.name), o]));
+  const flowNames = flows.map((f) => String(f?.name));
+  const permNames = permissions.map((p) => String(p?.name));
+
+  const scan = (docName: string, content: string, locale?: string): void => {
+    const where = `docs/${docName}${locale ? ` (${locale})` : ''}`;
+    const err = (rule: string, message: string) => issues.push({ severity: 'error', rule, message, path: where });
+
+    for (const body of extractMetadataFences(content)) {
+      const f = parseMetadataFenceBody(body);
+      const type = f.type;
+
+      // ── body shape ──
+      if (!type) {
+        err('docs/metadata-embed', `metadata embed in "${docName}" is missing \`type\` (one of ${METADATA_EMBED_TYPES.join(', ')}).`);
+        continue;
+      }
+      if (!(METADATA_EMBED_TYPES as readonly string[]).includes(type)) {
+        const s = nearest(type, METADATA_EMBED_TYPES as unknown as string[]);
+        err('docs/metadata-embed', `metadata embed in "${docName}" has unknown type "${type}"${s ? ` — did you mean \`${s}\`?` : ` (expected ${METADATA_EMBED_TYPES.join(', ')})`}.`);
+        continue;
+      }
+      if (!f.name) {
+        err('docs/metadata-embed', `metadata embed (${type}) in "${docName}" is missing \`name\`.`);
+        continue;
+      }
+
+      // ── reference liveness (same-package) ──
+      if (type === 'state_machine') {
+        if (!f.object) {
+          err('docs/metadata-embed', `state_machine embed "${f.name}" in "${docName}" is missing \`object\` (a state machine is a rule on an object).`);
+          continue;
+        }
+        const obj = objByName.get(f.object);
+        if (!obj) {
+          const s = nearest(f.object, [...objByName.keys()]);
+          err('docs/metadata-embed-ref', `state_machine embed in "${docName}" references object "${f.object}", which does not exist in this package${s ? ` — did you mean \`${s}\`?` : ''}.`);
+          continue;
+        }
+        const rules = obj.validations ?? obj.validationRules;
+        const smNames = (Array.isArray(rules) ? (rules as AnyRec[]) : [])
+          .filter((r) => r?.type === 'state_machine')
+          .map((r) => String(r?.name));
+        if (!smNames.includes(f.name)) {
+          const s = nearest(f.name, smNames);
+          err('docs/metadata-embed-ref', `state_machine embed in "${docName}" references "${f.name}", but object "${f.object}" has no state_machine rule with that name${s ? ` — did you mean \`${s}\`?` : ''}.`);
+        }
+      } else if (type === 'flow') {
+        if (!flowNames.includes(f.name)) {
+          const s = nearest(f.name, flowNames);
+          err('docs/metadata-embed-ref', `flow embed in "${docName}" references flow "${f.name}", which does not exist in this package${s ? ` — did you mean \`${s}\`?` : ''}.`);
+        }
+      } else if (type === 'permission') {
+        if (!permNames.includes(f.name)) {
+          const s = nearest(f.name, permNames);
+          err('docs/metadata-embed-ref', `permission embed in "${docName}" references permission set "${f.name}", which does not exist in this package${s ? ` — did you mean \`${s}\`?` : ''}.`);
+        }
+      }
+    }
+  };
+
+  for (const doc of docs) {
+    scan(doc.name, doc.content);
+    for (const [locale, v] of Object.entries(doc.translations ?? {})) scan(doc.name, v.content, locale);
+  }
+  return issues;
+}
+
 /**
  * One-call entry for `os build`: collect `src/docs/*.md`, merge with the
  * stack's inline `docs`, and lint the combined set. Returns the merged
@@ -346,6 +493,6 @@ export function collectAndLintDocs(
   const collected = collectDocsFromSrc(configPath);
   const namespace = (stack.manifest as { namespace?: string } | undefined)?.namespace;
   const docs = [...inline, ...collected.docs];
-  const issues = [...collected.issues, ...lintDocs(docs, namespace)];
+  const issues = [...collected.issues, ...lintDocs(docs, namespace), ...lintMetadataEmbeds(docs, stack)];
   return { docs, issues };
 }
