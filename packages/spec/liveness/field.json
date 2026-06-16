@@ -149,16 +149,22 @@
     },
     "referenceFilters": {
       "status": "dead",
-      "evidence": "lookup dialog reads lookup_filters (LookupField.tsx:171) — entirely dead as authored (naming drift)"
+      "evidence": "lookup dialog reads lookup_filters (LookupField.tsx:171) — entirely dead as authored (naming drift)",
+      "authorWarn": true,
+      "authorHint": "The lookup dialog reads `lookup_filters`, not `referenceFilters` — as authored this filters nothing. Use the supported lookup-filter key, or remove it to avoid implying a constrained lookup."
     },
     "maxRating": {
       "status": "dead",
-      "evidence": "RatingField reads `max` (RatingField.tsx:13) — dead + redundant with max"
+      "evidence": "RatingField reads `max` (RatingField.tsx:13) — dead + redundant with max",
+      "authorWarn": true,
+      "authorHint": "The rating renderer reads `max`, not `maxRating` — set `max` instead; `maxRating` is ignored."
     },
     "columnName": {
       "status": "dead",
       "evidence": "resolveColumnName (spec system-names.ts:182) has ZERO call sites; SQL driver hardcodes column = field key",
-      "note": "DANGEROUS — advertises custom physical columns the driver never honors."
+      "note": "DANGEROUS — advertises custom physical columns the driver never honors.",
+      "authorWarn": true,
+      "authorHint": "The physical column always equals the field key — a custom `columnName` is silently ignored by the driver. Remove it; rename the field key itself if you need a different column."
     },
     "searchable": {
       "status": "live",
@@ -167,7 +173,9 @@
     },
     "index": {
       "status": "dead",
-      "evidence": "field-level — driver reads object indexes[] (sql-driver.ts:1252); field bool unused"
+      "evidence": "field-level — driver reads object indexes[] (sql-driver.ts:1252); field bool unused",
+      "authorWarn": true,
+      "authorHint": "A field-level `index: true` creates no index — the driver builds indexes from the object's `indexes[]` array. Declare the index there instead."
     },
     "externalId": {
       "status": "live",
@@ -181,11 +189,15 @@
     },
     "vectorConfig": {
       "status": "dead",
-      "evidence": "nested config — renderers read flat dimensions; no consumer, no vector-index DDL"
+      "evidence": "nested config — renderers read flat dimensions; no consumer, no vector-index DDL",
+      "authorWarn": true,
+      "authorHint": "This nested block is not read (no vector-index DDL). Set the flat `dimensions` sibling instead."
     },
     "fileAttachmentConfig": {
       "status": "dead",
-      "evidence": "nested config — renderers read flat multiple/accept/maxSize (FileField.tsx:16); no size/type/virus enforcement in write path"
+      "evidence": "nested config — renderers read flat multiple/accept/maxSize (FileField.tsx:16); no size/type/virus enforcement in write path",
+      "authorWarn": true,
+      "authorHint": "This nested block is not read — and note no size/type enforcement happens on write. Use the flat `multiple`/`accept`/`maxSize` siblings for the renderer."
     },
     "dependencies": {
       "status": "dead",

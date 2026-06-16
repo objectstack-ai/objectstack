@@ -172,6 +172,7 @@
   "files": [
     "dist",
     "json-schema",
+    "liveness",
     "prompts",
     "llms.txt",
     "README.md",

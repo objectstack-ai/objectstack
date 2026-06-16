@@ -35,6 +35,36 @@ Resolution per property: **ledger entry → spec `.describe()` marker → UNCLAS
 Framework provenance/lock fields (`_lock*`, `_provenance`, `_packageId/Version`,
 `protection` — ADR-0010) are auto-classified `live`.
 
+## Author warnings — closing the loop (`authorWarn`)
+
+Classification is also fed back to the *author* at build time. The CLI `compile`
+lint (`packages/cli/src/utils/lint-liveness-properties.ts`) reads these ledgers and
+emits an advisory **warning** when an authored object/field sets a property that is
+misleading — "you set this expecting it to do something; at runtime it does nothing /
+isn't enforced" — with a corrective hint. Never fails the build.
+
+Signal over noise is the whole point, so warnings are **opt-in per entry**:
+
+| Field | Effect |
+|---|---|
+| `"authorWarn": true` | warn when this property is authored (in addition, any `experimental` entry warns by default — it's a declared-but-unenforced guarantee). |
+| `"authorHint": "…"` | the corrective one-liner shown under the warning (falls back to `note`). |
+
+Two rules keep it false-positive-free, **both of which the marker author must respect**:
+
+1. **Only mark genuinely *misleading* dead props** — ones that imply a capability/behavior
+   that doesn't exist (`enable.feeds`, `field.columnName`, `versioning`). Benign display/doc
+   metadata that's "dead" (no runtime reader) — `description`, `tags`, `icon` — must NOT be
+   marked; an author isn't misled by them.
+2. **Booleans: only mark `default(false)` flags.** The lint warns on a boolean only when set
+   `true`, and it can't tell author-set-`true` from a schema default. A `default(true)` flag
+   (`enable.trash`/`mru`, `enable.searchable`) would then warn on *every* object that has an
+   `enable` block — so leave those unmarked (see `enable.searchable`'s `_authorWarnSkipped`).
+   Object/string/array props warn when merely present, so this caveat is boolean-only.
+
+The lint is ledger-driven: coverage grows by marking more entries `authorWarn`, not by
+touching the lint code. Today it covers `object` (incl. `enable.*`) and `field`.
+
 ## Granularity — drill one level
 
 A property is classified at the top level by default. A **container** property (object /

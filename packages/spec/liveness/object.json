@@ -141,23 +141,32 @@
         },
         "trackHistory": {
           "status": "dead",
-          "evidence": "no behavior-changing reader (database-loader.trackHistory is a separate ctor option)"
+          "evidence": "no behavior-changing reader (database-loader.trackHistory is a separate ctor option)",
+          "authorWarn": true,
+          "authorHint": "Per-field history is live via `Field.trackHistory` (plugin-audit, ADR-0052) — set it on the fields you want tracked instead of this object flag."
         },
         "searchable": {
           "status": "dead",
-          "evidence": "no behavior-changing reader"
+          "evidence": "no behavior-changing reader",
+          "_authorWarnSkipped": "defaults to true in the schema — the lint can't distinguish author-set-true from the default, so warning here would fire on every object with an enable block. Only default-FALSE booleans are safe to authorWarn."
         },
         "files": {
           "status": "dead",
-          "evidence": "no behavior-changing reader"
+          "evidence": "no behavior-changing reader",
+          "authorWarn": true,
+          "authorHint": "File attachments are modeled with a `Field.file`/`Field.image` (or the sys_attachment object), not this object flag — it enables nothing on its own."
         },
         "feeds": {
           "status": "dead",
-          "evidence": "no behavior-changing reader"
+          "evidence": "no behavior-changing reader",
+          "authorWarn": true,
+          "authorHint": "Comments/collaboration live on the dedicated sys_comment object (plugin-audit), not this flag — it enables no feed at runtime."
         },
         "activities": {
           "status": "dead",
-          "evidence": "no behavior-changing reader"
+          "evidence": "no behavior-changing reader",
+          "authorWarn": true,
+          "authorHint": "Tasks/events live on the dedicated sys_activity object (plugin-audit), not this flag — it enables no activity suite at runtime."
         },
         "trash": {
           "status": "dead",
@@ -176,31 +185,45 @@
     },
     "versioning": {
       "status": "dead",
-      "evidence": "aspirational; no runtime"
+      "evidence": "aspirational; no runtime",
+      "authorWarn": true,
+      "authorHint": "No record-versioning engine reads this block — setting it stores nothing and snapshots no history. Remove it (use Field.trackHistory for field-level history)."
     },
     "partitioning": {
       "status": "dead",
-      "evidence": "aspirational; no runtime"
+      "evidence": "aspirational; no runtime",
+      "authorWarn": true,
+      "authorHint": "No table-partitioning is applied from this block. Remove it — it has no runtime effect."
     },
     "softDelete": {
       "status": "dead",
-      "evidence": "no runtime; duplicates the (also dead) enable.trash"
+      "evidence": "no runtime; duplicates the (also dead) enable.trash",
+      "authorWarn": true,
+      "authorHint": "There is no soft-delete/recycle-bin runtime. Deletes are hard deletes; remove this to avoid implying restore semantics that don't exist."
     },
     "search": {
       "status": "dead",
-      "evidence": "SearchConfigSchema — no runtime; duplicates enable.searchable"
+      "evidence": "SearchConfigSchema — no runtime; duplicates enable.searchable",
+      "authorWarn": true,
+      "authorHint": "No search-engine config is consumed. Remove it — records remain queryable via the normal data API regardless."
     },
     "defaultDetailForm": {
       "status": "dead",
-      "evidence": "documented fallback chain unimplemented"
+      "evidence": "documented fallback chain unimplemented",
+      "authorWarn": true,
+      "authorHint": "The detail form is chosen by the view layer; this field's documented fallback chain is unimplemented and ignored. Remove it."
     },
     "recordName": {
       "status": "dead",
-      "evidence": "superseded by a field of type:'autonumber' + autonumberFormat (engine.ts:757)"
+      "evidence": "superseded by a field of type:'autonumber' + autonumberFormat (engine.ts:757)",
+      "authorWarn": true,
+      "authorHint": "Auto-naming is done by a `Field` of type 'autonumber' (with autonumberFormat). This block is not read — model the name field instead."
     },
     "keyPrefix": {
       "status": "dead",
-      "evidence": "no runtime"
+      "evidence": "no runtime",
+      "authorWarn": true,
+      "authorHint": "Record ids are not prefixed from this value (no Salesforce-style key prefix runtime). Remove it — it has no effect."
     },
     "tags": {
       "status": "dead",

@@ -11,6 +11,7 @@ import { lowerCallables } from '../utils/lower-callables.js';
 import { validateStackExpressions } from '../utils/validate-expressions.js';
 import { validateWidgetBindings } from '../utils/validate-widget-bindings.js';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
+import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { buildRuntimeBundle, cleanupOldRuntimeBundles } from '../utils/build-runtime.js';
 import {
@@ -202,6 +203,22 @@ export default class Compile extends Command {
       if (flowLint.length > 0 && !flags.json) {
         console.log('');
         for (const fnd of flowLint) {
+          printWarning(`${fnd.where}: ${fnd.message}`);
+          console.log(chalk.dim(`    ${fnd.hint}`));
+          console.log(chalk.dim(`    rule: ${fnd.rule}`));
+        }
+      }
+
+      // 3d-bis. Liveness author-warning lint — close the spec-liveness loop on
+      //     the author side: an authored property the ledger marks dead-and-
+      //     misleading (e.g. `object.enable.feeds`, `field.columnName`) or
+      //     experimental is set hopefully but does nothing / isn't enforced at
+      //     runtime. Advisory only; ledger-driven (entries opt in via
+      //     `authorWarn`), so it's high-signal and NEVER fails the build.
+      const livenessLint = lintLivenessProperties(result.data as Record<string, unknown>);
+      if (livenessLint.length > 0 && !flags.json) {
+        console.log('');
+        for (const fnd of livenessLint) {
           printWarning(`${fnd.where}: ${fnd.message}`);
           console.log(chalk.dim(`    ${fnd.hint}`));
           console.log(chalk.dim(`    rule: ${fnd.rule}`));
