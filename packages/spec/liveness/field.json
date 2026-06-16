@@ -224,6 +224,11 @@
       "status": "live",
       "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts + views/RecordDetailView.tsx",
       "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
+    },
+    "trackHistory": {
+      "status": "live",
+      "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts",
+      "note": "ADR-0052 §5b — the audit-writer renders tracked-field diffs as human-readable activity summaries (renderTrackedChangeSummary + getFieldDefs read field.trackHistory). Reintroduces the pruned auditTrail concept WITH a runtime consumer, satisfying enforce-or-remove (ADR-0049)."
     }
   }
 }

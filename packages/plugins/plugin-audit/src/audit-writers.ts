@@ -129,6 +129,50 @@ function safeStringify(v: any): string {
 }
 
 /**
+ * Resolve a field value to its display string, preferring a select/picklist
+ * option label over the raw stored value. Empty/missing → "∅".
+ */
+function displayFieldValue(field: any, value: any): string {
+  if (value === null || value === undefined || value === '') return '∅';
+  const options = field?.options;
+  if (Array.isArray(options)) {
+    for (const o of options) {
+      const ov = o && typeof o === 'object' ? (o.value ?? o.name ?? o.label) : o;
+      if (ov === value) {
+        const ol = o && typeof o === 'object' ? (o.label ?? o.name ?? ov) : o;
+        return String(ol);
+      }
+    }
+  }
+  return String(value);
+}
+
+/**
+ * ADR-0052 §5b — declarative activity. For fields declared `trackHistory: true`,
+ * render the diff the writer already captured as a human-readable timeline
+ * summary ("Stage: Proposal → Closed Won"; multiple changes joined by "; "),
+ * using the field label and select option labels. Returns null when no tracked
+ * field changed, so the caller falls back to the generic "Updated <object>".
+ */
+function renderTrackedChangeSummary(
+  fields: Record<string, any> | undefined | null,
+  oldVals: Record<string, any> | null,
+  newVals: Record<string, any> | null,
+): string | null {
+  if (!fields || !newVals) return null;
+  const parts: string[] = [];
+  for (const key of Object.keys(newVals)) {
+    const field = fields[key];
+    if (!field || field.trackHistory !== true) continue;
+    const label = (typeof field.label === 'string' && field.label) || key;
+    const from = displayFieldValue(field, oldVals ? oldVals[key] : undefined);
+    const to = displayFieldValue(field, newVals[key]);
+    parts.push(`${label}: ${from} → ${to}`);
+  }
+  return parts.length > 0 ? parts.join('; ') : null;
+}
+
+/**
  * Install audit + activity writers on the given engine. Idempotent per
  * `packageId` — calling twice with the same id replaces the previous
  * registration.
@@ -176,6 +220,24 @@ export function installAuditWriters(
       fieldSetCache.set(objectName, set);
     }
     return set != null && set.has(field);
+  };
+
+  // Cached full field-definition map per object (for ADR-0052 §5b trackHistory
+  // rendering — needs labels/options, not just field names).
+  const fieldDefsCache = new Map<string, Record<string, any> | null>();
+  const getFieldDefs = (objectName: string): Record<string, any> | null => {
+    if (fieldDefsCache.has(objectName)) return fieldDefsCache.get(objectName) ?? null;
+    let defs: Record<string, any> | null = null;
+    try {
+      const schema: any =
+        typeof (engine as any).getSchema === 'function' ? (engine as any).getSchema(objectName) : null;
+      const fields = schema?.fields;
+      if (fields && typeof fields === 'object' && !Array.isArray(fields)) defs = fields;
+    } catch {
+      /* ignore — best-effort; absence just means we fall back to generic text */
+    }
+    fieldDefsCache.set(objectName, defs);
+    return defs;
   };
 
   /**
@@ -298,10 +360,18 @@ export function installAuditWriters(
     }
 
     const label = recordLabel(after ?? before, recordId ?? '');
-    const summary =
-      action === 'create' ? `Created ${ctx.object} "${label}"` :
-      action === 'update' ? `Updated ${ctx.object} "${label}"` :
-                            `Deleted ${ctx.object} "${label}"`;
+    let summary: string;
+    if (action === 'create') {
+      summary = `Created ${ctx.object} "${label}"`;
+    } else if (action === 'delete') {
+      summary = `Deleted ${ctx.object} "${label}"`;
+    } else {
+      // ADR-0052 §5b: if any changed field declares `trackHistory: true`, render
+      // the diff legibly ("Stage: Proposal → Closed Won"); else generic text.
+      summary =
+        renderTrackedChangeSummary(getFieldDefs(ctx.object), oldValue, newValue) ??
+        `Updated ${ctx.object} "${label}"`;
+    }
 
     const activityRow: Record<string, any> = {
       type: activityTypeFor(action),

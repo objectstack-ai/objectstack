@@ -474,6 +474,20 @@ export const FieldSchema = lazySchema(() => z.object({
   // File attachment field config
   fileAttachmentConfig: FileAttachmentConfigSchema.optional().describe('Configuration for file and attachment field types'),
 
+  /**
+   * Track this field's value changes on the record **activity timeline**. When
+   * TRUE, the platform's activity writer renders each change as a human-readable
+   * entry ("<label>: <old> → <new>") instead of a generic "Updated <object>"
+   * row — no app code required. Opt-in per field (cf. Salesforce Feed Tracking,
+   * ServiceNow field auditing, Dataverse column auditing). The writer already
+   * captures the field diff; this flag controls whether it is surfaced legibly.
+   *
+   * Unlike the pruned `auditTrail` below, this flag HAS a runtime consumer
+   * (`@objectstack/plugin-audit` audit-writers), satisfying enforce-or-remove
+   * (ADR-0049). See ADR-0052 §5b.
+   */
+  trackHistory: z.boolean().optional().describe("Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."),
+
   // Pruned 2026-06 (dead in both layers — aspirational governance with no runtime
   // consumer; encryption/masking implied at-rest protection that never happened —
   // the real channel is type:'secret'). See

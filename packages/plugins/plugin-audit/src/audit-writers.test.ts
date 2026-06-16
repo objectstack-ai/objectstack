@@ -25,7 +25,7 @@ interface CapturedRow {
  *   `engine.getSchema(name)` returns after `applySystemFields` has (or has
  *   not) injected `organization_id`.
  */
-function makeEngine(schemas: Record<string, string[]>) {
+function makeEngine(schemas: Record<string, string[] | Record<string, any>>) {
   const hooks = new Map<string, Array<(ctx: any) => any>>();
   const created: CapturedRow[] = [];
 
@@ -46,7 +46,10 @@ function makeEngine(schemas: Record<string, string[]>) {
     getSchema(name: string) {
       const fields = schemas[name];
       if (!fields) return undefined;
-      return { name, fields: Object.fromEntries(fields.map((f) => [f, { type: 'text' }])) };
+      const fieldMap = Array.isArray(fields)
+        ? Object.fromEntries(fields.map((f) => [f, { type: 'text' }]))
+        : fields;
+      return { name, fields: fieldMap };
     },
     registerHook(event: string, fn: (ctx: any) => any) {
       const list = hooks.get(event) ?? [];
@@ -117,5 +120,60 @@ describe('audit writers — organization_id stamping (#1532)', () => {
     const activity = created.find((c) => c.object === 'sys_activity');
     expect(audit?.row.organization_id).toBe('org-9');
     expect(activity?.row.organization_id).toBe('org-9');
+  });
+});
+
+describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', () => {
+  // crm_opportunity with a tracked select field (Stage) carrying option labels.
+  const SCHEMA = {
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: SINGLE_TENANT.sys_activity,
+    crm_opportunity: {
+      id: { type: 'text' },
+      name: { type: 'text', label: 'Name' },
+      amount: { type: 'currency', label: 'Amount' },
+      stage: {
+        type: 'select',
+        label: 'Stage',
+        trackHistory: true,
+        options: [
+          { value: 'proposal', label: 'Proposal' },
+          { value: 'closed_won', label: 'Closed Won' },
+        ],
+      },
+    },
+  };
+
+  it('renders a tracked field change as "<label>: <old> → <new>" with option labels', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterUpdate', {
+      object: 'crm_opportunity',
+      input: { id: 'opp-1', stage: 'closed_won' },
+      result: { id: 'opp-1', name: 'Acme Renewal', stage: 'closed_won' },
+      __previous: { id: 'opp-1', name: 'Acme Renewal', stage: 'proposal' },
+      session: {},
+    });
+
+    const activity = created.find((c) => c.object === 'sys_activity');
+    // Platform-generated, human-readable — no app code wrote this.
+    expect(activity?.row.summary).toBe('Stage: Proposal → Closed Won');
+  });
+
+  it('falls back to the generic summary when only untracked fields change', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterUpdate', {
+      object: 'crm_opportunity',
+      input: { id: 'opp-1', amount: 200 },
+      result: { id: 'opp-1', name: 'Acme Renewal', amount: 200, stage: 'proposal' },
+      __previous: { id: 'opp-1', name: 'Acme Renewal', amount: 100, stage: 'proposal' },
+      session: {},
+    });
+
+    const activity = created.find((c) => c.object === 'sys_activity');
+    expect(activity?.row.summary).toBe('Updated crm_opportunity "Acme Renewal"');
   });
 });
