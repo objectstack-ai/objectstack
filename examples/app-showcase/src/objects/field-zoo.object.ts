@@ -105,7 +105,7 @@ export const FieldZoo = ObjectSchema.create({
     // ── Calculated / system ──────────────────────────────────────────────
     f_formula: Field.formula({
       label: 'Formula (number × percent)',
-      expression: cel`(f_number == null ? 0 : f_number) * (f_percent == null ? 0 : f_percent) / 100`,
+      expression: cel`(record.f_number == null ? 0 : record.f_number) * (record.f_percent == null ? 0 : record.f_percent) / 100`,
     }),
     f_summary: Field.summary({ label: 'Roll-up Summary' }),
     f_autonumber: Field.autonumber({ label: 'Auto Number' }),

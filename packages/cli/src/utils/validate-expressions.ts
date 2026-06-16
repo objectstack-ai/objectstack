@@ -57,11 +57,16 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   const objects = asArray(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
 
-  const check = (where: string, raw: unknown, objectName?: string): void => {
+  const check = (
+    where: string,
+    raw: unknown,
+    objectName?: string,
+    scope: 'record' | 'flattened' = 'flattened',
+  ): void => {
     if (raw == null) return;
     const fields = objectName ? fieldIndex.get(objectName) : undefined;
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
-      objectName ? { objectName, fields } : undefined);
+      objectName ? { objectName, fields, scope } : { scope });
     for (const e of res.errors) issues.push({ where, message: e.message, source: e.source });
   };
 
@@ -126,8 +131,9 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     const validations = obj.validations ?? obj.validationRules;
     for (const rule of asArray(validations)) {
       const where = `object '${objectName}' · validation '${(rule.name as string) ?? '?'}'`;
-      // Common predicate keys across rule shapes.
-      check(where, rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula, objectName);
+      // Common predicate keys across rule shapes. Validation predicates are
+      // `record`-scoped — no field flattening — so bare refs are flagged (#1928).
+      check(where, rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula, objectName, 'record');
     }
     // Field-level formulas (computed fields) reference the same object.
     const fields = obj.fields;
@@ -136,9 +142,10 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       : (fields && typeof fields === 'object' ? Object.values(fields as AnyRec) as AnyRec[] : []);
     for (const f of fieldList) {
       if (f && typeof f === 'object' && f.formula) {
-        // formulas are `value` role (any return type), still CEL.
+        // formulas are `value` role (any return type), still CEL. They are
+        // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
         const res = validateExpression('value', f.formula as string | { dialect?: string; source?: string },
-          objectName ? { objectName, fields: fieldIndex.get(objectName) } : undefined);
+          objectName ? { objectName, fields: fieldIndex.get(objectName), scope: 'record' } : { scope: 'record' });
         for (const e of res.errors) {
           issues.push({ where: `object '${objectName}' · field '${(f.name as string) ?? '?'}' formula`, message: e.message, source: e.source });
         }

@@ -80,6 +80,45 @@ describe('validateExpression (ADR-0032)', () => {
     });
   });
 
+  // #1928 — a bare top-level identifier is a silent bug in a `record`-scoped
+  // site (formula field / validation predicate) but correct in a `flattened`
+  // flow/automation condition. The validator must distinguish by `scope`.
+  describe('bare-reference detection by scope (#1928)', () => {
+    it('flags a bare field reference in a record-scoped predicate', () => {
+      const r = validateExpression('predicate', 'lead_score != null && lead_score > 100', { scope: 'record' });
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toMatch(/bare reference `lead_score`/);
+      expect(r.errors[0].message).toMatch(/record\.lead_score/);
+    });
+
+    it('flags a bare reference in a record-scoped value (formula) expression', () => {
+      const r = validateExpression('value', '(budget == null ? 0 : budget) - (spent == null ? 0 : spent)', { scope: 'record' });
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toMatch(/bare reference `(budget|spent)`/);
+    });
+
+    it('accepts the record-qualified form in a record-scoped site', () => {
+      const r = validateExpression('value', '(record.budget == null ? 0 : record.budget) - (record.spent == null ? 0 : record.spent)', { scope: 'record' });
+      expect(r.ok).toBe(true);
+    });
+
+    it('does NOT flag bare references in a flattened (flow) condition', () => {
+      // The record's fields are flattened to top-level for flow conditions, and
+      // flow variables share that namespace, so bare refs are correct here.
+      expect(validateExpression('predicate', 'status == "done" && previous.status != "done"', { scope: 'flattened' }).ok).toBe(true);
+      expect(validateExpression('predicate', 'budget > 100000', { scope: 'flattened' }).ok).toBe(true);
+      expect(validateExpression('predicate', 'expiring_deals.length > 0', { scope: 'flattened' }).ok).toBe(true);
+    });
+
+    it('defaults to flattened scope (no bare-ref flag) when scope is unset', () => {
+      expect(validateExpression('predicate', 'status == "done"').ok).toBe(true);
+    });
+
+    it('does not flag a null-guard on a record-qualified field (no type false-positive)', () => {
+      expect(validateExpression('predicate', 'record.lead_score != null && record.lead_score > 100', { scope: 'record' }).ok).toBe(true);
+    });
+  });
+
   describe('introspection', () => {
     it('reports the dialect + scope for a field role', () => {
       expect(expectedDialect('predicate')).toBe('cel');

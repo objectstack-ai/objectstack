@@ -17,7 +17,7 @@
  * This validator detects that specific mistake and returns the exact fix.
  */
 
-import { celEngine } from './cel-engine';
+import { celEngine, detectBareReference } from './cel-engine';
 import { templateEngine } from './template-engine';
 
 export type FieldRole = 'predicate' | 'value' | 'template';
@@ -36,6 +36,21 @@ export interface ExprSchemaHint {
   objectName?: string;
   /** Known top-level field names, so `record.<field>` can be checked. */
   fields?: readonly string[];
+  /**
+   * Evaluation scope of the authoring site — determines whether a bare top-level
+   * identifier is legal (#1928):
+   *  - `'record'`    → the record is bound only as the `record` namespace, with
+   *                    no field flattening (`Field.formula`, object validation
+   *                    predicates). A bare `amount` resolves to nothing and the
+   *                    expression silently evaluates to `null` / never fires, so
+   *                    it MUST be written `record.amount`. We flag bare refs.
+   *  - `'flattened'` → the record's own fields are spread to top-level alongside
+   *                    flow variables (flow / automation conditions), so bare
+   *                    `status` is correct. We do NOT flag bare refs here — flow
+   *                    variables are not schema-knowable, so a bare identifier
+   *                    can't be soundly told apart from a typo. (Default.)
+   */
+  scope?: 'record' | 'flattened';
 }
 
 export interface ExprValidationError {
@@ -169,6 +184,21 @@ export function validateExpression(
     });
   } else {
     checkFieldExistence(source, schema, errors);
+    // In a `record`-scoped site a bare top-level identifier is a silent bug —
+    // it must be `record.<field>` (#1928). Only flagged here; flow/automation
+    // conditions (`scope: 'flattened'`, the default) legitimately use bare refs.
+    if (schema?.scope === 'record') {
+      const bare = detectBareReference(source);
+      if (bare) {
+        errors.push({
+          source,
+          message:
+            `bare reference \`${bare}\` — a formula/validation expression binds the record as the ` +
+            `\`record\` namespace, not at top level, so \`${bare}\` resolves to nothing and the ` +
+            `expression silently evaluates to null. Write \`record.${bare}\`.`,
+        });
+      }
+    }
   }
   return { ok: errors.length === 0, errors };
 }
