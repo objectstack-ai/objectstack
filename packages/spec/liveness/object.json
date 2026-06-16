@@ -2,63 +2,228 @@
   "type": "object",
   "_note": "ObjectSchema (top-level). Seeded from docs/audits/2026-06-objectschema-property-liveness.md. Roughly half dead — a large aspirational enterprise-data-management tier with zero runtime. Framework evidence cited with paths; objectui-renderer evidence as prose.",
   "props": {
-    "name": { "status": "live", "evidence": "packages/plugins/driver-sql/src/sql-driver.ts", "note": "table name; objectql registry key." },
-    "label": { "status": "live", "note": "objectui app-shell/grid." },
-    "pluralLabel": { "status": "live", "note": "objectui." },
-    "description": { "status": "live", "note": "display metadata." },
-    "icon": { "status": "live", "note": "objectui." },
-    "displayNameField": { "status": "live", "note": "objectui RecordDetailView." },
-    "titleFormat": { "status": "live", "note": "objectui ({{record.field}} interpolation)." },
-    "compactLayout": { "status": "live", "note": "objectui hover/cards/lookups." },
-    "fieldGroups": { "status": "live", "note": "objectui form layout order." },
-    "listViews": { "status": "live", "note": "objectui segmented tabs." },
-    "detail": { "status": "live", "note": "objectui plugin-detail (detail.renderViaSchema)." },
-    "fields": { "status": "live", "evidence": "packages/objectql/src/engine.ts", "note": "engine/DDL + forms." },
-    "datasource": { "status": "live", "evidence": "packages/objectql/src/engine.ts:1147", "note": "driver routing." },
-    "external": { "status": "live", "evidence": "packages/runtime/src/external-validation-plugin.ts", "note": "remote table + write gate." },
-    "indexes": { "status": "live", "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1181", "note": "DDL." },
-    "validations": { "status": "live", "evidence": "packages/objectql/src/validation/rule-validator.ts:154", "note": "incl. state_machine." },
-    "activityMilestones": { "status": "live", "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts", "note": "ADR-0052 §5b.2 — audit-writer matchMilestone() emits a templated activity row when a watched field transitions into the configured value." },
-    "actions": { "status": "live", "evidence": "packages/runtime/src/app-plugin.ts:929", "note": "served on /meta/objects/:name." },
-    "managedBy": { "status": "live", "evidence": "packages/objectql/src/registry.ts:208", "note": "default perms; ui crudAffordances." },
-    "userActions": { "status": "live", "note": "objectui ObjectGrid per-object CRUD." },
-    "systemFields": { "status": "live", "evidence": "packages/objectql/src/registry.ts", "note": "organization_id auto-inject gate." },
-    "sharingModel": { "status": "live", "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:54" },
-    "publicSharing": { "status": "live", "evidence": "packages/plugins/plugin-sharing/src/share-link-service.ts:56" },
+    "name": {
+      "status": "live",
+      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts",
+      "note": "table name; objectql registry key."
+    },
+    "label": {
+      "status": "live",
+      "note": "objectui app-shell/grid."
+    },
+    "pluralLabel": {
+      "status": "live",
+      "note": "objectui."
+    },
+    "description": {
+      "status": "live",
+      "note": "display metadata."
+    },
+    "icon": {
+      "status": "live",
+      "note": "objectui."
+    },
+    "displayNameField": {
+      "status": "live",
+      "note": "objectui RecordDetailView."
+    },
+    "titleFormat": {
+      "status": "live",
+      "note": "objectui ({{record.field}} interpolation)."
+    },
+    "compactLayout": {
+      "status": "live",
+      "note": "objectui hover/cards/lookups."
+    },
+    "fieldGroups": {
+      "status": "live",
+      "note": "objectui form layout order."
+    },
+    "listViews": {
+      "status": "live",
+      "note": "objectui segmented tabs."
+    },
+    "detail": {
+      "status": "live",
+      "note": "objectui plugin-detail (detail.renderViaSchema)."
+    },
+    "fields": {
+      "status": "live",
+      "evidence": "packages/objectql/src/engine.ts",
+      "note": "engine/DDL + forms."
+    },
+    "datasource": {
+      "status": "live",
+      "evidence": "packages/objectql/src/engine.ts:1147",
+      "note": "driver routing."
+    },
+    "external": {
+      "status": "live",
+      "evidence": "packages/runtime/src/external-validation-plugin.ts",
+      "note": "remote table + write gate."
+    },
+    "indexes": {
+      "status": "live",
+      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1181",
+      "note": "DDL."
+    },
+    "validations": {
+      "status": "live",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts:154",
+      "note": "incl. state_machine."
+    },
+    "activityMilestones": {
+      "status": "live",
+      "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts",
+      "note": "ADR-0052 §5b.2 — audit-writer matchMilestone() emits a templated activity row when a watched field transitions into the configured value."
+    },
+    "actions": {
+      "status": "live",
+      "evidence": "packages/runtime/src/app-plugin.ts:929",
+      "note": "served on /meta/objects/:name."
+    },
+    "managedBy": {
+      "status": "live",
+      "evidence": "packages/objectql/src/registry.ts:208",
+      "note": "default perms; ui crudAffordances."
+    },
+    "userActions": {
+      "status": "live",
+      "note": "objectui ObjectGrid per-object CRUD."
+    },
+    "systemFields": {
+      "status": "live",
+      "evidence": "packages/objectql/src/registry.ts",
+      "note": "organization_id auto-inject gate."
+    },
+    "sharingModel": {
+      "status": "live",
+      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:54"
+    },
+    "publicSharing": {
+      "status": "live",
+      "evidence": "packages/plugins/plugin-sharing/src/share-link-service.ts:56"
+    },
     "tenancy": {
       "children": {
-        "enabled": { "status": "live", "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1081" },
-        "strategy": { "status": "dead", "evidence": "inert — only tenancy.enabled is read" },
-        "tenantField": { "status": "dead", "evidence": "inert" },
-        "crossTenantAccess": { "status": "dead", "evidence": "inert" }
+        "enabled": {
+          "status": "live",
+          "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1081"
+        },
+        "strategy": {
+          "status": "dead",
+          "evidence": "inert — only tenancy.enabled is read",
+          "note": "part of the live tenancy block (sql-driver reads enabled+tenantField); verify before touching."
+        },
+        "tenantField": {
+          "status": "live",
+          "evidence": "packages/plugins/driver-sql/src/sql-driver.ts",
+          "note": "row-level tenant scoping (org-scoping plugin path) reads tenancy.tenantField — audit called it inert; corrected."
+        },
+        "crossTenantAccess": {
+          "status": "dead",
+          "evidence": "inert",
+          "note": "part of the live tenancy block; verify before touching."
+        }
       }
     },
     "enable": {
       "children": {
-        "apiEnabled": { "status": "live", "evidence": "packages/rest/src/rest-server.ts", "note": "enforced by enforceApiAccess on the REST data surface (ADR-0049 #1889) — apiEnabled:false → 404." },
-        "apiMethods": { "status": "live", "evidence": "packages/rest/src/rest-server.ts", "note": "enforced by enforceApiAccess — operations outside the whitelist → 405." },
-        "trackHistory": { "status": "dead", "evidence": "no behavior-changing reader (database-loader.trackHistory is a separate ctor option)" },
-        "searchable": { "status": "dead", "evidence": "no behavior-changing reader" },
-        "files": { "status": "dead", "evidence": "no behavior-changing reader" },
-        "feeds": { "status": "dead", "evidence": "no behavior-changing reader" },
-        "activities": { "status": "dead", "evidence": "no behavior-changing reader" },
-        "trash": { "status": "dead", "evidence": "no behavior-changing reader" },
-        "mru": { "status": "dead", "evidence": "no behavior-changing reader" },
-        "clone": { "status": "dead", "evidence": "no behavior-changing reader" }
+        "apiEnabled": {
+          "status": "live",
+          "evidence": "packages/rest/src/rest-server.ts",
+          "note": "enforced by enforceApiAccess on the REST data surface (ADR-0049 #1889) — apiEnabled:false → 404."
+        },
+        "apiMethods": {
+          "status": "live",
+          "evidence": "packages/rest/src/rest-server.ts",
+          "note": "enforced by enforceApiAccess — operations outside the whitelist → 405."
+        },
+        "trackHistory": {
+          "status": "dead",
+          "evidence": "no behavior-changing reader (database-loader.trackHistory is a separate ctor option)"
+        },
+        "searchable": {
+          "status": "dead",
+          "evidence": "no behavior-changing reader"
+        },
+        "files": {
+          "status": "dead",
+          "evidence": "no behavior-changing reader"
+        },
+        "feeds": {
+          "status": "dead",
+          "evidence": "no behavior-changing reader"
+        },
+        "activities": {
+          "status": "dead",
+          "evidence": "no behavior-changing reader"
+        },
+        "trash": {
+          "status": "dead",
+          "evidence": "no behavior-changing reader"
+        },
+        "mru": {
+          "status": "dead",
+          "evidence": "no behavior-changing reader"
+        },
+        "clone": {
+          "status": "dead",
+          "evidence": "no behavior-changing reader"
+        }
       }
     },
-    "versioning": { "status": "dead", "evidence": "aspirational; no runtime" },
-    "partitioning": { "status": "dead", "evidence": "aspirational; no runtime" },
-    "cdc": { "status": "dead", "evidence": "aspirational; no runtime" },
-    "softDelete": { "status": "dead", "evidence": "no runtime; duplicates the (also dead) enable.trash" },
-    "search": { "status": "dead", "evidence": "SearchConfigSchema — no runtime; duplicates enable.searchable" },
-    "recordTypes": { "status": "dead", "evidence": "elaborate docstring, unimplemented" },
-    "defaultDetailForm": { "status": "dead", "evidence": "documented fallback chain unimplemented" },
-    "recordName": { "status": "dead", "evidence": "superseded by a field of type:'autonumber' + autonumberFormat (engine.ts:757)" },
-    "keyPrefix": { "status": "dead", "evidence": "no runtime" },
-    "tags": { "status": "dead", "evidence": "no runtime reader" },
-    "abstract": { "status": "dead", "evidence": "no runtime reader" },
-    "isSystem": { "status": "dead", "evidence": "object-level — no runtime reader" },
-    "active": { "status": "dead", "evidence": "object-level — no runtime reader" }
+    "versioning": {
+      "status": "dead",
+      "evidence": "aspirational; no runtime"
+    },
+    "partitioning": {
+      "status": "dead",
+      "evidence": "aspirational; no runtime"
+    },
+    "cdc": {
+      "status": "dead",
+      "evidence": "aspirational; no runtime"
+    },
+    "softDelete": {
+      "status": "dead",
+      "evidence": "no runtime; duplicates the (also dead) enable.trash"
+    },
+    "search": {
+      "status": "dead",
+      "evidence": "SearchConfigSchema — no runtime; duplicates enable.searchable"
+    },
+    "recordTypes": {
+      "status": "dead",
+      "evidence": "elaborate docstring, unimplemented"
+    },
+    "defaultDetailForm": {
+      "status": "dead",
+      "evidence": "documented fallback chain unimplemented"
+    },
+    "recordName": {
+      "status": "dead",
+      "evidence": "superseded by a field of type:'autonumber' + autonumberFormat (engine.ts:757)"
+    },
+    "keyPrefix": {
+      "status": "dead",
+      "evidence": "no runtime"
+    },
+    "tags": {
+      "status": "dead",
+      "evidence": "no runtime reader"
+    },
+    "abstract": {
+      "status": "dead",
+      "evidence": "no runtime reader"
+    },
+    "isSystem": {
+      "status": "dead",
+      "evidence": "object-level — no runtime reader"
+    },
+    "active": {
+      "status": "dead",
+      "evidence": "object-level — no runtime reader"
+    }
   }
 }
