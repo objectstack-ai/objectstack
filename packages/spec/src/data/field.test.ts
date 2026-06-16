@@ -279,7 +279,6 @@ describe('FieldSchema', () => {
         type: 'master_detail',
         reference: 'parent_object',
         deleteBehavior: 'cascade',
-        writeRequiresMasterRead: true,
       };
 
       const result = FieldSchema.parse(masterDetailField);

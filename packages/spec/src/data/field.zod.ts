@@ -3,8 +3,6 @@
 import { z } from 'zod';
 import { SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import { EncryptionConfigSchema } from '../system/encryption.zod';
-import { MaskingRuleSchema } from '../system/masking.zod';
 
 /**
  * Field Type Enum
@@ -401,7 +399,6 @@ export const FieldSchema = lazySchema(() => z.object({
     + 'Required for relationship types. Used by $expand to resolve foreign key IDs into full objects.'
   ),
   referenceFilters: z.array(z.string()).optional().describe('Filters applied to lookup dialogs (e.g. "active = true")'),
-  writeRequiresMasterRead: z.boolean().optional().describe('If true, user needs read access to master record to edit this field'),
   deleteBehavior: z.enum(['set_null', 'cascade', 'restrict']).optional().default('set_null').describe('What happens if referenced record is deleted'),
   /**
    * Master-detail INLINE EDITING. On a child's `master_detail`/`lookup` field
@@ -477,27 +474,14 @@ export const FieldSchema = lazySchema(() => z.object({
   // File attachment field config
   fileAttachmentConfig: FileAttachmentConfigSchema.optional().describe('Configuration for file and attachment field types'),
 
-  /** Enhanced Security & Compliance */
-  // Encryption configuration
-  encryptionConfig: EncryptionConfigSchema.optional().describe('Field-level encryption configuration for sensitive data (GDPR/HIPAA/PCI-DSS)'),
-  
-  // Data masking rules
-  maskingRule: MaskingRuleSchema.optional().describe('Data masking rules for PII protection'),
-  
-  // Audit trail
-  auditTrail: z.boolean().default(false).describe('Enable detailed audit trail for this field (tracks all changes with user and timestamp)'),
-  
+  // Pruned 2026-06 (dead in both layers — aspirational governance with no runtime
+  // consumer; encryption/masking implied at-rest protection that never happened —
+  // the real channel is type:'secret'). See
+  // docs/audits/2026-06-dead-surface-disposition-plan.md (P0/P2 field prune):
+  // encryptionConfig, maskingRule, auditTrail, cached, dataQuality.
+
   /** Field Dependencies & Relationships */
-  // Field dependencies
   dependencies: z.array(z.string()).optional().describe('Array of field names that this field depends on (for formulas, visibility rules, etc.)'),
-  
-  /** Computed Field Optimization */
-  // Computed field caching
-  cached: ComputedFieldCacheSchema.optional().describe('Caching configuration for computed/formula fields'),
-  
-  /** Data Quality & Governance */
-  // Data quality rules
-  dataQuality: DataQualityRulesSchema.optional().describe('Data quality validation and monitoring rules'),
 
   /** Layout & Grouping */
   group: z.string().optional().describe('Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system")'),
@@ -523,7 +507,6 @@ export const FieldSchema = lazySchema(() => z.object({
   system: z.boolean().optional().describe('Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag.'),
   sortable: z.boolean().optional().default(true).describe('Whether field is sortable in list views'),
   inlineHelpText: z.string().optional().describe('Help text displayed below the field in forms'),
-  trackFeedHistory: z.boolean().optional().describe('Track field changes in Chatter/activity feed (Salesforce pattern)'),
   caseSensitive: z.boolean().optional().describe('Whether text comparisons are case-sensitive'),
   autonumberFormat: z.string().optional().describe('Auto-number display format pattern (e.g., "CASE-{0000}")'),
   /** Indexing */

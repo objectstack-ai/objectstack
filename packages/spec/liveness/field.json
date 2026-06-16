@@ -184,41 +184,13 @@
       "status": "dead",
       "evidence": "nested config — renderers read flat multiple/accept/maxSize (FileField.tsx:16); no size/type/virus enforcement in write path"
     },
-    "encryptionConfig": {
-      "status": "dead",
-      "evidence": "no consumer; the only at-rest protection is the separate type:'secret' channel (engine.ts encryptSecretFields)"
-    },
-    "maskingRule": {
-      "status": "dead",
-      "evidence": "no consumer"
-    },
-    "auditTrail": {
-      "status": "dead",
-      "evidence": "no consumer (aspirational governance)"
-    },
-    "dataQuality": {
-      "status": "dead",
-      "evidence": "no consumer (aspirational governance)"
-    },
-    "cached": {
-      "status": "dead",
-      "evidence": "no consumer"
-    },
     "dependencies": {
-      "status": "dead",
-      "evidence": "no consumer"
-    },
-    "trackFeedHistory": {
       "status": "dead",
       "evidence": "no consumer"
     },
     "caseSensitive": {
       "status": "dead",
       "evidence": "no consumer"
-    },
-    "writeRequiresMasterRead": {
-      "status": "dead",
-      "evidence": "no consumer (governance)"
     },
     "inlineTitle": {
       "status": "dead",
