@@ -295,17 +295,29 @@ export const defaultPermissionSets: PermissionSet[] = [
         operation: 'all',
         using: 'organization_id = current_user.organization_id',
       },
+      // Owner-scoped writes/deletes for rank-and-file members: you may modify
+      // and delete the records you created, not other users'. Keyed on
+      // `created_by` — the column the engine stamps on EVERY record — rather
+      // than `owner_id`, which author-defined objects almost never declare. The
+      // old `owner_id` key referenced a missing column on real objects, so
+      // `computeRlsFilter` dropped the policy and the scoping silently no-op'd
+      // (any member could edit/delete any record — #1985). These policies are
+      // ENFORCED on writes via the security middleware's pre-image check (a
+      // by-id update/delete never builds an RLS `where`, so the predicate is
+      // verified against the target row before the mutation). Objects that
+      // model transferable ownership with a dedicated owner field should
+      // override these with a per-object policy.
       {
         name: 'owner_only_writes',
         object: '*',
         operation: 'update',
-        using: 'owner_id = current_user.id',
+        using: 'created_by = current_user.id',
       },
       {
         name: 'owner_only_deletes',
         object: '*',
         operation: 'delete',
-        using: 'owner_id = current_user.id',
+        using: 'created_by = current_user.id',
       },
       // ── better-auth system tables that lack `organization_id` and would
       //    otherwise be left unprotected by the wildcard rule above. ────

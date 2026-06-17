@@ -97,13 +97,20 @@ describe('SecurityPlugin', () => {
   // wildcard `current_user.organization_id` RLS policies. Otherwise it
   // strips them so single-tenant deployments aren't filtered to nothing.
   // -------------------------------------------------------------------------
-  const makeMiddlewareCtx = (overrides: { permissionSets: PermissionSet[]; objectFields?: string[]; schemaExtra?: Record<string, any>; orgScoping?: boolean }) => {
+  const makeMiddlewareCtx = (overrides: { permissionSets: PermissionSet[]; objectFields?: string[]; schemaExtra?: Record<string, any>; orgScoping?: boolean; findOneImpl?: (query: any) => any }) => {
     const fields: Record<string, any> = {};
     for (const f of overrides.objectFields ?? ['id', 'organization_id', 'owner_id', 'name']) {
       fields[f] = { name: f };
     }
     const baseSchema: any = { name: 'task', fields, ...(overrides.schemaExtra ?? {}) };
     let middleware: any;
+    // The pre-image write-authorization check re-reads the target row via
+    // `ql.findOne(object, { where: { $and: [{ id }, writeFilter] }, … })`.
+    // `findOneImpl` lets a test decide whether that row is "visible" (owned /
+    // in-tenant) or filtered out (someone else's row → null → deny).
+    const findOne = vi.fn(async (_object: string, query: any) =>
+      overrides.findOneImpl ? overrides.findOneImpl(query) : null,
+    );
     const ql = {
       registerMiddleware: (mw: any) => {
         // Capture only the FIRST middleware (the security CRUD one);
@@ -112,6 +119,7 @@ describe('SecurityPlugin', () => {
         if (!middleware) middleware = mw;
       },
       getSchema: () => baseSchema,
+      findOne,
     };
     const metadata = {
       get: async () => baseSchema,
@@ -136,6 +144,7 @@ describe('SecurityPlugin', () => {
     };
     return {
       ctx,
+      findOne,
       run: async (opCtx: any) => {
         await middleware(opCtx, async () => {});
         return opCtx;
@@ -224,6 +233,98 @@ describe('SecurityPlugin', () => {
     // No deny sentinel, no organization_id where clause: the read
     // passes through and the catalog row is visible to every tenant.
     expect(opCtx.ast.where).toBeUndefined();
+  });
+
+  // ── Row-level WRITE authorization (pre-image check, #1985) ──────────────
+  // A by-id update/delete never builds an RLS `where`, so the owner/tenant
+  // predicate must be enforced by re-reading the target row before mutating.
+  describe('pre-image write authorization', () => {
+    const ownerPolicySet: PermissionSet = {
+      name: 'member_default',
+      label: 'Member',
+      isProfile: true,
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+      rowLevelSecurity: [
+        { name: 'owner_only_writes', object: '*', operation: 'update', using: 'created_by = current_user.id' },
+        { name: 'owner_only_deletes', object: '*', operation: 'delete', using: 'created_by = current_user.id' },
+      ],
+    } as any;
+    const memberCtx = { userId: 'u1', tenantId: 'org-1', roles: [], permissions: [] };
+    const ownerFields = ['id', 'created_by', 'name'];
+
+    it('DENIES an update when the target row is not visible under the write filter (not the owner)', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [ownerPolicySet],
+        objectFields: ownerFields,
+        findOneImpl: () => null, // row exists but filtered out by created_by → not visible
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = {
+        object: 'task', operation: 'update',
+        data: { id: 'r1', name: 'hijack' }, options: { where: { id: 'r1' } },
+        context: memberCtx,
+      };
+      await expect(harness.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+      expect(harness.findOne).toHaveBeenCalledTimes(1);
+      // the re-read ANDs the row id with the owner write filter
+      const [, query] = harness.findOne.mock.calls[0];
+      expect(query.where.$and[0]).toEqual({ id: 'r1' });
+    });
+
+    it('ALLOWS an update when the target row IS visible under the write filter (the owner)', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [ownerPolicySet],
+        objectFields: ownerFields,
+        findOneImpl: () => ({ id: 'r1', created_by: 'u1', name: 'mine' }),
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = {
+        object: 'task', operation: 'delete',
+        options: { where: { id: 'r1' } },
+        context: memberCtx,
+      };
+      await expect(harness.run(opCtx)).resolves.toBeDefined();
+      expect(harness.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('SKIPS the check when no RLS policy applies (e.g. modifyAllRecords / admin) — no extra read', async () => {
+      const adminSet: PermissionSet = {
+        name: 'admin_full_access', label: 'Admin', isProfile: true,
+        objects: { '*': { allowRead: true, allowEdit: true, allowDelete: true, modifyAllRecords: true, viewAllRecords: true } },
+        // no rowLevelSecurity
+      } as any;
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'admin_full_access' });
+      const harness = makeMiddlewareCtx({ permissionSets: [adminSet], objectFields: ownerFields });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = {
+        object: 'task', operation: 'update',
+        data: { id: 'r1', name: 'x' }, options: { where: { id: 'r1' } },
+        context: { userId: 'admin', roles: ['admin_full_access'], permissions: [] },
+      };
+      await expect(harness.run(opCtx)).resolves.toBeDefined();
+      expect(harness.findOne).not.toHaveBeenCalled();
+    });
+
+    it('SKIPS the check for a multi-row predicate id ({$in}) — only single-id by-pk writes are guarded', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [ownerPolicySet], objectFields: ownerFields, findOneImpl: () => null,
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = {
+        object: 'task', operation: 'update', multi: true,
+        data: { name: 'bulk' }, options: { multi: true, where: { id: { $in: ['r1', 'r2'] } } },
+        context: memberCtx,
+      };
+      await harness.run(opCtx);
+      expect(harness.findOne).not.toHaveBeenCalled();
+    });
   });
 
   it('tenancy.enabled=false via systemFields.tenant=false — also skipped', async () => {

@@ -338,6 +338,67 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
+      // 2.7. Row-level WRITE authorization (pre-image check).
+      //
+      // RLS is injected as a `where` filter on the read path (step 3, via
+      // `opCtx.ast`), but a single-id update/delete goes straight to
+      // `driver.update(object, id, …)` / `driver.delete(object, id)` — it builds
+      // no `ast`, so the row-level predicate is NEVER applied to by-id writes.
+      // The result (#1985): the CRUD check passes (member_default grants edit/
+      // delete) and the owner/tenant RLS that was supposed to scope the write is
+      // silently bypassed — any member could modify another user's record.
+      //
+      // Fix: before the mutation, compute the write-operation RLS filter and
+      // verify the TARGET row satisfies it. We re-read the row through the
+      // engine with `{ id } AND <writeFilter>`; a `find` does not re-enter this
+      // block, so there is no recursion, and read-side RLS/tenant scoping
+      // compose naturally. A `null` result means the row is either gone or
+      // RLS-hidden → deny. When `computeRlsFilter` returns `null` (no policy
+      // applies — e.g. an admin set with no RLS, or `modifyAllRecords`) the
+      // check is skipped and behaviour is unchanged.
+      if (
+        (opCtx.operation === 'update' || opCtx.operation === 'delete') &&
+        permissionSets.length > 0 &&
+        !!opCtx.context?.userId &&
+        this.ql
+      ) {
+        const targetId = this.extractSingleId(opCtx);
+        if (targetId != null) {
+          const writeFilter = await this.computeRlsFilter(
+            permissionSets,
+            opCtx.object,
+            opCtx.operation,
+            opCtx.context,
+          );
+          if (writeFilter) {
+            let visible: unknown = null;
+            try {
+              visible = await this.ql.findOne(opCtx.object, {
+                where: { $and: [{ id: targetId }, writeFilter] },
+                context: opCtx.context,
+              });
+            } catch {
+              // A read denial (e.g. no read permission) is itself a "cannot
+              // touch this row" signal — fall through to the deny below.
+              visible = null;
+            }
+            if (!visible) {
+              throw new PermissionDeniedError(
+                `[Security] Access denied: not permitted to ${opCtx.operation} this ` +
+                  `'${opCtx.object}' record (row-level security)`,
+                {
+                  operation: opCtx.operation,
+                  object: opCtx.object,
+                  roles,
+                  permissionSets: explicitPermissionSets,
+                  recordId: targetId,
+                },
+              );
+            }
+          }
+        }
+      }
+
       // 2.5. Field-Level Security write enforcement.
       //
       // The client-side masker (ObjectForm / inline grid) already hides
@@ -657,6 +718,28 @@ export class SecurityPlugin implements Plugin {
       );
     }
     return permissionSets;
+  }
+
+  /**
+   * Resolve a single scalar primary-key id from an update/delete operation
+   * context, mirroring the engine's "single-id vs predicate" rule
+   * (`engine.ts` update/delete): only a scalar `data.id` or `where.id`
+   * identifies one row. An operator object (`{ $in: [...] }`, …) is a
+   * multi-row predicate and returns `null` (multi-row writes route through the
+   * `*Many` paths, out of scope for the by-id pre-image check).
+   */
+  private extractSingleId(opCtx: any): string | number | bigint | null {
+    const isScalar = (v: unknown): v is string | number | bigint =>
+      v !== null && (typeof v === 'string' || typeof v === 'number' || typeof v === 'bigint');
+    const data = opCtx?.data;
+    if (data && typeof data === 'object' && !Array.isArray(data) && isScalar(data.id)) {
+      return data.id;
+    }
+    const where = opCtx?.options?.where;
+    if (where && typeof where === 'object' && 'id' in where && isScalar((where as any).id)) {
+      return (where as any).id;
+    }
+    return null;
   }
 
   /**
