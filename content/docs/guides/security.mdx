@@ -231,8 +231,21 @@ than redefining the basics.
 |:--|:--|:--|:--|
 | `admin_full_access` | Platform (no RLS) | All objects, all system permissions, Studio + Setup, cross-org reads | Reserved for platform operators. Auto-granted to the bootstrap admin (`bootstrapPlatformAdmin`) — the **first registered human**. The non-loginable seed-data identity `usr_system` (role `system`, provisioned before the first sign-up to own seeded rows) is deliberately skipped, so the real admin wins the promotion. |
 | `organization_admin` | Per-org (`tenant_isolation` RLS, only active when `@objectstack/plugin-org-scoping` is loaded) | Wildcard CRUD inside the org, `manage_org_users`, Setup app shell (only org-scoped entries visible), invite members, manage roles assignment | **Read-only** on `sys_role`, `sys_permission_set`, `sys_role_permission_set`, `sys_user_permission_set`, `sys_user_role` to prevent self-elevation. Does **not** see Studio. |
-| `member_default` | Per-org | Standard end-user CRUD on org records | Default profile for invited members. |
+| `member_default` | Per-org | Standard end-user CRUD on org records; **writes are owner-scoped** | Default profile for invited members. |
 | `viewer_readonly` | Per-org | Read access only | For auditors / read-only stakeholders. |
+
+> **Owner-scoped writes.** `member_default` grants read/create on org records but
+> restricts **edit and delete to the records the user created** — via the
+> `owner_only_writes` / `owner_only_deletes` RLS policies, keyed on `created_by`
+> (the ownership column the engine stamps on every row). These are enforced on
+> single-id `update`/`delete` by a **pre-image authorization check**: before the
+> mutation the middleware re-reads the target row through the write-operation RLS
+> filter, and a member attempting to modify another user's record gets `403`.
+> A permission set with `modifyAllRecords` (or no RLS, e.g. `admin_full_access`)
+> bypasses this. An object that opts out of audit fields (`systemFields.audit:
+> false`, no `created_by`) fails **closed** for member writes — grant
+> `modifyAllRecords` or a per-object policy, or model transferable ownership with
+> a dedicated owner field + custom policy.
 
 > **Single-org vs. multi-org runtimes.** The wildcard `tenant_isolation`
 > RLS row above only takes effect when `@objectstack/plugin-org-scoping`
