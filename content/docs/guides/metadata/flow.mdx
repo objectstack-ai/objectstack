@@ -206,6 +206,36 @@ rather than evaluating an arbitrary JavaScript string:
 }
 ```
 
+**Screen (object form):**
+
+A `screen` node normally renders a flat `fields` list. Set `config.objectName`
+to instead render an object's **entire** create/edit form — including any
+master-detail child grids (`inlineEdit`) — as one wizard step. The client
+renders the object form and, on save, **persists the record itself** (parent +
+inline children atomically); the flow then resumes with the new record's id
+bound to `config.idVariable` so a later step can reference it.
+
+```typescript
+{
+  id: 'new_opportunity',
+  type: 'screen',
+  label: 'Opportunity Details',
+  config: {
+    objectName: 'opportunity',         // render this object's full form
+    mode: 'create',                    // 'create' (default) | 'edit'
+    // recordId: '{account_id}',        // required for mode: 'edit'
+    defaults: {                        // pre-filled values (interpolated)
+      account: '{account_id}',
+      stage: 'prospecting',
+    },
+    idVariable: 'opportunity_id',      // bind the saved record's id for later steps
+  },
+}
+```
+
+This is how a single flow walks the user through several full object forms in
+sequence (e.g. lead → account → opportunity), each step saving its own record.
+
 ## Structured control flow (ADR-0031)
 
 `loop`, `parallel`, and `try_catch` are **structured control-flow constructs** —

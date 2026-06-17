@@ -180,6 +180,8 @@ interface Action {
   // UX
   confirmText?: string;         // Confirmation message before execution
   successMessage?: string;      // Toast shown after success
+  errorMessage?: string;        // Toast shown on failure (overrides the raw error)
+  undoable?: boolean;           // Offer an Undo affordance after a single-record update succeeds
   refreshAfter?: boolean;       // Reload the view after execution (default false)
   resultDialog?: ResultDialog;  // One-shot reveal of API response values
   shortcut?: string;            // Keyboard shortcut, e.g. "Ctrl+S"
@@ -247,6 +249,23 @@ target: /api/orders/ship
 disabled: "record.status != 'paid'"
 ```
 
+<Callout type="warn">
+Predicates are **bare CEL** — `record.status == 'paid'`, not `${record.status == 'paid'}` and not `{record.status} == 'paid'` (in CEL, `{…}` is a map literal). A `${…}`-wrapped or brace-wrapped predicate is not evaluated as a boolean.
+</Callout>
+
+#### Evaluation context
+
+Action predicates evaluate against the **record the action is attached to**. Both `record.<field>` and the bare field name resolve to the current record's value:
+
+```yaml
+disabled: "record.status == 'converted'"   # preferred — works on every surface
+disabled: "status == 'converted'"          # bare field — also resolves to the record
+```
+
+Prefer the `record.<field>` form: it reads unambiguously and resolves identically on **every** surface an action renders (`record_header`, `record_more`, `list_item`, related lists). The bare-field form is supported for brevity but is easy to confuse with a local variable.
+
+This is a narrower scope than [record-alert](/docs/protocol/objectui/record-alert) conditions (which also expose `os.user` / `os.org` / `os.env`) — action predicates see the record only.
+
 ## Confirmation & Feedback
 
 Actions express confirmation and feedback through dedicated string fields — there is no nested confirm-dialog object with `requireTyping`/`confirmLabel`.
@@ -265,9 +284,24 @@ refreshAfter: true
 ```
 
 - `confirmText` — message shown in a confirm dialog before the action runs.
-- `successMessage` — toast shown after a successful run.
+- `successMessage` — toast shown after a successful run. When omitted the UI shows a generic "Action completed" toast, so set this for any action whose outcome isn't self-evident.
+- `errorMessage` — toast shown when the action fails; overrides the raw server error with author-controlled copy.
+- `undoable` — for a single-record update action, offer an **Undo** affordance in the success toast (and via `Ctrl+Z`). The runtime captures the record's prior values before the write and restores them on undo. Only meaningful for reversible single-record mutations.
 - `refreshAfter` — reload the current view after success.
 - `mode` — a semantic hint (`create` / `edit` / `delete` / `custom`) the UI uses to pick confirm copy and default variants.
+
+```yaml
+# A reversible owner reassignment: custom success/error copy + Undo
+name: reassign_lead
+label: Reassign Lead
+type: api
+target: lead
+params:
+  - { field: assigned_to, required: true }
+undoable: true
+successMessage: Lead reassigned.
+errorMessage: Couldn't reassign this lead — try again.
+```
 
 ### Result Dialog (one-shot reveals)
 

@@ -1088,11 +1088,35 @@ Register them under `defineStack({ actions: [...] })`.
 | `list_toolbar`   | Bulk action on selected rows (`input.selectedIds`) |
 | `global`         | Global action launcher (utility bar) |
 
-### Visibility & Confirmation
+### Visibility, Disable & Feedback
 
-Use `visible` (CEL predicate, prefer the `P\`...\`` tagged template) to
-gate the action against the current record. Set `confirmText` for any
-destructive or irreversible operation.
+- `visible` — CEL predicate (prefer the `P\`...\`` tagged template); when false the action is **hidden**.
+- `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**. Use this (not `visible`) when the action should stay discoverable but locked in the current state.
+- `confirmText` — set for any destructive or irreversible operation.
+- `successMessage` / `errorMessage` — author-controlled toast copy on success / failure. Always set `successMessage` for non-obvious outcomes; without it the UI shows a generic "Action completed" toast.
+- `undoable: true` — on a single-record update, offers an **Undo** in the success toast (and `Ctrl+Z`); the runtime snapshots prior values and restores them.
+
+Predicates are **bare CEL** — `record.status == "converted"`, evaluated against
+the current record. `record.<field>` resolves identically on every surface
+(`record_header`, `list_item`, …); prefer it over the bare-field form. Never
+wrap a predicate in `${…}` or `{…}` braces (see `objectstack-formula`).
+
+```typescript
+export const ReassignLeadAction: Action = {
+  name: 'reassign_lead',
+  label: 'Reassign Lead',
+  objectName: 'lead',
+  type: 'api',
+  target: 'lead',
+  locations: ['record_header', 'list_item'],
+  // Greys out (stays visible) once the lead is converted:
+  disabled: P`record.status == "converted"`,
+  params: [{ field: 'assigned_to', required: true }],
+  undoable: true,                 // success toast offers Undo; Ctrl+Z works too
+  successMessage: 'Lead reassigned.',
+  errorMessage: "Couldn't reassign this lead — try again.",
+};
+```
 
 ### Examples
 
