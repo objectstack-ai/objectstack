@@ -18,6 +18,27 @@ import type { LLMAdapter } from '@objectstack/spec/contracts';
  * Always echoes back the last user message prefixed with "[memory] ".
  * Useful for unit tests, CI pipelines, and local dev without an LLM key.
  */
+/**
+ * Rough token estimate for the in-memory adapter. The memory adapter stands in
+ * for a real LLM in dev/CI/local-E2E; returning a flat `0` usage made every
+ * token-metering feature (quota guardrails, usage dashboards, cost caps)
+ * impossible to exercise without a paid provider key. This is intentionally
+ * crude — ~4 chars/token, the standard ballpark — NOT provider-accurate. It
+ * exists so usage-driven behaviour can be tested money-free, not to bill anyone.
+ */
+function estimateTokens(text: string): number {
+  return text ? Math.max(1, Math.ceil(text.length / 4)) : 0;
+}
+
+function estimateUsage(messages: ModelMessage[], output = ''): AIResult['usage'] {
+  const promptText = messages
+    .map(m => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))
+    .join('\n');
+  const promptTokens = estimateTokens(promptText);
+  const completionTokens = estimateTokens(output);
+  return { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens };
+}
+
 export class MemoryLLMAdapter implements LLMAdapter {
   readonly name = 'memory';
 
@@ -66,7 +87,7 @@ export class MemoryLLMAdapter implements LLMAdapter {
           return {
             content: '',
             model: options?.model ?? 'memory',
-            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+            usage: estimateUsage(messages),
             toolCalls: [
               {
                 type: 'tool-call',
@@ -89,7 +110,7 @@ export class MemoryLLMAdapter implements LLMAdapter {
       return {
         content: '',
         model: options?.model ?? 'memory',
-        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        usage: estimateUsage(messages),
         toolCalls: [
           {
             type: 'tool-call',
@@ -126,13 +147,13 @@ export class MemoryLLMAdapter implements LLMAdapter {
         return {
           content: `[memory] action ${payload.action ?? ''} failed: ${payload.error}`,
           model: options?.model ?? 'memory',
-          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          usage: estimateUsage(messages),
         };
       }
       return {
         content: `[memory] ${payload.message ?? 'Action executed.'} (${payload.action ?? 'action'})`,
         model: options?.model ?? 'memory',
-        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        usage: estimateUsage(messages),
       };
     }
 
@@ -163,7 +184,7 @@ export class MemoryLLMAdapter implements LLMAdapter {
         return {
           content: `[memory] query_data failed: ${payload.error}`,
           model: options?.model ?? 'memory',
-          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          usage: estimateUsage(messages),
         };
       }
       const records = payload.records ?? [];
@@ -171,7 +192,7 @@ export class MemoryLLMAdapter implements LLMAdapter {
       return {
         content: `[memory] Found ${count} record${count === 1 ? '' : 's'} for "${userText}".`,
         model: options?.model ?? 'memory',
-        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        usage: estimateUsage(messages),
       };
     }
 
@@ -182,15 +203,16 @@ export class MemoryLLMAdapter implements LLMAdapter {
     return {
       content,
       model: options?.model ?? 'memory',
-      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      usage: estimateUsage(messages),
     };
   }
 
   async complete(prompt: string, options?: AIRequestOptions): Promise<AIResult> {
+    const content = `[memory] ${prompt}`;
     return {
-      content: `[memory] ${prompt}`,
+      content,
       model: options?.model ?? 'memory',
-      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      usage: estimateUsage([{ role: 'user', content: prompt }], content),
     };
   }
 
@@ -208,7 +230,7 @@ export class MemoryLLMAdapter implements LLMAdapter {
     yield {
       type: 'finish',
       finishReason: 'stop' as const,
-      totalUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      totalUsage: estimateUsage(messages, result.content),
       rawFinishReason: 'stop',
     } as unknown as TextStreamPart<ToolSet>;
   }
@@ -310,7 +332,7 @@ export class MemoryLLMAdapter implements LLMAdapter {
         return {
           object: result.data,
           model: options?.model ?? 'memory',
-          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          usage: estimateUsage(messages),
         };
       }
     }

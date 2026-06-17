@@ -45,6 +45,21 @@ describe('MemoryLLMAdapter', () => {
     expect(result.usage).toBeDefined();
   });
 
+  it('estimates non-zero, monotonic token usage so metering is testable money-free', async () => {
+    const short = await adapter.chat([{ role: 'user', content: 'hi' }]);
+    const long = await adapter.chat([
+      { role: 'system', content: 'You are a helpful assistant with a long preamble. '.repeat(20) },
+      { role: 'user', content: 'Tell me everything about my data. '.repeat(20) },
+    ]);
+    // Non-zero (the whole point — a flat 0 made quota/guardrail features untestable).
+    expect(short.usage!.totalTokens).toBeGreaterThan(0);
+    // total = prompt + completion, and grows with input size (monotonic).
+    expect(short.usage!.totalTokens).toBe(
+      short.usage!.promptTokens + short.usage!.completionTokens,
+    );
+    expect(long.usage!.promptTokens).toBeGreaterThan(short.usage!.promptTokens);
+  });
+
   it('should handle no user message in chat()', async () => {
     const messages: ModelMessage[] = [{ role: 'system', content: 'System only' }];
     const result = await adapter.chat(messages);
