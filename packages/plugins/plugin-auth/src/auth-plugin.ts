@@ -393,6 +393,10 @@ export class AuthPlugin implements Plugin {
           const trimmed = value.trim();
           return trimmed ? trimmed : undefined;
         };
+        const asPositiveInt = (value: unknown): number | undefined => {
+          const n = Math.floor(Number(value));
+          return Number.isFinite(n) && n > 0 ? n : undefined;
+        };
 
         const patch: Partial<AuthManagerOptions> = {};
         const emailAndPassword: Partial<NonNullable<AuthConfig['emailAndPassword']>> = {};
@@ -408,8 +412,33 @@ export class AuthPlugin implements Plugin {
             false,
           );
         }
+        // Password policy — better-auth enforces these bounds on sign-up and
+        // password reset. Ignore malformed/non-positive values (keep the default).
+        if (isExplicit('password_min_length')) {
+          const n = asPositiveInt(values.password_min_length);
+          if (n !== undefined) emailAndPassword.minPasswordLength = n;
+        }
+        if (isExplicit('password_max_length')) {
+          const n = asPositiveInt(values.password_max_length);
+          if (n !== undefined) emailAndPassword.maxPasswordLength = n;
+        }
         if (Object.keys(emailAndPassword).length > 0) {
           patch.emailAndPassword = emailAndPassword as AuthManagerOptions['emailAndPassword'];
+        }
+
+        // Session lifetime — days → seconds for better-auth's `session`
+        // (`expiresIn` = absolute lifetime; `updateAge` = refresh threshold).
+        const session: { expiresIn?: number; updateAge?: number } = {};
+        if (isExplicit('session_expiry_days')) {
+          const d = asPositiveInt(values.session_expiry_days);
+          if (d !== undefined) session.expiresIn = d * 86_400;
+        }
+        if (isExplicit('session_refresh_days')) {
+          const d = asPositiveInt(values.session_refresh_days);
+          if (d !== undefined) session.updateAge = d * 86_400;
+        }
+        if (Object.keys(session).length > 0) {
+          patch.session = session as AuthManagerOptions['session'];
         }
 
         if (

@@ -353,7 +353,7 @@ business_hours_start:
   defaultValue: "09:00:00"
 ```
 
-**Storage format:** `HH:MM:SS`
+**Storage format:** `HH:MM:SS` — input accepts `HH:MM` or `HH:MM:SS` (with an optional fractional part and `Z`/offset). A `time` is a wall-clock value, not an instant: it is validated as a time-of-day, not parsed as a date.
 
 **Use cases:**
 - Business hours
@@ -518,6 +518,14 @@ const opportunities = await ObjectQL.query({
 - `set_null`: Set field to null when referenced record is deleted
 - `restrict`: Prevent deletion if references exist
 - `cascade`: Delete this record when referenced record is deleted
+
+> **Required foreign keys.** A `required: true` lookup cannot be nulled, so the
+> *default* `set_null` automatically escalates to `restrict` on such a field —
+> deleting the parent is refused with `409 DELETE_RESTRICTED` (the response
+> carries `dependentObject` and `dependentCount`) instead of a confusing
+> "&lt;field&gt; is required" validation error. To delete the children along with
+> the parent, set `deleteBehavior: cascade` explicitly. An explicit `set_null`
+> or `cascade` is always honored as written.
 
 **Multiple lookups:**
 ```yaml

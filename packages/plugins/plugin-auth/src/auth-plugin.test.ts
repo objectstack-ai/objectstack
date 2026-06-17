@@ -608,6 +608,32 @@ describe('AuthPlugin', () => {
       expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(true);
     });
 
+    it('applies password-policy bounds and session lifetime (days → seconds)', async () => {
+      const { manager } = await bootWithAuthSettings({
+        password_min_length: { value: 12, source: 'global' },
+        password_max_length: { value: 200, source: 'global' },
+        session_expiry_days: { value: 30, source: 'global' },
+        session_refresh_days: { value: 3, source: 'global' },
+      });
+      const cfg = (manager as any).config;
+      expect(cfg.emailAndPassword.minPasswordLength).toBe(12);
+      expect(cfg.emailAndPassword.maxPasswordLength).toBe(200);
+      expect(cfg.session.expiresIn).toBe(30 * 86_400);
+      expect(cfg.session.updateAge).toBe(3 * 86_400);
+    });
+
+    it('ignores unset (default-source) and malformed password/session values', async () => {
+      const { manager } = await bootWithAuthSettings({
+        password_min_length: { value: 8, source: 'default' }, // not explicit → ignored
+        session_expiry_days: { value: 'abc', source: 'global' }, // malformed → ignored
+        session_refresh_days: { value: 0, source: 'global' }, // non-positive → ignored
+      });
+      const cfg = (manager as any).config;
+      expect(cfg.emailAndPassword?.minPasswordLength).toBeUndefined();
+      expect(cfg.session?.expiresIn).toBeUndefined();
+      expect(cfg.session?.updateAge).toBeUndefined();
+    });
+
     it('enables Google from env credentials when google_enabled is explicit true', async () => {
       process.env.GOOGLE_CLIENT_ID = 'google-env-client-id';
       process.env.GOOGLE_CLIENT_SECRET = 'google-env-client-secret';

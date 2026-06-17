@@ -126,6 +126,14 @@ export const en: TranslationData = {
           title: 'Email and password',
           description: 'Control local email/password sign-in and self-service registration.',
         },
+        password_policy: {
+          title: 'Password policy',
+          description: 'Length bounds enforced by the auth provider on sign-up and password reset.',
+        },
+        sessions: {
+          title: 'Sessions',
+          description: 'How long a signed-in session stays valid.',
+        },
         social: {
           title: 'Social sign-in',
           description:
@@ -136,6 +144,10 @@ export const en: TranslationData = {
         email_password_enabled: { label: 'Enable email/password login' },
         signup_enabled: { label: 'Allow self-service registration' },
         require_email_verification: { label: 'Require email verification' },
+        password_min_length: { label: 'Minimum password length' },
+        password_max_length: { label: 'Maximum password length', help: 'Guards against denial-of-service via very long password hashing.' },
+        session_expiry_days: { label: 'Session lifetime (days)', help: 'A session expires this many days after sign-in.' },
+        session_refresh_days: { label: 'Refresh threshold (days)', help: 'An active session is extended when it is older than this.' },
         google_enabled: {
           label: 'Enable Google login',
           help: 'Requires a Google OAuth client ID and secret from Google Cloud Console.',

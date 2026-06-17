@@ -122,6 +122,14 @@ export const zhCN: TranslationData = {
           title: '邮箱与密码',
           description: '控制本地邮箱/密码登录与自助注册。',
         },
+        password_policy: {
+          title: '密码策略',
+          description: '由认证提供商在注册和重置密码时强制的长度限制。',
+        },
+        sessions: {
+          title: '会话',
+          description: '登录会话的有效时长。',
+        },
         social: {
           title: '社交登录',
           description: '配置内置的 Google 登录提供商。部署环境变量仍优先生效。',
@@ -131,6 +139,10 @@ export const zhCN: TranslationData = {
         email_password_enabled: { label: '启用邮箱/密码登录' },
         signup_enabled: { label: '允许自助注册' },
         require_email_verification: { label: '要求邮箱验证' },
+        password_min_length: { label: '密码最小长度' },
+        password_max_length: { label: '密码最大长度', help: '防止超长密码哈希导致的拒绝服务。' },
+        session_expiry_days: { label: '会话有效期(天)', help: '登录后会话在此天数后过期。' },
+        session_refresh_days: { label: '刷新阈值(天)', help: '活跃会话在超过此时长后自动续期。' },
         google_enabled: {
           label: '启用 Google 登录',
           help: '需要在 Google Cloud Console 中创建的 Google OAuth 客户端 ID 与密钥。',

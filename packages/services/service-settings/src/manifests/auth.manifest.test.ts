@@ -30,6 +30,25 @@ describe('authSettingsManifest', () => {
     ]);
   });
 
+  it('exposes password-policy + session number fields with bounds and defaults', () => {
+    const specs = authSettingsManifest.specifiers as any[];
+    const byKey = (k: string) => specs.find((s) => s.key === k);
+
+    const min = byKey('password_min_length');
+    expect(min.type).toBe('number');
+    expect(min.default).toBe(8);
+    expect(min.min).toBe(6);
+    expect(min.max).toBe(64);
+
+    expect(byKey('password_max_length').default).toBe(128);
+    expect(byKey('session_expiry_days').default).toBe(7);
+    expect(byKey('session_refresh_days').default).toBe(1);
+
+    const groups = specs.filter((s) => s.type === 'group').map((s) => s.id);
+    expect(groups).toContain('password_policy');
+    expect(groups).toContain('sessions');
+  });
+
   it('exposes encrypted Google OAuth credential fields', () => {
     const keys = (authSettingsManifest.specifiers as any[])
       .map((s) => s.key)

@@ -251,6 +251,24 @@ Batch delete records by ID list.
 
 ---
 
+### `POST /data/:object/:id/clone`
+
+Clone a record. Reads the source, drops engine-owned columns (`id`, the audit
+fields, autonumbers, and computed `formula`/`summary` values) so they are
+re-derived, applies any caller `overrides`, and inserts the copy. Shallow by
+design — it duplicates the record's own fields, not its child records.
+
+Gated by the object's `enable.clone` capability (default `true`); an object with
+`enable.clone: false` returns `403 CLONE_DISABLED`.
+
+**Body** (optional): `{ "overrides": { "name": "Acme (Copy)" } }` — applied on
+top of the copied values (a bare field map is also accepted). The natural place
+to set a new name or clear a unique field.
+
+**Response** `201`: `{ object, id, sourceId, record }`
+
+---
+
 ## Analytics
 
 Semantic BI queries using a cube-style API. Available when the analytics service is enabled.
