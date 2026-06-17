@@ -1353,6 +1353,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/formula':
+        specifier: workspace:*
+        version: link:../../formula
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects

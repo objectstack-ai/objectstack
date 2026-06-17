@@ -12,7 +12,7 @@
 export { ExpressionEngine, getEngine, hasDialect, register } from './registry';
 export { celEngine, DEFAULT_LIMITS } from './cel-engine';
 export { cronEngine } from './cron-engine';
-export { templateEngine, TEMPLATE_FORMATTERS } from './template-engine';
+export { templateEngine, TEMPLATE_FORMATTERS, formatValue } from './template-engine';
 export { registerStdLib, buildScope } from './stdlib';
 export { resolveSeed, resolveSeedRecord } from './seed-eval';
 export { normalizeExpression, normalizeExpressionTree } from './normalize';

@@ -25,8 +25,9 @@ export interface EvalContext {
   now?: Date;
   /**
    * Reference timezone (IANA name, e.g. `America/New_York`) for calendar-day
-   * functions `today()` / `daysFromNow()` / `daysAgo()` (ADR-0053 Phase 2).
-   * Defaults to `UTC` when unset.
+   * functions `today()` / `daysFromNow()` / `daysAgo()` and for rendering
+   * `datetime` template holes in that zone's wall-clock (ADR-0053 Phase 2).
+   * Defaults to `UTC` when unset. Calendar-day `date` rendering stays tz-naive.
    */
   timezone?: string;
   /** Current authenticated subject (hook / action / view contexts). */

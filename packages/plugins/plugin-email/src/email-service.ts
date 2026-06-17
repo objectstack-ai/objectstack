@@ -333,10 +333,16 @@ export class EmailService implements IEmailService {
       }
     }
 
-    const subject = renderTemplate(row.subject, data);
-    const html = renderTemplate(row.body_html, data);
+    // Render holes with the recipient's locale + reference timezone so
+    // `{{ ts | datetime }}` shows the right wall-clock (ADR-0053 Phase 2).
+    const renderOpts = {
+      ...(input.locale ? { locale: input.locale } : {}),
+      ...(input.timezone ? { timeZone: input.timezone } : {}),
+    };
+    const subject = renderTemplate(row.subject, data, renderOpts);
+    const html = renderTemplate(row.body_html, data, renderOpts);
     const text = row.body_text
-      ? renderTemplate(row.body_text, data)
+      ? renderTemplate(row.body_text, data, renderOpts)
       : htmlToText(html);
 
     const from: EmailAddress | undefined = input.from

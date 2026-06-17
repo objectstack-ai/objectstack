@@ -60,6 +60,34 @@ describe('EmailService.sendTemplate', () => {
     expect(msg.text).toContain('reset: https://x.com/r/abc');
   });
 
+  it('renders a datetime hole in the input reference timezone (ADR-0053 Phase 2)', async () => {
+    const transport = new CaptureTransport();
+    const tpl: EmailTemplateRow = {
+      name: 'order.shipped',
+      locale: 'en-US',
+      subject: 'Shipped',
+      body_html: '<p>Ships {{ shipAt | datetime }}</p>',
+      body_text: 'Ships {{ shipAt | datetime }}',
+      active: true,
+    };
+    const svc = new EmailService({
+      transport,
+      defaultFrom: { address: 'no-reply@x.com' },
+      templateLoader: makeLoader([tpl]),
+    });
+
+    // 2026-06-02T01:30Z → 2026-06-01 in America/New_York.
+    await svc.sendTemplate({
+      template: 'order.shipped',
+      to: 'a@x.com',
+      data: { shipAt: '2026-06-02T01:30:00Z' },
+      timezone: 'America/New_York',
+    });
+
+    expect(transport.sent[0].html).toContain('6/1/26'); // shifted to NY day
+    expect(transport.sent[0].html).not.toContain('2026-06-02T01:30'); // not raw ISO
+  });
+
   it('throws TEMPLATE_NOT_FOUND when loader returns null', async () => {
     const svc = new EmailService({
       transport: new CaptureTransport(),

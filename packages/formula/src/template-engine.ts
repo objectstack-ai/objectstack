@@ -32,7 +32,12 @@ const HOLE_RE = /\{\{([^}]*)\}\}/g;
 
 // ───────────────────────── formatter whitelist (ADR-0032 §3) ──────────────
 
-type Formatter = (value: unknown, arg: string | undefined, locale: string) => string;
+type Formatter = (
+  value: unknown,
+  arg: string | undefined,
+  locale: string,
+  timeZone?: string,
+) => string;
 
 function asNumber(v: unknown): number | undefined {
   if (typeof v === 'number') return v;
@@ -85,7 +90,9 @@ const FORMATTERS: Record<string, Formatter> = {
       maximumFractionDigits: Number.isNaN(digits) ? 0 : digits,
     }).format(n);
   },
-  // date | date:long | date:iso  → date-only
+  // date | date:long | date:iso  → date-only. Intentionally tz-naive
+  // (ADR-0053): a `Field.date` is a calendar day with no zone, so rendering
+  // never applies a reference timezone — that would shift the day.
   date: (v, arg, locale) => {
     const d = asDate(v);
     if (!d) return baseString(v);
@@ -93,8 +100,10 @@ const FORMATTERS: Record<string, Formatter> = {
     const style = arg === 'long' ? 'long' : arg === 'medium' ? 'medium' : 'short';
     return new Intl.DateTimeFormat(locale, { dateStyle: style as 'short' | 'medium' | 'long' }).format(d);
   },
-  // datetime | datetime:long | datetime:iso
-  datetime: (v, arg, locale) => {
+  // datetime | datetime:long | datetime:iso. A `datetime` is a UTC instant;
+  // when a reference `timeZone` is supplied (ADR-0053 Phase 2) the wall-clock
+  // styles render in that zone. `iso` stays UTC (machine-readable, unambiguous).
+  datetime: (v, arg, locale, timeZone) => {
     const d = asDate(v);
     if (!d) return baseString(v);
     if (arg === 'iso') return d.toISOString();
@@ -102,6 +111,7 @@ const FORMATTERS: Record<string, Formatter> = {
     return new Intl.DateTimeFormat(locale, {
       dateStyle: style as 'short' | 'medium' | 'long',
       timeStyle: style as 'short' | 'medium' | 'long',
+      ...(timeZone ? { timeZone } : {}),
     }).format(d);
   },
   // truncate:80  → cut with an ellipsis
@@ -123,6 +133,27 @@ const FORMATTERS: Record<string, Formatter> = {
 
 /** Public list of whitelisted template formatters (for introspection/docs). */
 export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
+
+/**
+ * Apply a whitelisted formatter to a value, the single source of truth for
+ * value→string semantics across dialects. Returns `undefined` for an unknown
+ * formatter name so callers can decide how to handle it (the template engine
+ * rejects at compile time; other consumers may pass the raw value through).
+ *
+ * Exported so renderers that don't run the full CEL template engine — notably
+ * the email pipeline (ADR-0053 Phase 2 slice 4) — format dates, money, etc.
+ * identically to in-app templates, including reference-timezone `datetime`.
+ */
+export function formatValue(
+  name: string,
+  value: unknown,
+  arg: string | undefined,
+  opts: { locale?: string; timeZone?: string } = {},
+): string | undefined {
+  const fmt = FORMATTERS[name];
+  if (!fmt) return undefined;
+  return fmt(value, arg, opts.locale ?? 'en-US', opts.timeZone);
+}
 
 function baseString(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -234,13 +265,16 @@ export const templateEngine: DialectEngine = {
       (ctx.extra && typeof ctx.extra.locale === 'string' && ctx.extra.locale) ||
       (typeof (ctx as { locale?: string }).locale === 'string' && (ctx as { locale?: string }).locale) ||
       'en-US';
+    // Reference timezone for `datetime` rendering (ADR-0053 Phase 2). Unset →
+    // Intl uses the runtime zone, matching pre-Phase-2 behavior.
+    const timeZone = typeof ctx.timezone === 'string' ? ctx.timezone : undefined;
 
     const out = expr.source.replace(HOLE_RE, (_match, inner) => {
       const parsed = parseHole(String(inner));
       if (!parsed) return _match; // compile already validated; defensive
       const value = resolvePath(scope, parsed.path);
       if (parsed.filter) {
-        return FORMATTERS[parsed.filter.name](value, parsed.filter.arg, locale as string);
+        return FORMATTERS[parsed.filter.name](value, parsed.filter.arg, locale as string, timeZone);
       }
       return baseString(value);
     });

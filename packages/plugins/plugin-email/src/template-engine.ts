@@ -9,6 +9,13 @@
  * (e.g. when injecting pre-rendered HTML fragments such as URLs in
  * `<a href="">`).
  *
+ * A hole may carry an optional formatter from the shared formula
+ * whitelist — `{{ order.total | currency:EUR }}`, `{{ ts | datetime }}` —
+ * reusing `@objectstack/formula`'s `formatValue` so dates, money, and
+ * (ADR-0053 Phase 2) reference-timezone `datetime` render identically to
+ * in-app templates. An unknown formatter falls back to the raw string,
+ * keeping the lenient "never throw on render" contract.
+ *
  * Deliberately tiny (no loops / conditionals / partials) — the design
  * stance is that email templates SHOULD be data-only renderings; any
  * branching belongs in the caller. If we ever need more, swap for
@@ -16,7 +23,19 @@
  * runtime; we resist that until a real use case demands it.
  */
 
-const PLACEHOLDER = /(\{\{\{?)\s*([\w.]+)\s*(\}?\}\})/g;
+import { formatValue } from '@objectstack/formula';
+
+// 1=open(`{{`|`{{{`) 2=path 3=formatter(opt) 4=arg(opt) 5=close(`}}`|`}}}`).
+// `[^'}]*?` is brace/quote-free, so it cannot run past the closing braces —
+// the matcher stays linear (no ReDoS).
+const PLACEHOLDER =
+  /(\{\{\{?)\s*([\w.]+)(?:\s*\|\s*(\w+)(?:\s*:\s*'?([^'}]*?)'?)?)?\s*(\}\}\}?)/g;
+
+/** Locale + reference timezone for hole formatters (ADR-0053 Phase 2). */
+export interface RenderOptions {
+  locale?: string;
+  timeZone?: string;
+}
 
 function lookup(data: Record<string, any>, path: string): unknown {
   if (!path) return undefined;
@@ -43,15 +62,32 @@ function escapeHtml(s: string): string {
  * render as empty strings (no throw); call `requireVars()` first if
  * you need strict validation.
  */
-export function renderTemplate(template: string, data: Record<string, any>): string {
+export function renderTemplate(
+  template: string,
+  data: Record<string, any>,
+  opts: RenderOptions = {},
+): string {
   if (!template) return '';
-  return template.replace(PLACEHOLDER, (_match, open: string, path: string, close: string) => {
-    const isUnescaped = open === '{{{' && close === '}}}';
-    const raw = lookup(data, path);
-    if (raw == null) return '';
-    const str = typeof raw === 'string' ? raw : String(raw);
-    return isUnescaped ? str : escapeHtml(str);
-  });
+  return template.replace(
+    PLACEHOLDER,
+    (_match, open: string, path: string, fname: string | undefined, farg: string | undefined, close: string) => {
+      const isUnescaped = open === '{{{' && close === '}}}';
+      const raw = lookup(data, path);
+      let str: string;
+      if (fname) {
+        // Formatted holes render '' for a missing value (the formula formatters
+        // treat null as empty), so they never emit "undefined".
+        const formatted = formatValue(fname, raw, farg, { locale: opts.locale, timeZone: opts.timeZone });
+        str = formatted !== undefined
+          ? formatted
+          : raw == null ? '' : (typeof raw === 'string' ? raw : String(raw)); // unknown formatter → raw
+      } else {
+        if (raw == null) return '';
+        str = typeof raw === 'string' ? raw : String(raw);
+      }
+      return isUnescaped ? str : escapeHtml(str);
+    },
+  );
 }
 
 /**

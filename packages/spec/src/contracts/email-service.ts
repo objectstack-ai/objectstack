@@ -142,6 +142,14 @@ export interface SendTemplateInput {
   data?: Record<string, unknown>;
   /** Preferred BCP-47 locale (e.g. user's locale). Falls back to `'en-US'`. */
   locale?: string;
+  /**
+   * Reference timezone (IANA name, e.g. `America/New_York`) for rendering
+   * `datetime` holes — `{{ ts | datetime }}` (ADR-0053 Phase 2). The caller
+   * supplies the recipient's / tenant's zone (typically from the resolved
+   * `ExecutionContext.timezone`). Unset → the runtime zone (pre-Phase-2
+   * behavior). Calendar-day `date` holes are unaffected (tz-naive).
+   */
+  timezone?: string;
   /** Tenant id for org-overlay resolution (when supported). */
   org?: string;
   /** Envelope sender override (otherwise template.fromOverride → service default). */
