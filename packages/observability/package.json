@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/observability",
-  "version": "9.8.0",
+  "version": "9.9.0",
   "license": "Apache-2.0",
   "description": "Observability contracts and exporters for ObjectStack — MetricsRegistry, ErrorReporter, Logger plus noop/console/OTLP-HTTP exporters. Deployment-target neutral; runtime and services depend on this so the same instrumentation works on Cloudflare Workers, Node, and self-hosted Kubernetes.",
   "type": "module",

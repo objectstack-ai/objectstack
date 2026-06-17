@@ -1,5 +1,24 @@
 # @objectstack/driver-sqlite-wasm
 
+## 9.9.0
+
+### Patch Changes
+
+- Updated dependencies [84249a4]
+- Updated dependencies [796f0d6]
+- Updated dependencies [11af299]
+- Updated dependencies [d5774b5]
+- Updated dependencies [bfa3102]
+- Updated dependencies [134043a]
+- Updated dependencies [90108e0]
+- Updated dependencies [9afeb2d]
+- Updated dependencies [6bec07e]
+- Updated dependencies [601cc11]
+- Updated dependencies [575448d]
+  - @objectstack/spec@9.9.0
+  - @objectstack/driver-sql@9.9.0
+  - @objectstack/core@9.9.0
+
 ## 9.8.0
 
 ### Patch Changes

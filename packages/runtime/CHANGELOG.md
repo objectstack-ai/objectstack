@@ -1,5 +1,73 @@
 # @objectstack/runtime
 
+## 9.9.0
+
+### Minor Changes
+
+- 11af299: feat(runtime): resolve a reference timezone onto ExecutionContext (ADR-0053 Phase 2 foundation)
+
+  Adds `ExecutionContext.timezone` (optional IANA zone) and resolves it once per request in `resolveExecutionContext`, with precedence **user preference → org default → `UTC`**:
+
+  - User override: `sys_user_preference` row `(user_id, key='timezone')`.
+  - Org default: the tenant-scoped `sys_setting` `(namespace='localization', key='timezone', scope='tenant')` — one org per physical tenant (ADR-0002), so no tenant_id filter is needed.
+  - An invalid IANA zone is ignored and resolution falls through; every read is defensive and never blocks auth.
+
+  This is **pure plumbing with no behavior change**: nothing reads `ctx.timezone` yet, and an absent value resolves to `UTC` (today's behavior). It is the foundation the rest of ADR-0053 Phase 2 consumes — tz-aware `today()`/`daysFromNow()` (#1980), datetime rendering (#1981), and analytics bucketing (#1982). A discoverable `localization` settings manifest for the org default is a follow-up; the resolver already reads the row if present.
+
+  Part of #1978.
+
+- 9afeb2d: feat(settings): `localization` settings — platform default timezone, language & formats (ADR-0053 Phase 2)
+
+  Adds a `localization` SettingsManifest, the missing keystone that makes the Phase 2 reference-timezone actually configurable end-to-end. One declaration gives the full settings stack for free: platform built-in default → `global` → `tenant` cascade, a permission-gated settings page, and i18n.
+
+  **Keys** (organization-level; per-user overrides intentionally out of scope for v1): `timezone` (UTC), `locale` (en-US), `default_country`, `date_format`, `time_format`, `number_format`, `first_day_of_week`, `currency` (USD), `fiscal_year_start`. Benchmarked against Salesforce/Workday "Company Information + Locale".
+
+  **Resolver 收编** — `resolveExecutionContext` now resolves `timezone` **and** `locale` from the `localization` settings via the `settings` service (canonical 4-tier cascade), falling back to a direct tenant-scoped `sys_setting` read, then `UTC` / `en-US`. This replaces the hand-rolled `sys_user_preference` + tenant-only `sys_setting` path from #1978 (which bypassed the settings abstraction and is dropped along with the per-user tier). New `ExecutionContext.locale`.
+
+  **Consumer wiring** — analytics date bucketing now picks up the resolved org timezone: `DatasetExecutor` threads `ExecutionContext.timezone` into the query (precedence: explicit selection tz → request tz → UTC), so #1982's tz-aware buckets fire for a configured org without callers passing a zone. Formula `today()`/`datetime` were already wired (#1979/#1980).
+
+  Email `datetime` rendering (`SendTemplateInput.timezone`, shipped in #1981) is intentionally **not** wired here: the only current `sendTemplate` callers are pre-session auth emails with no org context; business-notification callers can pass the zone when they appear.
+
+### Patch Changes
+
+- 83fd318: fix(runtime): drive sandbox host calls with deferred promises and a deadline-bounded pump
+
+  The QuickJS sandbox exposed `ctx.api.object(x).find/update/...` via `newAsyncifiedFunction`, which unwinds the WASM stack per host call and forbids a second call while the first is unwound. A script awaiting two host calls in sequence (e.g. an action doing `findOne()` then `update()`) drove the second call from a continuation resumed inside `executePendingJobs`, corrupting the wasm heap (`memory access out of bounds` / `p->ref_count == 0`) or exhausting the fixed 1000-iteration pump budget — surfacing as `action '…' did not resolve after 1000 pump iterations`.
+
+  Host API methods are now exposed as deferred QuickJS promises (`vm.newPromise()`), so sequential `await`s compose with no stack unwinding, and the pump loop is bounded by the configured `timeoutMs` instead of a fixed iteration cap. Host **method** calls now require `await` (the `.object(name)` proxy getter stays synchronous); a stuck/never-settling host call is cut off with a clear timeout error.
+
+- Updated dependencies [84249a4]
+- Updated dependencies [44c5348]
+- Updated dependencies [796f0d6]
+- Updated dependencies [11af299]
+- Updated dependencies [d5774b5]
+- Updated dependencies [bfa3102]
+- Updated dependencies [134043a]
+- Updated dependencies [67c29ee]
+- Updated dependencies [90108e0]
+- Updated dependencies [9afeb2d]
+- Updated dependencies [6bec07e]
+- Updated dependencies [92d75ca]
+- Updated dependencies [601cc11]
+- Updated dependencies [d99a75a]
+- Updated dependencies [575448d]
+  - @objectstack/spec@9.9.0
+  - @objectstack/objectql@9.9.0
+  - @objectstack/rest@9.9.0
+  - @objectstack/driver-sql@9.9.0
+  - @objectstack/plugin-security@9.9.0
+  - @objectstack/core@9.9.0
+  - @objectstack/formula@9.9.0
+  - @objectstack/metadata@9.9.0
+  - @objectstack/observability@9.9.0
+  - @objectstack/driver-memory@9.9.0
+  - @objectstack/driver-sqlite-wasm@9.9.0
+  - @objectstack/plugin-auth@9.9.0
+  - @objectstack/plugin-org-scoping@9.9.0
+  - @objectstack/service-cluster@9.9.0
+  - @objectstack/service-i18n@9.9.0
+  - @objectstack/types@9.9.0
+
 ## 9.8.0
 
 ### Patch Changes

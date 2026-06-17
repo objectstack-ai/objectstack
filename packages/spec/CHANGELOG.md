@@ -1,5 +1,120 @@
 # @objectstack/spec
 
+## 9.9.0
+
+### Minor Changes
+
+- 84249a4: feat(action): `undoable` flag on the UI Action schema
+
+  Single-record update actions can declare `undoable: true`. The runtime captures
+  the record's prior field values and offers an "Undo" affordance on the success
+  toast (backed by the client UndoManager). Pairs with the objectui runtime that
+  honours it. Also documents that conditional `visible` / `disabled` CEL
+  predicates are evaluated by the action renderers (used here to hide an action
+  when it no longer applies, e.g. Convert Lead on an already-converted lead).
+
+- 11af299: feat(runtime): resolve a reference timezone onto ExecutionContext (ADR-0053 Phase 2 foundation)
+
+  Adds `ExecutionContext.timezone` (optional IANA zone) and resolves it once per request in `resolveExecutionContext`, with precedence **user preference → org default → `UTC`**:
+
+  - User override: `sys_user_preference` row `(user_id, key='timezone')`.
+  - Org default: the tenant-scoped `sys_setting` `(namespace='localization', key='timezone', scope='tenant')` — one org per physical tenant (ADR-0002), so no tenant_id filter is needed.
+  - An invalid IANA zone is ignored and resolution falls through; every read is defensive and never blocks auth.
+
+  This is **pure plumbing with no behavior change**: nothing reads `ctx.timezone` yet, and an absent value resolves to `UTC` (today's behavior). It is the foundation the rest of ADR-0053 Phase 2 consumes — tz-aware `today()`/`daysFromNow()` (#1980), datetime rendering (#1981), and analytics bucketing (#1982). A discoverable `localization` settings manifest for the org default is a follow-up; the resolver already reads the row if present.
+
+  Part of #1978.
+
+- d5774b5: fix(spec): `Field.rating` / `Field.vector` builders emit live props instead of dead ones
+
+  The `Field.rating(n)` and `Field.vector(n)` builders emitted properties the
+  spec-liveness ledger classifies as **dead** (silent runtime no-ops), so every
+  field authored through them tripped the `liveness-dead-property` author lint:
+
+  - `Field.rating(n)` emitted `maxRating`, but the rating renderer reads the flat
+    `max` prop (`RatingField.tsx:13`). The builder now emits `max`.
+  - `Field.vector(n)` emitted a nested `vectorConfig` block, but the renderer
+    reads the flat `dimensions` sibling (`VectorField.tsx:11`) and nothing
+    consumes `vectorConfig` (no vector-index DDL). The builder now emits the flat
+    `dimensions`.
+
+  `dimensions` is also promoted to a **declared, live** top-level `FieldSchema`
+  property. It was previously only valid nested inside `vectorConfig`, so a flat
+  `dimensions` authored by hand was silently **stripped** during compile (Zod
+  drops unknown keys) — the renderer then saw no dimensionality. It now survives
+  compilation and is governed by the liveness gate.
+
+  `maxRating` and `vectorConfig` remain accepted by the schema (still classified
+  `dead` + `authorWarn`) for back-compat, so hand-authored usages still surface
+  the advisory warning rather than type-erroring.
+
+- 134043a: feat(automation): declarative screen-flow completion/error messages + action `errorMessage`
+
+  A screen flow can now declare `successMessage` / `errorMessage` (FlowSchema). The
+  engine surfaces them on the terminal `AutomationResult` (`successMessage` on
+  success, `errorMessage` on failure), so the UI flow-runner shows a meaningful
+  toast instead of a generic "Done" / the raw error — no manual "success screen"
+  node needed. The CRM convert-lead wizard sets a friendly completion message.
+
+  Also exposes `errorMessage` on the UI Action schema. The runtime (ActionRunner)
+  already honoured it; it just wasn't declarable in the spec — closing a
+  spec↔runtime gap so authors can set a friendly failure toast.
+
+- 9afeb2d: feat(settings): `localization` settings — platform default timezone, language & formats (ADR-0053 Phase 2)
+
+  Adds a `localization` SettingsManifest, the missing keystone that makes the Phase 2 reference-timezone actually configurable end-to-end. One declaration gives the full settings stack for free: platform built-in default → `global` → `tenant` cascade, a permission-gated settings page, and i18n.
+
+  **Keys** (organization-level; per-user overrides intentionally out of scope for v1): `timezone` (UTC), `locale` (en-US), `default_country`, `date_format`, `time_format`, `number_format`, `first_day_of_week`, `currency` (USD), `fiscal_year_start`. Benchmarked against Salesforce/Workday "Company Information + Locale".
+
+  **Resolver 收编** — `resolveExecutionContext` now resolves `timezone` **and** `locale` from the `localization` settings via the `settings` service (canonical 4-tier cascade), falling back to a direct tenant-scoped `sys_setting` read, then `UTC` / `en-US`. This replaces the hand-rolled `sys_user_preference` + tenant-only `sys_setting` path from #1978 (which bypassed the settings abstraction and is dropped along with the per-user tier). New `ExecutionContext.locale`.
+
+  **Consumer wiring** — analytics date bucketing now picks up the resolved org timezone: `DatasetExecutor` threads `ExecutionContext.timezone` into the query (precedence: explicit selection tz → request tz → UTC), so #1982's tz-aware buckets fire for a configured org without callers passing a zone. Formula `today()`/`datetime` were already wired (#1979/#1980).
+
+  Email `datetime` rendering (`SendTemplateInput.timezone`, shipped in #1981) is intentionally **not** wired here: the only current `sendTemplate` callers are pre-session auth emails with no org context; business-notification callers can pass the zone when they appear.
+
+- 6bec07e: feat(automation): object-form screen-flow steps
+
+  A `screen` node that declares `config.objectName` now renders the named object's
+  FULL create/edit form (including inline master-detail child grids) instead of a
+  flat field list. The node emits an `object-form` `ScreenSpec`
+  (`kind`/`objectName`/`mode`/`recordId`/`defaults`/`idVariable`); the client
+  renders the real ObjectForm, persists the record (and its children, atomically),
+  and resumes the run with the saved id bound to `idVariable` so a later step can
+  reference it — e.g. a lead-conversion wizard: a full Customer step, then a full
+  Opportunity-with-line-items step.
+
+  - **spec**: `ScreenSpec` gains `kind`/`objectName`/`mode`/`recordId`/`defaults`/`idVariable`.
+  - **service-automation**: the `screen` executor emits object-form specs and now
+    interpolates `title`/`description`/field `defaultValue`/object-form `defaults`
+    against live flow variables (the engine does not pre-interpolate node config).
+
+- 601cc11: feat(analytics): timezone-aware date bucketing (ADR-0053 Phase 2)
+
+  Analytics day/week/month/quarter/year buckets now resolve on a **reference timezone's** calendar days, so a row near a tz day-boundary lands in the bucket a user in that zone would expect — identically on SQLite and Postgres.
+
+  Per ADR-0053 decision **D2**, bucketing is done **in-memory, uniformly** for non-UTC zones rather than emitting dialect-specific `date_trunc … AT TIME ZONE` (SQLite has no tz database and MySQL needs tz tables loaded, so splitting by dialect would shift bucket boundaries for the same data). `engine.aggregate({ timezone })` therefore forces the in-memory aggregation path when a non-UTC reference tz is set — the date-range `where` still goes to the driver, so only matching rows are fetched. **UTC / unset keeps the native driver fast path unchanged.**
+
+  - New shared `calendarPartsInTz` / `calendarPartsInTzOrUtc` util in `@objectstack/core` (DST-safe via `Intl.DateTimeFormat`, never hand-rolled offset math; falls back to UTC for an unset/`'UTC'`/invalid zone).
+  - `EngineAggregateOptions` and the analytics `executeAggregate` bridge / `ObjectQLStrategy` thread the reference timezone (sourced from the dataset selection / `ExecutionContext`) through to `applyInMemoryAggregation` → `bucketDateValue`, and the draft-preview evaluator's `bucketDate`.
+  - `formatDateBucket` (dimension labels) stays UTC-only by design: it re-labels values that were _already_ bucketed upstream, so re-applying a timezone there would shift a correct bucket by a day.
+
+- 575448d: feat(formula,email): render `datetime` in a reference timezone (ADR-0053 Phase 2)
+
+  `datetime` template holes now render in a reference timezone's wall-clock when one is supplied, at the presentation boundary — storage stays UTC.
+
+  - **Formula template engine** — the `datetime` formatter takes the reference timezone from `EvalContext.timezone` (threaded in #1980) and passes it to `Intl.DateTimeFormat`. `{{ ts | datetime }}` renders in that zone; `{{ ts | datetime:iso }}` stays UTC (machine-readable). Calendar-day `date` rendering is intentionally **unchanged** (tz-naive — a `Field.date` has no zone). New exported `formatValue(name, value, arg, { locale, timeZone })` makes the whitelisted formatters reusable outside the full CEL template engine.
+  - **Email pipeline** — `plugin-email`'s renderer previously bypassed the formatter pipeline (`String()` only), so a datetime went out as raw ISO. Email holes now accept the shared formula formatters — `{{ order.total | currency }}`, `{{ ts | datetime }}` — reusing `formatValue` (single source of truth), while keeping the engine's HTML-escaping and `{{{ }}}` raw-output semantics. `SendTemplateInput.timezone` (mirroring the existing `locale`) flows into rendering so an email's datetime shows the recipient's wall-clock.
+
+### Patch Changes
+
+- 90108e0: feat(cli): liveness author-warning lint — close the spec-liveness loop on the author side.
+
+  The liveness ledgers already classify every authorable property live/experimental/dead with evidence, and the CI gate enforces classification _completeness_ — but that knowledge never reached the person (very often an AI) writing the metadata. The new `compile` lint (`lint-liveness-properties.ts`) reads the ledgers and emits an advisory **warning** when an authored object/field sets a property that is misleading at runtime — e.g. `object.enable.feeds` (no feed runtime; comments live on sys_comment), `object.versioning` (no versioning engine), `field.columnName` (driver ignores it; column == field key), `field.maxRating`/`vectorConfig` (renderer reads a different key) — each with a corrective hint toward the supported alternative. Never fails the build (advisory only), consistent with the existing flow anti-pattern lint.
+
+  Signal-over-noise by design: warnings are **opt-in per ledger entry** via a new `authorWarn`/`authorHint` annotation (plus `experimental` entries warn by default). Booleans warn only when set truthy, and only `default(false)` flags are marked, so schema defaults (`enable.trash`, `enable.searchable`) never trip it. Coverage grows by annotating more ledger entries, not by changing lint code; today it covers `object` (incl. `enable.*`) and `field`.
+
+  - `@objectstack/spec`: ledger entries gain optional `authorWarn`/`authorHint`; `liveness/` is now shipped in the package `files` so the CLI can read it. Seeded annotations on the misleading object capability flags + aspirational blocks and the misleading dead field props. No schema/runtime change.
+
 ## 9.8.0
 
 ### Minor Changes

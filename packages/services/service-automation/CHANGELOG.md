@@ -1,5 +1,53 @@
 # @objectstack/service-automation
 
+## 9.9.0
+
+### Minor Changes
+
+- 134043a: feat(automation): declarative screen-flow completion/error messages + action `errorMessage`
+
+  A screen flow can now declare `successMessage` / `errorMessage` (FlowSchema). The
+  engine surfaces them on the terminal `AutomationResult` (`successMessage` on
+  success, `errorMessage` on failure), so the UI flow-runner shows a meaningful
+  toast instead of a generic "Done" / the raw error — no manual "success screen"
+  node needed. The CRM convert-lead wizard sets a friendly completion message.
+
+  Also exposes `errorMessage` on the UI Action schema. The runtime (ActionRunner)
+  already honoured it; it just wasn't declarable in the spec — closing a
+  spec↔runtime gap so authors can set a friendly failure toast.
+
+- 6bec07e: feat(automation): object-form screen-flow steps
+
+  A `screen` node that declares `config.objectName` now renders the named object's
+  FULL create/edit form (including inline master-detail child grids) instead of a
+  flat field list. The node emits an `object-form` `ScreenSpec`
+  (`kind`/`objectName`/`mode`/`recordId`/`defaults`/`idVariable`); the client
+  renders the real ObjectForm, persists the record (and its children, atomically),
+  and resumes the run with the saved id bound to `idVariable` so a later step can
+  reference it — e.g. a lead-conversion wizard: a full Customer step, then a full
+  Opportunity-with-line-items step.
+
+  - **spec**: `ScreenSpec` gains `kind`/`objectName`/`mode`/`recordId`/`defaults`/`idVariable`.
+  - **service-automation**: the `screen` executor emits object-form specs and now
+    interpolates `title`/`description`/field `defaultValue`/object-form `defaults`
+    against live flow variables (the engine does not pre-interpolate node config).
+
+### Patch Changes
+
+- Updated dependencies [84249a4]
+- Updated dependencies [11af299]
+- Updated dependencies [d5774b5]
+- Updated dependencies [134043a]
+- Updated dependencies [90108e0]
+- Updated dependencies [9afeb2d]
+- Updated dependencies [6bec07e]
+- Updated dependencies [601cc11]
+- Updated dependencies [d99a75a]
+- Updated dependencies [575448d]
+  - @objectstack/spec@9.9.0
+  - @objectstack/core@9.9.0
+  - @objectstack/formula@9.9.0
+
 ## 9.8.0
 
 ### Patch Changes

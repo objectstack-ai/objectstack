@@ -1,5 +1,33 @@
 # @objectstack/plugin-email
 
+## 9.9.0
+
+### Minor Changes
+
+- 575448d: feat(formula,email): render `datetime` in a reference timezone (ADR-0053 Phase 2)
+
+  `datetime` template holes now render in a reference timezone's wall-clock when one is supplied, at the presentation boundary — storage stays UTC.
+
+  - **Formula template engine** — the `datetime` formatter takes the reference timezone from `EvalContext.timezone` (threaded in #1980) and passes it to `Intl.DateTimeFormat`. `{{ ts | datetime }}` renders in that zone; `{{ ts | datetime:iso }}` stays UTC (machine-readable). Calendar-day `date` rendering is intentionally **unchanged** (tz-naive — a `Field.date` has no zone). New exported `formatValue(name, value, arg, { locale, timeZone })` makes the whitelisted formatters reusable outside the full CEL template engine.
+  - **Email pipeline** — `plugin-email`'s renderer previously bypassed the formatter pipeline (`String()` only), so a datetime went out as raw ISO. Email holes now accept the shared formula formatters — `{{ order.total | currency }}`, `{{ ts | datetime }}` — reusing `formatValue` (single source of truth), while keeping the engine's HTML-escaping and `{{{ }}}` raw-output semantics. `SendTemplateInput.timezone` (mirroring the existing `locale`) flows into rendering so an email's datetime shows the recipient's wall-clock.
+
+### Patch Changes
+
+- Updated dependencies [84249a4]
+- Updated dependencies [11af299]
+- Updated dependencies [d5774b5]
+- Updated dependencies [134043a]
+- Updated dependencies [90108e0]
+- Updated dependencies [9afeb2d]
+- Updated dependencies [6bec07e]
+- Updated dependencies [601cc11]
+- Updated dependencies [d99a75a]
+- Updated dependencies [575448d]
+  - @objectstack/spec@9.9.0
+  - @objectstack/core@9.9.0
+  - @objectstack/formula@9.9.0
+  - @objectstack/platform-objects@9.9.0
+
 ## 9.8.0
 
 ### Patch Changes
