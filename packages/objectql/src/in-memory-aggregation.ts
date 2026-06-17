@@ -25,15 +25,22 @@
 // invalid values bucket as the literal string `'(null)'` to remain
 // consistent with the client `useReportData` hook.
 
+import { calendarPartsInTzOrUtc } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
 
 /**
  * Group + aggregate raw rows according to the AST's `groupBy` /
  * `aggregations`. When neither is present, returns the rows unchanged.
+ *
+ * `timezone` (ADR-0053 Phase 2) shifts date bucketing to a reference timezone
+ * so a row near a tz day-boundary lands in the right day/week/month/quarter.
+ * It is only consulted by `groupBy` items carrying a `dateGranularity`; an
+ * unset or `'UTC'` value keeps the historical UTC bucketing.
  */
 export function applyInMemoryAggregation(
   rows: any[],
   ast: Pick<QueryAST, 'groupBy' | 'aggregations'>,
+  timezone?: string,
 ): any[] {
   const groupBy = (ast.groupBy ?? []) as GroupByNode[];
   const aggregations = (ast.aggregations ?? []) as AggregationNode[];
@@ -50,7 +57,7 @@ export function applyInMemoryAggregation(
     const parts: string[] = [];
     for (const g of groupBy) {
       const fieldName = typeof g === 'string' ? g : (g.alias ?? g.field);
-      const value = projectGroupValue(row, g);
+      const value = projectGroupValue(row, g, timezone);
       key[fieldName] = value;
       parts.push(`${fieldName}=${value}`);
     }
@@ -71,11 +78,11 @@ export function applyInMemoryAggregation(
   return out;
 }
 
-function projectGroupValue(row: any, g: GroupByNode): string {
+function projectGroupValue(row: any, g: GroupByNode, timezone?: string): string {
   const field = typeof g === 'string' ? g : g.field;
   const v = row?.[field];
   if (typeof g !== 'string' && g.dateGranularity) {
-    return bucketDateValue(v, g.dateGranularity);
+    return bucketDateValue(v, g.dateGranularity, timezone);
   }
   return v == null ? '(null)' : String(v);
 }
@@ -161,13 +168,23 @@ function toNumber(v: any): number {
 /**
  * Bucket a date-like value into an ISO-formatted period label. Weeks start
  * Monday and use ISO week numbering.
+ *
+ * `timezone` (ADR-0053 Phase 2) resolves the calendar day in a reference zone
+ * so an instant near a tz day-boundary buckets where a user in that zone would
+ * expect. An unset / `'UTC'` / invalid zone keeps the historical UTC bucketing.
+ * The y/m/d are taken in the reference zone and the ISO-week math then runs on
+ * a UTC date built from those parts — the parts already carry the zone shift,
+ * so the week boundary lands correctly without re-applying any offset.
  */
-export function bucketDateValue(value: unknown, granularity: DateGranularityValue): string {
+export function bucketDateValue(
+  value: unknown,
+  granularity: DateGranularityValue,
+  timezone?: string,
+): string {
   if (value == null) return '(null)';
   const d = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(d.getTime())) return '(null)';
-  const y = d.getUTCFullYear();
-  const m = d.getUTCMonth() + 1;
+  const { year: y, month: m, day } = calendarPartsInTzOrUtc(d, timezone);
   switch (granularity) {
     case 'year':
       return String(y);
@@ -176,10 +193,10 @@ export function bucketDateValue(value: unknown, granularity: DateGranularityValu
     case 'month':
       return `${y}-${String(m).padStart(2, '0')}`;
     case 'day':
-      return `${y}-${String(m).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     case 'week': {
       // ISO-8601 week date: week 1 contains the first Thursday of the year.
-      const target = new Date(Date.UTC(y, d.getUTCMonth(), d.getUTCDate()));
+      const target = new Date(Date.UTC(y, m - 1, day));
       const dayNum = (target.getUTCDay() + 6) % 7; // Mon=0..Sun=6
       target.setUTCDate(target.getUTCDate() - dayNum + 3);
       const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));

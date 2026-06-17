@@ -21,6 +21,8 @@ interface DataEngineLike {
     where?: Record<string, unknown>;
     groupBy?: string[];
     aggregations?: Array<{ function: string; field: string; alias: string }>;
+    /** Reference timezone (IANA) for date bucketing — ADR-0053 Phase 2. */
+    timezone?: string;
   }): Promise<unknown[]>;
   execute?(command: unknown, options?: Record<string, unknown>): Promise<unknown>;
   /** Return the registered object schema (relationship → target + display-label resolution). */
@@ -55,6 +57,8 @@ export interface AnalyticsServicePluginOptions {
     groupBy?: string[];
     aggregations?: Array<{ field: string; method: string; alias: string }>;
     filter?: Record<string, unknown>;
+    /** Reference timezone (IANA) for date bucketing — ADR-0053 Phase 2. */
+    timezone?: string;
   }) => Promise<Record<string, unknown>[]>;
   /**
    * ADR-0021 D-C — context-aware per-object read scope (tenant + RLS). The
@@ -160,7 +164,7 @@ export class AnalyticsServicePlugin implements Plugin {
           'will retry per-query. Register ObjectQLPlugin or pass executeAggregate.',
         );
       }
-      executeAggregate = async (objectName, { groupBy, aggregations, filter }) => {
+      executeAggregate = async (objectName, { groupBy, aggregations, filter, timezone }) => {
         const engine = tryGetDataEngine();
         if (!engine) {
           throw new Error(
@@ -176,6 +180,9 @@ export class AnalyticsServicePlugin implements Plugin {
             field: a.field,
             alias: a.alias,
           })),
+          // ADR-0053 Phase 2: thread the reference tz so date buckets resolve on
+          // that zone's calendar days (engine buckets in-memory when non-UTC).
+          timezone,
         });
         return rows as Record<string, unknown>[];
       };

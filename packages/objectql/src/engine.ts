@@ -2484,16 +2484,27 @@ export class ObjectQL implements IDataEngine {
             if (!g?.dateGranularity) return true; // plain {field} object is fine
             return granularityCaps?.[g.dateGranularity] === true;
         });
-        if (typeof drv.aggregate === 'function' && allStructuredSupported) {
+        // ADR-0053 Phase 2 (D2): native driver date bucketing (`date_trunc`) is
+        // UTC-only — SQLite has no tz database and MySQL needs tz tables loaded,
+        // so pushing tz-aware bucketing down splits boundaries per dialect. When
+        // a non-UTC reference timezone is in play we therefore force the
+        // in-memory path: the date-range `where` still goes to the driver (only
+        // matching rows are fetched), but bucketing runs uniformly in JS so a
+        // row near a tz day-boundary lands identically on every driver.
+        const tz = query.timezone;
+        const hasDateBucket = structuredItems.some((g: any) => !!g?.dateGranularity);
+        const tzRequiresInMemory = !!tz && tz !== 'UTC' && hasDateBucket;
+        if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory) {
             return drv.aggregate(object, ast, this.buildDriverOptions(opCtx.context));
         }
         // In-memory fallback path: ask the driver for raw rows, then bucket +
         // aggregate here. This guarantees `groupBy` (incl. structured items
         // carrying `dateGranularity`) and `aggregations` always work even on
         // drivers that have no native aggregation support (driver-rest,
-        // driver-memory, partial SQL drivers).
+        // driver-memory, partial SQL drivers), and is the path that honours a
+        // non-UTC reference timezone.
         const raw = await driver.find(object, ast, this.buildDriverOptions(opCtx.context));
-        return applyInMemoryAggregation(raw, ast);
+        return applyInMemoryAggregation(raw, ast, tz);
       });
 
       return opCtx.result as any[];

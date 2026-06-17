@@ -60,6 +60,12 @@ const pad = (n: number) => String(n).padStart(2, '0');
  *   month   → "2026-04"
  *   week    → "2026-04-13" (ISO date of the bucket)
  *   day     → "2026-04-15"
+ *
+ * Intentionally UTC-only (ADR-0053 Phase 2): timezone bucketing happens
+ * upstream in `bucketDate` / `bucketDateValue`, so by the time a value reaches
+ * here it is *already* the reference-zone bucket (often a label string like
+ * "2026-Q2"). Re-applying a timezone here would shift an already-correct
+ * `YYYY-MM-DD` day bucket by a day — this is a pure, idempotent re-labeler.
  */
 export function formatDateBucket(value: unknown, granularity?: DateGranularity | string): unknown {
   if (value == null || value instanceof Date === false) {

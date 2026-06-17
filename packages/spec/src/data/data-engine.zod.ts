@@ -222,11 +222,18 @@ export const EngineAggregateOptionsSchema = lazySchema(() => BaseEngineOptionsSc
   where: z.union([z.record(z.string(), z.unknown()), FilterConditionSchema]).optional(),
   /** Group By fields */
   groupBy: z.array(z.string()).optional(),
-  /** 
+  /**
    * Aggregation definitions — uses standard AggregationNodeSchema (`function` key).
    * e.g. [{ function: 'sum', field: 'amount', alias: 'total' }]
    */
   aggregations: z.array(AggregationNodeSchema).optional(),
+  /**
+   * Reference timezone (IANA name) for date bucketing (ADR-0053 Phase 2).
+   * When set to a non-UTC zone, `groupBy` items carrying a `dateGranularity`
+   * bucket on that zone's calendar days. Unset or `'UTC'` keeps the UTC
+   * fast path (native driver `date_trunc`).
+   */
+  timezone: z.string().optional(),
 }).describe('QueryAST-aligned options for DataEngine.aggregate operations'));
 
 // --------------------------------------------------------------------------

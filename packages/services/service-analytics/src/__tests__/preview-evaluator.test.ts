@@ -150,4 +150,14 @@ describe('evaluateAnalyticsQueryOverRows', () => {
     expect(matchesWhere({ a: 5 }, { a: { $in: [1, 5] } })).toBe(true);
     expect(matchesWhere({ a: 'Hello World' }, { a: { $contains: 'world' } })).toBe(true);
   });
+
+  it('helpers: bucketDate resolves the calendar day in a reference timezone', () => {
+    // 2024-03-01T03:00Z is still 2024-02-29 in America/New_York.
+    const near = '2024-03-01T03:00:00.000Z';
+    expect(bucketDate(near, 'day', 'America/New_York')).toBe('2024-02-29');
+    expect(bucketDate(near, 'month', 'America/New_York')).toBe('2024-02');
+    // Unset / UTC keep the historical UTC bucketing.
+    expect(bucketDate(near, 'day')).toBe('2024-03-01');
+    expect(bucketDate(near, 'day', 'UTC')).toBe('2024-03-01');
+  });
 });

@@ -23,6 +23,9 @@ export * from './security/index.js';
 // Export environment utilities
 export * from './utils/env.js';
 
+// Export timezone-aware calendar utilities (ADR-0053 Phase 2)
+export * from './utils/datetime.js';
+
 // Export in-memory fallbacks for core-criticality services
 export * from './fallbacks/index.js';
 

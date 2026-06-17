@@ -105,4 +105,56 @@ describe('bucketDateValue', () => {
     expect(bucketDateValue(null, 'month')).toBe('(null)');
     expect(bucketDateValue('not-a-date', 'month')).toBe('(null)');
   });
+
+  // ADR-0053 Phase 2 (D2): a non-UTC reference timezone shifts the calendar day.
+  describe('timezone-aware bucketing', () => {
+    // 2024-03-01T03:00Z is still 2024-02-29 (22:00) in America/New_York.
+    const nearMidnight = '2024-03-01T03:00:00.000Z';
+
+    it('buckets on the reference zone calendar day (day/month/quarter)', () => {
+      expect(bucketDateValue(nearMidnight, 'day', 'America/New_York')).toBe('2024-02-29');
+      expect(bucketDateValue(nearMidnight, 'month', 'America/New_York')).toBe('2024-02');
+      expect(bucketDateValue(nearMidnight, 'quarter', 'America/New_York')).toBe('2024-Q1');
+      // ...while UTC sees the next day/month.
+      expect(bucketDateValue(nearMidnight, 'day', 'UTC')).toBe('2024-03-01');
+      expect(bucketDateValue(nearMidnight, 'month', 'UTC')).toBe('2024-03');
+    });
+
+    it('shifts the ISO week when the zone moves the day across a Monday', () => {
+      // 2024-03-04T02:00Z is a Monday in UTC (ISO week 10) but still
+      // 2024-03-03 Sunday (ISO week 9) in America/New_York.
+      const mondayUtc = '2024-03-04T02:00:00.000Z';
+      expect(bucketDateValue(mondayUtc, 'week', 'UTC')).toBe('2024-W10');
+      expect(bucketDateValue(mondayUtc, 'week', 'America/New_York')).toBe('2024-W09');
+    });
+
+    it('falls back to UTC for unset / UTC / invalid zones', () => {
+      expect(bucketDateValue(nearMidnight, 'day')).toBe('2024-03-01');
+      expect(bucketDateValue(nearMidnight, 'day', 'UTC')).toBe('2024-03-01');
+      expect(bucketDateValue(nearMidnight, 'day', 'Not/AZone')).toBe('2024-03-01');
+    });
+
+    it('groups rows into the right tz bucket via applyInMemoryAggregation', () => {
+      // Two events 4h apart that straddle the NY midnight: in UTC they share
+      // the 2024-03-01 day; in NY they split across 02-29 and 03-01.
+      const rows = [
+        { closed_at: '2024-03-01T03:00:00.000Z', amount: 10 }, // NY: 02-29
+        { closed_at: '2024-03-01T07:00:00.000Z', amount: 5 },  // NY: 03-01
+      ];
+      const ast = {
+        groupBy: [{ field: 'closed_at', dateGranularity: 'day' as const }],
+        aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+      };
+      const utc = applyInMemoryAggregation(rows, ast, 'UTC');
+      expect(utc).toEqual([{ closed_at: '2024-03-01', total: 15 }]);
+
+      const ny = applyInMemoryAggregation(rows, ast, 'America/New_York').sort(
+        (a, b) => String(a.closed_at).localeCompare(String(b.closed_at)),
+      );
+      expect(ny).toEqual([
+        { closed_at: '2024-02-29', total: 10 },
+        { closed_at: '2024-03-01', total: 5 },
+      ]);
+    });
+  });
 });

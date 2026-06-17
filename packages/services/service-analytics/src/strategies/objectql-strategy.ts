@@ -86,6 +86,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       groupBy: groupBy.length > 0 ? (groupBy as unknown as string[]) : undefined,
       aggregations: aggregations.length > 0 ? aggregations : undefined,
       filter: Object.keys(filter).length > 0 ? filter : undefined,
+      // ADR-0053 Phase 2 (D2): forward the reference tz so date buckets resolve
+      // on that zone's calendar days. A non-UTC zone makes the engine bucket
+      // in-memory (uniform across drivers); UTC/unset keeps the DB fast path.
+      timezone: query.timezone,
     });
 
     // Remap short field names back to cube-qualified names

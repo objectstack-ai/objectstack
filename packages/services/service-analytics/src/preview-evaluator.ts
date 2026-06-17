@@ -17,6 +17,7 @@
 // Anything beyond (joins via `include`, raw SQL) falls back to the caller's
 // normal execution path — the preview simply doesn't claim it.
 
+import { calendarPartsInTzOrUtc } from '@objectstack/core';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
 
@@ -66,20 +67,24 @@ export function matchesWhere(row: Row, where: Record<string, unknown> | undefine
 
 // ── Time bucketing ──────────────────────────────────────────────────────────
 
-export function bucketDate(value: unknown, granularity: string): string | null {
+export function bucketDate(value: unknown, granularity: string, timezone?: string): string | null {
   const d = new Date(String(value));
   if (Number.isNaN(d.getTime())) return null;
-  const y = d.getUTCFullYear();
-  const m = `${d.getUTCMonth() + 1}`.padStart(2, '0');
-  const day = `${d.getUTCDate()}`.padStart(2, '0');
+  // ADR-0053 Phase 2: resolve the calendar day in the reference zone so an
+  // instant near a tz day-boundary buckets where a user in that zone expects.
+  // Unset / 'UTC' / invalid keeps the historical UTC bucketing.
+  const { year: y, month, day: dayNum } = calendarPartsInTzOrUtc(d, timezone);
+  const m = `${month}`.padStart(2, '0');
+  const day = `${dayNum}`.padStart(2, '0');
   switch (granularity) {
     case 'year': return `${y}`;
-    case 'quarter': return `${y}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+    case 'quarter': return `${y}-Q${Math.floor((month - 1) / 3) + 1}`;
     case 'month': return `${y}-${m}`;
     case 'week': {
-      const monday = new Date(d);
-      const dow = (d.getUTCDay() + 6) % 7; // Monday=0
-      monday.setUTCDate(d.getUTCDate() - dow);
+      // Build a UTC date from the zone-shifted parts, then step back to Monday.
+      const monday = new Date(Date.UTC(y, month - 1, dayNum));
+      const dow = (monday.getUTCDay() + 6) % 7; // Monday=0
+      monday.setUTCDate(monday.getUTCDate() - dow);
       return monday.toISOString().slice(0, 10);
     }
     case 'day':
@@ -134,6 +139,7 @@ export function evaluateAnalyticsQueryOverRows(
 
   // 2. Grouping keys: each selected dimension (time dims bucketed).
   const dimensions = query.dimensions ?? [];
+  const timezone = query.timezone; // ADR-0053 Phase 2: reference tz for bucketing
   const granByDim = new Map(timeDims.filter((t) => t.granularity).map((t) => [t.dimension, t.granularity!]));
   const keyOf = (r: Row): { key: string; values: Row } => {
     const values: Row = {};
@@ -142,7 +148,7 @@ export function evaluateAnalyticsQueryOverRows(
       const field = String(dim?.sql ?? name);
       const raw = r[field];
       const gran = granByDim.get(name) ?? (dim?.type === 'time' && dim.granularities?.length === 1 ? String(dim.granularities[0]) : undefined);
-      values[name] = gran ? bucketDate(raw, gran) : (raw ?? null);
+      values[name] = gran ? bucketDate(raw, gran, timezone) : (raw ?? null);
     }
     return { key: JSON.stringify(values), values };
   };

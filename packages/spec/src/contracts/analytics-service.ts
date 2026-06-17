@@ -242,6 +242,13 @@ export interface StrategyContext {
         groupBy?: string[];
         aggregations?: Array<{ field: string; method: string; alias: string }>;
         filter?: Record<string, unknown>;
+        /**
+         * Reference timezone (IANA name) for date bucketing (ADR-0053 Phase 2).
+         * Forwarded to the engine so `groupBy` items with a `dateGranularity`
+         * bucket on that zone's calendar days. Unset / `'UTC'` keeps the UTC
+         * fast path.
+         */
+        timezone?: string;
     }): Promise<Record<string, unknown>[]>;
     /**
      * Fallback in-memory analytics service (e.g. MemoryAnalyticsService from driver-memory).
