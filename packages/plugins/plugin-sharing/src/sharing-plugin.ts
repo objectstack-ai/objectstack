@@ -139,37 +139,41 @@ export class SharingServicePlugin implements Plugin {
       });
       ctx.registerService('sharing', this.service);
 
+      // Enforcement (read-filter middleware + sharing-rule hooks) is opt-out
+      // via `enforce: false`. The share-link service below is registered
+      // REGARDLESS — capability-token sharing does not depend on principal-
+      // based RLS enforcement, and multi-tenant hosts mount this plugin purely
+      // for the `shareLinks` service (per-env enforcement is applied elsewhere).
       if (this.options.enforce === false) {
-        ctx.logger.info('SharingServicePlugin: enforcement disabled (enforce=false)');
-        return;
-      }
-
-      const mw = buildSharingMiddleware(this.service);
-      if (typeof engine.registerMiddleware === 'function') {
-        engine.registerMiddleware(mw, { object: '*' });
-        ctx.logger.info('SharingServicePlugin: enforcement middleware installed');
+        ctx.logger.info('SharingServicePlugin: enforcement disabled (enforce=false) — share-link service still registered');
       } else {
-        ctx.logger.warn('SharingServicePlugin: engine has no registerMiddleware — enforcement not applied');
-      }
-
-      // Rule evaluator + hot-rebindable lifecycle hooks.
-      try {
-        this.ruleService = new SharingRuleService({
-          engine: engine as SharingEngine,
-          sharing: this.service,
-          logger: ctx.logger as any,
-        });
-        ctx.registerService('sharingRules', this.ruleService);
-
-        if (typeof engine.registerHook === 'function' && typeof engine.unregisterHooksByPackage === 'function') {
-          const rules = await this.ruleService.listRules({ activeOnly: true }, { isSystem: true } as any);
-          unbindAllRuleHooks(engine);
-          bindRuleHooks(engine, this.ruleService, rules, ctx.logger as any);
+        const mw = buildSharingMiddleware(this.service);
+        if (typeof engine.registerMiddleware === 'function') {
+          engine.registerMiddleware(mw, { object: '*' });
+          ctx.logger.info('SharingServicePlugin: enforcement middleware installed');
         } else {
-          ctx.logger.warn('SharingServicePlugin: engine has no hook API — sharing rule auto-evaluation disabled');
+          ctx.logger.warn('SharingServicePlugin: engine has no registerMiddleware — enforcement not applied');
         }
-      } catch (err: any) {
-        ctx.logger.warn('SharingServicePlugin: sharing-rule subsystem not started', { error: err?.message });
+
+        // Rule evaluator + hot-rebindable lifecycle hooks.
+        try {
+          this.ruleService = new SharingRuleService({
+            engine: engine as SharingEngine,
+            sharing: this.service,
+            logger: ctx.logger as any,
+          });
+          ctx.registerService('sharingRules', this.ruleService);
+
+          if (typeof engine.registerHook === 'function' && typeof engine.unregisterHooksByPackage === 'function') {
+            const rules = await this.ruleService.listRules({ activeOnly: true }, { isSystem: true } as any);
+            unbindAllRuleHooks(engine);
+            bindRuleHooks(engine, this.ruleService, rules, ctx.logger as any);
+          } else {
+            ctx.logger.warn('SharingServicePlugin: engine has no hook API — sharing rule auto-evaluation disabled');
+          }
+        } catch (err: any) {
+          ctx.logger.warn('SharingServicePlugin: sharing-rule subsystem not started', { error: err?.message });
+        }
       }
 
       // ── Share-Link service (capability tokens) ────────────────
