@@ -409,6 +409,9 @@ importers:
       '@objectstack/client':
         specifier: workspace:*
         version: link:../client
+      '@objectstack/cloud-connection':
+        specifier: workspace:*
+        version: link:../cloud-connection
       '@objectstack/console':
         specifier: workspace:*
         version: link:../console

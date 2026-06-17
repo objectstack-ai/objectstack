@@ -1007,18 +1007,64 @@ export default class Serve extends Command {
         }
       }
 
-      // 5 / 5b / 5b-ii — REMOVED (ADR-0006 Phase 4, cloud ADR-0007 ⑤).
+      // 5. Marketplace browse/install + runtime-config — auto-wired from the
+      // open `@objectstack/cloud-connection` package, gated on a resolved
+      // cloud URL.
       //
-      // The CLI used to auto-inject MarketplaceProxyPlugin,
-      // MarketplaceInstallLocalPlugin and RuntimeConfigPlugin from
-      // `@objectstack/runtime` here. Those were duplicates of the canonical
-      // cloud implementations and are deleted from the framework in this
-      // phase: marketplace browse/install and the runtime-config endpoint
-      // are cloud-distribution features (`@objectstack/objectos-runtime`),
-      // wired explicitly by hosts that want them (see the cloud repo's
-      // apps/objectos-ee config for the single-env wiring). A vanilla
-      // `objectstack dev` no longer mounts a marketplace; the Console SPA
-      // falls back to its defaults when `/api/v1/runtime/config` is absent.
+      // History: ADR-0006 Phase 4 deleted the framework's DUPLICATE copies
+      // (which lived in `@objectstack/runtime`) because the canonical
+      // implementation then lived in the cloud distribution. ADR-0008 then
+      // open-sourced that client surface into `@objectstack/cloud-connection`
+      // (Apache-2.0, framework-side), so the CLI can wire it again WITHOUT
+      // crossing the open-core boundary — there is no longer a cloud-only
+      // copy to duplicate. This restores marketplace for `objectstack start`
+      // empty-boot, which advertises "boot an empty kernel against your
+      // marketplace" but, with no config/artifact, has no host to carry the
+      // wiring (the only place it can come from is the CLI itself).
+      //
+      // Mirrors the objectos-ee single-env host wiring: proxy + install-local
+      // + cloud-connection only when `resolveCloudUrl()` is truthy
+      // (OS_CLOUD_URL=off -> nothing mounts, preserving the vanilla
+      // marketplace-less `objectstack dev`). Each plugin self-registers its
+      // own Setup nav bundle in start(), so no manual bundle registration is
+      // needed here.
+      //
+      // SKIPPED in runtime/host-kernel mode: the cloud distribution
+      // (objectos-stack) wires its own MarketplaceProxyPlugin on the host
+      // kernel, so auto-wiring here would double-mount. Detect runtime mode by
+      // ObjectOSEnvironmentPlugin (same signal the AuthPlugin guard below
+      // uses); OS_CLOUD_URL alone is NOT a reliable signal -- a regular
+      // `objectstack dev` app sets it precisely to enable the marketplace.
+      const isRuntimeHostKernel = plugins.some(
+        (p: any) => p?.name === 'com.objectstack.runtime.objectos-environment'
+          || p?.constructor?.name === 'ObjectOSEnvironmentPlugin'
+      );
+      if (!isRuntimeHostKernel) {
+        try {
+          const ccPkg = '@objectstack/cloud-connection';
+          const {
+            MarketplaceProxyPlugin,
+            MarketplaceInstallLocalPlugin,
+            RuntimeConfigPlugin,
+            createCloudConnectionPlugin,
+            resolveCloudUrl,
+          } = await import(/* webpackIgnore: true */ ccPkg);
+          const marketplaceUrl = resolveCloudUrl();
+          if (marketplaceUrl) {
+            await kernel.use(new MarketplaceProxyPlugin({ controlPlaneUrl: marketplaceUrl }));
+            await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: marketplaceUrl }));
+            // Same-origin /cloud-connection/* surface (status + device-code
+            // bind + control-plane catalog views) in single-environment mode.
+            await kernel.use(createCloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: marketplaceUrl }));
+            // Server-pushed runtime config so the Console knows marketplace +
+            // install-local are live (same-origin; install into THIS kernel).
+            await kernel.use(new RuntimeConfigPlugin({ controlPlaneUrl: '', singleEnvironment: true, installLocal: true }));
+            trackPlugin('Marketplace');
+          }
+        } catch (err: any) {
+          console.warn(chalk.yellow(`  \u26a0 Marketplace/cloud-connection wiring failed: ${err?.message ?? err}`));
+        }
+      }
 
       // 5c. Auto-register PlatformObjectsPlugin so platform-default
       // translation bundles (Setup App + metadata-type configuration

@@ -45,6 +45,7 @@
     "@ai-sdk/openai": "^3.0.71",
     "@objectstack/account": "workspace:*",
     "@objectstack/client": "workspace:*",
+    "@objectstack/cloud-connection": "workspace:*",
     "@objectstack/console": "workspace:*",
     "@objectstack/core": "workspace:^",
     "@objectstack/driver-memory": "workspace:^",
