@@ -21,14 +21,13 @@ export const ParkLeadAction: UI.Action = {
   // `dataSource.update` path (the row id comes from the list_item row record).
   type: 'api',
   target: 'crm_lead',
-  // List-row only: the apiHandler needs the row record (to capture prior values
-  // for Undo), and the list runtime drives param collection + the Undo toast.
-  locations: ['list_item'],
-  // Conditional disable (CEL): a converted lead is locked — the row-menu item
-  // shows but greys out, rather than disappearing. Demonstrates `disabled`
-  // (greys) vs `visible` (hides). Row-menu predicates resolve against the row's
-  // fields directly (bare `status`, not `record.status`).
-  disabled: 'status == "converted"',
+  // From the list row AND the record header — both runtimes drive param
+  // collection, the dataSource.update, and the Undo toast.
+  locations: ['list_item', 'record_header'],
+  // Conditional disable (CEL): a converted lead is locked — the action shows but
+  // greys out, rather than disappearing. Demonstrates `disabled` (greys) vs
+  // `visible` (hides). Evaluated against the record on every surface.
+  disabled: 'record.status == "converted"',
   params: [
     { field: 'assigned_to', label: 'Reassign to', defaultValue: 'Triage Queue', required: true },
   ],
