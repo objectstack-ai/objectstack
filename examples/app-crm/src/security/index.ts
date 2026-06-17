@@ -5,6 +5,7 @@ export {
   SalesManagerRole,
   FinanceApproverRole,
   SalesUserPermissionSet,
+  GuestPortalProfile,
 } from './sales-roles.js';
 
 export {

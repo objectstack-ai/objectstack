@@ -23,6 +23,7 @@ import {
   SalesManagerRole,
   FinanceApproverRole,
   SalesUserPermissionSet,
+  GuestPortalProfile,
   HighValueOpportunitySharingRule,
   RepLeadSharingRule,
   WonDealActivitySharingRule,
@@ -116,7 +117,7 @@ export default defineStack({
 
   // Security
   roles: [SalesRepRole, SalesManagerRole, FinanceApproverRole],
-  permissions: [SalesUserPermissionSet],
+  permissions: [SalesUserPermissionSet, GuestPortalProfile],
   sharingRules: [
     HighValueOpportunitySharingRule,
     RepLeadSharingRule,

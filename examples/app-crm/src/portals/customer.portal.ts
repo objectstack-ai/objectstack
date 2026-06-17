@@ -51,18 +51,11 @@ export const CustomerPortal: Portal = {
       target: '_blank',
     },
   ],
-  anonymousEntry: {
-    routes: [
-      {
-        path: '/contact',
-        actionRef: 'crm_lead.create',
-        rateLimit: { rule: '5/hour/ip', scope: 'ip' },
-        captcha: true,
-        bindIdentityFromField: 'email',
-      },
-    ],
-    defaultRateLimit: { rule: '100/day/ip', scope: 'ip' },
-  },
+  // NOTE: `anonymousEntry` is a spec property with no runtime consumer yet — the
+  // routes here would never mount (verified: 404). For a WORKING public capture
+  // form, see the `web_to_lead` form view in `views/lead.view.ts`
+  // (`sharing.allowAnonymous` → live `/api/v1/forms/contact-us` endpoint). Re-add
+  // `anonymousEntry` here only once the runtime mounts it.
   defaultRoute: {
     viewRef: 'crm_activity.activity_grid',
   },

@@ -45,6 +45,38 @@ export const LeadViews = defineView({
     },
   },
   formViews: {
+    /**
+     * PUBLIC / ANONYMOUS — Web-to-Lead.
+     *
+     * Hosted at GET/POST `/api/v1/forms/contact-us` (+ `/submit`). An
+     * unauthenticated visitor — or an `EmbeddableForm` iframe on a marketing
+     * site — submits it to create a `crm_lead`. `sharing.allowAnonymous` opens
+     * the public endpoint; the `guest_portal` profile (INSERT-only on crm_lead)
+     * authorizes the write. The lead object's own defaults/hooks stamp internal
+     * fields (status, owner, score).
+     */
+    web_to_lead: {
+      type: 'simple',
+      data: { provider: 'object', object: 'crm_lead' },
+      sections: [
+        {
+          label: 'Contact us',
+          columns: 1,
+          fields: [
+            { field: 'name', required: true },
+            { field: 'company' },
+            { field: 'email', required: true },
+            { field: 'phone' },
+            { field: 'title' },
+          ],
+        },
+      ],
+      sharing: {
+        enabled: true,
+        allowAnonymous: true,
+        publicLink: '/forms/contact-us',
+      },
+    },
     default: {
       type: 'simple',
       sections: [

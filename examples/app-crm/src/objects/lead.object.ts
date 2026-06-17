@@ -36,6 +36,10 @@ export const Lead = ObjectSchema.create({
     status: Field.select({
       label: 'Status',
       required: true,
+      // Write-path default so minimal creates (e.g. the public Web-to-Lead form,
+      // which doesn't expose status) satisfy `required` — the option `default`
+      // below is only a UI preselect.
+      defaultValue: 'new',
       options: [
         { label: 'New',            value: 'new',            default: true, color: '#94A3B8' },
         { label: 'Contacted',      value: 'contacted',                     color: '#3B82F6' },

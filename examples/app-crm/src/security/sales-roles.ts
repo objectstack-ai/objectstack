@@ -43,3 +43,21 @@ export const SalesUserPermissionSet: Security.PermissionSet = {
     crm_activity:    { allowRead: true, allowCreate: true,  allowEdit: true,  allowDelete: false },
   },
 };
+
+/**
+ * Guest profile for the public Web-to-Lead form (lead.view.ts `web_to_lead`).
+ *
+ * Applied to anonymous (unauthenticated) visitors who POST the public form. The
+ * anonymous permission path checks the FULL object name, so this MUST key
+ * `crm_lead` (not a short `lead`). INSERT-only — guests can never read, edit, or
+ * delete any record.
+ */
+export const GuestPortalProfile: Security.PermissionSet = {
+  name: 'guest_portal',
+  label: 'Guest (Public Forms)',
+  description: 'Anonymous Web-to-Lead submitters — INSERT-only on crm_lead.',
+  isProfile: true,
+  objects: {
+    crm_lead: { allowRead: false, allowCreate: true, allowEdit: false, allowDelete: false },
+  },
+};
