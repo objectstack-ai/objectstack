@@ -844,6 +844,9 @@ importers:
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
+      '@objectstack/plugin-org-scoping':
+        specifier: workspace:*
+        version: link:../plugins/plugin-org-scoping
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugins/plugin-security

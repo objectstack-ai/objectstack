@@ -4,14 +4,17 @@
 // real second user. The runner's hole-detection logic is unit-proven in
 // `rls-runner.test.ts`; this exercises it end-to-end against real apps.
 //
-// HONEST CURRENT STATE: the harness boots single-tenant, so org-scoped RLS is
-// stripped and a fresh member falls back to `member_default` (broad read) — so
-// every object reports `member-visible` and the #1994 by-id-write path isn't
-// exercised here. A hard, revert-provable gate needs an owner-scoped fixture
-// (a private-default object + a member permission set carrying RLS.ownerPolicy
-// + SecurityPlugin.fallbackPermissionSet) — tracked as the next step. The
-// invariant asserted now (zero holes) still guards against a regression that
-// makes a member able to mutate a record it cannot read.
+// SCOPE: this file is the single-tenant SMOKE over real apps. Single-tenant
+// strips the org `tenant_isolation` policy and a fresh member falls back to
+// `member_default` (broad read), so every object reports `member-visible` and
+// the by-id-write path isn't exercised HERE. That gap is now closed by two
+// sibling tests, so the hard gate lives there, not here:
+//   • rls-fixture.dogfood.test.ts     — owner-scoped fixture; green gate +
+//     automated red proof + a documented manual #1994 revert proof (README).
+//   • rls-multitenant.dogfood.test.ts — `{ multiTenant: true }`; org-scoped
+//     (organization_id) isolation, the model real apps like hotcrm use.
+// The invariant asserted here (zero holes) still guards against a regression
+// that makes a member able to mutate a record it cannot read.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import crmStack from '@objectstack/example-crm';

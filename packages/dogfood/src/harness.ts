@@ -57,6 +57,24 @@ export interface DogfoodStack {
 export interface BootOptions {
   /** Override the dev admin credentials the harness signs in with. */
   admin?: { email: string; password: string };
+  /**
+   * Override the SecurityPlugin instance. Pass a `new SecurityPlugin({...})`
+   * to carry a custom `fallbackPermissionSet` / extra permission sets — this
+   * is how the owner-isolated RLS fixture makes a fresh member fall back to a
+   * permission set that carries `RLS.ownerPolicy(...)` instead of the broad-read
+   * `member_default`. Defaults to a vanilla `new SecurityPlugin()`.
+   */
+  security?: SecurityPlugin;
+  /**
+   * Boot multi-tenant: register `@objectstack/plugin-org-scoping` BEFORE the
+   * SecurityPlugin so the wildcard `organization_id` RLS policies that ship in
+   * the default permission sets actually apply (SecurityPlugin probes the
+   * `org-scoping` service once at start and otherwise STRIPS them — see
+   * `collectRLSPolicies`). This exercises the org-scoped isolation real apps
+   * (e.g. hotcrm) rely on, rather than the single-tenant default where every
+   * tenant policy is stripped and a member sees every row. Default `false`.
+   */
+  multiTenant?: boolean;
 }
 
 /**
@@ -90,7 +108,17 @@ export async function bootDogfoodStack(
   await kernel.use(new SettingsServicePlugin());
   await kernel.use(new AnalyticsServicePlugin());
   await kernel.use(new AuthPlugin({ secret: 'dogfood-regression-secret' }));
-  await kernel.use(new SecurityPlugin());
+
+  // Multi-tenant: org-scoping MUST register BEFORE SecurityPlugin — the latter
+  // probes the `org-scoping` service exactly once at start and caches it, then
+  // keeps (vs strips) the wildcard `organization_id` RLS policies accordingly.
+  // Mirrors `plugin-dev`'s ordering for `OS_MULTI_ORG_ENABLED`.
+  if (opts.multiTenant) {
+    const { OrgScopingPlugin } = await import('@objectstack/plugin-org-scoping');
+    await kernel.use(new OrgScopingPlugin());
+  }
+
+  await kernel.use(opts.security ?? new SecurityPlugin());
   // Sharing service — apps that declare `requires: ['sharing']` rely on it for
   // record-share grants; without it their RLS/sharing rules are inert and the
   // verifier would under-report authorization.

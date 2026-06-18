@@ -22,7 +22,8 @@
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/example-crm": "workspace:*",
     "@objectstack/example-showcase": "workspace:*",
-    "@objectstack/plugin-sharing": "workspace:*"
+    "@objectstack/plugin-sharing": "workspace:*",
+    "@objectstack/plugin-org-scoping": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
