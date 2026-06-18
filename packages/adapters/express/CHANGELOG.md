@@ -1,5 +1,12 @@
 # @objectstack/express
 
+## 9.10.0
+
+### Patch Changes
+
+- Updated dependencies [e2b5324]
+  - @objectstack/runtime@9.10.0
+
 ## 9.9.1
 
 ### Patch Changes

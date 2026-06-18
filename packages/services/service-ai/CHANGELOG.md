@@ -1,5 +1,16 @@
 # @objectstack/service-ai
 
+## 9.10.0
+
+### Patch Changes
+
+- Updated dependencies [db02bd5]
+- Updated dependencies [641675d]
+  - @objectstack/spec@9.10.0
+  - @objectstack/core@9.10.0
+  - @objectstack/formula@9.10.0
+  - @objectstack/types@9.10.0
+
 ## 9.9.1
 
 ### Patch Changes

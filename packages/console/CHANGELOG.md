@@ -1,5 +1,7 @@
 # @objectstack/console
 
+## 9.10.0
+
 ## 9.9.1
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/dogfood",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "license": "Apache-2.0",
   "description": "Dogfood regression gate — boots real example apps in-process and exercises them through the real HTTP/service stack, catching runtime regressions that static checks (build, unit tests, spec liveness) miss.",
