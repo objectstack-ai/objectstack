@@ -1,6 +1,6 @@
 # ADR-0054: A live authorable property must be proven at runtime, not merely have a consumer (prove-it-runs gate)
 
-**Status**: Proposed (2026-06-18)
+**Status**: Accepted (2026-06-18)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove gate), [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime), [ADR-0053](./0053-date-and-datetime-semantics.md) (the domain of the motivating regression)
 **Consumers**: `@objectstack/spec` (liveness ledger `packages/spec/liveness/<type>.json`), the Spec Liveness Check CI gate (#1919), `@objectstack/dogfood` (the runtime gate, [#2020](https://github.com/objectstack-ai/framework/pull/2020)), spec authors, platform contributors.
