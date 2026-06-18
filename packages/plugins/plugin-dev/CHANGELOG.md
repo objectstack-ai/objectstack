@@ -1,5 +1,33 @@
 # @objectstack/plugin-dev
 
+## 9.10.0
+
+### Patch Changes
+
+- Updated dependencies [db02bd5]
+- Updated dependencies [641675d]
+- Updated dependencies [94e9040]
+- Updated dependencies [f169558]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [e2b5324]
+- Updated dependencies [fd07027]
+  - @objectstack/spec@9.10.0
+  - @objectstack/plugin-org-scoping@9.10.0
+  - @objectstack/plugin-security@9.10.0
+  - @objectstack/objectql@9.10.0
+  - @objectstack/runtime@9.10.0
+  - @objectstack/rest@9.10.0
+  - @objectstack/account@9.10.0
+  - @objectstack/setup@9.10.0
+  - @objectstack/studio@9.10.0
+  - @objectstack/core@9.10.0
+  - @objectstack/driver-memory@9.10.0
+  - @objectstack/plugin-auth@9.10.0
+  - @objectstack/plugin-hono-server@9.10.0
+  - @objectstack/service-i18n@9.10.0
+  - @objectstack/types@9.10.0
+
 ## 9.9.1
 
 ### Patch Changes

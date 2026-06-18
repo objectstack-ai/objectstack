@@ -1,5 +1,7 @@
 # create-objectstack
 
+## 9.10.0
+
 ## 9.9.1
 
 ## 9.9.0

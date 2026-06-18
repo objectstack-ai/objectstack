@@ -1,5 +1,22 @@
 # @objectstack/plugin-sharing
 
+## 9.10.0
+
+### Patch Changes
+
+- Updated dependencies [db02bd5]
+- Updated dependencies [641675d]
+- Updated dependencies [94e9040]
+- Updated dependencies [4331adb]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [e2b5324]
+- Updated dependencies [fd07027]
+  - @objectstack/spec@9.10.0
+  - @objectstack/platform-objects@9.10.0
+  - @objectstack/objectql@9.10.0
+  - @objectstack/core@9.10.0
+
 ## 9.9.1
 
 ### Patch Changes

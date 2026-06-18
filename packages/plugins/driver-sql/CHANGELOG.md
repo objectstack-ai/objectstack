@@ -1,5 +1,37 @@
 # @objectstack/driver-sql
 
+## 9.10.0
+
+### Patch Changes
+
+- db02bd5: Fix dashboard time-series charts / "last N months" KPIs that filter or group by a `Field.datetime` column silently returning "No rows".
+
+  The analytics `NativeSQLStrategy` compiles dashboard relative-date tokens (`{12_months_ago}`, `{today}`, …) to ISO date strings and binds them directly into raw SQL, bypassing the driver's own filter coercion. Under better-sqlite3 a `Field.datetime` column is stored as an INTEGER epoch (ms), so `assessed_at >= '2025-06-18'` became a TEXT-vs-INTEGER affinity compare that is always false — an empty result even though the rows exist. `Field.date` columns store ISO TEXT and were unaffected.
+
+  The strategy now coerces a temporal comparand to the column's on-disk storage form via a new optional `StrategyContext.coerceTemporalFilterValue` hook, wired to the driver's public `SqlDriver.temporalFilterValue` (the single source of truth for the storage convention). Coercion is dialect-correct: SQLite `Field.datetime` → epoch ms; `Field.date` text and native-timestamp dialects (Postgres/MySQL) are left unchanged, so Postgres is never handed an epoch integer. Applied to `gte`/`lte`/`gt`/`lt`/`equals`, `in`/`notIn`, and the `dateRange`/timeDimension `BETWEEN` path.
+
+- d9508d1: fix(driver-sql): make numeric-scalar type fidelity self-heal on legacy SQLite columns
+
+  The #2025 fix mapped `rating`/`slider`/`progress` to numeric columns, but SQLite never alters a column's type in place and the schema reconciler only adds missing columns — so a column created before that fix keeps its TEXT affinity and would still read back `'4'` instead of `4` forever.
+
+  A read-side numeric coercion (the new `numericFields` registry, single-sourced from `NUMERIC_SCALAR_TYPES`) now coerces numeric-looking stored strings back to numbers on read, mirroring how `dateFields` already repairs legacy timestamp-typed `Field.date` rows. The fidelity no longer depends on column affinity alone; `null` and genuinely non-numeric legacy values are left intact rather than turned into `0`/`NaN`.
+
+- 1d352d3: fix(driver-sql): round-trip rating/slider/toggle/progress with type fidelity
+
+  `rating`/`slider`/`toggle`/`progress` had no case in the DDL column-type switch, so they fell to `default → table.string` (TEXT affinity). SQLite then coerced the written value to a string — `rating: 4` read back `'4'`, `toggle: true` read back `'1'` — so the value persisted but the JS type leaked on read. On a low-code platform where field types are author-driven, a field that silently returns the wrong type is a runtime-fidelity trap the static gates and value-loss tests don't catch.
+
+  - `rating`/`slider`/`progress` now map to a REAL (numeric) column.
+  - `toggle` maps to a boolean column and is registered in the boolean read-coercion path, so stored `1`/`0` come back as real JS booleans.
+  - The object-valued `record`/`video`/`audio` types are folded into the shared `JSON_COLUMN_TYPES` source, and the DDL `default` case now derives JSON-vs-string from that set, so the column-type switch and `isJsonField` (the read-side deserializer) can no longer drift.
+
+- Updated dependencies [db02bd5]
+- Updated dependencies [641675d]
+- Updated dependencies [94e9040]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [1f88fd9]
+  - @objectstack/spec@9.10.0
+  - @objectstack/core@9.10.0
+
 ## 9.9.1
 
 ### Patch Changes

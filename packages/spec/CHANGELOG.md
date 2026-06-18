@@ -1,5 +1,44 @@
 # @objectstack/spec
 
+## 9.10.0
+
+### Minor Changes
+
+- 1f88fd9: Converge the RLS contract with the reference compiler, and wire §7.3.1 dynamic membership.
+
+  - **spec (docs)**: narrow `rls.zod.ts` to the four expression forms the compiler actually implements — `field = current_user.<prop>`, `field = 'literal'`, `field IN (current_user.<array>)`, and `1 = 1`. Removed the over-promised surface (subqueries, `AND`/`OR`/`NOT`, `LIKE`/`ILIKE`, regex, `ANY`/`ALL`, `NOT IN`, `IS NULL`, `NOW()`/`CURRENT_DATE`) from the operator list, context-variable list, and `@example` policies, and documented the fail-closed behaviour explicitly.
+  - **spec (schema)**: `ExecutionContext` gains `rlsMembership?: Record<string, string[]>` — a bag of pre-resolved dynamic-membership id arrays (team members, territory accounts, shared records) that the runtime stages so RLS can scope via `field IN (current_user.<key>)` without subquery support. Generalizes the previously hard-coded `org_user_ids`.
+  - **plugin-security**: `RLSCompiler.compileFilter` merges `rlsMembership` keys into the user context (arrays only, never clobbering the named `id`/`organization_id`/`roles`/`org_user_ids` fields), so §7.3.1 hierarchy- and sharing-based policies compile. `compileExpression` now recognizes `1 = 1` as always-true (empty filter), making `RLS.allowAllPolicy` grant access instead of silently failing closed. Missing/empty membership sets still fail closed.
+
+- 1f88fd9: Add a transaction boundary to sandboxed hook/action bodies: `ctx.api.transaction(async () => { … })`. Every `ctx.api` read/write inside the callback runs in one driver transaction — committed when the callback returns, rolled back if it throws (or if the body leaves the transaction open at timeout). Guarded by the new `api.transaction` capability.
+
+  - **spec**: new `api.transaction` capability token on `HookBodyCapability`.
+  - **objectql**: `ScopedContext` gains discrete `beginTransaction()` / `commitTransaction(handle)` / `rollbackTransaction(handle)` primitives. The handle is threaded **explicitly** through a child context (`resolveTx` honors it ahead of the ambient `txStore`), because the sandbox drives the body across many host event-loop turns where AsyncLocalStorage context does not survive. Degrades to non-transactional execution when the driver has no transaction support.
+  - **runtime**: the QuickJS runner wires `ctx.api.transaction` over three deferred-promise host leaves (begin/commit/rollback), routes in-transaction ops through the tx-scoped context, and rolls back a transaction the body left open before disposing the VM.
+
+### Patch Changes
+
+- db02bd5: Fix dashboard time-series charts / "last N months" KPIs that filter or group by a `Field.datetime` column silently returning "No rows".
+
+  The analytics `NativeSQLStrategy` compiles dashboard relative-date tokens (`{12_months_ago}`, `{today}`, …) to ISO date strings and binds them directly into raw SQL, bypassing the driver's own filter coercion. Under better-sqlite3 a `Field.datetime` column is stored as an INTEGER epoch (ms), so `assessed_at >= '2025-06-18'` became a TEXT-vs-INTEGER affinity compare that is always false — an empty result even though the rows exist. `Field.date` columns store ISO TEXT and were unaffected.
+
+  The strategy now coerces a temporal comparand to the column's on-disk storage form via a new optional `StrategyContext.coerceTemporalFilterValue` hook, wired to the driver's public `SqlDriver.temporalFilterValue` (the single source of truth for the storage convention). Coercion is dialect-correct: SQLite `Field.datetime` → epoch ms; `Field.date` text and native-timestamp dialects (Postgres/MySQL) are left unchanged, so Postgres is never handed an epoch integer. Applied to `gte`/`lte`/`gt`/`lt`/`equals`, `in`/`notIn`, and the `dateRange`/timeDimension `BETWEEN` path.
+
+- 641675d: Add `*Input` authoring-type aliases (`DatasourceInput`, `ConnectorInput`, `SharingRuleInput`, `JobInput`, `WebhookInput`, `EmailTemplateDefinitionInput`, `RoleInput`, `PermissionSetInput`, `ObjectExtensionInput`) alongside the existing `FieldInput`/`ActionInput`/`ReportInput`/`PortalInput` convention. These are `z.input<typeof XSchema>` aliases so authored literals keep `.default()` fields optional and accept CEL/Expression string shorthands — matching how `defineX()` helpers already accept input. No runtime change.
+- 94e9040: fix(spec): declare the extended Gantt config fields the renderer actually reads
+
+  `GanttConfigSchema` only declared the 5 core timeline fields as a plain
+  `z.object` (no passthrough), so every other field the Gantt renderer consumes —
+  `parentField`/`typeField` (two-level summary→step hierarchy), `colorField`,
+  `groupByField`, `tooltipFields`, `baselineStartField`/`baselineEndField`,
+  `resourceView`/`assigneeField`/`effortField`/`capacity`, `quickFilters`,
+  `autoZoomToFilter` — was silently stripped by `.parse()` on both the compile-time
+  protocol check and the runtime `GET /api/v1/meta/view/:object` re-validation. With
+  the keys gone before render, the Gantt degraded to a flat list (no parent/child
+  rows, no summary bars, no expand/collapse). These fields are now declared
+  explicitly (with descriptions), so the renderer contract round-trips through the
+  spec instead of requiring downstream patches.
+
 ## 9.9.1
 
 ## 9.9.0

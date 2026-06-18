@@ -1,5 +1,20 @@
 # @objectstack/formula
 
+## 9.10.0
+
+### Minor Changes
+
+- 1f88fd9: Add `addDays(date, n)` and `addMonths(date, n)` to the CEL standard library — shift an arbitrary date by a (possibly negative) number of days or months. Unlike `daysFromNow`, these operate on a _given_ date (the "next service date = last service + cycle" shape). `addMonths` clamps to the target month's last day (`addMonths(date('2026-01-31'), 1)` → Feb 28, never overflowing into March). Both coerce their inputs (Date | ISO string | epoch) and type `n` as `dyn` so a record number field arriving as a `double` doesn't fault `no such overload` (#1928).
+
+### Patch Changes
+
+- Updated dependencies [db02bd5]
+- Updated dependencies [641675d]
+- Updated dependencies [94e9040]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [1f88fd9]
+  - @objectstack/spec@9.10.0
+
 ## 9.9.1
 
 ### Patch Changes

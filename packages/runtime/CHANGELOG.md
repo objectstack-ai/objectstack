@@ -1,5 +1,81 @@
 # @objectstack/runtime
 
+## 9.10.0
+
+### Minor Changes
+
+- 1f88fd9: Add a transaction boundary to sandboxed hook/action bodies: `ctx.api.transaction(async () => { … })`. Every `ctx.api` read/write inside the callback runs in one driver transaction — committed when the callback returns, rolled back if it throws (or if the body leaves the transaction open at timeout). Guarded by the new `api.transaction` capability.
+
+  - **spec**: new `api.transaction` capability token on `HookBodyCapability`.
+  - **objectql**: `ScopedContext` gains discrete `beginTransaction()` / `commitTransaction(handle)` / `rollbackTransaction(handle)` primitives. The handle is threaded **explicitly** through a child context (`resolveTx` honors it ahead of the ambient `txStore`), because the sandbox drives the body across many host event-loop turns where AsyncLocalStorage context does not survive. Degrades to non-transactional execution when the driver has no transaction support.
+  - **runtime**: the QuickJS runner wires `ctx.api.transaction` over three deferred-promise host leaves (begin/commit/rollback), routes in-transaction ops through the tx-scoped context, and rolls back a transaction the body left open before disposing the VM.
+
+- e2b5324: feat(ownership): auto-provision a canonical `owner_id` and hand seeded records to the first admin
+
+  Ownership is now correct-by-default instead of opt-in — closing the gap where
+  seeded demo data ended up owned by nobody a human can log in as (so "My" views,
+  owner reports and owner notifications were empty out of the box) and where
+  author-written objects silently shipped with no working ownership at all.
+
+  - **`applySystemFields` (objectql)** now auto-injects a canonical, reassignable
+    `owner_id` lookup (→ `sys_user`) on user-authored business objects, alongside
+    the existing tenant/audit fields. Unlike the audit `*_by` lookups it is NOT
+    readonly — ownership transfers. Withheld for `managedBy` / `sys_*` tables and
+    for objects that opt out via `ownership: 'org' | 'none'` (Dataverse-style). The
+    safe default direction: forgetting the opt-out leaves a harmless spare column,
+    whereas the old opt-IN model let authors ship objects with broken ownership.
+    Once present, the existing machinery engages automatically (insert auto-stamp,
+    owner-scoped RLS, owner-keyed views/reports).
+
+  - **`claimSeedOwnership` (plugin-security)**, invoked from `bootstrapPlatformAdmin`
+    right after the first human is promoted to platform admin, transfers ownership
+    of seeded rows (`owner_id` NULL or `usr_system`) to that admin. The ownership
+    twin of org-scoping's `claimOrphanOrgRows`. Idempotent; skips `managedBy` /
+    `sys_*`. Authors write plain seed records (no `owner_id`) and the platform —
+    not the author — performs the handoff, so there is nothing to remember or
+    mistype.
+
+  - **`usr_system` is never minted (runtime + objectql).** The seed loader binds
+    `os.user` to a NULL identity, so `cel`os.user.id``resolves to NULL at seed
+time (the owning admin does not exist yet) and the row seeds NULL-owned — then
+the handoff above fills it. The runtime's`ensureSeedIdentity`(the only code
+that inserted a`usr_system`row) is removed.`SystemUserId.SYSTEM`survives
+only as a reserved id so legacy DBs' exclusion guards / ownership handoff still
+recognize a pre-existing row.`os.org`is unaffected (derived from`organizationId`).
+
+  Also hardens `bootstrapPlatformAdmin` against a latent dts typecheck error
+  (defensive read of the untyped `description` on seed permission sets).
+
+### Patch Changes
+
+- Updated dependencies [db02bd5]
+- Updated dependencies [641675d]
+- Updated dependencies [d9508d1]
+- Updated dependencies [1d352d3]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [94e9040]
+- Updated dependencies [f169558]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [e2b5324]
+- Updated dependencies [fd07027]
+  - @objectstack/driver-sql@9.10.0
+  - @objectstack/spec@9.10.0
+  - @objectstack/formula@9.10.0
+  - @objectstack/plugin-org-scoping@9.10.0
+  - @objectstack/plugin-security@9.10.0
+  - @objectstack/objectql@9.10.0
+  - @objectstack/rest@9.10.0
+  - @objectstack/driver-sqlite-wasm@9.10.0
+  - @objectstack/core@9.10.0
+  - @objectstack/metadata@9.10.0
+  - @objectstack/observability@9.10.0
+  - @objectstack/driver-memory@9.10.0
+  - @objectstack/plugin-auth@9.10.0
+  - @objectstack/service-cluster@9.10.0
+  - @objectstack/service-i18n@9.10.0
+  - @objectstack/types@9.10.0
+
 ## 9.9.1
 
 ### Patch Changes

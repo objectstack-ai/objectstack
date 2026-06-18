@@ -1,5 +1,63 @@
 # @objectstack/plugin-security
 
+## 9.10.0
+
+### Minor Changes
+
+- 1f88fd9: Converge the RLS contract with the reference compiler, and wire §7.3.1 dynamic membership.
+
+  - **spec (docs)**: narrow `rls.zod.ts` to the four expression forms the compiler actually implements — `field = current_user.<prop>`, `field = 'literal'`, `field IN (current_user.<array>)`, and `1 = 1`. Removed the over-promised surface (subqueries, `AND`/`OR`/`NOT`, `LIKE`/`ILIKE`, regex, `ANY`/`ALL`, `NOT IN`, `IS NULL`, `NOW()`/`CURRENT_DATE`) from the operator list, context-variable list, and `@example` policies, and documented the fail-closed behaviour explicitly.
+  - **spec (schema)**: `ExecutionContext` gains `rlsMembership?: Record<string, string[]>` — a bag of pre-resolved dynamic-membership id arrays (team members, territory accounts, shared records) that the runtime stages so RLS can scope via `field IN (current_user.<key>)` without subquery support. Generalizes the previously hard-coded `org_user_ids`.
+  - **plugin-security**: `RLSCompiler.compileFilter` merges `rlsMembership` keys into the user context (arrays only, never clobbering the named `id`/`organization_id`/`roles`/`org_user_ids` fields), so §7.3.1 hierarchy- and sharing-based policies compile. `compileExpression` now recognizes `1 = 1` as always-true (empty filter), making `RLS.allowAllPolicy` grant access instead of silently failing closed. Missing/empty membership sets still fail closed.
+
+- e2b5324: feat(ownership): auto-provision a canonical `owner_id` and hand seeded records to the first admin
+
+  Ownership is now correct-by-default instead of opt-in — closing the gap where
+  seeded demo data ended up owned by nobody a human can log in as (so "My" views,
+  owner reports and owner notifications were empty out of the box) and where
+  author-written objects silently shipped with no working ownership at all.
+
+  - **`applySystemFields` (objectql)** now auto-injects a canonical, reassignable
+    `owner_id` lookup (→ `sys_user`) on user-authored business objects, alongside
+    the existing tenant/audit fields. Unlike the audit `*_by` lookups it is NOT
+    readonly — ownership transfers. Withheld for `managedBy` / `sys_*` tables and
+    for objects that opt out via `ownership: 'org' | 'none'` (Dataverse-style). The
+    safe default direction: forgetting the opt-out leaves a harmless spare column,
+    whereas the old opt-IN model let authors ship objects with broken ownership.
+    Once present, the existing machinery engages automatically (insert auto-stamp,
+    owner-scoped RLS, owner-keyed views/reports).
+
+  - **`claimSeedOwnership` (plugin-security)**, invoked from `bootstrapPlatformAdmin`
+    right after the first human is promoted to platform admin, transfers ownership
+    of seeded rows (`owner_id` NULL or `usr_system`) to that admin. The ownership
+    twin of org-scoping's `claimOrphanOrgRows`. Idempotent; skips `managedBy` /
+    `sys_*`. Authors write plain seed records (no `owner_id`) and the platform —
+    not the author — performs the handoff, so there is nothing to remember or
+    mistype.
+
+  - **`usr_system` is never minted (runtime + objectql).** The seed loader binds
+    `os.user` to a NULL identity, so `cel`os.user.id``resolves to NULL at seed
+time (the owning admin does not exist yet) and the row seeds NULL-owned — then
+the handoff above fills it. The runtime's`ensureSeedIdentity`(the only code
+that inserted a`usr_system`row) is removed.`SystemUserId.SYSTEM`survives
+only as a reserved id so legacy DBs' exclusion guards / ownership handoff still
+recognize a pre-existing row.`os.org`is unaffected (derived from`organizationId`).
+
+  Also hardens `bootstrapPlatformAdmin` against a latent dts typecheck error
+  (defensive read of the untyped `description` on seed permission sets).
+
+### Patch Changes
+
+- Updated dependencies [db02bd5]
+- Updated dependencies [641675d]
+- Updated dependencies [94e9040]
+- Updated dependencies [4331adb]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [1f88fd9]
+  - @objectstack/spec@9.10.0
+  - @objectstack/platform-objects@9.10.0
+  - @objectstack/core@9.10.0
+
 ## 9.9.1
 
 ### Patch Changes

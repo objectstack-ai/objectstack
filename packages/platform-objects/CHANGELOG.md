@@ -1,5 +1,18 @@
 # @objectstack/platform-objects
 
+## 9.10.0
+
+### Patch Changes
+
+- 4331adb: fix(i18n): add view form `end_user_controls` translations for en, es-ES, ja-JP and zh-CN metadata-forms bundles.
+- Updated dependencies [db02bd5]
+- Updated dependencies [641675d]
+- Updated dependencies [94e9040]
+- Updated dependencies [1f88fd9]
+- Updated dependencies [1f88fd9]
+  - @objectstack/spec@9.10.0
+  - @objectstack/metadata-core@9.10.0
+
 ## 9.9.1
 
 ### Patch Changes
