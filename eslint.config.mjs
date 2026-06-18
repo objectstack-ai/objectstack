@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import tsParser from '@typescript-eslint/parser';
+
 // Flat ESLint config — guards against memory-bloating import patterns.
 //
 // Background: `export * as Namespace from './sub'` is NOT tree-shakeable in
@@ -9,7 +11,13 @@
 // in `@objectstack/objectos`. Those root barrels are gone — this rule prevents
 // them coming back via consumer imports.
 //
-// To enable: `pnpm add -DW eslint` then `pnpm exec eslint .`
+// Wired into CI via the root `lint` script (.github/workflows/lint.yml).
+// Run locally with `pnpm lint`. The script passes `--no-inline-config`:
+// source files carry orphaned `eslint-disable` directives for a richer rule
+// set this config does not register (a fuller setup was stripped to this
+// import guard), and the flag ignores them so the guard runs clean. The only
+// active rule (no-restricted-imports) should never need a local opt-out — it
+// prevents a ~1.2GB RSS regression.
 
 const SUBPATH_NAMES = [
   'Data', 'UI', 'System', 'AI', 'API', 'Automation',
@@ -40,6 +48,10 @@ export default [
       'packages/cli/src/commands/create.ts',
       'packages/create-objectstack/src/index.ts',
     ],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+    },
     rules: {
       'no-restricted-imports': ['error', {
         paths: [{

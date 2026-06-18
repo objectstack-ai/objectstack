@@ -23,7 +23,8 @@
     "objectui:build": "bash scripts/build-console.sh",
     "objectui:bump": "bash scripts/bump-objectui.sh",
     "objectui:refresh": "bash scripts/bump-objectui.sh && bash scripts/build-console.sh",
-    "objectui:clean": "rm -rf packages/console/dist .cache/objectui-*"
+    "objectui:clean": "rm -rf packages/console/dist .cache/objectui-*",
+    "lint": "eslint . --no-inline-config"
   },
   "keywords": [
     "objectstack",
@@ -37,6 +38,8 @@
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
     "@types/node": "^25.9.3",
+    "@typescript-eslint/parser": "^8.61.1",
+    "eslint": "^10.5.0",
     "tsup": "^8.5.1",
     "tsx": "^4.22.4",
     "turbo": "^2.9.18",
