@@ -210,6 +210,33 @@ describe('GanttConfigSchema', () => {
 
     expect(() => GanttConfigSchema.parse(config)).not.toThrow();
   });
+
+  it('should accept extended renderer fields (hierarchy, baseline, grouping, resource, tooltip, quick filters)', () => {
+    const config = {
+      startDateField: 'start_date',
+      endDateField: 'end_date',
+      titleField: 'name',
+      colorField: 'status',
+      parentField: 'parent_id',
+      typeField: 'row_type',
+      baselineStartField: 'planned_start',
+      baselineEndField: 'planned_end',
+      groupByField: 'workshop',
+      resourceView: true,
+      assigneeField: 'owner',
+      effortField: 'effort',
+      capacity: 8,
+      tooltipFields: ['owner', { field: 'effort', label: '工时' }],
+      quickFilters: [
+        { field: 'status' },
+        { field: 'category', label: '类别', options: ['A', { value: 1, label: 'B' }] },
+      ],
+      autoZoomToFilter: false,
+    };
+
+    expect(() => GanttConfigSchema.parse(config)).not.toThrow();
+    expect(GanttConfigSchema.parse(config)).toMatchObject({ parentField: 'parent_id', typeField: 'row_type' });
+  });
 });
 
 describe('ListViewSchema', () => {
