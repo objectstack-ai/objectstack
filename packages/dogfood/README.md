@@ -36,4 +36,31 @@ sockets, CI-stable). Tests act as a browser client would: sign in, hit
 4. **Prove it catches the bug**: temporarily revert the relevant fix and confirm
    the test goes red. A green-on-the-bug test is not a gate.
 
+## Capability matrix (the AI-authoring angle)
+
+This is a **development platform**: third parties have an AI author arbitrary
+metadata. The risk is not "a platform change broke the CRM example" — it's "the
+AI used a valid primitive the examples don't exercise, and it silently breaks at
+runtime." So beyond pinning the example apps, the gate is growing into a
+**capability matrix**: every authorable primitive gets a runtime round-trip
+proof.
+
+`test/field-zoo-roundtrip.dogfood.test.ts` is the first block — it writes one
+record covering many field types over the real REST API and asserts each reads
+back with type fidelity. On its first run it surfaced three real gaps
+(`rating`/`slider`/`toggle` read back as strings), which are **quarantined**, not
+hidden:
+
+```ts
+// Known type-fidelity gap → it.fails passes while broken and turns RED the day
+// it's fixed, forcing the quarantine to be lifted instead of rotting.
+const runner = c.xfail ? it.fails : it;
+```
+
+Roadmap (each its own slice, see the ADR): flow-node matrix, form-widget matrix,
+RLS-pattern matrix; then a generative pass that emits random valid metadata from
+the spec's zod surface; then run the AI **template corpus** through the harness.
+The binding policy — every authorable+live primitive must carry a runtime proof
+— is the subject of a dedicated ADR.
+
 Runs in CI as the `Dogfood Regression Gate` job (and under `turbo run test`).

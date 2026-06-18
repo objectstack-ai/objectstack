@@ -20,7 +20,8 @@
     "@objectstack/plugin-security": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
     "@objectstack/service-analytics": "workspace:*",
-    "@objectstack/example-crm": "workspace:*"
+    "@objectstack/example-crm": "workspace:*",
+    "@objectstack/example-showcase": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",

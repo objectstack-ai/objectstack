@@ -823,6 +823,9 @@ importers:
       '@objectstack/example-crm':
         specifier: workspace:*
         version: link:../../examples/app-crm
+      '@objectstack/example-showcase':
+        specifier: workspace:*
+        version: link:../../examples/app-showcase
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
