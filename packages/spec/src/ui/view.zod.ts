@@ -379,7 +379,26 @@ export const CalendarConfigSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Quick filter dimension for the Gantt toolbar.
+ */
+export const GanttQuickFilterSchema = lazySchema(() => z.object({
+  field: z.string().describe('Record field / dot-path the dimension filters on'),
+  label: z.string().optional().describe('Trigger label (falls back to the field label)'),
+  options: z.array(z.union([
+    z.string(),
+    z.object({
+      value: z.union([z.string(), z.number()]),
+      label: z.string().optional(),
+    }),
+  ])).optional().describe('Explicit option override for fixed enums'),
+}));
+
+/**
  * Gantt Settings
+ *
+ * Beyond the core timeline fields, the renderer supports a two-level
+ * parent/child hierarchy (parentField/typeField), planned-vs-actual baselines,
+ * dynamic grouping, a resource/workload view, hover tooltips and quick filters.
  */
 export const GanttConfigSchema = lazySchema(() => z.object({
   startDateField: z.string(),
@@ -387,6 +406,27 @@ export const GanttConfigSchema = lazySchema(() => z.object({
   titleField: z.string(),
   progressField: z.string().optional(),
   dependenciesField: z.string().optional(),
+  colorField: z.string().optional().describe('Field that drives the bar color'),
+  // Two-level hierarchy: a parent task id (summary bar) and a row type.
+  parentField: z.string().optional().describe('Field holding the parent task id (builds the summary → step tree)'),
+  typeField: z.string().optional().describe('Field whose value maps to task/summary/milestone'),
+  // Planned-vs-actual reference bars.
+  baselineStartField: z.string().optional().describe('Baseline (planned) start field'),
+  baselineEndField: z.string().optional().describe('Baseline (planned) end field'),
+  // Dynamic grouping: bucket leaf tasks under one synthesized summary per value.
+  groupByField: z.string().optional().describe('Field to group leaf tasks by (synthesized summary rows)'),
+  // Resource / workload view.
+  resourceView: z.boolean().optional().describe('Render a per-resource workload histogram instead of the timeline'),
+  assigneeField: z.string().optional().describe('Resource field to bucket load by (resource view)'),
+  effortField: z.string().optional().describe('Per-task load units (resource view; default 1)'),
+  capacity: z.number().optional().describe('Per-resource capacity ceiling; loads above this flag overload'),
+  // Hover tooltip + quick filters.
+  tooltipFields: z.array(z.union([
+    z.string(),
+    z.object({ field: z.string(), label: z.string().optional() }),
+  ])).optional().describe('Fields to surface in the hover tooltip, in display order'),
+  quickFilters: z.array(GanttQuickFilterSchema).optional().describe('Multi-select filter dropdowns rendered above the chart'),
+  autoZoomToFilter: z.boolean().optional().describe('When true (default), filtering zooms the range to the filtered tasks'),
 }));
 
 /**
