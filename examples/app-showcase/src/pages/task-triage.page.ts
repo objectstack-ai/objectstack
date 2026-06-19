@@ -33,10 +33,10 @@ export const TaskTriagePage: Page = {
       element: 'tabs',
       showAllRecords: true,
       tabs: [
-        { name: 'in_progress', label: 'In Progress', filter: [{ field: 'status', operator: 'equals', value: 'in_progress' }] },
-        { name: 'urgent', label: 'Urgent', icon: 'flame', filter: [{ field: 'priority', operator: 'equals', value: 'urgent' }] },
-        { name: 'in_review', label: 'In Review', filter: [{ field: 'status', operator: 'equals', value: 'in_review' }] },
-        { name: 'done', label: 'Done', filter: [{ field: 'status', operator: 'equals', value: 'done' }] },
+        { name: 'in_progress', label: 'In Progress', pinned: false, isDefault: false, visible: true, filter: [{ field: 'status', operator: 'equals', value: 'in_progress' }] },
+        { name: 'urgent', label: 'Urgent', icon: 'flame', pinned: false, isDefault: false, visible: true, filter: [{ field: 'priority', operator: 'equals', value: 'urgent' }] },
+        { name: 'in_review', label: 'In Review', pinned: false, isDefault: false, visible: true, filter: [{ field: 'status', operator: 'equals', value: 'in_review' }] },
+        { name: 'done', label: 'Done', pinned: false, isDefault: false, visible: true, filter: [{ field: 'status', operator: 'equals', value: 'done' }] },
       ],
     },
 

@@ -1,6 +1,6 @@
 # ADR-0055: Master-detail "controlled by parent" permissions — derived access via pre-resolved master-id membership
 
-**Status**: Proposed (2026-06-19)
+**Status**: Accepted (2026-06-19) — implemented in this PR (P0–P2)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs)
 **Surfaced by**: an audit of master-detail permission semantics — `OWDModel.controlled_by_parent` is **declared but unenforced** (zero runtime consumers; not reachable through the object's `sharingModel` enum; the RLS compiler is relationship-blind). This is *false compliance* (ADR-0049) and *unproven liveness* (ADR-0054).
