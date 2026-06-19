@@ -78,8 +78,8 @@ binding lands one class at a time (ADR-0054 §3), never as a big-bang backfill.
 | Field types | ✅ enforced | `field.type` | `field-zoo-roundtrip.dogfood.test.ts#field-type-roundtrip` |
 | RLS / sharing | ✅ enforced | `permission.rowLevelSecurity.using` | `rls-fixture.dogfood.test.ts#rls-by-id-write` |
 | Flow nodes | ✅ enforced | `flow.nodes.type` | `flow-node.dogfood.test.ts#flow-node-execution` |
-| Analytics dims/measures | ⛔ pending | — | `analytics-timezone.dogfood.test.ts#analytics-tz-bucketing` (proof exists; surface `dataset`/`report` not yet governed) |
-| Form layout/section/widget | ⛔ pending | — | none yet (Phase 2) |
+| Analytics dims/measures | ✅ enforced | `dataset.dimensions.dateGranularity` | `analytics-timezone.dogfood.test.ts#analytics-tz-bucketing` |
+| Form layout/section/widget | ⛔ pending | — | none yet (form surface not yet governed) |
 
 To bind a pending class: add its dogfood proof + `@proof:` tag, set `bound: true` and
 its `ledgerBindings` in `proof-registry.mts`, add the `proof` to the ledger entry, and
@@ -172,7 +172,8 @@ The governed set is `GOVERNED` at the top of `check-liveness.mts`. To add a type
 | agent | 18 | 4 | 5 | access/permissions/visibility dead (chat route hardcodes perms); autonomy experimental |
 | tool | 13 | 1 | 5 | write-only metadata; runtime uses a parallel AIToolDefinition |
 | skill | 15 | – | 2 | triggerPhrases dead (no matcher); permissions dead |
+| dataset | 26 | – | 1 | analytics semantic layer (compiled to a Cube); `measures.certified` dead; `dimensions.dateGranularity` carries the org-tz bucketing proof |
 
 The `dead` set across types is the enforce-or-remove worklist (ADR-0049). Not yet governed
-(rollout): view, page, dashboard, app, report, dataset, job, datasource, translation,
+(rollout): view, page, dashboard, app, report, job, datasource, translation,
 email_template, doc, book, validation, seed.

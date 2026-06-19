@@ -81,14 +81,11 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     label: 'Analytics dimensions / measures',
     summary: 'date-dimension bucketing / aggregation under the org timezone (#1982/#2018).',
     proofId: 'analytics-tz-bucketing',
-    // The proof EXISTS (golden tz-bucketing regression) and is tagged, so it is a
-    // known proof — but it cannot be BOUND yet (see blockedReason).
     proofRef: 'packages/dogfood/test/analytics-timezone.dogfood.test.ts#analytics-tz-bucketing',
-    bound: false,
-    ledgerBindings: [],
-    blockedReason:
-      'the authorable surface (dataset/report dimensions+measures) is not yet a GOVERNED ledger type, ' +
-      'so there is no entry to carry the proof. Bind once dataset/report are governed.',
+    bound: true,
+    // The org-timezone shift acts on a time dimension's bucketing granularity —
+    // the property whose end-to-end correctness the tz proof guards.
+    ledgerBindings: [{ type: 'dataset', path: 'dimensions.dateGranularity' }],
   },
   {
     id: 'flow-node',

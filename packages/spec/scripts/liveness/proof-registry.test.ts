@@ -102,7 +102,12 @@ describe('registry invariants', () => {
 
   it('BOUND_PROOF_PATHS maps the expected entries this phase', () => {
     expect([...BOUND_PROOF_PATHS.keys()].sort()).toEqual(
-      ['field/type', 'flow/nodes.type', 'permission/rowLevelSecurity.using'].sort(),
+      [
+        'field/type',
+        'flow/nodes.type',
+        'permission/rowLevelSecurity.using',
+        'dataset/dimensions.dateGranularity',
+      ].sort(),
     );
   });
 
@@ -120,6 +125,7 @@ describe('real proof wiring resolves', () => {
     field: 'packages/spec/liveness/field.json',
     permission: 'packages/spec/liveness/permission.json',
     flow: 'packages/spec/liveness/flow.json',
+    dataset: 'packages/spec/liveness/dataset.json',
   };
 
   function ledgerEntry(type: string, path: string): any {
@@ -144,8 +150,10 @@ describe('real proof wiring resolves', () => {
     }
   }
 
-  it('the analytics proof file exists and declares its tag (registered, pending bind)', () => {
-    const analytics = HIGH_RISK_CLASSES.find((c) => c.id === 'analytics')!;
-    expect(validateProofRef(analytics.proofRef, { repoRoot, fs, join })).toEqual({ ok: true });
+  it('no bound class is left with an unresolved proof or a blockedReason', () => {
+    for (const cls of HIGH_RISK_CLASSES.filter((c) => c.bound)) {
+      expect(cls.blockedReason, `${cls.id} is bound but still records a blockedReason`).toBeUndefined();
+      expect(validateProofRef(cls.proofRef, { repoRoot, fs, join })).toEqual({ ok: true });
+    }
   });
 });

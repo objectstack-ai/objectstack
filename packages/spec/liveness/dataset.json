@@ -1,0 +1,109 @@
+{
+  "type": "dataset",
+  "_note": "DatasetSchema (analytics semantic layer). Consumer: @objectstack/service-analytics — compileDataset() turns a dataset into a Cube, DatasetExecutor runs the query. Seeded from a dataset-property consumer audit (file:line evidence in service-analytics). ADR-0054: dimensions.dateGranularity carries the org-timezone date-bucketing proof (#1982/#2018). Framework provenance/lock fields auto-live.",
+  "props": {
+    "name": {
+      "status": "live",
+      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:178",
+      "note": "registry key + compiled Cube name."
+    },
+    "label": {
+      "status": "live",
+      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:179",
+      "note": "compiled into Cube title for presentations."
+    },
+    "description": {
+      "status": "live",
+      "note": "display/doc metadata (presentations); not read by analytics execution."
+    },
+    "object": {
+      "status": "live",
+      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:180",
+      "note": "base table — Cube sql + join resolution + draft-rows resolver."
+    },
+    "include": {
+      "status": "live",
+      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:92",
+      "note": "compiled into Cube joins + the NativeSQLStrategy join allowlist (ADR-0021)."
+    },
+    "filter": {
+      "status": "live",
+      "evidence": "packages/services/service-analytics/src/dataset-executor.ts:205",
+      "note": "dataset-level WHERE, ANDed with runtime + measure-scoped filters."
+    },
+    "dimensions": {
+      "children": {
+        "name": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:141",
+          "note": "dimension identifier (Cube dimension key)."
+        },
+        "label": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:142",
+          "note": "compiled into Cube dimension for presentations."
+        },
+        "field": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:144",
+          "note": "emitted as the dimension's SQL column reference (relationship-validated)."
+        },
+        "type": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:143",
+          "note": "dimensionType() maps to Cube time/number/boolean/string; drives grouping."
+        },
+        "dateGranularity": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:146",
+          "proof": "packages/dogfood/test/analytics-timezone.dogfood.test.ts#analytics-tz-bucketing",
+          "note": "ADR-0054 high-risk class (analytics): a time dimension's single granularity auto-buckets at query time (dataset-executor.ts:272-287); the proof asserts the day bucket SHIFTS with the org timezone (2024-03-01T03:00Z buckets to 2024-02-29 in America/Los_Angeles) — guarding the analytics-strategy ↔ in-memory count ↔ REST exec-context integration that #2018 fixed."
+        }
+      }
+    },
+    "measures": {
+      "children": {
+        "name": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:166",
+          "note": "measure identifier + derived-measure reference."
+        },
+        "label": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/analytics-service.ts:479",
+          "note": "compiled into Cube metric + enriched onto result fields."
+        },
+        "aggregate": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:60",
+          "note": "aggregateToMetricType() → Cube metric type (sum/count/avg/…); unsupported aggregates throw."
+        },
+        "field": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:170",
+          "note": "SQL aggregate operand (count omits field → '*'); relationship-validated."
+        },
+        "filter": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-executor.ts:225",
+          "note": "measure-scoped WHERE, applied via a supplementary per-measure query."
+        },
+        "format": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/analytics-service.ts:480",
+          "note": "compiled into Cube metric + enriched onto result fields for the renderer."
+        },
+        "certified": {
+          "status": "dead",
+          "evidence": "no runtime consumer — analytics execution never reads it; not compiled into the Cube",
+          "note": "measure trust/governance flag, declared but unenforced (ADR-0049 enforce-or-remove candidate). Not authorWarn'd: it may surface as an objectui badge, so it is not necessarily misleading."
+        },
+        "derived": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-executor.ts:247",
+          "note": "post-aggregation arithmetic (ratio/sum/difference/product) over base measures; {op, of} both consumed."
+        }
+      }
+    }
+  }
+}
