@@ -85,7 +85,7 @@ All use `fileAttachmentConfig` for size limits, allowed types, virus scanning, a
 |:-----|:------------|:-------|
 | `formula` | Computed from an expression referencing other fields | `expression`, `resultType` |
 | `summary` | Roll-up aggregation from child records | `summaryType` (count/sum/min/max/avg), `summaryField`, `reference` |
-| `autonumber` | Auto-incrementing display format | `format` (e.g., `"CASE-{0000}"`) |
+| `autonumber` | Auto-incrementing display format ({0000} counter + optional date / {field} tokens, resets per scope) | `format` (e.g., `"CASE-{0000}"`, `"AD{YYYYMMDD}{0000}"`) |
 
 ## Enhanced Types
 
@@ -282,6 +282,23 @@ What kind of data?
 }
 ```
 
+The `format` is literal text interleaved with `{...}` tokens:
+
+| Token | Renders | Example |
+|:------|:--------|:--------|
+| `{0000}` | The counter, zero-padded to that many digits (**minimum** width). At most ONE slot. | `CASE-{0000}` → `CASE-0042` |
+| `{YYYY}` `{YY}` `{MM}` `{DD}` `{YYYYMMDD}` | Generation date in the request's business timezone | `AD{YYYYMMDD}{0000}` → `AD202606170001` |
+| `{field_name}` | The value of another field **on the same record** | `{plan_no}{000}` → `PLAN-001001` |
+
+**The counter resets per "scope"** — everything rendered *before* the `{0000}` slot. So `AD{YYYYMMDD}{0000}` restarts each day, `{section}{island_zone}{000}` counts per group, `{plan_no}{000}` counts per parent — no separate reset config. A fixed-prefix format (`CASE-{0000}`) has an empty scope → one global counter.
+
+**Rules — get these wrong and records mis-number silently or fail to save:**
+
+1. **Every `{field}` you interpolate must be `required: true`** and set before the record is created. An empty interpolated field makes the record number generation *throw* (the compile lint flags a non-existent field as an error, an optional one as a warning).
+2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique). The literal separator keeps distinct groups apart.
+3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000` (it grows, never wraps). Size it for readability, not as a ceiling.
+4. **Only known tokens are interpolated.** Date tokens are **case-sensitive and exact** (`{YYYY}`, not `{yyyy}` or `{YYYY-MM}`). An unrecognized `{...}` is emitted **literally** into the number — `{ YYYY }` (spaces) renders the text `{ YYYY }`.
+
 ### Vector (AI Embeddings)
 
 ```typescript
@@ -344,5 +361,23 @@ options: [
 {
   type: 'lookup',
   reference: 'account',  // ✅ Target object specified
+}
+```
+
+### ❌ Incorrect — Autonumber interpolating an optional / adjacent field
+
+```typescript
+{
+  plan_no: { type: 'text' },  // ❌ not required — empty value throws at create
+  order_no: { type: 'autonumber', format: '{section}{plan_no}{000}' },  // ❌ no delimiter
+}
+```
+
+### ✅ Correct — Required field + delimiter between variable tokens
+
+```typescript
+{
+  plan_no: { type: 'text', required: true },  // ✅ always set before generation
+  order_no: { type: 'autonumber', format: '{section}-{plan_no}-{000}' },  // ✅ delimited
 }
 ```

@@ -6,6 +6,7 @@ import {
   AUTONUMBER_UNKNOWN_FIELD,
   AUTONUMBER_OPTIONAL_FIELD,
   AUTONUMBER_SELF_REFERENCE,
+  AUTONUMBER_LITERAL_TOKEN,
 } from './lint-autonumber-formats.js';
 
 describe('lintAutonumberFormats', () => {
@@ -75,6 +76,40 @@ describe('lintAutonumberFormats', () => {
     expect(out).toHaveLength(1);
     expect(out[0].severity).toBe('error');
     expect(out[0].rule).toBe(AUTONUMBER_SELF_REFERENCE);
+  });
+
+  it('warns on an unrecognized token that would render literally', () => {
+    const stack = {
+      objects: [
+        { name: 'wo', fields: { wo_no: { type: 'autonumber', autonumberFormat: 'WO-{ YYYY }-{0000}' } } },
+      ],
+    };
+    const out = lintAutonumberFormats(stack);
+    expect(out).toHaveLength(1);
+    expect(out[0].severity).toBe('warning');
+    expect(out[0].rule).toBe(AUTONUMBER_LITERAL_TOKEN);
+    expect(out[0].message).toContain('{ YYYY }');
+  });
+
+  it('warns on a second sequence slot (only the first counts)', () => {
+    const stack = {
+      objects: [
+        { name: 'wo', fields: { wo_no: { type: 'autonumber', autonumberFormat: '{0000}-{000}' } } },
+      ],
+    };
+    const out = lintAutonumberFormats(stack);
+    expect(out).toHaveLength(1);
+    expect(out[0].rule).toBe(AUTONUMBER_LITERAL_TOKEN);
+    expect(out[0].message).toContain('second sequence slot');
+  });
+
+  it('does not warn on valid date/counter tokens', () => {
+    const stack = {
+      objects: [
+        { name: 'audit', fields: { audit_no: { type: 'autonumber', autonumberFormat: 'AD{YYYYMMDD}{0000}' } } },
+      ],
+    };
+    expect(lintAutonumberFormats(stack)).toEqual([]);
   });
 
   it('handles array-shaped fields and the `format` shorthand', () => {

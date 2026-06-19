@@ -36,6 +36,7 @@ type AnyRec = Record<string, unknown>;
 export const AUTONUMBER_UNKNOWN_FIELD = 'autonumber-references-unknown-field';
 export const AUTONUMBER_OPTIONAL_FIELD = 'autonumber-references-optional-field';
 export const AUTONUMBER_SELF_REFERENCE = 'autonumber-references-self';
+export const AUTONUMBER_LITERAL_TOKEN = 'autonumber-unrecognized-token';
 
 function asArray(v: unknown): AnyRec[] {
   if (Array.isArray(v)) return v as AnyRec[];
@@ -67,8 +68,34 @@ export function lintAutonumberFormats(stack: AnyRec): AutonumberLintFinding[] {
         ? f.autonumberFormat
         : (typeof f.format === 'string' ? f.format : '');
       if (!fmt) continue;
-      const refs = referencedFields(parseAutonumberFormat(fmt));
+      const tokens = parseAutonumberFormat(fmt);
+      const refs = referencedFields(tokens);
       const where = `object '${objectName}' · field '${name}' (autonumber "${fmt}")`;
+
+      // An unrecognized `{...}` group is kept as literal text by the parser, so
+      // it ships VERBATIM in the record number. This catches case/spacing/typo
+      // mistakes the field-reference checks miss — date tokens are exact
+      // (`{YYYY}`, not `{yyyy}` or `{ YYYY }`), and only one `{0..0}` slot counts.
+      for (const t of tokens) {
+        if (t.kind !== 'literal') continue;
+        const braced = t.text.match(/\{[^{}]*\}/g);
+        if (!braced) continue;
+        for (const tok of braced) {
+          const body = tok.slice(1, -1);
+          const isExtraSeq = /^0+$/.test(body);
+          findings.push({
+            where,
+            message: isExtraSeq
+              ? `format has a second sequence slot \`${tok}\` — only the first \`{0..0}\` counts; this one renders literally as "${tok}".`
+              : `format has an unrecognized token \`${tok}\` — it is not a counter/date/{field} token, so it renders literally as "${tok}" in every record number.`,
+            hint: isExtraSeq
+              ? `Use a single \`{0000}\` slot; fold any second number into a literal or a {field} token.`
+              : `Date tokens are case-sensitive and exact: {YYYY} {YY} {MM} {DD} {YYYYMMDD} (no spaces/punctuation inside). For a field value use {field_name}.`,
+            rule: AUTONUMBER_LITERAL_TOKEN,
+            severity: 'warning',
+          });
+        }
+      }
       for (const ref of refs) {
         if (ref === name) {
           findings.push({
