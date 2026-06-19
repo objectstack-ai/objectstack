@@ -715,6 +715,7 @@ export const FormFieldSchema: z.ZodType<any> = lazySchema(() => z.object({
 
   dependsOn: z.string().optional().describe('Parent field name for cascading'),
   visibleOn: ExpressionInputSchema.optional().describe('Visibility predicate (CEL).'),
+  disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
 }));
 
 /**

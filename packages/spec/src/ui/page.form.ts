@@ -95,7 +95,7 @@ export const pageForm = defineForm({
             { field: 'filterBy', type: 'repeater', helpText: 'Always-on base filter for the page' },
             { field: 'levels', helpText: 'Hierarchy levels to display (tree-like sources)' },
             // ── Appearance ──
-            { field: 'appearance', type: 'composite', helpText: 'Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility' },
+            { field: 'appearance', type: 'composite', disclosure: 'popover', helpText: 'Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility' },
             // ── User filters ──
             {
               field: 'userFilters',
@@ -103,8 +103,8 @@ export const pageForm = defineForm({
               helpText: 'End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field). None removes the config.',
             },
             // ── User actions ──
-            { field: 'userActions', type: 'composite', helpText: 'Toolbar toggles (search, sort, filter, row height)' },
-            { field: 'addRecord', type: 'composite', helpText: 'Add-record entry point' },
+            { field: 'userActions', type: 'composite', disclosure: 'popover', helpText: 'Toolbar toggles (search, sort, filter, row height)' },
+            { field: 'addRecord', type: 'composite', disclosure: 'popover', helpText: 'Add-record entry point' },
             { field: 'showRecordCount', helpText: 'Show the record count bar' },
             { field: 'allowPrinting', helpText: 'Allow users to print this page' },
           ],
