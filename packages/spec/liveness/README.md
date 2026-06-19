@@ -77,6 +77,7 @@ binding lands one class at a time (ADR-0054 §3), never as a big-bang backfill.
 |---|---|---|---|
 | Field types | ✅ enforced | `field.type` | `field-zoo-roundtrip.dogfood.test.ts#field-type-roundtrip` |
 | RLS / sharing | ✅ enforced | `permission.rowLevelSecurity.using` | `rls-fixture.dogfood.test.ts#rls-by-id-write` |
+| Master-detail controlled-by-parent | ✅ enforced | `object.sharingModel` | `controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent` |
 | Flow nodes | ✅ enforced | `flow.nodes.type` | `flow-node.dogfood.test.ts#flow-node-execution` |
 | Analytics dims/measures | ✅ enforced | `dataset.dimensions.dateGranularity` | `analytics-timezone.dogfood.test.ts#analytics-tz-bucketing` |
 | Form layout/section/widget | ⛔ pending | — | none yet (form surface not yet governed) |

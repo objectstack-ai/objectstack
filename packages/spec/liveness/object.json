@@ -98,7 +98,9 @@
     },
     "sharingModel": {
       "status": "live",
-      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:54"
+      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:54",
+      "proof": "packages/dogfood/test/controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent",
+      "note": "ADR-0055 high-risk class (sharing): the `controlled_by_parent` value derives a detail object's access from its master — the security layer injects `masterFK IN (accessible master ids)` on reads and requires master edit-access on by-id writes. The proof asserts a member who cannot read the master can neither read nor by-id-write the detail, and is not over-blocked on a master they own."
     },
     "publicSharing": {
       "status": "live",

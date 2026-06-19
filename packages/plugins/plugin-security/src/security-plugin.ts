@@ -106,6 +106,8 @@ export class SecurityPlugin implements Plugin {
    */
   private metadata: any = null;
   private ql: any = null;
+  /** ADR-0055: cache the resolved master-detail relation per controlled_by_parent object. */
+  private cbpRelCache = new Map<string, { fk: string; master: string } | null>();
   private dbLoader?: (names: string[]) => Promise<PermissionSet[]>;
   private logger: { info?: (...a: any[]) => void; warn?: (...a: any[]) => void; error?: (...a: any[]) => void } = {};
 
@@ -399,6 +401,25 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
+      // 2.8. ADR-0055 — controlled-by-parent WRITE: a detail write (insert/update/
+      // delete) requires edit access to its master. The detail itself carries no
+      // authored RLS, so the #1994 pre-image check above is a no-op for it; this
+      // closes the by-id write path by checking the master instead.
+      if (
+        (opCtx.operation === 'insert' || opCtx.operation === 'update' || opCtx.operation === 'delete') &&
+        permissionSets.length > 0 &&
+        !!opCtx.context?.userId &&
+        this.ql
+      ) {
+        await this.assertControlledByParentWrite(
+          permissionSets,
+          opCtx.object,
+          opCtx.operation,
+          opCtx,
+          opCtx.context,
+        );
+      }
+
       // 2.5. Field-Level Security write enforcement.
       //
       // The client-side masker (ObjectForm / inline grid) already hides
@@ -479,18 +500,28 @@ export class SecurityPlugin implements Plugin {
       // the public getReadFilter service via computeRlsFilter, so the engine
       // find-path and the analytics raw-SQL path enforce identical scoping.
       if (opCtx.ast) {
+        const extra: Record<string, unknown>[] = [];
         const rlsFilter = await this.computeRlsFilter(
           permissionSets,
           opCtx.object,
           opCtx.operation,
           opCtx.context,
         );
-        if (rlsFilter) {
-          if (opCtx.ast.where) {
-            opCtx.ast.where = { $and: [opCtx.ast.where, rlsFilter] };
-          } else {
-            opCtx.ast.where = rlsFilter;
-          }
+        if (rlsFilter) extra.push(rlsFilter);
+        // ADR-0055: a controlled_by_parent object derives its read scope from the
+        // master record — `masterFK IN (accessible master ids)`, AND-ed in.
+        const cbpFilter = await this.computeControlledByParentFilter(
+          permissionSets,
+          opCtx.object,
+          opCtx.context,
+        );
+        if (cbpFilter) extra.push(cbpFilter);
+        if (extra.length) {
+          opCtx.ast.where = opCtx.ast.where
+            ? { $and: [opCtx.ast.where, ...extra] }
+            : extra.length === 1
+              ? extra[0]
+              : { $and: extra };
         }
       }
 
@@ -785,6 +816,154 @@ export class SecurityPlugin implements Plugin {
       rlsFilter = { ...RLS_DENY_FILTER };
     }
     return rlsFilter;
+  }
+
+  /**
+   * Resolve a controlled_by_parent object's master-detail relation (the FK field
+   * key + the master object name), or null. Prefers a required `master_detail`
+   * field; falls back to any `master_detail`, then a required `lookup`. Cached.
+   */
+  private resolveCbpRelation(object: string): { fk: string; master: string } | null {
+    if (this.cbpRelCache.has(object)) return this.cbpRelCache.get(object) ?? null;
+    let rel: { fk: string; master: string } | null = null;
+    const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(object) : null;
+    const fields = schema?.fields;
+    const entries: Array<[string, any]> = Array.isArray(fields)
+      ? fields.map((f: any) => [f?.name, f] as [string, any])
+      : fields && typeof fields === 'object'
+        ? (Object.entries(fields) as Array<[string, any]>)
+        : [];
+    const ref = (f: any) => f?.reference ?? f?.reference_to ?? f?.referenceTo;
+    const pick = (pred: (f: any) => boolean) => entries.find(([, f]) => pred(f) && ref(f));
+    const found =
+      pick((f) => f?.type === 'master_detail' && f?.required) ??
+      pick((f) => f?.type === 'master_detail') ??
+      pick((f) => f?.type === 'lookup' && f?.required);
+    if (found) rel = { fk: String(found[0]), master: String(ref(found[1])) };
+    this.cbpRelCache.set(object, rel);
+    return rel;
+  }
+
+  /**
+   * ADR-0055 — master-detail "controlled by parent" READ derivation.
+   *
+   * For an object whose `sharingModel` is `controlled_by_parent`, access is
+   * derived from the master: return a filter `masterFK IN (<master ids this user
+   * can read>)`. The id set is resolved by running the MASTER's own read RLS
+   * (reused via `computeRlsFilter`) under a system context — no middleware
+   * re-entry, so no recursion. An empty set yields `{ masterFK: { $in: [] } }`,
+   * which matches no rows (fail closed). A misconfigured object (no
+   * master_detail/lookup to derive from) denies all reads (defense-in-depth;
+   * spec validation should prevent authoring it). Returns null when the object is
+   * not controlled_by_parent.
+   *
+   * v1 scope (ADR-0055): single level — the master's OWN controlled_by_parent is
+   * not traversed transitively; master accessibility is the master's RLS filter
+   * (sharing-service grants on the master are not folded in).
+   */
+  private async computeControlledByParentFilter(
+    permissionSets: PermissionSet[],
+    object: string,
+    context: any,
+  ): Promise<Record<string, unknown> | null> {
+    if (!this.ql || !context?.userId) return null;
+    const schema = typeof this.ql.getSchema === 'function' ? this.ql.getSchema(object) : null;
+    const sharingModel = schema?.sharingModel ?? schema?.security?.sharingModel;
+    if (sharingModel !== 'controlled_by_parent') return null;
+
+    const rel = this.resolveCbpRelation(object);
+    if (!rel) return { ...RLS_DENY_FILTER };
+
+    const masterFilter = await this.computeRlsFilter(permissionSets, rel.master, 'find', context);
+    let masterIds: string[] = [];
+    try {
+      const rows = await this.ql.find(rel.master, {
+        where: masterFilter ?? {},
+        fields: ['id'],
+        context: { isSystem: true },
+      });
+      masterIds = (Array.isArray(rows) ? rows : [])
+        .map((r: any) => r?.id)
+        .filter((id: any) => id != null);
+    } catch {
+      masterIds = [];
+    }
+    return { [rel.fk]: { $in: masterIds } };
+  }
+
+  /**
+   * ADR-0055 — master-detail "controlled by parent" WRITE enforcement.
+   *
+   * A by-id write (insert/update/delete) to a controlled_by_parent detail
+   * requires EDIT access to its master: the caller must hold CRUD `update` on the
+   * master object AND the master row must be visible under the master's write RLS.
+   * This is the write-side companion to the read derivation — the RLS read filter
+   * never applies to a by-id write (the #1994 class), so without this a member
+   * could mutate a detail under a master they cannot edit. Throws on denial;
+   * no-op when the object is not controlled_by_parent.
+   *
+   * v1 scope: single-id writes. Bulk writes flow through the AST and are already
+   * scoped by the controlled-by-parent READ filter (to readable masters).
+   */
+  private async assertControlledByParentWrite(
+    permissionSets: PermissionSet[],
+    object: string,
+    operation: string,
+    opCtx: any,
+    context: any,
+  ): Promise<void> {
+    const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(object) : null;
+    const sharingModel = schema?.sharingModel ?? schema?.security?.sharingModel;
+    if (sharingModel !== 'controlled_by_parent') return;
+
+    const deny = (reason: string, recordId?: unknown) => {
+      throw new PermissionDeniedError(
+        `[Security] Access denied: ${operation} on '${object}' requires edit access to its master record (${reason})`,
+        { operation, object, recordId },
+      );
+    };
+
+    const rel = this.resolveCbpRelation(object);
+    if (!rel) deny('controlled_by_parent declared but no master_detail relation');
+
+    // Resolve the master id: from the incoming body on insert, else from the
+    // target row (read as system — we only need its FK value).
+    let masterId: unknown;
+    if (operation === 'insert') {
+      const data = opCtx.data;
+      masterId = data && typeof data === 'object' && !Array.isArray(data) ? (data as any)[rel!.fk] : undefined;
+    } else {
+      const targetId = this.extractSingleId(opCtx);
+      if (targetId == null) return; // bulk write — scoped by the read filter on the AST
+      let row: any = null;
+      try {
+        row = await this.ql.findOne(object, { where: { id: targetId }, context: { isSystem: true } });
+      } catch {
+        row = null;
+      }
+      if (!row) deny('target record not found', targetId);
+      masterId = row[rel!.fk];
+    }
+    if (masterId == null) deny('detail record has no master reference');
+
+    // Master edit access = CRUD update on the master AND master row visible under
+    // the master's write RLS.
+    if (!this.permissionEvaluator.checkObjectPermission('update', rel!.master, permissionSets)) {
+      deny(`no edit permission on master '${rel!.master}'`, masterId);
+    }
+    const masterWriteFilter = await this.computeRlsFilter(permissionSets, rel!.master, 'update', context);
+    if (masterWriteFilter) {
+      let visible: unknown = null;
+      try {
+        visible = await this.ql.findOne(rel!.master, {
+          where: { $and: [{ id: masterId }, masterWriteFilter] },
+          context,
+        });
+      } catch {
+        visible = null;
+      }
+      if (!visible) deny(`master '${rel!.master}' not editable by this user (row-level security)`, masterId);
+    }
   }
 
   /**

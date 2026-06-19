@@ -587,8 +587,18 @@ const ObjectSchemaBase = z.object({
    */
   enable: ObjectCapabilities.optional().describe('Enabled system features modules'),
 
-  /** Sharing Model */
-  sharingModel: z.enum(['private', 'read', 'read_write', 'full']).optional().describe('Default sharing model'),
+  /**
+   * Sharing Model (org-wide default).
+   *
+   * `controlled_by_parent` (ADR-0055) makes this a DETAIL object in a
+   * master-detail relationship: its access is *derived* from the master record
+   * — a user sees/edits a detail only if they can see/edit its master. The
+   * object must declare exactly one required `master_detail` field identifying
+   * the master; the security layer auto-injects `masterFK IN (accessible master
+   * ids)` on reads and requires master edit-access on by-id writes. No RLS policy
+   * is authored — the inheritance is derived from the relationship.
+   */
+  sharingModel: z.enum(['private', 'read', 'read_write', 'full', 'controlled_by_parent']).optional().describe('Default sharing model'),
 
   /**
    * Public Share-Link Policy

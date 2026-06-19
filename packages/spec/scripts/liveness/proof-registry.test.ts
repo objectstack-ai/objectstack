@@ -107,6 +107,7 @@ describe('registry invariants', () => {
         'flow/nodes.type',
         'permission/rowLevelSecurity.using',
         'dataset/dimensions.dateGranularity',
+        'object/sharingModel',
       ].sort(),
     );
   });
@@ -126,6 +127,7 @@ describe('real proof wiring resolves', () => {
     permission: 'packages/spec/liveness/permission.json',
     flow: 'packages/spec/liveness/flow.json',
     dataset: 'packages/spec/liveness/dataset.json',
+    object: 'packages/spec/liveness/object.json',
   };
 
   function ledgerEntry(type: string, path: string): any {

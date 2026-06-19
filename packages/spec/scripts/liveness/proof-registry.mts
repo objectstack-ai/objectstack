@@ -77,6 +77,15 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     ledgerBindings: [{ type: 'permission', path: 'rowLevelSecurity.using' }],
   },
   {
+    id: 'sharing-controlled-by-parent',
+    label: 'Master-detail controlled-by-parent',
+    summary: "a detail record's read/write access derived from its master record (ADR-0055).",
+    proofId: 'cbp-controlled-by-parent',
+    proofRef: 'packages/dogfood/test/controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent',
+    bound: true,
+    ledgerBindings: [{ type: 'object', path: 'sharingModel' }],
+  },
+  {
     id: 'analytics',
     label: 'Analytics dimensions / measures',
     summary: 'date-dimension bucketing / aggregation under the org timezone (#1982/#2018).',
