@@ -24,8 +24,13 @@ onlyBuiltDependencies:
 #   - form-data: GHSA-hmw2-7cc7-3qxx (high) — CRLF injection via unescaped
 #     multipart field names. Pulled 4.0.5 transitively through @vscode/vsce;
 #     force the patched >=4.0.6 line. Fails `pnpm audit --audit-level=high` (CI).
+#   - undici: GHSA-vmh5-mc38-953g (high) — TLS cert validation bypass via
+#     dropped requestTls in SOCKS5 ProxyAgent. Pulled 7.27.2 through
+#     @vscode/vsce > cheerio (declares undici ^7.19.0); force the patched
+#     7.28.0 line (stays in the 7.x major cheerio supports). CI audit gate.
 overrides:
   esbuild: '>=0.28.1'
   'minimatch@<10.2.3': '10.2.3'
   'tar@>=2.0.0 <7.5.11': '^7.5.11'
   'form-data@<4.0.6': '>=4.0.6'
+  'undici@>=7.23.0 <7.28.0': '^7.28.0'
