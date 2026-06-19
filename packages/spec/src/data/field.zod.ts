@@ -545,6 +545,12 @@ export const FieldSchema = lazySchema(() => z.object({
    *   - `{plan_no}{000}`      → `…PROD20260617001001` (per parent record)
    * A fixed-prefix format with no date/field token (e.g. `CASE-{0000}`) keeps a
    * single global counter — fully backward compatible.
+   *
+   * A `{field}` token must name an EXISTING field that is SET before the record
+   * is created (mark it `required: true`). An empty interpolated field would
+   * collapse the number into the wrong counter scope, so generation throws
+   * instead; `objectstack compile` lints this (unknown field → build error,
+   * optional field → warning).
    */
   autonumberFormat: z.string().optional().describe('Auto-number format: literal text + {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens (business tz), and {field_name} interpolation. Counter resets per rendered prefix (e.g. AD{YYYYMMDD}{0000} resets daily).'),
   /** Indexing */

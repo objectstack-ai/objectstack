@@ -123,6 +123,21 @@ describe('SqlDriver auto_number format tokens', () => {
     expect(b.plan_no).toBe(`PROD${utcYmd()}001`);
   });
 
+  it('refuses to generate when an interpolated {field} is empty (no silent mis-scope)', async () => {
+    await driver.initObjects([
+      {
+        name: 'dispatch_order',
+        fields: {
+          plan_no: { type: 'string' },
+          order_no: { type: 'autonumber', format: '{plan_no}{000}' },
+        },
+      },
+    ]);
+    // plan_no left blank → the prefix would collapse to '' and merge this row
+    // into the wrong counter scope, so generation must throw instead.
+    await expect(driver.create('dispatch_order', {})).rejects.toThrow(/plan_no/);
+  });
+
   it('leaves fixed-prefix formats on a single global counter (backward compatible)', async () => {
     await driver.initObjects([
       { name: 'invoice', fields: { invoice_number: { type: 'autonumber', format: 'INV-{0000}' } } },

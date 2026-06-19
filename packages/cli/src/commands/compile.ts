@@ -11,6 +11,7 @@ import { lowerCallables } from '../utils/lower-callables.js';
 import { validateStackExpressions } from '../utils/validate-expressions.js';
 import { validateWidgetBindings } from '../utils/validate-widget-bindings.js';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
+import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
 import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { buildRuntimeBundle, cleanupOldRuntimeBundles } from '../utils/build-runtime.js';
@@ -222,6 +223,38 @@ export default class Compile extends Command {
           printWarning(`${fnd.where}: ${fnd.message}`);
           console.log(chalk.dim(`    ${fnd.hint}`));
           console.log(chalk.dim(`    rule: ${fnd.rule}`));
+        }
+      }
+
+      // 3d-ter. Autonumber `{field}` interpolation lint. A format like
+      //     `{plan_no}{000}` makes the referenced field part of the counter
+      //     scope, so it must exist and be set at create time — otherwise the
+      //     runtime throws (or, unlinted, silently mis-numbers). An unknown
+      //     field is broken → fails the build; an optional field is fragile →
+      //     advisory warning. Mirrors the broken/fragile two-level guardrail.
+      const autonumberLint = lintAutonumberFormats(result.data as Record<string, unknown>);
+      const autonumberErrors = autonumberLint.filter((f) => f.severity === 'error');
+      const autonumberWarnings = autonumberLint.filter((f) => f.severity === 'warning');
+      if (autonumberErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({ success: false, error: 'autonumber format validation failed', issues: autonumberErrors }));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Autonumber format validation failed (${autonumberErrors.length} issue${autonumberErrors.length > 1 ? 's' : ''})`);
+        for (const f of autonumberErrors) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}`));
+        }
+        this.exit(1);
+      }
+      if (autonumberWarnings.length > 0 && !flags.json) {
+        console.log('');
+        for (const f of autonumberWarnings) {
+          printWarning(`${f.where}: ${f.message}`);
+          console.log(chalk.dim(`    ${f.hint}`));
+          console.log(chalk.dim(`    rule: ${f.rule}`));
         }
       }
 

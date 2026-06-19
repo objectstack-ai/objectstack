@@ -7,6 +7,7 @@ import {
   hasDynamicTokens,
   sequenceWidth,
   referencedFields,
+  missingFieldValues,
 } from './autonumber-format';
 
 // A fixed instant: 2026-06-17 21:30 UTC. In Asia/Shanghai (UTC+8) this is
@@ -52,6 +53,30 @@ describe('parseAutonumberFormat', () => {
       'section',
       'island_zone',
     ]);
+  });
+});
+
+describe('missingFieldValues', () => {
+  const tokens = parseAutonumberFormat('{section}{island_zone}{000}');
+
+  it('lists {field} tokens with no value on the record (null/undefined/empty)', () => {
+    expect(missingFieldValues(tokens, { section: 'JYG', island_zone: '1A' })).toEqual([]);
+    expect(missingFieldValues(tokens, { section: 'JYG' })).toEqual(['island_zone']);
+    expect(missingFieldValues(tokens, { section: '', island_zone: null })).toEqual([
+      'section',
+      'island_zone',
+    ]);
+    expect(missingFieldValues(tokens, undefined)).toEqual(['section', 'island_zone']);
+  });
+
+  it('treats 0 and false as present (only null/undefined/"" are missing)', () => {
+    const t = parseAutonumberFormat('{n}{flag}{000}');
+    expect(missingFieldValues(t, { n: 0, flag: false })).toEqual([]);
+  });
+
+  it('returns nothing for date-only / fixed-prefix formats (no {field} tokens)', () => {
+    expect(missingFieldValues(parseAutonumberFormat('AD{YYYYMMDD}{0000}'), {})).toEqual([]);
+    expect(missingFieldValues(parseAutonumberFormat('CASE-{0000}'), {})).toEqual([]);
   });
 });
 

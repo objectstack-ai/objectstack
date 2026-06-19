@@ -84,6 +84,25 @@ export function referencedFields(tokens: AutonumberToken[]): string[] {
   return tokens.filter((t): t is Extract<AutonumberToken, { kind: 'field' }> => t.kind === 'field').map((t) => t.field);
 }
 
+/**
+ * `{field}` tokens whose value is missing on the record (null / undefined /
+ * empty string). Such a field would silently render to an empty prefix and
+ * collapse the counter into the wrong scope (a different group's sequence), so
+ * callers should refuse to generate rather than emit a wrong record number.
+ * Returns the referenced field names in format order, deduplicated.
+ */
+export function missingFieldValues(
+  tokens: AutonumberToken[],
+  record?: Record<string, unknown>,
+): string[] {
+  const missing: string[] = [];
+  for (const field of referencedFields(tokens)) {
+    const v = record ? record[field] : undefined;
+    if ((v == null || v === '') && !missing.includes(field)) missing.push(field);
+  }
+  return missing;
+}
+
 interface CalendarParts {
   YYYY: string;
   YY: string;

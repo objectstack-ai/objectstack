@@ -10,7 +10,7 @@ import {
   EngineAggregateOptions,
   EngineCountOptions
 } from '@objectstack/spec/data';
-import { parseAutonumberFormat, renderAutonumber } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues } from '@objectstack/spec/data';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import { DriverInterface, IDataEngine, Logger, createLogger } from '@objectstack/core';
 import { CoreServiceName, StorageNameMapping } from '@objectstack/spec/system';
@@ -826,6 +826,17 @@ export class ObjectQL implements IDataEngine {
       // `format` (both appear in metadata; the driver reads both too) — #1603.
       const fmt = (def as any).autonumberFormat ?? (def as any).format;
       const tokens = parseAutonumberFormat(typeof fmt === 'string' ? fmt : '');
+      // Refuse to generate when an interpolated `{field}` is empty — it would
+      // render to an empty prefix and merge this record into the wrong counter
+      // scope. Mirror the SQL driver so both paths fail identically (#1603).
+      const missing = missingFieldValues(tokens, record);
+      if (missing.length > 0) {
+        throw new Error(
+          `Cannot generate autonumber "${object}.${name}" (format "${fmt}"): ` +
+            `referenced field(s) [${missing.join(', ')}] are empty on the record. ` +
+            `Fields interpolated into an autonumber format must be set before the record is created.`,
+        );
+      }
       // The counter scope is the rendered prefix (date/field tokens before the
       // sequence slot); it is independent of the counter value, so a throwaway
       // render with seq 0 yields the scope and the literal prefix to seed from.

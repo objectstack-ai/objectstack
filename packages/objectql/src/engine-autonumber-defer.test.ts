@@ -151,4 +151,22 @@ describe('ObjectQL autonumber ownership (#1603)', () => {
     // Today's UTC day + a fresh per-day counter.
     expect(r.audit_no).toMatch(/^AD\d{8}0001$/);
   });
+
+  it('fallback refuses to generate when an interpolated {field} is empty', async () => {
+    const TASK_SCHEMA = {
+      name: 'task',
+      fields: {
+        zone: { type: 'text' },
+        task_no: { type: 'autonumber', format: '{zone}{000}' },
+      },
+    };
+    vi.mocked(SchemaRegistry.getObject).mockReturnValue(TASK_SCHEMA as any);
+    const driver = makeDriver(false);
+    engine.registerDriver(driver, true);
+    await engine.init();
+
+    // zone left blank → the prefix collapses to '' and would mis-scope the
+    // counter, so generation must throw rather than emit a wrong number.
+    await expect(engine.insert('task', {})).rejects.toThrow(/zone/);
+  });
 });

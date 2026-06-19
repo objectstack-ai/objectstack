@@ -8,7 +8,7 @@
  */
 
 import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
-import { parseAutonumberFormat, renderAutonumber, type AutonumberToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, type AutonumberToken } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
@@ -219,6 +219,14 @@ export class SqlDriver implements IDataDriver {
 
   /** Whether the sequences table has been ensured this process. */
   protected sequencesTableReady = false;
+  /**
+   * Set when a legacy 3-column `_objectstack_sequences` table could not have
+   * its primary key widened to include `scope`. Fixed-prefix sequences (empty
+   * scope) keep working under the old PK; only a per-scope write would collide,
+   * so `getNextSequenceValue` raises an actionable error in that case rather
+   * than letting an opaque PK violation surface at create time.
+   */
+  protected sequencesScopeKeyUnsafe = false;
   /** In-flight ensure promise; deduplicates concurrent first calls. */
   protected sequencesTableEnsurePromise: Promise<void> | null = null;
 
@@ -642,10 +650,18 @@ export class SqlDriver implements IDataDriver {
         ]);
       }
     } catch (err) {
-      // Widening the PK is best-effort; the column itself is what new writes
-      // need. A stale 3-column PK only bites if a field's format flips from
-      // fixed to dynamic on an already-seeded deployment.
-      this.logger.warn('Failed to widen _objectstack_sequences primary key', { error: String(err) });
+      // The `scope` column landed (new writes can record it) but the PK is
+      // still the legacy 3-column shape. Fixed-prefix sequences are unaffected;
+      // a per-scope write, however, would hit an opaque PK violation at insert
+      // time. Flag it so getNextSequenceValue can fail loudly and actionably
+      // instead, and surface it at error level for operators to migrate by hand.
+      this.sequencesScopeKeyUnsafe = true;
+      this.logger.warn(
+        `[autonumber] Failed to widen ${SEQUENCES_TABLE} primary key to include "scope". ` +
+          `Fixed-prefix autonumbers keep working; date/{field}/per-parent formats will ` +
+          `error until the primary key is migrated to (object, tenant_id, field, scope) by hand.`,
+        { error: String(err) },
+      );
     }
   }
 
@@ -705,6 +721,17 @@ export class SqlDriver implements IDataDriver {
     scope = '',
   ): Promise<number> {
     await this.ensureSequencesTable();
+    if (scope !== '' && this.sequencesScopeKeyUnsafe) {
+      // The legacy sequences table could not have its PK widened to include
+      // `scope`, so a second scope under the same (object, tenant, field) would
+      // collide. Fail with a clear, actionable message instead of an opaque
+      // database PK violation at insert time.
+      throw new Error(
+        `Cannot generate a per-scope autonumber for "${object}.${field}": the ` +
+          `${SEQUENCES_TABLE} primary key is still the legacy 3-column shape. ` +
+          `Migrate it to (object, tenant_id, field, scope) before using date/{field}/per-parent formats.`,
+      );
+    }
     const resolvedTenantId = tenantField && tenantId ? String(tenantId) : GLOBAL_TENANT;
     // `scope` (rendered date/field prefix) gives each period/group its own
     // counter; '' keeps the single global counter for fixed-prefix formats.
@@ -773,6 +800,18 @@ export class SqlDriver implements IDataDriver {
     const now = new Date();
     for (const cfg of cfgs) {
       if (row[cfg.name] !== undefined && row[cfg.name] !== null && row[cfg.name] !== '') continue;
+      // A `{field}` token with no value would render to an empty prefix and
+      // silently merge this record into the wrong counter scope, so refuse to
+      // generate rather than emit a wrong record number (the referenced field
+      // must be populated before the autonumber — see field.zod docs).
+      const missing = missingFieldValues(cfg.tokens, row);
+      if (missing.length > 0) {
+        throw new Error(
+          `Cannot generate autonumber "${object}.${cfg.name}" (format "${cfg.format}"): ` +
+            `referenced field(s) [${missing.join(', ')}] are empty on the record. ` +
+            `Fields interpolated into an autonumber format must be set before the record is created.`,
+        );
+      }
       // Resolve tenant for this row: explicit field on the record wins,
       // then driver options, else null → global sequence.
       const rowTenant = cfg.tenantField ? row[cfg.tenantField] : undefined;
