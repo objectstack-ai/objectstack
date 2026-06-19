@@ -18,7 +18,7 @@ import { ChartGalleryDashboard } from './src/dashboards/index.js';
 import { ShowcaseTaskDataset, ShowcaseProjectDataset } from './src/datasets/index.js';
 import { allReports } from './src/reports/index.js';
 import { allActions } from './src/actions/index.js';
-import { ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage } from './src/pages/index.js';
+import { ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage } from './src/pages/index.js';
 import { allFlows } from './src/flows/index.js';
 import { allWebhooks } from './src/webhooks/index.js';
 import { allHooks } from './src/hooks/index.js';
@@ -143,7 +143,7 @@ export default defineStack({
   apps: [ShowcaseApp],
   portals: allPortals,
   views: [TaskViews, ProjectViews],
-  pages: [ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage],
+  pages: [ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage],
   dashboards: [ChartGalleryDashboard],
   books: allBooks,
   datasets: [ShowcaseTaskDataset, ShowcaseProjectDataset],

@@ -5,6 +5,7 @@ import type { Page } from '@objectstack/spec/ui';
 export { ProjectWorkspacePage } from './project-workspace.page.js';
 export { ProjectDetailPage } from './project-detail.page.js';
 export { TaskWorkbenchPage } from './task-workbench.page.js';
+export { TaskTriagePage } from './task-triage.page.js';
 
 /**
  * Component Gallery — a custom page that places a spread of standard page

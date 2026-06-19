@@ -26,18 +26,11 @@ export const TaskViews = defineView({
       { field: 'progress' },
     ],
 
-    // ADR-0047 — in-view filter tabs (ViewTab presets). Each tab applies
-    // its own filter rules on top of the view's base criteria; the first
-    // tab is the unfiltered default. Filter tabs and dropdown filters are
-    // MUTUALLY EXCLUSIVE on the toolbar (Airtable's Elements choice):
-    // this view demonstrates tabs; the `tabular` view below demonstrates
-    // dropdowns. Configuring both renders tabs only.
-    tabs: [
-      { name: 'all_tasks', label: 'All', isDefault: true },
-      { name: 'in_progress', label: 'In Progress', filter: [{ field: 'status', operator: 'equals', value: 'in_progress' }] },
-      { name: 'urgent', label: 'Urgent', icon: 'flame', filter: [{ field: 'priority', operator: 'equals', value: 'urgent' }] },
-      { name: 'done', label: 'Done', filter: [{ field: 'status', operator: 'equals', value: 'done' }] },
-    ],
+    // ADR-0053 — on the object's DEFAULT list (views mode) status presets are
+    // *named views* in the switcher (Salesforce/Airtable "saved views"), not an
+    // in-view tab row. See the `in_progress` / `urgent` / `done` listViews below.
+    // The end-user filter ELEMENTS (Airtable "User filters": tabs / dropdowns)
+    // belong to interface pages (filters mode) — see the *.page.ts examples.
 
     // ADR-0047 — runtime visualization whitelist (Airtable "Appearance →
     // Visualizations"). Rendered as a compact dropdown in the toolbar's
@@ -49,6 +42,30 @@ export const TaskViews = defineView({
   },
 
   listViews: {
+    // ── Status presets (ADR-0053) — saved views with a base ListView.filter,
+    // shown as switcher entries on the object's default list (views mode). ──
+    in_progress: {
+      label: 'In Progress',
+      type: 'grid',
+      data,
+      columns: [{ field: 'title' }, { field: 'project' }, { field: 'assignee' }, { field: 'status' }, { field: 'priority' }, { field: 'due_date' }],
+      filter: [{ field: 'status', operator: 'equals', value: 'in_progress' }],
+    },
+    urgent: {
+      label: 'Urgent',
+      type: 'grid',
+      data,
+      columns: [{ field: 'title' }, { field: 'project' }, { field: 'assignee' }, { field: 'status' }, { field: 'priority' }, { field: 'due_date' }],
+      filter: [{ field: 'priority', operator: 'equals', value: 'urgent' }],
+    },
+    done: {
+      label: 'Done',
+      type: 'grid',
+      data,
+      columns: [{ field: 'title' }, { field: 'project' }, { field: 'assignee' }, { field: 'status' }, { field: 'due_date' }],
+      filter: [{ field: 'status', operator: 'equals', value: 'done' }],
+    },
+
     // 0 ── Tabular ───────────────────────────────────────────────────────
     // ADR-0021 Phase 2: replaces the former `showcase_task_list` report
     // (a flat record list — a ListView concern, not analytics).
