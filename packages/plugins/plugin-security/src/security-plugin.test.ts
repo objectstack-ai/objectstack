@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { SecurityPlugin } from './security-plugin.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { FieldMasker } from './field-masker.js';
-import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
+import { RLSCompiler, RLS_DENY_FILTER, isSupportedRlsExpression } from './rls-compiler.js';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { RLS } from '@objectstack/spec/security';
 
@@ -1191,5 +1191,46 @@ describe('RLSCompiler', () => {
     const filter = compiler.compileFilter([policy]);
     expect(filter).toEqual({});
     expect(filter).not.toEqual(RLS_DENY_FILTER);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-0056 D4 — RLS predicates that won't compile must not vanish in silence
+// ---------------------------------------------------------------------------
+describe('RLSCompiler D4 — uncompilable predicates are surfaced', () => {
+  it('isSupportedRlsExpression accepts the compilable shapes', () => {
+    expect(isSupportedRlsExpression('owner_id = current_user.id')).toBe(true);
+    expect(isSupportedRlsExpression('owner = current_user.email')).toBe(true);
+    expect(isSupportedRlsExpression("status = 'published'")).toBe(true);
+    expect(isSupportedRlsExpression('id IN (current_user.org_user_ids)')).toBe(true);
+    expect(isSupportedRlsExpression('1 = 1')).toBe(true);
+  });
+
+  it('isSupportedRlsExpression rejects shapes the runtime would drop', () => {
+    expect(isSupportedRlsExpression('owner == current_user.name')).toBe(false); // `==`
+    expect(isSupportedRlsExpression('a = current_user.id AND b = 1')).toBe(false); // AND
+    expect(isSupportedRlsExpression('amount > 100')).toBe(false); // range
+    expect(isSupportedRlsExpression('')).toBe(false);
+  });
+
+  it('WARNS (does not silently drop) an unsupported-shape policy', () => {
+    const warned: string[] = [];
+    const compiler = new RLSCompiler();
+    compiler.setLogger({ warn: (message: string) => warned.push(message) });
+    const policy: any = { name: 'bad', object: 'thing', operation: 'select', using: 'owner == current_user.name' };
+    const filter = compiler.compileFilter([policy], { userId: 'u1' } as any);
+    expect(filter).toEqual(RLS_DENY_FILTER); // only policy dropped → fail-closed
+    expect(warned.length).toBe(1);
+    expect(warned[0]).toContain('uncompilable predicate');
+  });
+
+  it('does NOT warn a SUPPORTED shape whose context var is merely absent', () => {
+    const warned: string[] = [];
+    const compiler = new RLSCompiler();
+    compiler.setLogger({ warn: (message: string) => warned.push(message) });
+    // valid shape; `department` simply isn't in the context → intentional fail-closed skip.
+    const policy: any = { name: 'dept', object: 'thing', operation: 'select', using: 'dept = current_user.department' };
+    compiler.compileFilter([policy], { userId: 'u1' } as any);
+    expect(warned.length).toBe(0);
   });
 });

@@ -2,6 +2,11 @@
 
 import { z } from 'zod';
 
+// ⚠️ EXPERIMENTAL — NOT ENFORCED (ADR-0056). Data-masking rules are declared but no
+// redaction layer applies them — Field-Level Security (PermissionSet.fields) is the
+// enforced field-visibility mechanism today. Authoring masking does NOT change
+// behaviour (roadmap M2+; per ADR-0049).
+
 /**
  * Data masking protocol for PII protection
  */

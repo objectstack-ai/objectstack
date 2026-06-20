@@ -422,6 +422,8 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
  * 
  * Records a single RLS policy evaluation event for compliance and debugging.
  */
+// ⚠️ EXPERIMENTAL — NOT ENFORCED (ADR-0056). RLS audit events are not emitted by the
+// runtime RLS path — no consumer writes these. Authoring does NOT change behaviour (per ADR-0049).
 export const RLSAuditEventSchema = lazySchema(() => z.object({
   /** ISO 8601 timestamp of the evaluation */
   timestamp: z.string()
@@ -518,6 +520,8 @@ export type RLSAuditConfig = z.infer<typeof RLSAuditConfigSchema>;
  * Global configuration for the Row-Level Security system.
  * Defines how RLS is enforced across the entire platform.
  */
+// ⚠️ EXPERIMENTAL — NOT ENFORCED (ADR-0056). Global RLSConfig (defaultPolicy / bypassRoles /
+// caching / audit) is not read by the SecurityPlugin RLS path. Authoring does NOT change behaviour (per ADR-0049).
 export const RLSConfigSchema = lazySchema(() => z.object({
   /**
    * Global RLS enable/disable flag.

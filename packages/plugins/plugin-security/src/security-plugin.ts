@@ -205,6 +205,7 @@ export class SecurityPlugin implements Plugin {
     this.metadata = metadata;
     this.ql = ql;
     this.logger = ctx.logger;
+    this.rlsCompiler.setLogger?.(ctx.logger);
 
     // Probe for OrgScopingPlugin presence. When registered, its
     // `init()` exposes itself as the `org-scoping` service. We capture

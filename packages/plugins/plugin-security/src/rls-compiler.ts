@@ -59,12 +59,40 @@ export const RLS_DENY_FILTER: Record<string, unknown> = Object.freeze({
 });
 
 /**
+ * Recognize whether an RLS `using` / `check` expression matches one of the SHAPES
+ * the compiler can compile (equality against a `current_user.*` var, equality
+ * against a string literal, set-membership against a `current_user.*` array, or
+ * the `1 = 1` allow-all). This is SHAPE-only — it does not check whether the
+ * referenced context variable is populated at runtime.
+ *
+ * ADR-0056 D4: exposed so an authoring-time gate (`objectstack compile`) can REJECT
+ * a predicate the runtime would silently drop — the class of bug where
+ * `owner == current_user.name` (`==`, unsupported) compiled to nothing and left an
+ * object unprotected. A `false` here means "this predicate will never enforce".
+ */
+export function isSupportedRlsExpression(expression: string): boolean {
+  if (!expression) return false;
+  const e = expression.trim();
+  if (/^\s*1\s*=\s*1\s*$/.test(e)) return true;
+  if (/^\s*\w+\s*=\s*current_user\.\w+\s*$/.test(e)) return true;
+  if (/^\s*\w+\s*=\s*'[^']*'\s*$/.test(e)) return true;
+  if (/^\s*\w+\s+IN\s+\(\s*current_user\.\w+\s*\)\s*$/i.test(e)) return true;
+  return false;
+}
+
+/**
  * RLSCompiler
  * 
  * Compiles Row-Level Security policy expressions into query filters.
  * Converts `using` / `check` expressions into ObjectQL-compatible filter conditions.
  */
 export class RLSCompiler {
+  /** Optional logger so a SILENTLY-dropped (uncompilable-shape) policy is observable (ADR-0056 D4). */
+  private logger?: { warn?: (message: string, meta?: Record<string, unknown>) => void };
+  setLogger(logger: { warn?: (message: string, meta?: Record<string, unknown>) => void } | undefined): void {
+    this.logger = logger;
+  }
+
   /**
    * Compile RLS policies into a query filter for the given user context.
    * Multiple policies for the same object/operation are OR-combined (any match allows access).
@@ -115,6 +143,16 @@ export class RLSCompiler {
       const filter = this.compileExpression(policy.using, userCtx);
       if (filter) {
         filters.push(filter);
+      } else if (!isSupportedRlsExpression(policy.using)) {
+        // ADR-0056 D4: an UNSUPPORTED-SHAPE predicate (e.g. `==`, AND/OR, ranges)
+        // compiles to nothing and would silently vanish, leaving the object
+        // unprotected. Surface it instead of dropping in silence. (A SUPPORTED
+        // shape that returned null is the intentional "context var absent" path —
+        // it fails closed downstream and is not warned here.)
+        this.logger?.warn?.(
+          `[RLS] policy '${(policy as { name?: string }).name ?? '(unnamed)'}' on '${(policy as { object?: string }).object ?? '?'}' ` +
+            `has an uncompilable predicate and was DROPPED (no enforcement): ${policy.using}`,
+        );
       }
     }
 

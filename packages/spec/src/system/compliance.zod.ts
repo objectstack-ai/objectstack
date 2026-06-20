@@ -1,6 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+
+// ⚠️ EXPERIMENTAL — NOT ENFORCED (ADR-0056). The GDPR/HIPAA/PCI-DSS schemas below
+// are parsed but have NO runtime consumer — no data-subject-rights engine,
+// retention enforcer, BAA gate, or tokenizer reads them. Authoring them does NOT
+// change behaviour; recorded as roadmap intent (M2+). Do not rely on them for
+// compliance until a consumer lands (per ADR-0049 enforce-or-remove).
 import { ComplianceFrameworkSchema } from './security-context.zod';
 
 /**

@@ -2,6 +2,10 @@
 
 import { z } from 'zod';
 
+// ⚠️ EXPERIMENTAL — NOT ENFORCED (ADR-0056). Field-level encryption is declared but
+// no runtime crypto provider reads this config to encrypt/decrypt at rest.
+// Authoring it does NOT change behaviour (roadmap M2+; per ADR-0049).
+
 /**
  * Field-level encryption protocol
  * GDPR/HIPAA/PCI-DSS compliant

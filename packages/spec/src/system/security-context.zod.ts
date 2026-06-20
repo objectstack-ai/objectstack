@@ -2,6 +2,10 @@
 
 import { z } from 'zod';
 
+// ⚠️ EXPERIMENTAL — NOT ENFORCED (ADR-0056). The unified security-context governance
+// (audit/encryption/masking/compliance correlation) is declared but has no runtime
+// consumer. Authoring it does NOT change behaviour (roadmap M2+; per ADR-0049).
+
 /**
  * Unified Security Context Protocol
  *
