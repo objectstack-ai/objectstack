@@ -107,6 +107,16 @@ export const pageForm = defineForm({
             { field: 'addRecord', type: 'composite', disclosure: 'popover', helpText: 'Add-record entry point' },
             // Buttons ARE object actions — pick from the source object's actions.
             { field: 'buttons', widget: 'action-multi', dependsOn: 'source', helpText: "Toolbar buttons — pick from this object's actions" },
+            {
+              field: 'recordAction',
+              options: [
+                { label: 'Drawer (right-side peek)', value: 'drawer' },
+                { label: 'Full page', value: 'page' },
+                { label: 'Modal', value: 'modal' },
+                { label: 'Not clickable', value: 'none' },
+              ],
+              helpText: 'How clicking a record opens its detail',
+            },
             { field: 'showRecordCount', helpText: 'Show the record count bar' },
             { field: 'allowPrinting', helpText: 'Allow users to print this page' },
           ],

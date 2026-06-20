@@ -261,6 +261,12 @@ export const InterfacePageConfigSchema = lazySchema(() => z.object({
    * Buttons ARE object actions (not free text): correct-by-construction. */
   buttons: z.array(z.string()).optional().describe("Toolbar buttons — names of the source object's actions to surface in the page toolbar"),
 
+  /** How clicking a record opens its detail: 'drawer' (right-side peek panel,
+   * default), 'page' (full-page navigate to the record route), 'modal', or
+   * 'none' (rows not clickable). */
+  recordAction: z.enum(['drawer', 'page', 'modal', 'none']).optional()
+    .describe("How clicking a record opens its detail (drawer | page | modal | none). Default: drawer"),
+
   /** Record count */
   showRecordCount: z.boolean().optional().describe('Show record count at page bottom'),
 
