@@ -188,3 +188,39 @@ The one-time table above rots. Make it a **living ledger**: extend the ADR-0054 
 - ADR-0049 (no unenforced security properties), ADR-0054 (runtime proof), ADR-0055 (controlled-by-parent), ADR-0010 (metadata protection), ADR-0029 (kernel object ownership).
 - Audit evidence: `plugin-security/src/security-plugin.ts`, `rls-compiler.ts`; `plugin-sharing/src/sharing-service.ts`, `sharing-rule-service.ts`; `rest/src/rest-server.ts`; `runtime/src/security/resolve-execution-context.ts`; `spec/src/security/{permission,rls,sharing}.zod.ts`, `spec/src/data/object.zod.ts`.
 - Liveness ledger: `packages/spec/scripts/liveness/proof-registry.mts`. Implementation status: `content/docs/concepts/implementation-status.mdx`, `content/docs/guides/security.mdx`.
+
+---
+
+## Implementation status (2026-06-20)
+
+The decisions landed incrementally, each with a runtime proof:
+
+| Decision | Status | Proof / artifact |
+| :-- | :-- | :-- |
+| OWD scenarios (private + public-read) | ✅ landed | `showcase-private-owd`, `showcase-public-read-owd` dogfood |
+| D1 — canonical OWD vocabulary | ✅ landed | `plugin-sharing` units + OWD dogfood |
+| D2 — anonymous deny (warn) | ✅ landed (warn) | `showcase-anonymous-deny` dogfood; **flip release-gated** |
+| D4 — RLS compiler no-silent-drop | ✅ landed | `plugin-security` units |
+| D6 — configurable role hierarchy | ✅ landed | `RoleGraphService` units (`role_and_subordinates`) |
+| D7 — app-declared default profile | ✅ landed | `showcase-default-profile` dogfood |
+| D8 — experimental-tag unenforced surface | ✅ landed | spec markers + liveness |
+| **D10 — conformance matrix** | ✅ landed | `authz-conformance.matrix.ts` + `.test.ts` (CI-checked) |
+| D6/D7 e2e showcase, requireAuth flip | follow-on | see below |
+
+### `requireAuth` default-flip readiness (pre-flip audit)
+
+Flipping the global `requireAuth` default to secure-by-default is **release-gated**. A
+pre-flip audit of the legitimate anonymous surfaces found:
+
+- **Share links** — SAFE. `share-link-service.ts` validates the token then reads under a
+  **system context** (`SYSTEM_CTX`), so it does not depend on the anonymous fail-open and
+  survives a deny flip.
+- **Control-plane** (`/auth`, `/health`, `/discovery`) — exempt via dispatcher skip-paths.
+- **Public forms** — AT RISK. `/forms/:slug/submit` bypasses `enforceAuth` but the INSERT
+  relies on a `guest_portal` profile to scope it; `guest_portal` is **not built-in** (only
+  the CRM example defines one), so under a deny flip, public forms break unless the
+  deployment ships a `guest_portal` profile.
+
+**Pre-requisite for the flip:** make public-form submission self-authorizing (grant INSERT
+on the form's declared target object) or ship a built-in `guest_portal`, then warn→enforce
+with a migration note. Until then, D2's boot WARN is the landed state.
