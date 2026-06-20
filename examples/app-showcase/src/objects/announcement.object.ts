@@ -5,7 +5,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 /**
  * Team Announcement — the canonical PUBLIC-READ object (ADR-0056 OWD).
  *
- * Declares `sharingModel: 'read'`: every member can READ every announcement,
+ * Declares `sharingModel: 'public_read'`: every member can READ every announcement,
  * but only the OWNER may edit or delete it (the engine derives "everyone reads,
  * owner writes" from the OWD baseline + the auto-stamped `owner_id`). No RLS
  * policy is authored. This is the sibling of `showcase_private_note`
@@ -20,8 +20,9 @@ export const Announcement = ObjectSchema.create({
   icon: 'megaphone',
   description: 'A team announcement everyone can read but only its owner can edit — `read` OWD (ADR-0056).',
 
-  // Everyone reads; owner writes. No RLS authored.
-  sharingModel: 'read',
+  // Everyone reads; owner writes. Canonical OWD name (ADR-0056 D1); `read` is
+  // the legacy alias. No RLS authored.
+  sharingModel: 'public_read',
 
   fields: {
     title: Field.text({ label: 'Title', required: true, searchable: true, maxLength: 160 }),

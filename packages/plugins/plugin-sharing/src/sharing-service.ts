@@ -45,15 +45,21 @@ const SYSTEM_CTX = { isSystem: true, roles: [], permissions: [] } as const;
 const OWNER_FIELD = 'owner_id';
 
 /**
- * Effective sharing model. Anything other than `private` / `read` is
- * treated as public — that includes objects that don't declare
- * `sharingModel` at all, so existing CRM behaviour is preserved
- * until an admin opts an object in.
+ * Effective sharing model — collapses the authorable OWD vocabulary onto the
+ * three behaviours this service enforces (ADR-0056 D1):
+ *   - `private`                         → owner-only read + write
+ *   - `public_read` / legacy `read`     → everyone reads, owner writes
+ *   - everything else                   → public (no record-level filter)
+ *
+ * "Everything else" covers the canonical `public_read_write`, the legacy
+ * `read_write` / `full` aliases, `controlled_by_parent` (scoped separately by
+ * the security plugin), and objects that declare no `sharingModel` at all — so
+ * existing behaviour is preserved until an admin opts an object in.
  */
 function effectiveSharingModel(schema: any): 'private' | 'read' | 'public' {
   const m = schema?.sharingModel ?? schema?.security?.sharingModel;
   if (m === 'private') return 'private';
-  if (m === 'read') return 'read';
+  if (m === 'read' || m === 'public_read') return 'read';
   return 'public';
 }
 

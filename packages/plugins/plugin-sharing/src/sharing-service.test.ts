@@ -100,6 +100,18 @@ const PUBLIC_SCHEMA = {
   fields: { id: {}, name: {}, owner_id: {} },
 };
 
+// ADR-0056 D1 — canonical OWD vocabulary maps onto the same enforced behaviours.
+const CANON_PUBLIC_READ_SCHEMA = {
+  name: 'kbarticle',
+  sharingModel: 'public_read', // canonical alias of legacy `read`
+  fields: { id: {}, name: {}, owner_id: {} },
+};
+const CANON_PUBLIC_RW_SCHEMA = {
+  name: 'whiteboard',
+  sharingModel: 'public_read_write', // canonical alias of "public" (no record filter)
+  fields: { id: {}, name: {}, owner_id: {} },
+};
+
 const ORPHAN_SCHEMA = {
   name: 'note',
   sharingModel: 'private',
@@ -118,6 +130,8 @@ describe('SharingService.buildReadFilter', () => {
       lead: LEAD_SCHEMA,
       task: PUBLIC_SCHEMA,
       note: ORPHAN_SCHEMA,
+      kbarticle: CANON_PUBLIC_READ_SCHEMA,
+      whiteboard: CANON_PUBLIC_RW_SCHEMA,
       sys_record_share: { name: 'sys_record_share' },
     });
     svc = new SharingService({ engine });
@@ -137,6 +151,14 @@ describe('SharingService.buildReadFilter', () => {
 
   it('returns null for read-only-sharing objects (writes are gated, reads are not)', async () => {
     expect(await svc.buildReadFilter('lead', { userId: 'u1' })).toBeNull();
+  });
+
+  it('canonical public_read reads like `read` (everyone reads → no filter) [ADR-0056 D1]', async () => {
+    expect(await svc.buildReadFilter('kbarticle', { userId: 'u1' })).toBeNull();
+  });
+
+  it('canonical public_read_write is unscoped on read [ADR-0056 D1]', async () => {
+    expect(await svc.buildReadFilter('whiteboard', { userId: 'u1' })).toBeNull();
   });
 
   it('returns null for objects without owner_id even when private', async () => {
@@ -171,6 +193,8 @@ describe('SharingService.canEdit', () => {
       account: ACCOUNT_SCHEMA,
       lead: LEAD_SCHEMA,
       task: PUBLIC_SCHEMA,
+      kbarticle: CANON_PUBLIC_READ_SCHEMA,
+      whiteboard: CANON_PUBLIC_RW_SCHEMA,
       sys_record_share: { name: 'sys_record_share' },
     });
     svc = new SharingService({ engine });
@@ -180,6 +204,9 @@ describe('SharingService.canEdit', () => {
     ];
     engine._tables.lead = [
       { id: 'l1', name: 'Lead1', owner_id: 'alice' },
+    ];
+    engine._tables.kbarticle = [
+      { id: 'k1', name: 'KB1', owner_id: 'alice' },
     ];
   });
 
@@ -212,6 +239,15 @@ describe('SharingService.canEdit', () => {
   it('enforces canEdit for sharingModel=read', async () => {
     expect(await svc.canEdit('lead', 'l1', { userId: 'alice' })).toBe(true);
     expect(await svc.canEdit('lead', 'l1', { userId: 'bob' })).toBe(false);
+  });
+
+  it('canonical public_read gates writes to the owner [ADR-0056 D1]', async () => {
+    expect(await svc.canEdit('kbarticle', 'k1', { userId: 'alice' })).toBe(true);
+    expect(await svc.canEdit('kbarticle', 'k1', { userId: 'bob' })).toBe(false);
+  });
+
+  it('canonical public_read_write lets anyone write [ADR-0056 D1]', async () => {
+    expect(await svc.canEdit('whiteboard', 'anything', { userId: 'bob' })).toBe(true);
   });
 });
 

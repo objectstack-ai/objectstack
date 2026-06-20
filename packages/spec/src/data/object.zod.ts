@@ -598,7 +598,7 @@ const ObjectSchemaBase = z.object({
    * ids)` on reads and requires master edit-access on by-id writes. No RLS policy
    * is authored — the inheritance is derived from the relationship.
    */
-  sharingModel: z.enum(['private', 'read', 'read_write', 'full', 'controlled_by_parent']).optional().describe('Default sharing model'),
+  sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent', 'read', 'read_write', 'full']).optional().describe('Org-Wide Default record visibility (OWD). Canonical: private (owner-only) | public_read (everyone reads, owner writes) | public_read_write (everyone reads+writes) | controlled_by_parent (derived from the master record). Legacy aliases: read=public_read, read_write/full=public_read_write. ADR-0056 D1.'),
 
   /**
    * Public Share-Link Policy
