@@ -179,7 +179,7 @@ OWD sets the baseline access level for each object across the entire organizatio
 | **Full Access** | `full` | All users | All users (incl. transfer/share) | Fully collaborative data |
 
 <Callout type="info">
-A standalone `OWDModel` enum also exists (`packages/spec/src/security/sharing.zod.ts`) with the values `private`, `public_read`, `public_read_write`, and `controlled_by_parent` — the last is for child objects in master-detail relationships, where access is derived from the parent record. Note the per-object `sharingModel` field (`read`/`read_write`) and `OWDModel` (`public_read`/`public_read_write`) use different value spellings.
+Since ADR-0056 (D1), `object.sharingModel` accepts the **canonical OWD vocabulary** — `private`, `public_read`, `public_read_write`, and `controlled_by_parent` — *in addition to* the legacy `read` / `read_write` / `full` spellings shown above (both are valid; the canonical values are preferred for new objects). `controlled_by_parent` is for child objects in a master-detail relationship, where access is **derived from the parent record** (a line is visible/editable only if its master is). These models are enforced by `plugin-sharing` + `plugin-security` and dogfood-proven over the real HTTP stack.
 </Callout>
 
 ### Configuration Example

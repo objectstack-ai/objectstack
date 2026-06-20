@@ -426,27 +426,54 @@ permissions: {
 
 ### Row-Level Security (RLS)
 
-Filter records visible to a role using a CEL predicate. Returns the rows the
-caller may see — the runtime ANDs it into every query.
+The **enforced** RLS surface is a list of `rowLevelSecurity` policies on a
+**permission set / profile** (`PermissionSetSchema.rowLevelSecurity`), *not* a
+CEL predicate on the object. Each policy carries a `using` (read filter) and/or
+`check` (write filter) **string** predicate. The compiler ANDs `using` into
+every read for users carrying that set; `check` gates writes. (`@objectstack/plugin-security`
+re-reads the target row through the write filter before single-id `update`/`delete`.)
 
 ```typescript
-rls: [
+// in a *.profile.ts / permission-set
+rowLevelSecurity: [
   {
     name: 'own_records',
-    roles: ['sales'],
-    predicate: P`record.owner_id == os.user.id`,
+    operations: ['select', 'update', 'delete'],
+    using: 'owner_id = current_user.id',   // read scope
+    check: 'owner_id = current_user.id',   // write scope
   },
   {
-    name: 'territory_scope',
-    roles: ['sales_manager'],
-    predicate: P`record.territory in os.user.managedTerritories`,
+    name: 'org_isolation',
+    operations: ['all'],
+    using: 'organization_id = current_user.organization_id',
   },
 ]
 ```
 
-- Source: `node_modules/@objectstack/spec/src/security/rls.zod.ts`
-- The CEL predicate uses the same syntax as formulas — load
-  **objectstack-formula** when authoring complex predicates.
+Predicates use a **restricted grammar** (not arbitrary CEL): `field = current_user.<prop>`,
+`field = 'literal'`, `field IN (current_user.<array>)`, or `1=1`. The
+compiler resolves these `current_user.*` placeholders:
+
+| Placeholder | Resolves to |
+|:--|:--|
+| `current_user.id` | the caller's user id (ownership) |
+| `current_user.email` | the caller's email (ADR-0056 #2054) |
+| `current_user.organization_id` | the caller's tenant |
+| `current_user.org_user_ids` | ids of users in the same org (for `IN`) |
+| `current_user.roles` | the caller's roles (for `IN`) |
+
+- Source: `node_modules/@objectstack/spec/src/security/permission.zod.ts` (policy shape),
+  `node_modules/@objectstack/spec/src/security/rls.zod.ts` (predicate grammar).
+- Owner-scoping shortcut: the built-in `member_default` set already owner-scopes
+  writes via `owner_only_writes` / `owner_only_deletes`, and an object's
+  `sharingModel` (`private` / `public_read` / `controlled_by_parent`, ADR-0056 D1)
+  is the declarative way to set the org-wide default — prefer those over
+  hand-written policies for the common cases.
+
+> **Experimental:** a separate object-level `rls` config with a free-form CEL
+> `predicate` exists in `rls.zod.ts` but is marked experimental (ADR-0056 D8) and
+> is **not** the path the runtime compiles/enforces. Author RLS as
+> `rowLevelSecurity` policies as shown above.
 
 ### Field-level encryption
 

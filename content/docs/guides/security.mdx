@@ -7,7 +7,7 @@ description: "Complete guide to implementing enterprise-grade security in Object
 
 Complete guide to implementing enterprise-grade security in ObjectStack with fine-grained permissions and data access controls.
 
-> **Implementation status — Phase-1 RBAC is live.** REST → ObjectQL now propagates a populated `ExecutionContext` (userId, tenantId, roles, permissions) into the SecurityPlugin middleware, so CRUD / FLS / RLS checks actually fire on every authenticated request. The default `member_default` permission set ships a wildcard RLS rule `organization_id = current_user.organization_id` plus explicit per-object overrides `sys_organization_self` (`id = current_user.organization_id`) and `sys_user_self` (`id = current_user.id`) for the two global tables that lack an `organization_id` column. RLS expressions, the physical column, and `RLSUserContext.organization_id` all use the same canonical name — there is no `tenantField` rewrite indirection (schemas with a different physical tenant column should fork the defaults). The legacy `objectql.registerTenantMiddleware` has been removed; SecurityPlugin is the sole authority for tenant isolation. Analytics also reuses the same read scope: `@objectstack/service-analytics` auto-bridges to `security.getReadFilter(object, context)` when the security service is registered, so dataset-bound dashboards/reports do not bypass RLS. End-to-end verified on `pnpm dev:crm` across `sys_organization`, `sys_member`, `sys_user`, `sys_user_permission_set`, `sys_role_permission_set`. **Anonymous traffic still bypasses enforcement** until a default-deny pass lands; Sharing Rules, Studio RLS visual editor, per-user×org permission cache, and audit UI for denied access are queued. See `CHANGELOG.md` and `concepts/implementation-status.mdx` for the latest matrix.
+> **Implementation status — Phase-1 RBAC is live.** REST → ObjectQL now propagates a populated `ExecutionContext` (userId, tenantId, roles, permissions) into the SecurityPlugin middleware, so CRUD / FLS / RLS checks actually fire on every authenticated request. The default `member_default` permission set ships a wildcard RLS rule `organization_id = current_user.organization_id` plus explicit per-object overrides `sys_organization_self` (`id = current_user.organization_id`) and `sys_user_self` (`id = current_user.id`) for the two global tables that lack an `organization_id` column. RLS expressions, the physical column, and `RLSUserContext.organization_id` all use the same canonical name — there is no `tenantField` rewrite indirection (schemas with a different physical tenant column should fork the defaults). The legacy `objectql.registerTenantMiddleware` has been removed; SecurityPlugin is the sole authority for tenant isolation. Analytics also reuses the same read scope: `@objectstack/service-analytics` auto-bridges to `security.getReadFilter(object, context)` when the security service is registered, so dataset-bound dashboards/reports do not bypass RLS. End-to-end verified on `pnpm dev:crm` across `sys_organization`, `sys_member`, `sys_user`, `sys_user_permission_set`, `sys_role_permission_set`. **Anonymous traffic still falls open by default** (the default-deny flip is release-gated); since ADR-0056 D2 the server logs a boot-time warning when `requireAuth` is unset, and public forms self-authorize via a declaration-derived `publicFormGrant` (ADR-0056 Option A — see [Public Forms](./public-forms)). Organization-Wide Defaults (`private` / `public_read` / `public_read_write` / `controlled_by_parent`) and Sharing Rules (owner + criteria, with `role_and_subordinates` hierarchy widening) are live and dogfood-proven (ADR-0056); the Studio RLS visual editor, per-user×org permission cache, and audit UI for denied access are queued. See `CHANGELOG.md` and `concepts/implementation-status.mdx` for the latest matrix.
 
 ## Table of Contents
 
@@ -399,7 +399,7 @@ export const AccountTeamSharingRule: SharingRule = {
   // Predicate (CEL): which records to share
   condition: P`record.type == "customer" && record.is_active == true`,
 
-  // Who to share with (a single recipient: user, group, role, etc.)
+  // Who to share with (a single recipient — see the recipient types below)
   sharedWith: {
     type: 'role',
     value: 'sales_manager',
@@ -409,6 +409,27 @@ export const AccountTeamSharingRule: SharingRule = {
   accessLevel: 'edit',
 };
 ```
+
+#### Recipient types
+
+`sharedWith` (and `ownedBy`) accept a `{ type, value }` recipient. The supported
+`type` values are:
+
+| `type` | Shares with |
+|:--|:--|
+| `user` | A single user |
+| `group` | All members of a public group |
+| `role` | Everyone assigned that role |
+| `role_and_subordinates` | Everyone in that role **and every role below it** in the hierarchy (ADR-0056 D6) — configurable per rule, so one rule can cascade down a branch of the org chart |
+
+```typescript
+// Share with a sales manager AND everyone reporting up to them.
+sharedWith: { type: 'role_and_subordinates', value: 'sales_manager' },
+```
+
+The recipient set is expanded by `@objectstack/plugin-sharing` when the rule is
+evaluated (`afterInsert` / `afterUpdate`); `role_and_subordinates` walks the
+`sys_role.parent` graph (cycle-safe).
 
 ### Owner-Based Sharing Rules
 

@@ -9,7 +9,7 @@ ObjectStack Forms are Airtable-style **metadata-driven** forms with two render m
 
 | Mode | Route | Auth | Spec source | Submit target |
 |---|---|---|---|---|
-| **Public** | `/console/f/:slug` | anonymous | `GET /api/v1/forms/:slug` (resolved by `sharing.publicLink`) | `POST /api/v1/forms/:slug/submit` (field whitelist + `guest_portal` profile) |
+| **Public** | `/console/f/:slug` | anonymous | `GET /api/v1/forms/:slug` (resolved by `sharing.publicLink`) | `POST /api/v1/forms/:slug/submit` (field whitelist + declaration-derived `publicFormGrant`) |
 | **Internal** | `/console/forms/:name` | authed | `GET /api/v1/meta/view/:name` (+ `meta/object/:object`) | `POST /api/v1/data/:object` (full RBAC) |
 
 Both modes:
@@ -31,13 +31,23 @@ GET  /api/v1/forms/:slug   →   rest-server scans views     →
                            ←   { form, objectSchema }
 
 POST /api/v1/forms/:slug/  →   field whitelist (form)
-     submit                →   inject permissions:
-                               ['guest_portal']            →
+     submit                →   derive publicFormGrant:
+                               { object: <form target> }   →
                                protocol.createData()       →   INSERT
                            ←   { object, id, record }
 ```
 
 Only the spec'd whitelist of form fields is accepted; everything else (status, owner, internal_notes, …) is stripped server-side. Lifecycle hooks then stamp server-controlled defaults.
+
+> **Self-authorizing forms (ADR-0056 Option A).** The submit route does **not**
+> require a deployment-configured profile. It derives a narrow `publicFormGrant`
+> from the form's own declaration — `{ object: <the form's target object> }` —
+> and the SecurityPlugin authorizes **only** create + the immediate read-back on
+> exactly that object, never anything else and never the anonymous fall-open. So
+> public forms work under secure-by-default (`requireAuth: true`) with **no**
+> `guest_portal` profile. The `guest_portal` permission set + `anonymous` flag
+> are still attached for **back-compat** (object hooks that detect a guest via a
+> falsy `ctx.user?.id`), but they are no longer the authorization mechanism.
 
 ## 1. Declare the form view
 
@@ -87,9 +97,14 @@ export default defineView({
 > - Anything not in the `sections[].fields[]` whitelist is silently stripped at submit time. Treat the whitelist as the form's authoritative "what the public is allowed to set" list.
 > - Multiple form views per object are fine — only the one(s) with `sharing.allowAnonymous === true` are exposed.
 
-## 2. Create the `guest_portal` profile
+## 2. (Optional) Create the `guest_portal` profile
 
-The submit handler attaches `permissions: ['guest_portal']` to the anonymous execution context, so you must define a profile by that name (or rename and adjust the handler logic). Restrict it to INSERT-only on the target object.
+Authorization no longer depends on this profile — the declaration-derived
+`publicFormGrant` (see the note above) is what permits the insert. You only need
+a `guest_portal` profile if you rely on the legacy back-compat path (e.g. an
+older runtime, or object hooks that branch on the `guest_portal` permission).
+When present it is still attached to the anonymous context, so keep it
+INSERT-only on the target object.
 
 ```ts
 // hotcrm/src/profiles/guest-portal.profile.ts
@@ -214,7 +229,7 @@ The companion `GET /api/v1/forms/:slug` route returns `500 FORM_RESOLVE_FAILED` 
 ### Auth model
 
 - Neither route calls `enforceAuth`, so they work even when the project is configured with `requireAuth: true`.
-- The execution context handed to ObjectQL is `{ permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin resolves the profile and enforces its allow-list.
+- The execution context handed to ObjectQL is `{ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin honors `publicFormGrant` first — a create + read-back grant scoped to exactly the declared object — so authorization holds even without a `guest_portal` profile. `permissions: ['guest_portal']` is retained for back-compat.
 - No CSRF or auth header is needed; embed the form on any domain.
 
 ## 5. Embedding from a front-end
@@ -372,7 +387,7 @@ The same FormView can therefore drive **three** experiences — public collectio
 
 - [x] **Whitelist enforced server-side** — clients cannot widen the field set by hand-crafting JSON.
 - [x] **Hook strips server-controlled fields** — `owner`, `status`, `internal_notes`, `is_*` flags, conversion fields are removed even if they survive the whitelist.
-- [x] **Profile is INSERT-only** — anonymous callers cannot read, edit, or delete via the form path.
+- [x] **Grant is create + read-back only** — the declaration-derived `publicFormGrant` authorizes only insert (and the immediate read-back) on the form's target object; anonymous callers cannot read other records, edit, or delete via the form path.
 - [x] **No tenancy leakage** — submissions land on the project resolved from hostname/path, not from a client-supplied tenant id.
 - [ ] **Rate limiting / captcha** — not built in. Add a reverse-proxy rate limit (e.g. nginx, Cloudflare) or fronting plugin if the form sits on the public internet.
 - [ ] **Schema disclosure** — `GET /forms/:slug` returns labels and select options for whitelisted fields. If any of those are commercially sensitive, do not include them in the form.
