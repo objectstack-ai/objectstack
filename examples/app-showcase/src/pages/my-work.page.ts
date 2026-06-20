@@ -58,16 +58,31 @@ export const MyWorkPage: Page = {
       name: 'sidebar',
       width: 'small',
       components: [
-        { type: 'element:text', properties: { content: 'Shortcuts' } },
-        { type: 'element:text', properties: { content: '• Delivery Operations — org-wide KPI dashboard.' } },
-        { type: 'element:text', properties: { content: '• Approvals — items in review.' } },
-        { type: 'element:text', properties: { content: '• New Project (Wizard).' } },
-        // Per-user rendering via `visible` on the signed-in user (now that the
-        // renderer feeds `user` into the expression context). The first line
-        // shows for the admin; the second is gated to a different email and
-        // stays hidden — proving the gate, not just always-on rendering.
-        { type: 'element:text', properties: { visible: "user.email == 'admin@objectos.ai'", content: '✓ Admin-only note (visible: user.email == admin@objectos.ai)' } },
-        { type: 'element:text', properties: { visible: "user.email == 'nobody@example.com'", content: 'This must NOT appear (gated to a different user).' } },
+        // Shortcuts in a page:card — children now render in a region
+        // (the bare `page:card` key is no longer shadowed by the thin layout div).
+        {
+          type: 'page:card',
+          properties: {
+            title: 'Shortcuts',
+            children: [
+              { type: 'element:text', properties: { content: 'Delivery Operations — org-wide KPI dashboard.' } },
+              { type: 'element:text', properties: { content: 'Approvals — items awaiting a decision.' } },
+              { type: 'element:text', properties: { content: 'New Project (Wizard) — stepped create.' } },
+            ],
+          },
+        },
+        // Admin-only card — per-user rendering via `visible` on the signed-in
+        // user (the renderer now feeds `user` into the expression context).
+        {
+          type: 'page:card',
+          properties: {
+            title: 'Leadership View',
+            visible: "user.email == 'admin@objectos.ai'",
+            children: [
+              { type: 'element:text', properties: { content: 'Admin-only — shown because user.email matches the card’s visible expression.' } },
+            ],
+          },
+        },
       ],
     },
   ],
