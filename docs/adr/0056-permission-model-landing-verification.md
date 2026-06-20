@@ -64,7 +64,7 @@ Legend — **E** enforced · **P** partial · **U** declared-but-unenforced (fai
 | 12 | Ownership `owner_id` stamp + scope | **E** | `security-plugin.ts` ~`479` auto-stamp; owner RLS | ✓ `rls-fixture` | OK |
 | 13 | Manual record shares (`sys_record_share`) | **E** | `sharing-service.ts` ~`117` buildReadFilter | unit ✗pf | OK; add proof |
 | 14 | Sharing rules (criteria/owner) | **P** | rules materialize into `sys_record_share`; **spec CEL `condition`+recipients diverge from runtime `criteria_json`** | unit ✗pf | **D5 (spec↔runtime reconcile, per 0049)** |
-| 15 | Role hierarchy widening (`parent`) | **N** | `permission-evaluator.ts` notes "no subordinate rollup"; manager does **not** see subordinates | ✗ | **D6: implement or `experimental`** |
+| 15 | Role hierarchy widening (`parent`) | **N** | `sharing-rule-service.ts` ~`253` `expandRecipient` has no `role_and_subordinates` case (declared in the enum, never expanded); `team-graph.ts:27` flat; no consumer of `Role.parent` | ✗ | **D6: implement or `experimental`** |
 | 16 | Multi-tenant org isolation | **E** | `plugin-org-scoping` ~`129` stamp + wildcard RLS + field-existence fail-closed | ✓ `rls-multitenant` | OK |
 | 17 | Anonymous / unauthenticated | **P/U** | `rest-server.ts` `requireAuth` **defaults false**; no context ⇒ checks skipped ⇒ reads unscoped data | unit ✗pf | **D2 (fail-open, HIGH)** |
 | 18 | `systemPermissions` / tab-app gating | **E** | `rest-server.ts` ~`1069` filterAppForUser (server-side) | ✗pf | OK; add proof |
@@ -116,7 +116,7 @@ The spec declares `CriteriaSharingRuleSchema`/`OwnerSharingRuleSchema` with a CE
 
 ### D6 — Role-hierarchy widening: implement, or mark `experimental`
 
-`Role.parent` exists and is documented as "managers see subordinates," but no code rolls subordinate access up. It is **silently a no-op** — a 0049 violation.
+`Role.parent` exists and is documented as "managers see subordinates," but no code consumes it: `expandRecipient` (`sharing-rule-service.ts:253`) resolves a `role` recipient to its **direct** members only and has **no `role_and_subordinates` branch** (the enum value ships, unexpanded). It is **silently a no-op** — a 0049 violation. (Department hierarchy *is* walked — `department-graph.ts:32` — so the gap is role-specific.)
 
 - **Decision: mark `Role.parent`'s visibility-rollup semantics `[EXPERIMENTAL — not enforced]`** in the spec now (it is not on the critical path for v1), with a roadmap entry to implement it as a `rlsMembership` pre-resolution (`current_user.subordinate_user_ids`) reusing the ADR-0055 IN-form — **no compiler change**. (Implementing now is acceptable if cheap; the default is honest-tagging over a silent no-op.)
 
