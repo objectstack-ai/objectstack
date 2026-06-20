@@ -1,5 +1,110 @@
 # @objectstack/plugin-security
 
+## 9.11.0
+
+### Minor Changes
+
+- fa8964d: feat(security): RLS predicates that won't compile are surfaced, not silently dropped (ADR-0056 D4)
+
+  The RLS compiler previously dropped any `using`/`check` it could not parse (e.g. `==`,
+  `AND`/`OR`, ranges) in silence — if it was the only policy, the object lost protection
+  with no signal (the class of bug that left a showcase owner predicate inert for two PRs).
+  Now the compiler WARNS (via the security plugin's logger) when an **unsupported-shape**
+  predicate is dropped, distinguishing it from the intentional "context variable absent"
+  fail-closed skip. Also exports `isSupportedRlsExpression(expr)` so an authoring-time gate
+  (`objectstack compile`) can reject a predicate the runtime would never enforce. No change
+  to compiled filters for valid predicates; fail-closed semantics preserved.
+
+- 6595b53: feat(security): app-declarable default profile (`isDefault`, ADR-0056 D7)
+
+  An app can now declare its default access posture for authenticated users who have
+  no explicit grants, via `isDefault: true` on a permission set — instead of always
+  inheriting the built-in `member_default`. The SecurityPlugin resolves the fallback
+  from the `isDefault` profile when no explicit `fallbackPermissionSet` is configured
+  (falling back to `member_default` when none is declared — non-breaking). This is the
+  foundation for SSO/JIT provisioning (mapping IdP claims → a declared default profile).
+  Proven by the `showcase-default-profile` dogfood test: a sign-up governed by a custom
+  default that grants only `showcase_announcement` can read it but is denied
+  `showcase_private_note` (which the `member_default` wildcard would have allowed).
+
+- 751f5cf: feat(security): declaration-derived public-form authorization (ADR-0056, Option A)
+
+  Public form submissions are now authorized by the **declaration**, not by a
+  deployment-configured `guest_portal` profile. The form-submit route derives a narrow
+  `publicFormGrant: { object }` from the matched form's target object; the SecurityPlugin
+  honors it as a least-privilege capability — **create + the immediate read-back on THAT
+  object only**, with no userId, and crucially NOT the anonymous fall-open. This makes
+  public forms work under secure-by-default (`requireAuth`) **without** a hand-configured
+  `guest_portal`, scoped to exactly the declared object (the field allow-list is still
+  enforced at the route; `guest_portal`/`anonymous` are kept on the context for back-compat
+  with guest-detection hooks). It is the prerequisite that unblocks the eventual
+  `requireAuth` default flip, and generalizes the platform principle "public access =
+  declared + runtime-derived scoped grant" (the same shape share-links already use).
+  Proven by `form-self-auth` dogfood (create on target allowed; cross-object + update/delete
+  denied). plugin-security 108, rest 121, full dogfood 98 — no regression.
+
+- 5a5a9fe: feat(security): public-form demo (Option A) + app-declared default profile wiring (ADR-0056 D7)
+
+  Wires ADR-0056's app-declarable default profile through the CLI so it actually
+  takes effect under `pnpm dev`. `@objectstack/plugin-security` exports a new
+  `appDefaultProfileName(permissions)` helper that extracts the first
+  `isProfile && isDefault` profile name from a stack; `@objectstack/cli` (`serve.ts`)
+  passes it as the SecurityPlugin `fallbackPermissionSet` (undefined → built-in
+  `member_default` preserved, so apps that declare no default are unaffected).
+
+  The showcase gains a working web-to-lead **public form** (`showcase_inquiry` +
+  an `allowAnonymous` FormView authorized by the declaration-derived
+  `publicFormGrant`, no `guest_portal` profile) and an app-declared default
+  profile (`showcase_member_default`), each covered by a dogfood proof over the
+  real HTTP stack.
+
+- 4c213c2: Master-detail "controlled by parent" permissions (ADR-0055).
+
+  A detail object can now declare `sharingModel: 'controlled_by_parent'`: its read/write access is derived from its master record, with no authored RLS.
+
+  - `@objectstack/spec`: `controlled_by_parent` added to the authorable `object.sharingModel` enum.
+  - `@objectstack/plugin-security`: reads inject `masterFK IN (accessible master ids)` (resolved from the master's own RLS, reusing the existing filter machinery — zero RLS-compiler changes); by-id writes (insert/update/delete) to a detail now require edit access to its master, closing the #1994-class by-id hole for derived access.
+  - `@objectstack/verify`: related-record **topological synthesis** — `deriveCrudCases` no longer skips objects with required relations; it builds the object dependency graph, orders it topologically, and threads real target ids, so relationship-dense objects (and the master-detail RLS proof) are verifiable. Honest `blocked` verdicts remain for required-reference cycles and external/missing targets.
+
+  v1 limits (per ADR-0055): the accessible-master id set is unbounded (large-tenant scale is a documented future limit), and master-detail chains are single-level (not transitively traversed).
+
+- 2afb612: feat(security): resolve `current_user.email` in RLS owner policies
+
+  RLS `using` predicates can now reference **`current_user.email`** — a unique,
+  human-readable, _seedable_ owner anchor (`owner = current_user.email`). Previously
+  the RLS compiler resolved only `current_user.id` / `organization_id` / `roles` /
+  `org_user_ids`, so any owner-by-name/email predicate silently compiled to the
+  deny sentinel (fail-closed → the user saw nothing). Email is sourced for free
+  from the auth session (with a bounded `sys_user` fallback for the API-key path)
+  and threaded onto the `ExecutionContext` in both identity resolvers — the REST
+  data path (`rest-server`) and the dispatcher path (`resolve-execution-context`).
+
+  Display `name` is deliberately **not** exposed to RLS: names collide, and a
+  collision on an ownership predicate is an access-control leak. Only unique
+  identifiers (`id`, `email`) are resolvable.
+
+  This makes owner-scoped row-level security work with seed data (no per-user ids
+  needed) and, combined with `controlled_by_parent` (ADR-0055), lets a master's
+  owner scoping flow to its detail records. The example-showcase demonstrates it:
+  `showcase_invoice` carries an `owner` email + an owner RLS policy, its lines are
+  controlled-by-parent, and invoices/lines are seeded per owner. It also fixes the
+  showcase's previously inert owner predicates (they used `==` and `current_user.name`,
+  neither of which the compiler accepts) to `= current_user.email`.
+
+### Patch Changes
+
+- Updated dependencies [e7f6539]
+- Updated dependencies [2365d07]
+- Updated dependencies [6595b53]
+- Updated dependencies [fa8964d]
+- Updated dependencies [36138c7]
+- Updated dependencies [a8e4f3b]
+- Updated dependencies [4c213c2]
+- Updated dependencies [2afb612]
+  - @objectstack/spec@9.11.0
+  - @objectstack/core@9.11.0
+  - @objectstack/platform-objects@9.11.0
+
 ## 9.10.0
 
 ### Minor Changes

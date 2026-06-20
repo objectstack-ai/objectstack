@@ -1,5 +1,12 @@
 # @objectstack/nuxt
 
+## 9.11.0
+
+### Patch Changes
+
+- Updated dependencies [2afb612]
+  - @objectstack/runtime@9.11.0
+
 ## 9.10.0
 
 ### Patch Changes

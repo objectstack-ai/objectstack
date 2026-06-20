@@ -1,5 +1,91 @@
 # @objectstack/example-showcase
 
+## 0.2.0
+
+### Minor Changes
+
+- 37e9acb: feat(app-showcase): declarative OWD scenarios — owner-private + public-read (ADR-0056)
+
+  Adds the two canonical Org-Wide-Default scenarios, each declaring its access policy
+  in ONE word with no authored RLS:
+
+  - `showcase_private_note` — `sharingModel: 'private'`: a user sees and edits only
+    the notes they own (owner-only read + write).
+  - `showcase_announcement` — `sharingModel: 'read'`: every member reads every
+    announcement, but only the owner may edit/delete it (public-read).
+
+  Both derive scoping from the OWD baseline + the auto-stamped `owner_id` — the
+  declarative counterpart to the invoice's hand-written `owner = current_user.email`
+  escape-hatch. Proven end-to-end (two users, real HTTP) by the new
+  `showcase-private-owd` and `showcase-public-read-owd` dogfood tests, which together
+  demonstrate the OWD read-visibility axis (`private` hides others' rows; `read`
+  shows them but still protects writes).
+
+### Patch Changes
+
+- e7f6539: feat(spec,sharing): canonical OWD vocabulary on `object.sharingModel` (ADR-0056 D1)
+
+  Reconciles the Org-Wide-Default naming so authors use ONE vocabulary. `object.sharingModel`
+  now accepts the canonical OWD names — `private` | `public_read` | `public_read_write` |
+  `controlled_by_parent` — alongside the legacy `read` / `read_write` / `full` aliases (kept,
+  non-breaking). The sharing runtime maps them onto the three enforced behaviours
+  (`public_read` ≡ legacy `read` = everyone reads / owner writes; `public_read_write` =
+  unscoped). Unknown values remain rejected by the enum (authoring-time, fail-closed). The
+  showcase announcement now declares the canonical `public_read`, exercised end-to-end by the
+  public-read dogfood proof.
+
+- 5a5a9fe: feat(security): public-form demo (Option A) + app-declared default profile wiring (ADR-0056 D7)
+
+  Wires ADR-0056's app-declarable default profile through the CLI so it actually
+  takes effect under `pnpm dev`. `@objectstack/plugin-security` exports a new
+  `appDefaultProfileName(permissions)` helper that extracts the first
+  `isProfile && isDefault` profile name from a stack; `@objectstack/cli` (`serve.ts`)
+  passes it as the SecurityPlugin `fallbackPermissionSet` (undefined → built-in
+  `member_default` preserved, so apps that declare no default are unaffected).
+
+  The showcase gains a working web-to-lead **public form** (`showcase_inquiry` +
+  an `allowAnonymous` FormView authorized by the declaration-derived
+  `publicFormGrant`, no `guest_portal` profile) and an app-declared default
+  profile (`showcase_member_default`), each covered by a dogfood proof over the
+  real HTTP stack.
+
+- 2afb612: feat(security): resolve `current_user.email` in RLS owner policies
+
+  RLS `using` predicates can now reference **`current_user.email`** — a unique,
+  human-readable, _seedable_ owner anchor (`owner = current_user.email`). Previously
+  the RLS compiler resolved only `current_user.id` / `organization_id` / `roles` /
+  `org_user_ids`, so any owner-by-name/email predicate silently compiled to the
+  deny sentinel (fail-closed → the user saw nothing). Email is sourced for free
+  from the auth session (with a bounded `sys_user` fallback for the API-key path)
+  and threaded onto the `ExecutionContext` in both identity resolvers — the REST
+  data path (`rest-server`) and the dispatcher path (`resolve-execution-context`).
+
+  Display `name` is deliberately **not** exposed to RLS: names collide, and a
+  collision on an ownership predicate is an access-control leak. Only unique
+  identifiers (`id`, `email`) are resolvable.
+
+  This makes owner-scoped row-level security work with seed data (no per-user ids
+  needed) and, combined with `controlled_by_parent` (ADR-0055), lets a master's
+  owner scoping flow to its detail records. The example-showcase demonstrates it:
+  `showcase_invoice` carries an `owner` email + an owner RLS policy, its lines are
+  controlled-by-parent, and invoices/lines are seeded per owner. It also fixes the
+  showcase's previously inert owner predicates (they used `==` and `current_user.name`,
+  neither of which the compiler accepts) to `= current_user.email`.
+
+- Updated dependencies [e7f6539]
+- Updated dependencies [2365d07]
+- Updated dependencies [6595b53]
+- Updated dependencies [fa8964d]
+- Updated dependencies [36138c7]
+- Updated dependencies [a8e4f3b]
+- Updated dependencies [4c213c2]
+- Updated dependencies [2afb612]
+  - @objectstack/spec@9.11.0
+  - @objectstack/runtime@9.11.0
+  - @objectstack/cloud-connection@9.11.0
+  - @objectstack/connector-rest@9.11.0
+  - @objectstack/connector-slack@9.11.0
+
 ## 0.1.23
 
 ### Patch Changes

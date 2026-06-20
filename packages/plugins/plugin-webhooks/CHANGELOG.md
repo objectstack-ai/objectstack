@@ -1,5 +1,21 @@
 # @objectstack/plugin-webhooks
 
+## 9.11.0
+
+### Patch Changes
+
+- Updated dependencies [e7f6539]
+- Updated dependencies [2365d07]
+- Updated dependencies [6595b53]
+- Updated dependencies [fa8964d]
+- Updated dependencies [36138c7]
+- Updated dependencies [a8e4f3b]
+- Updated dependencies [4c213c2]
+- Updated dependencies [2afb612]
+  - @objectstack/spec@9.11.0
+  - @objectstack/core@9.11.0
+  - @objectstack/service-messaging@9.11.0
+
 ## 9.10.0
 
 ### Patch Changes

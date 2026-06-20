@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-messaging",
-  "version": "9.10.0",
+  "version": "9.11.0",
   "license": "Apache-2.0",
   "description": "Messaging Service for ObjectStack — outbound notification dispatch (ADR-0012). Ships the MessagingChannel registry, emit() fan-out, and the always-on inbox channel; other channels (email/webhook/push/IM) plug in.",
   "type": "module",

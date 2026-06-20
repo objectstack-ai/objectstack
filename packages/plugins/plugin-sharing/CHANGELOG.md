@@ -1,5 +1,48 @@
 # @objectstack/plugin-sharing
 
+## 9.11.0
+
+### Minor Changes
+
+- 2365d07: feat(sharing): configurable role-hierarchy widening — `role_and_subordinates` recipient (ADR-0056 D6)
+
+  Role-hierarchy access widening ("a manager sees records shared with their team") is now
+  **implemented and configurable per sharing rule**, not a hardcoded no-op. The
+  `role_and_subordinates` recipient (declarable on `sys_sharing_rule.recipient_type`) expands,
+  at evaluation time, to the named role **plus every subordinate role** by walking the
+  `sys_role.parent` hierarchy via a new `RoleGraphService` (mirroring the department/team
+  graphs; cycle-safe). Previously `Role.parent` was declared but never consumed — a silent
+  no-op flagged by the ADR-0056 audit. This is the Salesforce "grant access using hierarchies"
+  model expressed declaratively: each rule chooses whether to roll up the hierarchy. Unit-proven
+  (role-graph traversal, subordinate-user expansion, cycle safety); the recipient is added to
+  the authoring select + the `SharingRuleRecipientType` contract.
+
+### Patch Changes
+
+- e7f6539: feat(spec,sharing): canonical OWD vocabulary on `object.sharingModel` (ADR-0056 D1)
+
+  Reconciles the Org-Wide-Default naming so authors use ONE vocabulary. `object.sharingModel`
+  now accepts the canonical OWD names — `private` | `public_read` | `public_read_write` |
+  `controlled_by_parent` — alongside the legacy `read` / `read_write` / `full` aliases (kept,
+  non-breaking). The sharing runtime maps them onto the three enforced behaviours
+  (`public_read` ≡ legacy `read` = everyone reads / owner writes; `public_read_write` =
+  unscoped). Unknown values remain rejected by the enum (authoring-time, fail-closed). The
+  showcase announcement now declares the canonical `public_read`, exercised end-to-end by the
+  public-read dogfood proof.
+
+- Updated dependencies [e7f6539]
+- Updated dependencies [2365d07]
+- Updated dependencies [6595b53]
+- Updated dependencies [fa8964d]
+- Updated dependencies [36138c7]
+- Updated dependencies [a8e4f3b]
+- Updated dependencies [4c213c2]
+- Updated dependencies [2afb612]
+  - @objectstack/spec@9.11.0
+  - @objectstack/objectql@9.11.0
+  - @objectstack/core@9.11.0
+  - @objectstack/platform-objects@9.11.0
+
 ## 9.10.0
 
 ### Patch Changes

@@ -1,5 +1,148 @@
 # @objectstack/spec
 
+## 9.11.0
+
+### Minor Changes
+
+- e7f6539: feat(spec,sharing): canonical OWD vocabulary on `object.sharingModel` (ADR-0056 D1)
+
+  Reconciles the Org-Wide-Default naming so authors use ONE vocabulary. `object.sharingModel`
+  now accepts the canonical OWD names — `private` | `public_read` | `public_read_write` |
+  `controlled_by_parent` — alongside the legacy `read` / `read_write` / `full` aliases (kept,
+  non-breaking). The sharing runtime maps them onto the three enforced behaviours
+  (`public_read` ≡ legacy `read` = everyone reads / owner writes; `public_read_write` =
+  unscoped). Unknown values remain rejected by the enum (authoring-time, fail-closed). The
+  showcase announcement now declares the canonical `public_read`, exercised end-to-end by the
+  public-read dogfood proof.
+
+- 2365d07: feat(sharing): configurable role-hierarchy widening — `role_and_subordinates` recipient (ADR-0056 D6)
+
+  Role-hierarchy access widening ("a manager sees records shared with their team") is now
+  **implemented and configurable per sharing rule**, not a hardcoded no-op. The
+  `role_and_subordinates` recipient (declarable on `sys_sharing_rule.recipient_type`) expands,
+  at evaluation time, to the named role **plus every subordinate role** by walking the
+  `sys_role.parent` hierarchy via a new `RoleGraphService` (mirroring the department/team
+  graphs; cycle-safe). Previously `Role.parent` was declared but never consumed — a silent
+  no-op flagged by the ADR-0056 audit. This is the Salesforce "grant access using hierarchies"
+  model expressed declaratively: each rule chooses whether to roll up the hierarchy. Unit-proven
+  (role-graph traversal, subordinate-user expansion, cycle safety); the recipient is added to
+  the authoring select + the `SharingRuleRecipientType` contract.
+
+- 6595b53: feat(security): app-declarable default profile (`isDefault`, ADR-0056 D7)
+
+  An app can now declare its default access posture for authenticated users who have
+  no explicit grants, via `isDefault: true` on a permission set — instead of always
+  inheriting the built-in `member_default`. The SecurityPlugin resolves the fallback
+  from the `isDefault` profile when no explicit `fallbackPermissionSet` is configured
+  (falling back to `member_default` when none is declared — non-breaking). This is the
+  foundation for SSO/JIT provisioning (mapping IdP claims → a declared default profile).
+  Proven by the `showcase-default-profile` dogfood test: a sign-up governed by a custom
+  default that grants only `showcase_announcement` can read it but is denied
+  `showcase_private_note` (which the `member_default` wildcard would have allowed).
+
+- 36138c7: feat(autonumber): date, {field} and per-scope counter reset for autonumber formats
+
+  `autonumberFormat` previously only understood a single `{0000}` sequence slot —
+  everything else was a fixed literal prefix on one global counter. Real MES/eHR
+  record numbers need three more token classes, so the format is now tokenized by a
+  shared pure renderer in `@objectstack/spec` (`parseAutonumberFormat` /
+  `renderAutonumber`) that the engine fallback and the SQL driver both call, so they
+  emit byte-identical numbers (#1603 parity):
+
+  - **Date tokens** — `{YYYY}` `{YY}` `{MM}` `{DD}` `{YYYYMMDD}` resolve the calendar
+    day in the request's **business timezone** (`ExecutionContext.timezone`, ADR-0053;
+    UTC fallback), threaded through the new `DriverOptions.timezone`.
+  - **`{field}` interpolation** — `{section}{island_zone}{000}` substitutes record
+    field values into the prefix.
+  - **Per-scope counter reset** — the counter's scope is the rendered prefix _before_
+    the sequence slot, so `AD{YYYYMMDD}{0000}` resets daily, `{section}{island_zone}{000}`
+    numbers per group, and `{plan_no}{000}` numbers per parent — all from one
+    mechanism, no separate reset config.
+
+  Fixed-prefix formats like `CASE-{0000}` render an empty scope and keep their single
+  global counter, so existing sequences are unchanged. The persistent
+  `_objectstack_sequences` table is keyed by a `key_hash` (SHA-256 of
+  `object, tenant_id, field, scope`) — a single 64-char primary key that keys every
+  dialect uniformly, stays within MySQL's utf8mb4 index-length limit (four raw
+  columns would not), and lets `scope` be a generous non-indexed column. Deployments
+  with an older table (3-column, or an interim `scope` column) are migrated in place
+  on first use, carrying existing counters to `scope=''`.
+
+  Guardrails:
+
+  - **Empty interpolated field is a hard error, not a silent mis-number.** A
+    `{field}` token whose value is missing at create time would render to an empty
+    prefix and collapse the record into the wrong counter scope. Both the SQL driver
+    and the engine fallback now refuse to generate and throw a clear error naming the
+    empty field (shared `missingFieldValues` helper).
+  - **Build-time lint (`@objectstack/cli compile`).** `autonumber` formats are
+    checked against the object's fields: a `{field}` token naming a non-existent
+    field (or the autonumber field itself) **fails the build**; a token naming an
+    _optional_ field emits an advisory warning to mark it `required: true`.
+  - **Migration fails safe.** If a legacy table cannot be migrated to the `key_hash`
+    shape, fixed-prefix sequences keep working via the legacy key and a per-scope
+    write raises an actionable error instead of corrupting counters.
+  - **Long `{field}` scopes are supported** (e.g. a long `{plan_no}`): the non-indexed
+    `scope` column and hashed key remove the old varchar/PK length ceiling.
+
+  Notes on inherent semantics (documented, not bugs):
+
+  - The counter scope IS the rendered prefix. When two records' tokens render to the
+    same prefix string (e.g. `{a}{b}` for `('AB','C')` and `('A','BC')`) they also
+    render the same visible number, so they share one counter to stay unique — the
+    remedy for genuinely-distinct groups is an unambiguous format (a delimiter
+    literal between variable tokens).
+  - The sequence pad width is a MINIMUM; past it the number grows (`{000}` →
+    `1000`), it never wraps — matching mainstream autonumber semantics.
+
+- 4c213c2: Master-detail "controlled by parent" permissions (ADR-0055).
+
+  A detail object can now declare `sharingModel: 'controlled_by_parent'`: its read/write access is derived from its master record, with no authored RLS.
+
+  - `@objectstack/spec`: `controlled_by_parent` added to the authorable `object.sharingModel` enum.
+  - `@objectstack/plugin-security`: reads inject `masterFK IN (accessible master ids)` (resolved from the master's own RLS, reusing the existing filter machinery — zero RLS-compiler changes); by-id writes (insert/update/delete) to a detail now require edit access to its master, closing the #1994-class by-id hole for derived access.
+  - `@objectstack/verify`: related-record **topological synthesis** — `deriveCrudCases` no longer skips objects with required relations; it builds the object dependency graph, orders it topologically, and threads real target ids, so relationship-dense objects (and the master-detail RLS proof) are verifiable. Honest `blocked` verdicts remain for required-reference cycles and external/missing targets.
+
+  v1 limits (per ADR-0055): the accessible-master id set is unbounded (large-tenant scale is a documented future limit), and master-detail chains are single-level (not transitively traversed).
+
+- 2afb612: feat(security): resolve `current_user.email` in RLS owner policies
+
+  RLS `using` predicates can now reference **`current_user.email`** — a unique,
+  human-readable, _seedable_ owner anchor (`owner = current_user.email`). Previously
+  the RLS compiler resolved only `current_user.id` / `organization_id` / `roles` /
+  `org_user_ids`, so any owner-by-name/email predicate silently compiled to the
+  deny sentinel (fail-closed → the user saw nothing). Email is sourced for free
+  from the auth session (with a bounded `sys_user` fallback for the API-key path)
+  and threaded onto the `ExecutionContext` in both identity resolvers — the REST
+  data path (`rest-server`) and the dispatcher path (`resolve-execution-context`).
+
+  Display `name` is deliberately **not** exposed to RLS: names collide, and a
+  collision on an ownership predicate is an access-control leak. Only unique
+  identifiers (`id`, `email`) are resolvable.
+
+  This makes owner-scoped row-level security work with seed data (no per-user ids
+  needed) and, combined with `controlled_by_parent` (ADR-0055), lets a master's
+  owner scoping flow to its detail records. The example-showcase demonstrates it:
+  `showcase_invoice` carries an `owner` email + an owner RLS policy, its lines are
+  controlled-by-parent, and invoices/lines are seeded per owner. It also fixes the
+  showcase's previously inert owner predicates (they used `==` and `current_user.name`,
+  neither of which the compiler accepts) to `= current_user.email`.
+
+### Patch Changes
+
+- fa8964d: docs(spec): mark unenforced compliance/encryption/masking/RLS-config surface EXPERIMENTAL (ADR-0056 D8)
+
+  Per ADR-0049's enforce-or-remove gate (and ADR-0056 D8), the security-adjacent
+  schemas that are parsed but have **no runtime consumer** now carry an explicit
+  `⚠️ EXPERIMENTAL — NOT ENFORCED` header so the no-op is visible to authors and the
+  reference docs: GDPR/HIPAA/PCI compliance configs, field-level encryption, data
+  masking, the unified security-context governance, and the global `RLSConfig` /
+  `RLSAuditEvent` (distinct from the ENFORCED `RowLevelSecurityPolicySchema`, which is
+  left untouched). No behaviour change — these were already inert; the marker makes
+  the inertness honest rather than silent.
+
+- a8e4f3b: Add the ADR-0054 "prove-it-runs" proof field + ratchet to the spec liveness gate. A `live` ledger entry may now carry a `proof` — a reference (`<file>#<proof-id>`) to a dogfood test that asserts the property's runtime behavior. A bound high-risk `live` property must carry a valid proof, validated statically by the liveness gate (the file exists and declares the matching `@proof:` tag). Four high-risk classes are bound this phase: field types (`field.type`), RLS (`permission.rowLevelSecurity.using`), flow nodes (`flow.nodes.type`), and analytics (`dataset.dimensions.dateGranularity`). The `dataset` metadata type is now governed (new `liveness/dataset.json`). The authoritative high-risk-class list lives in `scripts/liveness/proof-registry.mts`; see `liveness/README.md`.
+
 ## 9.10.0
 
 ### Minor Changes

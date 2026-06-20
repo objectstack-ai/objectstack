@@ -1,5 +1,72 @@
 # @objectstack/rest
 
+## 9.11.0
+
+### Patch Changes
+
+- e7f6539: feat(rest): warn on fail-open anonymous posture (ADR-0056 D2, warn→enforce)
+
+  Secure-by-default work for the data API. The deny capability already exists
+  (`api.requireAuth=true` rejects anonymous via `enforceAuth`, and share-link /
+  `guest_portal` / control-plane routes are exempt) — but the **default is fail-open**
+  (`requireAuth=false`), so an object with no OWD/RLS is world-readable with no signal.
+  This adds a boot-time WARN when running in that posture, making it explicit
+  (consistent with D4/D8 honesty). The global default is deliberately NOT flipped here
+  — that is a release-gated decision; flipping it would 401 deployments that rely on
+  anonymous reads. Proven by the `showcase-anonymous-deny` dogfood test (anonymous
+  read+write → 401, authenticated → 200, control-plane open).
+
+- 751f5cf: feat(security): declaration-derived public-form authorization (ADR-0056, Option A)
+
+  Public form submissions are now authorized by the **declaration**, not by a
+  deployment-configured `guest_portal` profile. The form-submit route derives a narrow
+  `publicFormGrant: { object }` from the matched form's target object; the SecurityPlugin
+  honors it as a least-privilege capability — **create + the immediate read-back on THAT
+  object only**, with no userId, and crucially NOT the anonymous fall-open. This makes
+  public forms work under secure-by-default (`requireAuth`) **without** a hand-configured
+  `guest_portal`, scoped to exactly the declared object (the field allow-list is still
+  enforced at the route; `guest_portal`/`anonymous` are kept on the context for back-compat
+  with guest-detection hooks). It is the prerequisite that unblocks the eventual
+  `requireAuth` default flip, and generalizes the platform principle "public access =
+  declared + runtime-derived scoped grant" (the same shape share-links already use).
+  Proven by `form-self-auth` dogfood (create on target allowed; cross-object + update/delete
+  denied). plugin-security 108, rest 121, full dogfood 98 — no regression.
+
+- 2afb612: feat(security): resolve `current_user.email` in RLS owner policies
+
+  RLS `using` predicates can now reference **`current_user.email`** — a unique,
+  human-readable, _seedable_ owner anchor (`owner = current_user.email`). Previously
+  the RLS compiler resolved only `current_user.id` / `organization_id` / `roles` /
+  `org_user_ids`, so any owner-by-name/email predicate silently compiled to the
+  deny sentinel (fail-closed → the user saw nothing). Email is sourced for free
+  from the auth session (with a bounded `sys_user` fallback for the API-key path)
+  and threaded onto the `ExecutionContext` in both identity resolvers — the REST
+  data path (`rest-server`) and the dispatcher path (`resolve-execution-context`).
+
+  Display `name` is deliberately **not** exposed to RLS: names collide, and a
+  collision on an ownership predicate is an access-control leak. Only unique
+  identifiers (`id`, `email`) are resolvable.
+
+  This makes owner-scoped row-level security work with seed data (no per-user ids
+  needed) and, combined with `controlled_by_parent` (ADR-0055), lets a master's
+  owner scoping flow to its detail records. The example-showcase demonstrates it:
+  `showcase_invoice` carries an `owner` email + an owner RLS policy, its lines are
+  controlled-by-parent, and invoices/lines are seeded per owner. It also fixes the
+  showcase's previously inert owner predicates (they used `==` and `current_user.name`,
+  neither of which the compiler accepts) to `= current_user.email`.
+
+- Updated dependencies [e7f6539]
+- Updated dependencies [2365d07]
+- Updated dependencies [6595b53]
+- Updated dependencies [fa8964d]
+- Updated dependencies [36138c7]
+- Updated dependencies [a8e4f3b]
+- Updated dependencies [4c213c2]
+- Updated dependencies [2afb612]
+  - @objectstack/spec@9.11.0
+  - @objectstack/core@9.11.0
+  - @objectstack/service-package@9.11.0
+
 ## 9.10.0
 
 ### Patch Changes
