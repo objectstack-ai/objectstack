@@ -36,9 +36,9 @@ export const MyWorkPage: Page = {
             columns: 3,
             gap: 4,
             children: [
-              { type: 'object-metric', properties: { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', aggregate: { field: 'id', function: 'count' }, filter: { status: { $ne: 'done' } } } },
-              { type: 'object-metric', properties: { objectName: 'showcase_task', label: 'In Review', icon: 'eye', aggregate: { field: 'id', function: 'count' }, filter: { status: 'in_review' } } },
-              { type: 'object-metric', properties: { objectName: 'showcase_project', label: 'At-Risk Projects', icon: 'alert-triangle', aggregate: { field: 'id', function: 'count' }, filter: { health: 'red' } } },
+              { type: 'object-metric', properties: { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: { status: { $ne: 'done' } } } },
+              { type: 'object-metric', properties: { objectName: 'showcase_task', label: 'In Review', icon: 'eye', colorVariant: 'warning', description: 'awaiting review', aggregate: { field: 'id', function: 'count' }, filter: { status: 'in_review' } } },
+              { type: 'object-metric', properties: { objectName: 'showcase_project', label: 'At-Risk Projects', icon: 'alert-triangle', colorVariant: 'danger', description: 'health red', aggregate: { field: 'id', function: 'count' }, filter: { health: 'red' } } },
             ],
           },
         },
