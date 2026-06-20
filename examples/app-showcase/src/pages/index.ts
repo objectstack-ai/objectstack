@@ -12,6 +12,7 @@ export { AccountDetailPage } from './account-detail.page.js';
 export { ReviewQueuePage } from './review-queue.page.js';
 export { NewProjectWizardPage } from './new-project-wizard.page.js';
 export { MyWorkPage } from './my-work.page.js';
+export { SettingsPage } from './settings.page.js';
 export {
   TaskBoardPage,
   TaskCalendarPage,

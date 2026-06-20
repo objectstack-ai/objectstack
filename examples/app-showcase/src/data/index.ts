@@ -3,6 +3,7 @@
 import { defineSeed } from '@objectstack/spec/data';
 import { cel } from '@objectstack/spec';
 import { Account } from '../objects/account.object.js';
+import { Preference } from '../objects/preference.object.js';
 import { Project } from '../objects/project.object.js';
 import { Task } from '../objects/task.object.js';
 import { Category } from '../objects/category.object.js';
@@ -174,4 +175,12 @@ const invoiceLines = defineSeed(InvoiceLine, {
   ],
 });
 
-export const ShowcaseSeedData = [accounts, products, projects, tasks, categories, teams, memberships, fieldZoo, invoices, invoiceLines];
+const preferences = defineSeed(Preference, {
+  mode: 'upsert',
+  externalId: 'name',
+  records: [
+    { name: 'My Preferences', theme: 'light', default_landing: 'my_work', email_digest: 'daily', items_per_page: 50, notifications_enabled: true, compact_density: false },
+  ],
+});
+
+export const ShowcaseSeedData = [accounts, products, projects, tasks, categories, teams, memberships, fieldZoo, invoices, invoiceLines, preferences];
