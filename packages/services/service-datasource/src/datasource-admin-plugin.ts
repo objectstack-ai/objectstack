@@ -223,6 +223,45 @@ export class DatasourceAdminServicePlugin implements Plugin {
     this.config = config;
     this.service = new DatasourceAdminService(config);
     ctx.registerService('datasource-admin', this.service);
+
+    // Setup-app nav (ADR-0029 D7): datasources are a *capability* this plugin
+    // owns, so it contributes its own entry into the `group_integrations` slot
+    // (core setup-nav must not fill capability-owned slots). datasource is a
+    // metadata type, so the entry opens the generic metadata-admin engine route
+    // rather than a bespoke page or an object view.
+    try {
+      const manifest = ctx.getService<{ register(m: any): void }>('manifest');
+      if (manifest && typeof manifest.register === 'function') {
+        manifest.register({
+          id: 'com.objectstack.service-datasource.nav',
+          namespace: 'sys',
+          version: this.version,
+          type: 'plugin',
+          scope: 'system',
+          name: 'Datasource Navigation',
+          description: 'Contributes the Datasources entry to the Setup app Integrations group.',
+          navigationContributions: [
+            {
+              app: 'setup',
+              group: 'group_integrations',
+              priority: 100,
+              items: [
+                {
+                  id: 'nav_datasources',
+                  type: 'url',
+                  label: 'Datasources',
+                  url: '/apps/setup/component/metadata/resource?type=datasource',
+                  icon: 'database',
+                  requiredPermissions: ['manage_platform_settings'],
+                },
+              ],
+            },
+          ],
+        });
+      }
+    } catch (err) {
+      this.options.logger?.warn?.('datasource nav contribution skipped', err);
+    }
   }
 
   async start(ctx: PluginContext): Promise<void> {
