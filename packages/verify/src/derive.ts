@@ -129,6 +129,8 @@ export function deriveCrudCases(config: any): CrudCase[] {
   const objects: any[] = config?.objects ?? [];
   const byName = new Map<string, any>();
   for (const o of objects) if (o?.name) byName.set(o.name, o);
+  const dsByName = new Map<string, any>();
+  for (const ds of (config?.datasources ?? [])) if (ds?.name) dsByName.set(ds.name, ds);
 
   const drafts = new Map<string, Draft>();
 
@@ -139,6 +141,20 @@ export function deriveCrudCases(config: any): CrudCase[] {
     const d: Draft = {
       name: obj.name, body: {}, asserts: [], skippedFields: [], relationalRefs: [], requiredTargets: [],
     };
+
+    // Federated (external) objects are read-only unless BOTH the datasource and
+    // the object opt into writes (ADR-0015 write gate). The CRUD probe insert is
+    // correctly rejected by the gate for them, so mark the case blocked (skipped)
+    // rather than letting a guaranteed-rejected insert surface as a failure.
+    if (obj.external) {
+      const ds = obj.datasource ? dsByName.get(obj.datasource) : undefined;
+      const writable = ds?.external?.allowWrites === true && obj.external?.writable === true;
+      if (!writable) {
+        d.blocked = `external read-only object (federated datasource "${obj.datasource ?? 'default'}"; no inserts)`;
+        drafts.set(obj.name, d);
+        continue;
+      }
+    }
 
     for (const [name, f] of Object.entries(fields)) {
       const type = String((f as any)?.type ?? '').toLowerCase();
