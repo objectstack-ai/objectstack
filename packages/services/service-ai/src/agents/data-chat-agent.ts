@@ -32,11 +32,17 @@ import type { Agent } from '@objectstack/spec/ai';
  *
  * This is the implicit default copilot for every application that does
  * not pin its own `app.defaultAgent`. Studio is the only built-in app
- * that overrides it (→ `metadata_assistant`). Keeping the name as an
- * exported constant lets the runtime resolve the fallback
+ * that overrides it (→ the `build` authoring agent). Keeping the name as
+ * an exported constant lets the runtime resolve the fallback
  * deterministically instead of guessing "first active agent".
+ *
+ * Path A renamed this from `data_chat`→`ask`; the legacy name stays
+ * resolvable via the alias table (see `agent-aliases.ts`).
  */
-export const DEFAULT_DATA_AGENT_NAME = 'data_chat';
+export const DEFAULT_DATA_AGENT_NAME = 'ask';
+
+/** Legacy id this agent was renamed from (kept for back-compat / migrations). */
+export const LEGACY_DATA_AGENT_NAME = 'data_chat';
 
 export const DATA_CHAT_AGENT: Agent = {
   name: DEFAULT_DATA_AGENT_NAME,

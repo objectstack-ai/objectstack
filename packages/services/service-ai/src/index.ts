@@ -57,7 +57,10 @@ export { SkillRegistry } from './skill-registry.js';
 export type { SkillContext, SkillSummary } from './skill-registry.js';
 
 // Built-in agents
-export { DATA_CHAT_AGENT } from './agents/index.js';
+export { DATA_CHAT_AGENT, DEFAULT_DATA_AGENT_NAME, LEGACY_DATA_AGENT_NAME } from './agents/index.js';
+// Back-compat agent-name aliases (Path A rename). Other packages register their
+// own renames (e.g. cloud AI Studio: `metadata_assistant`→`build`).
+export { registerAgentAlias, resolveAgentAlias, agentAliasEntries } from './agents/index.js';
 
 // Built-in skills
 export {

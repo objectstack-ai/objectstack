@@ -11,6 +11,7 @@ import { AgentSchema } from '@objectstack/spec/ai';
 import { SkillRegistry, type SkillContext } from './skill-registry.js';
 import { SchemaRetriever, type ObjectShape } from './schema-retriever.js';
 import { DEFAULT_DATA_AGENT_NAME } from './agents/index.js';
+import { resolveAgentAlias } from './agents/agent-aliases.js';
 
 /**
  * Context passed alongside a user message when chatting with an agent.
@@ -96,7 +97,10 @@ export class AgentRuntime {
    * or validation fails.
    */
   async loadAgent(agentName: string): Promise<Agent | undefined> {
-    const raw = await this.metadataService.get('agent', agentName);
+    // Normalize legacy ids (e.g. `data_chat`→`ask`, `metadata_assistant`→`build`)
+    // so old `/agents/:name/chat` links and persisted conversation `agent_id`s
+    // keep resolving after the Path A rename.
+    const raw = await this.metadataService.get('agent', resolveAgentAlias(agentName));
     if (!raw) return undefined;
 
     const result = AgentSchema.safeParse(raw);

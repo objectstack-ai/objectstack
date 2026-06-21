@@ -24,7 +24,7 @@ import { registerVisualizeDataTool, VISUALIZE_DATA_TOOL } from './tools/visualiz
 import { registerActionsAsTools } from './tools/action-tools.js';
 import { AgentRuntime } from './agent-runtime.js';
 import { SkillRegistry } from './skill-registry.js';
-import { DATA_CHAT_AGENT } from './agents/index.js';
+import { DATA_CHAT_AGENT, LEGACY_DATA_AGENT_NAME } from './agents/index.js';
 import { DATA_EXPLORER_SKILL, ACTIONS_EXECUTOR_SKILL } from './skills/index.js';
 import { VercelLLMAdapter } from './adapters/vercel-adapter.js';
 import { MemoryLLMAdapter } from './adapters/memory-adapter.js';
@@ -848,6 +848,20 @@ export class AIServicePlugin implements Plugin {
             }
           };
           await upsertBuiltin('agent', DATA_CHAT_AGENT.name, DATA_CHAT_AGENT);
+          // Path A rename (`data_chat`→`ask`): drop the stale legacy agent
+          // record on upgrade so the catalog doesn't list the agent twice. The
+          // legacy NAME stays resolvable for chat via the alias table; this only
+          // removes the now-duplicate registry entry. Idempotent on fresh installs.
+          if (DATA_CHAT_AGENT.name !== LEGACY_DATA_AGENT_NAME) {
+            try {
+              if (await withTimeout(metadataService.exists('agent', LEGACY_DATA_AGENT_NAME))) {
+                await withTimeout(metadataService.unregister('agent', LEGACY_DATA_AGENT_NAME));
+                ctx.logger.info(`[AI] removed legacy agent record "${LEGACY_DATA_AGENT_NAME}" (renamed → "${DATA_CHAT_AGENT.name}")`);
+              }
+            } catch (err) {
+              ctx.logger.warn('[AI] Failed to remove legacy data agent record', err instanceof Error ? { error: err.message } : { error: String(err) });
+            }
+          }
           await upsertBuiltin('skill', DATA_EXPLORER_SKILL.name, DATA_EXPLORER_SKILL);
           await upsertBuiltin('skill', ACTIONS_EXECUTOR_SKILL.name, ACTIONS_EXECUTOR_SKILL);
         }
