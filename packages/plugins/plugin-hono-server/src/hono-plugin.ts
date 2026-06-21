@@ -718,6 +718,25 @@ export class HonoServerPlugin implements Plugin {
             }
         });
 
+        // GET /me/localization — the resolved regional defaults (currency /
+        // locale / timezone) for the current request's tenant, exposed to EVERY
+        // authenticated user. The `localization` SETTINGS are gated to
+        // `setup.access`, but the resolved defaults are needed by every renderer
+        // to format currency/dates/numbers — so they ride on the request
+        // ExecutionContext (ADR-0053) and are surfaced here without that gate.
+        rawApp.get(`${prefix}/auth/me/localization`, async (c: any) => {
+            const execCtx = await resolveCtx(c);
+            if (!execCtx?.userId) {
+                return c.json({ authenticated: false });
+            }
+            return c.json({
+                authenticated: true,
+                currency: execCtx.currency ?? null,
+                locale: execCtx.locale ?? null,
+                timezone: execCtx.timezone ?? null,
+            });
+        });
+
         // GET /me/apps — list apps the current user is allowed to enter.
         // Filters `metadata.list('app')` by:
         //   1. AppSchema.requiredPermissions ⊆ ctx.systemPermissions
