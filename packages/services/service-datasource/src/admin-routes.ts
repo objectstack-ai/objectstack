@@ -99,6 +99,21 @@ export function registerDatasourceAdminRoutes(
   // `datasource` `test_connection` action). Distinct from `POST /datasources/test`
   // which probes an unsaved draft carried inline. Registered before the generic
   // `:name` mutation routes.
+  // Read one datasource's full detail for the edit form (credential stripped;
+  // `config` is non-sensitive, plus a `hasSecret` flag). Registered after the
+  // static `/drivers` route so that literal segment is never captured as a name.
+  server.get(`${root}/:name`, async (req: any, res: any) => {
+    const svc = adminService();
+    if (!svc?.getDatasource) return unavailable(res);
+    try {
+      const datasource = await svc.getDatasource(req.params.name);
+      if (!datasource) return res.status(404).json({ error: 'not_found' });
+      res.json({ datasource });
+    } catch (err) {
+      badRequest(res, err);
+    }
+  });
+
   server.post(`${root}/:name/test`, async (req: any, res: any) => {
     const svc = externalService();
     if (!svc?.testConnection) return unavailable(res);

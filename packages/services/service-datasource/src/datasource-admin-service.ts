@@ -130,6 +130,36 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     return summaries;
   }
 
+  /**
+   * Read one datasource's full detail for editing, with the credential stripped.
+   * Returns `config` (non-sensitive — credentials live in `sys_secret`, never in
+   * config), `origin`, and a `hasSecret` flag so the UI can show "leave blank to
+   * keep" without ever receiving the `credentialsRef` or any cleartext. Returns
+   * `undefined` when the name is unknown.
+   */
+  async getDatasource(name: string): Promise<
+    | (Pick<StoredDatasource, 'name' | 'label' | 'driver' | 'schemaMode' | 'config' | 'active' | 'definedIn'> & {
+        origin: 'code' | 'runtime';
+        hasSecret: boolean;
+      })
+    | undefined
+  > {
+    const rec = await this.config.getDatasourceRecord(name);
+    if (!rec) return undefined;
+    const hasSecret = Boolean(rec.external?.credentialsRef);
+    return {
+      name: rec.name,
+      label: rec.label,
+      driver: rec.driver,
+      schemaMode: rec.schemaMode ?? 'managed',
+      config: rec.config ?? {},
+      active: rec.active ?? true,
+      origin: rec.origin === 'runtime' ? 'runtime' : 'code',
+      hasSecret,
+      ...(rec.definedIn ? { definedIn: rec.definedIn } : {}),
+    };
+  }
+
   async testConnection(input: DatasourceDraft, secret?: SecretInput): Promise<TestConnectionResult> {
     if (!input?.driver) {
       return { ok: false, error: 'A driver is required to test a connection.' };

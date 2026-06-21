@@ -76,6 +76,21 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     expect(generateObjectDraft).toHaveBeenCalledWith('demo_ext', 'customers', {});
   });
 
+  it('GET /api/v1/datasources/:name returns the credential-stripped detail (404 when unknown)', async () => {
+    const getDatasource = vi.fn(async (name: string) =>
+      name === 'demo_ext'
+        ? { name: 'demo_ext', driver: 'sqlite', schemaMode: 'managed', config: { filename: '/tmp/x.db' }, active: true, origin: 'runtime', hasSecret: false }
+        : undefined,
+    );
+    const app = mount({ getDatasource });
+    const ok = await app.fetch(json('/api/v1/datasources/demo_ext'));
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).datasource.config.filename).toBe('/tmp/x.db');
+    const missing = await app.fetch(json('/api/v1/datasources/nope'));
+    expect(missing.status).toBe(404);
+    expect(getDatasource).toHaveBeenCalledWith('demo_ext');
+  });
+
   it('POST /api/v1/datasources/:name/test probes a saved datasource by name', async () => {
     const testConnection = vi.fn().mockResolvedValue({ ok: true, latencyMs: 7, tableCount: 2 });
     const app = mount({ testConnection });

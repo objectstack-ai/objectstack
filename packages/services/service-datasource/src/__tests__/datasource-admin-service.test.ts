@@ -286,3 +286,33 @@ describe('removeDatasource', () => {
     await expect(service.removeDatasource('nope')).rejects.toThrow(/not found/i);
   });
 });
+
+describe('getDatasource', () => {
+  it('returns config + hasSecret with the credentialsRef stripped', async () => {
+    const { service } = makeHarness({
+      seed: [
+        {
+          name: 'pg',
+          driver: 'postgres',
+          origin: 'runtime',
+          config: { host: 'db', port: 5432, database: 'app' },
+          external: { credentialsRef: 'sys_secret://datasource/pg#1' },
+        },
+      ],
+    });
+    const ds = await service.getDatasource('pg');
+    expect(ds).toMatchObject({ name: 'pg', driver: 'postgres', origin: 'runtime', hasSecret: true });
+    expect(ds!.config).toEqual({ host: 'db', port: 5432, database: 'app' });
+    // The opaque credential handle must never be returned.
+    expect(JSON.stringify(ds)).not.toContain('sys_secret');
+    expect(JSON.stringify(ds)).not.toContain('credentialsRef');
+  });
+
+  it('reports hasSecret:false and returns undefined for unknown names', async () => {
+    const { service } = makeHarness({
+      seed: [{ name: 'lite', driver: 'sqlite', origin: 'runtime', config: { filename: '/tmp/a.db' } }],
+    });
+    expect((await service.getDatasource('lite'))!.hasSecret).toBe(false);
+    expect(await service.getDatasource('missing')).toBeUndefined();
+  });
+});
