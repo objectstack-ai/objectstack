@@ -580,6 +580,7 @@ const ObjectSchemaBase = z.object({
   /** 
    * Search Engine Config 
    */
+  searchableFields: z.array(z.string()).optional().describe('Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields.'),
   search: SearchConfigSchema.optional().describe('Search engine configuration'),
   
   /** 

@@ -242,6 +242,10 @@
     "active": {
       "status": "dead",
       "evidence": "object-level — no runtime reader"
+    },
+    "searchableFields": {
+      "status": "live",
+      "note": "objectql `$search` executor (ADR-0061: expandSearchToFilter in engine.find) + objectui list/lookup/command-palette; canonical searchable-field source."
     }
   }
 }

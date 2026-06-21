@@ -19,6 +19,11 @@ export const Account = ObjectSchema.create({
   icon: 'building',
   description: 'A company the org delivers projects for.',
 
+  // ADR-0061: which fields `$search` matches. Includes the two selects
+  // (industry/status) so searching a label like "Retail" or "Active" resolves
+  // to the stored value, plus the text identifiers.
+  searchableFields: ['name', 'industry', 'status', 'billing_email', 'tax_id'],
+
   fields: {
     name: Field.text({ label: 'Account Name', required: true, searchable: true, maxLength: 200 }),
     industry: Field.select({

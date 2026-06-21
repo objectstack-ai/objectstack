@@ -225,6 +225,46 @@ describe('ObjectQL Engine', () => {
         });
     });
 
+    describe('$search expansion (ADR-0061)', () => {
+        beforeEach(async () => {
+            engine.registerDriver(mockDriver, true);
+            await engine.init();
+        });
+
+        it('expands $search into a cross-field $or pushed to the driver', async () => {
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({
+                name: 'account',
+                fields: {
+                    name: { type: 'text' },
+                    industry: { type: 'select', options: [{ label: 'Retail', value: 'retail' }] },
+                },
+            } as any);
+
+            await engine.find('account', { search: 'retail' });
+
+            const ast = (mockDriver.find as any).mock.calls.at(-1)[1];
+            expect(ast.where).toEqual({ $or: [
+                { name: { $contains: 'retail' } },
+                { industry: { $in: ['retail'] } },
+            ] });
+            expect(ast.search).toBeUndefined();
+        });
+
+        it('ANDs $search with an existing filter and honours declared searchableFields', async () => {
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({
+                name: 'account',
+                fields: { name: { type: 'text' }, code: { type: 'text' } },
+                searchableFields: ['name'],
+            } as any);
+
+            await engine.find('account', { search: 'acme', filter: { status: 'active' } });
+
+            const ast = (mockDriver.find as any).mock.calls.at(-1)[1];
+            expect(ast.where.$and).toContainEqual({ status: 'active' });
+            expect(ast.where.$and).toContainEqual({ $or: [{ name: { $contains: 'acme' } }] });
+        });
+    });
+
     describe('CRUD Operations', () => {
         beforeEach(async () => {
             engine.registerDriver(mockDriver, true);

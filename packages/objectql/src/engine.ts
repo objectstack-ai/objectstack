@@ -25,6 +25,7 @@ import {
 } from './secret-fields.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN } from './registry.js';
+import { expandSearchToFilter } from './search-filter.js';
 import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
@@ -1885,6 +1886,32 @@ export class ObjectQL implements IDataEngine {
     // names and inject their dependencies, so the driver returns the raw
     // fields needed to compute the formulas after fetch.
     const _findSchema = this._registry.getObject(object);
+
+    // ADR-0061: expand `$search` into a server-resolved cross-field `$or`
+    // of `$contains`. Field resolution is server-side (declared
+    // `searchableFields` -> auto-default); the optional `$searchFields` override
+    // is intersected with the allowed set. All drivers already execute
+    // `$or`/`$contains`, so this needs no driver changes.
+    {
+      const _searchRaw = (ast as any).search ?? (ast as any).$search;
+      if (_searchRaw != null && _findSchema?.fields) {
+        const _reqFields = (ast as any).searchFields ?? (ast as any).$searchFields
+          ?? (typeof (ast as any).search === 'object' ? (ast as any).search?.fields : undefined);
+        const _searchFilter = expandSearchToFilter(_searchRaw, {
+          fields: _findSchema.fields as any,
+          searchableFields: (_findSchema as any).searchableFields,
+          requestedFields: Array.isArray(_reqFields) ? _reqFields : undefined,
+          displayField: (_findSchema as any).displayNameField,
+        });
+        if (_searchFilter) {
+          ast.where = ast.where ? { $and: [ast.where, _searchFilter] } : _searchFilter;
+        }
+      }
+      delete (ast as any).search;
+      delete (ast as any).$search;
+      delete (ast as any).searchFields;
+      delete (ast as any).$searchFields;
+    }
     const _findFormula = planFormulaProjection(_findSchema, ast.fields as string[] | undefined);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
 
