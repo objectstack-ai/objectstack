@@ -8,7 +8,7 @@
 // #1887 class of declared-but-unwired predicate — breaks the build.
 
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
 import { EXPRESSION_SURFACE, type ExprSurface } from './expression-conformance.ledger.js';
@@ -26,10 +26,12 @@ const DIALECTS = new Set(['cel', 'cron', 'template', 'js']);
 function discoverSurfaces(): Set<string> {
   const found = new Set<string>();
   const walk = (dir: string) => {
-    for (const e of readdirSync(dir)) {
-      const p = join(dir, e);
-      if (statSync(p).isDirectory()) walk(p);
-      else if (e.endsWith('.zod.ts')) {
+    // `withFileTypes` reads the entry type from the single readdir syscall — no
+    // stat-then-read window (avoids a file-system TOCTOU race; CodeQL).
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, ent.name);
+      if (ent.isDirectory()) walk(p);
+      else if (ent.isFile() && ent.name.endsWith('.zod.ts')) {
         const rel = relative(SPEC_SRC, p);
         for (const line of readFileSync(p, 'utf8').split('\n')) {
           const m = line.match(/^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*ExpressionInputSchema\b/);

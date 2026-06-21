@@ -387,7 +387,9 @@ function resolveValue(leaf: Leaf, ctx: Ctx): unknown {
 function coerceLiteral(v: unknown): unknown {
   if (typeof v === 'bigint') return Number(v);
   if (v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
-  if (typeof v === 'object' && v !== null && typeof (v as { valueOf?: unknown }).valueOf === 'function') {
+  // `v` is already non-null here (the line above returns for null), so a
+  // further `v !== null` would be a dead comparison; rely on the early return.
+  if (typeof v === 'object' && typeof (v as { valueOf?: unknown }).valueOf === 'function') {
     const prim = (v as { valueOf: () => unknown }).valueOf();
     if (typeof prim === 'bigint') return Number(prim);
     if (typeof prim === 'number' || typeof prim === 'string' || typeof prim === 'boolean') return prim;
