@@ -95,6 +95,21 @@ export function registerDatasourceAdminRoutes(
     }
   });
 
+  // Test a *saved* datasource by name with a live round-trip (backs the
+  // `datasource` `test_connection` action). Distinct from `POST /datasources/test`
+  // which probes an unsaved draft carried inline. Registered before the generic
+  // `:name` mutation routes.
+  server.post(`${root}/:name/test`, async (req: any, res: any) => {
+    const svc = externalService();
+    if (!svc?.testConnection) return unavailable(res);
+    try {
+      const result = await svc.testConnection(req.params.name);
+      res.json(result);
+    } catch (err) {
+      badRequest(res, err);
+    }
+  });
+
   server.post(`${root}/:name/object-draft`, async (req: any, res: any) => {
     const svc = externalService();
     if (!svc?.generateObjectDraft) return unavailable(res);

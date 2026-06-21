@@ -76,6 +76,15 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     expect(generateObjectDraft).toHaveBeenCalledWith('demo_ext', 'customers', {});
   });
 
+  it('POST /api/v1/datasources/:name/test probes a saved datasource by name', async () => {
+    const testConnection = vi.fn().mockResolvedValue({ ok: true, latencyMs: 7, tableCount: 2 });
+    const app = mount({ testConnection });
+    const res = await app.fetch(json('/api/v1/datasources/demo_ext/test', { method: 'POST', body: '{}' }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, latencyMs: 7, tableCount: 2 });
+    expect(testConnection).toHaveBeenCalledWith('demo_ext');
+  });
+
   it('POST /api/v1/datasources/test splits the inline secret out of the draft', async () => {
     const testConnection = vi.fn().mockResolvedValue({ ok: true });
     const app = mount({ testConnection });

@@ -155,6 +155,31 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     return tables;
   }
 
+  /**
+   * Probe a *saved* datasource by name with a live round-trip. Reuses the
+   * introspection path (driver connect + schema read) as a cheap connectivity
+   * check, so the secret is resolved through the same wired pool as the rest of
+   * the introspection surface — the caller never handles cleartext. Returns a
+   * structured result rather than throwing so the route can render ok/error
+   * uniformly. This backs the `datasource` `test_connection` action
+   * (`POST /datasources/:name/test`).
+   */
+  async testConnection(
+    datasource: string,
+  ): Promise<{ ok: boolean; latencyMs?: number; tableCount?: number; error?: string }> {
+    const started = Date.now();
+    try {
+      const schema = await this.config.introspect(datasource);
+      return {
+        ok: true,
+        latencyMs: Date.now() - started,
+        tableCount: Object.keys(schema.tables).length,
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   async generateObjectDraft(
     datasource: string,
     remoteName: string,
