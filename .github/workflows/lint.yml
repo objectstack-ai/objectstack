@@ -100,3 +100,10 @@ jobs:
 
       - name: Type check example apps
         run: pnpm --filter './examples/*' run typecheck
+
+      # Backward-compatibility gate: a frozen third-party-style consumer
+      # (#2035). Unlike the examples it must NOT be migrated to accommodate a
+      # spec change — a red typecheck here means the spec dropped/narrowed an
+      # export a published-spec third party already uses. See the package README.
+      - name: Type check downstream consumer contract
+        run: pnpm --filter @objectstack/downstream-contract run typecheck
