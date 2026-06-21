@@ -196,3 +196,12 @@ export type PermissionSet = z.infer<typeof PermissionSetSchema>;
 export type PermissionSetInput = z.input<typeof PermissionSetSchema>;
 export type ObjectPermission = z.infer<typeof ObjectPermissionSchema>;
 export type FieldPermission = z.infer<typeof FieldPermissionSchema>;
+
+/**
+ * Type-safe factory for a permission set / profile. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: PermissionSet` literal.
+ */
+export function definePermissionSet(config: z.input<typeof PermissionSetSchema>): PermissionSet {
+  return PermissionSetSchema.parse(config);
+}

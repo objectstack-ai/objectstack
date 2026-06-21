@@ -630,3 +630,12 @@ export const ConnectorSchema = lazySchema(() => z.object({
 export type Connector = z.infer<typeof ConnectorSchema>;
 /** Authoring input for {@link Connector} — defaulted fields are optional. */
 export type ConnectorInput = z.input<typeof ConnectorSchema>;
+
+/**
+ * Type-safe factory for an external-system connector. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Connector` literal.
+ */
+export function defineConnector(config: z.input<typeof ConnectorSchema>): Connector {
+  return ConnectorSchema.parse(config);
+}

@@ -260,3 +260,12 @@ export type Datasource = z.infer<typeof DatasourceSchema>;
 /** Authoring input for {@link Datasource} — defaulted fields are optional. */
 export type DatasourceInput = z.input<typeof DatasourceSchema>;
 export type DatasourceCapabilitiesType = z.infer<typeof DatasourceCapabilities>;
+
+/**
+ * Type-safe factory for an external data connection (datasource). Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Datasource` literal.
+ */
+export function defineDatasource(config: z.input<typeof DatasourceSchema>): Datasource {
+  return DatasourceSchema.parse(config);
+}

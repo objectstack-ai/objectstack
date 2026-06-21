@@ -77,3 +77,14 @@ export const PolicySchema = lazySchema(() => z.object({
 }));
 
 export type Policy = z.infer<typeof PolicySchema>;
+/** Authoring input for {@link Policy} — defaulted fields are optional. */
+export type PolicyInput = z.input<typeof PolicySchema>;
+
+/**
+ * Type-safe factory for a security / compliance policy. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Policy` literal.
+ */
+export function definePolicy(config: z.input<typeof PolicySchema>): Policy {
+  return PolicySchema.parse(config);
+}

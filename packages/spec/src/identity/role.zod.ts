@@ -45,3 +45,12 @@ export const RoleSchema = lazySchema(() => z.object({
 export type Role = z.infer<typeof RoleSchema>;
 /** Authoring input for {@link Role} — defaulted fields are optional. */
 export type RoleInput = z.input<typeof RoleSchema>;
+
+/**
+ * Type-safe factory for a role in the role hierarchy. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Role` literal.
+ */
+export function defineRole(config: z.input<typeof RoleSchema>): Role {
+  return RoleSchema.parse(config);
+}

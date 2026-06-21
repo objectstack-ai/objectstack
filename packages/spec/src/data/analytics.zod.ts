@@ -174,4 +174,15 @@ export type Metric = z.infer<typeof MetricSchema>;
 export type Dimension = z.infer<typeof DimensionSchema>;
 export type CubeJoin = z.infer<typeof CubeJoinSchema>;
 export type Cube = z.infer<typeof CubeSchema>;
+/** Authoring input for {@link Cube} — defaulted fields are optional. */
+export type CubeInput = z.input<typeof CubeSchema>;
+
+/**
+ * Type-safe factory for an analytics semantic-layer cube. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Cube` literal.
+ */
+export function defineCube(config: z.input<typeof CubeSchema>): Cube {
+  return CubeSchema.parse(config);
+}
 export type AnalyticsQuery = z.infer<typeof AnalyticsQuerySchema>;

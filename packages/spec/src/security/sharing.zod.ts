@@ -112,3 +112,12 @@ export type SharingRule = z.infer<typeof SharingRuleSchema>;
 export type SharingRuleInput = z.input<typeof SharingRuleSchema>;
 export type CriteriaSharingRule = z.infer<typeof CriteriaSharingRuleSchema>;
 export type OwnerSharingRule = z.infer<typeof OwnerSharingRuleSchema>;
+
+/**
+ * Type-safe factory for a record sharing rule. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: SharingRule` literal.
+ */
+export function defineSharingRule(config: z.input<typeof SharingRuleSchema>): SharingRule {
+  return SharingRuleSchema.parse(config);
+}

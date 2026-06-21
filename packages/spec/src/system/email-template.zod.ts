@@ -135,3 +135,12 @@ function EmailAddressInlineSchema() {
 export type EmailTemplateDefinition = z.infer<typeof EmailTemplateDefinitionSchema>;
 /** Authoring input for {@link EmailTemplateDefinition} — defaulted fields are optional. */
 export type EmailTemplateDefinitionInput = z.input<typeof EmailTemplateDefinitionSchema>;
+
+/**
+ * Type-safe factory for an email template. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: EmailTemplateDefinition` literal.
+ */
+export function defineEmailTemplateDefinition(config: z.input<typeof EmailTemplateDefinitionSchema>): EmailTemplateDefinition {
+  return EmailTemplateDefinitionSchema.parse(config);
+}

@@ -502,3 +502,12 @@ export type ActionInput = z.input<typeof ActionSchema>;
 export const Action = {
   create: (config: z.input<typeof ActionSchema>): Action => ActionSchema.parse(config),
 } as const;
+
+/**
+ * Type-safe factory for a global or object action. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Action` literal.
+ */
+export function defineAction(config: z.input<typeof ActionSchema>): Action {
+  return ActionSchema.parse(config);
+}

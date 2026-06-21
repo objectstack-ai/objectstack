@@ -80,6 +80,27 @@ export { defineBook } from './system/book.zod';
 export { defineAgent } from './ai/agent.zod';
 export { defineTool } from './ai/tool.zod';
 export { defineSkill } from './ai/skill.zod';
+
+// DX factories for the remaining authoring domains (issue #2035) — one type-safe
+// entry per writable domain, mirroring the 19 factories above. `defineX` is a
+// *value* import: a broken import hard-errors instead of silently degrading to
+// `any` (the #2023 failure mode). Input-shape config + runtime `.parse()`.
+export { defineDatasource } from './data/datasource.zod';
+export { defineConnector } from './integration/connector.zod';
+export { definePolicy } from './security/policy.zod';
+export { defineSharingRule } from './security/sharing.zod';
+export { defineRole } from './identity/role.zod';
+export { definePermissionSet } from './security/permission.zod';
+export { defineEmailTemplateDefinition } from './system/email-template.zod';
+export { defineReport } from './ui/report.zod';
+export { defineWebhook } from './automation/webhook.zod';
+export { defineObjectExtension } from './data/object.zod';
+export { defineCube } from './data/analytics.zod';
+export { defineMapping } from './data/mapping.zod';
+export { defineTheme } from './ui/theme.zod';
+export { defineTranslationBundle } from './system/translation.zod';
+export { definePage } from './ui/page.zod';
+export { defineAction } from './ui/action.zod';
 export type { Agent } from './ai/agent.zod';
 export type { Tool } from './ai/tool.zod';
 export type { Skill } from './ai/skill.zod';

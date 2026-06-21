@@ -295,6 +295,17 @@ export type TranslationData = z.infer<typeof TranslationDataSchema>;
 export const TranslationBundleSchema = lazySchema(() => z.record(LocaleSchema, TranslationDataSchema).describe('Map of locale codes to translation data'));
 
 export type TranslationBundle = z.infer<typeof TranslationBundleSchema>;
+/** Authoring input for {@link TranslationBundle} — defaulted fields are optional. */
+export type TranslationBundleInput = z.input<typeof TranslationBundleSchema>;
+
+/**
+ * Type-safe factory for an i18n translation bundle (locale code → translations map). Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: TranslationBundle` literal.
+ */
+export function defineTranslationBundle(config: z.input<typeof TranslationBundleSchema>): TranslationBundle {
+  return TranslationBundleSchema.parse(config);
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // File Organization Convention

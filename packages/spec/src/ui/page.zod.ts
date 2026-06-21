@@ -399,6 +399,17 @@ export const PageSchema = lazySchema(() => z.object({
 }));
 
 export type Page = z.infer<typeof PageSchema>;
+/** Authoring input for {@link Page} — defaulted fields are optional. */
+export type PageInput = z.input<typeof PageSchema>;
+
+/**
+ * Type-safe factory for a custom page. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Page` literal.
+ */
+export function definePage(config: z.input<typeof PageSchema>): Page {
+  return PageSchema.parse(config);
+}
 export type PageType = z.infer<typeof PageTypeSchema>;
 export type PageComponent = z.infer<typeof PageComponentSchema>;
 export type PageRegion = z.infer<typeof PageRegionSchema>;

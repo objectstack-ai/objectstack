@@ -144,3 +144,12 @@ export type Webhook = z.infer<typeof WebhookSchema>;
 /** Authoring input for {@link Webhook} — defaulted fields are optional. */
 export type WebhookInput = z.input<typeof WebhookSchema>;
 export type WebhookReceiver = z.infer<typeof WebhookReceiverSchema>;
+
+/**
+ * Type-safe factory for an outbound webhook. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Webhook` literal.
+ */
+export function defineWebhook(config: z.input<typeof WebhookSchema>): Webhook {
+  return WebhookSchema.parse(config);
+}

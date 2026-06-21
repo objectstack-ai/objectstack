@@ -220,3 +220,12 @@ export type ReportChartInput = z.input<typeof ReportChartSchema>;
 export const Report = {
   create: (config: ReportInput): Report => ReportSchema.parse(config),
 } as const;
+
+/**
+ * Type-safe factory for an analytics report. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Report` literal.
+ */
+export function defineReport(config: z.input<typeof ReportSchema>): Report {
+  return ReportSchema.parse(config);
+}

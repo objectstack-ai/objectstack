@@ -1011,3 +1011,12 @@ export const ObjectExtensionSchema = lazySchema(() => z.object({
 export type ObjectExtension = z.infer<typeof ObjectExtensionSchema>;
 /** Authoring input for {@link ObjectExtension} — defaulted fields are optional. */
 export type ObjectExtensionInput = z.input<typeof ObjectExtensionSchema>;
+
+/**
+ * Type-safe factory for an extension to an object owned by another package. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: ObjectExtension` literal.
+ */
+export function defineObjectExtension(config: z.input<typeof ObjectExtensionSchema>): ObjectExtension {
+  return ObjectExtensionSchema.parse(config);
+}

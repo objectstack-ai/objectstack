@@ -92,4 +92,15 @@ export const MappingSchema = lazySchema(() => z.object({
 }));
 
 export type Mapping = z.infer<typeof MappingSchema>;
+/** Authoring input for {@link Mapping} — defaulted fields are optional. */
+export type MappingInput = z.input<typeof MappingSchema>;
+
+/**
+ * Type-safe factory for a data import/export mapping. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Mapping` literal.
+ */
+export function defineMapping(config: z.input<typeof MappingSchema>): Mapping {
+  return MappingSchema.parse(config);
+}
 export type FieldMapping = z.infer<typeof FieldMappingSchema>;

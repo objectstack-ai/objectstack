@@ -270,6 +270,17 @@ export const ThemeSchema = lazySchema(() => z.object({
 }));
 
 export type Theme = z.infer<typeof ThemeSchema>;
+/** Authoring input for {@link Theme} — defaulted fields are optional. */
+export type ThemeInput = z.input<typeof ThemeSchema>;
+
+/**
+ * Type-safe factory for a UI theme. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL
+ * shorthand) — preferred over a bare `: Theme` literal.
+ */
+export function defineTheme(config: z.input<typeof ThemeSchema>): Theme {
+  return ThemeSchema.parse(config);
+}
 export type ColorPalette = z.infer<typeof ColorPaletteSchema>;
 export type Typography = z.infer<typeof TypographySchema>;
 export type Spacing = z.infer<typeof SpacingSchema>;
