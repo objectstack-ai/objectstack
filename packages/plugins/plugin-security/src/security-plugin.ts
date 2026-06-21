@@ -5,6 +5,7 @@ import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/se
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { bootstrapDeclaredRoles } from './bootstrap-declared-roles.js';
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
+import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
 import { PermissionDeniedError } from './errors.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
@@ -535,6 +536,68 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
+      // 3.6. [ADR-0058 D4] RLS WRITE `check` — post-image validation.
+      //
+      // `using` gates which EXISTING rows a write may target (the #1994
+      // pre-image, step 2.7). `check` validates the NEW / CHANGED row
+      // (post-image) on insert/update — the PostgreSQL WITH CHECK analog. We
+      // compile the declared `check` clauses with the canonical compiler and
+      // match the resolved FilterCondition against the post-image in-memory
+      // (the single-record backend for the same filter shape, ADR-0058 D6). A
+      // row that fails the check is DENIED (fail closed, D5) — never silently
+      // written. Scoped to policies that EXPLICITLY declare `check`, so an
+      // object governed only by `using` is unaffected.
+      if (
+        (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
+        opCtx.data &&
+        typeof opCtx.data === 'object' &&
+        !Array.isArray(opCtx.data) &&
+        permissionSets.length > 0 &&
+        !!opCtx.context?.userId
+      ) {
+        const checkFilter = await this.computeWriteCheckFilter(
+          permissionSets,
+          opCtx.object,
+          opCtx.operation,
+          opCtx.context,
+        );
+        if (checkFilter) {
+          // Build the post-image. Insert → the new row. Update by-id → the
+          // pre-image merged with the change set (so a check on an unchanged
+          // field still sees its value). A bulk update (no single id) cannot
+          // form a post-image here — it is governed by the using-based AST
+          // scoping (step 3); we log and skip rather than guess.
+          let postImage: Record<string, unknown> | null = { ...(opCtx.data as Record<string, unknown>) };
+          if (opCtx.operation === 'update') {
+            const targetId = this.extractSingleId(opCtx);
+            if (targetId == null) {
+              this.logger.warn?.(
+                `[Security] RLS check on bulk update '${opCtx.object}' is not post-image validated ` +
+                  `(governed by the using-scoped where); single-id writes are checked.`,
+              );
+              postImage = null;
+            } else if (this.ql) {
+              let pre: any = null;
+              try {
+                pre = await this.ql.findOne(opCtx.object, { where: { id: targetId }, context: opCtx.context });
+              } catch {
+                pre = null;
+              }
+              if (pre && typeof pre === 'object') postImage = { ...(pre as Record<string, unknown>), ...(opCtx.data as Record<string, unknown>) };
+            }
+          }
+          if (postImage && !matchesFilterCondition(postImage, checkFilter as any)) {
+            this.logger.warn?.(
+              `[Security] RLS check FAILED on ${opCtx.operation} '${opCtx.object}' — write denied (fail-closed)`,
+            );
+            throw new PermissionDeniedError(
+              `[Security] Access denied: the ${opCtx.operation} would violate a row-level CHECK on '${opCtx.object}'`,
+              { operation: opCtx.operation, object: opCtx.object, roles, permissionSets: explicitPermissionSets },
+            );
+          }
+        }
+      }
+
       // 3. RLS filter injection. The policy collection + field-existence
       // safety + compile (incl. the fail-closed deny sentinel) is shared with
       // the public getReadFilter service via computeRlsFilter, so the engine
@@ -863,6 +926,26 @@ export class SecurityPlugin implements Plugin {
       rlsFilter = { ...RLS_DENY_FILTER };
     }
     return rlsFilter;
+  }
+
+  /**
+   * [ADR-0058 D4] Compile the WRITE `check` predicate for a post-image
+   * validation. Scoped to applicable policies that EXPLICITLY declare a `check`
+   * clause — an object governed only by `using` (the pre-image path) yields no
+   * check filter and is unaffected. The compiled FilterCondition is matched
+   * against the post-image record by the caller (fail closed).
+   */
+  private async computeWriteCheckFilter(
+    permissionSets: PermissionSet[],
+    object: string,
+    operation: string,
+    context: any,
+  ): Promise<Record<string, unknown> | null> {
+    const withCheck = this.collectRLSPolicies(permissionSets, object, operation).filter(
+      (p) => typeof (p as { check?: string }).check === 'string' && (p as { check?: string }).check!.trim() !== '',
+    );
+    if (withCheck.length === 0) return null;
+    return this.rlsCompiler.compileFilter(withCheck, context, 'check');
   }
 
   /**

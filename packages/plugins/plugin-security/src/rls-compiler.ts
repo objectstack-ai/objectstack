@@ -144,7 +144,8 @@ export class RLSCompiler {
    */
   compileFilter(
     policies: RowLevelSecurityPolicy[],
-    executionContext?: ExecutionContext
+    executionContext?: ExecutionContext,
+    clause: 'using' | 'check' = 'using',
   ): Record<string, unknown> | null {
     if (policies.length === 0) return null;
 
@@ -173,24 +174,38 @@ export class RLSCompiler {
     }
 
     const filters: Record<string, unknown>[] = [];
+    let applicable = 0;
 
     for (const policy of policies) {
-      if (!policy.using) continue;
-      const filter = this.compileExpression(policy.using, userCtx);
+      // [ADR-0058 D4] On a WRITE (check) pass, the post-image is validated against
+      // the `check` clause, defaulting to `using` when omitted. Reads use `using`.
+      const predicate = clause === 'check'
+        ? ((policy as { check?: string }).check ?? policy.using)
+        : policy.using;
+      // A policy that carries no predicate for THIS clause (e.g. a check-only
+      // policy on the `using` read pass) is not applicable here — skip it
+      // WITHOUT counting it toward the fail-closed deny below.
+      if (!predicate) continue;
+      applicable++;
+      const filter = this.compileExpression(predicate, userCtx);
       if (filter) {
         filters.push(filter);
-      } else if (!isSupportedRlsExpression(policy.using)) {
-        // ADR-0056 D4: an UNSUPPORTED-SHAPE predicate (e.g. `==`, AND/OR, ranges)
-        // compiles to nothing and would silently vanish, leaving the object
-        // unprotected. Surface it instead of dropping in silence. (A SUPPORTED
-        // shape that returned null is the intentional "context var absent" path —
-        // it fails closed downstream and is not warned here.)
+      } else if (!isSupportedRlsExpression(predicate)) {
+        // ADR-0056 D4: an UNSUPPORTED-SHAPE predicate (e.g. arithmetic, functions,
+        // subqueries) compiles to nothing and would silently vanish, leaving the
+        // object unprotected. Surface it instead of dropping in silence. (A
+        // SUPPORTED shape that returned null is the intentional "context var
+        // absent" path — it fails closed downstream and is not warned here.)
         this.logger?.warn?.(
           `[RLS] policy '${(policy as { name?: string }).name ?? '(unnamed)'}' on '${(policy as { object?: string }).object ?? '?'}' ` +
-            `has an uncompilable predicate and was DROPPED (no enforcement): ${policy.using}`,
+            `has an uncompilable predicate (${clause} clause) and was DROPPED (no enforcement): ${predicate}`,
         );
       }
     }
+
+    // No policy carried a predicate for this clause → nothing to apply (NOT a
+    // deny). e.g. a check-only policy seen on the `using` read pass.
+    if (applicable === 0) return null;
 
     if (filters.length === 0) {
       // Policies *were* applicable but every one of them depended on a

@@ -689,6 +689,85 @@ describe('SecurityPlugin', () => {
     await orig.call(harness, opCtx);
     // No throw — find is not a write operation.
   });
+
+
+  // ---------------------------------------------------------------------------
+  // ADR-0058 D4 — RLS `check` clause (write post-image validation)
+  //
+  // `using` gates which EXISTING rows a write may target (pre-image, step 2.7);
+  // `check` validates the NEW / CHANGED row (post-image) on insert/update — the
+  // PostgreSQL WITH CHECK analog — compiled by the canonical compiler and matched
+  // in-memory. Fail closed (D5). Scoped to policies that explicitly declare check.
+  // ---------------------------------------------------------------------------
+  describe('RLS check enforcement (ADR-0058 D4)', () => {
+    const checkPolicySet: PermissionSet = {
+      name: 'member_default',
+      label: 'Member',
+      isProfile: true,
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+      rowLevelSecurity: [
+        { name: 'emea_insert_check', object: '*', operation: 'insert', check: "region == 'EMEA'" },
+        { name: 'emea_update_check', object: '*', operation: 'update', check: "region == 'EMEA'" },
+      ],
+    } as any;
+
+    const started = async (findOneImpl?: (q: any) => any) => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [checkPolicySet],
+        objectFields: ['id', 'region', 'owner_id', 'name'],
+        findOneImpl,
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      return harness;
+    };
+    const ctx = () => ({ userId: 'u1', tenantId: 'org-1', roles: [], permissions: ['member_default'] });
+
+    it('INSERT whose post-image satisfies the check succeeds', async () => {
+      const h = await started();
+      const opCtx: any = { object: 'task', operation: 'insert', data: { name: 'A', region: 'EMEA' }, context: ctx() };
+      await expect(h.run(opCtx)).resolves.toBeDefined();
+    });
+
+    it('INSERT whose post-image VIOLATES the check is denied (fail closed)', async () => {
+      const h = await started();
+      const opCtx: any = { object: 'task', operation: 'insert', data: { name: 'A', region: 'APAC' }, context: ctx() };
+      await expect(h.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('INSERT missing the checked field is denied (fail closed)', async () => {
+      const h = await started();
+      const opCtx: any = { object: 'task', operation: 'insert', data: { name: 'A' }, context: ctx() };
+      await expect(h.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('UPDATE whose post-image (pre-image ∪ change) satisfies the check succeeds', async () => {
+      // Pre-image is APAC; the update moves it to EMEA → post-image is valid.
+      const h = await started(() => ({ id: 'r1', region: 'APAC', name: 'X' }));
+      const opCtx: any = { object: 'task', operation: 'update', data: { id: 'r1', region: 'EMEA' }, context: ctx() };
+      await expect(h.run(opCtx)).resolves.toBeDefined();
+    });
+
+    it('UPDATE that changes a valid row to violate the check is denied', async () => {
+      // Pre-image is EMEA (valid); the update moves it to APAC → post-image invalid.
+      const h = await started(() => ({ id: 'r1', region: 'EMEA', name: 'X' }));
+      const opCtx: any = { object: 'task', operation: 'update', data: { id: 'r1', region: 'APAC' }, context: ctx() };
+      await expect(h.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('UPDATE leaving the checked field unchanged uses the pre-image value (valid stays valid)', async () => {
+      const h = await started(() => ({ id: 'r1', region: 'EMEA', name: 'X' }));
+      const opCtx: any = { object: 'task', operation: 'update', data: { id: 'r1', name: 'renamed' }, context: ctx() };
+      await expect(h.run(opCtx)).resolves.toBeDefined();
+    });
+
+    it('DELETE is unaffected by check (no new row to validate)', async () => {
+      const h = await started(() => ({ id: 'r1', region: 'APAC' }));
+      const opCtx: any = { object: 'task', operation: 'delete', data: { id: 'r1' }, context: ctx() };
+      await expect(h.run(opCtx)).resolves.toBeDefined();
+    });
+  });
 });
 // ---------------------------------------------------------------------------
 describe('PermissionEvaluator', () => {

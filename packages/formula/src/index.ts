@@ -21,6 +21,7 @@ export { normalizeExpression, normalizeExpressionTree } from './normalize';
 // and plugin-sharing; honours ADR-0055 (no subquery / no cross-object traversal).
 export { compileCelToFilter, isPushdownableCel, lowerCelAst } from './cel-to-filter';
 export type { CelFilterCompileResult, CelFilterCompileOptions, CelFilterFailReason } from './cel-to-filter';
+export { matchesFilterCondition } from './matches-filter';
 // ADR-0032 — shared validator + introspection (one validator for build,
 // registration, and the agent-callable validate_expression tool).
 export { validateExpression, introspectScope, expectedDialect, CEL_STDLIB_FUNCTIONS } from './validate';
