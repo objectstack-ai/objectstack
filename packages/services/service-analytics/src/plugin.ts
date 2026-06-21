@@ -436,6 +436,13 @@ export class AnalyticsServicePlugin implements Plugin {
       coerceTemporalFilterValue,
       relationshipResolver,
       labelResolver,
+      // ADR-0053 — source-field currency metadata for the measure currency chain.
+      measureCurrency: (object: string, field: string) => {
+        const f = dataEngine()?.getObject?.(object)?.fields?.[field] as
+          | { type?: string; currencyConfig?: { defaultCurrency?: string } }
+          | undefined;
+        return f ? { type: f.type, defaultCurrency: f.currencyConfig?.defaultCurrency } : undefined;
+      },
       draftRowsResolver,
     };
 

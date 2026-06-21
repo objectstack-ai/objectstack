@@ -122,6 +122,45 @@ describe('AnalyticsService.queryDataset', () => {
     expect(revenueField?.format).toBe('0,0');
   });
 
+  // ── ADR-0053 currency chain (measure → field currencyConfig → tenant ctx) ──
+  function pricedSvc(rows: Array<Record<string, unknown>>, measureCurrency?: (o: string, f: string) => { type?: string; defaultCurrency?: string } | undefined) {
+    return new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      executeRawSql: async () => rows,
+      getReadScope: (_o, ctx?: ExecutionContext) => (ctx?.tenantId ? { organization_id: ctx.tenantId } : undefined),
+      ...(measureCurrency ? { measureCurrency } : {}),
+    });
+  }
+  const moneyDataset = (measure: Record<string, unknown>) => DatasetSchema.parse({
+    name: 'money', label: 'Money', object: 'opportunity', include: [],
+    dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+    measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount', label: 'Revenue', ...measure }],
+  });
+
+  it('chain: a currency-FIELD measure (no explicit currency) inherits the field defaultCurrency', async () => {
+    const svc = pricedSvc([{ stage: 'Won', revenue: 1000 }], (_o, f) => f === 'amount' ? { type: 'currency', defaultCurrency: 'EUR' } : undefined);
+    const r = await svc.queryDataset(moneyDataset({}), { dimensions: ['stage'], measures: ['revenue'] }, { tenantId: 'o' } as ExecutionContext) as any;
+    expect(r.fields.find((f: any) => f.name === 'revenue')?.currency).toBe('EUR');
+  });
+
+  it('chain: a currency field with no defaultCurrency falls back to the tenant ctx.currency', async () => {
+    const svc = pricedSvc([{ stage: 'Won', revenue: 1000 }], (_o, f) => f === 'amount' ? { type: 'currency' } : undefined);
+    const r = await svc.queryDataset(moneyDataset({}), { dimensions: ['stage'], measures: ['revenue'] }, { tenantId: 'o', currency: 'GBP' } as ExecutionContext) as any;
+    expect(r.fields.find((f: any) => f.name === 'revenue')?.currency).toBe('GBP');
+  });
+
+  it('chain: an explicit measure currency wins over the field default and the tenant ctx', async () => {
+    const svc = pricedSvc([{ stage: 'Won', revenue: 1000 }], (_o, f) => f === 'amount' ? { type: 'currency', defaultCurrency: 'EUR' } : undefined);
+    const r = await svc.queryDataset(moneyDataset({ currency: 'JPY' }), { dimensions: ['stage'], measures: ['revenue'] }, { tenantId: 'o', currency: 'GBP' } as ExecutionContext) as any;
+    expect(r.fields.find((f: any) => f.name === 'revenue')?.currency).toBe('JPY');
+  });
+
+  it('chain: a NON-currency field measure never gets a currency (even with a tenant default)', async () => {
+    const svc = pricedSvc([{ stage: 'Won', revenue: 1000 }], (_o, f) => f === 'amount' ? { type: 'number' } : undefined);
+    const r = await svc.queryDataset(moneyDataset({}), { dimensions: ['stage'], measures: ['revenue'] }, { tenantId: 'o', currency: 'USD' } as ExecutionContext) as any;
+    expect(r.fields.find((f: any) => f.name === 'revenue')?.currency).toBeUndefined();
+  });
+
   it('enriches dimension columns with their dataset display label', async () => {
     const labeled = DatasetSchema.parse({
       name: 'sales2', label: 'Sales', object: 'opportunity', include: ['account'],

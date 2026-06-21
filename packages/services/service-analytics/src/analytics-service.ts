@@ -141,6 +141,14 @@ export interface AnalyticsServiceConfig {
    * provided, `queryDataset` validates that every declared `include` exists.
    */
   relationshipResolver?: RelationshipResolver;
+  /**
+   * ADR-0053 currency chain — resolve a measure's SOURCE FIELD currency
+   * metadata so a monetary measure that omits an explicit `currency` falls back
+   * to the field's declared currency, then the tenant default (`ctx.currency`).
+   * Returns the source field's `type` and (fixed-mode) `defaultCurrency`;
+   * `undefined` for an unknown field. Non-`currency` fields never get a code.
+   */
+  measureCurrency?: (object: string, field: string) => { type?: string; defaultCurrency?: string } | undefined;
   /** Pre-defined datasets to compile + register at construction (ADR-0021). */
   datasets?: Dataset[];
   /**
@@ -204,6 +212,7 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly datasetRegistry = new Map<string, CompiledDataset>();
   /** Optional object-graph resolver used when compiling datasets. */
   private readonly relationshipResolver?: RelationshipResolver;
+  private readonly measureCurrency?: AnalyticsServiceConfig['measureCurrency'];
   /** Optional dimension display-label resolver (select options / lookup names). */
   private readonly labelResolver?: DimensionLabelDeps;
   /** ADR-0037 P3: pending-seed row resolver for draft data preview. */
@@ -222,6 +231,7 @@ export class AnalyticsService implements IAnalyticsService {
 
     this.readScopeProvider = config.getReadScope;
     this.relationshipResolver = config.relationshipResolver;
+    this.measureCurrency = config.measureCurrency;
     this.labelResolver = config.labelResolver;
     this.draftRowsResolver = config.draftRowsResolver;
 
@@ -524,11 +534,22 @@ export class AnalyticsService implements IAnalyticsService {
         if (!m) continue;
         if (f.label == null && typeof m.label === 'string') f.label = m.label;
         if (f.format == null && m.format) f.format = m.format;
-        // Carry the measure's declared currency so the renderer can render a
-        // locale-correct symbol via Intl (never a "$" baked into `format`).
+        // ADR-0053 currency chain. A MONETARY measure resolves its display
+        // currency from: explicit measure `currency` → source-field
+        // `currencyConfig.defaultCurrency` → tenant default (`ctx.currency`). A
+        // measure is monetary if it declares a currency OR aggregates a
+        // `currency`-type field; non-monetary measures (count, avg of a plain
+        // number) never receive a currency code.
         const fc = f as { currency?: string };
         const mc = m as { currency?: string };
-        if (fc.currency == null && mc.currency) fc.currency = mc.currency;
+        if (fc.currency == null) {
+          const meta = m.field ? this.measureCurrency?.(dataset.object, m.field) : undefined;
+          const monetary = !!mc.currency || meta?.type === 'currency';
+          if (monetary) {
+            const resolved = mc.currency ?? meta?.defaultCurrency ?? context?.currency;
+            if (resolved) fc.currency = resolved;
+          }
+        }
       }
     }
 
