@@ -1,6 +1,6 @@
 # ADR-0060: Conformance Ledger as a Platform Pattern
 
-**Status**: Proposed (2026-06-21)
+**Status**: Accepted — P1–P2 implemented; D5 landed-bar in force; D6 (CI aggregate) deferred (2026-06-21)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: ADR-0049 (enforce-or-remove / no unenforced declaration), ADR-0054
 (runtime proof per enforced high-risk primitive), ADR-0056 D10 (Authorization
@@ -171,8 +171,33 @@ shared invariants, independent ratchets, additive.
   authz + expression ledgers onto it (tests stay green; proves reuse).
 - **P2** — D3 validation-rule-surface ledger + ratchet; classify every rule type,
   pin the ADR-0020 `state_machine` enforcement with a proof.
-- **P3** — D5 as the documented "landed" bar; D6 CI aggregate; extend to the next
-  highest-risk surfaces (flow conditions, UI actions, connectors) as evidence warrants.
+- **P3** — D5 as the documented "landed" bar (**done** — see Implementation status);
+  D6 CI aggregate **deferred** (each ledger self-gates); extend to the next highest-risk
+  surfaces (flow conditions, UI actions, connectors) as evidence warrants.
+
+## Implementation status (2026-06-21)
+
+P1–P2 landed; the pattern is proven across **three** surfaces sharing one helper:
+
+| Surface | Ledger | Discover / ratchet | Enforcement |
+| :-- | :-- | :-- | :-- |
+| Authorization (ADR-0056 D10) | `authz-conformance.matrix.ts` | curated primitives | plugin-security / plugin-sharing |
+| Expression (ADR-0058 D7) | `expression-conformance.ledger.ts` | every `ExpressionInputSchema` field in spec | `@objectstack/formula` compiler |
+| Validation rules (ADR-0020) | `validation-conformance.ledger.ts` | every `validations` union rule type | `objectql` rule-validator |
+
+Helper: `@objectstack/verify` → `checkLedger(rows, opts)`.
+
+**D5 — the "landed" bar (in force).** A declaration surface is **landed iff it has
+a conformance ledger whose `checkLedger` ratchet is green.** Adding a new authorable
+surface (a new `ExpressionInputSchema`-style family, a new `validations` rule type,
+a new authz primitive) without a ledger row is, by construction, an unclassified-
+surface CI failure. This is ADR-0049's "enforce or remove" with a mechanical third
+leg: **ledger or it isn't landed.**
+
+**D6 — CI aggregate: deferred.** Each ledger already gates itself in CI, so a single
+aggregate meta-test adds little beyond a registry of registries. It is deferred until
+the surface count makes a one-call "is the whole conformance surface green?" worth the
+indirection.
 
 ## References
 
