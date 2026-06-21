@@ -33,6 +33,82 @@ interface DataEngineLike {
   registerDriver?: (driver: unknown, isDefault?: boolean) => void;
   registerDatasourceDef?: (def: { name: string; schemaMode?: string; external?: { allowWrites?: boolean } }) => void;
   getDriverByName?: (name: string) => unknown;
+  // sys_metadata CRUD used to persist runtime datasource records durably (same
+  // table runtime objects use). Optional — absent on lightweight kernels, in
+  // which case persistence degrades to in-memory (pre-existing behavior).
+  findOne?: (object: string, query: { where?: Record<string, unknown> }) => Promise<Record<string, unknown> | undefined | null>;
+  find?: (object: string, query: { where?: Record<string, unknown> }) => Promise<Record<string, unknown>[]>;
+  insert?: (object: string, row: Record<string, unknown>) => Promise<unknown>;
+  update?: (object: string, row: Record<string, unknown>, opts: { where: Record<string, unknown> }) => Promise<unknown>;
+  delete?: (object: string, opts: { where: Record<string, unknown> }) => Promise<unknown>;
+}
+
+/**
+ * Durable persistence for runtime datasource records via the `sys_metadata`
+ * table — the same store runtime objects use (the protocol writes objects there
+ * directly). `MetadataManager.register()` alone is in-memory unless a writable
+ * `datasource:` loader is wired, which standalone `serve` does not do; so a
+ * UI-created datasource vanished on restart. These helpers persist on write and
+ * the plugin restores them into the registry on boot before rehydrating pools.
+ * Credential cleartext is never stored — only the opaque `external.credentialsRef`.
+ */
+const DS_META_TYPE = 'datasource';
+const SYS_METADATA = 'sys_metadata';
+
+function newMetaId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `meta_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+async function persistDatasourceRow(engine: DataEngineLike | undefined, record: { name: string }): Promise<void> {
+  if (!engine?.insert || !engine.findOne) return; // no durable store — in-memory only
+  const now = new Date().toISOString();
+  const existing = await engine.findOne(SYS_METADATA, {
+    where: { type: DS_META_TYPE, name: record.name, state: 'active' },
+  });
+  if (existing) {
+    await engine.update?.(
+      SYS_METADATA,
+      { metadata: JSON.stringify(record), updated_at: now, version: ((existing.version as number) || 0) + 1, state: 'active' },
+      { where: { id: existing.id } },
+    );
+  } else {
+    await engine.insert(SYS_METADATA, {
+      id: newMetaId(),
+      name: record.name,
+      type: DS_META_TYPE,
+      scope: 'platform',
+      metadata: JSON.stringify(record),
+      state: 'active',
+      version: 1,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+}
+
+async function deleteDatasourceRow(engine: DataEngineLike | undefined, name: string): Promise<void> {
+  if (!engine?.findOne) return;
+  const existing = await engine.findOne(SYS_METADATA, { where: { type: DS_META_TYPE, name, state: 'active' } });
+  if (!existing) return;
+  if (engine.delete) await engine.delete(SYS_METADATA, { where: { id: existing.id } });
+  else await engine.update?.(SYS_METADATA, { state: 'inactive' }, { where: { id: existing.id } });
+}
+
+async function loadDatasourceRows(engine: DataEngineLike | undefined): Promise<Array<Record<string, unknown>>> {
+  if (!engine?.find) return [];
+  const rows = await engine.find(SYS_METADATA, { where: { type: DS_META_TYPE, state: 'active' } });
+  const out: Array<Record<string, unknown>> = [];
+  for (const r of rows ?? []) {
+    const raw = (r as { metadata?: unknown }).metadata;
+    try {
+      out.push(typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>));
+    } catch {
+      /* skip corrupt row */
+    }
+  }
+  return out;
 }
 
 /**
@@ -147,7 +223,10 @@ export class DatasourceAdminServicePlugin implements Plugin {
         if (!metadata?.register) {
           throw new Error('Metadata service is unavailable; cannot persist datasource.');
         }
+        // In-memory registry (immediate visibility) + durable sys_metadata row
+        // (survives restart; restored on boot by restoreRuntimeDatasources).
         await metadata.register('datasource', record.name, record);
+        await persistDatasourceRow(engineOf(), record);
       },
 
       deleteDatasourceRecord: async (name) => {
@@ -156,6 +235,7 @@ export class DatasourceAdminServicePlugin implements Plugin {
           throw new Error('Metadata service is unavailable; cannot remove datasource.');
         }
         await metadata.unregister('datasource', name);
+        await deleteDatasourceRow(engineOf(), name);
       },
 
       writeSecret: async (input, hint) => {
@@ -265,11 +345,41 @@ export class DatasourceAdminServicePlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
-    // Rebuild live connection pools for persisted runtime datasources before
-    // announcing readiness — a node restart otherwise leaves UI-created
-    // datasources with a record but no open pool until the next write.
+    // Restore UI-created (runtime) datasources from the durable sys_metadata
+    // store back into the in-memory registry, THEN rebuild their live pools.
+    // `register()` is in-memory only in standalone serve (no writable
+    // `datasource:` loader), so without this a node restart drops every
+    // UI-created datasource. Code-defined datasources come from the artifact and
+    // are unaffected.
+    await this.restoreRuntimeDatasources(ctx);
     await this.rehydratePools();
     if (this.service) await ctx.trigger('datasource-admin:ready', this.service);
+  }
+
+  /** Reload persisted runtime datasource rows (sys_metadata) into the registry. */
+  private async restoreRuntimeDatasources(ctx: PluginContext): Promise<void> {
+    const engine = safeGetService<DataEngineLike>(ctx, 'data');
+    const metadata = safeGetService<MetadataServiceLike>(ctx, 'metadata');
+    if (!engine?.find || !metadata?.register) return;
+    let rows: Array<Record<string, unknown>>;
+    try {
+      rows = await loadDatasourceRows(engine);
+    } catch (err) {
+      this.options.logger?.warn?.('datasource restore: reading sys_metadata failed', err);
+      return;
+    }
+    let restored = 0;
+    for (const rec of rows) {
+      const name = (rec as { name?: string }).name;
+      if (!name) continue;
+      try {
+        await metadata.register('datasource', name, rec);
+        restored += 1;
+      } catch (err) {
+        this.options.logger?.warn?.(`datasource restore: register '${name}' failed`, err);
+      }
+    }
+    if (restored > 0) this.options.logger?.info?.(`datasource: restored ${restored} runtime record(s) from sys_metadata`);
   }
 
   /**

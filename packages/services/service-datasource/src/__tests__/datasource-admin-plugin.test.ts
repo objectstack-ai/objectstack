@@ -229,3 +229,62 @@ describe('DatasourceAdminServicePlugin: persistence + bound count', () => {
     await expect(service.removeDatasource('reporting')).rejects.toThrow(/1 object\(s\)/);
   });
 });
+
+describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
+  /** In-memory `sys_metadata` engine shared across two boots (a "restart"). */
+  function fakeSysMetadataEngine() {
+    const rows: Array<Record<string, unknown>> = [];
+    return {
+      rows,
+      registerDriver() {},
+      registerDatasourceDef() {},
+      getDriverByName() { return undefined; },
+      findOne: async (_o: string, q: { where?: Record<string, unknown> }) => {
+        const w = q.where ?? {};
+        return rows.find((r) => Object.entries(w).every(([k, v]) => r[k] === v));
+      },
+      find: async (_o: string, q: { where?: Record<string, unknown> }) => {
+        const w = q.where ?? {};
+        return rows.filter((r) => Object.entries(w).every(([k, v]) => r[k] === v));
+      },
+      insert: async (_o: string, row: Record<string, unknown>) => { rows.push({ ...row }); },
+      update: async (_o: string, row: Record<string, unknown>, opts: { where: Record<string, unknown> }) => {
+        const i = rows.findIndex((r) => r.id === opts.where.id);
+        if (i >= 0) rows[i] = { ...rows[i], ...row };
+      },
+      delete: async (_o: string, opts: { where: Record<string, unknown> }) => {
+        const i = rows.findIndex((r) => r.id === opts.where.id);
+        if (i >= 0) rows.splice(i, 1);
+      },
+    };
+  }
+
+  it('persists a UI-created datasource to sys_metadata and restores it after a restart', async () => {
+    const data = fakeSysMetadataEngine();
+
+    // Boot #1: create a runtime sqlite datasource (no secret needed).
+    const b1 = await boot({ services: { data } });
+    await b1.service.createDatasource({ name: 'demo_ext', driver: 'sqlite', config: { filename: '/tmp/x.db' } });
+    // It is durably written to sys_metadata (not just the in-memory registry).
+    expect(data.rows.filter((r) => r.type === 'datasource' && r.name === 'demo_ext')).toHaveLength(1);
+
+    // Boot #2 = "restart": fresh in-memory registry, SAME sys_metadata engine.
+    const b2 = await boot({ services: { data } });
+    // Before restore, the fresh registry is empty.
+    expect(await b2.service.listDatasources()).toHaveLength(0);
+    // start() restores runtime rows from sys_metadata into the registry.
+    await b2.plugin.start(b2.ctx);
+    const after = await b2.service.listDatasources();
+    expect(after.map((d) => d.name)).toContain('demo_ext');
+    expect(after.find((d) => d.name === 'demo_ext')?.origin).toBe('runtime');
+  });
+
+  it('removes the durable sys_metadata row when a datasource is deleted', async () => {
+    const data = fakeSysMetadataEngine();
+    const b = await boot({ services: { data } });
+    await b.service.createDatasource({ name: 'gone', driver: 'sqlite', config: { filename: '/tmp/y.db' } });
+    expect(data.rows.some((r) => r.name === 'gone')).toBe(true);
+    await b.service.removeDatasource('gone');
+    expect(data.rows.some((r) => r.name === 'gone')).toBe(false);
+  });
+});
