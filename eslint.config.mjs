@@ -31,6 +31,22 @@ const SUBPATH_RULE_MESSAGE =
   're-exports were removed because Node ESM cannot tree-shake them — see ' +
   'packages/spec/src/index.ts.';
 
+// issue #2035 — the 16 writable domains that now have a `defineX` factory. In
+// example/app metadata files these must be authored through the factory, never a
+// bare `: DomainType` / `: DomainTypeInput` literal: the factory validates at
+// `.parse()` time and is a *value* import that fails loudly on a broken import
+// instead of silently degrading to `any` (the #2023 failure mode).
+const DOMAIN_TYPES = [
+  'Datasource', 'Connector', 'Policy', 'SharingRule', 'Role', 'PermissionSet',
+  'EmailTemplateDefinition', 'Report', 'Webhook', 'ObjectExtension', 'Cube',
+  'Mapping', 'Theme', 'TranslationBundle', 'Page', 'Action',
+].flatMap((t) => [t, t + 'Input']).join('|');
+
+const DOMAIN_RULE_MESSAGE =
+  'Author this metadata through its defineX factory (e.g. `definePage({ ... })`) ' +
+  'instead of a bare `: Type` literal. The factory validates at parse time and a ' +
+  'broken value import fails loudly instead of degrading to `any` — see issue #2035.';
+
 export default [
   {
     files: ['**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'],
@@ -60,6 +76,31 @@ export default [
           message: SUBPATH_RULE_MESSAGE,
         }],
       }],
+    },
+  },
+  // issue #2035 — authoring-entry guard. Flags exported consts in example
+  // metadata files that are annotated with a spec domain type (simple `Page`
+  // or qualified `UI.Page`) instead of being wrapped in the `defineX` factory.
+  // AST-only (no type info): matches the declaration shape, not local vars or
+  // function params. Scoped to examples — the reference corpus AI learns from.
+  {
+    files: ['examples/**/*.{ts,tsx,mts,cts}'],
+    ignores: ['**/node_modules/**', '**/dist/**'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+    },
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: `ExportNamedDeclaration VariableDeclarator[id.typeAnnotation.typeAnnotation.typeName.name=/^(${DOMAIN_TYPES})$/]`,
+          message: DOMAIN_RULE_MESSAGE,
+        },
+        {
+          selector: `ExportNamedDeclaration VariableDeclarator[id.typeAnnotation.typeAnnotation.typeName.right.name=/^(${DOMAIN_TYPES})$/]`,
+          message: DOMAIN_RULE_MESSAGE,
+        },
+      ],
     },
   },
 ];
