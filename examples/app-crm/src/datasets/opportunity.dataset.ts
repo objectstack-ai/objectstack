@@ -18,6 +18,10 @@ export const OpportunityDataset = defineDataset({
 
   dimensions: [
     { name: 'stage', label: 'Stage', field: 'stage', type: 'string' },
+    // Lookup dimension — the analytics layer resolves the account FK to its
+    // display name in `rows`, but exposes the raw FK via drillRawRows so a
+    // report drill filters by the stored id (ADR-0021 D2), not the name.
+    { name: 'account', label: 'Account', field: 'account', type: 'lookup' },
     // ADR-0021 single-form: the monthly bucketing the trend widget used to carry
     // as `categoryGranularity: 'month'` now lives on the dimension itself.
     { name: 'close_date', label: 'Close Date', field: 'close_date', type: 'date', dateGranularity: 'month' },

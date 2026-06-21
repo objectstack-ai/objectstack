@@ -154,4 +154,23 @@ describe('AnalyticsService.queryDataset', () => {
     expect(result.object).toBeUndefined();
     expect(result.drillRawRows).toBeUndefined();
   });
+
+  it('marks a LOOKUP dimension drillable, exposing the raw FK for exact-match drill', async () => {
+    const byAccount = DatasetSchema.parse({
+      name: 'sales_acct', label: 'Sales', object: 'opportunity', include: [],
+      dimensions: [{ name: 'account', field: 'account', type: 'lookup', label: 'Account' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount', certified: true }],
+    });
+    const svc = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      executeRawSql: async () => [{ account: 'acc_123', revenue: 1000 }],
+      getReadScope: (_o, ctx?: ExecutionContext) => (ctx?.tenantId ? { organization_id: ctx.tenantId } : undefined),
+    });
+    const result = await svc.queryDataset(byAccount, { dimensions: ['account'], measures: ['revenue'] }, { tenantId: 'org_A' } as ExecutionContext) as any;
+    // A lookup dim IS drillable (unlike a date bucket): its raw FK is exposed so
+    // the report drill filters by the stored id, not the resolved display name.
+    expect(result.object).toBe('opportunity');
+    expect(result.dimensionFields).toEqual({ account: 'account' });
+    expect(result.drillRawRows).toEqual([{ account: 'acc_123' }]);
+  });
 });
