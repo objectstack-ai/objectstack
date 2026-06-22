@@ -97,6 +97,7 @@ export const RecalcEstimateAction = defineAction({
   objectName: task,
   type: 'api',
   target: '/api/v1/showcase/recalc',
+  successMessage: 'Estimate recalculated.',
   locations: ['record_more', 'record_section'],
   refreshAfter: true,
 });
