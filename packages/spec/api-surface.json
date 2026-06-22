@@ -3282,6 +3282,7 @@
     "TransitionConfigSchema (const)",
     "TransitionPreset (type)",
     "TransitionPresetSchema (const)",
+    "TreeConfigSchema (const)",
     "Typography (type)",
     "TypographySchema (const)",
     "UrlNavItem (type)",
