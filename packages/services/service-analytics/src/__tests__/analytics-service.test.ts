@@ -704,3 +704,34 @@ describe('AnalyticsService — RAW_SQL_UNSUPPORTED fallback', () => {
     await expect(service.query({ cube: 'orders', measures: ['count'] })).rejects.toThrow('No strategy can handle');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────
+// Auto-inferred cube log level (object-metric KPI tiles).
+//
+// A scalar metric query (measures only, no grouping) is the supported
+// "metric over an object" path — auto-inferring a count/sum cube is
+// expected, so it logs at debug, not warn. A grouped query (explicit
+// dimension / time bucket) over an unregistered cube keeps the warn,
+// since a forgotten cube registration there is a real mistake.
+
+describe('AnalyticsService — auto-inferred cube log level', () => {
+  const makeService = (logger: any) =>
+    new AnalyticsService({
+      logger,
+      executeAggregate: vi.fn().mockResolvedValue([{ count: 3 }]),
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+    });
+
+  it('logs at debug (not warn) for a scalar metric over an unregistered cube', async () => {
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn().mockReturnThis() } as any;
+    await makeService(logger).query({ cube: 'showcase_task', measures: ['count'] });
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('No cube registered for "showcase_task"'));
+  });
+
+  it('keeps warn for a grouped query over an unregistered cube', async () => {
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn().mockReturnThis() } as any;
+    await makeService(logger).query({ cube: 'showcase_task', measures: ['count'], dimensions: ['status'] });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('No cube registered for "showcase_task"'));
+  });
+});

@@ -642,12 +642,21 @@ export class AnalyticsService implements IAnalyticsService {
     if (!cube) {
       cube = this.inferCubeFromQuery(query);
       this.cubeRegistry.register(cube);
-      this.logger.warn(
+      // A scalar query — only measures, no grouping (no `dimensions`/
+      // `timeDimensions`) — is the first-class "metric over an object" path
+      // (e.g. the `object-metric` KPI widget). Auto-inferring a count/sum cube
+      // is the intended behaviour there, so log at debug. A query that groups
+      // by an explicit dimension or time bucket almost certainly meant to hit a
+      // registered cube; keep that at warn so a forgotten registration is loud.
+      const isScalarMetric =
+        (query.dimensions?.length ?? 0) === 0 && (query.timeDimensions?.length ?? 0) === 0;
+      const message =
         `[Analytics] No cube registered for "${name}"; auto-inferred a minimal cube ` +
         `(sql="${name}", measures=${Object.keys(cube.measures).join(',') || '(none)'}, ` +
         `dimensions=${Object.keys(cube.dimensions).join(',') || '(none)'}). ` +
-        `Define an explicit Cube in your stack for full control.`,
-      );
+        `Define an explicit Cube in your stack for full control.`;
+      if (isScalarMetric) this.logger.debug(message);
+      else this.logger.warn(message);
       return;
     }
 
