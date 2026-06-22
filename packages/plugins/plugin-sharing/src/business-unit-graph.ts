@@ -139,7 +139,7 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     let row: any = null;
     try {
       const rows = await this.engine.find('sys_business_unit', {
-        where: { id: businessUnitId },
+        where: this.orgScope({ id: businessUnitId }),
         fields: ['id', 'manager_user_id'],
         limit: 1,
         context: SYSTEM_CTX,

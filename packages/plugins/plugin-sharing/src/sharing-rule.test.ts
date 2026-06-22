@@ -170,6 +170,14 @@ describe('BusinessUnitGraphService (recursive sys_business_unit)', () => {
     expect(await d.headOf('emea_sales')).toEqual('alice');
     expect(await d.headOf('emea_marketing')).toBeNull();
   });
+
+  it('headOf is org-scoped — does not leak a manager across organizations', async () => {
+    // 'foreign' is in org2; an org1-scoped service must not read its head.
+    const foreign = engine._tables.sys_business_unit.find((r: any) => r.id === 'foreign');
+    foreign.manager_user_id = 'mallory';
+    const d = new BusinessUnitGraphService({ engine: engine as any, organizationId: 'org1' });
+    expect(await d.headOf('foreign')).toBeNull();
+  });
 });
 
 describe('SharingRuleService', () => {

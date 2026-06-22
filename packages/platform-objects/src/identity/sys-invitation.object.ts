@@ -172,7 +172,10 @@ export const SysInvitation = ObjectSchema.create({
     
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
-      required: true,
+      // Optional: single-tenant has no sys_organization row and no auto-stamp
+      // (org-scoping is multi-tenant-only). Multi-tenant: OrgScopingPlugin stamps it
+      // and tenant-isolation RLS hides null-org rows (fail-closed). ADR-0057 addendum.
+      required: false,
     }),
     
     email: Field.email({
