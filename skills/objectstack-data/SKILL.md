@@ -198,6 +198,7 @@ For comprehensive documentation with incorrect/correct examples:
 - **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
 - **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes
 - **[Lifecycle Hooks](./rules/hooks.md)** — Hook quick reference (→ see [references/data-hooks.md](./references/data-hooks.md) for the full 14-event guide)
+- **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
 
 ---
 

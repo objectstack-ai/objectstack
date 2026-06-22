@@ -33,6 +33,7 @@
     "contracts",
     "project-scoping",
     "driver-configuration",
+    "external-datasources",
     "kernel-services",
     "runtime-services",
     "data-flow",
