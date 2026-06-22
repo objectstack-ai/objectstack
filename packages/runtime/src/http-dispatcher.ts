@@ -699,7 +699,7 @@ export class HttpDispatcher {
         if (!this.enforceMembership) return null;
 
         // Control-plane paths — never gated by project membership.
-        const skipPaths = ['/auth', '/cloud', '/health', '/discovery'];
+        const skipPaths = ['/auth', '/cloud', '/health', '/ready', '/discovery'];
         if (skipPaths.some(p => path.startsWith(p))) return null;
 
         // Public share-link resolve/messages — the token IS the authorisation,
@@ -3074,6 +3074,20 @@ export class HttpDispatcher {
                     uptime: typeof process !== 'undefined' ? process.uptime() : undefined,
                 }),
             };
+        }
+
+        // 0b2. Readiness Endpoint (GET /ready) — k8s / load-balancer readiness probe.
+        // 200 only when the kernel is fully running; 503 while booting
+        // (idle/initializing) or shutting down (stopping/stopped) so a load
+        // balancer stops routing to this replica BEFORE in-flight requests are
+        // drained and the server closes (graceful rolling restart).
+        if (cleanPath === '/ready' && method === 'GET') {
+            const state: string = typeof (this.kernel as any)?.getState === 'function'
+                ? (this.kernel as any).getState()
+                : 'running';
+            return state === 'running'
+                ? { handled: true, response: this.success({ status: 'ready', state }) }
+                : { handled: true, response: this.error('Service not ready', 503, { state }) };
         }
 
         // 0c. Plan-A diagnostics removed; the seed-replay and oauth2/callback
