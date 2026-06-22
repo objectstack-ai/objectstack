@@ -44,7 +44,7 @@ jobs:
         run: pnpm test:smoke
       - name: Upload report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: showcase-smoke-report
           path: examples/app-showcase/playwright-report/
