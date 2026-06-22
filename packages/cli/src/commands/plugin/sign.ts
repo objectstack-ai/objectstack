@@ -15,7 +15,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { createPrivateKey, createPublicKey } from 'node:crypto';
+import { createPublicKey } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import { parseSignature, signPayload, verifyPayload } from '@objectstack/core';
@@ -89,7 +89,10 @@ export default class PluginSign extends Command {
     // Self-check: verify the freshly produced signature against the public
     // half so a bad key / wrong format never ships silently.
     try {
-      const pub = createPublicKey(createPrivateKey(privateKeyPem));
+      // Derive the public half from the private-key PEM string. (Passing a
+      // KeyObject works at runtime but @types/node 26 narrowed createPublicKey's
+      // input union to exclude KeyObject; the string form is equivalent.)
+      const pub = createPublicKey(privateKeyPem);
       if (!verifyPayload(artifact, signature, pub)) {
         printError('Self-verification of the produced signature failed.');
         this.exit(1);
