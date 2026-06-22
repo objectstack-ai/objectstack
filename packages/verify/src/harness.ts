@@ -127,6 +127,26 @@ export async function bootStack(
   await kernel.use(new AnalyticsServicePlugin());
   await kernel.use(new AuthPlugin({ secret: opts.authSecret ?? DEFAULT_AUTH_SECRET }));
 
+  // ADR-0062 — datasource connection service (registers 'datasource-connection'),
+  // mirroring `objectstack dev`/serve. Without it, AppPlugin's declared-datasource
+  // auto-connect (D1/D2) degrades and a federated app would need an `onEnable`
+  // driver bridge — so this is what exercises the no-`onEnable` federation path
+  // end-to-end in the dogfood gate. Wired only when the app declares datasources
+  // (so the vast majority of apps are unaffected); the D2 gate then leaves
+  // managed/unrouted datasources metadata-only (e.g. app-crm — unchanged).
+  {
+    const dsDefs = (config as { datasources?: unknown }).datasources;
+    const declaresDatasources = Array.isArray(dsDefs)
+      ? dsDefs.length > 0
+      : !!dsDefs && typeof dsDefs === 'object' && Object.keys(dsDefs).length > 0;
+    if (declaresDatasources) {
+      const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
+        '@objectstack/service-datasource'
+      );
+      await kernel.use(new DatasourceAdminServicePlugin({ driverFactory: createDefaultDatasourceDriverFactory() }));
+    }
+  }
+
   // Multi-tenant: org-scoping MUST register BEFORE SecurityPlugin — the latter
   // probes the `org-scoping` service exactly once at start and caches it, then
   // keeps (vs strips) the wildcard `organization_id` RLS policies accordingly.

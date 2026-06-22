@@ -129,11 +129,13 @@ export default defineStack({
   // AI-authored metadata survive restarts (a `:memory:` datasource would wipe
   // everything on every restart, which makes local app-building unusable).
   //
-  // External-datasource federation demo (ADR-0015): a second, read-only SQLite
-  // file declared as a code-defined external datasource. It appears in
-  // Setup → Datasources and its federated objects (below) are queryable via
-  // REST. The fixture file + live driver are wired by `onEnable` (bottom of
-  // this file). `os dev` needs no extra setup.
+  // External-datasource federation demo (ADR-0015 / ADR-0062): a second,
+  // read-only SQLite file declared as a code-defined external datasource. It
+  // appears in Setup → Datasources and its federated objects (below) are
+  // queryable via REST — with NO driver wiring: the declared `external`
+  // datasource AUTO-CONNECTS at boot (ADR-0062 D1/D8). `onEnable` (bottom of
+  // this file) only provisions the "remote" fixture file's tables + seed data;
+  // `os dev` needs no extra setup.
   datasources: [ShowcaseExternalDatasource],
 
   // i18n
@@ -185,11 +187,14 @@ export default defineStack({
 });
 
 /**
- * Runtime wiring for the external-datasource federation demo (ADR-0015).
+ * Provisions the "remote" fixture database for the external-datasource
+ * federation demo (ADR-0015 / ADR-0062). Creating + seeding the remote tables is
+ * CODE (DDL on a separate SQLite file), so it can't live in the declarative
+ * artifact — it runs here. The AppPlugin invokes `onEnable` at boot.
  *
- * Code (fixture provisioning + live external-driver registration) can't live in
- * the declarative artifact, so it runs here. The AppPlugin invokes `onEnable` at
- * boot (Phase 2), before the external-validation gate fires on `kernel:ready`.
+ * NOTE (ADR-0062 D8): this no longer registers the external driver. The declared
+ * `external` datasource auto-connects at boot, so the federated objects are
+ * queryable with no driver wiring.
  */
 export const onEnable = async (ctx: unknown): Promise<void> => {
   await setupShowcaseExternalDatasource(ctx as Parameters<typeof setupShowcaseExternalDatasource>[0]);

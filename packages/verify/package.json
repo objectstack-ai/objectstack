@@ -32,7 +32,8 @@
     "@objectstack/plugin-org-scoping": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
     "@objectstack/service-analytics": "workspace:*",
-    "@objectstack/service-automation": "workspace:*"
+    "@objectstack/service-automation": "workspace:*",
+    "@objectstack/service-datasource": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

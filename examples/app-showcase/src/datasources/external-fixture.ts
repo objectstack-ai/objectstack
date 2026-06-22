@@ -3,22 +3,22 @@
 import { SqlDriver } from '@objectstack/driver-sql';
 
 /**
- * Runtime wiring for the external-datasource federation demo (ADR-0015).
+ * Fixture provisioning for the external-datasource federation demo
+ * (ADR-0015 / ADR-0062).
  *
- * This is CODE, so it can't live in the declarative artifact — it runs from the
- * stack's `onEnable` hook, which the AppPlugin invokes at boot (Phase 2), before
- * the external-validation gate fires on `kernel:ready` (Phase 3).
+ * This is the "remote database" stand-in: it idempotently creates the separate
+ * SQLite file with `customers` / `orders` tables + a little seed data (a MANAGED
+ * driver — DDL allowed) so `os dev` needs no external server. It runs from the
+ * stack's `onEnable` hook at boot.
  *
- * It does three things, all zero-config so `os dev` "just works":
- *   1. Idempotently provisions the "remote" SQLite file with `customers` /
- *      `orders` tables + a little seed data (a MANAGED driver — DDL allowed).
- *   2. Registers a read-only `schemaMode: 'external'` driver for that same file
- *      under the datasource name `showcase_external`, so ObjectQL can route
- *      queries to it. (Declared datasources are surfaced in the metadata
- *      registry for Setup → Datasources, but a live driver must be registered
- *      for the federated objects to be queryable in standalone mode.)
- *   3. Registers the federated objects' read metadata (DDL-free) so coercion +
- *      the remote-table mapping exist immediately.
+ * **It no longer registers a driver or syncs object schemas (ADR-0062 D8).** The
+ * declared `external` datasource (see `showcase-external.datasource.ts`) now
+ * AUTO-CONNECTS: at boot the runtime's `DatasourceConnectionService` builds the
+ * read-only `schemaMode:'external'` driver, registers it under the datasource
+ * name, and registers the federated objects' read metadata — with zero app code.
+ * The old `onEnable` + `ctx.drivers.register` bridge is gone; `onEnable` +
+ * `ctx.drivers.register` remains *supported* only as an advanced escape hatch
+ * (drivers built dynamically at runtime).
  */
 
 // Same relative path as the datasource config — resolved against the project
@@ -60,15 +60,17 @@ const ORDER_ROWS = [
   { id: 'o4', customer_id: 'c3', amount: 3300, status: 'paid', placed_on: '2026-03-01' },
 ];
 
-/** Stack `onEnable` payload (subset we use). */
+/** Stack `onEnable` payload (subset we use — provisioning only logs). */
 interface OnEnableContext {
-  ql: { syncObjectSchema?: (name: string) => Promise<void> };
-  drivers: { register: (driver: unknown) => void };
   logger?: { info?: (msg: string, meta?: unknown) => void; warn?: (msg: string, meta?: unknown) => void };
 }
 
+/**
+ * Provision the "remote" fixture database. Idempotent: creates the tables and
+ * seeds them only when empty. Does NOT register a driver — the declared external
+ * datasource auto-connects at boot (ADR-0062 D1/D8).
+ */
 export async function setupShowcaseExternalDatasource(ctx: OnEnableContext): Promise<void> {
-  // 1. Provision the remote fixture with a MANAGED driver (DDL allowed). Idempotent.
   const fixture = new SqlDriver({
     client: 'better-sqlite3',
     connection: { filename: EXTERNAL_DB_FILE },
@@ -93,21 +95,7 @@ export async function setupShowcaseExternalDatasource(ctx: OnEnableContext): Pro
     await fixture.disconnect();
   }
 
-  // 2. Register the read-only EXTERNAL driver under the datasource name.
-  const ext = new SqlDriver({
-    client: 'better-sqlite3',
-    connection: { filename: EXTERNAL_DB_FILE },
-    useNullAsDefault: true,
-    schemaMode: 'external',
-  } as never) as unknown as { name: string; connect: () => Promise<void> };
-  ext.name = 'showcase_external'; // MUST equal the datasource name (ObjectQL routes by driver name).
-  await ext.connect();
-  ctx.drivers.register(ext);
-
-  // 3. Register read metadata for the federated objects (DDL-free; ADR-0015).
-  //    Needed because the driver is registered after the boot schema-sync.
-  await ctx.ql.syncObjectSchema?.('showcase_ext_customer');
-  await ctx.ql.syncObjectSchema?.('showcase_ext_order');
-
-  ctx.logger?.info?.('[showcase] external datasource "showcase_external" ready — federation demo (ADR-0015)');
+  ctx.logger?.info?.(
+    '[showcase] external fixture provisioned — datasource "showcase_external" auto-connects (ADR-0062)',
+  );
 }

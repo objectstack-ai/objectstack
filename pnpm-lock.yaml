@@ -2249,6 +2249,9 @@ importers:
       '@objectstack/service-automation':
         specifier: workspace:*
         version: link:../services/service-automation
+      '@objectstack/service-datasource':
+        specifier: workspace:*
+        version: link:../services/service-datasource
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../services/service-settings

@@ -136,6 +136,14 @@ export interface AnalyticsServiceConfig {
    */
   coerceTemporalFilterValue?: (objectName: string, fieldName: string, value: unknown) => unknown;
   /**
+   * ADR-0062 D6 — report whether an object is federated (external datasource).
+   * Threaded into the StrategyContext so `NativeSQLStrategy` declines external
+   * objects (which it would otherwise query against the wrong physical table),
+   * routing them to the driver-correct ObjectQL aggregate path instead. See
+   * `StrategyContext.isExternalObject`.
+   */
+  isExternalObject?: (objectName: string) => boolean;
+  /**
    * ADR-0021 — optional object-graph resolver used when compiling datasets:
    * `(baseObject, relationshipName) => relatedObjectName | undefined`. When
    * provided, `queryDataset` validates that every declared `include` exists.
@@ -260,6 +268,7 @@ export class AnalyticsService implements IAnalyticsService {
         this.datasetRegistry.get(cubeName)?.allowedRelationships
         ?? config.getAllowedRelationships?.(cubeName),
       coerceTemporalFilterValue: config.coerceTemporalFilterValue,
+      isExternalObject: config.isExternalObject,
     };
 
     // Build strategy chain (built-in + custom, sorted by priority)

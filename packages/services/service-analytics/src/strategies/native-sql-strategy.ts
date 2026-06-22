@@ -28,6 +28,26 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // query silently grouped by the raw timestamp — one bucket per row — and a
     // non-UTC reference timezone was ignored entirely (ADR-0053 Phase 2, #1982).
     if (query.timeDimensions?.some((td) => !!td.granularity)) return false;
+    // ADR-0062 D6 — DECLINE federated (external-datasource) objects. This
+    // strategy hand-compiles `FROM "<object>"` and bare column references, which
+    // bypass the driver's physical-table resolution (`external.remoteName` /
+    // `remoteSchema` / `columnMap`) and would query the WRONG table. Routing the
+    // query to the lower-priority ObjectQL aggregate path keeps it correct —
+    // that path goes through the driver's `getBuilder` (#2138/#2149). Applies to
+    // the base object AND any joined object (a join would also hit the wrong
+    // table). Until native-SQL learns the driver's resolution, "disabled" beats
+    // "silently wrong".
+    if (typeof ctx.isExternalObject === 'function') {
+      const cube = ctx.getCube(query.cube);
+      if (cube) {
+        if (ctx.isExternalObject(this.extractObjectName(cube))) return false;
+        const joinTargets = cube.joins ? Object.values(cube.joins) : [];
+        for (const j of joinTargets) {
+          const joinedObject = (j as { name?: string })?.name;
+          if (joinedObject && ctx.isExternalObject(joinedObject)) return false;
+        }
+      }
+    }
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
   }

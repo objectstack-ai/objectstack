@@ -32,6 +32,10 @@ interface DataEngineLike {
       reference?: string;
       options?: Array<{ value: unknown; label?: string }>;
     }>;
+    /** Federation marker (ADR-0015): set on objects bound to an external datasource. */
+    external?: unknown;
+    /** The datasource this object is bound to (ADR-0062 D6 external detection). */
+    datasource?: string;
   } | undefined;
   /**
    * Resolve the storage driver backing an object (public ObjectQL accessor).
@@ -442,6 +446,13 @@ export class AnalyticsServicePlugin implements Plugin {
           | { type?: string; currencyConfig?: { defaultCurrency?: string } }
           | undefined;
         return f ? { type: f.type, defaultCurrency: f.currencyConfig?.defaultCurrency } : undefined;
+      },
+      // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
+      // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
+      // hit the wrong physical table) and the driver-correct ObjectQL path runs.
+      isExternalObject: (objectName: string) => {
+        const obj = dataEngine()?.getObject?.(objectName);
+        return !!(obj && obj.external != null);
       },
       draftRowsResolver,
     };

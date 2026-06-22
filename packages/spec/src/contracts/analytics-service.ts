@@ -322,6 +322,26 @@ export interface StrategyContext {
      * @param value      The stringified comparand from the normalized filter.
      */
     coerceTemporalFilterValue?(objectName: string, fieldName: string, value: unknown): unknown;
+
+    /**
+     * ADR-0062 D6 — is `objectName` a federated (external-datasource) object?
+     *
+     * The `NativeSQLStrategy` compiles its own `FROM "<object>"` and column
+     * references, which bypass the driver's physical-table resolution and so
+     * would query the WRONG table for a federated object whose `external.remoteName`
+     * / `remoteSchema` / `columnMap` differ from the logical object/field names.
+     * Until native-SQL learns the driver's physical resolution, the strategy
+     * DECLINES external objects (see its `canHandle`), so they fall through to the
+     * ObjectQL aggregate path — which routes through the driver's `getBuilder`
+     * (honouring `remoteName`/`remoteSchema`, #2138/#2149). This keeps external
+     * analytics correct ("reuse the driver's resolution") rather than silently
+     * querying the wrong table.
+     *
+     * Returns `true` for a federated object, `false`/`undefined` otherwise. When
+     * the hook is absent (legacy wiring) the strategy assumes non-external —
+     * purely additive, no behavior change for managed objects.
+     */
+    isExternalObject?(objectName: string): boolean;
 }
 
 /**
