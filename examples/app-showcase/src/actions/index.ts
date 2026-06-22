@@ -10,13 +10,37 @@ const task = 'showcase_task';
  * record header/more, related list, global nav).
  */
 
-/** script — inline handler, shown on each row and the record header. */
+/**
+ * script — inline sandboxed handler, shown on each row and the record header.
+ *
+ * The `body` (L2 sandboxed JS) is what makes this action *executable*: AppPlugin
+ * walks the bundle's actions on bind and only registers an engine handler for
+ * those carrying a `body` (or `target` -> bundle function). Without it the
+ * runtime has nothing to invoke and `POST /actions/showcase_task/showcase_mark_done`
+ * fails with "Action ... not found".
+ *
+ * It flips the dedicated `done` flag and `progress` rather than the `status`
+ * select on purpose: `status` is governed by the `task_status_flow`
+ * state-machine (only `in_review -> done` is a legal direct jump), so writing
+ * `status: 'done'` from a Backlog/To Do/In Progress row would be rejected. The
+ * `done` boolean is the completion flag that works from any state.
+ */
 export const MarkDoneAction = defineAction({
   name: 'showcase_mark_done',
   label: 'Mark Done',
   icon: 'check',
   objectName: task,
   type: 'script',
+  body: {
+    language: 'js',
+    source:
+      "var id = ctx.recordId || (ctx.record && ctx.record.id) || input.recordId;" +
+      "if (!id) throw new Error('No record to mark done');" +
+      "await ctx.api.object('showcase_task').update({ id: id, done: true, progress: 100 });" +
+      "return { ok: true, id: id };",
+    capabilities: ['api.write'],
+  },
+  successMessage: 'Task marked done.',
   // `record_section` so the Task Detail page's `record:quick_actions` bar
   // (which names this action) resolves it — the engine location-filters even
   // explicitly-named actions, mirroring the platform's own sys-user pages.
