@@ -1,69 +1,74 @@
-# ADR-0063: Two kernel agents (`ask` / `build`); skills are the only third-party extension primitive
+# ADR-0063: Two agents (`ask` / `build`), bound by surface; skills are the only third-party extension primitive
 
 **Status**: Proposed (2026-06-22)
 **Deciders**: ObjectStack Protocol Architects
-**Supersedes**: [ADR-0040 §3 and §4](./0040-unified-assistant-and-agent-binding.md) — "custom agents are a builder/admin feature" is withdrawn; the follow-up tool-scoping contract is reframed.
-**Builds on**: [ADR-0040](./0040-unified-assistant-and-agent-binding.md) (unified assistant — the end user never picks an agent), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (draft → verify → publish), [ADR-0038](./0038-build-verification-loop.md) (verify-fix-reverify discipline carried by skills)
-**Consumers**: `@objectstack/spec` (agent/skill types), `@objectstack/service-ai` (the open-source `ask` shell), `../cloud/service-ai-studio` (the cloud-only `build` shell), `../objectui` (chat surfaces)
+**Supersedes**: [ADR-0040](./0040-unified-assistant-and-agent-binding.md) — its core decision (a *single* unified assistant selected by *per-turn intent classification*) is **reversed**. ADR-0040's UX win ("the end user never picks from a roster") is **kept** but re-grounded: the *surface* binds the agent, not a classifier and not a dropdown. §3 (custom tenant agents) is withdrawn; §4 (tool-scoping) is handed to [ADR-0064](./0064-tool-scoping-to-agent.md).
+**Builds on**: [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (draft → verify → publish), [ADR-0038](./0038-build-verification-loop.md) (verify-fix-reverify discipline carried by skills)
+**Consumers**: `@objectstack/spec` (agent/skill types), `@objectstack/service-ai` (the open-source `ask` agent), `../cloud/service-ai-studio` (the cloud-only `build` agent), `../objectui` (chat surfaces)
 
 **Premise**: pre-launch, no back-compat debt beyond the alias table — specify the target end-state directly.
+
+> **Revises** the first cut of ADR-0063 (merged in #2164), which framed the two as "shells split by what they mutate" while leaving ADR-0040's unified assistant in place. On reflection the unified assistant was itself the error; this revision separates the two agents by *surface*.
 
 ---
 
 ## TL;DR
 
-The kernel keeps **exactly two agents**, and they are **platform-owned shells**, not a roster:
+The kernel ships **exactly two agents**, and they are **two products for two different needs**, not two intents of one assistant:
 
-- **`ask`** — the data shell. Reads/queries/explores records and executes business actions. **Open-source, free** (`@objectstack/service-ai`).
-- **`build`** — the authoring shell. Mutates *metadata* (objects, fields, views, flows). **Cloud-only, paid** (`../cloud/service-ai-studio`).
+- **`ask`** — the data product (≈ **Claude Chat**). Conversational read/query/explore over records, and execution of business actions. End-user audience, RLS-bounded, fast turns. **Open-source, free** (`@objectstack/service-ai`).
+- **`build`** — the authoring product (≈ **Claude Code**). Agentic mutation of *metadata* (objects, fields, views, flows) through a plan → draft → verify → publish loop. Builder/admin audience, governance-gated, long-running pinned sessions. **Cloud-only, paid** (`../cloud/service-ai-studio`).
 
-Everything else — domain depth, playbooks, persona, judgment, reach to external systems — is delivered as **skills** (+ tools / MCP), loaded by relevance into whichever shell applies. **Third parties extend the platform by authoring `*.skill.ts` and tools, never `*.agent.ts`.** ADR-0040's "custom agents are a builder feature" is withdrawn.
+**The user never picks an agent from a roster — the surface they are in binds it.** You are in the data console → `ask`; you are in the builder/Studio → `build`. Exactly as you open *claude.ai* or you open *Claude Code* — you choose a product, not an agent.
 
-This is the analogue of Claude: **`build` ≈ Code, `ask` ≈ Chat.** Claude Code is enormously capable and ships **zero** user-authored agents — its power is skills + tools/MCP + platform-owned subagents. ObjectStack adopts the same shape.
+Everything else — domain depth, playbooks, persona, judgment, reach to external systems — is delivered as **skills** (+ tools / MCP), each bound to one agent by affinity. **Third parties extend the platform by authoring `*.skill.ts` and tools, never `*.agent.ts`.** Claude Code is enormously capable and ships **zero** user-authored agents — its power is skills + tools/MCP + platform-owned subagents. ObjectStack adopts the same shape.
 
 ---
 
-## Context — why "custom agents" was old thinking
+## Context — why ADR-0040's unified assistant was the wrong call
 
-ADR-0040 already removed the agent *picker* from end users, but it preserved `*.agent.ts` as a **builder/admin extension surface** (§3) and named tool-scoping as a follow-up (§4). The design conversation that produced this ADR found that surface to be a category error:
+ADR-0040 collapsed data Q&A and metadata authoring into **one** assistant carrying *all* skills, switched by a **per-turn intent classifier**. On reflection that was a design error, for the same reason Anthropic ships Claude Chat and Claude Code as **separate products**: they serve genuinely different needs, with different interaction models, audiences, risk profiles, and pricing.
 
-1. **The platform is metadata-driven, so domain knowledge is already shared.** The `ask` shell reads the full metadata registry — objects, fields, actions, flows. It is *structurally domain-aware for free* on any app that is loaded. "A custom agent is needed to teach the assistant the industry" is false: the ontology is in the metadata, not in the agent.
+| | `ask` (≈ Chat) | `build` (≈ Code) |
+|---|---|---|
+| Need | conversational data Q&A + act | agentic authoring of the app itself |
+| Audience / permission | end user · row-level security | builder/admin · governance gate |
+| Mutates | records (business data) | metadata (the app definition) |
+| Interaction rhythm | quick question → answer | plan → draft → verify → publish, self-correcting, long-running |
+| Blast radius | one user's data, RLS-scoped | the app for everyone |
+| Commerce | open-source · free | cloud-only · paid |
 
-2. **What is left over is exactly the definition of a skill.** Persona, judgment, playbooks, instructions, bundled tools, reach to external systems — that is `SKILL.md` (instructions + resources, relevance-routed by frontmatter `description`, progressively disclosed). Describing that as a "custom agent" is just using the wrong word for a skill.
+These are not two *intents* of one assistant — they are two *products*. The seam (**"what you change": records vs. the app definition**) carries the architectural boundary, the governance boundary, **and** the commercial boundary at once: three lines, one cut.
 
-3. **Skills compose; agents don't.** A real request is cross-domain (CRM + accounting + an ISV connector in one breath). You can only be *in* one agent — so agent-first fragments the workflow and re-introduces a routing/selection problem. Skill-first loads every relevant skill into the **same** turn. Agents partition work; skills unify it.
+**ADR-0040's own incident argues for separation, not unification.** Its motivating failure (staging, 2026-06-11) was a user in the *Data* assistant asking it to "build a library app"; it flailed because it lacked the authoring disciplines. ADR-0040 read this as "the data persona was missing build skills" and bolted all skills onto one assistant. The correct reading: **that request should never have reached the data surface.** In a Chat/Code-separated world, app-building happens in the builder surface. The incident is evidence the *surfaces were leaking*, not evidence for merging the personas. The per-turn classifier ADR-0040 introduced is a fragile router that re-implements — worse, and at the wrong layer — the boundary a clean product split gives for free (misclassification, wrong-discipline leakage, mid-conversation handoff).
 
-4. **Skills scale; agents don't.** Progressive disclosure makes 1,000 skills cost ~nothing until relevant. 1,000 agents is a selection nightmare. A metadata platform's surface (objects/actions/flows) grows without bound — only skill-first scales.
-
-**Conclusion:** the extension *primitive* is the skill. Agents are *orchestration shells* the platform owns — like Claude Code's `Explore` / `Plan` subagents, spawned by the platform, never authored by tenants.
+**What ADR-0040 got right, and we keep:** the end user must not face a roster/dropdown of agents. We preserve that — but the resolution is **surface binding**, not a classifier and not a menu.
 
 ---
 
 ## Decision
 
-### 1. Two kernel shells, split by what they mutate
+### 1. Two agents, two products, bound by surface
 
-| | `ask` shell | `build` shell |
-|---|---|---|
-| Claude analogue | Chat | Code |
-| **Mutates** | records (business data) | metadata (the app definition) |
-| Governance | row-level security; end-user permission | draft → verify → publish; builder/admin permission |
-| Persona | Business Application Assistant | Schema architect |
-| **Packaging / commerce** | **open-source · free** (`@objectstack/service-ai`) | **cloud-only · paid** (`../cloud/service-ai-studio`) |
+The two agents above are platform-owned. The agent is resolved deterministically from **where the user is**, never chosen per-turn or from a roster:
 
-The seam is **"what you change," not "what domain you are in."** Both shells share the same metadata ontology; they differ only in mutation target, risk surface, permission model, and verification discipline. That single seam carries the architectural boundary, the governance boundary, **and** the commercial boundary at once — three lines, one cut.
+- Data console / embedded app chat → **`ask`**.
+- Builder / Studio authoring surface → **`build`**.
+- Resolution chain stays `app.defaultAgent` → surface default → platform default; the surface sets the default, so the user makes **no** selection.
+- No per-turn intent classifier. A `build`-shaped request arriving at an `ask` surface is **declined and redirected to the builder**, not silently re-routed into authoring.
 
-This is why the count is exactly two: merging them blurs a real governance boundary (record edits vs. app-definition edits have different blast radius and audiences); splitting further re-creates the roster ADR-0040 killed.
+Why exactly two: merging them blurs the records-vs-app-definition governance boundary (different blast radius, audience, verification discipline, price); splitting further re-creates the roster this ADR refuses.
 
 ### 2. Skills (+ tools / MCP) are the only third-party extension primitive
 
-- Third parties author `*.skill.ts` and contribute tools / MCP connectors. They do **not** author agents.
-- `*.agent.ts` is **closed to third parties.** It remains an internal definition surface for platform-owned shells and subagents only.
-- ADR-0040 §3 ("custom agents are a builder/admin feature", `app.defaultAgent` binding of tenant agents) is **withdrawn**. There is no commercial path for a tenant to define a new agent species that would have to live inside a paid platform component anyway.
+- The platform is metadata-driven, so domain *structure* is already shared: both agents read the full metadata registry (objects, fields, actions, flows) and are structurally domain-aware for free. "A custom agent is needed to teach the assistant the industry" is false — the ontology is in the metadata.
+- What is left over — persona, judgment, playbooks, instructions, bundled tools, external reach — is **exactly the definition of a skill**. Calling that a "custom agent" is using the wrong word for a skill.
+- **Skills compose; agents don't.** A real request can span domains (CRM + accounting + an ISV connector); skill-first loads every relevant skill into the same turn, agent-first forces one. **Skills scale; agents don't** — progressive disclosure makes 1,000 skills cost ~nothing until relevant; 1,000 agents is a selection nightmare.
+- Therefore: third parties author `*.skill.ts` and tools / MCP connectors. `*.agent.ts` is **closed to third parties** — internal only, for the two platform agents and platform-owned subagents (the `Explore`/`Plan` analogues). **ADR-0040 §3 (tenant custom agents bound via `app.defaultAgent`) is withdrawn.**
 
-### 3. Skill ↔ shell affinity (the one new contract)
+### 3. Skill ↔ agent affinity (the one new contract)
 
-For relevance-routing to work, a skill must declare which shell(s) it applies to:
+Because the two agents are distinct, each skill declares which one it belongs to:
 
 ```ts
 defineSkill({
@@ -77,13 +82,11 @@ defineSkill({
 - `metadata_authoring`, `solution_design` → `build`
 - A cross-cutting ISV domain skill → usually `ask`, occasionally `both`
 
-This is the analogue of a Claude Code skill being scoped to the Code surface. Without affinity, the `build` shell drowns in data-analysis skills and vice versa.
+This is the analogue of a Claude Code skill being scoped to the Code surface. Affinity is also what makes tool scoping clean (ADR-0064): an agent's tool set is the union of its skills' tools, and a skill cannot attach to an agent whose surface it does not match.
 
-### 4. Naming — one canonical word per shell, by user intent
+### 4. Naming — one canonical word per agent, by user intent
 
-The canonical ids are the **verb of user intent**, one word per shell, used everywhere:
-
-| | data shell | authoring shell |
+| | data agent | authoring agent |
 |---|---|---|
 | **Canonical id / spoken name** | **`ask`** | **`build`** |
 | Legacy alias (permanent, silent — back-compat only) | `data_chat` | `metadata_assistant` |
@@ -91,44 +94,42 @@ The canonical ids are the **verb of user intent**, one word per shell, used ever
 
 Rules:
 
-- Name by **user intent (a verb)**, not by domain noun. `ask` + `build` share one axis ("ask my app" / "build my app"); `data` + `build` would mix a noun with a verb and the ambiguity grows back.
-- `ask` is preferred over `data` because the shell also executes actions — "ask → answer → act" describes it; "data" implies read-only.
-- The commercial line reads naturally off the names: **Ask your app (free) / Build your app (paid).**
-- **"data agent" / "metadata assistant" are aliases, never vocabulary.** Documentation and code use `ask` / `build` exclusively. ADRs describe the seam ("`ask` mutates records, `build` mutates metadata") using the ids — they do not introduce a parallel "data agent" label.
-- Do **not** re-rename ids (no `ask` → `data` churn). The fix for today's ambiguity is eliminating the residual "data-chat"口径 drift in code/files, not another rename.
+- Name by **user intent (a verb)**: `ask` + `build` share one axis ("ask my app" / "build my app"). `data` + `build` would mix a noun with a verb and the ambiguity grows back.
+- `ask` over `data` because the agent also executes actions — "ask → answer → act"; "data" implies read-only.
+- The commercial line reads off the names: **Ask your app (free) / Build your app (paid).**
+- `data_chat` / `metadata_assistant` are **aliases, never vocabulary**; docs and code use `ask` / `build` exclusively.
+- **`build` is not yet canonical in code** — the cloud agent id is still `metadata_assistant`. Make `build` canonical there, mirroring the `ask` rename. No further id churn after that.
 
-### 5. Tier-aware routing
+### 5. Surface binding, not per-turn routing; tier degradation
 
-ADR-0040's per-turn intent routing must not assume both shells exist:
-
-- On the **open-source / free** deployment only the `ask` shell is present. A `build`-intent turn must degrade gracefully ("authoring needs the cloud Build assistant"), not dead-end on a missing shell.
-- **`build`-affinity skills only light up where the `build` shell exists** (cloud). Skill authors must know a `surface:'build'` skill is inert on OSS. This is intentional tiering, not a bug — but it must be documented at the authoring contract.
-- Therefore the **free `ask` shell + open `ask`-skill ecosystem must stand on its own.** The free-tier value story rests entirely on it; if `ask` alone is weak, the tiering is hollow.
+- The **surface** picks the agent (§1). There is no per-turn intent classifier to maintain, mis-tune, or mis-fire.
+- On the **open-source / free** deployment only `ask` (and its `surface:'ask'` skills) exists. The builder surface and `build` agent simply aren't present; an `ask`-surface user who asks to build the app is told app-building lives in the (cloud) Builder, with no half-built attempt.
+- **`build`-affinity skills only light up where the `build` agent exists** (cloud). A `surface:'build'` skill is inert on OSS by design — documented at the authoring contract, not a bug.
+- Therefore the **free `ask` agent + open `ask`-skill ecosystem must stand on its own.** The free-tier value story rests entirely on it.
 
 ---
 
 ## Consequences
 
 **Positive**
-- One mental model end-to-end: two shells, everything else is a skill. The "agent zoo" / choice-confusion failure mode is designed out, not managed.
-- The capability-boundary gap ADR-0040 §4 worried about (registry-global tools, no per-agent constraint) **largely dissolves**: there is no tenant agent to constrain. Tools are scoped by *shell* (platform-owned) + *skill affinity*, not by a tenant-authored agent. §4's tool-scoping is reframed from "make custom agents safe" to "scope tools to the two shells."
+- One mental model: two products, bound by surface; everything else is a skill. The "agent zoo" / choice-confusion failure mode is designed out, and so is the fragile per-turn classifier.
+- The capability-boundary gap ADR-0040 §4 worried about narrows sharply: there is no tenant agent to constrain, and an agent's tools are exactly its skills' tools. Residual cross-agent sharing (read-only `describe_object` / `list_objects`) is handled by ADR-0064.
 - Architecture, governance, and pricing align on a single seam.
 
 **Negative / costs**
-- Withdraws a feature ADR-0040 proposed; any tenant-agent assumptions in `../objectui` / Studio must be removed.
-- Adds the `surface` affinity field to the skill schema and a routing change so each shell only loads its skills.
-- Requires the residual-naming cleanup below to actually remove the ambiguity.
+- Reverses ADR-0040's core: the unified all-skills `ask`, the per-turn intent classifier, and the `buildRegisterActive` degradation shim are removed (see cleanup).
+- Withdraws tenant custom agents: flip the `agent` metadata-type flags and filter the runtime catalog.
+- Adds the `surface` affinity field to the skill schema and the scoping work in ADR-0064.
 
 ---
 
-## Follow-up: residual-naming cleanup (separate small PR)
+## Follow-up work (tracked in the consolidated issue)
 
-The `ask` id is already canonical, but code/files still speak "data-chat", which is the physical source of the id≠name ambiguity. Clean it up:
+Implementation, none of which changes a *public* id:
 
-- [ ] `packages/services/service-ai/src/agents/data-chat-agent.ts` → `ask-agent.ts` (keep the export surface; update `index.ts`).
-- [ ] `DEFAULT_DATA_AGENT_NAME` → `ASK_AGENT_NAME` (retain `LEGACY_DATA_AGENT_NAME = 'data_chat'` as the alias constant).
-- [ ] Sweep docs/prose for "data agent" / "Data Assistant" → "ask agent" / the `ask` id; keep `data_chat` only in the alias table.
-- [ ] Add `surface: 'ask' | 'build' | 'both'` to the skill schema; backfill the four built-in skills.
-- [ ] Make per-turn routing tier-aware (graceful `build`-intent degradation when the `build` shell is absent).
-
-These are mechanical and independently shippable; none changes a public id.
+- [ ] **Split the personas.** Remove the unified `ask`-carries-all-skills definition and the per-turn intent preamble; `ask` carries only `surface:'ask'` skills, `build` only `surface:'build'`. Delete the `buildRegisterActive` degradation shim in `agent-runtime.ts` (no longer needed once surfaces are separate).
+- [ ] **Make `build` canonical** in `../cloud/service-ai-studio` (`metadata_assistant` → `build`), registering `metadata_assistant` as the permanent alias — mirroring `data_chat`→`ask`.
+- [ ] **Finish the `ask` rename drift**: `service-ai/src/agents/data-chat-agent.ts` → `ask-agent.ts`; `DEFAULT_DATA_AGENT_NAME` → `ASK_AGENT_NAME` (keep `LEGACY_DATA_AGENT_NAME`). Prose sweep "Data/Metadata Assistant" → `ask`/`build`.
+- [ ] **Withdraw tenant agents**: set `agent` metadata-type `allowRuntimeCreate:false, allowOrgOverride:false` in `metadata-plugin.zod.ts`; filter custom agents from the runtime catalog; drop the `app.defaultAgent` custom-agent guidance in the cloud plugin.
+- [ ] **Add `surface: 'ask' | 'build' | 'both'`** to `SkillSchema`; backfill the four built-in skills.
+- [ ] **Bind agent → surface** in `../objectui` (data console → `ask`, Studio → `build`); keep the picker hidden/builder-only.
