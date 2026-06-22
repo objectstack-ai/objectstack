@@ -1,5 +1,14 @@
 # @objectstack/fastify
 
+## 10.0.0
+
+### Patch Changes
+
+- Updated dependencies [e16f2a8]
+- Updated dependencies [47d978a]
+- Updated dependencies [220ce5b]
+  - @objectstack/runtime@10.0.0
+
 ## 9.11.0
 
 ### Patch Changes

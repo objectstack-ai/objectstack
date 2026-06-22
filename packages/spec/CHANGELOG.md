@@ -1,5 +1,147 @@
 # @objectstack/spec
 
+## 10.0.0
+
+### Minor Changes
+
+- d7ff626: spec(action): a `script` action must declare an executable binding — reject at
+  author/compile time when it has neither an inline `body` nor a `target`.
+
+  A `type: 'script'` action with no `body` and no `target` registers no runtime
+  handler: `AppPlugin` skips it, and invoking it falls through to the wildcard
+  lookup and fails with `Action '<name>' on object '*' not found` (the #2169
+  "Mark Done" bug). The shape was schema-valid and passed coverage tests, so the
+  break only surfaced when a user clicked the button.
+
+  `ActionSchema` now enforces the invariant via `superRefine`: `script` requires
+  `body || target` (mirroring the existing "non-script types require `target`"
+  rule). `body`-bound actions are auto-registered by the runtime; `target`-bound
+  actions name a function wired imperatively (e.g. via `onEnable`). This only
+  rejects configurations that were already non-functional at runtime — verified
+  against the full monorepo build (every shipped bundle still compiles).
+
+- e16f2a8: **BREAKING:** the system object `sys_department` is renamed to `sys_business_unit`
+  — object + member table (`sys_department_member` → `sys_business_unit_member`),
+  fields, and i18n — with **no compatibility alias**. Any deployment holding
+  `sys_department` rows, or metadata that references the object by name (lookups,
+  list views, queries, sharing/approval scopes), must migrate to `sys_business_unit`.
+  A renamed shipped system object is a breaking change to the platform's public
+  data surface, so this lands as a **major**. Verified per ADR-0059's pre-publish
+  hotcrm gate: no published downstream consumer references the old name.
+
+  ADR-0057 — ERP authorization core. Adds permission-grant access DEPTH
+  (`own`/`own_and_reports`/`unit`/`unit_and_below`/`org`), renames `sys_department`
+  → `sys_business_unit` (no aliases — see BREAKING above), introduces the platform-owned
+  `sys_user_role` assignment, and seeds stack-declared `roles`/`sharingRules` into
+  `sys_role`/`sys_sharing_rule` at boot (closes #2077). Hierarchy-relative scopes are
+  delegated to a pluggable `IHierarchyScopeResolver` (open edition fails closed to
+  owner-only; `defineStack` errors without `requires: ['hierarchy-security']`). Also
+  fixes a latent over-grant where `engine.find({ filter })` was ignored (driver reads
+  `where`) — normalized `filter`→`where` in the engine.
+
+- e411a82: feat(ai): split `ask`/`build` agents by surface + tool scoping (ADR-0063/0064).
+
+  Two kernel agents bound by surface, not a per-turn classifier. `SkillSchema`
+  gains `surface: 'ask'|'build'|'both'` and `AgentSchema` gains `surface:
+'ask'|'build'` (ADR-0063 §3); an agent's tools are exactly the union of its
+  surface-compatible skills' tools — incompatible binding is a load error in
+  `resolveActiveSkills` (ADR-0064 §3). The `ask` agent is now data-only (the
+  ADR-0040 unified "INTENT FIRST" classifier and the `buildRegisterActive`
+  degradation shim are removed); a new `schema_reader` (`surface:'both'`) owns
+  the shared reads `describe_object`/`list_objects`/`query_data` so the build
+  agent reuses them without dual-listing. `*.agent.ts` is closed to third
+  parties: the `agent` metadata-type is `allowRuntimeCreate:false,
+allowOrgOverride:false` and the runtime catalog lists only platform agents
+  (ADR-0063 §2). Renames `data-chat-agent.ts`→`ask-agent.ts`,
+  `DEFAULT_DATA_AGENT_NAME`→`ASK_AGENT_NAME` (the `data_chat`/`metadata_assistant`
+  aliases stay resolvable).
+
+- a581385: Propagate a dataset measure's declared currency to the analytics result field.
+
+  Adds an optional `DatasetMeasure.currency` (ISO 4217) on the semantic layer and
+  carries it onto each measure result field alongside `label`/`format`, so a
+  currency-aware client (Intl symbol) can render `¥1,234` / `$616,000` from a real
+  currency code instead of a plain number or a `$` baked into `format`. Additive
+  and optional — existing datasets are unaffected.
+
+- 220ce5b: Resolve the tenant default currency onto ExecutionContext.
+
+  Adds `ExecutionContext.currency` (ISO 4217) and resolves it from the
+  `localization.currency` setting alongside `timezone`/`locale` — in both the
+  runtime `resolveExecutionContext` and the REST mirror. This is the foundation
+  for the documented "applied when a currency field omits its own" fallback: the
+  tenant default is now carried on every request context, so analytics enrichment,
+  formatters, and renderers can resolve a measure/field currency down to the org
+  default instead of hard-coding it. Undefined when no tenant default is
+  configured (consumers then render a plain number).
+
+- 6ca20b3: ADR-0058 D1 follow-through — RLS predicates are now canonical CEL. Migrated every
+  seeded RLS `using`/`check` (default permission sets, showcase, and the
+  `RLS.ownerPolicy`/`tenantPolicy`/`allowAllPolicy` helper factories) from the
+  legacy SQL-ish form (`=`, `IN (...)`) to pure CEL (`==`, `in`), so authors and AI
+  learn ONE expression language. The `sqlPredicateToCel` bridge is retained as a
+  DEPRECATED transitional shim: a stored SQL-style predicate still compiles (no
+  silent deny on legacy data) but emits a deprecation warn; canonical CEL passes
+  through as a no-op. No runtime behavior change — CEL and the old SQL form compile
+  to the identical FilterCondition.
+- 5f875fe: spec: add `defineX` factories for the remaining 16 writable domains and the 6
+  missing `XInput` aliases — one consistent, type-safe authoring entry per domain
+  (#2035).
+
+  New factories: `defineDatasource`, `defineConnector`, `definePolicy`,
+  `defineSharingRule`, `defineRole`, `definePermissionSet`,
+  `defineEmailTemplateDefinition`, `defineReport`, `defineWebhook`,
+  `defineObjectExtension`, `defineCube`, `defineMapping`, `defineTheme`,
+  `defineTranslationBundle`, `definePage`, `defineAction`. Each mirrors the 19
+  existing factories (`XSchema.parse(z.input<…>)`): input-shape ergonomics +
+  authoring-time validation. Because a factory is a _value_ import, a broken
+  import hard-errors instead of silently degrading to `any` (the #2023 failure
+  mode), and errors surface at `.parse()` time with field-level messages.
+
+  Also adds the previously-missing input aliases `PolicyInput`, `CubeInput`,
+  `MappingInput`, `ThemeInput`, `TranslationBundleInput`, `PageInput`.
+
+  Purely additive: no existing exports change.
+
+- b469950: feat(spec): add a `tree` view type to the ListView schema
+
+  `'tree'` is now a valid `ListView.type` (and `VisualizationType`), backed by a
+  new `TreeConfigSchema` (`parentField` / `labelField` / `fields` /
+  `defaultExpandedDepth`, passthrough). This lets a self-referencing object be
+  served as a tree-grid; without it the runtime Zod-validates view metadata and
+  silently drops `type:'tree'`. Renderer ships in objectui `@object-ui/plugin-tree`.
+
+### Patch Changes
+
+- 2a1b16b: fix(ADR-0015): honor `external.remoteName` / `external.remoteSchema` on the federation read path.
+
+  The query path previously resolved an external object's physical table from the
+  object name, ignoring its `external` binding — so a federated object bound to a
+  differently-named remote table failed with `no such table`, and ADR-0015's own
+  `wh_order` → `mart.fact_orders` example was unqueryable. The SQL driver now
+  resolves the remote table (`remoteName`, plus `remoteSchema` via `.withSchema()`
+  on pg/mysql) and registers external objects' read-coercion metadata without DDL
+  (`SqlDriver.registerExternalObject`, routed from the engine/plugin schema-sync).
+  The managed path is unchanged. See ADR-0015 §18.
+
+- 3efe334: Honor a nested `where` filter inside `expand` on lookup/master_detail expansion.
+
+  The expand post-processor batch-loads related records with an `id $in [...]` query but never merged the nested QueryAST `where`, so a documented `expand: { rel: { where: {...} } }` filter was silently ignored and every related record came back. The nested filter is now AND-merged into the batch query via an explicit `$and` group (`{ $and: [{ id: { $in } }, nestedAST.where] }`) — robust against a nested filter that itself keys `id` or uses a top-level `$or`/`$and`, where a shallow spread would clobber or reorder the constraint.
+
+  `limit`/`offset`/`orderBy` remain intentionally not honored on the expand path: it batch-loads every parent's related records in one `$in` query and re-keys them per parent by foreign key, so a per-parent page size or ordering can't be expressed there. Docs and the schema `describe()` are updated to match, with a guard test asserting `limit`/`offset` are not pushed into the expand query.
+
+- feead7e: fix(spec): make `GanttConfigSchema` forward-compatible via `.passthrough()`.
+
+  The gantt renderer (objectui plugin-gantt) keeps adding view-config knobs
+  (e.g. `lockField`, `defaultCollapsedDepth`) ahead of this schema. Without
+  passthrough, the console — which validates the view config against a bundled
+  copy of this schema before handing it to the renderer — strips any field not
+  declared here, so every new renderer knob needs a spec release + console
+  rebuild before it can take effect. Adding `.passthrough()` lets unknown fields
+  flow through to the renderer, decoupling renderer releases from spec releases.
+  Known fields keep their validation; the renderer still only reads what it
+  understands.
+
 ## 9.11.0
 
 ### Minor Changes

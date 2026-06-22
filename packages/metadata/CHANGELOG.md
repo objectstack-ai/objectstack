@@ -1,5 +1,36 @@
 # @objectstack/metadata
 
+## 10.0.0
+
+### Patch Changes
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [2256e93]
+- Updated dependencies [7108ff3]
+- Updated dependencies [30c0313]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [e411a82]
+- Updated dependencies [ae271d0]
+- Updated dependencies [61ed5c7]
+- Updated dependencies [a581385]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [0df063e]
+- Updated dependencies [ce13bb8]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+- Updated dependencies [b469950]
+- Updated dependencies [47d978a]
+  - @objectstack/spec@10.0.0
+  - @objectstack/platform-objects@10.0.0
+  - @objectstack/core@10.0.0
+  - @objectstack/metadata-core@10.0.0
+  - @objectstack/types@10.0.0
+  - @objectstack/metadata-fs@10.0.0
+
 ## 9.11.0
 
 ### Patch Changes

@@ -1,5 +1,125 @@
 # @objectstack/platform-objects
 
+## 10.0.0
+
+### Major Changes
+
+- e16f2a8: **BREAKING:** the system object `sys_department` is renamed to `sys_business_unit`
+  — object + member table (`sys_department_member` → `sys_business_unit_member`),
+  fields, and i18n — with **no compatibility alias**. Any deployment holding
+  `sys_department` rows, or metadata that references the object by name (lookups,
+  list views, queries, sharing/approval scopes), must migrate to `sys_business_unit`.
+  A renamed shipped system object is a breaking change to the platform's public
+  data surface, so this lands as a **major**. Verified per ADR-0059's pre-publish
+  hotcrm gate: no published downstream consumer references the old name.
+
+  ADR-0057 — ERP authorization core. Adds permission-grant access DEPTH
+  (`own`/`own_and_reports`/`unit`/`unit_and_below`/`org`), renames `sys_department`
+  → `sys_business_unit` (no aliases — see BREAKING above), introduces the platform-owned
+  `sys_user_role` assignment, and seeds stack-declared `roles`/`sharingRules` into
+  `sys_role`/`sys_sharing_rule` at boot (closes #2077). Hierarchy-relative scopes are
+  delegated to a pluggable `IHierarchyScopeResolver` (open edition fails closed to
+  owner-only; `defineStack` errors without `requires: ['hierarchy-security']`). Also
+  fixes a latent over-grant where `engine.find({ filter })` was ignored (driver reads
+  `where`) — normalized `filter`→`where` in the engine.
+
+### Minor Changes
+
+- 2256e93: Setup nav: gate Organizations/Invitations on multi-org; enforce `requiresService` server-side (ADR-0057 addendum D10).
+
+  `rest-server`'s `filterAppForUser` now honours `NavigationItem.requiresService` — entries
+  whose named kernel service isn't registered are dropped from the served app metadata
+  (fail-open when the kernel can't be probed; previously the field was a frontend-only hint).
+  Applies `requiresService: 'org-scoping'` to the Setup app's Organizations and Invitations
+  entries, so they surface only in multi-org (multi-tenant) deployments and disappear in
+  single-tenant. Business Units is intentionally left ungated — it is open per the open/paid
+  seam + D12 ("pick people by BU"); only the hierarchy rollup capability is enterprise.
+
+- 7108ff3: Drop the unused `team` value from `sys_business_unit.kind` (ADR-0057 addendum D11).
+
+  The `team` kind collided head-on with the first-class `sys_team` object: a
+  `kind='team'` business unit walks the hierarchical `BusinessUnitGraphService`,
+  while `sys_team` is the flat better-auth collaboration grouping served by
+  `TeamGraphService`. `kind` is a display-only categorisation hint (it does not
+  change graph semantics) and had **zero** usages anywhere in the repo, so this is a
+  safe narrowing with no data migration. New enum:
+  `company | division | department | office | cost_center`.
+
+- 30c0313: Add `sys_user.primary_business_unit_id` projection (ADR-0057 addendum D12).
+
+  Adds a denormalised `primary_business_unit_id` lookup to `sys_user`, maintained
+  by plugin-sharing as a projection of `sys_business_unit_member.is_primary`
+  (insert/update/delete hooks + a boot-time backfill). This makes "pick people by
+  business unit" — the Dataverse _filtered lookup_ / ServiceNow _reference
+  qualifier_ interaction — expressible as a plain `where: { primary_business_unit_id: X }`
+  (and thus as a `lookupFilters` picker filter) with **zero** query-engine change,
+  without traversing the membership junction. `sys_business_unit_member` remains
+  the effective-dated, matrix-friendly source of truth; the new column is a
+  maintained projection, not a second source. Home is plugin-sharing (always
+  loaded, owns the BU graph) rather than plugin-org-scoping, so the projection
+  works in single-tenant deployments too. Picker filtering by BU is therefore an
+  **open** (non-enterprise) capability — only hierarchy _rollup_ stays paid.
+
+- ae271d0: feat(identity): add an Org Chart tree view to `sys_business_unit`
+
+  `sys_business_unit` is already a self-referencing hierarchy
+  (`parent_business_unit_id`, ADR-0057 D2) but Setup only exposed flat grids. Adds
+  an `org_chart` list view (`type: 'tree'`) that renders the hierarchy as an
+  indented, expand/collapse tree-grid, listed first so it's the default tab. No
+  schema change — the parent pointer and graph traversal already existed; this only
+  surfaces them. The `active` / `inactive` / `by_kind` / `all` grids stay for
+  search, filter, and bulk edit.
+
+- 47d978a: Add `manager_id` (self-lookup) to `sys_user` — the reporting chain that the ADR-0057 `own_and_reports` hierarchy scope walks.
+
+  The `own_and_reports` scope was implemented in the resolver but **unbacked**: nothing on `sys_user` modelled a manager, so it always degraded to owner-only. This adds the field (+ en/zh/ja/es labels) and extends the scope-depth dogfood to prove the scope end-to-end — a user now sees their own records plus everyone down their `manager_id` chain.
+
+### Patch Changes
+
+- 61ed5c7: Complete the ADR-0057 `sys_department` → `sys_business_unit` rename in the Setup app and across the object's i18n (en / zh / ja / es).
+
+  - Setup nav entry "Departments" → "Business Units" (`nav_departments` → `nav_business_units`).
+  - `sys_business_unit` / `sys_business_unit_member` field **labels and descriptions** in the object definitions now read "business unit" instead of "department" (the generated `en` labels had been hand-updated ahead of the def; the def was the stale source).
+  - All four locales' generated object translations aligned to 业务单元 / ビジネスユニット / Unidad de negocio.
+
+  Intentionally preserved: the `kind` enum value `department` (a business unit can be _of kind_ department) and the multi-concept node descriptions that list kinds.
+
+- 0df063e: Fix: `sys_business_unit` / `sys_team` could not be created in single-tenant deployments.
+
+  `organization_id` was `required`, but single-tenant has no `sys_organization` row and
+  nothing auto-stamps one (OrgScopingPlugin is multi-tenant-only), so every create failed
+  with `VALIDATION_FAILED: organization_id (required)`. Make `organization_id` optional on
+  both objects: single-tenant leaves it null; multi-tenant still auto-stamps it via
+  OrgScopingPlugin and tenant-isolation RLS hides any null-org row (fail-closed), so there is
+  no cross-tenant exposure. (sys_member / sys_invitation carry the same `required` flag but are
+  created only through better-auth org flows, which always supply an org — left unchanged.)
+
+- ce13bb8: Single-tenant audit follow-ups (ADR-0057):
+
+  - **`sys_member` / `sys_invitation`**: make `organization_id` optional (same class as the
+    sys_business_unit/sys_team fix #2178). Single-tenant has no org row and no auto-stamp;
+    multi-tenant still auto-stamps via OrgScopingPlugin with null-org rows hidden by
+    tenant-isolation RLS (fail-closed). Completes the org-scoped identity graph's
+    single-tenant consistency.
+  - **`BusinessUnitGraphService.headOf()`**: add the missing `orgScope()` org filter (it
+    queries under SYSTEM_CTX, bypassing RLS, so the scope is the only isolation). Previously
+    `headOf(buId)` read a business unit's `manager_user_id` by id alone — a cross-organization
+    leak in multi-tenant. Now consistent with `descendants()`. +regression test.
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [e411a82]
+- Updated dependencies [a581385]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+- Updated dependencies [b469950]
+  - @objectstack/spec@10.0.0
+  - @objectstack/metadata-core@10.0.0
+
 ## 9.11.0
 
 ### Patch Changes

@@ -1,5 +1,64 @@
 # @objectstack/verify
 
+## 10.0.0
+
+### Minor Changes
+
+- ee86099: ADR-0060 P1 — add the reusable conformance-ledger helper. `@objectstack/verify`
+  now exports `checkLedger(rows, opts)` + `ConformanceRow`: the static complement to
+  its runtime harness, encoding the shared invariants the platform had hand-written
+  twice (unique ids / valid state / enforced-has-site / experimental·removed-has-note
+  / proof-file-exists / high-risk-has-proof / exactly-one-cover / discover ratchet).
+  The ADR-0056 authz and ADR-0058 expression ledgers are refactored onto it.
+
+### Patch Changes
+
+- 0feea92: fix(verify): skip read-only federated (external) objects in CRUD verification.
+
+  `objectstack verify` probe-inserts a record into every object. A federated object
+  on an external datasource is read-only unless BOTH the datasource and the object
+  opt into writes (ADR-0015 write gate), so that insert is correctly rejected —
+  which `verify` was reporting as a `create-failed` runtime failure. `deriveCrudCases`
+  now marks such objects `blocked` (skipped), matching the write gate's double
+  opt-in rule, so the dogfood gate stays honest while supporting external datasource
+  example apps.
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [2256e93]
+- Updated dependencies [30c0313]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [cfd86ce]
+- Updated dependencies [e411a82]
+- Updated dependencies [70609af]
+- Updated dependencies [3187952]
+- Updated dependencies [a581385]
+- Updated dependencies [47d978a]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [3754f80]
+- Updated dependencies [ce13bb8]
+- Updated dependencies [feead7e]
+- Updated dependencies [00c32f2]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+- Updated dependencies [b469950]
+  - @objectstack/spec@10.0.0
+  - @objectstack/objectql@10.0.0
+  - @objectstack/rest@10.0.0
+  - @objectstack/plugin-sharing@10.0.0
+  - @objectstack/plugin-security@10.0.0
+  - @objectstack/runtime@10.0.0
+  - @objectstack/service-analytics@10.0.0
+  - @objectstack/core@10.0.0
+  - @objectstack/plugin-hono-server@10.0.0
+  - @objectstack/driver-sqlite-wasm@10.0.0
+  - @objectstack/plugin-auth@10.0.0
+  - @objectstack/plugin-org-scoping@10.0.0
+  - @objectstack/service-automation@10.0.0
+  - @objectstack/service-settings@10.0.0
+
 ## 9.11.0
 
 ### Minor Changes

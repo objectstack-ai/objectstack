@@ -1,5 +1,68 @@
 # @objectstack/objectql
 
+## 10.0.0
+
+### Minor Changes
+
+- e16f2a8: **BREAKING:** the system object `sys_department` is renamed to `sys_business_unit`
+  — object + member table (`sys_department_member` → `sys_business_unit_member`),
+  fields, and i18n — with **no compatibility alias**. Any deployment holding
+  `sys_department` rows, or metadata that references the object by name (lookups,
+  list views, queries, sharing/approval scopes), must migrate to `sys_business_unit`.
+  A renamed shipped system object is a breaking change to the platform's public
+  data surface, so this lands as a **major**. Verified per ADR-0059's pre-publish
+  hotcrm gate: no published downstream consumer references the old name.
+
+  ADR-0057 — ERP authorization core. Adds permission-grant access DEPTH
+  (`own`/`own_and_reports`/`unit`/`unit_and_below`/`org`), renames `sys_department`
+  → `sys_business_unit` (no aliases — see BREAKING above), introduces the platform-owned
+  `sys_user_role` assignment, and seeds stack-declared `roles`/`sharingRules` into
+  `sys_role`/`sys_sharing_rule` at boot (closes #2077). Hierarchy-relative scopes are
+  delegated to a pluggable `IHierarchyScopeResolver` (open edition fails closed to
+  owner-only; `defineStack` errors without `requires: ['hierarchy-security']`). Also
+  fixes a latent over-grant where `engine.find({ filter })` was ignored (driver reads
+  `where`) — normalized `filter`→`where` in the engine.
+
+### Patch Changes
+
+- 2a1b16b: fix(ADR-0015): honor `external.remoteName` / `external.remoteSchema` on the federation read path.
+
+  The query path previously resolved an external object's physical table from the
+  object name, ignoring its `external` binding — so a federated object bound to a
+  differently-named remote table failed with `no such table`, and ADR-0015's own
+  `wh_order` → `mart.fact_orders` example was unqueryable. The SQL driver now
+  resolves the remote table (`remoteName`, plus `remoteSchema` via `.withSchema()`
+  on pg/mysql) and registers external objects' read-coercion metadata without DDL
+  (`SqlDriver.registerExternalObject`, routed from the engine/plugin schema-sync).
+  The managed path is unchanged. See ADR-0015 §18.
+
+- 3efe334: Honor a nested `where` filter inside `expand` on lookup/master_detail expansion.
+
+  The expand post-processor batch-loads related records with an `id $in [...]` query but never merged the nested QueryAST `where`, so a documented `expand: { rel: { where: {...} } }` filter was silently ignored and every related record came back. The nested filter is now AND-merged into the batch query via an explicit `$and` group (`{ $and: [{ id: { $in } }, nestedAST.where] }`) — robust against a nested filter that itself keys `id` or uses a top-level `$or`/`$and`, where a shallow spread would clobber or reorder the constraint.
+
+  `limit`/`offset`/`orderBy` remain intentionally not honored on the expand path: it batch-loads every parent's related records in one `$in` query and re-keys them per parent by foreign key, so a per-parent page size or ordering can't be expressed there. Docs and the schema `describe()` are updated to match, with a guard test asserting `limit`/`offset` are not pushed into the expand query.
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [cfd86ce]
+- Updated dependencies [e411a82]
+- Updated dependencies [a581385]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+- Updated dependencies [b469950]
+- Updated dependencies [48a307a]
+- Updated dependencies [25fc0e4]
+  - @objectstack/spec@10.0.0
+  - @objectstack/formula@10.0.0
+  - @objectstack/core@10.0.0
+  - @objectstack/metadata-core@10.0.0
+  - @objectstack/types@10.0.0
+
 ## 9.11.0
 
 ### Minor Changes

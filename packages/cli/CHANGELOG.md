@@ -1,5 +1,136 @@
 # @objectstack/cli
 
+## 10.0.0
+
+### Minor Changes
+
+- 48a307a: build: validate UI action `visible` / `disabled` predicates at compile time
+
+  Extends the ADR-0032 build-time expression check to cover action `visible` and
+  `disabled` predicates (stack-level and object-attached), evaluated record-scoped
+  like validation rules. A record-header / row action's `visible` is evaluated by
+  `ActionEngine` against `{ record, recordId, objectName, user, … }` with
+  fail-closed semantics, so a **bare** field reference (`!done` instead of
+  `!record.done`) throws at runtime and the action is **silently hidden on every
+  record** — the trap behind the #2183 "Mark Done never hides" debugging hunt.
+  `os build` now reports it as an error with the corrective `record.<field>`
+  message instead of letting it ship.
+
+  `@objectstack/formula`: `ctx` and `features` are added to the record-scope
+  namespace roots (alongside the existing `user`, `data`, `context`, …) so the
+  ambient globals real action predicates use (`record.id == ctx.user.id`,
+  `features.multiOrgEnabled`) are not false-positives. Verified against the full
+  monorepo build (every example + platform bundle still compiles clean).
+
+- 25fc0e4: build: extend ADR-0032 predicate validation to all flat record-scoped sites
+
+  Builds on the action-predicate guard. `os build` now also validates these
+  record-scoped predicates for bare field references (`status` instead of
+  `record.status`), which otherwise evaluate to nothing at runtime and silently
+  mis-behave:
+
+  - **field conditional rules** — `requiredWhen`, `readonlyWhen`,
+    `conditionalRequired`, `visibleWhen` (server-enforced; a broken one is
+    fail-open — the required/readonly rule just never fires);
+  - **sharing-rule `condition`** (security-critical — decides which rows a
+    principal sees);
+  - **lifecycle hook `condition`** (skips the handler when false);
+  - **nested `when`** on `conditional` validation rules (previously only the
+    top-level rule predicate was checked).
+
+  `@objectstack/formula`: adds `parent` to the record-scope namespace roots —
+  master-detail inline grids inject the header record as `parent` for a child
+  field's `readonlyWhen`/`requiredWhen` (ADR-0036, #1581), so `parent.status` is
+  legitimate, not a bare ref. Verified against the full monorepo build (76 tasks
+  clean).
+
+  Not yet covered (separate follow-up — needs a recursive view/page tree walker
+  and per-node scope classification): deeply-nested UI visibility predicates
+  (`view` element/section `visibleOn`/`condition`, `page` component `visibility`),
+  object field-group `visibleOn`, and app-nav `visible` (user/feature-scoped, not
+  record-scoped).
+
+### Patch Changes
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [92db3e5]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [2256e93]
+- Updated dependencies [7108ff3]
+- Updated dependencies [30c0313]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [cfd86ce]
+- Updated dependencies [e411a82]
+- Updated dependencies [70609af]
+- Updated dependencies [ae271d0]
+- Updated dependencies [61ed5c7]
+- Updated dependencies [ee86099]
+- Updated dependencies [3187952]
+- Updated dependencies [a581385]
+- Updated dependencies [47d978a]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [3754f80]
+- Updated dependencies [0df063e]
+- Updated dependencies [ce13bb8]
+- Updated dependencies [feead7e]
+- Updated dependencies [00c32f2]
+- Updated dependencies [be07ce7]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+- Updated dependencies [b469950]
+- Updated dependencies [47d978a]
+- Updated dependencies [48a307a]
+- Updated dependencies [25fc0e4]
+- Updated dependencies [0feea92]
+  - @objectstack/spec@10.0.0
+  - @objectstack/driver-sql@10.0.0
+  - @objectstack/objectql@10.0.0
+  - @objectstack/rest@10.0.0
+  - @objectstack/platform-objects@10.0.0
+  - @objectstack/plugin-sharing@10.0.0
+  - @objectstack/plugin-security@10.0.0
+  - @objectstack/runtime@10.0.0
+  - @objectstack/plugin-approvals@10.0.0
+  - @objectstack/formula@10.0.0
+  - @objectstack/service-ai@10.0.0
+  - @objectstack/service-analytics@10.0.0
+  - @objectstack/verify@10.0.0
+  - @objectstack/core@10.0.0
+  - @objectstack/plugin-hono-server@10.0.0
+  - @objectstack/account@10.0.0
+  - @objectstack/setup@10.0.0
+  - @objectstack/studio@10.0.0
+  - @objectstack/client@10.0.0
+  - @objectstack/cloud-connection@10.0.0
+  - @objectstack/mcp@10.0.0
+  - @objectstack/observability@10.0.0
+  - @objectstack/driver-memory@10.0.0
+  - @objectstack/driver-mongodb@10.0.0
+  - @objectstack/driver-sqlite-wasm@10.0.0
+  - @objectstack/plugin-audit@10.0.0
+  - @objectstack/plugin-auth@10.0.0
+  - @objectstack/plugin-email@10.0.0
+  - @objectstack/plugin-org-scoping@10.0.0
+  - @objectstack/plugin-reports@10.0.0
+  - @objectstack/plugin-webhooks@10.0.0
+  - @objectstack/service-automation@10.0.0
+  - @objectstack/service-cache@10.0.0
+  - @objectstack/service-datasource@10.0.0
+  - @objectstack/service-job@10.0.0
+  - @objectstack/service-messaging@10.0.0
+  - @objectstack/service-package@10.0.0
+  - @objectstack/service-queue@10.0.0
+  - @objectstack/service-realtime@10.0.0
+  - @objectstack/service-settings@10.0.0
+  - @objectstack/service-storage@10.0.0
+  - @objectstack/trigger-api@10.0.0
+  - @objectstack/trigger-record-change@10.0.0
+  - @objectstack/trigger-schedule@10.0.0
+  - @objectstack/types@10.0.0
+  - @objectstack/console@10.0.0
+
 ## 9.11.0
 
 ### Minor Changes

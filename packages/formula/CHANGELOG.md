@@ -1,5 +1,81 @@
 # @objectstack/formula
 
+## 10.0.0
+
+### Minor Changes
+
+- cfd86ce: ADR-0058 — expression & predicate surface unification. Adds the canonical
+  CEL→FilterCondition pushdown compiler in `@objectstack/formula`
+  (`compileCelToFilter`, `isPushdownableCel`, `lowerCelAst`) plus an in-memory
+  `matchesFilterCondition` backend (one AST, three backends). `plugin-security`
+  (RLS `using`, via a SQL bridge) and `plugin-sharing` (`celToFilter`) cut over to
+  it, retiring the bespoke regex/field-equality front-ends. Compound sharing
+  conditions now compile and enforce end-to-end (closes #1887). The RLS `check`
+  clause is now enforced on the write post-image (insert/by-id update), fail-closed.
+  Non-pushdownable predicates (arithmetic, functions, subqueries, cross-object) are
+  an authoring compile error, never silently dropped (ADR-0049/0055).
+
+### Patch Changes
+
+- 48a307a: build: validate UI action `visible` / `disabled` predicates at compile time
+
+  Extends the ADR-0032 build-time expression check to cover action `visible` and
+  `disabled` predicates (stack-level and object-attached), evaluated record-scoped
+  like validation rules. A record-header / row action's `visible` is evaluated by
+  `ActionEngine` against `{ record, recordId, objectName, user, … }` with
+  fail-closed semantics, so a **bare** field reference (`!done` instead of
+  `!record.done`) throws at runtime and the action is **silently hidden on every
+  record** — the trap behind the #2183 "Mark Done never hides" debugging hunt.
+  `os build` now reports it as an error with the corrective `record.<field>`
+  message instead of letting it ship.
+
+  `@objectstack/formula`: `ctx` and `features` are added to the record-scope
+  namespace roots (alongside the existing `user`, `data`, `context`, …) so the
+  ambient globals real action predicates use (`record.id == ctx.user.id`,
+  `features.multiOrgEnabled`) are not false-positives. Verified against the full
+  monorepo build (every example + platform bundle still compiles clean).
+
+- 25fc0e4: build: extend ADR-0032 predicate validation to all flat record-scoped sites
+
+  Builds on the action-predicate guard. `os build` now also validates these
+  record-scoped predicates for bare field references (`status` instead of
+  `record.status`), which otherwise evaluate to nothing at runtime and silently
+  mis-behave:
+
+  - **field conditional rules** — `requiredWhen`, `readonlyWhen`,
+    `conditionalRequired`, `visibleWhen` (server-enforced; a broken one is
+    fail-open — the required/readonly rule just never fires);
+  - **sharing-rule `condition`** (security-critical — decides which rows a
+    principal sees);
+  - **lifecycle hook `condition`** (skips the handler when false);
+  - **nested `when`** on `conditional` validation rules (previously only the
+    top-level rule predicate was checked).
+
+  `@objectstack/formula`: adds `parent` to the record-scope namespace roots —
+  master-detail inline grids inject the header record as `parent` for a child
+  field's `readonlyWhen`/`requiredWhen` (ADR-0036, #1581), so `parent.status` is
+  legitimate, not a bare ref. Verified against the full monorepo build (76 tasks
+  clean).
+
+  Not yet covered (separate follow-up — needs a recursive view/page tree walker
+  and per-node scope classification): deeply-nested UI visibility predicates
+  (`view` element/section `visibleOn`/`condition`, `page` component `visibility`),
+  object field-group `visibleOn`, and app-nav `visible` (user/feature-scoped, not
+  record-scoped).
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [e411a82]
+- Updated dependencies [a581385]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+- Updated dependencies [b469950]
+  - @objectstack/spec@10.0.0
+
 ## 9.11.0
 
 ### Patch Changes

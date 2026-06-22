@@ -1,5 +1,94 @@
 # @objectstack/runtime
 
+## 10.0.0
+
+### Minor Changes
+
+- e16f2a8: **BREAKING:** the system object `sys_department` is renamed to `sys_business_unit`
+  — object + member table (`sys_department_member` → `sys_business_unit_member`),
+  fields, and i18n — with **no compatibility alias**. Any deployment holding
+  `sys_department` rows, or metadata that references the object by name (lookups,
+  list views, queries, sharing/approval scopes), must migrate to `sys_business_unit`.
+  A renamed shipped system object is a breaking change to the platform's public
+  data surface, so this lands as a **major**. Verified per ADR-0059's pre-publish
+  hotcrm gate: no published downstream consumer references the old name.
+
+  ADR-0057 — ERP authorization core. Adds permission-grant access DEPTH
+  (`own`/`own_and_reports`/`unit`/`unit_and_below`/`org`), renames `sys_department`
+  → `sys_business_unit` (no aliases — see BREAKING above), introduces the platform-owned
+  `sys_user_role` assignment, and seeds stack-declared `roles`/`sharingRules` into
+  `sys_role`/`sys_sharing_rule` at boot (closes #2077). Hierarchy-relative scopes are
+  delegated to a pluggable `IHierarchyScopeResolver` (open edition fails closed to
+  owner-only; `defineStack` errors without `requires: ['hierarchy-security']`). Also
+  fixes a latent over-grant where `engine.find({ filter })` was ignored (driver reads
+  `where`) — normalized `filter`→`where` in the engine.
+
+- 220ce5b: Resolve the tenant default currency onto ExecutionContext.
+
+  Adds `ExecutionContext.currency` (ISO 4217) and resolves it from the
+  `localization.currency` setting alongside `timezone`/`locale` — in both the
+  runtime `resolveExecutionContext` and the REST mirror. This is the foundation
+  for the documented "applied when a currency field omits its own" fallback: the
+  tenant default is now carried on every request context, so analytics enrichment,
+  formatters, and renderers can resolve a measure/field currency down to the org
+  default instead of hard-coding it. Undefined when no tenant default is
+  configured (consumers then render a plain number).
+
+### Patch Changes
+
+- 47d978a: Fix: the artifact-serve path now honors an app-declared default permission-set
+  profile (`isProfile: true, isDefault: true`) under `objectstack dev`/`serve`/`start`.
+
+  `createStandaloneStack` (the boot path used when serving a compiled
+  `dist/objectstack.json` with no host `objectstack.config.ts`) surfaced
+  `objects`/`requires`/`manifest` from the artifact bundle but dropped
+  `permissions[]` and `roles[]`. As a result the CLI's
+  `appDefaultProfileName(config.permissions)` saw `undefined` and the SecurityPlugin
+  fell back to the built-in owner-only `member_default` — so an app whose default
+  profile carries e.g. `readScope: 'unit_and_below'` (ADR-0056 D7 / ADR-0057 D1)
+  was silently ignored. The config-load path was unaffected because the app's
+  `permissions` survived via the original stack object.
+
+  `createStandaloneStack` now surfaces `permissions[]` and `roles[]` from the
+  artifact bundle, mirroring the existing `objects`/`requires`/`manifest` handling,
+  so the artifact-serve path applies the app default profile exactly like the
+  config-load path.
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [92db3e5]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [2256e93]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [cfd86ce]
+- Updated dependencies [e411a82]
+- Updated dependencies [a581385]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [3754f80]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+- Updated dependencies [b469950]
+- Updated dependencies [48a307a]
+- Updated dependencies [25fc0e4]
+  - @objectstack/spec@10.0.0
+  - @objectstack/driver-sql@10.0.0
+  - @objectstack/objectql@10.0.0
+  - @objectstack/rest@10.0.0
+  - @objectstack/plugin-security@10.0.0
+  - @objectstack/formula@10.0.0
+  - @objectstack/core@10.0.0
+  - @objectstack/metadata@10.0.0
+  - @objectstack/observability@10.0.0
+  - @objectstack/driver-memory@10.0.0
+  - @objectstack/driver-sqlite-wasm@10.0.0
+  - @objectstack/plugin-auth@10.0.0
+  - @objectstack/plugin-org-scoping@10.0.0
+  - @objectstack/service-cluster@10.0.0
+  - @objectstack/service-i18n@10.0.0
+  - @objectstack/types@10.0.0
+
 ## 9.11.0
 
 ### Patch Changes
