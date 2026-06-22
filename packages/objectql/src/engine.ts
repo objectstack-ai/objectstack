@@ -1916,7 +1916,7 @@ export class ObjectQL implements IDataEngine {
         const _searchFilter = expandSearchToFilter(_searchRaw, {
           fields: _findSchema.fields as any,
           searchableFields: (_findSchema as any).searchableFields,
-          requestedFields: Array.isArray(_reqFields) ? _reqFields : undefined,
+          requestedFields: _reqFields,
           displayField: (_findSchema as any).displayNameField,
         });
         if (_searchFilter) {

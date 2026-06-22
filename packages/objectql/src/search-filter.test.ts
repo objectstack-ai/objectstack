@@ -55,6 +55,15 @@ describe('resolveSearchFields', () => {
     expect(f).toEqual(['industry']);
   });
 
+  it('accepts a comma-separated requestedFields string (URL param form)', () => {
+    const f = resolveSearchFields({
+      fields: accountFields,
+      searchableFields: ['name', 'industry', 'status'],
+      requestedFields: 'industry, status',
+    });
+    expect(f).toEqual(['industry', 'status']);
+  });
+
   it('ignores an override that resolves to nothing allowed (falls back)', () => {
     const f = resolveSearchFields({
       fields: accountFields,

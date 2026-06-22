@@ -31,8 +31,10 @@ export interface ExpandSearchOptions {
   fields: Record<string, SearchFieldMeta>;
   /** Object-declared `searchableFields` (the canonical default set). */
   searchableFields?: string[];
-  /** Validated `$searchFields` override — intersected with the allowed set. */
-  requestedFields?: string[];
+  /** Validated `$searchFields` override — intersected with the allowed set.
+   *  Accepts an array or a comma-separated string (the form a URL query param
+   *  arrives as). */
+  requestedFields?: string | string[];
   /** Preferred display field, placed first in the auto-default. */
   displayField?: string;
 }
@@ -93,9 +95,12 @@ export function resolveSearchFields(opts: ExpandSearchOptions): string[] {
   const all = opts.fields || {};
   const declared = opts.searchableFields?.filter((f) => all[f]);
   const allowed = declared && declared.length > 0 ? declared : autoDefaultFields(all, opts.displayField);
-  if (opts.requestedFields && opts.requestedFields.length > 0) {
+  const requested = typeof opts.requestedFields === 'string'
+    ? opts.requestedFields.split(',').map((f) => f.trim()).filter(Boolean)
+    : opts.requestedFields;
+  if (requested && requested.length > 0) {
     const allowSet = new Set(allowed);
-    const validated = opts.requestedFields.filter((f) => allowSet.has(f));
+    const validated = requested.filter((f) => allowSet.has(f));
     if (validated.length > 0) return validated;
   }
   return allowed;
