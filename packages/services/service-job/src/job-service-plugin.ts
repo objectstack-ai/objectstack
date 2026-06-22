@@ -16,6 +16,11 @@ import {
 /**
  * Configuration options for the JobServicePlugin.
  */
+/** Resolve the cluster service if present; undefined on single-node. */
+function getClusterSafe(ctx: any): any {
+  try { return ctx.getService('cluster'); } catch { return undefined; }
+}
+
 export interface JobServicePluginOptions {
   /**
    * Job adapter type.
@@ -99,7 +104,7 @@ export class JobServicePlugin implements Plugin {
     }
 
     if (choice === 'cron') {
-      const cron = new CronJobAdapter({ timezone: 'UTC' });
+      const cron = new CronJobAdapter({ timezone: 'UTC', cluster: getClusterSafe(ctx) });
       ctx.registerService('job', cron);
       ctx.logger.info('JobServicePlugin: registered CronJobAdapter');
       return;
@@ -129,7 +134,7 @@ export class JobServicePlugin implements Plugin {
       let cron: CronJobAdapter | undefined;
       if (this.options.enableCron !== false) {
         try {
-          cron = new CronJobAdapter({ timezone: 'UTC' });
+          cron = new CronJobAdapter({ timezone: 'UTC', cluster: getClusterSafe(ctx) });
         } catch (err) {
           ctx.logger.warn('JobServicePlugin: cron adapter init failed; cron jobs will not auto-run', err as any);
         }
