@@ -12,6 +12,14 @@ import { parseAutonumberFormat, renderAutonumber, missingFieldValues, type Auton
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
+import {
+  diffManagedTable,
+  driftKey,
+  type ManagedDriftEntry,
+  type DriftOp,
+  type SqlDialectName,
+  type PhysicalColumn,
+} from './schema-drift.js';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
@@ -115,7 +123,17 @@ export interface IntrospectedSchema {
  * all schema-mutating DDL. Defaults to `'managed'` when omitted, preserving
  * legacy behaviour.
  */
-export type SqlDriverConfig = Knex.Config & { schemaMode?: SchemaMode };
+export type SqlDriverConfig = Knex.Config & {
+  schemaMode?: SchemaMode;
+  /**
+   * Dev-only schema auto-reconcile (issue #2186). When `'safe'`, `initObjects`
+   * automatically applies *non-destructive* alters (relax NOT NULL, widen
+   * varchar) so an existing database self-heals after a metadata change
+   * loosens a constraint. `'off'` (default) only warns. Never applies
+   * destructive DDL, and is force-disabled when `NODE_ENV==='production'`.
+   */
+  autoMigrate?: 'off' | 'safe';
+};
 
 // ── SQL Driver ───────────────────────────────────────────────────────────────
 
@@ -267,7 +285,10 @@ export class SqlDriver implements IDataDriver {
    * production callers wire in their preferred logger. Defaults to
    * `console.warn` so warnings surface even without setup.
    */
-  protected logger: { warn: (msg: string, meta?: any) => void } = {
+  protected logger: {
+    warn: (msg: string, meta?: any) => void;
+    info?: (msg: string, meta?: any) => void;
+  } = {
     warn: (msg, meta) => console.warn(msg, meta ?? ''),
   };
 
@@ -373,11 +394,30 @@ export class SqlDriver implements IDataDriver {
    */
   protected readonly schemaMode: SchemaMode;
 
+  /**
+   * Dev-only auto-reconcile policy (issue #2186). See {@link SqlDriverConfig.autoMigrate}.
+   */
+  protected readonly autoMigrate: 'off' | 'safe';
+
+  /**
+   * Metadata field defs for every table this driver manages, captured during
+   * `initObjects` (tableName → fields). The source of truth that
+   * {@link detectManagedDrift} diffs the physical schema against.
+   */
+  protected managedObjectFields = new Map<string, Record<string, any>>();
+
+  /** Declared indexes per managed table (tableName → indexes[]), captured in `initObjects`. Used to recreate indexes after a SQLite table rebuild. */
+  protected managedObjectIndexes = new Map<string, any[]>();
+
+  /** De-dup set for boot-time drift warnings (keyed by {@link driftKey}). */
+  protected driftWarned = new Set<string>();
+
   constructor(config: SqlDriverConfig) {
-    // `schemaMode` is an ObjectStack concern, not a Knex option — strip it
-    // before handing the config to Knex.
-    const { schemaMode, ...knexConfig } = config;
+    // `schemaMode` / `autoMigrate` are ObjectStack concerns, not Knex options —
+    // strip them before handing the config to Knex.
+    const { schemaMode, autoMigrate, ...knexConfig } = config;
     this.schemaMode = schemaMode ?? 'managed';
+    this.autoMigrate = autoMigrate ?? 'off';
     this.config = knexConfig;
     this.knex = knex(knexConfig);
   }
@@ -1374,6 +1414,12 @@ export class SqlDriver implements IDataDriver {
 
     for (const obj of objects) {
       const tableName = StorageNameMapping.resolveTableName(obj);
+      // #2186: remember the authoritative metadata field set for this table so
+      // drift detection / `os migrate` can diff the physical schema against it.
+      this.managedObjectFields.set(tableName, obj.fields ?? {});
+      if (Array.isArray((obj as any).indexes)) {
+        this.managedObjectIndexes.set(tableName, (obj as any).indexes);
+      }
 
       const jsonCols: string[] = [];
       const booleanCols: string[] = [];
@@ -1503,7 +1549,311 @@ export class SqlDriver implements IDataDriver {
         const physicalColumns = new Set(Object.keys(colInfo));
         await this.syncDeclaredIndexes(tableName, declaredIndexes, physicalColumns);
       }
+
+      // #2186: the additive sync above only ever ADDs tables/columns. For a
+      // table that already existed, detect (and in dev, auto-reconcile) any
+      // non-additive divergence (relaxed NOT NULL, widened varchar, orphaned
+      // column) between metadata and the physical schema.
+      if (exists) {
+        await this.reconcileAndWarnDrift(tableName, obj.fields ?? {});
+      }
     }
+  }
+
+  // ── Managed-schema drift & reconcile (#2186) ───────────────────────────────
+
+  /** Canonical dialect name for the drift differ. */
+  protected get dialectName(): SqlDialectName {
+    if (this.isSqlite) return 'sqlite';
+    if (this.isPostgres) return 'postgres';
+    if (this.isMysql) return 'mysql';
+    return 'unknown';
+  }
+
+  /** True only when running under `NODE_ENV=production` — auto-DDL is force-disabled there. */
+  protected isProductionEnv(): boolean {
+    try {
+      return (process.env.NODE_ENV ?? '').toLowerCase() === 'production';
+    } catch {
+      return false;
+    }
+  }
+
+  /** Diff one table's metadata fields against its physical columns. */
+  protected async detectTableDrift(
+    tableName: string,
+    fields: Record<string, any>,
+  ): Promise<ManagedDriftEntry[]> {
+    const cols = await this.introspectColumns(tableName);
+    const physical: PhysicalColumn[] = cols.map((c) => ({
+      name: c.name,
+      type: c.type,
+      nullable: c.nullable,
+      maxLength: c.maxLength,
+    }));
+    return diffManagedTable({ table: tableName, fields, columns: physical, dialect: this.dialectName });
+  }
+
+  /**
+   * Detect every managed-schema divergence between metadata and the physical
+   * database. Metadata is the source of truth. Returns one entry per drift,
+   * sorted by table then column. Used by `os migrate` (P3) and tests.
+   *
+   * @param objects optional explicit object list; defaults to whatever
+   *   `initObjects` last synced (captured in {@link managedObjectFields}).
+   */
+  async detectManagedDrift(
+    objects?: Array<{ name: string; fields?: Record<string, any> }>,
+  ): Promise<ManagedDriftEntry[]> {
+    const tables = new Map<string, Record<string, any>>();
+    if (objects) {
+      for (const o of objects) tables.set(StorageNameMapping.resolveTableName(o), o.fields ?? {});
+    } else {
+      for (const [t, f] of this.managedObjectFields) tables.set(t, f);
+    }
+
+    const out: ManagedDriftEntry[] = [];
+    for (const [tableName, fields] of tables) {
+      if (!(await this.knex.schema.hasTable(tableName))) continue;
+      out.push(...(await this.detectTableDrift(tableName, fields)));
+    }
+    out.sort((a, b) => (a.table === b.table ? (a.column ?? '').localeCompare(b.column ?? '') : a.table.localeCompare(b.table)));
+    return out;
+  }
+
+  /**
+   * Boot-time per-table drift handling (P1 + P2): detect divergence, in dev
+   * auto-reconcile the *safe* (loosening) subset when `autoMigrate==='safe'`,
+   * then WARN once per remaining divergence with an actionable hint.
+   */
+  protected async reconcileAndWarnDrift(tableName: string, fields: Record<string, any>): Promise<void> {
+    let drift: ManagedDriftEntry[];
+    try {
+      drift = await this.detectTableDrift(tableName, fields);
+    } catch (e: any) {
+      this.logger.warn(`[schema-drift] could not introspect '${tableName}' for drift detection`, e?.message ?? e);
+      return;
+    }
+    if (drift.length === 0) return;
+
+    const autoOn = this.autoMigrate === 'safe' && this.schemaMode === 'managed';
+    if (autoOn && this.isProductionEnv()) {
+      this.logger.warn(
+        `[schema-drift] autoMigrate='safe' is ignored under NODE_ENV=production — schema is never auto-altered in production. Run 'os migrate' deliberately.`,
+      );
+    } else if (autoOn) {
+      const safe = drift.filter((d) => d.category === 'safe');
+      if (safe.length > 0) {
+        try {
+          const { applied } = await this.applyMigrationEntries(safe, { allowDestructive: false });
+          for (const d of applied) {
+            (this.logger.info ?? this.logger.warn)(`[schema-drift] auto-reconciled ${d.op.type} on ${d.table}.${d.column}`);
+          }
+          // Re-detect so the warnings below reflect the post-reconcile state.
+          drift = await this.detectTableDrift(tableName, fields);
+        } catch (e: any) {
+          this.logger.warn(`[schema-drift] dev auto-reconcile failed for '${tableName}' — falling back to warning`, e?.message ?? e);
+        }
+      }
+    }
+
+    for (const d of drift) {
+      const k = driftKey(d);
+      if (this.driftWarned.has(k)) continue;
+      this.driftWarned.add(k);
+      this.logger.warn(`[schema-drift] ${d.message}`);
+    }
+  }
+
+  /**
+   * Apply a set of drift entries to the physical schema. Destructive entries
+   * are skipped unless `allowDestructive` is set. Postgres/MySQL alter columns
+   * in place; SQLite (which cannot alter constraints in place) rebuilds each
+   * affected table (copy → swap) applying only the requested edits.
+   *
+   * @returns the entries actually applied and those skipped (e.g. destructive
+   *   without `allowDestructive`, or unsupported on the dialect).
+   */
+  async applyMigrationEntries(
+    entries: ManagedDriftEntry[],
+    opts: { allowDestructive?: boolean } = {},
+  ): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
+    this.assertSchemaMutable('reconcileManagedSchema');
+    const allowDestructive = opts.allowDestructive === true;
+
+    const applied: ManagedDriftEntry[] = [];
+    const skipped: ManagedDriftEntry[] = [];
+
+    const candidates = entries.filter((d) => {
+      if (d.category === 'destructive' && !allowDestructive) {
+        skipped.push(d);
+        return false;
+      }
+      return true;
+    });
+    if (candidates.length === 0) return { applied, skipped };
+
+    // Group by table — SQLite reconciles a whole table in one rebuild.
+    const byTable = new Map<string, ManagedDriftEntry[]>();
+    for (const d of candidates) {
+      (byTable.get(d.table) ?? byTable.set(d.table, []).get(d.table)!).push(d);
+    }
+
+    for (const [table, ents] of byTable) {
+      try {
+        if (this.isSqlite) {
+          await this.rebuildSqliteTablePatched(table, ents);
+          applied.push(...ents);
+        } else {
+          for (const d of ents) {
+            const ok = await this.applyDriftOpInPlace(d.op);
+            (ok ? applied : skipped).push(d);
+          }
+        }
+      } catch (e: any) {
+        this.logger.warn(`[schema-drift] failed to reconcile '${table}'`, e?.message ?? e);
+        for (const d of ents) if (!applied.includes(d)) skipped.push(d);
+      }
+    }
+    return { applied, skipped };
+  }
+
+  /** Apply a single drift op in place (Postgres / MySQL). Returns false if unsupported. */
+  protected async applyDriftOpInPlace(op: DriftOp): Promise<boolean> {
+    const { table, column } = op;
+    if (this.isPostgres) {
+      switch (op.type) {
+        case 'relax_not_null':
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP NOT NULL', [table, column]);
+          return true;
+        case 'tighten_not_null':
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? SET NOT NULL', [table, column]);
+          return true;
+        case 'widen_varchar':
+        case 'narrow_varchar':
+          await this.knex.raw(`ALTER TABLE ?? ALTER COLUMN ?? TYPE varchar(${op.to})`, [table, column]);
+          return true;
+        case 'drop_column':
+          await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
+          return true;
+      }
+    }
+    if (this.isMysql) {
+      // MySQL MODIFY restates the FULL column definition — reconstruct the
+      // type (with length for char types, so a nullability change never
+      // silently drops a varchar's declared length) from columnInfo.
+      const info: any = await this.knex(table).columnInfo();
+      const ci: any = info?.[column];
+      const colType: string | undefined = ci?.type
+        ? (/char/i.test(ci.type) && ci.maxLength ? `${ci.type}(${ci.maxLength})` : ci.type)
+        : undefined;
+      switch (op.type) {
+        case 'relax_not_null':
+          if (!colType) return false;
+          await this.knex.raw(`ALTER TABLE ?? MODIFY ?? ${colType} NULL`, [table, column]);
+          return true;
+        case 'tighten_not_null':
+          if (!colType) return false;
+          await this.knex.raw(`ALTER TABLE ?? MODIFY ?? ${colType} NOT NULL`, [table, column]);
+          return true;
+        case 'widen_varchar':
+        case 'narrow_varchar':
+          await this.knex.raw(`ALTER TABLE ?? MODIFY ?? varchar(${op.to})`, [table, column]);
+          return true;
+        case 'drop_column':
+          await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
+          return true;
+      }
+    }
+    this.logger.warn(`[schema-drift] ${op.type} on ${table}.${column} is unsupported on dialect '${this.dialectName}' — skipped`);
+    return false;
+  }
+
+  /**
+   * Rebuild a SQLite table applying a set of column edits (relax/tighten NOT
+   * NULL, drop column), preserving all other columns and their data. Follows
+   * the official SQLite procedure: create patched table → copy → drop → rename.
+   * varchar widen/narrow are no-ops on SQLite (dynamic typing) and ignored.
+   *
+   * Unique field-level constraints and declared indexes are recreated from
+   * metadata afterwards (the source of truth). DB-level foreign keys declared
+   * by `lookup` fields are not re-added (ObjectStack enforces relationships at
+   * the application layer, not via SQLite FK constraints).
+   */
+  protected async rebuildSqliteTablePatched(table: string, ents: ManagedDriftEntry[]): Promise<void> {
+    const relax = new Set<string>();
+    const tighten = new Set<string>();
+    const drop = new Set<string>();
+    for (const e of ents) {
+      if (e.op.type === 'relax_not_null') relax.add(e.op.column);
+      else if (e.op.type === 'tighten_not_null') tighten.add(e.op.column);
+      else if (e.op.type === 'drop_column') drop.add(e.op.column);
+      // widen/narrow varchar: SQLite ignores declared length — nothing to do.
+    }
+
+    const physical = await this.introspectColumns(table);
+    const kept = physical.filter((c) => !drop.has(c.name));
+    const keptNames = kept.map((c) => c.name);
+    const fields = this.managedObjectFields.get(table) ?? {};
+    const tmp = `__os_mig_${table}`;
+
+    // FK enforcement must be toggled OUTSIDE the transaction (SQLite ignores
+    // the PRAGMA inside one). Off during the swap so the rename doesn't trip
+    // any dangling references mid-flight.
+    await this.knex.raw('PRAGMA foreign_keys = OFF');
+    try {
+      await this.knex.transaction(async (trx) => {
+        await trx.schema.dropTableIfExists(tmp);
+        await trx.schema.createTable(tmp, (t) => {
+          for (const c of kept) {
+            const col = this.buildRebuiltColumn(t, c);
+            if (!col) continue;
+            const nullable = relax.has(c.name) ? true : tighten.has(c.name) ? false : c.nullable;
+            if (!nullable && c.name !== 'id') col.notNullable();
+            if (c.name === 'created_at' || c.name === 'updated_at') col.defaultTo(this.knex.fn.now());
+          }
+        });
+        const colList = keptNames.map((n) => `"${n}"`).join(', ');
+        await trx.raw(`INSERT INTO "${tmp}" (${colList}) SELECT ${colList} FROM "${table}"`);
+        await trx.schema.dropTable(table);
+        await trx.schema.renameTable(tmp, table);
+      });
+    } finally {
+      await this.knex.raw('PRAGMA foreign_keys = ON');
+    }
+
+    // Recreate unique constraints + declared indexes from metadata.
+    try {
+      const keptSet = new Set(keptNames);
+      for (const [name, field] of Object.entries<any>(fields)) {
+        if (field?.unique && keptSet.has(name)) {
+          const idx = `uniq_${table}_${name}`;
+          await this.knex.raw('CREATE UNIQUE INDEX IF NOT EXISTS ?? ON ?? (??)', [idx, table, name]);
+        }
+      }
+      const declared = this.managedObjectIndexes.get(table);
+      if (Array.isArray(declared) && declared.length > 0) {
+        await this.syncDeclaredIndexes(table, declared, keptSet);
+      }
+    } catch (e: any) {
+      this.logger.warn(`[schema-drift] could not fully recreate indexes for '${table}' after rebuild`, e?.message ?? e);
+    }
+  }
+
+  /** Map an introspected SQLite column to a knex builder for the rebuilt table. */
+  protected buildRebuiltColumn(t: Knex.CreateTableBuilder, c: IntrospectedColumn): any {
+    if (c.name === 'id') return t.string('id').primary();
+    const ty = (c.type || 'text').toLowerCase();
+    if (ty.includes('int')) return t.integer(c.name);
+    if (/(real|floa|doub|num|dec)/.test(ty)) return t.float(c.name);
+    if (ty.includes('bool')) return t.boolean(c.name);
+    if (ty.includes('datetime') || ty.includes('timestamp')) return t.timestamp(c.name);
+    if (ty === 'date') return t.date(c.name);
+    if (ty === 'time') return t.time(c.name);
+    if (ty.includes('json')) return t.json(c.name);
+    if (ty.includes('blob') || ty.includes('binary')) return t.binary(c.name);
+    if (ty.includes('text')) return t.text(c.name);
+    return t.string(c.name);
   }
 
   /**

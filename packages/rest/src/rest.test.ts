@@ -1681,6 +1681,11 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.fields).toEqual([
       { field: 'organization_id', code: 'required', message: 'organization_id is required' },
     ]);
+    // #2186: reaching this branch means metadata did not require the field, so
+    // it is physical-schema drift — surface an actionable hint without breaking
+    // the back-compat envelope.
+    expect(String(r.body.hint)).toMatch(/os migrate/);
+    expect(String(r.body.hint)).toMatch(/drifted from metadata/);
   });
 
   it('maps Postgres not-null violation → 400 VALIDATION_FAILED', () => {

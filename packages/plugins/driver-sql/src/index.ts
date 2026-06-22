@@ -11,6 +11,22 @@ export type {
   IntrospectedForeignKey,
 } from './sql-driver.js';
 
+// Managed-schema drift / reconcile (#2186)
+export {
+  diffManagedTable,
+  driftKey,
+  fieldHasColumn,
+  BUILTIN_COLUMNS,
+} from './schema-drift.js';
+export type {
+  ManagedDriftEntry,
+  DriftOp,
+  DriftCategory,
+  SqlDialectName,
+  PhysicalColumn,
+  FieldDef as DriftFieldDef,
+} from './schema-drift.js';
+
 export default {
   id: 'com.objectstack.driver.sql',
   version: '1.0.0',

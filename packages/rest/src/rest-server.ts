@@ -196,12 +196,23 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         /column\s+["'`]([a-z0-9_]+)["'`]\s+cannot be null/i.exec(raw);
     if (notNull) {
         const field = notNull[1];
+        // The metadata required-check (`record-validator`) runs BEFORE the
+        // driver, so a NOT NULL violation that reaches this far means metadata
+        // did NOT consider the field required — i.e. the physical column has
+        // drifted from metadata (#2186), not a genuine missing-required-field.
+        // We keep the `VALIDATION_FAILED` / `required` envelope for back-compat
+        // (form UIs key off it) but add an actionable `hint` so the message
+        // stops being misleading.
         return {
             status: 400,
             body: {
                 error: `${field} is required`,
                 code: 'VALIDATION_FAILED',
                 fields: [{ field, code: 'required', message: `${field} is required` }],
+                hint:
+                    `If '${field}' is optional in your object metadata, the database column is still NOT NULL — ` +
+                    `the physical schema has drifted from metadata. Run 'os migrate' to reconcile ` +
+                    `(or reset the dev database).`,
                 ...(object ? { object } : {}),
             },
         };

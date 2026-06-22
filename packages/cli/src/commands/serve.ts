@@ -606,6 +606,9 @@ export default class Serve extends Command {
                client: 'better-sqlite3',
                connection: { filename: filePath },
                useNullAsDefault: true,
+               // #2186: in dev, self-heal a persisted DB when a metadata change
+               // relaxes a constraint (loosen-only; never destructive / never in prod).
+               autoMigrate: isDev ? 'safe' : undefined,
              }) as any));
              trackPlugin('SqlDriver');
              resolvedDriverLabel = 'SqlDriver(sqlite)';
@@ -626,6 +629,7 @@ export default class Serve extends Command {
                client: 'pg',
                connection: databaseUrl,
                pool: { min: 0, max: 5 },
+               autoMigrate: isDev ? 'safe' : undefined, // #2186 dev loosen-only self-heal
              }) as any));
              trackPlugin('PostgresDriver');
              resolvedDriverLabel = 'SqlDriver(pg)';
@@ -636,6 +640,7 @@ export default class Serve extends Command {
                client: 'mysql2',
                connection: databaseUrl,
                pool: { min: 0, max: 5 },
+               autoMigrate: isDev ? 'safe' : undefined, // #2186 dev loosen-only self-heal
              }) as any));
              trackPlugin('MySQLDriver');
              resolvedDriverLabel = 'SqlDriver(mysql2)';
@@ -666,6 +671,7 @@ export default class Serve extends Command {
                  client: 'better-sqlite3',
                  connection: { filename: ':memory:' },
                  useNullAsDefault: true,
+                 autoMigrate: 'safe', // #2186 dev loosen-only self-heal
                });
                await sqliteDriver.connect();
                sqliteOk = true;

@@ -17,6 +17,11 @@ export { default as StartCommand } from './commands/start.js';
 export { default as TestCommand } from './commands/test.js';
 export { default as DoctorCommand } from './commands/doctor.js';
 
+// ─── Migrate topic subcommands (#2186) ──────────────────────────────
+export { default as MigrateCommand } from './commands/migrate/index.js';
+export { default as MigratePlanCommand } from './commands/migrate/plan.js';
+export { default as MigrateApplyCommand } from './commands/migrate/apply.js';
+
 // ─── Environments topic subcommands ─────────────────────────────────
 export { default as EnvironmentsListCommand } from './commands/environments/list.js';
 export { default as EnvironmentsShowCommand } from './commands/environments/show.js';
