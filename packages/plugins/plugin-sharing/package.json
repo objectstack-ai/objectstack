@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-sharing",
-  "version": "10.0.0",
+  "version": "10.1.0",
   "license": "Apache-2.0",
   "description": "Record-level sharing for ObjectStack — sys_record_share + middleware that enforces sharingModel + ISharingService.",
   "main": "dist/index.js",

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/formula",
-  "version": "10.0.0",
+  "version": "10.1.0",
   "license": "Apache-2.0",
   "description": "ObjectStack canonical expression engine — CEL (cel-js) + ObjectStack stdlib + dialect registry",
   "main": "dist/index.js",

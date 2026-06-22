@@ -1,5 +1,15 @@
 # @objectstack/service-automation
 
+## 10.1.0
+
+### Patch Changes
+
+- Updated dependencies [49da36e]
+- Updated dependencies [ac79f16]
+  - @objectstack/spec@10.1.0
+  - @objectstack/core@10.1.0
+  - @objectstack/formula@10.1.0
+
 ## 10.0.0
 
 ### Patch Changes

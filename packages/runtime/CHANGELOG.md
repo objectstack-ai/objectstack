@@ -1,5 +1,84 @@
 # @objectstack/runtime
 
+## 10.1.0
+
+### Minor Changes
+
+- ac79f16: feat(datasource): auto-connect declared external datasources (ADR-0062 Phase 1, D1/D2/D5)
+
+  A declared external datasource is now connected to a live ObjectQL driver and its
+  federated objects are queryable **with zero app code** — no `onEnable` driver
+  wiring. Implements ADR-0062 Phase 1.
+
+  - **D1 — one connect path.** New `DatasourceConnectionService` in
+    `@objectstack/service-datasource` owns the single "definition → live driver"
+    path: build via the injected driver factory → resolve `external.credentialsRef`
+    via the `SecretBinder` → connect → `engine.registerDriver` under the datasource
+    name → register the datasource def → sync each bound federated object's read
+    metadata (DDL-free). Both origins converge on it: the runtime-admin
+    `registerPool` now delegates here, and `AppPlugin` auto-connects code-defined
+    datasources. Exposed as the `'datasource-connection'` kernel service.
+  - **D2 — opt-in-safe gate.** A declared datasource auto-connects only when it is
+    `external`, an object **explicitly** binds to it via `object.datasource`, or it
+    sets the new `autoConnect: true` flag. A managed datasource that nothing
+    explicitly binds (incl. ones referenced only by a `datasourceMapping` rule, e.g.
+    `examples/app-crm`'s `:memory:` datasources) stays metadata-only — existing apps
+    are byte-for-byte unchanged. See the ADR-0062 D2 implementation note.
+  - **D5 — lifecycle, ordering & policy.** Connect happens in `AppPlugin.start()`
+    (before the `kernel:ready` validation gate, relying on the kernel's
+    init-all-then-start-all ordering). Fail-fast for a declared `external` datasource
+    with `validation.onMismatch: 'fail'`; degrade-with-warning otherwise (and always
+    for runtime-admin/rehydrate, so a UI action or replica blip never bricks the
+    server). Adds a host-injectable `DatasourceConnectPolicy` (open-core default
+    allows; a multi-tenant host binds a stricter fail-closed policy for egress
+    isolation) consulted before every connect — one connect path, no cloud fork.
+
+  Adds `datasource.autoConnect` to the spec. The legacy `onEnable` +
+  `ctx.drivers.register` bridge remains supported as an escape hatch (idempotent vs.
+  auto-connect). No behavior change for managed apps.
+
+### Patch Changes
+
+- 94d2161: refactor(runtime): build the standalone default driver via the shared datasource factory (ADR-0062 follow-up)
+
+  `createStandaloneStack` now constructs its `default` driver for the user-facing
+  kinds (memory / better-sqlite3 / postgres / mongodb) through the **same**
+  `createDefaultDatasourceDriverFactory` used for declared and runtime-admin
+  datasources — one "driver kind → instance" construction path instead of two
+  hand-mirrored ones. Adding a dialect or changing connection/pool defaults now
+  happens in a single place. URL→config translation, filesystem prep (`mkdir`),
+  and pre-engine `DriverPlugin` registration stay in the stack (unchanged); the
+  factory only constructs the driver. The pure-JS WASM sqlite driver stays bespoke
+  in the stack — it's the standalone-specific, CI-safe default and not a
+  user-creatable datasource type, so it has a single construction site already.
+
+  No behavior change: the same driver instances are built for the same inputs
+  (verified by a per-kind connect + CRUD round-trip test and a real `os dev` boot).
+  Adds `@objectstack/service-datasource` as a runtime dependency (no cycle — that
+  package depends only on core/spec).
+
+- Updated dependencies [49da36e]
+- Updated dependencies [49da36e]
+- Updated dependencies [ac79f16]
+- Updated dependencies [517dad9]
+  - @objectstack/spec@10.1.0
+  - @objectstack/service-datasource@10.1.0
+  - @objectstack/driver-sql@10.1.0
+  - @objectstack/rest@10.1.0
+  - @objectstack/core@10.1.0
+  - @objectstack/formula@10.1.0
+  - @objectstack/metadata@10.1.0
+  - @objectstack/objectql@10.1.0
+  - @objectstack/observability@10.1.0
+  - @objectstack/driver-memory@10.1.0
+  - @objectstack/driver-sqlite-wasm@10.1.0
+  - @objectstack/plugin-auth@10.1.0
+  - @objectstack/plugin-org-scoping@10.1.0
+  - @objectstack/plugin-security@10.1.0
+  - @objectstack/service-cluster@10.1.0
+  - @objectstack/service-i18n@10.1.0
+  - @objectstack/types@10.1.0
+
 ## 10.0.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/spec",
-  "version": "10.0.0",
+  "version": "10.1.0",
   "description": "ObjectStack Protocol & Specification - TypeScript Interfaces, JSON Schemas, and Convention Configurations",
   "license": "Apache-2.0",
   "main": "dist/index.js",

@@ -1,5 +1,17 @@
 # @objectstack/cloud-connection
 
+## 10.1.0
+
+### Patch Changes
+
+- Updated dependencies [49da36e]
+- Updated dependencies [ac79f16]
+- Updated dependencies [94d2161]
+  - @objectstack/spec@10.1.0
+  - @objectstack/runtime@10.1.0
+  - @objectstack/core@10.1.0
+  - @objectstack/types@10.1.0
+
 ## 10.0.0
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-job",
-  "version": "10.0.0",
+  "version": "10.1.0",
   "license": "Apache-2.0",
   "description": "Job Service for ObjectStack — implements IJobService with setInterval and cron scheduling",
   "type": "module",

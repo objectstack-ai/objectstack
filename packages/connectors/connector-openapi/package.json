@@ -1,6 +1,6 @@
 {
     "name": "@objectstack/connector-openapi",
-    "version": "10.0.0",
+    "version": "10.1.0",
     "license": "Apache-2.0",
     "description": "OpenAPI 3.x connector generator for ObjectStack — turns a declarative OpenAPI document into connector actions on the automation engine's registry, with a self-contained static-auth HTTP transport (ADR-0023).",
     "main": "dist/index.js",
