@@ -41,6 +41,14 @@ export const MarkDoneAction = defineAction({
     capabilities: ['api.write'],
   },
   successMessage: 'Task marked done.',
+  // Hide once the task is complete. Gate on `record.done` (the boolean this
+  // action sets) so the button vanishes after a successful click and stays
+  // hidden on finished records (the "why is it still here?" report). NOTE the
+  // `record.`-prefix: the ActionEngine evaluates a record-header action's
+  // `visible` against `{ record, recordId, … }` with fail-closed semantics, so
+  // a bare `done`/`status` throws (field not at top level) and silently hides
+  // the action. Single operand, too — the template path throws on `&&`/`||`.
+  visible: '!record.done',
   // `record_section` so the Task Detail page's `record:quick_actions` bar
   // (which names this action) resolves it — the engine location-filters even
   // explicitly-named actions, mirroring the platform's own sys-user pages.
