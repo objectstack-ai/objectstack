@@ -103,7 +103,7 @@
   "devDependencies": {
     "@oclif/plugin-help": "^6.2.52",
     "@oclif/plugin-plugins": "^5.4.78",
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.0.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
