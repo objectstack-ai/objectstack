@@ -108,6 +108,8 @@ export class SecurityPlugin implements Plugin {
    */
   private metadata: any = null;
   private ql: any = null;
+  /** Unsubscribe handle for metadata-change cache invalidation (runtime metadata edits). */
+  private metadataWatch: { unsubscribe: () => void } | null = null;
   /** ADR-0055: cache the resolved master-detail relation per controlled_by_parent object. */
   private cbpRelCache = new Map<string, { fk: string; master: string } | null>();
   private dbLoader?: (names: string[]) => Promise<PermissionSet[]>;
@@ -211,6 +213,19 @@ export class SecurityPlugin implements Plugin {
     this.ql = ql;
     this.logger = ctx.logger;
     this.rlsCompiler.setLogger?.(ctx.logger);
+
+    // Invalidate metadata-derived caches when object/field metadata changes
+    // at runtime (Studio / AI authoring). Without this they go stale until
+    // restart — even single-node. With a cluster pub/sub driver the
+    // metadata.changed event propagates cross-node, so peers invalidate too.
+    const md: any = this.metadata;
+    if (typeof md?.watch === 'function') {
+      this.metadataWatch = md.watch('*', () => {
+        this.fieldNamesCache.clear();
+        this.tenancyDisabledCache.clear();
+        this.cbpRelCache.clear();
+      });
+    }
 
     // Probe for OrgScopingPlugin presence. When registered, its
     // `init()` exposes itself as the `org-scoping` service. We capture
@@ -764,7 +779,8 @@ export class SecurityPlugin implements Plugin {
   }
 
   async destroy(): Promise<void> {
-    // No cleanup needed
+    this.metadataWatch?.unsubscribe();
+    this.metadataWatch = null;
   }
 
   /**

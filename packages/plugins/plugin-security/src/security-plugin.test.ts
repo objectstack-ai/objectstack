@@ -1365,3 +1365,41 @@ describe('RLSCompiler — SQL→CEL deprecation bridge (ADR-0058 D1)', () => {
     expect(warned.length).toBe(0);
   });
 });
+
+describe('SecurityPlugin – metadata-change cache invalidation', () => {
+  it('clears metadata-derived caches when metadata changes at runtime', async () => {
+    const plugin = new SecurityPlugin();
+    let watchCb: (() => void) | undefined;
+    const metadata = {
+      watch: (_type: string, cb: () => void) => {
+        watchCb = cb;
+        return { unsubscribe: vi.fn() };
+      },
+    };
+    const ctx: any = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      registerService: vi.fn(),
+      hook: vi.fn(),
+      getService: vi.fn().mockImplementation((name: string) => {
+        if (name === 'manifest') return { register: vi.fn() };
+        if (name === 'metadata') return metadata;
+        if (name === 'objectql') return { registerMiddleware: vi.fn() };
+        return undefined;
+      }),
+    };
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+
+    expect(typeof watchCb).toBe('function');
+
+    (plugin as any).fieldNamesCache.set('crm_account', new Set(['name']));
+    (plugin as any).tenancyDisabledCache.set('crm_account', true);
+    (plugin as any).cbpRelCache.set('crm_account', null);
+
+    watchCb!();
+
+    expect((plugin as any).fieldNamesCache.size).toBe(0);
+    expect((plugin as any).tenancyDisabledCache.size).toBe(0);
+    expect((plugin as any).cbpRelCache.size).toBe(0);
+  });
+});
