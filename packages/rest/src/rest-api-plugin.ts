@@ -185,8 +185,13 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             
             ctx.logger.info('Hydrating REST API from Protocol...');
             
+            // Single-env service-existence probe for nav capability gates
+            // (ADR-0057 D10). Multi-env uses the per-request kernel instead.
+            const serviceExistsProvider = (name: string): boolean => {
+                try { return ctx.getService<any>(name) != null; } catch { return false; }
+            };
             try {
-                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider);
+                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');

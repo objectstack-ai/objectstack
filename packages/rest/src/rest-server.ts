@@ -542,6 +542,10 @@ export class RestServer {
     private i18nServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private analyticsServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private settingsServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
+    /** Sync probe: is a kernel service registered? Single-env path for nav
+     *  capability gates (ADR-0057 D10) — resolveExecCtx sets no kernel in
+     *  single-kernel deployments, so this prevents the gate failing open. */
+    private serviceExistsProvider?: (name: string) => boolean;
 
     constructor(
         server: IHttpServer,
@@ -560,6 +564,7 @@ export class RestServer {
         i18nServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         analyticsServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         settingsServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
+        serviceExistsProvider?: (name: string) => boolean,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -577,6 +582,7 @@ export class RestServer {
         this.i18nServiceProvider = i18nServiceProvider;
         this.analyticsServiceProvider = analyticsServiceProvider;
         this.settingsServiceProvider = settingsServiceProvider;
+        this.serviceExistsProvider = serviceExistsProvider;
     }
 
     /**
@@ -1151,7 +1157,18 @@ export class RestServer {
      * behaviour). ADR-0057 addendum D10.
      */
     private async resolveRegisteredServices(kernel: any, items: any[]): Promise<Set<string> | null> {
-        if (!kernel || typeof kernel.getServiceAsync !== 'function') return null;
+        // Prefer the per-request kernel (multi-env, resolved via kernelManager).
+        // Fall back to the single-env service-existence provider — in single-kernel
+        // deployments resolveExecCtx never sets a kernel, so without this the gate
+        // would fail open (ADR-0057 D10).
+        let probe: ((name: string) => Promise<boolean>) | null = null;
+        if (kernel && typeof kernel.getServiceAsync === 'function') {
+            probe = async (name) => { try { return (await kernel.getServiceAsync(name)) != null; } catch { return false; } };
+        } else if (this.serviceExistsProvider) {
+            const exists = this.serviceExistsProvider;
+            probe = async (name) => { try { return exists(name) === true; } catch { return false; } };
+        }
+        if (!probe) return null;
         const wanted = new Set<string>();
         const walk = (e: any): void => {
             if (!e || typeof e !== 'object') return;
@@ -1163,10 +1180,7 @@ export class RestServer {
         for (const it of items) walk(it);
         if (wanted.size === 0) return new Set();
         const registered = new Set<string>();
-        for (const name of wanted) {
-            try { if ((await kernel.getServiceAsync(name)) != null) registered.add(name); }
-            catch { /* service not registered -> leave out */ }
-        }
+        for (const name of wanted) { if (await probe(name)) registered.add(name); }
         return registered;
     }
 
