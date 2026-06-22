@@ -213,6 +213,18 @@ export const DatasourceSchema = lazySchema(() => z.object({
   active: z.boolean().default(true).describe('Is datasource enabled'),
 
   /**
+   * Auto-connect opt-in (ADR-0062 D2(c)).
+   *
+   * Forces the runtime to build a live driver for this datasource at boot even
+   * when it is `managed` and nothing routes to it. By default a declared
+   * datasource only auto-connects when it is `external` or an object explicitly
+   * binds to it via `object.datasource` (see ADR-0062 D2). Set this to opt a
+   * managed, unrouted datasource into the live-connection lifecycle.
+   */
+  autoConnect: z.boolean().default(false)
+    .describe('Force a live driver connection at boot even when managed + unrouted (ADR-0062 D2).'),
+
+  /**
    * Schema Ownership Mode (ADR-0015)
    * Declares whether ObjectStack owns this schema (`managed`, default) or
    * is a guest in a mature external database (`external` / `validate-only`).

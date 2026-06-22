@@ -16,3 +16,14 @@ export type {
   DatasourceDriverHandle,
   IDatasourceDriverFactory,
 } from './datasource-driver-factory.js';
+
+// Host-injectable connect policy (ADR-0062 D5 / epic #2163 seam).
+export {
+  allowAllConnectPolicy,
+} from './connect-policy.js';
+export type {
+  DatasourceConnectPolicy,
+  DatasourceConnectDecision,
+  DatasourceConnectContext,
+  DatasourceConnectSubject,
+} from './connect-policy.js';

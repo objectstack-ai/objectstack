@@ -39,7 +39,25 @@ export type {
   DatasourceConnectionSpec,
   DatasourceDriverHandle,
   IDatasourceDriverFactory,
+  // Connect policy (ADR-0062 D5 / epic #2163 seam).
+  DatasourceConnectPolicy,
+  DatasourceConnectDecision,
+  DatasourceConnectContext,
+  DatasourceConnectSubject,
 } from './contracts/index.js';
+export { allowAllConnectPolicy } from './contracts/index.js';
+
+// Shared "definition → live driver" path (ADR-0062 D1).
+export { DatasourceConnectionService, isDatasourceAddressed } from './datasource-connection-service.js';
+export type {
+  DatasourceConnectionServiceConfig,
+  ConnectableDatasource,
+  DatasourceBoundObject,
+  ConnectionEngineLike,
+  ConnectionSecretResolver,
+  ConnectResult,
+  ConnectStatus,
+} from './datasource-connection-service.js';
 
 // Decoupled lifecycle service + injected-config shape.
 export { DatasourceAdminService } from './datasource-admin-service.js';

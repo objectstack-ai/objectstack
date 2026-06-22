@@ -240,6 +240,72 @@ export class AppPlugin implements Plugin {
             });
         }
 
+        // Auto-connect declared datasources (ADR-0062 D1/D2/D5). The metadata
+        // registration above only makes a datasource *visible*; to make its
+        // federated objects *queryable* with zero app boilerplate, build + open
+        // + register a live driver via the shared `'datasource-connection'`
+        // service (when present — wired by the datasource-admin plugin). The
+        // service applies the D2 gate (connect only when `external`, an object
+        // explicitly binds via `object.datasource`, or `autoConnect:true`) and
+        // the host connect policy, so managed+unrouted datasources stay
+        // metadata-only (e.g. app-crm's `:memory:` datasources — byte-for-byte
+        // unchanged). Idempotent vs. a legacy `onEnable` driver registration.
+        //
+        // Runs in `start()` (before the `kernel:ready` external-validation gate)
+        // so the kernel's init-all-then-start-all ordering guarantees the
+        // connection service was already registered during init.
+        try {
+            const dsDefs = this.bundle.datasources;
+            const dsList: any[] = Array.isArray(dsDefs)
+                ? dsDefs
+                : dsDefs && typeof dsDefs === 'object'
+                    ? Object.entries(dsDefs).map(([name, def]) => ({ name, ...(def as any) }))
+                    : [];
+            if (dsList.length > 0) {
+                // `ctx.getService` throws when a service is absent, so resolve
+                // defensively — a runtime without the datasource-admin plugin
+                // simply has no connection service, and declared datasources
+                // stay metadata-only (the legacy `onEnable` escape hatch still
+                // works). This must NOT fall into the fail-fast catch below.
+                let connection:
+                    | {
+                          connectDeclared?: (input: {
+                              datasources: any[];
+                              objects?: Array<{ name?: string; datasource?: string }>;
+                          }) => Promise<Array<{ name: string; status: string }>>;
+                      }
+                    | undefined;
+                try {
+                    connection = ctx.getService('datasource-connection');
+                } catch {
+                    connection = undefined;
+                }
+                if (typeof connection?.connectDeclared === 'function') {
+                    const objects = Array.isArray(this.bundle.objects) ? this.bundle.objects : [];
+                    const results = await connection.connectDeclared({ datasources: dsList, objects });
+                    const connected = results.filter((r) => r.status === 'connected');
+                    if (connected.length > 0) {
+                        ctx.logger.info('Auto-connected declared datasources', {
+                            appId,
+                            connected: connected.map((r) => r.name),
+                        });
+                    }
+                } else {
+                    ctx.logger.debug('No datasource-connection service — declared datasources stay metadata-only', { appId });
+                }
+            }
+        } catch (err) {
+            // A fail-fast (external + onMismatch:'fail') connect error propagates
+            // to brick boot as intended (ADR-0062 D5); other errors are already
+            // degraded inside the connection service. Re-throw so the kernel
+            // surfaces the real cause.
+            ctx.logger.error('[AppPlugin] declared-datasource auto-connect failed', {
+                appId,
+                error: (err as Error)?.message ?? String(err),
+            });
+            throw err;
+        }
+
         // [ADR-0057 / #2077] Surface stack-declared SECURITY metadata (roles,
         // permission sets, sharing rules, policies) in the metadata registry so
         // the boot seeders (plugin-security / plugin-sharing) and runtime

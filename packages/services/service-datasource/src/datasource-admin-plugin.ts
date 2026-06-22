@@ -4,7 +4,6 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { registerMetadataTypeActions } from '@objectstack/spec/kernel';
 import type {
   IDatasourceDriverFactory,
-  DatasourceConnectionSpec,
   TestConnectionResult,
 } from './contracts/index.js';
 import {
@@ -13,6 +12,11 @@ import {
   type StoredDatasource,
   type ProbeInput,
 } from './datasource-admin-service.js';
+import {
+  DatasourceConnectionService,
+  type ConnectionEngineLike,
+} from './datasource-connection-service.js';
+import type { DatasourceConnectPolicy } from './contracts/connect-policy.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -135,6 +139,13 @@ export interface DatasourceAdminServicePluginOptions {
   secrets?: SecretBinder;
   /** Override the driver factory (defaults to the `'datasource-driver-factory'` service). */
   driverFactory?: IDatasourceDriverFactory;
+  /**
+   * Host-injectable connect policy consulted before opening any datasource
+   * connection (ADR-0062 D5 / epic #2163 seam). Open-core default is permissive
+   * (allow); a multi-tenant host binds a stricter, fail-closed policy. Shared by
+   * both code-defined auto-connect and runtime-admin pool registration.
+   */
+  connectPolicy?: DatasourceConnectPolicy;
   logger?: Logger;
 }
 
@@ -162,6 +173,8 @@ export class DatasourceAdminServicePlugin implements Plugin {
 
   private service?: DatasourceAdminService;
   private config?: DatasourceAdminServiceConfig;
+  /** Shared "definition → live driver" path (ADR-0062 D1); also exposed as the `'datasource-connection'` service. */
+  private connection?: DatasourceConnectionService;
   private readonly options: DatasourceAdminServicePluginOptions;
 
   constructor(options: DatasourceAdminServicePluginOptions = {}) {
@@ -203,6 +216,19 @@ export class DatasourceAdminServicePlugin implements Plugin {
 
     const factory = (): IDatasourceDriverFactory | undefined =>
       this.options.driverFactory ?? safeGetService<IDatasourceDriverFactory>(ctx, 'datasource-driver-factory');
+
+    // The single "definition → live driver" path (ADR-0062 D1). Built here so
+    // the admin pool registration (runtime origin) and the app-plugin
+    // auto-connect (code origin) share one connect + lifecycle + policy path.
+    // Registered as a kernel service so `AppPlugin.start()` can resolve it.
+    this.connection = new DatasourceConnectionService({
+      factory,
+      engine: () => engineOf() as ConnectionEngineLike | undefined,
+      secrets: { resolve: (ref) => this.options.secrets?.resolve?.(ref) ?? Promise.resolve(undefined) },
+      policy: this.options.connectPolicy,
+      logger: this.options.logger,
+    });
+    ctx.registerService('datasource-connection', this.connection);
 
     const config: DatasourceAdminServiceConfig = {
       probe: (input) => this.probe(factory(), input),
@@ -261,40 +287,21 @@ export class DatasourceAdminServicePlugin implements Plugin {
         return objects.filter((o) => o?.datasource === datasource).length;
       },
 
+      // Hot pool (de)registration converges on the shared
+      // DatasourceConnectionService (ADR-0062 D1) — one connect path for code-
+      // and runtime-origin datasources. `connect()` builds the driver via the
+      // factory, dereferences `external.credentialsRef` through the SecretBinder,
+      // opens the connection, and registers the live driver + datasource def.
+      // Runtime-admin connects always degrade-with-warning on failure (never
+      // fail-fast), preserving the pre-ADR-0062 admin behavior.
       registerPool: async (record) => {
-        const f = factory();
-        const engine = engineOf();
-        if (!f || !engine?.registerDriver || !f.supports(record.driver)) return;
-        // Recover the cleartext credential from `sys_secret` so the pool opens
-        // with the real password. The cleartext is never persisted on the
-        // record (only `credentialsRef`), so it must be dereferenced here —
-        // both on create/update and on boot rehydration. Credential-less
-        // drivers (sqlite/memory) simply have no ref and skip this.
-        const credentialsRef = record.external?.credentialsRef;
-        const secret = credentialsRef ? await this.options.secrets?.resolve?.(credentialsRef) : undefined;
-        const handle = await f.create({ ...this.toSpec(record), ...(secret ? { secret } : {}) });
-        if (typeof handle?.connect === 'function') await handle.connect();
-        // The engine routes a datasource to a driver by `driver.name === <datasource name>`
-        // (see ObjectQL engine.getDriver). Prefer the factory's underlying engine
-        // driver (the `driver` escape hatch); fall back to the handle itself. Stamp
-        // the name so routing resolves to this pool.
-        const engineDriver = (handle.driver ?? handle) as { name?: string };
-        try {
-          engineDriver.name = record.name;
-        } catch {
-          /* frozen driver — registration may still work if name already matches */
-        }
-        engine.registerDriver(engineDriver);
-        engine.registerDatasourceDef?.({
-          name: record.name,
-          schemaMode: record.schemaMode,
-          external: record.external as { allowWrites?: boolean } | undefined,
+        await this.connection?.connect(record, {
+          context: { origin: record.origin ?? 'runtime', trigger: 'runtime-admin' },
         });
       },
 
       unregisterPool: async (name) => {
-        const driver = engineOf()?.getDriverByName?.(name) as { disconnect?: () => Promise<void> } | undefined;
-        if (typeof driver?.disconnect === 'function') await driver.disconnect();
+        await this.connection?.disconnect(name);
       },
 
       logger,
@@ -425,16 +432,6 @@ export class DatasourceAdminServicePlugin implements Plugin {
   }
 
   // --- internals -----------------------------------------------------------
-
-  private toSpec(record: StoredDatasource): DatasourceConnectionSpec {
-    return {
-      name: record.name,
-      driver: record.driver,
-      config: record.config ?? {},
-      external: record.external,
-      pool: record.pool,
-    };
-  }
 
   /** Probe a connection via the driver factory: build → connect → ping → close. */
   private async probe(

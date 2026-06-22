@@ -47,6 +47,8 @@ export interface StoredDatasource {
   external?: (Record<string, unknown> & { credentialsRef?: string }) | undefined;
   pool?: Record<string, unknown>;
   active?: boolean;
+  /** Force a live connection at boot even when managed + unrouted (ADR-0062 D2(c)). */
+  autoConnect?: boolean;
   origin?: 'code' | 'runtime';
   /** Package that defines a code-origin datasource, when known. */
   definedIn?: string;
