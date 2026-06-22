@@ -197,6 +197,68 @@ describe('DatasourceConnectionService.connect', () => {
   });
 });
 
+describe('D3 credential resolution — fail-closed', () => {
+  const credExternal: ConnectableDatasource = {
+    name: 'warehouse',
+    driver: 'sqlite',
+    schemaMode: 'external',
+    config: {},
+    external: { allowWrites: false, credentialsRef: 'sys_secret:abc', validation: { onMismatch: 'warn' } },
+  };
+
+  it('fails closed when a credentialsRef is declared but NO secret store is configured', async () => {
+    const factory = fakeFactory();
+    const { service, engine } = svc({ factory }); // no `secrets`
+    const result = await service.connect(credExternal, { context: { trigger: 'runtime-admin' } });
+    expect(result.status).toBe('failed-credentials');
+    expect(result.reason).toMatch(/no secret store/);
+    expect(factory.create).not.toHaveBeenCalled(); // never built without the secret
+    expect(engine!.drivers.size).toBe(0);
+  });
+
+  it('fails closed when the credentialsRef cannot be resolved/decrypted (undefined)', async () => {
+    const factory = fakeFactory();
+    const { service } = svc({ factory, secrets: { resolve: async () => undefined } });
+    const result = await service.connect(credExternal, { context: { trigger: 'runtime-admin' } });
+    expect(result.status).toBe('failed-credentials');
+    expect(result.reason).toMatch(/could not be resolved or decrypted/);
+    expect(factory.create).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the resolver throws', async () => {
+    const factory = fakeFactory();
+    const { service } = svc({
+      factory,
+      secrets: {
+        resolve: async () => {
+          throw new Error('kms unreachable');
+        },
+      },
+    });
+    const result = await service.connect(credExternal, { context: { trigger: 'runtime-admin' } });
+    expect(result.status).toBe('failed-credentials');
+    expect(factory.create).not.toHaveBeenCalled();
+  });
+
+  it('fail-fast: a declared-auto external + onMismatch:fail with an unresolvable credential re-throws', async () => {
+    const failCred: ConnectableDatasource = {
+      ...credExternal,
+      external: { allowWrites: false, credentialsRef: 'sys_secret:abc', validation: { onMismatch: 'fail' } },
+    };
+    const { service } = svc({ secrets: { resolve: async () => undefined } });
+    await expect(service.connect(failCred, { context: { trigger: 'declared-auto' } })).rejects.toThrow(/fail-fast/);
+  });
+
+  it('connects when the credential resolves to a secret', async () => {
+    const create = vi.fn(async () => ({ driver: { name: 'd' }, connect: async () => {} }));
+    const factory: IDatasourceDriverFactory = { supports: () => true, create };
+    const { service } = svc({ factory, secrets: { resolve: async () => 's3cr3t' } });
+    const result = await service.connect(credExternal);
+    expect(result.status).toBe('connected');
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ secret: 's3cr3t' }));
+  });
+});
+
 describe('DatasourceConnectionService.connectDeclared', () => {
   it('connects only the gated datasources and syncs each one’s bound objects', async () => {
     const { service, engine, factory } = svc();

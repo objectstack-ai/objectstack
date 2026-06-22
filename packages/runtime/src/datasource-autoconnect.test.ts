@@ -131,6 +131,55 @@ describe('ADR-0062 declared-datasource auto-connect', () => {
   });
 });
 
+describe('ADR-0062 credentials fail-closed (D3)', () => {
+  // An external datasource that declares a credentialsRef the host cannot
+  // resolve (no matching sys_secret row) must FAIL CLOSED — never connect with
+  // a missing credential. With onMismatch:'fail' that bricks boot (fail-fast).
+  function credArtifact() {
+    return {
+      manifest: { id: 'com.test.ds-cred', name: 'DS Cred', version: '1.0.0' },
+      objects: [{ name: 'note', label: 'Note', fields: { title: { type: 'text' } } }],
+      datasources: [
+        {
+          name: 'needs_secret',
+          driver: 'memory',
+          schemaMode: 'external',
+          origin: 'code',
+          config: {},
+          external: {
+            allowWrites: false,
+            credentialsRef: 'sys_secret:does-not-exist',
+            validation: { onMismatch: 'fail', checkOnBoot: false },
+          },
+          active: true,
+        },
+      ],
+    };
+  }
+
+  it('bricks boot with a clear message when a required credential cannot be resolved', async () => {
+    const { ObjectQLPlugin } = await import('@objectstack/objectql');
+    const { InMemoryDriver } = await import('@objectstack/driver-memory');
+    const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
+      '@objectstack/service-datasource'
+    );
+    const runtime = new Runtime({ cluster: false });
+    const kernel = runtime.getKernel();
+    await kernel.use(new DriverPlugin(new InMemoryDriver()));
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AppPlugin(credArtifact()));
+    await kernel.use(
+      new DatasourceAdminServicePlugin({
+        driverFactory: createDefaultDatasourceDriverFactory(),
+        // A binder whose resolve never finds the secret (rotated key / missing row).
+        secrets: { bind: async () => 'sys_secret:x', resolve: async () => undefined },
+      }),
+    );
+    await expect(kernel.bootstrap()).rejects.toThrow(/needs_secret|credential|fail-fast/i);
+    try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
+  }, BOOT_TIMEOUT);
+});
+
 describe('ADR-0062 connect policy seam', () => {
   it('a deny policy leaves the external datasource unconnected (cloud egress isolation)', async () => {
     const denyExternal: DatasourceConnectPolicy = {
