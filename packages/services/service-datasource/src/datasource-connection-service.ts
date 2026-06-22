@@ -106,6 +106,7 @@ export type ConnectStatus =
   | 'skipped-policy'
   | 'skipped-no-infra'
   | 'skipped-unsupported'
+  | 'failed-credentials'
   | 'failed-degraded';
 
 export interface ConnectResult {
@@ -233,9 +234,42 @@ export class DatasourceConnectionService {
       );
     }
 
+    // Credential resolution (ADR-0062 D3) — FAIL-CLOSED, and done *before* the
+    // build try-block so a fail-fast verdict propagates (rather than being
+    // swallowed and re-classified by the catch below). A declared
+    // `external.credentialsRef` MUST resolve to a cleartext secret before we
+    // open a connection: building a driver without it would silently connect
+    // with no/wrong auth (or fail later with a confusing driver error). So an
+    // absent secret store, or an unresolvable/undecryptable ref, leaves the
+    // datasource unconnected with a clear message — never a silent skip.
+    let secret: string | undefined;
+    const credentialsRef = record.external?.credentialsRef;
+    if (credentialsRef) {
+      const resolver = this.cfg.secrets?.resolve;
+      if (!resolver) {
+        return this.handleFailure(
+          record,
+          'failed-credentials',
+          `requires credential '${credentialsRef}' but no secret store (SecretBinder/ICryptoProvider) is configured`,
+          opts.context,
+        );
+      }
+      try {
+        secret = await resolver(credentialsRef);
+      } catch (err) {
+        return this.handleFailure(record, 'failed-credentials', `resolving credential '${credentialsRef}' threw: ${errMsg(err)}`, opts.context);
+      }
+      if (secret == null || secret === '') {
+        return this.handleFailure(
+          record,
+          'failed-credentials',
+          `credential '${credentialsRef}' could not be resolved or decrypted (missing sys_secret row, or the encryption key changed)`,
+          opts.context,
+        );
+      }
+    }
+
     try {
-      const credentialsRef = record.external?.credentialsRef;
-      const secret = credentialsRef ? await this.cfg.secrets?.resolve?.(credentialsRef) : undefined;
       const handle = await factory.create({ ...toSpec(record), ...(secret ? { secret } : {}) });
       if (typeof handle?.connect === 'function') await handle.connect();
 
@@ -285,11 +319,13 @@ export class DatasourceConnectionService {
   }
 
   /**
-   * Apply the D5 connect-failure policy. A code-defined `external` datasource
-   * with `onMismatch:'fail'` auto-connected at boot re-throws (fail-fast,
-   * bricking boot as intended). Runtime-admin create/update + boot rehydration
-   * always degrade-with-warning — a UI action or a replica blip must never
-   * brick the running server (preserves the pre-ADR-0062 admin behavior).
+   * Apply the D5 connect-failure policy (also covers D3 credential failures). A
+   * code-defined `external` datasource with `onMismatch:'fail'` auto-connected at
+   * boot re-throws (fail-fast, bricking boot as intended). Runtime-admin
+   * create/update + boot rehydration always degrade-with-warning — a UI action
+   * or a replica blip must never brick the running server (preserves the
+   * pre-ADR-0062 admin behavior). Either way the datasource is left unconnected
+   * with a clear message — never a silent skip.
    */
   private handleFailure(
     record: ConnectableDatasource,
