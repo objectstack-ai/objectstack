@@ -16,6 +16,7 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
         mockEngine = {
             find: vi.fn().mockResolvedValue([]),
             findOne: vi.fn().mockResolvedValue(null),
+            count: vi.fn().mockResolvedValue(0),
         };
         protocol = new ObjectStackProtocolImplementation(mockEngine);
     });
@@ -153,6 +154,64 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                     total: 1,
                 }),
             );
+        });
+
+        // ───────────────────────────────────────────────────────────
+        // Pagination metadata (issue #2212): with a `limit`, `total` must be
+        // the match total (via engine.count), not the page size; `hasMore`
+        // must reflect whether more pages remain.
+        // ───────────────────────────────────────────────────────────
+
+        it('returns the real match total (not the page size) when a limit is present', async () => {
+            mockEngine.find.mockResolvedValue(Array.from({ length: 100 }, (_, i) => ({ id: `r${i}` })));
+            mockEngine.count.mockResolvedValue(3125);
+
+            const result = await protocol.findData({ object: 'task', query: { $top: 100, $skip: 0 } });
+
+            expect(mockEngine.count).toHaveBeenCalledWith('task', expect.objectContaining({ where: undefined }));
+            expect(result.total).toBe(3125);
+            expect(result.hasMore).toBe(true);
+        });
+
+        it('forwards the same where filter to engine.count', async () => {
+            mockEngine.find.mockResolvedValue([{ id: 'r1' }]);
+            mockEngine.count.mockResolvedValue(42);
+
+            await protocol.findData({ object: 'task', query: { $top: 10, filter: { status: 'open' } } });
+
+            expect(mockEngine.count).toHaveBeenCalledWith('task', expect.objectContaining({ where: { status: 'open' } }));
+        });
+
+        it('reports hasMore=false on the last page', async () => {
+            // offset 3120, 5 returned, total 3125 → 3120 + 5 === 3125 → no more.
+            mockEngine.find.mockResolvedValue(Array.from({ length: 5 }, (_, i) => ({ id: `r${i}` })));
+            mockEngine.count.mockResolvedValue(3125);
+
+            const result = await protocol.findData({ object: 'task', query: { $top: 100, $skip: 3120 } });
+
+            expect(result.total).toBe(3125);
+            expect(result.hasMore).toBe(false);
+        });
+
+        it('does NOT call engine.count when no limit is given (full result set)', async () => {
+            mockEngine.find.mockResolvedValue([{ id: 't1' }, { id: 't2' }]);
+
+            const result = await protocol.findData({ object: 'task', query: {} });
+
+            expect(mockEngine.count).not.toHaveBeenCalled();
+            expect(result.total).toBe(2);
+            expect(result.hasMore).toBe(false);
+        });
+
+        it('skips count for search queries and estimates hasMore from a full page', async () => {
+            // engine.count() can't reproduce a $search, so we must not call it; a
+            // full page (length === limit) implies there may be more.
+            mockEngine.find.mockResolvedValue(Array.from({ length: 10 }, (_, i) => ({ id: `r${i}` })));
+
+            const result = await protocol.findData({ object: 'task', query: { $top: 10, $search: 'foo' } });
+
+            expect(mockEngine.count).not.toHaveBeenCalled();
+            expect(result.hasMore).toBe(true);
         });
     });
 

@@ -2164,26 +2164,59 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                 aggregations: options.aggregations,
                 context: options.context,
             } as any);
-            // Apply limit client-side (EngineAggregateOptions doesn't carry limit)
+            // Apply limit client-side (EngineAggregateOptions doesn't carry limit).
+            // `records` is the full grouped set, so its length IS the real total
+            // and `hasMore` follows from whether the slice dropped any groups.
             const limited = typeof options.limit === 'number' && options.limit > 0
                 ? records.slice(0, options.limit)
                 : records;
             return {
                 object: request.object,
                 records: limited,
-                total: limited.length,
-                hasMore: false,
+                total: records.length,
+                hasMore: limited.length < records.length,
             };
         }
 
         const records = await this.engine.find(request.object, options);
-        // Spec: FindDataResponseSchema — only `records` is returned.
-        // OData `value` adaptation (if needed) is handled in the HTTP dispatch layer.
+        // Pagination metadata. When a `limit` is present the response is a single
+        // page, so `records.length` is the page size — NOT the match total. Run a
+        // count over the same `where` so the client can render total pages and know
+        // whether more pages remain (true server-side pagination). Without a limit
+        // the full result set is returned, so its length already IS the total.
+        //
+        // engine.count() only honors `where`; a `search`/`distinct` query can't be
+        // reproduced by it, so for those we skip the count and fall back to a
+        // page-local estimate (a full page implies there may be more) rather than
+        // reporting a wrong total.
+        const pageLimit = typeof options.limit === 'number' && options.limit > 0 ? options.limit : undefined;
+        const pageOffset = typeof options.offset === 'number' && options.offset > 0 ? options.offset : 0;
+        let total = records.length;
+        let hasMore = false;
+        if (pageLimit !== undefined) {
+            const countable = options.search == null && options.distinct == null;
+            if (countable) {
+                try {
+                    total = await this.engine.count(request.object, {
+                        where: options.where,
+                        context: options.context,
+                    } as any);
+                } catch {
+                    // engine.count() has its own find().length fallback; if it still
+                    // throws, degrade to a page-local total rather than failing the list.
+                    total = pageOffset + records.length;
+                }
+                hasMore = pageOffset + records.length < total;
+            } else {
+                hasMore = records.length === pageLimit;
+                total = pageOffset + records.length + (hasMore ? 1 : 0);
+            }
+        }
         return {
             object: request.object,
             records,
-            total: records.length,
-            hasMore: false
+            total,
+            hasMore,
         };
     }
 
