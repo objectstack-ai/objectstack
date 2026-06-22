@@ -6,6 +6,11 @@
       "status": "live",
       "evidence": "packages/services/service-ai/src/agent-runtime.ts"
     },
+    "surface": {
+      "status": "live",
+      "evidence": "packages/services/service-ai/src/agent-runtime.ts (resolveActiveSkills)",
+      "note": "ADR-0063 §1 — the product surface this agent binds ('ask'|'build'). resolveActiveSkills enforces that only surface-compatible skills (matching, or 'both') attach; tool scoping is derived from that bundle."
+    },
     "label": {
       "status": "live",
       "note": "display/core."

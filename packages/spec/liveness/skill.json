@@ -6,6 +6,11 @@
       "status": "live",
       "evidence": "packages/services/service-ai/src/skill-registry.ts"
     },
+    "surface": {
+      "status": "live",
+      "evidence": "packages/services/service-ai/src/agent-runtime.ts (resolveActiveSkills)",
+      "note": "ADR-0063 §3 / ADR-0064 — skill↔agent affinity. resolveActiveSkills hard-fails when a bound skill's surface ('ask'|'build'|'both') is incompatible with the agent's surface; the union of surface-compatible skills' tools IS the agent's tool set (no global fall-through)."
+    },
     "label": {
       "status": "live",
       "evidence": "packages/services/service-ai/src/skill-registry.ts:247",
