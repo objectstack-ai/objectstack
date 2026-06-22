@@ -15,6 +15,7 @@ import * as objects from './src/objects/index.js';
 import { ShowcaseExternalDatasource } from './src/datasources/showcase-external.datasource.js';
 import { ExternalCustomer, ExternalOrder } from './src/objects/external/index.js';
 import { setupShowcaseExternalDatasource } from './src/datasources/external-fixture.js';
+import { registerRecalcEndpoint } from './src/server/recalc-endpoint.js';
 import { TaskViews, ProjectViews, InquiryViews } from './src/views/index.js';
 import { ShowcaseApp } from './src/apps/index.js';
 import { ChartGalleryDashboard, OpsDashboard } from './src/dashboards/index.js';
@@ -192,4 +193,6 @@ export default defineStack({
  */
 export const onEnable = async (ctx: unknown): Promise<void> => {
   await setupShowcaseExternalDatasource(ctx as Parameters<typeof setupShowcaseExternalDatasource>[0]);
+  // Mount the custom REST endpoint behind the `showcase_recalc_estimate` api action.
+  registerRecalcEndpoint(ctx as Parameters<typeof registerRecalcEndpoint>[0]);
 };
