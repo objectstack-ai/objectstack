@@ -538,5 +538,8 @@ Implementing D10 refined the mechanism (no cross-repo relocation needed):
   set out to remove. If hiding BU in vanilla deployments later proves desirable, gate it on
   an explicit `business-units` opt-in, never on the paid resolver.
 
-Proof: a rest nav-serving test — single-tenant omits Organizations/Invitations; multi-org
-shows them; Business Units present in both.
+Proof: `filterAppForUser` unit tests (rest.test.ts) — requiresService entries drop when the
+gate reports the service absent, persist when present, fail-open with no gate, and
+requiresObject entries are untouched. An end-to-end Setup-nav test is not feasible in the
+verify harness: the platform Setup app's navigation is not materialized there (`/meta/app`
+lists only the business app; `/meta/app/setup` returns a protection stub).

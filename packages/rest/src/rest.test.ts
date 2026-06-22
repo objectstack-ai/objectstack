@@ -1875,6 +1875,57 @@ describe('filterAppForUser — ADR-0045 hidden-app gate', () => {
 });
 
 // ---------------------------------------------------------------------------
+// ADR-0057 D10 — requiresService capability gate (filterAppForUser)
+// ---------------------------------------------------------------------------
+
+describe('filterAppForUser — ADR-0057 D10 requiresService gate', () => {
+  const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any);
+  const app = () => ({
+    name: 'setup',
+    navigation: [
+      { id: 'nav_users', type: 'object' },
+      { id: 'nav_business_units', type: 'object', requiresObject: 'sys_business_unit' },
+      { id: 'nav_organizations', type: 'object', requiresService: 'org-scoping' },
+      { id: 'nav_invitations', type: 'object', requiresService: 'org-scoping' },
+    ],
+  });
+  const ids = (a: any): string[] => (a?.navigation ?? []).map((e: any) => e.id);
+
+  it('drops requiresService entries when the gate reports the service absent', () => {
+    const rest: any = make();
+    const out = rest.filterAppForUser(app(), new Set<string>(), (n: string) => n !== 'org-scoping');
+    expect(ids(out)).toEqual(['nav_users', 'nav_business_units']);
+  });
+
+  it('keeps requiresService entries when the service is present', () => {
+    const rest: any = make();
+    const out = rest.filterAppForUser(app(), new Set<string>(), () => true);
+    expect(ids(out)).toContain('nav_organizations');
+    expect(ids(out)).toContain('nav_invitations');
+  });
+
+  it('fail-open: with no service gate, requiresService entries are kept (prior behaviour)', () => {
+    const rest: any = make();
+    expect(ids(rest.filterAppForUser(app(), new Set<string>()))).toContain('nav_organizations');
+  });
+
+  it('the service gate does not touch requiresObject entries (client-side concern)', () => {
+    const rest: any = make();
+    const out = rest.filterAppForUser(app(), new Set<string>(), () => false);
+    expect(ids(out)).toContain('nav_business_units');
+    expect(ids(out)).not.toContain('nav_organizations');
+  });
+
+  it('resolveRegisteredServices probes only referenced services and reports presence', async () => {
+    const rest: any = make();
+    const kernel = { getServiceAsync: async (n: string) => { if (n === 'org-scoping') return {}; throw new Error('not registered'); } };
+    const reg = await rest.resolveRegisteredServices(kernel, [app()]);
+    expect(reg.has('org-scoping')).toBe(true);
+    expect(reg.size).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Object API exposure — enable.apiEnabled / enable.apiMethods (ADR-0049 #1889)
 // ---------------------------------------------------------------------------
 
