@@ -122,8 +122,13 @@ export const SysTeam = ObjectSchema.create({
 
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
-      required: true,
-      description: 'Parent organization for this team',
+      // Optional: single-tenant deployments have no organization row (org-scoping
+      // is multi-tenant-only, nothing auto-stamps one) — requiring it would make
+      // the object uncreatable single-tenant. In multi-tenant, OrgScopingPlugin
+      // auto-stamps this from the active tenant and tenant-isolation RLS hides any
+      // null-org row (fail-closed). ADR-0057 addendum.
+      required: false,
+      description: 'Parent organization for this team. Null in single-tenant; auto-stamped in multi-tenant.',
       group: 'Identity',
     }),
 
