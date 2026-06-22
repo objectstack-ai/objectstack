@@ -1,5 +1,34 @@
 # @objectstack/plugin-hono-server
 
+## 10.0.0
+
+### Minor Changes
+
+- 00c32f2: Expose resolved regional defaults to every authenticated user.
+
+  Adds `GET /api/v1/auth/me/localization` returning the request tenant's resolved
+  `{ currency, locale, timezone }` from the ExecutionContext (ADR-0053). The
+  `localization` SETTINGS are gated to `setup.access`, but the resolved defaults
+  are needed by every renderer to format currency/dates/numbers — so they are
+  surfaced here without that gate. Enables a client to format a currency field
+  in the tenant's default currency when the field omits its own.
+
+### Patch Changes
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [a581385]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+  - @objectstack/spec@10.0.0
+  - @objectstack/core@10.0.0
+  - @objectstack/types@10.0.0
+
 ## 9.11.0
 
 ### Patch Changes

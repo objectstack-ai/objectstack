@@ -1,5 +1,80 @@
 # @objectstack/plugin-sharing
 
+## 10.0.0
+
+### Major Changes
+
+- e16f2a8: **BREAKING:** the system object `sys_department` is renamed to `sys_business_unit`
+  — object + member table (`sys_department_member` → `sys_business_unit_member`),
+  fields, and i18n — with **no compatibility alias**. Any deployment holding
+  `sys_department` rows, or metadata that references the object by name (lookups,
+  list views, queries, sharing/approval scopes), must migrate to `sys_business_unit`.
+  A renamed shipped system object is a breaking change to the platform's public
+  data surface, so this lands as a **major**. Verified per ADR-0059's pre-publish
+  hotcrm gate: no published downstream consumer references the old name.
+
+  ADR-0057 — ERP authorization core. Adds permission-grant access DEPTH
+  (`own`/`own_and_reports`/`unit`/`unit_and_below`/`org`), renames `sys_department`
+  → `sys_business_unit` (no aliases — see BREAKING above), introduces the platform-owned
+  `sys_user_role` assignment, and seeds stack-declared `roles`/`sharingRules` into
+  `sys_role`/`sys_sharing_rule` at boot (closes #2077). Hierarchy-relative scopes are
+  delegated to a pluggable `IHierarchyScopeResolver` (open edition fails closed to
+  owner-only; `defineStack` errors without `requires: ['hierarchy-security']`). Also
+  fixes a latent over-grant where `engine.find({ filter })` was ignored (driver reads
+  `where`) — normalized `filter`→`where` in the engine.
+
+### Minor Changes
+
+- 30c0313: Add `sys_user.primary_business_unit_id` projection (ADR-0057 addendum D12).
+
+  Adds a denormalised `primary_business_unit_id` lookup to `sys_user`, maintained
+  by plugin-sharing as a projection of `sys_business_unit_member.is_primary`
+  (insert/update/delete hooks + a boot-time backfill). This makes "pick people by
+  business unit" — the Dataverse _filtered lookup_ / ServiceNow _reference
+  qualifier_ interaction — expressible as a plain `where: { primary_business_unit_id: X }`
+  (and thus as a `lookupFilters` picker filter) with **zero** query-engine change,
+  without traversing the membership junction. `sys_business_unit_member` remains
+  the effective-dated, matrix-friendly source of truth; the new column is a
+  maintained projection, not a second source. Home is plugin-sharing (always
+  loaded, owns the BU graph) rather than plugin-org-scoping, so the projection
+  works in single-tenant deployments too. Picker filtering by BU is therefore an
+  **open** (non-enterprise) capability — only hierarchy _rollup_ stays paid.
+
+- cfd86ce: ADR-0058 — expression & predicate surface unification. Adds the canonical
+  CEL→FilterCondition pushdown compiler in `@objectstack/formula`
+  (`compileCelToFilter`, `isPushdownableCel`, `lowerCelAst`) plus an in-memory
+  `matchesFilterCondition` backend (one AST, three backends). `plugin-security`
+  (RLS `using`, via a SQL bridge) and `plugin-sharing` (`celToFilter`) cut over to
+  it, retiring the bespoke regex/field-equality front-ends. Compound sharing
+  conditions now compile and enforce end-to-end (closes #1887). The RLS `check`
+  clause is now enforced on the write post-image (insert/by-id update), fail-closed.
+  Non-pushdownable predicates (arithmetic, functions, subqueries, cross-object) are
+  an authoring compile error, never silently dropped (ADR-0049/0055).
+
+### Patch Changes
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [2256e93]
+- Updated dependencies [7108ff3]
+- Updated dependencies [30c0313]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [cfd86ce]
+- Updated dependencies [61ed5c7]
+- Updated dependencies [a581385]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+- Updated dependencies [47d978a]
+  - @objectstack/spec@10.0.0
+  - @objectstack/objectql@10.0.0
+  - @objectstack/platform-objects@10.0.0
+  - @objectstack/formula@10.0.0
+  - @objectstack/core@10.0.0
+
 ## 9.11.0
 
 ### Minor Changes

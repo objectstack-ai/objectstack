@@ -1,5 +1,56 @@
 # @objectstack/rest
 
+## 10.0.0
+
+### Minor Changes
+
+- 2256e93: Setup nav: gate Organizations/Invitations on multi-org; enforce `requiresService` server-side (ADR-0057 addendum D10).
+
+  `rest-server`'s `filterAppForUser` now honours `NavigationItem.requiresService` — entries
+  whose named kernel service isn't registered are dropped from the served app metadata
+  (fail-open when the kernel can't be probed; previously the field was a frontend-only hint).
+  Applies `requiresService: 'org-scoping'` to the Setup app's Organizations and Invitations
+  entries, so they surface only in multi-org (multi-tenant) deployments and disappear in
+  single-tenant. Business Units is intentionally left ungated — it is open per the open/paid
+  seam + D12 ("pick people by BU"); only the hierarchy rollup capability is enterprise.
+
+- 220ce5b: Resolve the tenant default currency onto ExecutionContext.
+
+  Adds `ExecutionContext.currency` (ISO 4217) and resolves it from the
+  `localization.currency` setting alongside `timezone`/`locale` — in both the
+  runtime `resolveExecutionContext` and the REST mirror. This is the foundation
+  for the documented "applied when a currency field omits its own" fallback: the
+  tenant default is now carried on every request context, so analytics enrichment,
+  formatters, and renderers can resolve a measure/field currency down to the org
+  default instead of hard-coding it. Undefined when no tenant default is
+  configured (consumers then render a plain number).
+
+### Patch Changes
+
+- 3754f80: Fix: the Setup-nav capability gate (`requiresService`, ADR-0057 D10) was a no-op on the single-item app-meta path.
+
+  `GET /meta/app/:name` returns a metadata envelope `{ type, name, item: <app>, ... }`, but
+  `filterAppForUser` was applied to the envelope — whose `.navigation` is undefined — so it
+  returned it untouched, silently bypassing BOTH the `requiredPermissions` gate and the D10
+  `requiresService` gate. Organizations/Invitations therefore still appeared in the Setup app
+  even in single-tenant deployments. `filterAppForUser` and `resolveRegisteredServices` now
+  unwrap the envelope (the list path already passed the raw app). Verified against a live
+  `os dev`: single-tenant hides Organizations/Invitations; multi-tenant shows them.
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [a581385]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+  - @objectstack/spec@10.0.0
+  - @objectstack/core@10.0.0
+  - @objectstack/service-package@10.0.0
+
 ## 9.11.0
 
 ### Patch Changes

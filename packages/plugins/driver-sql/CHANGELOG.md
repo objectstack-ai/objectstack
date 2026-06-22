@@ -1,5 +1,42 @@
 # @objectstack/driver-sql
 
+## 10.0.0
+
+### Patch Changes
+
+- 92db3e5: feat(driver-sql): honor `external.columnMap` on federated (external) objects (ADR-0015).
+
+  When a federated object declares `external.columnMap` ({ remoteColumn -> localField }),
+  the SQL driver now translates queries to the physical remote columns: WHERE and
+  ORDER BY map local fields to remote columns (value coercion stays keyed by the local
+  field), `formatOutput` renames remote-column keys back to local field names on read,
+  and write payloads are key-remapped. Managed objects and external objects without a
+  columnMap are unchanged (the resolver falls back to the existing per-site behavior).
+
+- 2a1b16b: fix(ADR-0015): honor `external.remoteName` / `external.remoteSchema` on the federation read path.
+
+  The query path previously resolved an external object's physical table from the
+  object name, ignoring its `external` binding — so a federated object bound to a
+  differently-named remote table failed with `no such table`, and ADR-0015's own
+  `wh_order` → `mart.fact_orders` example was unqueryable. The SQL driver now
+  resolves the remote table (`remoteName`, plus `remoteSchema` via `.withSchema()`
+  on pg/mysql) and registers external objects' read-coercion metadata without DDL
+  (`SqlDriver.registerExternalObject`, routed from the engine/plugin schema-sync).
+  The managed path is unchanged. See ADR-0015 §18.
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [a581385]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+  - @objectstack/spec@10.0.0
+  - @objectstack/core@10.0.0
+
 ## 9.11.0
 
 ### Minor Changes

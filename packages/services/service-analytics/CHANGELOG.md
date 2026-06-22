@@ -1,5 +1,41 @@
 # Changelog — @objectstack/service-analytics
 
+## 10.0.0
+
+### Minor Changes
+
+- 70609af: Resolve a monetary measure's display currency via the field→tenant chain.
+
+  A dataset measure-currency now resolves through: explicit measure `currency` →
+  source-field `currencyConfig.defaultCurrency` → tenant default (`ctx.currency`).
+  A measure is monetary iff it declares a currency or aggregates a `currency`-type
+  field, so count/avg-of-number measures never receive a code. Wires a
+  `measureCurrency` field-metadata resolver from the data engine's object schema.
+
+- 3187952: Dataset analytics enrich **dimension** result fields with their display label (so report/dashboard table headers read "Status" instead of the raw field name) and expose drill-through metadata on the dataset query result: the base `object`, a drillable dimension→field map, and a parallel `drillRawRows` array of each row's raw grouped values (captured before label resolution). This lets a host drill a grouped bucket back to its underlying records with an exact-match filter built from the stored value, not the display label. Date dimensions are excluded (a humanized bucket can't be exact-matched).
+- a581385: Propagate a dataset measure's declared currency to the analytics result field.
+
+  Adds an optional `DatasetMeasure.currency` (ISO 4217) on the semantic layer and
+  carries it onto each measure result field alongside `label`/`format`, so a
+  currency-aware client (Intl symbol) can render `¥1,234` / `$616,000` from a real
+  currency code instead of a plain number or a `$` baked into `format`. Additive
+  and optional — existing datasets are unaffected.
+
+### Patch Changes
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [a581385]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+  - @objectstack/spec@10.0.0
+  - @objectstack/core@10.0.0
+
 ## 9.11.0
 
 ### Patch Changes

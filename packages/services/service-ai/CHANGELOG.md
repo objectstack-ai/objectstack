@@ -1,5 +1,29 @@
 # @objectstack/service-ai
 
+## 10.0.0
+
+### Minor Changes
+
+- be07ce7: Rename the built-in data agent `data_chat` → `ask` (Path A: friendly console URL == real id). Back-compat preserved via a new process-wide alias registry: `AgentRuntime.loadAgent` normalizes legacy names, so `/agents/data_chat/chat` and persisted `agent_id='data_chat'` keep resolving. `registerAgentAlias()` is exported so other packages register their own renames (cloud AI Studio: `metadata_assistant`→`build`). The plugin prunes the stale legacy agent record on upgrade so the catalog isn't doubled.
+
+### Patch Changes
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [cfd86ce]
+- Updated dependencies [a581385]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [feead7e]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+  - @objectstack/spec@10.0.0
+  - @objectstack/formula@10.0.0
+  - @objectstack/core@10.0.0
+  - @objectstack/types@10.0.0
+
 ## 9.11.0
 
 ### Patch Changes

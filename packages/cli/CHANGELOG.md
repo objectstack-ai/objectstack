@@ -1,5 +1,81 @@
 # @objectstack/cli
 
+## 10.0.0
+
+### Patch Changes
+
+- Updated dependencies [d7ff626]
+- Updated dependencies [92db3e5]
+- Updated dependencies [2a1b16b]
+- Updated dependencies [2256e93]
+- Updated dependencies [7108ff3]
+- Updated dependencies [30c0313]
+- Updated dependencies [e16f2a8]
+- Updated dependencies [cfd86ce]
+- Updated dependencies [70609af]
+- Updated dependencies [61ed5c7]
+- Updated dependencies [ee86099]
+- Updated dependencies [3187952]
+- Updated dependencies [a581385]
+- Updated dependencies [47d978a]
+- Updated dependencies [d5f6d29]
+- Updated dependencies [220ce5b]
+- Updated dependencies [3efe334]
+- Updated dependencies [3754f80]
+- Updated dependencies [feead7e]
+- Updated dependencies [00c32f2]
+- Updated dependencies [be07ce7]
+- Updated dependencies [6ca20b3]
+- Updated dependencies [5f875fe]
+- Updated dependencies [47d978a]
+- Updated dependencies [0feea92]
+  - @objectstack/spec@10.0.0
+  - @objectstack/driver-sql@10.0.0
+  - @objectstack/objectql@10.0.0
+  - @objectstack/rest@10.0.0
+  - @objectstack/platform-objects@10.0.0
+  - @objectstack/plugin-sharing@10.0.0
+  - @objectstack/plugin-security@10.0.0
+  - @objectstack/runtime@10.0.0
+  - @objectstack/plugin-approvals@10.0.0
+  - @objectstack/formula@10.0.0
+  - @objectstack/service-analytics@10.0.0
+  - @objectstack/verify@10.0.0
+  - @objectstack/core@10.0.0
+  - @objectstack/plugin-hono-server@10.0.0
+  - @objectstack/service-ai@10.0.0
+  - @objectstack/account@10.0.0
+  - @objectstack/setup@10.0.0
+  - @objectstack/studio@10.0.0
+  - @objectstack/client@10.0.0
+  - @objectstack/cloud-connection@10.0.0
+  - @objectstack/mcp@10.0.0
+  - @objectstack/observability@10.0.0
+  - @objectstack/driver-memory@10.0.0
+  - @objectstack/driver-mongodb@10.0.0
+  - @objectstack/driver-sqlite-wasm@10.0.0
+  - @objectstack/plugin-audit@10.0.0
+  - @objectstack/plugin-auth@10.0.0
+  - @objectstack/plugin-email@10.0.0
+  - @objectstack/plugin-org-scoping@10.0.0
+  - @objectstack/plugin-reports@10.0.0
+  - @objectstack/plugin-webhooks@10.0.0
+  - @objectstack/service-automation@10.0.0
+  - @objectstack/service-cache@10.0.0
+  - @objectstack/service-datasource@10.0.0
+  - @objectstack/service-job@10.0.0
+  - @objectstack/service-messaging@10.0.0
+  - @objectstack/service-package@10.0.0
+  - @objectstack/service-queue@10.0.0
+  - @objectstack/service-realtime@10.0.0
+  - @objectstack/service-settings@10.0.0
+  - @objectstack/service-storage@10.0.0
+  - @objectstack/trigger-api@10.0.0
+  - @objectstack/trigger-record-change@10.0.0
+  - @objectstack/trigger-schedule@10.0.0
+  - @objectstack/types@10.0.0
+  - @objectstack/console@10.0.0
+
 ## 9.11.0
 
 ### Minor Changes
