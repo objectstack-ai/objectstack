@@ -56,6 +56,9 @@ const SCOPE_ROOTS = [
   // UI action / predicate context (ActionEngine, renderers): the current
   // record plus ambient globals exposed to `visible`/`disabled` predicates.
   'ctx', 'features',
+  // Master-detail inline grids inject the header record as `parent` for a
+  // child field's `readonlyWhen`/`requiredWhen` predicate (ADR-0036, #1581).
+  'parent',
 ] as const;
 
 /**

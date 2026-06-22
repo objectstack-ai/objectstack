@@ -287,4 +287,60 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues.filter(i => i.where.includes("action 'mark_done' visible"))).toHaveLength(1);
     });
   });
+
+  describe('record-scoped coverage extensions (field rules / sharing / hooks / nested when)', () => {
+    it('flags a bare-field `readonlyWhen`/`requiredWhen` on a field', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'showcase_task',
+          fields: {
+            done: { type: 'boolean', readonlyWhen: 'done == true' },
+            title: { type: 'text', requiredWhen: 'status == "x"' },
+          },
+        }],
+      });
+      expect(issues.some(i => i.where.includes('readonlyWhen') && /bare reference `done`/.test(i.message))).toBe(true);
+      expect(issues.some(i => i.where.includes('requiredWhen') && /bare reference `status`/.test(i.message))).toBe(true);
+    });
+
+    it('accepts record-qualified field rules and the master-detail `parent` namespace', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'inv_line',
+          fields: {
+            qty: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
+            note: { type: 'text', requiredWhen: 'record.qty >= 100' },
+          },
+        }],
+      });
+      expect(issues).toHaveLength(0);
+    });
+
+    it('flags a bare-field sharing-rule condition', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_account', fields: { region: { type: 'text' } } }],
+        sharingRules: [{ name: 'sales_region', object: 'crm_account', condition: 'region == "EMEA"' }],
+      });
+      expect(issues.some(i => i.where.includes("sharingRule 'sales_region'") && /bare reference `region`/.test(i.message))).toBe(true);
+    });
+
+    it('flags a bare-field hook condition', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_lead', fields: { status: { type: 'select' } } }],
+        hooks: [{ name: 'on_close', object: 'crm_lead', condition: 'status == "closed"' }],
+      });
+      expect(issues.some(i => i.where.includes("hook 'on_close'") && /bare reference `status`/.test(i.message))).toBe(true);
+    });
+
+    it('flags a bare-field nested `when` on a conditional validation rule', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_account',
+          fields: { tier: { type: 'select' } },
+          validations: [{ name: 'cond', type: 'conditional', when: 'tier == "gold"', then: { type: 'required' } }],
+        }],
+      });
+      expect(issues.some(i => i.where.includes('when') && /bare reference `tier`/.test(i.message))).toBe(true);
+    });
+  });
 });

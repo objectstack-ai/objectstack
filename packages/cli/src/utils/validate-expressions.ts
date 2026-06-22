@@ -142,6 +142,8 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // Common predicate keys across rule shapes. Validation predicates are
       // `record`-scoped — no field flattening — so bare refs are flagged (#1928).
       check(where, rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula, objectName, 'record');
+      // `conditional` rules carry a nested `when` predicate (record-scoped).
+      check(`${where} when`, (rule as AnyRec).when, objectName, 'record');
     }
     // Field-level formulas (computed fields) reference the same object.
     const fields = obj.fields;
@@ -149,6 +151,15 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       ? (fields as AnyRec[])
       : (fields && typeof fields === 'object' ? Object.values(fields as AnyRec) as AnyRec[] : []);
     for (const f of fieldList) {
+      // Field-level conditional rules are server-enforced (rule-validator) and
+      // record-scoped — a bare ref silently fails the rule (required/readonly
+      // not enforced = data-integrity hole). #1928 class, same as actions.
+      if (f && typeof f === 'object') {
+        const fname = (f.name as string) ?? '?';
+        for (const key of ['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen'] as const) {
+          check(`object '${objectName}' · field '${fname}' ${key}`, (f as AnyRec)[key], objectName, 'record');
+        }
+      }
       if (f && typeof f === 'object' && f.formula) {
         // formulas are `value` role (any return type), still CEL. They are
         // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
@@ -191,6 +202,24 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     for (const action of asArray(obj.actions)) {
       checkAction(`object '${objectName}'`, action, objectName);
     }
+  }
+
+  // ── Sharing-rule predicates (security-critical, record-scoped) ─────
+  // A criteria sharing rule's `condition` decides which rows a principal sees.
+  // It is evaluated against the record, so a bare ref silently changes access.
+  for (const rule of asArray(stack.sharingRules)) {
+    const ruleObj = typeof rule.object === 'string' ? rule.object : undefined;
+    const where = `sharingRule '${(rule.name as string) ?? '?'}'${ruleObj ? ` (${ruleObj})` : ''} condition`;
+    check(where, rule.condition ?? rule.criteria ?? rule.predicate, ruleObj, 'record');
+  }
+
+  // ── Hook `condition` predicates (record-scoped gate) ───────────────
+  // A lifecycle hook's `condition` skips the handler when false; it is
+  // evaluated against the record, so a bare ref silently makes the hook
+  // run on every record (or never) instead of the intended subset.
+  for (const hook of asArray(stack.hooks)) {
+    const hookObj = typeof hook.object === 'string' ? hook.object : undefined; // array targets → no single field set
+    check(`hook '${(hook.name as string) ?? '?'}'${hookObj ? ` (${hookObj})` : ''} condition`, hook.condition, hookObj, 'record');
   }
 
   return issues;
