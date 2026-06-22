@@ -7,6 +7,7 @@ import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/s
 import { loadConfig } from '../utils/config.js';
 import { validateStackExpressions } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
+import { validateResponsiveStyles } from '@objectstack/lint';
 import {
   printHeader,
   printKV,
@@ -133,6 +134,36 @@ export default class Validate extends Command {
         this.exit(1);
       }
 
+      // 3b. SDUI scoped-styling correctness (ADR-0065) — a styled node's
+      //     responsiveStyles must be scopable (needs an `id`), reference real
+      //     CSS properties + design tokens, and carry a `large` base;
+      //     Tailwind-in-className silently does nothing. Same bar for
+      //     hand-authored and AI-generated pages (ADR-0019).
+      if (!flags.json) printStep('Checking SDUI styling (ADR-0065)...');
+      const styleFindings = validateResponsiveStyles(result.data as Record<string, unknown>);
+      const styleErrors = styleFindings.filter((f) => f.severity === 'error');
+      const styleWarnings = styleFindings.filter((f) => f.severity === 'warning');
+
+      if (styleErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({
+            valid: false,
+            errors: styleErrors,
+            warnings: [...widgetWarnings, ...styleWarnings],
+            duration: timer.elapsed(),
+          }, null, 2));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`SDUI styling check failed (${styleErrors.length} issue${styleErrors.length > 1 ? 's' : ''})`);
+        for (const f of styleErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+        }
+        this.exit(1);
+      }
+
       // 4. Collect and display stats
       const stats = collectMetadataStats(config);
 
@@ -141,7 +172,7 @@ export default class Validate extends Command {
           valid: true,
           manifest: config.manifest,
           stats,
-          warnings: [...exprWarnings, ...widgetWarnings],
+          warnings: [...exprWarnings, ...widgetWarnings, ...styleWarnings],
           duration: timer.elapsed(),
         }, null, 2));
         return;
@@ -154,6 +185,9 @@ export default class Validate extends Command {
         warnings.push(`${i.where}: ${i.message}`);
       }
       for (const f of widgetWarnings) {
+        warnings.push(`${f.where}: ${f.message}`);
+      }
+      for (const f of styleWarnings) {
         warnings.push(`${f.where}: ${f.message}`);
       }
       if (stats.objects === 0) {

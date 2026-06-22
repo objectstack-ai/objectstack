@@ -25,3 +25,13 @@ export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-wid
 
 export { validateStackExpressions } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
+
+export {
+  validateResponsiveStyles,
+  STYLE_NODE_MISSING_ID,
+  STYLE_CLASSNAME_TAILWIND,
+  STYLE_RESPONSIVE_NO_BASE,
+  STYLE_UNKNOWN_CSS_PROPERTY,
+  STYLE_UNKNOWN_TOKEN,
+} from './validate-responsive-styles.js';
+export type { StyleFinding, StyleSeverity } from './validate-responsive-styles.js';

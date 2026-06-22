@@ -10,6 +10,7 @@ import { loadConfig } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { validateStackExpressions } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
+import { validateResponsiveStyles } from '@objectstack/lint';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
 import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
 import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
@@ -189,6 +190,37 @@ export default class Compile extends Command {
       if (widgetWarnings.length > 0 && !flags.json) {
         console.log('');
         for (const w of widgetWarnings) {
+          printWarning(`${w.where}: ${w.message}`);
+          console.log(chalk.dim(`    ${w.hint}`));
+          console.log(chalk.dim(`    rule: ${w.rule}  at ${w.path}`));
+        }
+      }
+
+      // 3c. SDUI scoped-styling correctness (ADR-0065) — a styled node without
+      //     an `id` drops its CSS silently; Tailwind-in-className does nothing
+      //     from metadata. Same bar for hand-authored and AI-generated pages
+      //     (ADR-0019). Errors fail the build; warnings are advisory.
+      if (!flags.json) printStep('Checking SDUI styling (ADR-0065)...');
+      const styleFindings = validateResponsiveStyles(result.data as Record<string, unknown>);
+      const styleErrors = styleFindings.filter((f) => f.severity === 'error');
+      const styleWarnings = styleFindings.filter((f) => f.severity === 'warning');
+      if (styleErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({ success: false, error: 'SDUI styling validation failed', issues: styleErrors }));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`SDUI styling check failed (${styleErrors.length} issue${styleErrors.length > 1 ? 's' : ''})`);
+        for (const f of styleErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+        }
+        this.exit(1);
+      }
+      if (styleWarnings.length > 0 && !flags.json) {
+        console.log('');
+        for (const w of styleWarnings) {
           printWarning(`${w.where}: ${w.message}`);
           console.log(chalk.dim(`    ${w.hint}`));
           console.log(chalk.dim(`    rule: ${w.rule}  at ${w.path}`));
