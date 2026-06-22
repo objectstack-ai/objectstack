@@ -51,6 +51,11 @@ import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
+/** Best-effort manifest id from a registry package entry (shape varies). */
+function manifestIdOf(p: any): string | undefined {
+    return p?.manifest?.id ?? p?.id ?? p?.manifest?.name ?? undefined;
+}
+
 export interface MarketplaceInstallLocalPluginConfig {
     /** Cloud control-plane base URL. When unset, falls back to OS_CLOUD_URL
      *  and then to the public ObjectStack cloud so a fresh `objectstack dev`
@@ -75,6 +80,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private readonly ledger: LocalManifestSource;
     private readonly storageDir: string;
     private readonly credentials: ConnectionCredentialStore;
+    /**
+     * Manifest ids already present in the engine registry at `kernel:ready`,
+     * BEFORE this plugin rehydrates its own ledger. These are genuine
+     * user/config-defined apps (AppPlugin from objectstack.config.ts). Used by
+     * findConflict to tell real local code apart from an orphaned marketplace
+     * install whose ledger entry went missing.
+     */
+    private readonly bootUserCodeIds = new Set<string>();
 
     constructor(config: MarketplaceInstallLocalPluginConfig = {}) {
         this.cloudUrl = resolveCloudUrl(config.controlPlaneUrl);
@@ -89,6 +102,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
     start = async (ctx: PluginContext): Promise<void> => {
         ctx.hook('kernel:ready', async () => {
+            // Snapshot the manifest ids the engine already knows about BEFORE
+            // we register anything or rehydrate the ledger — by now AppPlugin
+            // has loaded objectstack.config.ts, so whatever is registered here
+            // is genuine local/user code. findConflict uses this to avoid
+            // misreading an orphaned marketplace install as user code.
+            this.captureBootUserCodeIds(ctx);
+
             // Plugin-owned Setup nav (cloud ADR-0009): "Installed Apps"
             // ships WITH the local-install capability.
             try {
@@ -454,20 +474,45 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *                    (refuse to avoid silently overwriting authored code)
      */
     private findConflict = (ctx: PluginContext, manifestId: string): 'none' | 'marketplace' | 'user-code' => {
-        // First check: do we already have a marketplace install entry?
+        // 1. A live ledger entry is the authoritative "we installed this" record.
         if (this.ledger.has(manifestId)) {
             return 'marketplace';
         }
-        // Then check: is the manifest_id already in the engine's registry?
+        // 2. Present in the engine registry AND captured at boot before we
+        //    rehydrated — genuine user/config code. Refuse to overwrite.
+        if (this.bootUserCodeIds.has(manifestId)) {
+            return 'user-code';
+        }
+        // 3. Registered, but neither in the ledger nor in the boot snapshot.
+        //    This is an ORPHANED marketplace install — its ledger entry was
+        //    lost/renamed/corrupted (e.g. a half-finished upgrade left a
+        //    `.bak`). It is NOT user code, so treat it as a marketplace package
+        //    and let the upgrade overwrite it, rather than refusing with a
+        //    misleading "defined by this runtime's local code" error.
         try {
             const ql: any = ctx.getService('objectql');
             const packages: any[] = ql?.registry?.getAllPackages?.() ?? [];
-            const hit = packages.find((p: any) =>
-                (p?.manifest?.id ?? p?.id ?? p?.manifest?.name) === manifestId,
-            );
-            if (hit) return 'user-code';
+            if (packages.some((p: any) => manifestIdOf(p) === manifestId)) {
+                return 'marketplace';
+            }
         } catch { /* objectql not registered yet — treat as fresh */ }
         return 'none';
+    };
+
+    /**
+     * Record the manifest ids the engine registry already holds, called once at
+     * `kernel:ready` before rehydrate. Best-effort: a missing/empty registry
+     * just yields an empty snapshot (every later install is treated as fresh).
+     */
+    private captureBootUserCodeIds = (ctx: PluginContext): void => {
+        try {
+            const ql: any = ctx.getService('objectql');
+            const packages: any[] = ql?.registry?.getAllPackages?.() ?? [];
+            for (const p of packages) {
+                const id = manifestIdOf(p);
+                if (id) this.bootUserCodeIds.add(id);
+            }
+        } catch { /* objectql not ready — leave snapshot empty */ }
     };
 
     /**
