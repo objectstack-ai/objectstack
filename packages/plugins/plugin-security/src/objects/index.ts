@@ -10,6 +10,7 @@
  */
 
 export { SysRole } from './sys-role.object.js';
+export { SysCapability } from './sys-capability.object.js';
 export { SysPermissionSet } from './sys-permission-set.object.js';
 export { SysUserPermissionSet } from './sys-user-permission-set.object.js';
 export { SysRolePermissionSet } from './sys-role-permission-set.object.js';

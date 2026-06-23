@@ -2590,6 +2590,45 @@ export class HttpDispatcher {
             return { handled: true, response: this.error('Data engine not available', 503) };
         }
 
+        // [ADR-0066 D4] Dual-surface action gate — the server is the source of
+        // truth. Resolve the action's declared `requiredPermissions` from the
+        // object schema and reject (403) when the caller's systemPermissions
+        // don't cover them. The objectui ActionRunner hides/disables the same
+        // action from the identical declaration, so a UI-hidden action is also
+        // server-closed (and the inverse footgun is removed). System/engine
+        // self-invocation (isSystem) bypasses; an unauthenticated caller holds
+        // no capabilities and is therefore denied for a gated action.
+        try {
+            const actionSchema: any =
+                (typeof ql.getSchema === 'function' ? ql.getSchema(objectName) : undefined) ??
+                ql.registry?.getObject?.(objectName);
+            const actionDef: any = Array.isArray(actionSchema?.actions)
+                ? actionSchema.actions.find((a: any) => a?.name === actionName)
+                : undefined;
+            const required: string[] = Array.isArray(actionDef?.requiredPermissions)
+                ? actionDef.requiredPermissions
+                : [];
+            if (required.length > 0) {
+                const execCtx: any = _context?.executionContext;
+                if (!execCtx?.isSystem) {
+                    const held = new Set<string>(execCtx?.systemPermissions ?? []);
+                    const missing = required.filter((perm) => !held.has(perm));
+                    if (missing.length > 0) {
+                        return {
+                            handled: true,
+                            response: this.error(
+                                `Action '${actionName}' on '${objectName}' requires capability ` +
+                                `[${required.join(', ')}] — caller is missing [${missing.join(', ')}]`,
+                                403,
+                            ),
+                        };
+                    }
+                }
+            }
+        } catch {
+            /* schema unresolved → no declared gate to enforce (handler-only action) */
+        }
+
         // Resolve the handler — fall back to wildcard '*' if the object-specific key is missing.
         // Since engine.executeAction throws when the key is unknown, we probe via the internal
         // map by attempting the call inside a try/catch and rotating to '*'.

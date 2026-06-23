@@ -84,6 +84,11 @@
       "status": "live",
       "note": "objectui — CEL, fail-closed."
     },
+    "requiredPermissions": {
+      "status": "live",
+      "evidence": "packages/runtime/src/http-dispatcher.ts",
+      "note": "ADR-0066 D4 dual-surface action gate. Server is source of truth: handleActions rejects (403) when the caller's systemPermissions don't cover action.requiredPermissions; objectui ActionRunner derives the same UI hide/disable. Unit-proven in packages/runtime/src/http-dispatcher.test.ts + packages/spec/src/ui/action.test.ts."
+    },
     "disabled": {
       "status": "live",
       "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/ActionPreview.tsx:169",

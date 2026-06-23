@@ -11,6 +11,7 @@
 import {
   SysPermissionSet,
   SysRole,
+  SysCapability,
   SysUserPermissionSet,
   SysRolePermissionSet,
   SysUserRole,
@@ -23,6 +24,7 @@ export const SECURITY_PLUGIN_VERSION = '1.0.0';
 /** Security objects owned by plugin-security. */
 export const securityObjects = [
   SysRole,
+  SysCapability,
   SysPermissionSet,
   SysUserPermissionSet,
   SysRolePermissionSet,

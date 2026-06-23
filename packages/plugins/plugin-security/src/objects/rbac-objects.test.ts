@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { SysRole, SysPermissionSet, defaultPermissionSets } from './index.js';
+import { SysRole, SysPermissionSet, SysCapability, defaultPermissionSets } from './index.js';
 
 /**
  * RBAC object + default-permission-set assertions. Moved here with the objects
@@ -117,5 +117,32 @@ describe('RBAC object canonical names + row actions', () => {
   it('SysPermissionSet exposes activate/deactivate/clone row actions', () => {
     const names = (SysPermissionSet.actions ?? []).map((a) => a.name).sort();
     expect(names).toEqual(['activate_permission_set', 'clone_permission_set', 'deactivate_permission_set']);
+  });
+});
+
+
+describe('sys_capability — ADR-0066 D1 capability registry', () => {
+  it('is a system config object with the canonical name', () => {
+    expect(SysCapability.name).toBe('sys_capability');
+    expect(SysCapability.isSystem).toBe(true);
+    expect(SysCapability.managedBy).toBe('config');
+  });
+
+  it('declares name/label/scope/managed_by fields', () => {
+    const f: any = SysCapability.fields;
+    expect(f.name).toBeDefined();
+    expect(f.label).toBeDefined();
+    expect(f.scope).toBeDefined();
+    expect(f.managed_by).toBeDefined();
+    // scope + managed_by are constrained selects
+    const scopeOpts = (f.scope.options ?? []).map((o: any) => o.value).sort();
+    expect(scopeOpts).toEqual(['org', 'platform']);
+    const mbOpts = (f.managed_by.options ?? []).map((o: any) => o.value).sort();
+    expect(mbOpts).toEqual(['admin', 'package', 'platform']);
+  });
+
+  it('enforces a unique index on name', () => {
+    const nameIdx = (SysCapability.indexes ?? []).find((i: any) => Array.isArray(i.fields) && i.fields.includes('name'));
+    expect(nameIdx?.unique).toBe(true);
   });
 });

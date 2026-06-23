@@ -4,6 +4,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { bootstrapDeclaredRoles } from './bootstrap-declared-roles.js';
+import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
@@ -167,6 +168,7 @@ export class SecurityPlugin implements Plugin {
           priority: 100,
           items: [
             { id: 'nav_roles', type: 'object', label: 'Roles', objectName: 'sys_role', icon: 'shield-check' },
+            { id: 'nav_capabilities', type: 'object', label: 'Capabilities', objectName: 'sys_capability', icon: 'badge-check' },
             { id: 'nav_permission_sets', type: 'object', label: 'Permission Sets', objectName: 'sys_permission_set', icon: 'lock' },
           ],
         },
@@ -716,6 +718,13 @@ export class SecurityPlugin implements Plugin {
           await bootstrapDeclaredRoles(ql, this.metadata, { logger: ctx.logger });
         } catch (e) {
           ctx.logger.warn('[security] declared-role seeding failed', { error: (e as Error).message });
+        }
+        // [ADR-0066 D1] Back-compat seed the capability registry (sys_capability)
+        // from the curated platform set + the default grants' systemPermissions.
+        try {
+          await bootstrapSystemCapabilities(ql, this.bootstrapPermissionSets, { logger: ctx.logger });
+        } catch (e) {
+          ctx.logger.warn('[security] capability seeding failed', { error: (e as Error).message });
         }
         bootstrapRanOnce = true;
         ctx.logger.info('[security] platform bootstrap complete', report);
