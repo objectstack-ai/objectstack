@@ -4117,6 +4117,8 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
          * health surfaces; probes never fail the publish itself.
          */
         probes?: import('./build-probes.js').BuildProbeReport;
+        /** ADR-0067 — id of the commit this publish recorded (absent if nothing published). */
+        commitId?: string;
     }> {
         await this.ensureOverlayIndex();
         const orgId = request.organizationId ?? null;
@@ -4135,6 +4137,29 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             ...drafts.filter((d) => d.type === 'seed'),
         ];
         const seedBodies: unknown[] = [];
+
+        // ADR-0067 — capture each artifact's PRE-publish state so this turn can
+        // be recorded as ONE revertible commit. existedBefore=false → the commit
+        // creates it (revert = soft-remove); true → it edits an existing artifact
+        // (revert = restoreVersion(prevVersion)). Best-effort: a capture failure
+        // just omits that item from the revert plan, never blocks the publish.
+        const commitItems: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }> = [];
+        for (const d of ordered) {
+            try {
+                const activeRow = (await this.engine.findOne('sys_metadata', {
+                    where: { organization_id: orgId, type: d.type, name: d.name, state: 'active' },
+                })) as { version?: number } | null;
+                commitItems.push({
+                    type: d.type,
+                    name: d.name,
+                    existedBefore: !!activeRow,
+                    prevVersion: activeRow && typeof activeRow.version === 'number' ? activeRow.version : null,
+                });
+            } catch {
+                commitItems.push({ type: d.type, name: d.name, existedBefore: false, prevVersion: null });
+            }
+        }
+        const publishedSeqs: number[] = [];
 
         for (const d of ordered) {
             try {
@@ -4155,6 +4180,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     _skipSeedApply: true,
                 });
                 published.push({ type: d.type, name: d.name, version: r.version });
+                if (typeof r.seq === 'number') publishedSeqs.push(r.seq);
             } catch (e: any) {
                 failed.push({
                     type: d.type,
@@ -4196,6 +4222,24 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             }
         }
 
+        // ADR-0067 — record this turn as ONE commit (best-effort; never fails
+        // the publish). Only artifacts that actually published are in the revert
+        // plan, so a partial publish reverts exactly what landed.
+        let commit: { commitId: string } | null = null;
+        if (published.length > 0) {
+            const publishedKeys = new Set(published.map((p) => `${p.type}/${p.name}`));
+            commit = await this.recordPackageCommit({
+                orgId,
+                packageId: request.packageId,
+                operation: 'apply',
+                ...(request.actor ? { actor: request.actor } : {}),
+                items: commitItems.filter((it) => publishedKeys.has(`${it.type}/${it.name}`)),
+                ...(publishedSeqs.length
+                    ? { eventSeqStart: Math.min(...publishedSeqs), eventSeqEnd: Math.max(...publishedSeqs) }
+                    : {}),
+            });
+        }
+
         return {
             success: failed.length === 0 && published.length > 0,
             publishedCount: published.length,
@@ -4204,6 +4248,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             failed,
             ...(seedApplied ? { seedApplied } : {}),
             ...(probes ? { probes } : {}),
+            ...(commit ? { commitId: commit.commitId } : {}),
         };
     }
 
@@ -4331,6 +4376,266 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             deleted,
             failed,
         };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ADR-0067 — package-scoped commit history & rollback
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Record one commit row (best-effort) grouping a turn's published
+     * artifacts. Returns the commit id, or null if the commit store is
+     * unavailable (e.g. unit-test stubs) — recording never blocks a publish.
+     */
+    private async recordPackageCommit(args: {
+        orgId: string | null;
+        packageId: string;
+        operation: 'apply' | 'revert';
+        message?: string;
+        actor?: string;
+        aiModel?: string;
+        parentCommitId?: string;
+        items: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }>;
+        eventSeqStart?: number;
+        eventSeqEnd?: number;
+    }): Promise<{ commitId: string } | null> {
+        try {
+            const commitId = 'cmt_' + (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+                ? crypto.randomUUID()
+                : `${args.eventSeqEnd ?? 0}-${args.items.length}-${args.packageId}`);
+            await this.engine.insert('sys_metadata_commit', {
+                id: commitId,
+                package_id: args.packageId,
+                operation: args.operation,
+                ...(args.message ? { message: args.message } : {}),
+                ...(args.actor ? { actor: args.actor } : {}),
+                ...(args.aiModel ? { ai_model: args.aiModel } : {}),
+                ...(args.parentCommitId ? { parent_commit_id: args.parentCommitId } : {}),
+                ...(args.eventSeqStart !== undefined ? { event_seq_start: args.eventSeqStart } : {}),
+                ...(args.eventSeqEnd !== undefined ? { event_seq_end: args.eventSeqEnd } : {}),
+                items: JSON.stringify(args.items),
+                item_count: args.items.length,
+                organization_id: args.orgId,
+                created_at: new Date().toISOString(),
+            });
+            return { commitId };
+        } catch {
+            // Commit store unavailable (or insert raced) — the publish itself
+            // already succeeded; grouping is a best-effort overlay on top.
+            return null;
+        }
+    }
+
+    private parseCommitItems(
+        raw: unknown,
+    ): Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }> {
+        if (Array.isArray(raw)) return raw as Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }>;
+        if (typeof raw === 'string') {
+            try {
+                const p = JSON.parse(raw);
+                return Array.isArray(p) ? p : [];
+            } catch {
+                return [];
+            }
+        }
+        return [];
+    }
+
+    /**
+     * List the commit timeline for a package, newest-first (ADR-0067). Returns
+     * [] if the commit store is unavailable.
+     */
+    async listCommits(request: {
+        packageId: string;
+        organizationId?: string;
+        limit?: number;
+    }): Promise<Array<{
+        id: string;
+        operation: 'apply' | 'revert';
+        message?: string;
+        actor?: string;
+        aiModel?: string;
+        parentCommitId?: string;
+        itemCount: number;
+        items: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }>;
+        createdAt?: string;
+    }>> {
+        try {
+            const where: Record<string, unknown> = { package_id: request.packageId };
+            if (request.organizationId) where.organization_id = request.organizationId;
+            const rows = (await this.engine.find('sys_metadata_commit', {
+                where,
+                ...(request.limit ? { limit: request.limit } : {}),
+            })) as any[];
+            const mapped = rows.map((r) => ({
+                id: r.id,
+                operation: (r.operation ?? 'apply') as 'apply' | 'revert',
+                ...(r.message ? { message: r.message } : {}),
+                ...(r.actor ? { actor: r.actor } : {}),
+                ...(r.ai_model ? { aiModel: r.ai_model } : {}),
+                ...(r.parent_commit_id ? { parentCommitId: r.parent_commit_id } : {}),
+                itemCount: typeof r.item_count === 'number' ? r.item_count : 0,
+                items: this.parseCommitItems(r.items),
+                ...(r.created_at ? { createdAt: r.created_at } : {}),
+            }));
+            // Newest-first; tolerate drivers that don't order by returning
+            // insertion order, then sort by the ISO timestamp.
+            mapped.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+            return mapped;
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * Revert a single commit (ADR-0067): undo exactly the artifacts it touched.
+     * A created-by-this-commit artifact is soft-removed (metadata row deleted;
+     * the data table is NOT dropped — recoverable, per ADR-0067 §5); a modified
+     * artifact is restored to its pre-commit `prevVersion`. The revert is itself
+     * recorded as a NEW commit (operation='revert'), so history stays
+     * append-only and the revert is itself revertible.
+     */
+    async revertCommit(request: {
+        commitId: string;
+        organizationId?: string;
+        actor?: string;
+    }): Promise<{
+        success: boolean;
+        revertedCount: number;
+        failedCount: number;
+        reverted: Array<{ type: string; name: string; action: 'removed' | 'restored' }>;
+        failed: Array<{ type: string; name: string; error: string; code?: string }>;
+        revertCommitId?: string;
+    }> {
+        await this.ensureOverlayIndex();
+        const orgId = request.organizationId ?? null;
+        const where: Record<string, unknown> = { id: request.commitId };
+        if (request.organizationId) where.organization_id = request.organizationId;
+        const row = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
+        if (!row) {
+            const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);
+            err.code = 'commit_not_found';
+            err.status = 404;
+            throw err;
+        }
+        const items = this.parseCommitItems(row.items);
+        const repo = this.getOverlayRepo(orgId);
+        const actor = request.actor ?? 'system';
+        const reverted: Array<{ type: string; name: string; action: 'removed' | 'restored' }> = [];
+        const failed: Array<{ type: string; name: string; error: string; code?: string }> = [];
+
+        // Reverse apply order so artifacts that depend on others (e.g. a view on
+        // a new object) are removed before the thing they reference.
+        for (const it of [...items].reverse()) {
+            const ref = { type: it.type, name: it.name, org: orgId ?? 'env' } as unknown as Parameters<typeof repo.get>[0];
+            try {
+                const current = await repo.get(ref, { state: 'active' });
+                if (!it.existedBefore) {
+                    // Created by this commit → soft-remove (metadata only; table stays).
+                    if (current) {
+                        await repo.delete(ref, {
+                            parentVersion: current.hash,
+                            actor,
+                            source: 'protocol.revertCommit',
+                            intent: 'override-artifact',
+                            state: 'active',
+                        });
+                    }
+                    reverted.push({ type: it.type, name: it.name, action: 'removed' });
+                } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
+                    // Edited an existing artifact → restore the pre-commit body.
+                    await repo.restoreVersion(ref, it.prevVersion, {
+                        actor,
+                        source: 'protocol.revertCommit',
+                        message: `revert commit ${request.commitId}`,
+                    });
+                    reverted.push({ type: it.type, name: it.name, action: 'restored' });
+                }
+            } catch (e: any) {
+                failed.push({
+                    type: it.type,
+                    name: it.name,
+                    error: e?.message ?? 'revert failed',
+                    ...(e?.code ? { code: e.code } : {}),
+                });
+            }
+        }
+
+        // Record the revert as its own commit (append-only history).
+        const revertCommit = await this.recordPackageCommit({
+            orgId,
+            packageId: row.package_id,
+            operation: 'revert',
+            message: `Revert: ${row.message ?? request.commitId}`,
+            ...(request.actor ? { actor: request.actor } : {}),
+            parentCommitId: request.commitId,
+            items: reverted.map((r) => ({
+                type: r.type,
+                name: r.name,
+                existedBefore: r.action === 'restored',
+                prevVersion: null,
+            })),
+        });
+
+        return {
+            success: failed.length === 0 && reverted.length > 0,
+            revertedCount: reverted.length,
+            failedCount: failed.length,
+            reverted,
+            failed,
+            ...(revertCommit ? { revertCommitId: revertCommit.commitId } : {}),
+        };
+    }
+
+    /**
+     * Roll a package back THROUGH every `apply` commit newer than `commitId`
+     * (newest first), leaving the package as it was at that commit. Each step is
+     * an individual `revertCommit`, so the whole rollback is itself audited.
+     */
+    async rollbackToPackageCommit(request: {
+        commitId: string;
+        organizationId?: string;
+        actor?: string;
+    }): Promise<{
+        success: boolean;
+        revertedCommits: string[];
+        failed: Array<{ commitId: string; error: string }>;
+    }> {
+        const where: Record<string, unknown> = { id: request.commitId };
+        if (request.organizationId) where.organization_id = request.organizationId;
+        const target = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
+        if (!target) {
+            const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);
+            err.code = 'commit_not_found';
+            err.status = 404;
+            throw err;
+        }
+        const all = await this.listCommits({
+            packageId: target.package_id,
+            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+        });
+        // listCommits is newest-first; revert every `apply` commit strictly newer
+        // than the target (by created_at). Revert commits are skipped (their
+        // effect is already captured by re-reverting the apply they undid).
+        const targetCreatedAt = String(target.created_at ?? '');
+        const toRevert = all.filter(
+            (c) => String(c.createdAt ?? '') > targetCreatedAt && c.operation === 'apply',
+        );
+        const revertedCommits: string[] = [];
+        const failed: Array<{ commitId: string; error: string }> = [];
+        for (const c of toRevert) {
+            try {
+                await this.revertCommit({
+                    commitId: c.id,
+                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+                    ...(request.actor ? { actor: request.actor } : {}),
+                });
+                revertedCommits.push(c.id);
+            } catch (e: any) {
+                failed.push({ commitId: c.id, error: e?.message ?? 'revert failed' });
+            }
+        }
+        return { success: failed.length === 0, revertedCommits, failed };
     }
 
     /**

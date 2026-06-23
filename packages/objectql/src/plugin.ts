@@ -7,6 +7,7 @@ import { StorageNameMapping } from '@objectstack/spec/system';
 import {
   SysMetadataObject,
   SysMetadataHistoryObject,
+  SysMetadataCommitObject,
   SysMetadataAuditObject,
   SysViewDefinitionObject,
 } from '@objectstack/metadata-core';
@@ -196,6 +197,7 @@ export class ObjectQLPlugin implements Plugin {
         objects: [
           SysMetadataObject,
           SysMetadataHistoryObject,
+          SysMetadataCommitObject,
           SysMetadataAuditObject,
           SysViewDefinitionObject,
         ],
