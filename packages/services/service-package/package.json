@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-package",
-  "version": "10.2.0",
+  "version": "10.3.0",
   "license": "Apache-2.0",
   "description": "Package management service for ObjectStack — publish, install, and manage packages",
   "type": "module",

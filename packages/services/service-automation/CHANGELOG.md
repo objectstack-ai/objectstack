@@ -1,5 +1,13 @@
 # @objectstack/service-automation
 
+## 10.3.0
+
+### Patch Changes
+
+- @objectstack/spec@10.3.0
+- @objectstack/core@10.3.0
+- @objectstack/formula@10.3.0
+
 ## 10.2.0
 
 ### Patch Changes

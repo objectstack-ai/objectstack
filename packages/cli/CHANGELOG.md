@@ -1,5 +1,114 @@
 # @objectstack/cli
 
+## 10.3.0
+
+### Minor Changes
+
+- 2b355d5: feat(cluster): multi-node authorization gate (open mechanism)
+
+  `@objectstack/service-cluster` now exports `registerMultiNodeGate` /
+  `checkMultiNodeAllowed`: a distribution (e.g. the Enterprise Edition) can
+  register a gate that authorizes whether the runtime may enable a multi-node
+  (remote-driver) topology. The open framework ships no gate — multi-node is
+  always allowed.
+
+  `os serve` consults the gate before activating a remote cluster driver; on
+  denial it **downgrades to single-node (in-memory) rather than failing** —
+  multi-node is an add-on, never bricks the runtime. The framework holds zero
+  license logic; this is the open seam an EE license plugs into (cloud ADR-0022).
+
+### Patch Changes
+
+- f75943a: feat(lint): SDUI styling validator (ADR-0065)
+
+  `validateResponsiveStyles` — a pure `(stack) => Finding[]` rule wired into
+  `os validate` and `os compile`, so hand-authored and AI-generated pages are
+  held to the same bar (ADR-0019). Catches the deterministic ways a
+  `responsiveStyles` block silently fails: a styled node with no `id` (CSS can't
+  be scoped → dropped) is an **error**; warnings cover Tailwind-in-`className`
+  (silently dead in metadata), a smaller breakpoint with no `large` base, unknown
+  CSS properties, and unknown/typo'd design tokens. Quality/visual judgement
+  (is it ugly) is out of scope — that needs render + a VLM gate.
+
+- f2063f3: fix(cli): extend native better-sqlite3 → wasm SQLite auto-fallback to the persistent-file / `--artifact` dev path (#2229)
+
+  The native-`better-sqlite3` → wasm SQLite → in-memory step-down previously only
+  guarded the zero-config `:memory:` dev branch of `serve`. A normal
+  `objectstack dev` run never reaches it — `dev` injects a persistent `file:` DB
+  (so AI-authored data survives restarts) and `--artifact` boots resolve sqlite
+  through the datasource factory — both of which constructed
+  `better-sqlite3` directly with no probe and no fallback. An ABI mismatch (e.g.
+  a cached prebuilt binary built for a different Node version) was therefore not
+  caught at boot and surfaced later as a runtime `Find operation failed` on the
+  first query.
+
+  The probe-by-connect + step-down is now hoisted into a shared
+  `resolveSqliteDriver` helper (`@objectstack/service-datasource`) and applied to
+  both previously-unguarded sqlite construction sites: the explicit `sqlite` /
+  `file:` branch in `serve.ts` and the sqlite branch of the default datasource
+  driver factory. better-sqlite3 loads its native addon lazily (first query), so
+  the helper forces the load with a `SELECT 1` and, **in dev only**, steps down to
+  wasm SQLite (real SQL + on-disk persistence — the same `file:` keeps working)
+  then to the in-memory driver as a last resort, emitting the existing
+  `⚠ native better-sqlite3 unavailable …` warning. In production the native driver
+  is returned unprobed so a load failure surfaces loudly (fail-closed) rather than
+  silently degrading to a different engine.
+
+- Updated dependencies [f73d40a]
+- Updated dependencies [5ba52b0]
+- Updated dependencies [211425e]
+- Updated dependencies [f75943a]
+- Updated dependencies [6d3bf54]
+- Updated dependencies [8cf4f7c]
+- Updated dependencies [f2063f3]
+  - @objectstack/service-analytics@10.3.0
+  - @objectstack/driver-sql@10.3.0
+  - @objectstack/objectql@10.3.0
+  - @objectstack/lint@10.3.0
+  - @objectstack/service-messaging@10.3.0
+  - @objectstack/runtime@10.3.0
+  - @objectstack/service-datasource@10.3.0
+  - @objectstack/verify@10.3.0
+  - @objectstack/driver-sqlite-wasm@10.3.0
+  - @objectstack/client@10.3.0
+  - @objectstack/plugin-sharing@10.3.0
+  - @objectstack/trigger-record-change@10.3.0
+  - @objectstack/plugin-webhooks@10.3.0
+  - @objectstack/cloud-connection@10.3.0
+  - @objectstack/spec@10.3.0
+  - @objectstack/console@10.3.0
+  - @objectstack/core@10.3.0
+  - @objectstack/types@10.3.0
+  - @objectstack/observability@10.3.0
+  - @objectstack/formula@10.3.0
+  - @objectstack/platform-objects@10.3.0
+  - @objectstack/studio@10.3.0
+  - @objectstack/setup@10.3.0
+  - @objectstack/rest@10.3.0
+  - @objectstack/driver-memory@10.3.0
+  - @objectstack/driver-mongodb@10.3.0
+  - @objectstack/plugin-approvals@10.3.0
+  - @objectstack/plugin-audit@10.3.0
+  - @objectstack/plugin-auth@10.3.0
+  - @objectstack/plugin-email@10.3.0
+  - @objectstack/plugin-hono-server@10.3.0
+  - @objectstack/mcp@10.3.0
+  - @objectstack/plugin-org-scoping@10.3.0
+  - @objectstack/plugin-reports@10.3.0
+  - @objectstack/plugin-security@10.3.0
+  - @objectstack/trigger-api@10.3.0
+  - @objectstack/trigger-schedule@10.3.0
+  - @objectstack/service-ai@10.3.0
+  - @objectstack/service-automation@10.3.0
+  - @objectstack/service-cache@10.3.0
+  - @objectstack/service-job@10.3.0
+  - @objectstack/service-package@10.3.0
+  - @objectstack/service-queue@10.3.0
+  - @objectstack/service-realtime@10.3.0
+  - @objectstack/service-settings@10.3.0
+  - @objectstack/service-storage@10.3.0
+  - @objectstack/account@10.3.0
+
 ## 10.2.0
 
 ### Patch Changes

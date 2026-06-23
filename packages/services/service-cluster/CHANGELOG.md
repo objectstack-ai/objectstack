@@ -1,5 +1,27 @@
 # @objectstack/service-cluster
 
+## 10.3.0
+
+### Minor Changes
+
+- 2b355d5: feat(cluster): multi-node authorization gate (open mechanism)
+
+  `@objectstack/service-cluster` now exports `registerMultiNodeGate` /
+  `checkMultiNodeAllowed`: a distribution (e.g. the Enterprise Edition) can
+  register a gate that authorizes whether the runtime may enable a multi-node
+  (remote-driver) topology. The open framework ships no gate — multi-node is
+  always allowed.
+
+  `os serve` consults the gate before activating a remote cluster driver; on
+  denial it **downgrades to single-node (in-memory) rather than failing** —
+  multi-node is an add-on, never bricks the runtime. The framework holds zero
+  license logic; this is the open seam an EE license plugs into (cloud ADR-0022).
+
+### Patch Changes
+
+- @objectstack/spec@10.3.0
+- @objectstack/core@10.3.0
+
 ## 10.2.0
 
 ### Patch Changes

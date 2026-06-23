@@ -1,5 +1,13 @@
 # @objectstack/service-cluster-redis
 
+## 10.3.0
+
+### Patch Changes
+
+- Updated dependencies [2b355d5]
+  - @objectstack/service-cluster@10.3.0
+  - @objectstack/spec@10.3.0
+
 ## 10.2.0
 
 ### Patch Changes

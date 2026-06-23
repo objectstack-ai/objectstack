@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/cloud-connection",
-  "version": "10.2.0",
+  "version": "10.3.0",
   "license": "Apache-2.0",
   "description": "Runtime-side client for an ObjectStack cloud control plane — marketplace browse proxy, install-local, device-code binding, org catalog and installed views, and the /api/v1/runtime/config discovery endpoint. Open mechanism (ADR-0008): the hub service, plan policy, and entitlements stay server-side.",
   "type": "module",

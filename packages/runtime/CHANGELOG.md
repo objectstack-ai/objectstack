@@ -1,5 +1,66 @@
 # @objectstack/runtime
 
+## 10.3.0
+
+### Patch Changes
+
+- 8cf4f7c: fix(runtime): mount `GET /ready` so the readiness probe is reachable over HTTP
+
+  The dispatcher's `/ready` branch (seam #2) was only reachable when calling
+  `dispatch()` directly — no `server.get('${prefix}/ready')` registration existed,
+  so a real server returned the Hono not-found 404 before the handler ran (the same
+  class of bug as `/mcp` and `/keys`). `/ready` is now mounted alongside `/health`,
+  returning 200 while the kernel is `running` and 503 while it is booting or
+  draining — the contract the EE multi-node rolling-restart drain gate polls
+  (cloud ADR-0018). Adds a registration assertion plus an integration test that
+  hits the endpoint through a real HTTP server.
+
+- f2063f3: fix(cli): extend native better-sqlite3 → wasm SQLite auto-fallback to the persistent-file / `--artifact` dev path (#2229)
+
+  The native-`better-sqlite3` → wasm SQLite → in-memory step-down previously only
+  guarded the zero-config `:memory:` dev branch of `serve`. A normal
+  `objectstack dev` run never reaches it — `dev` injects a persistent `file:` DB
+  (so AI-authored data survives restarts) and `--artifact` boots resolve sqlite
+  through the datasource factory — both of which constructed
+  `better-sqlite3` directly with no probe and no fallback. An ABI mismatch (e.g.
+  a cached prebuilt binary built for a different Node version) was therefore not
+  caught at boot and surfaced later as a runtime `Find operation failed` on the
+  first query.
+
+  The probe-by-connect + step-down is now hoisted into a shared
+  `resolveSqliteDriver` helper (`@objectstack/service-datasource`) and applied to
+  both previously-unguarded sqlite construction sites: the explicit `sqlite` /
+  `file:` branch in `serve.ts` and the sqlite branch of the default datasource
+  driver factory. better-sqlite3 loads its native addon lazily (first query), so
+  the helper forces the load with a `SELECT 1` and, **in dev only**, steps down to
+  wasm SQLite (real SQL + on-disk persistence — the same `file:` keeps working)
+  then to the in-memory driver as a last resort, emitting the existing
+  `⚠ native better-sqlite3 unavailable …` warning. In production the native driver
+  is returned unprobed so a load failure surfaces loudly (fail-closed) rather than
+  silently degrading to a different engine.
+
+- Updated dependencies [2b355d5]
+- Updated dependencies [5ba52b0]
+- Updated dependencies [211425e]
+- Updated dependencies [f2063f3]
+  - @objectstack/service-cluster@10.3.0
+  - @objectstack/driver-sql@10.3.0
+  - @objectstack/objectql@10.3.0
+  - @objectstack/service-datasource@10.3.0
+  - @objectstack/driver-sqlite-wasm@10.3.0
+  - @objectstack/spec@10.3.0
+  - @objectstack/core@10.3.0
+  - @objectstack/types@10.3.0
+  - @objectstack/metadata@10.3.0
+  - @objectstack/observability@10.3.0
+  - @objectstack/formula@10.3.0
+  - @objectstack/rest@10.3.0
+  - @objectstack/driver-memory@10.3.0
+  - @objectstack/plugin-auth@10.3.0
+  - @objectstack/plugin-org-scoping@10.3.0
+  - @objectstack/plugin-security@10.3.0
+  - @objectstack/service-i18n@10.3.0
+
 ## 10.2.0
 
 ### Patch Changes

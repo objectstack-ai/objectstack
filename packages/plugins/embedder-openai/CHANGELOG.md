@@ -1,5 +1,11 @@
 # @objectstack/embedder-openai
 
+## 10.3.0
+
+### Patch Changes
+
+- @objectstack/spec@10.3.0
+
 ## 10.2.0
 
 ### Patch Changes

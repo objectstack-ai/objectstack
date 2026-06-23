@@ -1,5 +1,16 @@
 # @objectstack/plugin-sharing
 
+## 10.3.0
+
+### Patch Changes
+
+- Updated dependencies [211425e]
+  - @objectstack/objectql@10.3.0
+  - @objectstack/spec@10.3.0
+  - @objectstack/core@10.3.0
+  - @objectstack/formula@10.3.0
+  - @objectstack/platform-objects@10.3.0
+
 ## 10.2.0
 
 ### Patch Changes

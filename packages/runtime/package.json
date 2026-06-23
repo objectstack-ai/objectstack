@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/runtime",
-  "version": "10.2.0",
+  "version": "10.3.0",
   "license": "Apache-2.0",
   "description": "ObjectStack Core Runtime & Query Engine",
   "type": "module",

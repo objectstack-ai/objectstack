@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/knowledge-memory",
-  "version": "10.2.0",
+  "version": "10.3.0",
   "license": "Apache-2.0",
   "description": "In-memory knowledge adapter for ObjectStack (dev / test reference implementation).",
   "main": "dist/index.js",
