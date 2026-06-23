@@ -1556,3 +1556,77 @@ describe('SecurityPlugin – metadata-change cache invalidation', () => {
     expect((plugin as any).cbpRelCache.size).toBe(0);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// ADR-0066 D3 — field-level requiredPermissions (read-mask + write-deny)
+// ---------------------------------------------------------------------------
+describe('SecurityPlugin — ADR-0066 D3 field-level requiredPermissions', () => {
+  const fieldsSchema = {
+    fields: {
+      id: { name: 'id' },
+      name: { name: 'name' },
+      salary: { name: 'salary', requiredPermissions: ['view_salary'] },
+    },
+  };
+  const setNoCap: PermissionSet = {
+    name: 'fld_member', isProfile: true,
+    objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+  } as any;
+  const setWithCap: PermissionSet = {
+    name: 'fld_cap', isProfile: true,
+    objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    systemPermissions: ['view_salary'],
+  } as any;
+
+  const harnessFor = (sets: PermissionSet[], fallback: string) => {
+    let middleware: any;
+    const schema = { name: 'task', ...fieldsSchema };
+    const ql: any = {
+      registerMiddleware: (mw: any) => { if (!middleware) middleware = mw; },
+      getSchema: () => schema,
+      findOne: async () => null,
+      find: async () => [],
+    };
+    const metadata = { get: async () => schema, list: async () => sets };
+    const services: Record<string, any> = { manifest: { register: vi.fn() }, objectql: ql, metadata };
+    const ctx: any = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      registerService: vi.fn(),
+      getService: (n: string) => { if (!(n in services)) throw new Error(`service not registered: ${n}`); return services[n]; },
+    };
+    const plugin = new SecurityPlugin({ fallbackPermissionSet: fallback });
+    return { plugin, ctx, run: async (opCtx: any) => { await middleware(opCtx, async () => {}); return opCtx; } };
+  };
+
+  it('masks a capability-gated field on read when the caller lacks the capability', async () => {
+    const h = harnessFor([setNoCap], 'fld_member');
+    await h.plugin.init(h.ctx); await h.plugin.start(h.ctx);
+    const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, result: [{ id: 'r1', name: 'A', salary: 100 }], context: { userId: 'u1', roles: [], permissions: [] } };
+    await h.run(opCtx);
+    expect(opCtx.result[0].name).toBe('A');
+    expect(opCtx.result[0].salary).toBeUndefined();
+  });
+
+  it('does NOT mask when the caller holds the capability', async () => {
+    const h = harnessFor([setWithCap], 'fld_cap');
+    await h.plugin.init(h.ctx); await h.plugin.start(h.ctx);
+    const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, result: [{ id: 'r1', name: 'A', salary: 100 }], context: { userId: 'u1', roles: [], permissions: ['fld_cap'] } };
+    await h.run(opCtx);
+    expect(opCtx.result[0].salary).toBe(100);
+  });
+
+  it('denies a write to a capability-gated field when the caller lacks the capability', async () => {
+    const h = harnessFor([setNoCap], 'fld_member');
+    await h.plugin.init(h.ctx); await h.plugin.start(h.ctx);
+    const opCtx: any = { object: 'task', operation: 'insert', data: { name: 'A', salary: 200 }, context: { userId: 'u1', roles: [], permissions: [] } };
+    await expect(h.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+  });
+
+  it('allows the write when the caller holds the capability', async () => {
+    const h = harnessFor([setWithCap], 'fld_cap');
+    await h.plugin.init(h.ctx); await h.plugin.start(h.ctx);
+    const opCtx: any = { object: 'task', operation: 'insert', data: { name: 'A', salary: 200 }, context: { userId: 'u1', roles: [], permissions: ['fld_cap'] } };
+    await expect(h.run(opCtx)).resolves.toBeDefined();
+  });
+});

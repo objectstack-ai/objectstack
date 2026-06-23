@@ -118,7 +118,7 @@ export class SecurityPlugin implements Plugin {
    * `requiredPermissions` capability contract. Populated lazily from the schema;
    * cleared on metadata change alongside the other schema-derived caches.
    */
-  private readonly objectSecurityMetaCache = new Map<string, { isPrivate: boolean; tenancyDisabled: boolean; requiredPermissions: string[] }>();
+  private readonly objectSecurityMetaCache = new Map<string, { isPrivate: boolean; tenancyDisabled: boolean; requiredPermissions: string[]; fieldRequiredPermissions: Record<string, string[]> }>();
   private dbLoader?: (names: string[]) => Promise<PermissionSet[]>;
   private logger: { info?: (...a: any[]) => void; warn?: (...a: any[]) => void; error?: (...a: any[]) => void } = {};
 
@@ -379,7 +379,7 @@ export class SecurityPlugin implements Plugin {
       const secMeta =
         permissionSets.length > 0
           ? await this.getObjectSecurityMeta(opCtx.object)
-          : { isPrivate: false, tenancyDisabled: false, requiredPermissions: [] as string[] };
+          : { isPrivate: false, tenancyDisabled: false, requiredPermissions: [] as string[], fieldRequiredPermissions: {} as Record<string, string[]> };
 
       // 1.5. [ADR-0066 D3] requiredPermissions AND-gate — a capability
       //      prerequisite checked BEFORE the CRUD grant (ADR §Precedence): a
@@ -538,10 +538,12 @@ export class SecurityPlugin implements Plugin {
         opCtx.data &&
         permissionSets.length > 0
       ) {
-        const fieldPerms = this.permissionEvaluator.getFieldPermissions(
+        let fieldPerms = this.permissionEvaluator.getFieldPermissions(
           opCtx.object,
           permissionSets,
         );
+        // [ADR-0066 D3] AND-gate field-level requiredPermissions into the map.
+        fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
         if (Object.keys(fieldPerms).length > 0) {
           const forbidden = this.fieldMasker.detectForbiddenWrites(
             opCtx.data,
@@ -686,7 +688,9 @@ export class SecurityPlugin implements Plugin {
 
       // 4. Field-level security: mask restricted fields in read results
       if (opCtx.result && ['find', 'findOne'].includes(opCtx.operation)) {
-        const fieldPerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
+        let fieldPerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
+        // [ADR-0066 D3] AND-gate field-level requiredPermissions into the mask.
+        fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
         if (Object.keys(fieldPerms).length > 0) {
           opCtx.result = this.fieldMasker.maskResults(opCtx.result, fieldPerms, opCtx.object);
         }
@@ -1223,12 +1227,27 @@ export class SecurityPlugin implements Plugin {
    */
   private async getObjectSecurityMeta(
     object: string,
-  ): Promise<{ isPrivate: boolean; tenancyDisabled: boolean; requiredPermissions: string[] }> {
+  ): Promise<{ isPrivate: boolean; tenancyDisabled: boolean; requiredPermissions: string[]; fieldRequiredPermissions: Record<string, string[]> }> {
     const cached = this.objectSecurityMetaCache.get(object);
     if (cached) return cached;
     let obj: any = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(object) : null;
     if (!obj) {
       try { obj = await this.metadata?.get?.('object', object); } catch { obj = null; }
+    }
+    // [ADR-0066 D3] Per-field capability requirements: { fieldName -> capability[] }.
+    const fieldRequiredPermissions: Record<string, string[]> = {};
+    const fields: any = (obj as any)?.fields;
+    if (Array.isArray(fields)) {
+      for (const f of fields) {
+        if (f?.name && Array.isArray(f.requiredPermissions) && f.requiredPermissions.length > 0) {
+          fieldRequiredPermissions[String(f.name)] = f.requiredPermissions.map(String);
+        }
+      }
+    } else if (fields && typeof fields === 'object') {
+      for (const [fname, fdef] of Object.entries(fields)) {
+        const rp = (fdef as any)?.requiredPermissions;
+        if (Array.isArray(rp) && rp.length > 0) fieldRequiredPermissions[fname] = rp.map(String);
+      }
     }
     const meta = {
       isPrivate: (obj as any)?.access?.default === 'private',
@@ -1237,9 +1256,34 @@ export class SecurityPlugin implements Plugin {
       requiredPermissions: Array.isArray((obj as any)?.requiredPermissions)
         ? (obj as any).requiredPermissions.map(String)
         : [],
+      fieldRequiredPermissions,
     };
     if (obj) this.objectSecurityMetaCache.set(object, meta);
     return meta;
+  }
+
+  /**
+   * [ADR-0066 D3] Fold per-field `requiredPermissions` into a FieldPermission map.
+   * A field whose declared capabilities are NOT all held by the caller is forced
+   * non-readable + non-editable (AND-gate, strictest-wins over permission-set
+   * field grants) so the existing FieldMasker masks it on read and denies it on
+   * write. Returns the base map unchanged when no field declares requirements.
+   */
+  private foldFieldRequiredPermissions(
+    baseFieldPerms: Record<string, { readable: boolean; editable: boolean }>,
+    fieldRequiredPermissions: Record<string, string[]>,
+    permissionSets: PermissionSet[],
+  ): Record<string, { readable: boolean; editable: boolean }> {
+    const entries = Object.entries(fieldRequiredPermissions ?? {});
+    if (entries.length === 0) return baseFieldPerms;
+    const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+    const merged: Record<string, { readable: boolean; editable: boolean }> = { ...baseFieldPerms };
+    for (const [field, caps] of entries) {
+      if (caps.length > 0 && !caps.every((c) => held.has(c))) {
+        merged[field] = { readable: false, editable: false };
+      }
+    }
+    return merged;
   }
 
   /**

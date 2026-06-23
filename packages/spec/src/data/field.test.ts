@@ -1503,3 +1503,19 @@ describe('FieldSchema - columnName', () => {
     expect(result.columnName).toBe('expiresAt');
   });
 });
+
+
+describe('ADR-0066 D3 — field-level requiredPermissions', () => {
+  it('FieldSchema accepts requiredPermissions', () => {
+    const f = FieldSchema.parse({ type: 'number', requiredPermissions: ['view_salary'] });
+    expect(f.requiredPermissions).toEqual(['view_salary']);
+  });
+  it('Field.text passes requiredPermissions through the builder', () => {
+    const f: any = Field.text({ label: 'SSN', requiredPermissions: ['view_pii'] });
+    expect(f.requiredPermissions).toEqual(['view_pii']);
+  });
+  it('requiredPermissions is optional (absent ⇒ undefined)', () => {
+    const f = FieldSchema.parse({ type: 'text' });
+    expect(f.requiredPermissions).toBeUndefined();
+  });
+});

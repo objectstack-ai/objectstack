@@ -554,6 +554,14 @@ export const FieldSchema = lazySchema(() => z.object({
   /** Security & Visibility */
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
   readonly: z.boolean().default(false).describe('Read-only in UI'),
+
+  /**
+   * [ADR-0066 D3] Capabilities required to READ/EDIT this field. A field
+   * declaring `requiredPermissions` is masked on read and denied on write unless
+   * the caller holds ALL listed capabilities — an AND-gate that is strictest-wins
+   * over permission-set field grants. Enforced by plugin-security's FieldMasker.
+   */
+  requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D3] Capabilities required to read/edit this field (mask on read, deny on write; AND-gate).'),
   system: z.boolean().optional().describe('Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag.'),
   sortable: z.boolean().optional().default(true).describe('Whether field is sortable in list views'),
   inlineHelpText: z.string().optional().describe('Help text displayed below the field in forms'),

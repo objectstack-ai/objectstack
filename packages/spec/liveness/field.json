@@ -88,6 +88,11 @@
       "status": "live",
       "note": "renderer."
     },
+    "requiredPermissions": {
+      "status": "live",
+      "evidence": "packages/plugins/plugin-security/src/security-plugin.ts",
+      "note": "ADR-0066 D3 field-level capability gate. getObjectSecurityMeta reads field.requiredPermissions; foldFieldRequiredPermissions forces non-readable+non-editable when the caller's systemPermissions don't cover them, so FieldMasker masks on read + detectForbiddenWrites denies on write (AND-gate). Unit-proven in packages/plugins/plugin-security/src/security-plugin.test.ts."
+    },
     "system": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts"
