@@ -219,6 +219,60 @@ describe('SqlDriver tenant scope (organization_id)', () => {
     });
   });
 
+  describe('tenancy.enabled:false opts out of driver org-scoping', () => {
+    // Regression: a platform-global object (e.g. sys_license, ADR-0066) keeps an
+    // optional, often-NULL `organization_id` FK but declares `tenancy.enabled:
+    // false`. The driver previously detected the `organization_id` column via the
+    // implicit fallback and org-scoped it anyway, so an authenticated caller's
+    // active-org `tenantId` injected `WHERE organization_id = <org>` and the
+    // NULL-org rows vanished — the platform admin read zero rows while an
+    // unscoped read still saw them. tenancy.enabled:false must win.
+    const platformGlobal = [
+      {
+        name: 'sys_license',
+        tenancy: { enabled: false, strategy: 'shared' },
+        fields: {
+          customer: { type: 'string' },
+          organization_id: { type: 'string' }, // optional owner FK, may be NULL
+          status: { type: 'string' },
+        },
+      },
+    ];
+
+    beforeEach(async () => {
+      await driver.disconnect();
+      driver = new SqlDriver({
+        client: 'better-sqlite3',
+        connection: { filename: ':memory:' },
+        useNullAsDefault: true,
+      });
+      await driver.initObjects(platformGlobal);
+      // A NULL-org platform row + an org-mapped one.
+      await driver.create('sys_license', { id: 'lic_global', customer: 'ACME', organization_id: null, status: 'active' });
+      await driver.create('sys_license', { id: 'lic_org_b', customer: 'Beta', organization_id: 'org_b', status: 'active' });
+    });
+
+    it('does NOT register a tenant field for a tenancy-disabled object', () => {
+      expect((driver as any).tenantFieldByTable['sys_license']).toBeNull();
+    });
+
+    it('read is unscoped even when the caller passes tenantId (admin with active org sees all)', async () => {
+      const adminRead = await driver.find('sys_license', { object: 'sys_license' }, { tenantId: 'org_admin_active' });
+      expect(adminRead.map(r => r.id).sort()).toEqual(['lic_global', 'lic_org_b']);
+    });
+
+    it('matches the unscoped (anonymous) read — no auth-dependent divergence', async () => {
+      const scoped = await driver.find('sys_license', { object: 'sys_license' }, { tenantId: 'org_admin_active' });
+      const unscoped = await driver.find('sys_license', { object: 'sys_license' });
+      expect(scoped.map(r => r.id).sort()).toEqual(unscoped.map(r => r.id).sort());
+    });
+
+    it('does NOT auto-inject organization_id on insert when tenancy is disabled', async () => {
+      const created = await driver.create('sys_license', { id: 'lic_new', customer: 'Gamma', status: 'active' }, { tenantId: 'org_admin_active' });
+      expect(created.organization_id ?? null).toBeNull();
+    });
+  });
+
   describe('audit warn on missing tenantId', () => {
     it('logs once per object:op when writing without tenantId', async () => {
       await driver.disconnect();

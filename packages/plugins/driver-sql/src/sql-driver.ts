@@ -1307,6 +1307,39 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Resolve the per-table tenant-isolation column for a schema, honoring an
+   * explicit tenancy opt-out. Single source of truth for both {@link initObjects}
+   * and {@link registerExternalObject} (they previously inlined this logic and
+   * drifted).
+   *
+   * Precedence:
+   *  1. `tenancy.enabled === false` → `null` (NO driver-level org scope), even
+   *     when the object carries an `organization_id` column. Platform-global
+   *     objects (e.g. `sys_license`) keep an optional, often-NULL org FK but must
+   *     NOT be tenant-scoped: otherwise an authenticated caller's active-org
+   *     `DriverOptions.tenantId` injects `WHERE organization_id = <org>` and every
+   *     NULL-org / cross-org row silently disappears (the platform admin then
+   *     reads zero licenses while an unscoped/anonymous read still sees them).
+   *     The declarative branch below already respected `enabled !== false`; the
+   *     implicit `organization_id` fallback did not — this closes that gap.
+   *  2. Declared `tenancy.tenantField` (when that field exists on the object).
+   *  3. Implicit `organization_id` column detection (legacy objects whose
+   *     multi-tenant column was injected by the kernel without a spec migration).
+   */
+  protected computeTenantField(schema: { fields?: Record<string, any>; tenancy?: any }): string | null {
+    const tenancyDecl = (schema as any)?.tenancy;
+    // Explicit opt-out wins over any column-presence heuristic.
+    if (tenancyDecl?.enabled === false) return null;
+    const fields = schema?.fields;
+    if (tenancyDecl?.tenantField) {
+      const declared = String(tenancyDecl.tenantField);
+      if (fields && Object.prototype.hasOwnProperty.call(fields, declared)) return declared;
+    }
+    if (fields && Object.prototype.hasOwnProperty.call(fields, 'organization_id')) return 'organization_id';
+    return null;
+  }
+
+  /**
    * Batch-initialise tables from an array of object definitions.
    */
   /**
@@ -1368,18 +1401,7 @@ export class SqlDriver implements IDataDriver {
     const datetimeCols: string[] = [];
     const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
 
-    const tenancyDecl = (schema as any)?.tenancy;
-    let tenantField: string | null = null;
-    if (tenancyDecl && tenancyDecl.enabled !== false && tenancyDecl.tenantField) {
-      const declared = String(tenancyDecl.tenantField);
-      if (schema.fields && Object.prototype.hasOwnProperty.call(schema.fields, declared)) {
-        tenantField = declared;
-      }
-    }
-    if (!tenantField) {
-      const hasOrgField = !!(schema.fields && Object.prototype.hasOwnProperty.call(schema.fields, 'organization_id'));
-      tenantField = hasOrgField ? 'organization_id' : null;
-    }
+    const tenantField = this.computeTenantField(schema);
     if (schema.fields) {
       for (const [name, field] of Object.entries<any>(schema.fields)) {
         const type = field.type || 'string';
@@ -1425,25 +1447,10 @@ export class SqlDriver implements IDataDriver {
       const booleanCols: string[] = [];
       const numericCols: string[] = [];
       const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
-      // Auto-detect tenant field. Convention: the field named
-      // `organization_id` (matching tenantPolicy default) scopes the
-      // Resolve tenant scope declaratively first (obj.tenancy.{enabled,
-      // tenantField}) — that's the user's explicit intent. Fall back to the
-      // implicit "has an organization_id field" detection so legacy objects
-      // (whose multi-tenant column was injected by the kernel implicitly)
-      // keep working without a spec migration.
-      const tenancyDecl = (obj as any)?.tenancy;
-      let tenantField: string | null = null;
-      if (tenancyDecl && tenancyDecl.enabled !== false && tenancyDecl.tenantField) {
-        const declared = String(tenancyDecl.tenantField);
-        if (obj.fields && Object.prototype.hasOwnProperty.call(obj.fields, declared)) {
-          tenantField = declared;
-        }
-      }
-      if (!tenantField) {
-        const hasOrgField = !!(obj.fields && Object.prototype.hasOwnProperty.call(obj.fields, 'organization_id'));
-        tenantField = hasOrgField ? 'organization_id' : null;
-      }
+      // Tenant-isolation column: explicit tenancy opt-out → declared field →
+      // implicit `organization_id`. See {@link computeTenantField} (shared with
+      // registerExternalObject so the two paths can't drift).
+      const tenantField = this.computeTenantField(obj);
       if (obj.fields) {
         for (const [name, field] of Object.entries<any>(obj.fields)) {
           const type = field.type || 'string';
