@@ -28,7 +28,9 @@ import { dirname, join } from 'node:path';
  *   4. Persisted file                 — `~/.objectstack/dev-crypto-key`
  *                                       (mode 0600). In development it is
  *                                       auto-created; in production it is
- *                                       only *read* (never minted).
+ *                                       only *read* unless `OS_CRYPTO_AUTOKEY`
+ *                                       opts the single-node self-host case
+ *                                       into minting + persisting it too.
  *   5. Ephemeral random key           — development/test only.
  *
  * ## Fail-loud guarantee (the reason this class exists)
@@ -46,9 +48,13 @@ import { dirname, join } from 'node:path';
  * To turn that silent data-loss into a config error at boot, the provider
  * REFUSES to mint a key in production: when `mode === 'production'` and no
  * stable key source (env var or pre-existing key file) is available, the
- * constructor throws an actionable error instead of generating one.
- * Development and test keep the ergonomic fallback so local loops and unit
- * tests stay frictionless.
+ * constructor throws an actionable error instead of generating one. The one
+ * exception is the `OS_CRYPTO_AUTOKEY` opt-in: a single-node self-host
+ * (`os start` on a durable filesystem) may mint + *persist* a key so the
+ * zero-config quickstart boots — but even then the ephemeral fallback stays
+ * forbidden, so a non-writable / ephemeral FS still fails loud rather than
+ * running under a key that won't survive a restart. Development and test keep
+ * the ergonomic fallback so local loops and unit tests stay frictionless.
  *
  * `mode` is auto-detected from `NODE_ENV` (`production` → strict;
  * `test`/`VITEST` → ephemeral, no disk; otherwise `development`) and can be
@@ -77,6 +83,14 @@ import { dirname, join } from 'node:path';
 const SECRET_KEY_ENV = 'OS_SECRET_KEY';
 const DEV_KEY_ENV = 'OS_DEV_CRYPTO_KEY';
 const DEV_KEY_LEGACY_ENV = 'OBJECTSTACK_DEV_CRYPTO_KEY';
+/**
+ * Opt-in that lets the strict production path mint + PERSIST a key (but never
+ * fall back to an ephemeral one). Set by `os start` for the single-node
+ * self-host quickstart so the documented zero-config boot works out of the
+ * box, while a real cluster deploy (which must provision `OS_SECRET_KEY`)
+ * leaves it unset and keeps the fail-loud guarantee. See `commands/start.ts`.
+ */
+const AUTOKEY_ENV = 'OS_CRYPTO_AUTOKEY';
 
 type EnvMap = Record<string, string | undefined>;
 
@@ -154,6 +168,12 @@ const parseKey = (raw: string | undefined): Buffer | undefined => {
     /* fall through */
   }
   return undefined;
+};
+
+/** Truthy env flag: `1` / `true` / `yes` (case-insensitive). */
+const parseBool = (raw: string | undefined): boolean => {
+  const v = raw?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
 };
 
 /** Read an existing key file (no creation). Returns `undefined` on miss / IO error. */
@@ -255,9 +275,7 @@ function resolveDataKey(opts: LocalCryptoProviderOptions): ResolvedKey {
   const path = keyFilePath(env);
 
   if (mode === 'production') {
-    // Honour a pre-existing, operator-provisioned key file, but NEVER mint
-    // one here — auto-generation is the silent-data-loss footgun this guard
-    // exists to prevent.
+    // Honour a pre-existing, operator-provisioned key file first.
     const existing = loadExistingKey(path);
     if (existing) {
       warn(
@@ -266,6 +284,30 @@ function resolveDataKey(opts: LocalCryptoProviderOptions): ResolvedKey {
       );
       return { key: existing, source: 'file' };
     }
+
+    // Single-node self-host opt-in (`os start` on a durable filesystem): mint
+    // a key AND persist it so the zero-config quickstart boots. We still
+    // REFUSE the ephemeral fallback below — if the key cannot be written
+    // (read-only / ephemeral FS), running anyway would silently lose every
+    // sys_secret on the next restart, the exact footgun this guard prevents.
+    // Multi-node deploys must NOT opt in (each node would mint a divergent
+    // key); `os start` only sets the flag when no cluster driver is set.
+    if (parseBool(env[AUTOKEY_ENV])) {
+      const persisted = loadOrCreateKey(path);
+      if (persisted) {
+        if (persisted.generated) {
+          warn(
+            `[LocalCryptoProvider] No ${SECRET_KEY_ENV} set — minted a new AES-256-GCM key and ` +
+              `persisted it to ${path} (mode 0600). Restarts on this host reuse it automatically. ` +
+              `For containers, CI, or multi-node, set ${SECRET_KEY_ENV} so every node shares one key.`,
+          );
+        }
+        return { key: persisted.key, source: persisted.generated ? 'generated-file' : 'file' };
+      }
+      // Persist failed → fall through to the hard error. Never run ephemeral
+      // in production, even with the opt-in.
+    }
+
     throw new Error(MISSING_PROD_KEY_MSG(path));
   }
 

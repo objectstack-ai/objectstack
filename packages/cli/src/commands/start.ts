@@ -237,6 +237,17 @@ export default class Start extends Command {
     // Allows `NODE_ENV=development objectstack start` to work for debugging.
     if (!localEnv.NODE_ENV) localEnv.NODE_ENV = 'production';
 
+    // Single-node self-host quickstart: forcing production above would make
+    // LocalCryptoProvider refuse to boot without OS_SECRET_KEY, breaking the
+    // documented zero-config `os start`. Opt the crypto provider into minting
+    // + persisting a key file (~/.objectstack/dev-crypto-key) so it works out
+    // of the box. A multi-node deploy (OS_CLUSTER_DRIVER set) must provision a
+    // shared OS_SECRET_KEY instead — each node minting its own key would
+    // diverge — so we do NOT opt in there; the provider still fails loud.
+    if (!localEnv.OS_CLUSTER_DRIVER && !localEnv.OS_SECRET_KEY) {
+      localEnv.OS_CRYPTO_AUTOKEY = '1';
+    }
+
     const binPath = process.argv[1];
     const child = spawn(
       process.execPath,

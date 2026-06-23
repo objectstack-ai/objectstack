@@ -80,6 +80,26 @@ describe('LocalCryptoProvider — key resolution', () => {
     expect(existsSync(keyPath)).toBe(false);
   });
 
+  it('mints + persists a key in production when OS_CRYPTO_AUTOKEY is set (os start quickstart)', async () => {
+    const env = { NODE_ENV: 'production', HOME: home, OS_CRYPTO_AUTOKEY: '1' };
+    const a = new LocalCryptoProvider({ env });
+    expect(a.keySource).toBe('generated-file');
+    const h = await a.encrypt('quickstart-secret', ctx);
+    // A fresh instance reads the persisted file and decrypts prior ciphertext.
+    const b = new LocalCryptoProvider({ env });
+    expect(b.keySource).toBe('file');
+    expect(await b.decrypt(h, ctx)).toBe('quickstart-secret');
+  });
+
+  it('still fails loud with OS_CRYPTO_AUTOKEY when the key cannot be persisted', () => {
+    // Point HOME at a path under a regular *file* so mkdir/write fails — the
+    // opt-in must NOT degrade to an ephemeral key in production.
+    const blocker = join(home, 'not-a-dir');
+    writeFileSync(blocker, 'x');
+    const env = { NODE_ENV: 'production', OS_HOME: join(blocker, 'nested'), OS_CRYPTO_AUTOKEY: '1' };
+    expect(() => new LocalCryptoProvider({ env })).toThrow(/Refusing to start in production/);
+  });
+
   it('auto-creates + persists a key in development', async () => {
     const env = { NODE_ENV: 'development', HOME: home };
     const a = new LocalCryptoProvider({ env });

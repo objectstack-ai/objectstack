@@ -130,10 +130,34 @@ requests and do not run through a target environment kernel.
 | `OS_DATABASE_URL` | Local runtime business database URL. |
 | `OS_DATABASE_DRIVER` | Local runtime driver id. |
 | `OS_AUTH_SECRET` | Better Auth session secret for hosted runtimes. |
+| `OS_SECRET_KEY` | 32-byte master key for `sys_secret` encryption (encrypted settings, `secret` fields, datasource credentials). 64 hex chars or base64 of 32 bytes. |
+| `OS_CLUSTER_DRIVER` | Cluster coordination driver. When set, the runtime treats the deployment as multi-node. |
 | `OS_PORT` | HTTP listen port. |
 
 Third-party provider variables such as `OPENAI_API_KEY`, `TURSO_*`,
 `SMTP_*`, `RESEND_API_KEY`, and OAuth client secrets keep their provider names.
+
+<Callout type="warn">
+**Set `OS_SECRET_KEY` for any containerized or multi-node deployment.** The
+default `LocalCryptoProvider` encrypts every `sys_secret` value under one
+32-byte key. On a single host, `os start` mints and persists that key to
+`~/.objectstack/dev-crypto-key` automatically, so the zero-config quickstart
+just works. But on an **ephemeral filesystem (containers)** the minted key is
+lost on restart, and across **multiple nodes** each node would mint a
+*different* key — in both cases previously-encrypted secrets become
+undecryptable.
+
+Provision one stable key shared by every node and every restart:
+
+```bash
+OS_SECRET_KEY=$(openssl rand -hex 32)
+```
+
+When `OS_CLUSTER_DRIVER` is set (multi-node), `os start` will **not** auto-mint
+a key — it fails loud at boot until `OS_SECRET_KEY` is provided, rather than
+silently running under a key that won't survive. For production, prefer a
+managed KMS / Vault provider behind the same `ICryptoProvider` seam.
+</Callout>
 
 ---
 
