@@ -165,13 +165,21 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
    * y: row
    * w: width (1-12)
    * h: height
+   *
+   * OPTIONAL — when omitted, the renderer auto-flows the widget into the grid
+   * (DashboardGridLayout falls back to `x: (i % 4) * 3, y: Math.floor(i/4) * 4,
+   * w: 3, h: 4`). The Studio dashboard designer adds widgets WITHOUT a layout
+   * and relies on this auto-flow; requiring `layout` here made every
+   * designer-authored dashboard fail validation (422 on draft save, Publish
+   * disabled) even though it rendered correctly. Authors may still pin an
+   * explicit grid position; absence means "auto-place".
    */
   layout: z.object({
     x: z.number(),
     y: z.number(),
     w: z.number(),
     h: z.number(),
-  }).describe('Grid layout position'),
+  }).optional().describe('Grid layout position (auto-flowed when omitted)'),
   
   /** Widget specific options (colors, legend, etc.) */
   options: z.unknown().optional().describe('Widget specific configuration'),
