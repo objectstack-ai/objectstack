@@ -909,4 +909,21 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
       })
     ).toThrow();
   });
+
+
+  it('[ADR-0066 D4] ActionSchema accepts requiredPermissions', () => {
+    const action = ActionSchema.parse({
+      name: 'issue_and_sign',
+      label: 'Issue & Sign',
+      type: 'api',
+      target: '/api/v1/cloud/licenses/issue',
+      requiredPermissions: ['manage_platform_settings'],
+    });
+    expect(action.requiredPermissions).toEqual(['manage_platform_settings']);
+  });
+
+  it('[ADR-0066 D4] requiredPermissions is optional (absent ⇒ undefined)', () => {
+    const action = ActionSchema.parse({ name: 'mark_done', label: 'Mark Done', type: 'script', execute: 'true' });
+    expect(action.requiredPermissions).toBeUndefined();
+  });
 });

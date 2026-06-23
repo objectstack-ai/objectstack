@@ -1846,3 +1846,57 @@ describe('HttpDispatcher', () => {
         });
     });
 });
+
+
+describe('HttpDispatcher — ADR-0066 D4 action requiredPermissions gate', () => {
+  const gated = { name: 'issue_and_sign', label: 'Issue', type: 'api', requiredPermissions: ['manage_platform_settings'] };
+  const make = (actionDef: any, execCtx: any) => {
+    const executeAction = vi.fn().mockResolvedValue({ ran: true });
+    const schemaOf = (name: string) => ({ name, actions: actionDef ? [actionDef] : [] });
+    const ql: any = {
+      executeAction,
+      getSchema: schemaOf,
+      // getObjectQLService only returns a service when `svc.registry` is truthy.
+      registry: { getObject: schemaOf },
+      find: vi.fn().mockResolvedValue([]),
+      insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
+    };
+    const kernel: any = { context: { getService: (n: string) => (n === 'objectql' ? ql : null) } };
+    const dispatcher = new HttpDispatcher(kernel);
+    const ctx: any = { request: {}, environmentId: 'platform', executionContext: execCtx };
+    return { dispatcher, executeAction, ctx };
+  };
+
+  it('rejects (403) when the caller lacks the action capability', async () => {
+    const { dispatcher, executeAction, ctx } = make(gated, { userId: 'u1', systemPermissions: [] });
+    const res = await dispatcher.handleActions('/sys_license/issue_and_sign', 'POST', {}, ctx);
+    expect(res.response.status).toBe(403);
+    expect(executeAction).not.toHaveBeenCalled();
+  });
+
+  it('allows when the caller holds the capability', async () => {
+    const { dispatcher, executeAction, ctx } = make(gated, { userId: 'u1', systemPermissions: ['manage_platform_settings'] });
+    const res = await dispatcher.handleActions('/sys_license/issue_and_sign', 'POST', {}, ctx);
+    expect(executeAction).toHaveBeenCalledTimes(1);
+    expect(res.response.status).not.toBe(403);
+  });
+
+  it('bypasses the gate for a system context', async () => {
+    const { dispatcher, executeAction, ctx } = make(gated, { isSystem: true });
+    await dispatcher.handleActions('/sys_license/issue_and_sign', 'POST', {}, ctx);
+    expect(executeAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not gate an action without requiredPermissions', async () => {
+    const { dispatcher, executeAction, ctx } = make({ name: 'mark_done', label: 'Mark', type: 'script', execute: 'true' }, { userId: 'u1', systemPermissions: [] });
+    await dispatcher.handleActions('/task/mark_done', 'POST', {}, ctx);
+    expect(executeAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('denies an unauthenticated caller for a gated action', async () => {
+    const { dispatcher, executeAction, ctx } = make(gated, undefined);
+    const res = await dispatcher.handleActions('/sys_license/issue_and_sign', 'POST', {}, ctx);
+    expect(res.response.status).toBe(403);
+    expect(executeAction).not.toHaveBeenCalled();
+  });
+});

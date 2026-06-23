@@ -373,6 +373,16 @@ export const ActionSchema = lazySchema(() => z.object({
   visible: ExpressionInputSchema.optional().describe('Visibility predicate (CEL).'),
   disabled: z.union([z.boolean(), ExpressionInputSchema]).optional().describe('Boolean or predicate (CEL) — action is disabled when TRUE.'),
 
+  /**
+   * [ADR-0066 D4] System capabilities required to INVOKE this action — a
+   * dual-surface gate from ONE declaration: the server (action route) rejects
+   * the call with 403 when the caller's systemPermissions don't cover these (the
+   * source of truth), and the objectui ActionRunner hides/disables the button
+   * using the same requirement. Independent of `visible` (CEL): this is the RBAC
+   * capability contract, mirroring `App.requiredPermissions`.
+   */
+  requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action (server-enforced 403 + UI hide/disable).'),
+
   /** Keyboard Shortcut */
   shortcut: z.string().optional().describe('Keyboard shortcut to trigger this action (e.g., "Ctrl+S")'),
 
