@@ -29,6 +29,18 @@ describe('DashboardWidgetSchema (dataset-bound)', () => {
     expect(w.values).toEqual(['revenue']);
   });
 
+  // Regression (Studio dashboard designer): the designer adds widgets WITHOUT a
+  // `layout`; the renderer auto-flows them. `layout` must be OPTIONAL — when it
+  // was required, every designer-authored dashboard failed validation (422 on
+  // draft save) and Publish stayed disabled even though the widget rendered.
+  it('accepts a widget with NO layout (auto-flowed; Studio designer omits it)', () => {
+    const w = DashboardWidgetSchema.parse({
+      id: 'widget_1', type: 'metric', dataset: 'showcase_task_metrics', values: ['task_count'],
+    });
+    expect(w.layout).toBeUndefined();
+    expect(w.values).toEqual(['task_count']);
+  });
+
   it('accepts a chart widget with dimensions', () => {
     const w = DashboardWidgetSchema.parse({
       id: 'by_stage', type: 'bar', dataset: 'sales', dimensions: ['stage'], values: ['revenue'],
@@ -80,6 +92,17 @@ describe('DashboardSchema', () => {
       ],
     });
     expect(d.widgets).toHaveLength(2);
+  });
+
+  it('parses a designer-authored dashboard whose widgets omit layout', () => {
+    const d = DashboardSchema.parse({
+      name: 'delivery_exec_overview', label: 'Delivery Executive Overview',
+      widgets: [
+        { id: 'widget_1', type: 'metric', dataset: 'showcase_task_metrics', values: ['task_count'] },
+        { id: 'widget_2', type: 'donut', dataset: 'showcase_task_metrics', dimensions: ['status'], values: ['task_count'] },
+      ],
+    });
+    expect(d.widgets.every((w) => w.layout === undefined)).toBe(true);
   });
 
   it('Dashboard.create factory parses + returns a typed dashboard', () => {
