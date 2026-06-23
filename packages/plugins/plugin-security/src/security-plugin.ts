@@ -112,6 +112,13 @@ export class SecurityPlugin implements Plugin {
   private metadataWatch: { unsubscribe: () => void } | null = null;
   /** ADR-0055: cache the resolved master-detail relation per controlled_by_parent object. */
   private cbpRelCache = new Map<string, { fk: string; master: string } | null>();
+  /**
+   * [ADR-0066 D2/D3] Per-object security posture cache: `private` flag
+   * (access.default), platform-global flag (tenancy disabled), and the object's
+   * `requiredPermissions` capability contract. Populated lazily from the schema;
+   * cleared on metadata change alongside the other schema-derived caches.
+   */
+  private readonly objectSecurityMetaCache = new Map<string, { isPrivate: boolean; tenancyDisabled: boolean; requiredPermissions: string[] }>();
   private dbLoader?: (names: string[]) => Promise<PermissionSet[]>;
   private logger: { info?: (...a: any[]) => void; warn?: (...a: any[]) => void; error?: (...a: any[]) => void } = {};
 
@@ -224,6 +231,7 @@ export class SecurityPlugin implements Plugin {
         this.fieldNamesCache.clear();
         this.tenancyDisabledCache.clear();
         this.cbpRelCache.clear();
+        this.objectSecurityMetaCache.clear();
       });
     }
 
@@ -366,12 +374,43 @@ export class SecurityPlugin implements Plugin {
         );
       }
 
+      // [ADR-0066 D2/D3] Resolve the object's security posture (private flag,
+      // platform-global flag, capability contract) once for the checks below.
+      const secMeta =
+        permissionSets.length > 0
+          ? await this.getObjectSecurityMeta(opCtx.object)
+          : { isPrivate: false, tenancyDisabled: false, requiredPermissions: [] as string[] };
+
+      // 1.5. [ADR-0066 D3] requiredPermissions AND-gate — a capability
+      //      prerequisite checked BEFORE the CRUD grant (ADR §Precedence): a
+      //      caller missing any required capability is denied regardless of how
+      //      permissive their grants are.
+      if (permissionSets.length > 0 && secMeta.requiredPermissions.length > 0) {
+        const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+        const missing = secMeta.requiredPermissions.filter((cap) => !held.has(cap));
+        if (missing.length > 0) {
+          throw new PermissionDeniedError(
+            `[Security] Access denied: '${opCtx.object}' requires capability ` +
+              `[${secMeta.requiredPermissions.join(', ')}] — caller is missing [${missing.join(', ')}]`,
+            {
+              operation: opCtx.operation,
+              object: opCtx.object,
+              roles,
+              permissionSets: explicitPermissionSets,
+              requiredPermissions: secMeta.requiredPermissions,
+              missingPermissions: missing,
+            },
+          );
+        }
+      }
+
       // 2. CRUD permission check
       if (permissionSets.length > 0) {
         const allowed = this.permissionEvaluator.checkObjectPermission(
           opCtx.operation,
           opCtx.object,
-          permissionSets
+          permissionSets,
+          { isPrivate: secMeta.isPrivate },
         );
 
         if (!allowed) {
@@ -390,9 +429,9 @@ export class SecurityPlugin implements Plugin {
       if (permissionSets.length > 0) {
         const sc: any = opCtx.context;
         if (['find', 'findOne', 'count', 'aggregate'].includes(opCtx.operation)) {
-          sc.__readScope = this.permissionEvaluator.getEffectiveScope('read', opCtx.object, permissionSets);
+          sc.__readScope = this.permissionEvaluator.getEffectiveScope('read', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
         } else if (opCtx.operation === 'update' || opCtx.operation === 'delete') {
-          sc.__writeScope = this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets);
+          sc.__writeScope = this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
         }
       }
 
@@ -913,6 +952,21 @@ export class SecurityPlugin implements Plugin {
     operation: string,
     context: any,
   ): Promise<Record<string, unknown> | null> {
+    // [ADR-0066 ①] Posture-gated super-user RLS bypass. On a `private` or
+    // platform-global object, a caller with the super-user bypass bit
+    // (viewAllRecords for reads, modifyAllRecords for writes) skips wildcard RLS
+    // entirely — so a platform admin (incl. one who is also an org admin whose
+    // tenant_isolation would otherwise narrow the result) sees all rows. The
+    // posture gate ensures this never grants cross-tenant visibility on ordinary
+    // tenant business objects.
+    const meta = await this.getObjectSecurityMeta(object);
+    if (meta.isPrivate || meta.tenancyDisabled) {
+      const isWrite = operation === 'insert' || operation === 'update' || operation === 'delete';
+      const bypass = isWrite
+        ? this.permissionEvaluator.hasSuperuserWriteBypass(object, permissionSets, { isPrivate: meta.isPrivate })
+        : this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate });
+      if (bypass) return null;
+    }
     const allRlsPolicies = this.collectRLSPolicies(permissionSets, object, operation);
     if (allRlsPolicies.length === 0) return null;
     // Field-existence safety: wildcard policies (`object: '*'`) target fields
@@ -957,6 +1011,15 @@ export class SecurityPlugin implements Plugin {
     operation: string,
     context: any,
   ): Promise<Record<string, unknown> | null> {
+    // [ADR-0066 ①] modifyAllRecords bypasses write-side RLS (incl. the post-image
+    // check) on private/platform-global objects.
+    const meta = await this.getObjectSecurityMeta(object);
+    if (
+      (meta.isPrivate || meta.tenancyDisabled) &&
+      this.permissionEvaluator.hasSuperuserWriteBypass(object, permissionSets, { isPrivate: meta.isPrivate })
+    ) {
+      return null;
+    }
     const withCheck = this.collectRLSPolicies(permissionSets, object, operation).filter(
       (p) => typeof (p as { check?: string }).check === 'string' && (p as { check?: string }).check!.trim() !== '',
     );
@@ -1148,6 +1211,35 @@ export class SecurityPlugin implements Plugin {
     }
 
     return this.rlsCompiler.getApplicablePolicies(objectName, operation, allPolicies);
+  }
+
+  /**
+   * [ADR-0066 D2/D3] Resolve and cache the object's security posture: whether it
+   * is `private` (access.default), platform-global (tenancy disabled), and its
+   * `requiredPermissions` capability contract. Prefers the live ObjectQL schema
+   * (reflects registry-time augmentation) and falls back to the metadata service.
+   * Returns the permissive default when the schema can't be resolved yet (boot) —
+   * the CRUD/RLS checks then behave as pre-0066 and the miss is retried next call.
+   */
+  private async getObjectSecurityMeta(
+    object: string,
+  ): Promise<{ isPrivate: boolean; tenancyDisabled: boolean; requiredPermissions: string[] }> {
+    const cached = this.objectSecurityMetaCache.get(object);
+    if (cached) return cached;
+    let obj: any = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(object) : null;
+    if (!obj) {
+      try { obj = await this.metadata?.get?.('object', object); } catch { obj = null; }
+    }
+    const meta = {
+      isPrivate: (obj as any)?.access?.default === 'private',
+      tenancyDisabled:
+        (obj as any)?.tenancy?.enabled === false || (obj as any)?.systemFields?.tenant === false,
+      requiredPermissions: Array.isArray((obj as any)?.requiredPermissions)
+        ? (obj as any).requiredPermissions.map(String)
+        : [],
+    };
+    if (obj) this.objectSecurityMetaCache.set(object, meta);
+    return meta;
   }
 
   /**

@@ -27,6 +27,30 @@ const OPERATION_TO_PERMISSION: Record<string, keyof ObjectPermission> = {
 const DESTRUCTIVE_OPERATIONS = new Set<string>(['transfer', 'restore', 'purge']);
 
 /**
+ * [ADR-0066 D2] Resolve the object permission a permission set contributes for
+ * `objectName`, honouring the secure-by-default posture:
+ *
+ *  - an EXPLICIT per-object grant (`ps.objects[objectName]`) always applies;
+ *  - the `'*'` wildcard applies to a `public` object (today's allow-by-default);
+ *  - for a `private` object the `'*'` wildcard applies ONLY when it carries the
+ *    super-user bypass bits (`viewAllRecords`/`modifyAllRecords` — the Salesforce
+ *    "View/Modify All Data" power). A plain `'*': {allowRead:true}` does NOT cover
+ *    a private object; access then requires an explicit per-object grant.
+ */
+function resolveObjectPermission(
+  ps: PermissionSet,
+  objectName: string,
+  isPrivate: boolean,
+): ObjectPermission | undefined {
+  const explicit = ps.objects?.[objectName];
+  if (explicit) return explicit;
+  const wild = ps.objects?.['*'];
+  if (!wild) return undefined;
+  if (!isPrivate) return wild;
+  return wild.viewAllRecords || wild.modifyAllRecords ? wild : undefined;
+}
+
+/**
  * PermissionEvaluator
  * 
  * Runtime evaluator for PermissionSet definitions.
@@ -40,7 +64,9 @@ export class PermissionEvaluator {
   checkObjectPermission(
     operation: string,
     objectName: string,
-    permissionSets: PermissionSet[]
+    permissionSets: PermissionSet[],
+    /** [ADR-0066 D2] When the object is `private`, the `'*'` wildcard only covers it if it is a super-user grant. */
+    opts: { isPrivate?: boolean } = {},
   ): boolean {
     const permKey = OPERATION_TO_PERMISSION[operation];
     if (!permKey) {
@@ -51,10 +77,10 @@ export class PermissionEvaluator {
     }
 
     for (const ps of permissionSets) {
-      // Honour the `'*'` wildcard sentinel — admin permission sets typically
-      // grant blanket access via a single `objects: { '*': … }` entry rather
-      // than enumerating every system object.
-      const objPerm = ps.objects?.[objectName] ?? ps.objects?.['*'];
+      // [ADR-0066 D2] Honour the `'*'` wildcard sentinel — admin permission
+      // sets grant blanket access via a single `objects: { '*': … }` entry —
+      // but a `private` object is excluded from a non-super-user wildcard.
+      const objPerm = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
       if (objPerm) {
         // Check if modifyAllRecords is set (super-user bypass for write ops)
         if (['allowEdit', 'allowDelete'].includes(permKey) && objPerm.modifyAllRecords) {
@@ -87,13 +113,14 @@ export class PermissionEvaluator {
     opClass: 'read' | 'write',
     objectName: string,
     permissionSets: PermissionSet[],
+    opts: { isPrivate?: boolean } = {},
   ): 'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' {
     const RANK = { own: 0, own_and_reports: 1, unit: 2, unit_and_below: 3, org: 4 } as const;
     const ORDER = ['own', 'own_and_reports', 'unit', 'unit_and_below', 'org'] as const;
     let widest = -1;
     let matched = false;
     for (const ps of permissionSets) {
-      const op: any = ps.objects?.[objectName] ?? ps.objects?.['*'];
+      const op: any = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
       if (!op) continue;
       matched = true;
       if (opClass === 'read' && (op.viewAllRecords || op.modifyAllRecords)) return 'org';
@@ -104,6 +131,51 @@ export class PermissionEvaluator {
     }
     if (!matched) return 'org';
     return ORDER[widest < 0 ? 0 : widest];
+  }
+
+  /**
+   * [ADR-0066 D3] Union of `systemPermissions` (capabilities) the caller holds
+   * across the resolved permission sets — used to enforce a resource's
+   * `requiredPermissions` AND-gate.
+   */
+  getSystemPermissions(permissionSets: PermissionSet[]): Set<string> {
+    const out = new Set<string>();
+    for (const ps of permissionSets) {
+      for (const cap of ps.systemPermissions ?? []) out.add(cap);
+    }
+    return out;
+  }
+
+  /**
+   * [ADR-0066 D2 / ①] Does any resolved set grant the super-user READ bypass
+   * (`viewAllRecords`/`modifyAllRecords`, the "View All Data" power) for the
+   * object? Honours the private posture (see {@link resolveObjectPermission}).
+   * The security plugin uses this to skip wildcard RLS on private/platform-global
+   * objects so a platform admin sees all rows.
+   */
+  hasSuperuserReadBypass(
+    objectName: string,
+    permissionSets: PermissionSet[],
+    opts: { isPrivate?: boolean } = {},
+  ): boolean {
+    for (const ps of permissionSets) {
+      const op = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
+      if (op && (op.viewAllRecords || op.modifyAllRecords)) return true;
+    }
+    return false;
+  }
+
+  /** [ADR-0066 D2 / ①] Super-user WRITE bypass (`modifyAllRecords`) for the object. */
+  hasSuperuserWriteBypass(
+    objectName: string,
+    permissionSets: PermissionSet[],
+    opts: { isPrivate?: boolean } = {},
+  ): boolean {
+    for (const ps of permissionSets) {
+      const op = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
+      if (op && op.modifyAllRecords) return true;
+    }
+    return false;
   }
 
   /**

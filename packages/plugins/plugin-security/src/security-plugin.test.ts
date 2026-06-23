@@ -390,6 +390,102 @@ describe('SecurityPlugin', () => {
   });
 
   // -------------------------------------------------------------------------
+  // ADR-0066 D2/D3 — private posture + requiredPermissions (full middleware)
+  // -------------------------------------------------------------------------
+  describe('ADR-0066 private posture + requiredPermissions (middleware)', () => {
+    const memberSet: PermissionSet = {
+      name: 'member_default', label: 'Member', isProfile: true,
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    } as any;
+    // Platform super-admin: super-user wildcard + the capability + a tenant_isolation
+    // RLS policy (to prove the posture-gated bypass actually short-circuits it).
+    const adminSet: PermissionSet = {
+      name: 'admin_full_access', label: 'Admin', isProfile: true,
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true } },
+      systemPermissions: ['manage_platform_settings'],
+      rowLevelSecurity: [
+        { name: 'tenant_isolation', object: '*', operation: 'all', using: 'organization_id = current_user.organization_id' },
+      ],
+    } as any;
+
+    it('DENIES a non-admin (plain wildcard) on a private object — wildcard does not cover it', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [memberSet],
+        objectFields: ['id', 'organization_id', 'signed_token'],
+        schemaExtra: { access: { default: 'private' } },
+        orgScoping: true,
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = {
+        object: 'task', operation: 'find', ast: { where: undefined },
+        context: { userId: 'u1', tenantId: 'org-1', roles: [], permissions: [] },
+      };
+      await expect(harness.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('DENIES a caller missing the required capability (D3 AND-gate)', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [memberSet],
+        objectFields: ['id', 'organization_id', 'signed_token'],
+        schemaExtra: { requiredPermissions: ['manage_platform_settings'] },
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = {
+        object: 'task', operation: 'find', ast: { where: undefined },
+        context: { userId: 'u1', tenantId: 'org-1', roles: [], permissions: [] },
+      };
+      await expect(harness.run(opCtx)).rejects.toMatchObject({
+        name: 'PermissionDeniedError',
+        message: expect.stringContaining('requires capability'),
+      });
+    });
+
+    it('ALLOWS the platform admin and BYPASSES wildcard RLS on a private object (read)', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'admin_full_access' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [adminSet],
+        objectFields: ['id', 'organization_id', 'signed_token'],
+        schemaExtra: { access: { default: 'private' }, requiredPermissions: ['manage_platform_settings'] },
+        orgScoping: true,
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = {
+        object: 'task', operation: 'find', ast: { where: undefined },
+        context: { userId: 'admin', tenantId: 'org-1', roles: ['admin_full_access'], permissions: [] },
+      };
+      await expect(harness.run(opCtx)).resolves.toBeDefined();
+      // Without the bypass this would be { organization_id: 'org-1' } and the
+      // platform admin would miss null-/cross-org rows (the sys_license bug).
+      expect(opCtx.ast.where).toBeUndefined();
+    });
+
+    it('BYPASSES the write pre-image check for a modifyAll admin on a private object', async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'admin_full_access' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [adminSet],
+        objectFields: ['id', 'organization_id', 'signed_token'],
+        schemaExtra: { access: { default: 'private' }, requiredPermissions: ['manage_platform_settings'] },
+        orgScoping: true,
+        findOneImpl: () => null, // would DENY if the pre-image check ran
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = {
+        object: 'task', operation: 'update',
+        data: { id: 'r1', signed_token: 'x' }, options: { where: { id: 'r1' } },
+        context: { userId: 'admin', tenantId: 'org-1', roles: ['admin_full_access'], permissions: [] },
+      };
+      await expect(harness.run(opCtx)).resolves.toBeDefined();
+      expect(harness.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // getReadFilter service (ADR-0021 D-C) — the reusable READ scope the
   // analytics raw-SQL path bridges to. Must produce the SAME FilterCondition
   // the engine middleware injects on `find`, and fail CLOSED on any error.
@@ -888,6 +984,63 @@ describe('PermissionEvaluator', () => {
       'admin_full_access',
       'export_reports',
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PermissionEvaluator — ADR-0066 D2 (private posture) + D3 (capabilities)
+// ---------------------------------------------------------------------------
+describe('PermissionEvaluator — ADR-0066 posture + capabilities', () => {
+  const ps = (name: string, objects: PermissionSet['objects'] = {}, systemPermissions?: string[]): PermissionSet =>
+    ({ name, objects, ...(systemPermissions ? { systemPermissions } : {}) });
+  const plainWildcard = ps('member', { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } });
+  const superWildcard = ps('admin', { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true } });
+  const explicitGrant = ps('license_reader', { sys_license: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false } });
+
+  it('private object is NOT covered by a plain (non-superuser) wildcard', () => {
+    const ev = new PermissionEvaluator();
+    expect(ev.checkObjectPermission('find', 'sys_license', [plainWildcard], { isPrivate: true })).toBe(false);
+    // ...but a public object still is (today's allow-by-default).
+    expect(ev.checkObjectPermission('find', 'crm_account', [plainWildcard])).toBe(true);
+    expect(ev.checkObjectPermission('find', 'crm_account', [plainWildcard], { isPrivate: false })).toBe(true);
+  });
+
+  it('private object IS covered by a super-user wildcard (View/Modify All Data)', () => {
+    const ev = new PermissionEvaluator();
+    expect(ev.checkObjectPermission('find', 'sys_license', [superWildcard], { isPrivate: true })).toBe(true);
+    expect(ev.checkObjectPermission('insert', 'sys_license', [superWildcard], { isPrivate: true })).toBe(true);
+    expect(ev.checkObjectPermission('update', 'sys_license', [superWildcard], { isPrivate: true })).toBe(true);
+  });
+
+  it('private object IS covered by an explicit per-object grant (no superuser bit needed)', () => {
+    const ev = new PermissionEvaluator();
+    expect(ev.checkObjectPermission('find', 'sys_license', [explicitGrant], { isPrivate: true })).toBe(true);
+    expect(ev.checkObjectPermission('update', 'sys_license', [explicitGrant], { isPrivate: true })).toBe(false);
+  });
+
+  it('getSystemPermissions unions capabilities across sets', () => {
+    const ev = new PermissionEvaluator();
+    const a = ps('a', {}, ['manage_users', 'export_data']);
+    const b = ps('b', {}, ['export_data', 'manage_platform_settings']);
+    expect([...ev.getSystemPermissions([a, b])].sort()).toEqual(['export_data', 'manage_platform_settings', 'manage_users']);
+    expect([...ev.getSystemPermissions([plainWildcard])]).toEqual([]);
+  });
+
+  it('hasSuperuserReadBypass honours the private posture', () => {
+    const ev = new PermissionEvaluator();
+    // plain wildcard: bypasses on a public object, NOT on a private one.
+    expect(ev.hasSuperuserReadBypass('crm_account', [plainWildcard], { isPrivate: false })).toBe(false); // no viewAll bit
+    expect(ev.hasSuperuserReadBypass('sys_license', [superWildcard], { isPrivate: true })).toBe(true);
+    expect(ev.hasSuperuserReadBypass('sys_license', [plainWildcard], { isPrivate: true })).toBe(false);
+    // explicit grant without viewAll → no read bypass.
+    expect(ev.hasSuperuserReadBypass('sys_license', [explicitGrant], { isPrivate: true })).toBe(false);
+  });
+
+  it('hasSuperuserWriteBypass requires modifyAllRecords', () => {
+    const ev = new PermissionEvaluator();
+    const viewOnly = ps('vo', { '*': { allowRead: true, viewAllRecords: true } });
+    expect(ev.hasSuperuserWriteBypass('sys_license', [superWildcard], { isPrivate: true })).toBe(true);
+    expect(ev.hasSuperuserWriteBypass('sys_license', [viewOnly], { isPrivate: true })).toBe(false);
   });
 });
 
