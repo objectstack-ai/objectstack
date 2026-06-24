@@ -3162,41 +3162,36 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     }
 
     /**
-     * True when `packageId` refers to a **loaded code package** — one that
-     * booted and registered a manifest (and typically objects/apps) into the
-     * engine. Such packages are read-only artifacts; runtime-authored items
-     * must not be bound to them (see {@link saveMetaItem}).
+     * True when `packageId` is a **writable base** — a DB-backed package an
+     * org or the AI may author *new* metadata into (ADR-0070 D2). The two
+     * read-only kinds return `false`:
      *
-     * A bare ADR-0048 *authoring-workspace* package id (no booted manifest,
-     * no registered metadata) returns `false`, so per-package authoring scope
-     * is preserved. Reads the engine's manifest map first (authoritative,
-     * O(1) — every `registerApp` call records the manifest there), then falls
-     * back to "owns ≥1 registered object" for defense in depth.
+     *   • **Booted code packages** — they register a manifest into the engine
+     *     at startup (`registerApp` → `engine.manifests`); their items are
+     *     code-shipped artifacts. Only `allowOrgOverride` overlays are allowed
+     *     (ADR-0005), never fresh authored items.
+     *   • **Installed / platform packages** — manifest `scope` is `system` or
+     *     `cloud` (marketplace / platform-delivered).
+     *
+     * A project-scoped DB package, or a bare ADR-0048 *authoring-workspace* id
+     * with no registered manifest, is writable.
+     *
+     * NOTE: the code-package signal is the engine manifest map ONLY — we
+     * deliberately do NOT fall back to "owns ≥1 registered object" (the old
+     * `isLoadedPackage` heuristic). A writable base accrues registered objects
+     * once its drafts publish, and that must never flip the base to read-only
+     * — that is the exact #2252 read-only-after-publish trap this ADR removes.
      */
-    private isLoadedPackage(packageId: string): boolean {
+    private isWritablePackage(packageId: string | null | undefined): boolean {
+        if (!packageId) return false;
         const engine = this.engine as any;
-        if (engine?.manifests?.has?.(packageId)) return true;
-        const registry = engine?.registry;
-        if (!registry) return false;
-        try {
-            // Objects contributed by the package (real data packages).
-            if (typeof registry.getAllObjects === 'function'
-                && registry.getAllObjects(packageId).length > 0) {
-                return true;
-            }
-            // UI / logic metadata bound to the package id. ADR-0048 — a code
-            // package registers its app via `registerApp(app, packageId)`, so
-            // the app item's `_packageId` is the package id; UI-only packages
-            // (no objects) are still detected here.
-            if (typeof registry.listItems === 'function') {
-                for (const t of ['app', 'view', 'page', 'flow', 'report', 'dashboard', 'agent', 'skill', 'role', 'permission']) {
-                    if (registry.listItems(t, packageId).length > 0) return true;
-                }
-            }
-        } catch {
-            // A partial registry (test mocks) → treat as "not loaded".
-        }
-        return false;
+        // Booted code package → read-only artifact source.
+        if (engine?.manifests?.has?.(packageId)) return false;
+        // Installed / platform package → read-only by manifest scope.
+        const scope = engine?.registry?.getPackage?.(packageId)?.manifest?.scope;
+        if (scope === 'system' || scope === 'cloud') return false;
+        // Project-scoped base, or unregistered authoring-workspace id → writable.
+        return true;
     }
 
     /**
@@ -3724,39 +3719,38 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             const intent: 'override-artifact' | 'runtime-only' = artifactBacked
                 ? 'override-artifact'
                 : 'runtime-only';
-            // GUARD — a brand-new, DB-only ("runtime-only") metadata item must
-            // not be bound to a *loaded code package*. Studio sends the
-            // currently-selected package via `?package=`; when a user authors a
-            // new object while browsing a code package (e.g. `app.objectstack.hotcrm`),
-            // persisting that id as the new row's `package_id` makes the org
-            // object read back as "provided by a code package" and become
-            // read-only after publish — the user can no longer edit what they
-            // just created. Drop the binding so it is a plain org overlay
-            // (`package_id = null`, editable).
+            // D1 (ADR-0070) — a brand-new, DB-only ("runtime-only") metadata
+            // item MUST resolve to a WRITABLE base. Binding it to a read-only
+            // code/installed package makes it read back as "code-provided" and
+            // lock read-only after publish (the #2252 bug). We used to silently
+            // coerce such a binding to `null`, but that scattered orphans into a
+            // package-less bucket with no container to delete; ADR-0070 replaces
+            // the coercion with an actionable rejection so the authoring surface
+            // (Studio / AI) redirects the user to pick or create a base first.
             //
-            // Two scopes are deliberately left bound:
+            // Left untouched (the binding survives):
             //   • `override-artifact` writes — an org overlay OF a packaged item
-            //     must keep pointing at that package.
-            //   • runtime writes into a package that is NOT loaded as code — an
-            //     ADR-0048 #1824 package *authoring workspace* is a bare id with
-            //     no registered manifest, and per-package scoping must survive.
-            // `isLoadedPackage` distinguishes the two: only a booted code
-            // package has a manifest / registered artifacts.
-            // Mutate `request.packageId` (not a local copy) so every downstream
-            // consumer — the repo write, the parent-version lookup, the live
-            // registry mutation on publish, and the audit record — sees the
-            // coerced value consistently. Coercing only the repo write left the
-            // in-memory object stamped with the code package, so it still read
-            // back as code-provided / read-only.
+            //     must keep pointing at the package it customizes (ADR-0005).
+            //   • a project-scoped base, or a bare ADR-0048 authoring-workspace
+            //     id — both are writable; `isWritablePackage` returns true.
+            // A `null` packageId is still accepted here (legacy org-overlay
+            // destination); ADR-0070 D5 retires it once the surfaces always
+            // resolve a base and the orphan migration has run.
             if (
                 intent === 'runtime-only' &&
                 request.packageId != null &&
-                this.isLoadedPackage(request.packageId)
+                !this.isWritablePackage(request.packageId)
             ) {
-                console.warn(
-                    `[Protocol] dropping package binding '${request.packageId}' from runtime-authored ${singularTypeForRepo}/${request.name} (it belongs to a loaded code package); persisting as an org overlay (package_id = null) so it stays editable.`,
+                const err = new Error(
+                    `[writable_package_required] Cannot author ${singularTypeForRepo}/${request.name} into `
+                    + `'${request.packageId}': it is a read-only code/installed package, not a writable base. `
+                    + `Create or select a writable base (package) first, then retry. `
+                    + `See docs/adr/0070-package-first-authoring.md.`,
                 );
-                request.packageId = null;
+                (err as any).code = 'writable_package_required';
+                (err as any).status = 422;
+                (err as any).packageId = request.packageId;
+                throw err;
             }
             const orgId = request.organizationId ?? null;
             const repo = this.getOverlayRepo(orgId);
