@@ -185,8 +185,15 @@ export const ChartConfigSchema = lazySchema(() => z.object({
   /** Series Configuration */
   series: z.array(ChartSeriesSchema).optional().describe('Defined series configuration'),
   
-  /** Appearance */
-  colors: z.array(z.string()).optional().describe('Color palette'),
+  /** Appearance. Either a positional palette (string[]) applied per category in
+   *  order, or a value→color map ({ value: color }, kanban-style). A value→color
+   *  map — and a select/lookup dimension's option colors — take precedence over
+   *  the positional palette per category, so semantic charts (health, status)
+   *  paint their own colors instead of the generic palette. */
+  colors: z.union([
+    z.array(z.string()),
+    z.record(z.string(), z.string()),
+  ]).optional().describe('Color palette (string[]) or value→color map ({ value: color })'),
   height: z.number().optional().describe('Fixed height in pixels'),
   
   /** Components */
