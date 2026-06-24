@@ -477,6 +477,15 @@ export const FieldSchema = lazySchema(() => z.object({
 
   /** Calculation — CEL formula. Plain string accepted for back-compat; build emits canonical envelope. */
   expression: ExpressionInputSchema.optional().describe('Formula expression (CEL). e.g. F`record.amount * 0.1`'),
+  /**
+   * The value type a `formula` field computes, declared at authoring (the way
+   * Salesforce/Airtable carry a formula's result type). Lets consumers — dataset
+   * measures, display formatting, validation — read a declared type instead of
+   * re-parsing the expression. Authoring stamps it from the inferred CEL type;
+   * absent when the type can't be proven (an ambiguous/`dyn` expression).
+   */
+  returnType: z.enum(['number', 'text', 'boolean', 'date']).optional()
+    .describe('Inferred value type of a formula field (number/text/boolean/date)'),
   summaryOperations: z.object({
     object: z.string().describe('Source child object name for roll-up'),
     field: z.string().describe('Field on child object to aggregate (ignored for count)'),

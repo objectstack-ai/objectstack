@@ -58,6 +58,10 @@
       "evidence": "packages/objectql/src/engine.ts",
       "note": "formula."
     },
+    "returnType": {
+      "status": "live",
+      "note": "declared value type of a formula field, stamped at authoring from the inferred CEL type; read by cloud service-ai-studio dataset-derive for formula measure-eligibility (and display formatting). Derivable from `expression` but cached so consumers needn't re-parse — the Salesforce/Airtable typed-formula-field pattern."
+    },
     "summaryOperations": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts",

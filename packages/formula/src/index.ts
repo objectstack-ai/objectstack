@@ -24,7 +24,7 @@ export type { CelFilterCompileResult, CelFilterCompileOptions, CelFilterFailReas
 export { matchesFilterCondition } from './matches-filter';
 // ADR-0032 — shared validator + introspection (one validator for build,
 // registration, and the agent-callable validate_expression tool).
-export { validateExpression, introspectScope, expectedDialect, CEL_STDLIB_FUNCTIONS } from './validate';
-export type { FieldRole, ExprSchemaHint, ExprValidationError, ExprValidationResult } from './validate';
+export { validateExpression, introspectScope, expectedDialect, inferExpressionType, CEL_STDLIB_FUNCTIONS } from './validate';
+export type { FieldRole, ExprInput, ExprSchemaHint, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
 export type { SeedValue, SeedPrimitive } from './seed-eval';
 export type { DialectEngine, EvalContext, EvalResult, EvalError } from './types';

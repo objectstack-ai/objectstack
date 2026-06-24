@@ -17,7 +17,7 @@
  * This validator detects that specific mistake and returns the exact fix.
  */
 
-import { celEngine, firstUndeclaredReference } from './cel-engine';
+import { celEngine, firstUndeclaredReference, inferCelType } from './cel-engine';
 import { templateEngine } from './template-engine';
 
 export type FieldRole = 'predicate' | 'value' | 'template';
@@ -254,6 +254,49 @@ export function introspectScope(role: FieldRole, schema?: ExprSchemaHint): {
     roots: ['record', 'previous', 'input', 'os', 'vars'],
     functions: CEL_STDLIB_FUNCTIONS,
   };
+}
+
+/**
+ * Coarse value categories a `value`/formula expression can compute. `'unknown'`
+ * means cel-js could not prove a concrete type — either a `dyn` result (an
+ * ambiguous expression over untyped operands) or one that does not type-check.
+ */
+export type InferredValueType = 'number' | 'text' | 'boolean' | 'date' | 'unknown';
+
+/** Map a cel-js type-checker type name onto an ObjectStack field value category. */
+function celTypeToValueType(celType: string | null): InferredValueType {
+  switch (celType) {
+    case 'int':
+    case 'uint':
+    case 'double':
+      return 'number';
+    case 'string':
+      return 'text';
+    case 'bool':
+      return 'boolean';
+    case 'google.protobuf.Timestamp':
+      return 'date';
+    default:
+      // `dyn`, `google.protobuf.Duration`, list/map, null, or un-type-checkable.
+      return 'unknown';
+  }
+}
+
+/**
+ * Infer the coarse value type a `value`/formula expression computes — `'number'`,
+ * `'text'`, `'boolean'`, `'date'`, or `'unknown'` when cel-js cannot prove a
+ * concrete type. `schema.fields` (the host object's field names) are declared so
+ * a bare `<field>` reference resolves the same as `record.<field>`.
+ *
+ * The motivating use is measure-eligibility: a dataset derives a SUM measure for
+ * a `formula` field ONLY when this returns `'number'`, so an ambiguous or
+ * non-numeric formula never yields an incoherent measure. Conservative by
+ * construction — see {@link inferCelType}.
+ */
+export function inferExpressionType(input: ExprInput, schema?: ExprSchemaHint): InferredValueType {
+  const { source } = toSource(input);
+  if (!source.trim()) return 'unknown';
+  return celTypeToValueType(inferCelType(source, schema?.fields));
 }
 
 /**
