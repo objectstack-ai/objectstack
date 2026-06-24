@@ -366,6 +366,7 @@ Field shapes:
 | `bands[].label` | yes | Header text for the band (白班 / 夜班). |
 | `bands[].start` / `bands[].end` | yes | `'HH:mm'`. When `end <= start` the band crosses midnight. Bands must tile the 24h day from `dayStart`. |
 | `bands[].color` | no | Any CSS color. Tints that band's column; **omit for no tint**. |
+| `showMidnight` | no | Draw the dashed calendar-midnight cue inside cross-midnight bands. Default `true`; set `false` to hide it. |
 
 Behavior:
 
@@ -378,7 +379,8 @@ Behavior:
 - **Drag-snaps to band boundaries** (the band duration, e.g. 12h) instead of
   whole days.
 - **Calendar-midnight cue.** A subtle dashed vertical line marks local 0:00
-  *inside* a cross-midnight band — the 排班日 cell itself stays unbroken.
+  *inside* a cross-midnight band — the 排班日 cell itself stays unbroken. Set
+  `showMidnight: false` to turn it off.
 - **Default off = zero regression.** Omit `timeSegments` and the gantt behaves
   exactly as before. Tints render only for bands that declare `color`.
 
