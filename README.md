@@ -101,21 +101,10 @@ From that single schema, ObjectStack compiles a running backend — the database
 
 ## Key Features
 
-- **Built for AI, not retrofitted** — Objects, permissions, flows, APIs, and UI are declarative typed metadata, not hand-written code — small enough for an AI agent to load and safely refactor end-to-end.
-- **Agent-ready metadata** — Business objects, actions, and permissions are explicit enough for AI agents to inspect and use.
-- **Automatic tool surface** — Metadata can power REST APIs, client SDKs, UI views, and MCP tools without redefining each action by hand.
-- **Protocol-first schemas** — All schemas are defined with Zod; TypeScript types are derived via `z.infer<>`.
-- **Versioned JSON artifacts** — TypeScript-authored metadata compiles into deployable, self-describing JSON artifacts.
-- **Microkernel plugin system** — DI container, EventBus, and lifecycle hooks (init -> start -> destroy).
-- **Multi-database support** — In-memory, PostgreSQL, MySQL, SQLite (via the unified SQL driver), and MongoDB. Turso/libSQL is not bundled here — it ships as the separate `@objectstack/driver-turso` package in the cloud repo.
-- **7 framework adapters** — Express, Fastify, Hono, NestJS, Next.js, Nuxt, SvelteKit.
-- **Client SDK + React hooks** — `useQuery`, `useMutation`, `usePagination` out of the box.
-- **Built-in authentication** — [better-auth](https://www.better-auth.com/) via `plugin-auth`.
-- **RBAC / RLS / FLS security** — Role-based, row-level, and field-level access control.
-- **Automation engine** — DAG-based flows, triggers, and workflow management.
-- **AI service** — Agent, Tool, and Skill protocol built on the Vercel AI SDK.
-- **Console UI** — Published ObjectUI console bundle for metadata exploration, schema inspection, API testing, and administration.
-- **CLI toolchain** — `os init`, `os dev`, `os start`, `os serve`, `os validate`, and more.
+- **AI-native, not retrofitted** — Objects, permissions, flows, APIs, and UI are declarative typed metadata, small enough for an agent to load end-to-end. That metadata generates an automatic tool surface — REST APIs, client SDKs, UI views, and an [MCP](packages/mcp) server — so agents inspect and act through the same contracts you defined.
+- **Protocol-first runtime** — Every definition starts as a Zod schema (`z.infer<>` types), compiles into versioned, self-describing JSON artifacts, and runs on a microkernel plugin system (DI container, EventBus, `init → start → destroy` lifecycle).
+- **Data & framework reach** — In-memory, PostgreSQL, MySQL, SQLite, and MongoDB drivers; 7 framework adapters (Express, Fastify, Hono, NestJS, Next.js, Nuxt, SvelteKit); a client SDK with React hooks (`useQuery` / `useMutation` / `usePagination`).
+- **Governance & built-ins** — better-auth, RBAC / RLS / FLS, a DAG-based automation engine, an AI service (Agent / Tool / Skill on the Vercel AI SDK), the ObjectUI Console, and a full CLI (`os init` / `dev` / `compile` / `validate` / …).
 
 ## Why AI-native?
 
@@ -337,33 +326,9 @@ Cloud, package registry, and environment management subcommands (`os publish`, `
 
 ObjectStack uses a **microkernel architecture** where the kernel provides only the essential infrastructure (DI, EventBus, lifecycle), and all capabilities are delivered as plugins. The three protocol layers sit above the kernel:
 
-```
-┌─────────────────────────────────────────────────────┐
-│              ObjectKernel (Core)                     │
-│  ┌───────────────────────────────────────────────┐  │
-│  │  Plugin Lifecycle Manager                     │  │
-│  │  • Dependency Resolution (Topological Sort)   │  │
-│  │  • Init → Start → Destroy Phases              │  │
-│  └───────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────┐  │
-│  │  Service Registry (DI Container)              │  │
-│  │  • registerService(name, service)             │  │
-│  │  • getService<T>(name): T                     │  │
-│  └───────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────┐  │
-│  │  Event Bus (Hook System)                      │  │
-│  │  • hook(name, handler)                        │  │
-│  │  • trigger(name, ...args)                     │  │
-│  └───────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────┘
-              │
-    ┌─────────┴─────────┬──────────┬──────────┐
-    │                   │          │          │
-┌───▼────┐      ┌───────▼──┐   ┌──▼───┐  ┌───▼────┐
-│ObjectQL│      │  Driver  │   │ Hono │  │  App   │
-│ Plugin │      │  Plugin  │   │Server│  │ Plugin │
-└────────┘      └──────────┘   └──────┘  └────────┘
-```
+<p align="center">
+  <img src="docs/screenshots/layers.png" width="900" alt="ObjectStack layered architecture: the ObjectQL data layer, ObjectOS control layer, and ObjectUI view layer sit on a microkernel (plugin lifecycle, service registry / DI, event bus); every capability — drivers, server, auth, security, automation, AI — is a plugin">
+</p>
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the complete design documentation including the plugin lifecycle state machine, dependency graph, and design decisions.
 
@@ -385,6 +350,12 @@ Key standards:
 Full documentation: **[https://docs.objectstack.ai](https://docs.objectstack.ai)**
 
 Run locally: `pnpm docs:dev`
+
+## Community
+
+- ⭐ **Star this repo** if ObjectStack is useful — it helps others find it.
+- 🐛 Questions, bugs, or feature requests → [open an issue](https://github.com/objectstack-ai/framework/issues).
+- 🤝 Want to contribute? See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
