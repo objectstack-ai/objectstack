@@ -283,30 +283,49 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
         return captured;
     }
 
-    it('runtime-only create while a LOADED code package is selected drops the binding (package_id = null)', async () => {
-        // The bug: a brand-new object authored while a loaded code package was
-        // selected in Studio's dropdown got `package_id = <that package>`. The
-        // object is NOT artifact-backed (intent = 'runtime-only') and the
-        // package IS loaded (its manifest is registered), so the binding must
-        // be dropped — otherwise it reads back as code-provided / read-only.
+    it('runtime-only create into a LOADED code package is rejected (writable_package_required)', async () => {
+        // ADR-0070 D1: a brand-new object authored while a loaded code package
+        // is selected must NOT be silently coerced to a package-less orphan
+        // (the old #2252 behaviour) — it is rejected so the authoring surface
+        // redirects the user to pick or create a writable base first.
         const { engine } = makeStubEngine();
         engine.manifests = new Map([['app.objectstack.hotcrm', { id: 'app.objectstack.hotcrm' }]]);
         const inserts = spyInserts(engine);
         const protocol = new ObjectStackProtocolImplementation(engine);
-        const result = await protocol.saveMetaItem({
-            type: 'object',
-            name: 'maint_asset',
-            organizationId: 'org_alpha',
-            packageId: 'app.objectstack.hotcrm', // Studio had a code package selected
-            mode: 'draft',
-            item: { name: 'maint_asset', label: 'Asset', fields: { name: { type: 'text', label: 'Name' } } },
-        });
-        expect(result.success).toBe(true);
-        const create = inserts.find((d) => d.type === 'object' && d.name === 'maint_asset');
-        expect(create).toBeTruthy();
-        // brand-new org object must NOT carry the package binding → stays editable.
-        expect(create!.package_id ?? null).toBeNull();
-        expect(create!.package_id).not.toBe('app.objectstack.hotcrm');
+        await expect(
+            protocol.saveMetaItem({
+                type: 'object',
+                name: 'maint_asset',
+                organizationId: 'org_alpha',
+                packageId: 'app.objectstack.hotcrm', // Studio had a code package selected
+                mode: 'draft',
+                item: { name: 'maint_asset', label: 'Asset', fields: { name: { type: 'text', label: 'Name' } } },
+            }),
+        ).rejects.toMatchObject({ code: 'writable_package_required', status: 422 });
+        // The orphan is never created — nothing was persisted.
+        expect(inserts.find((d) => d.type === 'object' && d.name === 'maint_asset')).toBeUndefined();
+    });
+
+    it('runtime-only create into a system-scoped installed package is rejected', async () => {
+        // ADR-0070 D2: read-only is also detected via manifest scope — an
+        // installed/platform package (scope system|cloud) that is NOT in the
+        // engine manifest map is still not a writable base.
+        const { engine } = makeStubEngine();
+        engine.registry.getPackage = (id: string) =>
+            id === 'platform.core' ? { manifest: { id, scope: 'system' } } : undefined;
+        const inserts = spyInserts(engine);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await expect(
+            protocol.saveMetaItem({
+                type: 'object',
+                name: 'maint_asset',
+                organizationId: 'org_alpha',
+                packageId: 'platform.core',
+                mode: 'draft',
+                item: { name: 'maint_asset', label: 'Asset', fields: { name: { type: 'text', label: 'Name' } } },
+            }),
+        ).rejects.toMatchObject({ code: 'writable_package_required', status: 422 });
+        expect(inserts.find((d) => d.type === 'object' && d.name === 'maint_asset')).toBeUndefined();
     });
 
     it('runtime-only create into a NON-loaded package keeps its binding (ADR-0048 #1824 authoring scope)', async () => {
