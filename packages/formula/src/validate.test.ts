@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateExpression, introspectScope, expectedDialect } from './validate';
+import { validateExpression, introspectScope, expectedDialect, inferExpressionType } from './validate';
 
 describe('validateExpression (ADR-0032)', () => {
   describe('predicates (CEL)', () => {
@@ -163,5 +163,47 @@ describe('validateExpression (ADR-0032)', () => {
       expect(scope.roots).toContain('record');
       expect(scope.functions).toContain('daysFromNow');
     });
+  });
+});
+
+describe('inferExpressionType — coarse value-type of a formula', () => {
+  // The host object's fields, so a bare `<field>` reference resolves the same as
+  // `record.<field>` (a stored formula may be written either way).
+  const fields = ['start_date', 'end_date', 'amount', 'rate', 'first', 'last', 'name', 'items'];
+
+  it('infers number for a computed-number formula (the leave_days repro)', () => {
+    // daysBetween(...): int, int + 1 → int → number. The exact case a "total
+    // leave days" dashboard card needs a SUM measure derived for.
+    expect(inferExpressionType('daysBetween(start_date, end_date) + 1', { fields })).toBe('number');
+    expect(inferExpressionType('daysBetween(record.start_date, record.end_date) + 1')).toBe('number');
+    expect(inferExpressionType('amount * 0.1', { fields })).toBe('number'); // dyn * double → double
+    expect(inferExpressionType('round(amount)', { fields })).toBe('number');
+    expect(inferExpressionType('len(items)', { fields })).toBe('number');
+  });
+
+  it('accepts the canonical Expression envelope as input', () => {
+    expect(inferExpressionType({ dialect: 'cel', source: 'amount * 0.1' }, { fields })).toBe('number');
+  });
+
+  it('infers text / boolean / date for non-numeric formulas', () => {
+    expect(inferExpressionType('upper(name)', { fields })).toBe('text');
+    expect(inferExpressionType('rate >= 0.5', { fields })).toBe('boolean');
+    expect(inferExpressionType('today()')).toBe('date');
+  });
+
+  it('is conservative — an ambiguous (dyn) result is unknown, never number', () => {
+    // `first + last` could be string concatenation OR numeric addition; with two
+    // untyped operands cel-js yields `dyn`, so we must NOT call it a number (else
+    // a dataset would SUM a text formula). This is the safety property.
+    expect(inferExpressionType('first + last', { fields })).toBe('unknown');
+    expect(inferExpressionType('amount + rate', { fields })).toBe('unknown');
+  });
+
+  it('returns unknown for empty, absent, or un-type-checkable expressions', () => {
+    expect(inferExpressionType('')).toBe('unknown');
+    expect(inferExpressionType(null)).toBe('unknown');
+    expect(inferExpressionType(undefined)).toBe('unknown');
+    expect(inferExpressionType('no_such_fn(amount)', { fields })).toBe('unknown'); // no overload
+    expect(inferExpressionType('undeclared_field + 1')).toBe('unknown'); // bare ref, no fields given
   });
 });

@@ -126,6 +126,42 @@ export function firstUndeclaredReference(
   return null;
 }
 
+/**
+ * The result type cel-js's type-checker infers for a `value`/`predicate`
+ * expression — its raw CEL type name (`'int'`, `'double'`, `'string'`, `'bool'`,
+ * `'google.protobuf.Timestamp'`, `'dyn'`, …) — or `null` when the expression does
+ * not type-check. Reuses the SAME record-scoped, stdlib-registered env as
+ * {@link firstUndeclaredReference}: namespace roots (`record`, `previous`, …) are
+ * declared `map` and `knownFields` are declared `dyn`, so both `record.<field>`
+ * and bare `<field>` references resolve while every stdlib call carries its
+ * declared return type.
+ *
+ * Deliberately conservative. A member access (`record.amount`) or a bare field is
+ * `dyn`, and an operator over two `dyn` operands stays `dyn` (cel-js cannot prove
+ * it numeric), so `record.a + record.b` — which could be string concatenation —
+ * infers `dyn`, not a number. A typed literal or a stdlib return DOES pin the
+ * type, so the common computed-number formulas resolve concretely:
+ * `daysBetween(start_date, end_date) + 1` → `int`, `amount * 0.1` → `double`. A
+ * caller keying off a concrete numeric type therefore never mis-classifies an
+ * ambiguous formula.
+ */
+export function inferCelType(source: string, knownFields: readonly string[] = []): string | null {
+  if (typeof source !== 'string' || !source.trim()) return null;
+  try {
+    const env = knownFields.length === 0
+      ? (recordScopeEnv ??= buildScopedEnv([]))
+      : buildScopedEnv(knownFields);
+    const result = env.parse(source).check?.() as
+      | { valid?: boolean; type?: unknown }
+      | undefined;
+    if (!result || result.valid === false) return null;
+    return typeof result.type === 'string' ? result.type : null;
+  } catch {
+    // Parse/other faults mean we cannot prove a type — the conservative `null`.
+    return null;
+  }
+}
+
 /** @deprecated use {@link firstUndeclaredReference} with no fields. */
 export function detectBareReference(source: string): string | null {
   return firstUndeclaredReference(source);
