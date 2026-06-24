@@ -2653,8 +2653,16 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                 etag,
                 lastModified: new Date().toISOString(),
                 cacheControl: {
-                    directives: ['public', 'max-age'],
-                    maxAge: 3600, // 1 hour
+                    // Metadata is invalidated by publish, so freshness must be
+                    // gated by the ETag validator — not a TTL. `no-cache` lets
+                    // clients store the body but forces an `If-None-Match`
+                    // revalidation on every use: a cheap 304 when unchanged,
+                    // fresh fields the instant a publish bumps the ETag. The old
+                    // `max-age=3600` pinned the schema for up to an hour, so the
+                    // AI-build "New" form kept rendering pre-publish fields until
+                    // the TTL lapsed (no revalidation in between). `private` also
+                    // keeps per-tenant metadata out of shared CDN/proxy caches.
+                    directives: ['private', 'no-cache'],
                 },
                 notModified: false,
             };

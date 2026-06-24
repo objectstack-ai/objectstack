@@ -656,6 +656,74 @@ describe('RestServer', () => {
     });
   });
 
+  describe('meta single-item Cache-Control header (cached path)', () => {
+    function getMetaItemRoute(rest: any) {
+      return rest
+        .getRoutes()
+        .find((r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name');
+    }
+    const mockRes = () => ({
+      json: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      header: vi.fn(),
+      send: vi.fn(),
+    });
+    const cacheControlOf = (res: any) =>
+      res.header.mock.calls.find((c: any[]) => c[0] === 'Cache-Control')?.[1];
+
+    it('emits a revalidate-always header (no max-age TTL) for object meta reads', async () => {
+      // Object metadata is invalidated by publish, so the response must force an
+      // ETag revalidation rather than pin a stale schema for up to an hour — the
+      // AI-build "New" form kept showing pre-publish fields under the old
+      // `max-age=3600`. Mirrors the shape protocol.getMetaItemCached now returns.
+      protocol.getMetaItemCached = vi.fn().mockResolvedValue({
+        data: { name: 'lead' },
+        etag: { value: 'abc', weak: false },
+        cacheControl: { directives: ['private', 'no-cache'] },
+        notModified: false,
+      });
+      const rest = new RestServer(server as any, protocol as any);
+      rest.registerRoutes();
+      const route = getMetaItemRoute(rest);
+      expect(route).toBeDefined();
+
+      const res = mockRes();
+      await route!.handler(
+        { params: { type: 'object', name: 'lead' }, query: {}, headers: {} },
+        res,
+      );
+
+      expect(protocol.getMetaItemCached).toHaveBeenCalled();
+      expect(cacheControlOf(res)).toBe('private, no-cache');
+      expect(cacheControlOf(res)).not.toMatch(/max-age/);
+    });
+
+    it('appends max-age once and never the malformed bare-token duplicate', async () => {
+      // Regression guard: a `max-age` placeholder directive in the array plus a
+      // `maxAge` value used to concatenate into `public, max-age, max-age=3600`.
+      // The bare token must be stripped so the header is a single well-formed
+      // `max-age=N`.
+      protocol.getMetaItemCached = vi.fn().mockResolvedValue({
+        data: { name: 'lead' },
+        etag: { value: 'abc', weak: false },
+        cacheControl: { directives: ['public', 'max-age'], maxAge: 3600 },
+        notModified: false,
+      });
+      const rest = new RestServer(server as any, protocol as any);
+      rest.registerRoutes();
+      const route = getMetaItemRoute(rest);
+
+      const res = mockRes();
+      await route!.handler(
+        { params: { type: 'object', name: 'lead' }, query: {}, headers: {} },
+        res,
+      );
+
+      expect(cacheControlOf(res)).toBe('public, max-age=3600');
+      expect(cacheControlOf(res)).not.toContain('max-age,');
+    });
+  });
+
   describe('findData handler expand/populate forwarding', () => {
     function getListRoute(rest: any) {
       const routes = rest.getRoutes();

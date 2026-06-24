@@ -793,6 +793,19 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             });
             expect(second.notModified).toBe(true);
         });
+
+        it('returns a revalidate-always cache-control with no max-age TTL', async () => {
+            // Metadata is invalidated by publish, so freshness must be gated by
+            // the ETag validator — not a TTL. A `max-age` here pinned a stale
+            // schema (e.g. the AI-build "New" form showing pre-publish fields)
+            // for up to an hour with no revalidation in between. `private` also
+            // keeps per-tenant metadata out of shared CDN/proxy caches.
+            const res = await protocol.getMetaItemCached({ type: 'object', name: 'customer' });
+            expect(res.notModified).toBe(false);
+            expect(res.cacheControl?.directives).toEqual(['private', 'no-cache']);
+            expect(res.cacheControl?.maxAge).toBeUndefined();
+            expect(res.cacheControl?.directives).not.toContain('max-age');
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════

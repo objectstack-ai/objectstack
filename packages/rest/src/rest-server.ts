@@ -2328,11 +2328,17 @@ export class RestServer {
                                 res.header('Last-Modified', new Date(result.lastModified).toUTCString());
                             }
                             if (result.cacheControl) {
-                                const directives = result.cacheControl.directives.join(', ');
-                                const maxAge = result.cacheControl.maxAge
-                                    ? `, max-age=${result.cacheControl.maxAge}`
-                                    : '';
-                                res.header('Cache-Control', directives + maxAge);
+                                // `max-age` is a placeholder directive in the
+                                // array; its real value is appended from the
+                                // `maxAge` field. Strip the bare token before
+                                // joining so the two never collide into the
+                                // malformed `public, max-age, max-age=3600`.
+                                const parts: string[] = result.cacheControl.directives
+                                    .filter((d: string) => d !== 'max-age');
+                                if (result.cacheControl.maxAge != null) {
+                                    parts.push(`max-age=${result.cacheControl.maxAge}`);
+                                }
+                                res.header('Cache-Control', parts.join(', '));
                             }
 
                             res.header('Vary', 'Accept-Language');
