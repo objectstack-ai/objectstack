@@ -9,7 +9,7 @@
  * within ObjectStack Studio. Covers:
  * - **Node Shape Registry**: Shape and visual style per FlowNodeAction type
  * - **Canvas Node**: Position, size, and rendering hints for each node on canvas
- * - **Canvas Edge**: Visual properties for sequence flows (normal, default, fault)
+ * - **Canvas Edge**: Visual properties for sequence flows (normal, default, fault, back-edge)
  * - **Flow Builder Config**: Canvas settings, palette, minimap, and toolbar
  *
  * ## Architecture
@@ -132,13 +132,16 @@ export type FlowCanvasNode = z.infer<typeof FlowCanvasNodeSchema>;
 // ─── Canvas Edge ─────────────────────────────────────────────────────
 
 /**
- * Visual style for a sequence flow edge on the canvas.
+ * Visual style for a sequence flow edge on the canvas. The `back` style marks an
+ * ADR-0044 declared back-edge (a `revise` loop's resubmit edge): consumers render
+ * it as a distinct curved/dashed return arc, set apart from forward flow.
  */
 export const FlowCanvasEdgeStyleSchema = lazySchema(() => z.enum([
   'solid',    // Normal sequence flow
   'dashed',   // Default sequence flow (isDefault: true)
   'dotted',   // Conditional edge
   'bold',     // Fault / error edge
+  'back',     // ADR-0044 back-edge (revise loop) — curved dashed return arc
 ]).describe('Edge line style'));
 
 export type FlowCanvasEdgeStyle = z.infer<typeof FlowCanvasEdgeStyleSchema>;

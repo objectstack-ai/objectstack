@@ -128,7 +128,7 @@ describe('FlowCanvasEdgeSchema', () => {
   });
 
   it('should accept all edge styles', () => {
-    const styles = ['solid', 'dashed', 'dotted', 'bold'];
+    const styles = ['solid', 'dashed', 'dotted', 'bold', 'back'];
     styles.forEach(s => {
       expect(FlowCanvasEdgeStyleSchema.parse(s)).toBe(s);
     });
