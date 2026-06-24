@@ -297,6 +297,56 @@ is one diagram a reviewer (or AI) can read end-to-end.
 }
 ```
 
+### Send-back for revision (ADR-0044)
+
+Approval centers also model **send back for revision** (退回修改) — distinct from
+`reject` (terminate) and from a comment thread (which keeps the request pending).
+Send-back is a **flow movement**: the request finalizes as `returned`, the run
+walks a **`revise`** out-edge to a `wait` node where the record unlocks and the
+submitter reworks it, and an explicit *resubmit* re-enters the approval node over
+a **declared back-edge**, opening round N+1 with a fresh approver slate.
+
+```
+approval ──approve──▶ …
+         ──reject───▶ …
+         ──revise───▶ wait (signal; record unlocked, submitter edits)
+                        └──resubmit──[type:'back']──▶ approval   (round N+1)
+```
+
+Three pieces author it:
+
+1. **`revise` out-edge** — a third branch label alongside `approve` / `reject`,
+   targeting an ordinary `wait` node (signal flavour).
+2. **`type: 'back'` resubmit edge** — the edge from the wait node back into the
+   approval node MUST be typed `'back'`. This is the *only* thing that legalizes
+   the cycle: `registerFlow` validates the graph **minus `back` edges** as a DAG,
+   so an **unmarked** cycle is rejected — you opt in, edge by edge. At run time a
+   back-edge traverses normally (it just re-enters the node).
+3. **`maxRevisions`** on the approval `config` (default `3`) — the budget of
+   send-backs per run; exceeding it **auto-rejects** (resumes down the `reject`
+   edge). `maxRevisions: 0` disables send-back, so never pair `0` with a `revise`
+   edge.
+
+```typescript
+{
+  id: 'manager_review', type: 'approval',
+  config: { approvers: [{ type: 'role', value: 'manager' }], lockRecord: true, maxRevisions: 2 },
+},
+{ id: 'wait_revision', type: 'wait', label: 'Awaiting Revision',
+  config: { eventType: 'signal', signalName: 'budget_revision' } },
+// …among the approval's edges…
+{ id: 'rev',  source: 'manager_review', target: 'wait_revision',  label: 'revise' },
+{ id: 'back', source: 'wait_revision',  target: 'manager_review', label: 'resubmit', type: 'back' },
+```
+
+> Two mistakes the compile-time flow lint flags: a `revise` edge whose wait node
+> never loops back (a dead end `registerFlow` accepts but that leaves the
+> submitter nowhere to resubmit), and a resubmit edge left **without**
+> `type: 'back'` (an unmarked cycle `registerFlow` rejects). Resubmit is an
+> explicit verb (`POST /api/v1/approvals/requests/:id/resubmit`), never a
+> record-save. See `examples/app-showcase` → `showcase_budget_approval` for the
+> canonical shape.
+
 ### Re-homing the old process model
 
 If you've seen the pre-ADR-0019 `ApprovalProcess.create({...})` shape, every
