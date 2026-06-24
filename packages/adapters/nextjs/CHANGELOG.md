@@ -1,5 +1,12 @@
 # @objectstack/nextjs
 
+## 10.4.0
+
+### Patch Changes
+
+- Updated dependencies [4d99a5c]
+  - @objectstack/runtime@10.4.0
+
 ## 10.3.0
 
 ### Patch Changes

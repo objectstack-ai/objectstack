@@ -1,5 +1,44 @@
 # @objectstack/service-automation
 
+## 10.4.0
+
+### Patch Changes
+
+- b6a4972: fix(automation): honor the `assignments` wrapper shape on assignment nodes
+
+  The built-in `assignment` node executor set each TOP-LEVEL `config` key as a flow
+  variable. But the surfaces that author these nodes all emit an `assignments`
+  wrapper instead:
+
+  - Studio's visual Assignment editor → `config: { assignments: { <var>: <value> } }`
+  - bundled example flows (app-crm, showcase) → `config: { assignments: [{ variable, value }] }`
+
+  So a node designed in Studio (or any of the shipped examples) silently set a
+  single variable literally named `assignments` to the whole map/array and never
+  set the intended variables — it passed build and no-oped at run time, leaving
+  every downstream reference unresolved.
+
+  The executor now normalizes all three shapes (`assignments` map, `assignments`
+  array of `{ variable | name | key, value }`, and the legacy flat
+  `{ <var>: <value> }`) and interpolates `{var}` templates in the values, matching
+  the CRUD / screen nodes. Adds `logic-nodes.test.ts` covering each shape as a
+  regression guard.
+
+- Updated dependencies [c1a754a]
+- Updated dependencies [6fbe91f]
+- Updated dependencies [715d667]
+- Updated dependencies [ef3ed67]
+- Updated dependencies [7697a0e]
+- Updated dependencies [e7e04f1]
+- Updated dependencies [cfd5ac4]
+- Updated dependencies [2be5c1f]
+- Updated dependencies [8801c02]
+- Updated dependencies [3d04e06]
+- Updated dependencies [4a84c98]
+  - @objectstack/spec@10.4.0
+  - @objectstack/formula@10.4.0
+  - @objectstack/core@10.4.0
+
 ## 10.3.0
 
 ### Patch Changes

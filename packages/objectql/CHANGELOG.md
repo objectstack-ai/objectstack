@@ -1,5 +1,60 @@
 # @objectstack/objectql
 
+## 10.4.0
+
+### Minor Changes
+
+- 4d99a5c: Package-scoped commit history & rollback for AI authoring (ADR-0067)
+
+  Each authoring apply now lands as one revertible **commit** on a package timeline, on top of `sys_metadata_history`:
+
+  - New `sys_metadata_commit` object groups a turn's metadata changes (by `event_seq` range).
+  - `publishPackageDrafts` records each publish as one commit (best-effort) with a per-artifact revert plan and an optional `message` / `aiModel`.
+  - New protocol methods `listCommits`, `revertCommit`, `rollbackToPackageCommit` (reusing `restoreVersion` + delete; a revert is itself an append-only commit).
+  - New REST routes: `GET /packages/:id/commits`, `POST /packages/:id/commits/:commitId/revert`, `POST /packages/:id/rollback`.
+
+### Patch Changes
+
+- 359c0aa: fix(objectql,rest): single-item meta reads must revalidate (no `max-age=3600`)
+
+  `GET /api/v1/meta/object/:name` (and the other single-item meta reads served by
+  the cached path) sent `Cache-Control: public, max-age, max-age=3600`. Two bugs:
+
+  1. **Stale metadata for up to an hour.** Object metadata is invalidated by
+     publish, but a one-hour TTL let browsers (and any CDN/proxy) serve a stale
+     schema _without revalidating_ — e.g. the AI-build "New" create form kept
+     rendering pre-publish fields until the TTL lapsed. The list endpoint
+     `GET /api/v1/meta/object` is uncached, which is why list views updated but
+     single-object reads didn't. `getMetaItemCached` now returns
+     `directives: ['private', 'no-cache']` with no `maxAge`, so the ETag validator
+     (which already changes on publish) gates freshness: a cheap `304` when
+     unchanged, fresh fields the instant a publish bumps the ETag. `private` also
+     keeps per-tenant metadata out of shared caches.
+
+  2. **Malformed header.** The directives array carried a bare `max-age`
+     placeholder _and_ the REST layer appended `max-age=3600` from the `maxAge`
+     field, concatenating into `public, max-age, max-age=3600`. The header builder
+     now strips the bare `max-age` token before appending the real value, so a
+     `maxAge` is emitted once as a well-formed `max-age=N`.
+
+- Updated dependencies [4d99a5c]
+- Updated dependencies [c1a754a]
+- Updated dependencies [6fbe91f]
+- Updated dependencies [715d667]
+- Updated dependencies [ef3ed67]
+- Updated dependencies [7697a0e]
+- Updated dependencies [e7e04f1]
+- Updated dependencies [cfd5ac4]
+- Updated dependencies [2be5c1f]
+- Updated dependencies [8801c02]
+- Updated dependencies [3d04e06]
+- Updated dependencies [4a84c98]
+  - @objectstack/metadata-core@10.4.0
+  - @objectstack/spec@10.4.0
+  - @objectstack/formula@10.4.0
+  - @objectstack/core@10.4.0
+  - @objectstack/types@10.4.0
+
 ## 10.3.0
 
 ### Patch Changes

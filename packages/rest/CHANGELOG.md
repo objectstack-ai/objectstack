@@ -1,5 +1,54 @@
 # @objectstack/rest
 
+## 10.4.0
+
+### Patch Changes
+
+- 359c0aa: fix(objectql,rest): single-item meta reads must revalidate (no `max-age=3600`)
+
+  `GET /api/v1/meta/object/:name` (and the other single-item meta reads served by
+  the cached path) sent `Cache-Control: public, max-age, max-age=3600`. Two bugs:
+
+  1. **Stale metadata for up to an hour.** Object metadata is invalidated by
+     publish, but a one-hour TTL let browsers (and any CDN/proxy) serve a stale
+     schema _without revalidating_ — e.g. the AI-build "New" create form kept
+     rendering pre-publish fields until the TTL lapsed. The list endpoint
+     `GET /api/v1/meta/object` is uncached, which is why list views updated but
+     single-object reads didn't. `getMetaItemCached` now returns
+     `directives: ['private', 'no-cache']` with no `maxAge`, so the ETag validator
+     (which already changes on publish) gates freshness: a cheap `304` when
+     unchanged, fresh fields the instant a publish bumps the ETag. `private` also
+     keeps per-tenant metadata out of shared caches.
+
+  2. **Malformed header.** The directives array carried a bare `max-age`
+     placeholder _and_ the REST layer appended `max-age=3600` from the `maxAge`
+     field, concatenating into `public, max-age, max-age=3600`. The header builder
+     now strips the bare `max-age` token before appending the real value, so a
+     `maxAge` is emitted once as a well-formed `max-age=N`.
+
+- a619a3a: fix(setup): first-run admin polish — pin Company/Localization, gate dashboard widgets by `requiresService`, i18n + settings PUT envelope
+
+  Dogfooding the Setup app as a brand-new system administrator surfaced a cluster of small first-run gaps, now fixed:
+
+  - **platform-objects**: pin **Localization** and **Company** in the Setup sidebar's Configuration group — both are registered `service-settings` manifests (the two lowest-`order` Workspace settings) but were reachable only via the "All Settings" hub. Translate the previously-English nav labels Cloud Connection (云连接), Datasources (数据源) and Capabilities (能力). Tag the System Overview `widget_organizations` KPI with `requiresService: 'org-scoping'`.
+  - **rest**: extend the ADR-0057 D10 server-side visibility gate to **dashboard widgets** — strip widgets whose `requiresService` names an unregistered kernel service (mirrors the existing app-nav gate; `resolveRegisteredServices` now also discovers gates declared on widgets). In a single-tenant runtime this removes the orphan "Organizations" KPI, matching the already-hidden org nav entries.
+  - **service-settings**: add the missing zh `help` strings for the Localization manifest (number/currency/first-day-of-week/fiscal-year fields), and accept the `{ values: { … } }` envelope on `PUT /api/settings/:ns` symmetrically with what `GET` returns.
+
+- Updated dependencies [c1a754a]
+- Updated dependencies [6fbe91f]
+- Updated dependencies [715d667]
+- Updated dependencies [ef3ed67]
+- Updated dependencies [7697a0e]
+- Updated dependencies [e7e04f1]
+- Updated dependencies [cfd5ac4]
+- Updated dependencies [2be5c1f]
+- Updated dependencies [8801c02]
+- Updated dependencies [3d04e06]
+- Updated dependencies [4a84c98]
+  - @objectstack/spec@10.4.0
+  - @objectstack/core@10.4.0
+  - @objectstack/service-package@10.4.0
+
 ## 10.3.0
 
 ### Patch Changes

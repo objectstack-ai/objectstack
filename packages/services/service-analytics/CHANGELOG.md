@@ -1,5 +1,33 @@
 # Changelog — @objectstack/service-analytics
 
+## 10.4.0
+
+### Patch Changes
+
+- 715d667: fix(analytics): qualify base-object columns in joined dataset queries
+
+  A dataset that joins a related object (`include` + a `relationship.field`
+  dimension/measure) emitted BARE base-table columns in SELECT/GROUP BY while the
+  joined columns were alias-qualified. When the base and joined tables share a
+  column name (e.g. both have `status`), the query failed at runtime with
+  "ambiguous column name". `NativeSQLStrategy` now qualifies plain base-column
+  identifiers with the base table when the cube has joins; single-object cubes
+  are unchanged (byte-for-byte identical SQL).
+
+- Updated dependencies [c1a754a]
+- Updated dependencies [6fbe91f]
+- Updated dependencies [715d667]
+- Updated dependencies [ef3ed67]
+- Updated dependencies [7697a0e]
+- Updated dependencies [e7e04f1]
+- Updated dependencies [cfd5ac4]
+- Updated dependencies [2be5c1f]
+- Updated dependencies [8801c02]
+- Updated dependencies [3d04e06]
+- Updated dependencies [4a84c98]
+  - @objectstack/spec@10.4.0
+  - @objectstack/core@10.4.0
+
 ## 10.3.0
 
 ### Patch Changes
