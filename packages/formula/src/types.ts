@@ -30,9 +30,22 @@ export interface EvalContext {
    * Defaults to `UTC` when unset. Calendar-day `date` rendering stays tz-naive.
    */
   timezone?: string;
-  /** Current authenticated subject (hook / action / view contexts). */
+  /**
+   * Current authenticated subject (hook / action / view contexts).
+   *
+   * ADR-0068: the canonical user contract is {@link EvalUser} from
+   * `@objectstack/spec`, surfaced to predicates as `current_user` (aliases
+   * `user`, `ctx.user`). `roles: string[]` is the only canonical role field;
+   * the singular `role` is deprecated (its "overwritten to 'admin' on
+   * promotion" behavior is the footgun ADR-0068 eliminates).
+   */
   user?: {
     id: string;
+    /** CANONICAL (ADR-0068). Scope-resolved role names assigned to the user. */
+    roles?: string[];
+    /** Active organization ID (null = platform / unscoped). */
+    organizationId?: string | null;
+    /** @deprecated ADR-0068 — use {@link roles}. Retained for back-compat only. */
     role?: string;
     email?: string;
     [key: string]: unknown;

@@ -138,3 +138,18 @@ export type {
   PredicateInput,
 } from './shared/expression.zod';
 
+
+// ADR-0068: unified user-context contract (EvalUser) + built-in identity roles.
+export {
+  createEvalUser,
+  mapMembershipRole,
+  EvalUserSchema,
+  BUILTIN_ROLE_NAMES,
+  BUILTIN_ROLE_METADATA,
+  BUILTIN_ROLE_PLATFORM_ADMIN,
+  BUILTIN_ROLE_ORG_OWNER,
+  BUILTIN_ROLE_ORG_ADMIN,
+  BUILTIN_ROLE_ORG_MEMBER,
+  ADMIN_FULL_ACCESS,
+} from './identity/eval-user.zod';
+export type { EvalUser, EvalUserInput, BuiltinRoleName } from './identity/eval-user.zod';

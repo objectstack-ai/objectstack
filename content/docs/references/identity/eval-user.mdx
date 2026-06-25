@@ -1,0 +1,61 @@
+---
+title: Eval User
+description: Eval User protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
+
+EvalUser — the one user-context contract (ADR-0068 D1).
+
+The signed-in user exposed to every predicate surface (server formula, server
+
+RLS, client UI gates) under the canonical variable name `current_user`
+
+(aliases `user`, `ctx.user`) with an **identical shape**. A predicate such as
+
+`current_user.roles.exists(r, r == 'org_admin')` (or
+
+`'org_admin' in current_user.roles`) therefore evaluates identically wherever
+
+it is written.
+
+`roles: string[]` is the **only canonical** role field. Singular `role` is NOT
+
+part of this contract — its legacy "overwritten to 'admin' on promotion"
+
+behavior is the footgun this eliminates.
+
+@see docs/adr/0068-unified-user-context-and-built-in-identity-roles.md
+
+<Callout type="info">
+**Source:** `packages/spec/src/identity/eval-user.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { EvalUser } from '@objectstack/spec/identity';
+import type { EvalUser } from '@objectstack/spec/identity';
+
+// Validate data
+const result = EvalUser.parse(data);
+```
+
+---
+
+## EvalUser
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | User ID |
+| **name** | `string` | optional | Display name |
+| **email** | `string` | optional | Email address |
+| **roles** | `string[]` | ✅ | Canonical role names assigned to the user (scope-resolved) |
+| **isPlatformAdmin** | `boolean` | optional | DERIVED alias of 'platform_admin' in roles. Deprecated. |
+| **organizationId** | `string \| null` | optional | Active organization ID (null = platform/unscoped) |
+
+
+---
+

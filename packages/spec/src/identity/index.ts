@@ -6,3 +6,4 @@ export * from './role.zod';
 export { roleForm } from './role.form';
 export * from './organization.zod';
 export * from './scim.zod';
+export * from './eval-user.zod';

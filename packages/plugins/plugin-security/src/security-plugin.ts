@@ -4,6 +4,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { bootstrapDeclaredRoles } from './bootstrap-declared-roles.js';
+import { bootstrapBuiltinRoles } from './bootstrap-builtin-roles.js';
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { matchesFilterCondition } from '@objectstack/formula';
@@ -718,6 +719,13 @@ export class SecurityPlugin implements Plugin {
           await bootstrapDeclaredRoles(ql, this.metadata, { logger: ctx.logger });
         } catch (e) {
           ctx.logger.warn('[security] declared-role seeding failed', { error: (e as Error).message });
+        }
+        // [ADR-0068 D2] Seed the framework's reserved built-in identity roles
+        // (platform_admin / org_*) so the role catalog is self-describing.
+        try {
+          await bootstrapBuiltinRoles(ql, { logger: ctx.logger });
+        } catch (e) {
+          ctx.logger.warn('[security] built-in role seeding failed', { error: (e as Error).message });
         }
         // [ADR-0066 D1] Back-compat seed the capability registry (sys_capability)
         // from the curated platform set + the default grants' systemPermissions.

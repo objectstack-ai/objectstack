@@ -1319,26 +1319,29 @@ describe('AuthManager', () => {
       expect(result.user.roles).toEqual(['manager']);
     });
 
-    it('keeps stored business roles in roles[] when promoting a platform admin', async () => {
+    it('appends platform_admin to roles[] without overwriting role when promoting a platform admin', async () => {
       const callback = await getSessionCallback(makeDataEngine({ platformAdmin: true }));
       const result = await callback({
         user: { id: 'u-1', email: 'a@b.com', role: 'manager' },
         session: {},
       });
-      // Promotion replaces `role` (existing semantics) but the stored
-      // business role survives in the array.
-      expect(result.user.role).toBe('admin');
-      expect(result.user.roles).toEqual(['manager', 'admin']);
+      // ADR-0068: NO `role:'admin'` overwrite footgun. The deprecated scalar
+      // keeps its stored value; the canonical platform_admin identity is added
+      // to roles[], and isPlatformAdmin is a derived alias.
+      expect(result.user.role).toBe('manager');
+      expect(result.user.roles).toEqual(['manager', 'platform_admin']);
+      expect(result.user.isPlatformAdmin).toBe(true);
     });
 
-    it('does not duplicate admin in roles[] when the stored role already includes it', async () => {
+    it('splits a multi-token stored role and appends platform_admin without duplicates', async () => {
       const callback = await getSessionCallback(makeDataEngine({ platformAdmin: true }));
       const result = await callback({
         user: { id: 'u-1', email: 'a@b.com', role: 'admin,manager' },
         session: {},
       });
-      expect(result.user.role).toBe('admin');
-      expect(result.user.roles).toEqual(['admin', 'manager']);
+      expect(result.user.role).toBe('admin,manager');
+      expect(result.user.roles).toEqual(['admin', 'manager', 'platform_admin']);
+      expect(result.user.isPlatformAdmin).toBe(true);
     });
 
     it('returns the payload untouched when the user has no id', async () => {

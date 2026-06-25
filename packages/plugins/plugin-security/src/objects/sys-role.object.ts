@@ -19,6 +19,10 @@ export const SysRole = ObjectSchema.create({
   managedBy: 'config',
   // ADR-0010 §3.7 — RBAC primitive; tenants may add custom rows
   // (created via UI / API) but the schema itself is locked.
+  // ADR-0068 D3: role-DEFINITION authority follows the isolation boundary.
+  // Framework-reserved built-in roles (platform_admin / org_*) are seeded with
+  // `managed_by = 'system'` and MUST NOT be repurposed by a tenant; ad-hoc role
+  // definitions in a shared cross-tenant kernel namespace are forbidden.
   protection: {
     lock: 'no-overlay',
     reason: 'RBAC schema is platform-defined — see ADR-0010.',
@@ -197,6 +201,16 @@ export const SysRole = ObjectSchema.create({
     }),
 
     // ── System ───────────────────────────────────────────────────
+    // ADR-0068 D2/D3 — provenance of this row. `system` = a framework-reserved
+    // built-in identity role (seeded by bootstrapBuiltinRoles); `config` =
+    // stack-declared; null / `user` = tenant-created. Built-in rows are read-only.
+    managed_by: Field.text({
+      label: 'Managed By',
+      readonly: true,
+      description: 'Provenance: system (built-in) / config (declared) / user (tenant)',
+      group: 'System',
+    }),
+
     id: Field.text({
       label: 'Role ID',
       required: true,

@@ -22,6 +22,11 @@
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
 import { resolveApiKeyPrincipal } from './api-key.js';
+import {
+  mapMembershipRole,
+  BUILTIN_ROLE_PLATFORM_ADMIN,
+  ADMIN_FULL_ACCESS,
+} from '@objectstack/spec';
 
 interface ResolveOptions {
   /** Function returning a service from the active kernel (or undefined). */
@@ -237,7 +242,10 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   for (const m of members) {
     if (m.role && typeof m.role === 'string') {
       // better-auth stores comma-separated roles for multi-role membership.
-      for (const r of m.role.split(',').map((s: string) => s.trim()).filter(Boolean)) {
+      for (const raw of m.role.split(',').map((s: string) => s.trim()).filter(Boolean)) {
+        // ADR-0068 D2: normalize better-auth owner/admin/member to the canonical
+        // org_owner/org_admin/org_member built-in role names.
+        const r = mapMembershipRole(raw);
         if (!ctx.roles!.includes(r)) ctx.roles!.push(r);
       }
     }
@@ -308,6 +316,18 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
       .filter(Boolean),
   );
 
+  // ADR-0068 D2: platform_admin is DERIVED from the UNSCOPED (org_id = null)
+  // admin_full_access grant — the single source of truth. Track which permission
+  // sets came from a null-org USER grant so we can project the built-in role
+  // without trusting any stored boolean flag.
+  const unscopedUserPsIds = new Set<string>(
+    upsRows
+      .filter((r) => ((r.organization_id ?? r.organizationId) ?? null) === null)
+      .map((r) => r.permission_set_id ?? r.permissionSetId)
+      .filter(Boolean),
+  );
+  let hasPlatformAdminGrant = false;
+
   // Resolve role-bound permission sets.
   if (ctx.roles!.length > 0) {
     const roleRows = await tryFind(ql, 'sys_role', { name: { $in: ctx.roles } }, 100);
@@ -346,6 +366,10 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
       if (ps.name && !ctx.permissions!.includes(ps.name)) {
         ctx.permissions!.push(ps.name);
       }
+      // ADR-0068 D2: an UNSCOPED admin_full_access grant => platform admin.
+      if (ps.name === ADMIN_FULL_ACCESS && unscopedUserPsIds.has(ps.id)) {
+        hasPlatformAdminGrant = true;
+      }
       // System permissions may be stored as JSON string in DB rows.
       const sysPerms = typeof ps.system_permissions === 'string'
         ? safeJsonParse(ps.system_permissions, [])
@@ -373,6 +397,12 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     if (Object.keys(mergedTabs).length > 0) {
       ctx.tabPermissions = mergedTabs;
     }
+  }
+
+  // ADR-0068 D2: project the derived platform_admin built-in role (unshift so it
+  // leads the list). roles[] is canonical; isPlatformAdmin is a derived alias.
+  if (hasPlatformAdminGrant && !ctx.roles!.includes(BUILTIN_ROLE_PLATFORM_ADMIN)) {
+    ctx.roles!.unshift(BUILTIN_ROLE_PLATFORM_ADMIN);
   }
 
   // 4. Localization (ADR-0053 Phase 2) — reference timezone + locale resolved

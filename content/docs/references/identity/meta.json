@@ -1,6 +1,7 @@
 {
   "title": "Identity Protocol",
   "pages": [
+    "eval-user",
     "identity",
     "organization",
     "role",

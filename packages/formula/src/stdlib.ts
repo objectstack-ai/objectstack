@@ -14,6 +14,7 @@
 import type { Environment } from '@marcbachmann/cel-js';
 
 import type { EvalContext } from './types';
+import { createEvalUser, type EvalUser } from '@objectstack/spec';
 
 /**
  * Calendar-day parts (y/m/d) of an instant *as seen in a timezone*
@@ -267,6 +268,34 @@ export function registerNumericCoercions(env: Environment): Environment {
 }
 
 /**
+ * Normalize the loosely-typed EvalContext user into the canonical EvalUser
+ * (ADR-0068). `roles` is preferred; a legacy singular `role` is folded in so
+ * existing call sites keep working.
+ */
+function toEvalUser(u: NonNullable<EvalContext['user']>): EvalUser {
+  const legacyRole = typeof u.role === 'string' && u.role ? [u.role] : [];
+  const roles = Array.isArray(u.roles) ? (u.roles as string[]) : [];
+  const canonical = createEvalUser({
+    id: u.id,
+    name: typeof u.name === 'string' ? u.name : undefined,
+    email: typeof u.email === 'string' ? u.email : undefined,
+    roles: [...roles, ...legacyRole],
+    organizationId:
+      typeof u.organizationId === 'string' || u.organizationId === null
+        ? (u.organizationId as string | null)
+        : undefined,
+  });
+  // Back-compat: keep the DEPRECATED singular `role` readable so existing
+  // predicates (`os.user.role`, `current_user.role`) keep resolving during the
+  // ADR-0068 migration window. `roles[]` is the canonical surface; the footgun
+  // ADR-0068 removes is the server-side OVERWRITE of `role`, not read access.
+  if (typeof u.role === 'string' && u.role) {
+    (canonical as EvalUser & { role?: string }).role = u.role;
+  }
+  return canonical;
+}
+
+/**
  * Build the variable scope for a single evaluation. Absent fields are simply
  * not bound — CEL macros (`has(record.foo)`) handle missing-key safely.
  */
@@ -279,7 +308,19 @@ export function buildScope(ctx: EvalContext): Record<string, unknown> {
 
   // Namespaced data — written as `os.user.id`, `os.env`, etc. in CEL.
   const os: Record<string, unknown> = {};
-  if (ctx.user !== undefined) os.user = ctx.user;
+  if (ctx.user !== undefined) {
+    // ADR-0068: one canonical EvalUser under every alias (`current_user`,
+    // `user`, `ctx.user`, `os.user`) — the SAME object, so a predicate
+    // evaluates identically wherever it is authored.
+    const currentUser = toEvalUser(ctx.user);
+    scope.current_user = currentUser;
+    scope.user = currentUser;
+    scope.ctx = {
+      ...(typeof scope.ctx === 'object' && scope.ctx !== null ? scope.ctx : {}),
+      user: currentUser,
+    };
+    os.user = currentUser;
+  }
   if (ctx.org !== undefined) os.org = ctx.org;
   if (ctx.env !== undefined) os.env = ctx.env;
   if (Object.keys(os).length > 0) scope.os = os;

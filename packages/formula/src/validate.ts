@@ -53,6 +53,14 @@ export interface ExprSchemaHint {
    *                    did-you-mean *warning*. (Default.)
    */
   scope?: 'record' | 'flattened';
+  /**
+   * ADR-0068 D4 — the closed catalog of valid role names (built-in + declared).
+   * When supplied, a role-membership predicate testing a role NOT in this set
+   * (e.g. `'org_admni' in current_user.roles`) is flagged as an error. Closes
+   * the AI-hallucination hole where a model invents a plausible-but-nonexistent
+   * role that then silently never matches. Absent => role checks are skipped.
+   */
+  roleCatalog?: readonly string[];
 }
 
 export interface ExprValidationError {
@@ -146,6 +154,46 @@ function levenshtein(a: string, b: string): number {
   return dp[m];
 }
 
+// ADR-0068 D4 — role-membership predicate heads: a role NAME literal used in a
+// membership test against a user subject's `.roles` (or the deprecated singular
+// `.role`). Matched names are validated against the closed role catalog.
+const ROLE_IN_RE = /(['"])([a-z0-9_]+)\1\s+in\s+(?:current_user|user|ctx\.user)\.roles\b/g;
+const ROLE_CONTAINS_RE = /(?:current_user|user|ctx\.user)\.roles\s*\.\s*contains\(\s*(['"])([a-z0-9_]+)\1\s*\)/g;
+const ROLE_EXISTS_RE = /(?:current_user|user|ctx\.user)\.roles\s*\.\s*exists\s*\([^,]*,\s*[^)]*?==\s*(['"])([a-z0-9_]+)\1/g;
+const ROLE_EQ_RE = /(?:current_user|user|ctx\.user)\.role\s*==\s*(['"])([a-z0-9_]+)\1/g;
+
+/**
+ * Flag role-membership predicates referencing a role outside the closed catalog
+ * (ADR-0068 D4 — anti-hallucination). No-op when no `roleCatalog` is supplied.
+ */
+function checkRoleCatalog(
+  source: string,
+  schema: ExprSchemaHint | undefined,
+  errors: ExprValidationError[],
+): void {
+  const catalog = schema?.roleCatalog;
+  if (!catalog || catalog.length === 0) return;
+  const known = new Set(catalog);
+  const seen = new Set<string>();
+  for (const re of [ROLE_IN_RE, ROLE_CONTAINS_RE, ROLE_EXISTS_RE, ROLE_EQ_RE]) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(source)) !== null) {
+      const name = m[2];
+      if (known.has(name) || seen.has(name)) continue;
+      seen.add(name);
+      const suggestion = nearest(name, catalog);
+      errors.push({
+        source,
+        message:
+          `unknown role \`${name}\` — not a defined role` +
+          (suggestion ? `; did you mean \`${suggestion}\`?` : '.') +
+          ` Valid roles: ${catalog.join(', ')}.`,
+      });
+    }
+  }
+}
+
 /**
  * Validate one expression for a given field role. Never throws — returns a
  * structured result. Call sites decide whether to throw (build/registration)
@@ -194,6 +242,7 @@ export function validateExpression(
     });
   } else {
     checkFieldExistence(source, schema, errors);
+    checkRoleCatalog(source, schema, errors);
     if (schema?.scope === 'record') {
       // In a `record`-scoped site a bare top-level identifier is a silent bug —
       // it must be `record.<field>` (#1928). Hard error.
@@ -246,12 +295,14 @@ export function introspectScope(role: FieldRole, schema?: ExprSchemaHint): {
   dialect: 'cel' | 'template';
   fields: string[];
   roots: string[];
+  roles: string[];
   functions: string[];
 } {
   return {
     dialect: expectedDialect(role),
     fields: [...(schema?.fields ?? [])],
-    roots: ['record', 'previous', 'input', 'os', 'vars'],
+    roots: ['record', 'previous', 'input', 'os', 'current_user', 'user', 'vars'],
+    roles: [...(schema?.roleCatalog ?? [])],
     functions: CEL_STDLIB_FUNCTIONS,
   };
 }

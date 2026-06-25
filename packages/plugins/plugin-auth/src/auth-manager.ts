@@ -13,6 +13,7 @@ import type {
 import type { IDataEngine } from '@objectstack/core';
 import type { IEmailService } from '@objectstack/spec/contracts';
 import { readEnvWithDeprecation } from '@objectstack/types';
+import { mapMembershipRole, BUILTIN_ROLE_PLATFORM_ADMIN } from '@objectstack/spec';
 import { createObjectQLAdapterFactory } from './objectql-adapter.js';
 import {
   AUTH_USER_CONFIG,
@@ -967,10 +968,10 @@ export class AuthManager {
     //      `admin`. Org owners/admins are entitled to manage org-scoped
     //      metadata such as saved list views, dashboards, etc.
     //
-    // Either path synthesizes `user.role = 'admin'` so the frontend can gate
-    // metadata-edit affordances uniformly. The raw membership role remains
-    // available via the `organization` plugin's `member` payload for
-    // finer-grained checks.
+    // ADR-0068 D2: rather than synthesizing `user.role = 'admin'`, both paths now
+    // contribute CANONICAL role names to `user.roles` (platform_admin / org_*),
+    // and `user.isPlatformAdmin` is a derived alias. The raw membership role
+    // remains available via the `organization` plugin's `member` payload.
     const dataEngine = this.config.dataEngine;
     if (dataEngine) {
       const { customSession } = await import('better-auth/plugins/custom-session');
@@ -1000,37 +1001,42 @@ export class AuthManager {
           }
         };
 
-        const isActiveOrgAdmin = async (): Promise<boolean> => {
+        // ADR-0068 D2 — surface CANONICAL org_* role names (not a boolean flag):
+        // a membership owner/admin/member maps to org_owner/org_admin/org_member.
+        const activeOrgRoles = async (): Promise<string[]> => {
           try {
             const orgId = (session as any)?.activeOrganizationId;
-            if (!orgId) return false;
+            if (!orgId) return [];
             const members = await dataEngine.find('sys_member', {
               where: { user_id: user.id, organization_id: orgId },
               limit: 5,
             });
-            return (Array.isArray(members) ? members : []).some((m: any) => {
-              // better-auth org plugin stores roles as either a single string
-              // or a comma-separated list (e.g. `"owner,admin"`). Treat any
-              // membership that includes `owner` or `admin` as administrative.
+            const out: string[] = [];
+            for (const m of (Array.isArray(members) ? members : [])) {
               const raw = typeof m?.role === 'string' ? m.role : '';
-              const roles = raw.split(',').map((s: string) => s.trim().toLowerCase());
-              return roles.includes('owner') || roles.includes('admin');
-            });
+              for (const r of raw.split(',').map((s: string) => s.trim()).filter(Boolean)) {
+                const mapped = mapMembershipRole(r);
+                if (!out.includes(mapped)) out.push(mapped);
+              }
+            }
+            return out;
           } catch {
-            return false;
+            return [];
           }
         };
 
+        // ADR-0068 D1/D2 — emit ONE canonical roles[] (identities-as-roles), with
+        // NO `role:'admin'` overwrite. isPlatformAdmin is a DERIVED alias of
+        // `'platform_admin' in roles`, retained for back-compat clients.
         const platformAdmin = await isPlatformAdmin();
-        const promote = platformAdmin || (await isActiveOrgAdmin());
+        const orgRoles = await activeOrgRoles();
         const storedRole = typeof (user as any).role === 'string' ? (user as any).role : '';
-        const roles = storedRole
-          .split(',')
-          .map((s: string) => s.trim())
-          .filter(Boolean);
-        if (promote && !roles.includes('admin')) roles.push('admin');
-        if (!promote) return { user: { ...user, roles, isPlatformAdmin: platformAdmin }, session };
-        return { user: { ...user, role: 'admin', roles, isPlatformAdmin: platformAdmin }, session };
+        const roles = Array.from(new Set([
+          ...storedRole.split(',').map((s: string) => s.trim()).filter(Boolean),
+          ...orgRoles,
+          ...(platformAdmin ? [BUILTIN_ROLE_PLATFORM_ADMIN] : []),
+        ]));
+        return { user: { ...user, roles, isPlatformAdmin: platformAdmin }, session };
       }));
     }
 
