@@ -608,9 +608,16 @@ export class AuthPlugin implements Plugin {
     // Register /config before the wildcard so it takes precedence.
     // better-auth has no /config endpoint, so without this explicit route
     // the wildcard below forwards the request and better-auth returns 404.
-    rawApp.get(`${basePath}/config`, (c: any) => {
+    rawApp.get(`${basePath}/config`, async (c: any) => {
       try {
         const config = this.authManager!.getPublicConfig();
+        // Refine the coarse "SSO wired" flag to "SSO usable" (≥1 provider
+        // configured) so the login UI also hides the "Sign in with SSO" button
+        // when SSO is enabled but no IdP exists yet — not just when it's off.
+        // Only queries when wired; falls open on any error (see isSsoUsable).
+        if (config.features?.sso) {
+          config.features.sso = await this.authManager!.isSsoUsable();
+        }
         return c.json({ success: true, data: config });
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
