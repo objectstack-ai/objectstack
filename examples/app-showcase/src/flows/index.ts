@@ -883,6 +883,10 @@ export const InvoiceDualSignoffFlow = defineFlow({
   label: 'Invoice Dual Sign-off (parallel approval)',
   description: 'On send, requires finance AND legal to both approve via one aggregating approval node — demonstrates parallel approvals without a token tree (ADR-0039 Track A).',
   type: 'autolaunched',
+  // The revert-on-reject write is an approval-process outcome, not an act of the
+  // submitter — run it as the system principal so it lands regardless of whether
+  // the submitter still has edit rights on a "sent" invoice (#1888 runAs enforced).
+  runAs: 'system',
   nodes: [
     {
       id: 'start',
@@ -1160,6 +1164,11 @@ export const InboundTaskWebhookFlow = defineFlow({
   label: 'Inbound Task Webhook',
   description: 'Creates a task from an external system via the HMAC-verified inbound hook.',
   type: 'api',
+  // An inbound webhook has no authenticated user, so the create must run as the
+  // system principal (#1888 runAs is now enforced). Without this it relies on the
+  // "no identity → security-skipped" fall-through, which breaks the moment the
+  // target object carries row-level security.
+  runAs: 'system',
   nodes: [
     {
       id: 'start',
