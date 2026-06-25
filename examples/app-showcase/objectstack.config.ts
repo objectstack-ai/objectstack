@@ -28,7 +28,6 @@ import { allWebhooks } from './src/webhooks/index.js';
 import { allHooks } from './src/hooks/index.js';
 import { allJobs } from './src/jobs/index.js';
 import { allEmails } from './src/emails/index.js';
-import { ShowcaseAssistantAgent, ProjectOpsSkill, allTools } from './src/agents/index.js';
 import { allBooks } from './src/books/index.js';
 import {
   allRoles,
@@ -176,11 +175,6 @@ export default defineStack({
   permissions: allPermissionSets,
   sharingRules: allSharingRules,
   policies: allPolicies,
-
-  // AI
-  agents: [ShowcaseAssistantAgent],
-  skills: [ProjectOpsSkill],
-  tools: allTools,
 
   // Seed data
   data: ShowcaseSeedData,
