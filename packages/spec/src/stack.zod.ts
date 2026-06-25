@@ -359,6 +359,13 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   requires: z.array(z.string()).optional().describe('Capability names this stack requires from the platform'),
 
   /**
+   * Plugin tier presets to auto-register (e.g. `core`, `ai`, `ui`, `auth`).
+   * Overrides the `--preset` flag; omit to use the preset default. Set a list
+   * WITHOUT `ai` to run without the AI service (Community-Edition deployments).
+   */
+  tiers: z.array(z.string()).optional().describe('Plugin tier presets to enable; overrides --preset'),
+
+  /**
    * DevPlugins: Development Capabilities
    * List of plugins to load ONLY in development environment.
    * Equivalent to `devDependencies` in package.json.

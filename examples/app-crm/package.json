@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@objectstack/runtime": "workspace:*",
+    "@objectstack/service-ai": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {

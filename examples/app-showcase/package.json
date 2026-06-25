@@ -27,6 +27,7 @@
     "@objectstack/connector-slack": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/runtime": "workspace:*",
+    "@objectstack/service-ai": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {

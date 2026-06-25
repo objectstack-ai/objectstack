@@ -1416,7 +1416,36 @@ export default class Serve extends Command {
           return import(/* webpackIgnore: true */ pkg);
         }
       };
-      if (!hasAIPlugin && tierEnabled('ai')) {
+      // [CE AI opt-in] Auto-register the headless AI service ONLY when the host
+      // app DECLARES the AI service (or the cloud AI Studio that builds on it).
+      // Declaration is the edition boundary: a Community-Edition app that omits
+      // both gets no AI service, no
+      // agents, and no `services.ai` in discovery (so the console hides its AI
+      // surface), while MCP and every other capability are unaffected. Gating on
+      // a *declared* dep — not mere resolvability — makes this reliable in a
+      // workspace/monorepo, where the package stays hoist-resolvable when undeclared.
+      const _fs = await import('node:fs');
+      const hostDeclaresDependency = (pkg: string): boolean => {
+        try {
+          const hostPkg = JSON.parse(
+            _fs.readFileSync(_hostRequire.resolve('./package.json'), 'utf8'),
+          ) as Record<string, Record<string, string> | undefined>;
+          return Boolean(
+            hostPkg.dependencies?.[pkg] ?? hostPkg.devDependencies?.[pkg]
+              ?? hostPkg.optionalDependencies?.[pkg] ?? hostPkg.peerDependencies?.[pkg],
+          );
+        } catch {
+          return false;
+        }
+      };
+      // AI Studio (`@objectstack/service-ai-studio`) attaches its personas via the
+      // `ai:ready` hook the base service fires, so declaring Studio implies the base
+      // service — load it even when only Studio is in the deps (the base is a
+      // transitive dep of Studio, so it stays resolvable).
+      const wantsAiService =
+        hostDeclaresDependency('@objectstack/service-ai')
+        || hostDeclaresDependency('@objectstack/service-ai-studio');
+      if (!hasAIPlugin && tierEnabled('ai') && wantsAiService) {
         try {
           const aiPkg = '@objectstack/service-ai';
           const { AIServicePlugin } = await importFromHost(aiPkg);
