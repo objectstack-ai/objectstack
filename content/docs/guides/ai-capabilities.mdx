@@ -7,6 +7,8 @@ description: "Complete guide to leveraging AI agents, RAG pipelines, and intelli
 
 Complete guide to leveraging AI agents, knowledge retrieval, and intelligent automation in ObjectStack.
 
+> **Note — the open edition exposes AI via MCP (BYO-AI).** Per ADR-0025, the in-UI AI runtime (`@objectstack/service-ai`: agents, the `ask`/`build` assistants, in-product chat) ships in the **cloud / Enterprise** distribution, not the open framework. A self-hosted **open** runtime instead exposes its objects, queries, and business actions to *your own* AI — Claude, Cursor, any MCP client, or a local model — through **`@objectstack/mcp`** (bring-your-own-AI, zero platform AI cost). The `@objectstack/service-ai` examples below therefore describe the cloud/EE distribution.
+
 ## Table of Contents
 
 1. [AI Architecture](#ai-architecture)

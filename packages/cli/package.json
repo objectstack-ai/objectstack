@@ -70,7 +70,6 @@
     "@objectstack/plugin-webhooks": "workspace:*",
     "@objectstack/rest": "workspace:*",
     "@objectstack/runtime": "workspace:^",
-    "@objectstack/service-ai": "workspace:*",
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
     "@objectstack/service-cache": "workspace:*",

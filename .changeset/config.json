@@ -59,7 +59,6 @@
       "@objectstack/nextjs",
       "@objectstack/nuxt",
       "@objectstack/sveltekit",
-      "@objectstack/service-ai",
       "@objectstack/service-analytics",
       "@objectstack/service-automation",
       "@objectstack/service-cache",

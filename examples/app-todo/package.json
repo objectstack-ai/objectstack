@@ -34,7 +34,6 @@
     "@objectstack/objectql": "workspace:^",
     "@objectstack/knowledge-memory": "workspace:*",
     "@objectstack/runtime": "workspace:^",
-    "@objectstack/service-ai": "workspace:*",
     "@objectstack/service-knowledge": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },

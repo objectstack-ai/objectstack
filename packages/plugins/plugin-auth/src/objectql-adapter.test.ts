@@ -25,6 +25,7 @@ import {
 } from './auth-schema-config';
 import { SystemObjectName } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
+import { sso } from '@better-auth/sso';
 
 describe('AUTH_MODEL_TO_PROTOCOL mapping', () => {
   it('should map all four core better-auth models to sys_ protocol names', () => {
@@ -281,6 +282,48 @@ describe('createObjectQLAdapter – legacy model name mapping', () => {
   });
 });
 
+describe('createObjectQLAdapterFactory – schema-less plugin bridging (@better-auth/sso)', () => {
+  // The sso plugin exposes no `schema` option, so its `ssoProvider` table +
+  // camelCase fields are bridged at the adapter layer. Pass the plugin so
+  // better-auth's wrapper recognises the model (it validates against the
+  // merged schema before delegating to our adapter methods).
+  const makeAdapter = (findOneRow: any = { id: '1', provider_id: 'okta', oidc_config: '{"clientId":"x"}', domain: 'acme.com' }) => {
+    const engine = {
+      insert: vi.fn().mockImplementation((_m: string, d: any) => Promise.resolve({ id: '1', ...d })),
+      findOne: vi.fn().mockResolvedValue(findOneRow),
+      find: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
+      update: vi.fn().mockResolvedValue({ id: '1' }),
+      delete: vi.fn().mockResolvedValue(undefined),
+    } as unknown as IDataEngine;
+    const adapter: any = (createObjectQLAdapterFactory(engine) as any)({ plugins: [sso()] } as any);
+    return { engine, adapter };
+  };
+
+  it('resolveProtocolName bridges ssoProvider -> sys_sso_provider', () => {
+    expect(resolveProtocolName('ssoProvider')).toBe('sys_sso_provider');
+    expect(AUTH_MODEL_TO_PROTOCOL.ssoProvider).toBe('sys_sso_provider');
+  });
+
+  it('maps the ssoProvider model + camelCase fields to sys_sso_provider snake columns on insert', async () => {
+    const { engine, adapter } = makeAdapter();
+    await adapter.create({ model: 'ssoProvider', data: { providerId: 'okta', oidcConfig: '{"clientId":"x"}', domain: 'acme.com' } });
+    const [tbl, payload] = (engine.insert as any).mock.calls[0];
+    expect(tbl).toBe('sys_sso_provider');
+    expect(payload).toMatchObject({ provider_id: 'okta', oidc_config: '{"clientId":"x"}', domain: 'acme.com' });
+    expect(payload).not.toHaveProperty('oidcConfig');
+  });
+
+  it('maps snake columns back to camelCase on read', async () => {
+    const { adapter } = makeAdapter();
+    const row: any = await adapter.findOne({
+      model: 'ssoProvider',
+      where: [{ field: 'providerId', value: 'okta', operator: 'eq', connector: 'AND' }],
+    });
+    expect(row).toMatchObject({ providerId: 'okta', oidcConfig: '{"clientId":"x"}' });
+    expect(row).not.toHaveProperty('oidc_config');
+  });
+});
 
 describe('withSystemReadContext – system-scoped reads (org-scope bypass)', () => {
   let mockEngine: IDataEngine;

@@ -16,7 +16,7 @@ ObjectStack is organized into **70 package manifests** across multiple categorie
 | **Framework adapters** | 7 | `express`, `fastify`, `hono`, `nestjs`, `nextjs`, `nuxt`, `sveltekit` |
 | **Drivers** | 4 | `driver-memory`, `driver-sql`, `driver-sqlite-wasm`, `driver-mongodb` |
 | **Plugins** | 22 | `plugin-auth`, `plugin-security`, `plugin-org-scoping`, `plugin-audit`, `plugin-approvals`, `plugin-sharing`, `plugin-email`, `plugin-webhooks`, `plugin-reports`, `plugin-hono-server`, `mcp`, `plugin-msw`, `plugin-dev`, trigger plugins, and knowledge/embedder plugins |
-| **Platform services** | 17 | `service-ai`, `service-analytics`, `service-automation`, `service-cache`, `service-cluster`, `service-cluster-redis`, `service-datasource`, `service-feed`, `service-i18n`, `service-job`, `service-knowledge`, `service-messaging`, `service-package`, `service-queue`, `service-realtime`, `service-settings`, `service-storage` |
+| **Platform services** | 16 | `service-analytics`, `service-automation`, `service-cache`, `service-cluster`, `service-cluster-redis`, `service-datasource`, `service-feed`, `service-i18n`, `service-job`, `service-knowledge`, `service-messaging`, `service-package`, `service-queue`, `service-realtime`, `service-settings`, `service-storage` |
 
 
 ## Core Packages
@@ -193,15 +193,6 @@ const driver = new SqliteWasmDriver({ filename: ':memory:' });
 ## Platform Services
 
 All services implement contracts from `@objectstack/spec/contracts` and are kernel-managed singletons.
-
-### @objectstack/service-ai
-
-**AI Service** — LLM adapter layer, conversation management, tool registry.
-
-- **Supports**: OpenAI, Anthropic, Google, custom providers via Vercel AI SDK
-- **Features**: Multi-model support, streaming, tool calling, conversation history
-- **When to use**: AI-powered features, chatbots, agents, RAG pipelines
-- **README**: [View README](/packages/services/service-ai/README.md)
 
 ### @objectstack/service-analytics
 
@@ -515,11 +506,11 @@ The snippets below illustrate which **runtime** packages you typically reach for
 // Host bootstrap (pseudocode — exact shape depends on adapter)
 import { ObjectKernel } from '@objectstack/core';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
-import { createServiceAiPlugin } from '@objectstack/service-ai';
+// Open edition: AI is exposed via @objectstack/mcp (BYO-AI), not an in-process plugin.
 
 const kernel = new ObjectKernel();
 await kernel.use(new SqliteWasmDriver({ filename: ':memory:' }));
-await kernel.use(createServiceAiPlugin({ /* model providers */ }));
+// Point your own AI (Claude/Cursor/local model) at objects, queries & actions over MCP.
 await kernel.bootstrap();
 ```
 

@@ -21,6 +21,7 @@ import {
   SysOauthRefreshToken,
   SysOrganization,
   SysSession,
+  SysSsoProvider,
   SysTeam,
   SysTeamMember,
   SysTwoFactor,
@@ -52,6 +53,7 @@ export const authIdentityObjects: any[] = [
   SysOauthConsent,
   SysJwks,
   SysDeviceCode,
+  SysSsoProvider,
 ];
 
 /** Manifest header shared by compile-time config and runtime registration. */

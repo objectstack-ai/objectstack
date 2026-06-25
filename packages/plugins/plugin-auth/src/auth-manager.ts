@@ -640,6 +640,8 @@ export class AuthManager {
     // override per-environment without touching the application bundle.
     const oidcEnv = (globalThis as any)?.process?.env?.OS_OIDC_PROVIDER_ENABLED;
     const oidcFromEnv = oidcEnv != null ? String(oidcEnv).toLowerCase() === 'true' : undefined;
+    const ssoEnv = (globalThis as any)?.process?.env?.OS_SSO_ENABLED;
+    const ssoFromEnv = ssoEnv != null ? String(ssoEnv).toLowerCase() === 'true' : undefined;
     const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
     const enabled = {
       organization: pluginConfig.organization ?? true,
@@ -649,6 +651,7 @@ export class AuthManager {
       oidcProvider: oidcFromEnv ?? pluginConfig.oidcProvider ?? false,
       deviceAuthorization: pluginConfig.deviceAuthorization ?? false,
       admin: pluginConfig.admin ?? false,
+      sso: ssoFromEnv ?? (pluginConfig as any).sso ?? false,
     };
 
     // bearer() — ALWAYS enabled.
@@ -958,6 +961,26 @@ export class AuthManager {
         consentPage: `${baseUrl}${uiBase}/oauth/consent`,
         schema: buildOauthProviderPluginSchema(),
       }));
+    }
+
+    // External SSO (OIDC / SAML) relying-party — lets this environment federate
+    // login to a customer's own IdP (Okta / Entra / Google …). Per-env, runtime-
+    // registered providers live in `sys_sso_provider` (ADR-0024: the OPEN SSO
+    // mechanism — cloud-free for self-host). Endpoints mount under
+    // /api/v1/auth/sso/{register,providers,delete-provider,callback,…}.
+    //
+    // Toggle with `OS_SSO_ENABLED` (mirrors `OS_OIDC_PROVIDER_ENABLED`).
+    if (enabled.sso) {
+      const { sso } = await import('@better-auth/sso');
+      // NOTE: unlike `oauthProvider`, @better-auth/sso hardcodes its `ssoProvider`
+      // model and accepts NO `schema` option (verified against 1.6.20 — no
+      // mergeSchema, runtime never reads options.schema). Its table mapping to
+      // `sys_sso_provider` must therefore be resolved by the better-auth adapter
+      // / a global model map, not per-plugin here (see AUTH_SSO_PROVIDER_SCHEMA;
+      // TODO confirm the resolved table name in E2E).
+      // provisionUser / organizationProvisioning will assign a default env role
+      // on first federated login (ADR-0024 V1); JIT works via account linking.
+      plugins.push(sso());
     }
 
     // Device Authorization Grant (RFC 8628) — for CLI / TV-style devices.

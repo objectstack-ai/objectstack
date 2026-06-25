@@ -84,6 +84,29 @@ export const RecordRelatedListProps = z.object({
   title: I18nLabelSchema.optional().describe('Custom title for the related list'),
   showViewAll: z.boolean().default(true).describe('Show "View All" link to see all related records'),
   actions: z.array(z.string()).optional().describe('Action IDs available for related records'),
+  /**
+   * Enable an "Add" affordance that links EXISTING records via a picker, rather
+   * than only "+ New" (create-and-navigate). Generic over m2m / junction
+   * relationships: pick records from `add.picker.object` (the far side) and
+   * create a link row in `objectName` with `{[relationshipField]: <parentId>,
+   * [add.linkField]: <pickedId>}`. Omit `linkField` for a plain 1:m re-parent
+   * (the picked child's `relationshipField` is set to the parent id instead).
+   * Server-side rules still apply on insert (e.g. the AI-seat cap), and their
+   * errors surface in the dialog. The canonical use is "Assigned Users" on a
+   * permission set (objectName=`sys_user_permission_set`,
+   * relationshipField=`permission_set_id`, picker.object=`sys_user`,
+   * linkField=`user_id`).
+   */
+  add: z.object({
+    picker: z.object({
+      object: z.string().describe('Object to pick records from (the far side of an m2m, or the child object for a 1:m re-parent).'),
+      valueField: z.string().default('id').describe('Field on the picked record used as the link value (default `id`).'),
+      labelField: z.string().optional().describe('Field shown in the picker rows (defaults to the object title field).'),
+      filter: z.array(ViewFilterRuleSchema).optional().describe('Restrict which records the picker offers.'),
+    }).describe('Where the Add affordance sources records from.'),
+    linkField: z.string().optional().describe('Field on `objectName` that stores the picked record id (junction case). Omit for a 1:m re-parent.'),
+    label: I18nLabelSchema.optional().describe('Label for the Add button (default "Add").'),
+  }).optional().describe('Add-existing-via-picker config (generic m2m/junction assignment).'),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
