@@ -12,7 +12,13 @@ to gate on, so it rendered a "Sign in with SSO" button unconditionally — and o
 a self-hosted / local deployment where SSO isn't wired, clicking it only then
 surfaced "No SSO provider is configured for this email domain."
 
-The config now includes `features.sso`, resolved with the EXACT logic that
-decides whether the plugin is mounted in `buildPlugins()`, so the advertised
-capability can never disagree with the actual `/sign-in/sso` route. The console
-login form consumes this to hide the button when SSO is off (objectui side).
+The config now includes `features.sso`. `getPublicConfig()` returns the coarse
+"is the plugin wired" flag — resolved with the EXACT logic that decides whether
+the plugin is mounted in `buildPlugins()`, so the advertised capability can never
+disagree with the actual `/sign-in/sso` route. The `/auth/config` route then
+refines it to "usable" via the new `AuthManager.isSsoUsable()`, which additionally
+requires at least one `sys_sso_provider` row to exist — so a freshly-enabled but
+unconfigured SSO setup doesn't advertise a button that errors for everyone.
+`isSsoUsable()` only queries when wired and fails open to the wired flag on any
+introspection error (no data engine, query failure), so config never 500s. The
+console login form consumes `features.sso` to hide the button (objectui side).

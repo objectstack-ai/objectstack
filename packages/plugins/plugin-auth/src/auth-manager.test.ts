@@ -1158,6 +1158,87 @@ describe('AuthManager', () => {
     });
   });
 
+  // The `/auth/config` route refines the coarse `features.sso` ("wired") flag
+  // to "usable" via isSsoUsable() so the login UI hides the "Sign in with SSO"
+  // button BOTH when SSO is off and when it's on but no IdP is configured yet.
+  describe('isSsoUsable – refines features.sso to "≥1 provider configured"', () => {
+    const makeEngine = (countImpl: () => Promise<number> | number) =>
+      ({
+        insert: vi.fn(),
+        findOne: vi.fn(),
+        find: vi.fn(),
+        count: vi.fn().mockImplementation(countImpl),
+        update: vi.fn(),
+        delete: vi.fn(),
+      });
+
+    it('returns false when SSO is not wired (skips the provider query entirely)', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const engine = makeEngine(() => 5);
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        dataEngine: engine as any,
+      });
+      warnSpy.mockRestore();
+
+      expect(await manager.isSsoUsable()).toBe(false);
+      expect(engine.count).not.toHaveBeenCalled();
+    });
+
+    it('returns false when wired but zero providers are configured', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const engine = makeEngine(() => 0);
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        plugins: { sso: true } as any,
+        dataEngine: engine as any,
+      });
+      warnSpy.mockRestore();
+
+      expect(await manager.isSsoUsable()).toBe(false);
+      // Reads sys_sso_provider under a system context (RLS would otherwise zero it out).
+      expect(engine.count.mock.calls[0][0]).toBe('sys_sso_provider');
+      expect(engine.count.mock.calls[0][1]?.context?.isSystem).toBe(true);
+    });
+
+    it('returns true when wired and at least one provider exists', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        plugins: { sso: true } as any,
+        dataEngine: makeEngine(() => 1) as any,
+      });
+      warnSpy.mockRestore();
+
+      expect(await manager.isSsoUsable()).toBe(true);
+    });
+
+    it('fails open to wired when there is no data engine to consult', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        plugins: { sso: true } as any,
+      });
+      warnSpy.mockRestore();
+
+      expect(await manager.isSsoUsable()).toBe(true);
+    });
+
+    it('fails open to wired when the provider-count query throws', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        plugins: { sso: true } as any,
+        dataEngine: makeEngine(() => {
+          throw new Error('db down');
+        }) as any,
+      });
+      warnSpy.mockRestore();
+
+      expect(await manager.isSsoUsable()).toBe(true);
+    });
+  });
+
   describe('WebContainer request-state polyfill', () => {
     const sym = Symbol.for('better-auth:global');
 

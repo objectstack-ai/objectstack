@@ -14,7 +14,7 @@ import type { IDataEngine } from '@objectstack/core';
 import type { IEmailService } from '@objectstack/spec/contracts';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import { mapMembershipRole, BUILTIN_ROLE_PLATFORM_ADMIN } from '@objectstack/spec';
-import { createObjectQLAdapterFactory } from './objectql-adapter.js';
+import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import {
   AUTH_USER_CONFIG,
   AUTH_SESSION_CONFIG,
@@ -1462,14 +1462,6 @@ export class AuthManager {
     // frontend will render UI for endpoints that 404.
     const oidcEnv = (globalThis as any)?.process?.env?.OS_OIDC_PROVIDER_ENABLED;
     const oidcFromEnv = oidcEnv != null ? String(oidcEnv).toLowerCase() === 'true' : undefined;
-    // Enterprise SSO (@better-auth/sso, domain-routed). Resolve it with the
-    // EXACT logic that decides whether the plugin is wired in `buildPlugins()`
-    // (`sso: ssoFromEnv ?? pluginConfig.sso ?? false`) so the two can never
-    // disagree. Surfacing it lets the login UI hide the "Sign in with SSO"
-    // button when `/sign-in/sso` isn't mounted, instead of rendering a button
-    // that only reveals "no SSO provider configured" at click time.
-    const ssoEnv = (globalThis as any)?.process?.env?.OS_SSO_ENABLED;
-    const ssoFromEnv = ssoEnv != null ? String(ssoEnv).toLowerCase() === 'true' : undefined;
     const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
 
     const features = {
@@ -1479,7 +1471,11 @@ export class AuthManager {
       organization: pluginConfig.organization ?? true,
       multiOrgEnabled,
       oidcProvider: oidcFromEnv ?? pluginConfig.oidcProvider ?? false,
-      sso: ssoFromEnv ?? (pluginConfig as any).sso ?? false,
+      // Coarse "is the @better-auth/sso plugin wired" flag. The `/auth/config`
+      // route refines this to "usable" (≥1 provider configured) via
+      // `isSsoUsable()` so the login UI can hide the "Sign in with SSO" button
+      // both when SSO is off AND when it's on but no IdP exists yet.
+      sso: this.isSsoWired(),
       deviceAuthorization: pluginConfig.deviceAuthorization ?? false,
       admin: pluginConfig.admin ?? false,
       ...(termsUrl ? { termsUrl } : {}),
@@ -1491,6 +1487,42 @@ export class AuthManager {
       socialProviders,
       features,
     };
+  }
+
+  /**
+   * Coarse "is the domain-routed `@better-auth/sso` plugin wired" flag.
+   * Resolved with the EXACT logic that decides whether the plugin is mounted
+   * in `buildPlugins()` (`ssoFromEnv ?? pluginConfig.sso ?? false`) so the
+   * advertised capability can never disagree with the actual `/sign-in/sso`
+   * route. `OS_SSO_ENABLED` (when set) wins over the config-file setting.
+   */
+  private isSsoWired(): boolean {
+    const ssoEnv = (globalThis as any)?.process?.env?.OS_SSO_ENABLED;
+    const ssoFromEnv = ssoEnv != null ? String(ssoEnv).toLowerCase() === 'true' : undefined;
+    return ssoFromEnv ?? (this.config.plugins as any)?.sso ?? false;
+  }
+
+  /**
+   * Whether enterprise SSO is actually *usable*, not merely wired: the plugin
+   * is on AND at least one `sys_sso_provider` row exists. Per-email domain→IdP
+   * matching still happens at `/sign-in/sso`; this answers the coarser "is
+   * there any point showing the SSO button at all", so a freshly-enabled but
+   * unconfigured SSO setup doesn't advertise a button that errors for everyone.
+   *
+   * Fails OPEN to the wired flag when providers can't be counted (no data
+   * engine, query error) — a config-introspection hiccup must never make the
+   * login page hide a button that genuinely works.
+   */
+  public async isSsoUsable(): Promise<boolean> {
+    if (!this.isSsoWired()) return false;
+    const engine = this.getDataEngine();
+    if (!engine) return true; // wired but can't verify — fall open
+    try {
+      const count = await withSystemReadContext(engine).count('sys_sso_provider');
+      return typeof count === 'number' ? count > 0 : true;
+    } catch {
+      return true; // provider introspection failed — keep the wired behaviour
+    }
   }
 
   /**

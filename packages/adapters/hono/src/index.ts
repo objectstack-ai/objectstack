@@ -290,6 +290,12 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
         try {
           const config = (authService as any).getPublicConfig?.();
           if (config) {
+            // Refine the coarse "SSO wired" flag to "SSO usable" (≥1 provider
+            // configured), mirroring the plugin-auth /config route. Guarded so
+            // it's a safe no-op against an auth service predating the method.
+            if (config.features?.sso && typeof (authService as any).isSsoUsable === 'function') {
+              config.features.sso = await (authService as any).isSsoUsable();
+            }
             return c.json({
               success: true,
               data: config,
