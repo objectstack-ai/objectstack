@@ -651,6 +651,50 @@ export function buildOauthProviderPluginSchema() {
 export const buildOidcProviderPluginSchema = buildOauthProviderPluginSchema;
 
 // ---------------------------------------------------------------------------
+// SSO plugin – ssoProvider table (@better-auth/sso)
+// ---------------------------------------------------------------------------
+
+/**
+ * `@better-auth/sso` plugin `ssoProvider` model mapping.
+ *
+ * Each row is an external OIDC/SAML IdP this environment federates login to
+ * (the relying-party side — ADR-0024's OPEN per-env SSO mechanism). The
+ * protocol detail lives in JSON blobs (`oidcConfig` / `samlConfig`); the model
+ * itself is thin. Mirrors @better-auth/sso@1.6.20's `BaseSSOProvider`.
+ *
+ * | camelCase (better-auth) | snake_case (ObjectStack) |
+ * |:------------------------|:-------------------------|
+ * | providerId              | provider_id              |
+ * | oidcConfig              | oidc_config              |
+ * | samlConfig              | saml_config              |
+ * | userId                  | user_id                  |
+ * | organizationId          | organization_id          |
+ * | issuer / domain         | (same name — no remap) |
+ */
+export const AUTH_SSO_PROVIDER_SCHEMA = {
+  modelName: 'sys_sso_provider',
+  fields: {
+    providerId: 'provider_id',
+    oidcConfig: 'oidc_config',
+    samlConfig: 'saml_config',
+    userId: 'user_id',
+    organizationId: 'organization_id',
+  },
+} as const;
+
+/**
+ * Builds the `schema` option for `@better-auth/sso`'s `sso()` plugin, pointing
+ * its single `ssoProvider` model at ObjectStack's `sys_sso_provider` table.
+ *
+ * @returns An object suitable for `sso({ schema: … })`
+ */
+export function buildSsoPluginSchema() {
+  return {
+    ssoProvider: AUTH_SSO_PROVIDER_SCHEMA,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Helper: build device-authorization plugin schema option
 // ---------------------------------------------------------------------------
 

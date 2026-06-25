@@ -20,6 +20,7 @@
   "dependencies": {
     "@better-auth/core": "^1.6.20",
     "@better-auth/oauth-provider": "^1.6.20",
+    "@better-auth/sso": "^1.6.20",
     "@noble/hashes": "^2.2.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",

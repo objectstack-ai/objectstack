@@ -23,6 +23,7 @@ import {
   buildOrganizationPluginSchema,
   buildTwoFactorPluginSchema,
   buildOauthProviderPluginSchema,
+  buildSsoPluginSchema,
   buildDeviceAuthorizationPluginSchema,
   buildJwtPluginSchema,
   buildAdminPluginSchema,
@@ -625,6 +626,8 @@ export class AuthManager {
     // override per-environment without touching the application bundle.
     const oidcEnv = (globalThis as any)?.process?.env?.OS_OIDC_PROVIDER_ENABLED;
     const oidcFromEnv = oidcEnv != null ? String(oidcEnv).toLowerCase() === 'true' : undefined;
+    const ssoEnv = (globalThis as any)?.process?.env?.OS_SSO_ENABLED;
+    const ssoFromEnv = ssoEnv != null ? String(ssoEnv).toLowerCase() === 'true' : undefined;
     const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
     const enabled = {
       organization: pluginConfig.organization ?? true,
@@ -634,6 +637,7 @@ export class AuthManager {
       oidcProvider: oidcFromEnv ?? pluginConfig.oidcProvider ?? false,
       deviceAuthorization: pluginConfig.deviceAuthorization ?? false,
       admin: pluginConfig.admin ?? false,
+      sso: ssoFromEnv ?? (pluginConfig as any).sso ?? false,
     };
 
     // bearer() — ALWAYS enabled.
@@ -923,6 +927,24 @@ export class AuthManager {
         loginPage: `${baseUrl}${uiBase}/login`,
         consentPage: `${baseUrl}${uiBase}/oauth/consent`,
         schema: buildOauthProviderPluginSchema(),
+      }));
+    }
+
+    // External SSO (OIDC / SAML) relying-party — lets this environment federate
+    // login to a customer's own IdP (Okta / Entra / Google …). Per-env, runtime-
+    // registered providers live in `sys_sso_provider` (ADR-0024: the OPEN SSO
+    // mechanism — cloud-free for self-host). Endpoints mount under
+    // /api/v1/auth/sso/{register,providers,delete-provider,callback,…}.
+    //
+    // Toggle with `OS_SSO_ENABLED` (mirrors `OS_OIDC_PROVIDER_ENABLED`).
+    if (enabled.sso) {
+      const { sso } = await import('@better-auth/sso');
+      plugins.push(sso({
+        schema: buildSsoPluginSchema(),
+        // provisionUser / organizationProvisioning are the hook for assigning a
+        // default env role on first federated login (ADR-0024 V1 minimal
+        // decisions). JIT user creation works out of the box via account
+        // linking; wire role defaults here in the follow-up.
       }));
     }
 
