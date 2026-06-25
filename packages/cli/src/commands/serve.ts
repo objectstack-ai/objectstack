@@ -1354,6 +1354,11 @@ export default class Serve extends Command {
         const apiConfig = (config as any).api ?? {};
         const enableProjectScoping = apiConfig.enableProjectScoping ?? false;
         const projectResolution = apiConfig.projectResolution ?? 'auto';
+        // Per-project membership (sys_environment_member 403 gate) is, by
+        // default, ON whenever project-scoping is on. A host can opt OUT
+        // (env-native auth IS the membership — ADR-0024 D9) by setting
+        // `api.enforceProjectMembership: false`. Undefined → dispatcher default.
+        const enforceProjectMembership = apiConfig.enforceProjectMembership;
         // `requireAuth: true` rejects anonymous requests on `/api/v1/data/*`
         // with HTTP 401 before they reach ObjectQL. Default-on when the
         // stack opts in OR when the resolved tier set includes `auth`
@@ -1383,6 +1388,7 @@ export default class Serve extends Command {
           await kernel.use(
             createDispatcherPlugin({
               scoping: { enableProjectScoping, projectResolution },
+              enforceProjectMembership,
               observability,
             }),
           );
