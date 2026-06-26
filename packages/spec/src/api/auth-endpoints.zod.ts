@@ -198,6 +198,9 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   passkeys: z.boolean().default(false).describe('Passkey/WebAuthn support enabled'),
   magicLink: z.boolean().default(false).describe('Magic link login enabled'),
   organization: z.boolean().default(false).describe('Multi-tenant organization support enabled'),
+  ssoEnforced: z.boolean().optional().describe(
+    'SSO-only login enforced: the UI hides the local password form + self-registration (a break-glass "use a password" link remains)',
+  ),
 }));
 
 /**

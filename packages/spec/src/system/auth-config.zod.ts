@@ -278,6 +278,18 @@ export const AuthConfigSchema = lazySchema(() => z.object({
   emailAndPassword: EmailAndPasswordConfigSchema,
   emailVerification: EmailVerificationConfigSchema,
   advanced: AdvancedAuthConfigSchema,
+  /**
+   * SSO-only ("enforced") login mode. When `true`, the login UI hides the
+   * local email/password form and self-registration so the team signs in via
+   * the configured IdP only (cloud-as-IdP, or an external OIDC/SAML provider).
+   * The break-glass password endpoint stays enabled — managed (IdP-provisioned)
+   * users simply hold no local credential, while the env owner retains a
+   * password escape hatch. Generic over the IdP; orthogonal to which providers
+   * are wired. Self-host can also set this via `OS_AUTH_SSO_ONLY=true`.
+   */
+  ssoOnlyMode: z.boolean().optional().describe(
+    'SSO-only login: hide the local password form + self-registration (the break-glass password endpoint stays enabled)',
+  ),
   mutualTls: MutualTLSConfigSchema.optional().describe('Mutual TLS (mTLS) configuration'),
 }).catchall(z.unknown()));
 

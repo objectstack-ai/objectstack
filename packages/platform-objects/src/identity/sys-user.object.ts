@@ -167,7 +167,11 @@ export const SysUser = ObjectSchema.create({
       locations: ['record_header', 'record_more', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/change-password',
-      visible: 'record.id == ctx.user.id',
+      // Managed (IdP-provisioned) users hold no local credential — hide the
+      // password form so they can't self-mint a password that bypasses
+      // enforced SSO. The break-glass owner (env-native, or flipped back when
+      // their break-glass password is set) keeps it. ADR-0024 D4/D5.2.
+      visible: 'record.id == ctx.user.id && record.source != "idp_provisioned"',
       successMessage: 'Password changed',
       refreshAfter: false,
       params: [
@@ -184,7 +188,9 @@ export const SysUser = ObjectSchema.create({
       locations: ['record_header', 'record_more', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/change-email',
-      visible: 'record.id == ctx.user.id',
+      // A managed user's email is owned by the IdP — a local change would
+      // desync. Hide for IdP-provisioned; env-native users keep it.
+      visible: 'record.id == ctx.user.id && record.source != "idp_provisioned"',
       successMessage: 'Verification email sent — check the new address to confirm.',
       refreshAfter: false,
       params: [
@@ -215,7 +221,9 @@ export const SysUser = ObjectSchema.create({
       locations: ['record_more', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/delete-user',
-      visible: 'record.id == ctx.user.id',
+      // Self-delete needs a local password; managed users are deprovisioned
+      // via the IdP (org-removal / SCIM), not local self-service. Hide for them.
+      visible: 'record.id == ctx.user.id && record.source != "idp_provisioned"',
       confirmText: 'Permanently delete your account? This cannot be undone — all your sessions will be terminated and all data you own will be removed per the configured retention policy.',
       successMessage: 'Account deleted',
       refreshAfter: false,
@@ -299,7 +307,7 @@ export const SysUser = ObjectSchema.create({
       name: 'all_users',
       label: 'All Users',
       data: { provider: 'object', object: 'sys_user' },
-      columns: ['name', 'email', 'email_verified', 'two_factor_enabled', 'created_at'],
+      columns: ['name', 'email', 'email_verified', 'source', 'two_factor_enabled', 'created_at'],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
@@ -431,6 +439,29 @@ export const SysUser = ObjectSchema.create({
     }),
 
     // ── System (auto-managed, hidden from create/edit forms) ─────
+    // Identity provenance (ADR-0024 D4). `idp_provisioned` users were
+    // JIT-created on first federated login (a `sys_account` exists for an
+    // external/OIDC provider — e.g. the cloud-as-IdP `objectstack-cloud`
+    // provider, or a customer's own IdP); `env_native` users registered
+    // locally (email/password) or are app end-users. Stamped automatically by
+    // the AuthManager `account.create.after` hook — never edited by hand.
+    // Drives the managed-vs-native user-mgmt UI gating (the password /
+    // identity-edit actions hide for managed users, who hold no local
+    // credential) and is the marker SCIM lifecycle keys off. Owned by objectql
+    // (better-auth is oblivious to this column — like `ai_access`).
+    source: Field.select({
+      label: 'Identity Source',
+      required: false,
+      readonly: true,
+      group: 'System',
+      defaultValue: 'env_native',
+      options: [
+        { label: 'IdP-Provisioned', value: 'idp_provisioned' },
+        { label: 'Env-Native', value: 'env_native' },
+      ],
+      description: 'How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.',
+    }),
+
     id: Field.text({
       label: 'User ID',
       required: true,

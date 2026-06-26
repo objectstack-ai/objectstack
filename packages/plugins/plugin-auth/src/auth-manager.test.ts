@@ -1047,6 +1047,7 @@ describe('AuthManager', () => {
         organization: true,
         oidcProvider: false,
         sso: false,
+        ssoEnforced: false,
         deviceAuthorization: false,
         admin: false,
         multiOrgEnabled: false,

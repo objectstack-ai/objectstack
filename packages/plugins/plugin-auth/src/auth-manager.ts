@@ -150,6 +150,16 @@ function readDisableSignUpEnv(): boolean | undefined {
 }
 
 /**
+ * SSO-only ("enforced") login mode from the deployment env. Self-host ops set
+ * `OS_AUTH_SSO_ONLY=true` to lock the team to the configured IdP (parity with
+ * the `OS_DISABLE_SIGNUP` self-host knob). The cloud runtime drives the same
+ * behaviour per-env via the `ssoOnlyMode` config field instead.
+ */
+function readSsoOnlyEnv(): boolean | undefined {
+  return readBooleanEnv('OS_AUTH_SSO_ONLY');
+}
+
+/**
  * Extended options for AuthManager
  */
 export interface AuthManagerOptions extends Partial<AuthConfig> {
@@ -394,7 +404,12 @@ export class AuthManager {
       // lock the registration policy without relying on UI state.
       emailAndPassword: (() => {
         const disableSignUpFromEnv = readDisableSignUpEnv();
-        const effectiveDisableSignUp = disableSignUpFromEnv ?? this.config.emailAndPassword?.disableSignUp;
+        // SSO-only ("enforced") forces self-registration off (the managed team
+        // signs in via the IdP). `enabled` stays true so the break-glass
+        // password endpoint keeps working for the env owner / local admin.
+        const effectiveDisableSignUp = this.resolveSsoOnly()
+          ? true
+          : (disableSignUpFromEnv ?? this.config.emailAndPassword?.disableSignUp);
         return {
           enabled: this.config.emailAndPassword?.enabled ?? true,
           ...(passwordHasher ? { password: passwordHasher } : {}),
@@ -502,8 +517,10 @@ export class AuthManager {
 
       // Database hooks (fired by better-auth's adapter writes — these run
       // for SSO JIT-provisioning too, unlike kernel-level ObjectQL
-      // middleware which better-auth's adapter bypasses).
-      ...(this.config.databaseHooks ? { databaseHooks: this.config.databaseHooks } : {}),
+      // middleware which better-auth's adapter bypasses). The framework's
+      // identity-source stamp (`account.create.after`) is always composed in,
+      // preserving any host-supplied hooks.
+      databaseHooks: this.composeDatabaseHooks(this.config.databaseHooks),
 
       // Bootstrap bypass for `disableSignUp`. The first-run owner wizard
       // (`/_account/setup`) calls `POST /auth/sign-up/email` to create
@@ -577,6 +594,68 @@ export class AuthManager {
             }
             return;
           }
+
+          // ── Break-glass: never remove the LAST local-password login ──────
+          // Under enforced SSO the managed team holds no local credential; the
+          // env owner / a local admin keeps one as the break-glass escape hatch
+          // so an IdP outage can never lock the org out. Refuse to delete or
+          // ban the last user holding a `credential` account. Generic over the
+          // IdP. Managed (credential-less) users are unaffected. Fail-open on
+          // lookup hiccups (a transient query error must not block legit ops).
+          if (
+            ctx?.path === '/delete-user' ||
+            ctx?.path === '/admin/remove-user' ||
+            ctx?.path === '/admin/ban-user'
+          ) {
+            let isLastLocalCredential = false;
+            try {
+              const adapter = ctx.context.adapter;
+              let targetId: string | undefined = ctx?.body?.userId ?? ctx?.body?.user_id;
+              if (!targetId && ctx.path === '/delete-user') {
+                const { getSessionFromCtx } = await import('better-auth/api');
+                const s: any = await getSessionFromCtx(ctx as any).catch(() => null);
+                targetId = s?.user?.id ?? s?.session?.userId;
+              }
+              if (targetId) {
+                // Only guard when the target actually holds a local credential —
+                // removing a credential-less (managed) user can't cause lockout.
+                const targetCred = await adapter.findOne({
+                  model: 'account',
+                  where: [
+                    { field: 'userId', value: targetId },
+                    { field: 'providerId', value: 'credential' },
+                  ],
+                });
+                if (targetCred) {
+                  const creds: any[] = await adapter.findMany({
+                    model: 'account',
+                    where: [{ field: 'providerId', value: 'credential' }],
+                  });
+                  const otherHolders = new Set(
+                    (creds ?? [])
+                      .map((a: any) => a?.userId ?? a?.user_id)
+                      .filter((id: any) => id && id !== targetId),
+                  );
+                  isLastLocalCredential = otherHolders.size === 0;
+                }
+              }
+            } catch {
+              // Fail-open — never block a legitimate op on a lookup error.
+            }
+            if (isLastLocalCredential) {
+              const { APIError } = await import('better-auth/api');
+              throw new APIError('CONFLICT', {
+                message:
+                  'Cannot remove the last local password login. At least one ' +
+                  'break-glass account with a password must remain so an identity-' +
+                  'provider outage can never lock the organization out. Add another ' +
+                  'local password first, then retry.',
+                code: 'LAST_LOCAL_CREDENTIAL',
+              });
+            }
+            // fall through to better-auth's own handler
+          }
+
           if (ctx?.path !== '/sign-up/email') return;
           const ep = ctx?.context?.options?.emailAndPassword;
           if (!ep?.disableSignUp) return;
@@ -1447,6 +1526,19 @@ export class AuthManager {
   // AuthPluginConfig.
   // ---------------------------------------------------------------------------
 
+  /**
+   * SSO-only ("enforced") login mode: the login UI hides the local password
+   * form + self-registration so the team signs in via the IdP only.
+   * `OS_AUTH_SSO_ONLY` (when set) wins over the `ssoOnlyMode` config knob —
+   * parity with the `disableSignUp` env override — so a deployment can force
+   * it regardless of the per-env/config value. Break-glass is preserved: this
+   * NEVER disables `emailAndPassword.enabled`; it only forces `disableSignUp`
+   * and signals the UI to hide the password form. Generic over the IdP.
+   */
+  private resolveSsoOnly(): boolean {
+    return readSsoOnlyEnv() ?? (this.config.ssoOnlyMode ?? false);
+  }
+
   getPublicConfig() {
     // Extract social providers info (without sensitive data)
     const socialProviders = [];
@@ -1493,9 +1585,13 @@ export class AuthManager {
     // `emailAndPassword.disableSignUp` (default `false`).
     const emailPasswordConfig: Partial<EmailAndPasswordConfig> = this.config.emailAndPassword ?? {};
     const disableSignUpFromEnv = readDisableSignUpEnv();
+    // SSO-only ("enforced") hides the local password form + self-registration.
+    // `enabled` stays true (break-glass), but signup is forced off and the UI
+    // suppresses the password form via `features.ssoEnforced` below.
+    const ssoOnly = this.resolveSsoOnly();
     const emailPassword = {
       enabled: emailPasswordConfig.enabled !== false, // Default to true
-      disableSignUp: disableSignUpFromEnv ?? emailPasswordConfig.disableSignUp ?? false,
+      disableSignUp: ssoOnly ? true : (disableSignUpFromEnv ?? emailPasswordConfig.disableSignUp ?? false),
       requireEmailVerification: emailPasswordConfig.requireEmailVerification ?? false,
     };
 
@@ -1550,6 +1646,10 @@ export class AuthManager {
       // `isSsoUsable()` so the login UI can hide the "Sign in with SSO" button
       // both when SSO is off AND when it's on but no IdP exists yet.
       sso: this.isSsoWired(),
+      // SSO-only ("enforced"): tell the login UI to hide the local password
+      // form + self-registration. A break-glass "use a password" link remains
+      // for the env owner / local admin. Driven by `ssoOnlyMode` / `OS_AUTH_SSO_ONLY`.
+      ssoEnforced: ssoOnly,
       deviceAuthorization: pluginConfig.deviceAuthorization ?? false,
       admin: pluginConfig.admin ?? false,
       ...(termsUrl ? { termsUrl } : {}),
@@ -1596,6 +1696,96 @@ export class AuthManager {
       return typeof count === 'number' ? count > 0 : true;
     } catch {
       return true; // provider introspection failed — keep the wired behaviour
+    }
+  }
+
+  /**
+   * Compose the framework's identity-source stamp (`account.create.after`)
+   * with any host-supplied `databaseHooks`, preserving BOTH. The cloud passes
+   * `user.create.after` (personal-org provisioning) + `session.create.before`
+   * (active-org) — different model/op, so no collision — but if a host ever
+   * adds its own `account.create.after` we chain it after the stamp rather
+   * than silently dropping one.
+   */
+  private composeDatabaseHooks(
+    host?: BetterAuthOptions['databaseHooks'],
+  ): BetterAuthOptions['databaseHooks'] {
+    const stamp = (account: any, ctx: any) => this.stampIdentitySource(account, ctx);
+    const hostAccountAfter = (host as any)?.account?.create?.after;
+    const after = hostAccountAfter
+      ? async (account: any, ctx: any) => {
+          await stamp(account, ctx);
+          return hostAccountAfter(account, ctx);
+        }
+      : stamp;
+    return {
+      ...(host ?? {}),
+      account: {
+        ...((host as any)?.account ?? {}),
+        create: {
+          ...((host as any)?.account?.create ?? {}),
+          after,
+        },
+      },
+    } as BetterAuthOptions['databaseHooks'];
+  }
+
+  /**
+   * Maintain `sys_user.source` (ADR-0024 D4 provenance) as accounts are linked.
+   * Drives the managed-vs-native user-mgmt gating: a managed (`idp-provisioned`)
+   * user holds no local credential, so the password / identity-edit actions
+   * hide for them — preventing a managed user from self-minting a local
+   * password that would bypass enforced SSO.
+   *
+   * Two cases, both break-glass safe and idempotent (only writes on a real
+   * change, so trackHistory stays quiet):
+   *
+   *  • A **federated** account (any non-`credential` provider — the cloud-as-IdP
+   *    `objectstack-cloud` provider OR a customer's own OIDC/SAML IdP) is
+   *    linked AND the user holds NO local credential → mark `idp-provisioned`.
+   *    A user who already has a `credential` account (an env-native user who
+   *    linked SSO) is left `env-native` — they keep a usable password.
+   *
+   *  • A **credential** account is created (local signup, or the break-glass
+   *    owner's password set via set-initial-password — which can land AFTER the
+   *    first SSO link) → ensure `env-native`. This flips a previously-stamped
+   *    owner back, so the break-glass admin never loses self-service password
+   *    management.
+   *
+   * Best-effort: any failure leaves the prior value (the gate fails open — a
+   * managed user might transiently show a password action that simply errors —
+   * never a hard login failure).
+   */
+  private async stampIdentitySource(account: any, _ctx?: unknown): Promise<void> {
+    try {
+      const providerId = account?.providerId ?? account?.provider_id;
+      const userId = account?.userId ?? account?.user_id;
+      if (!userId || !providerId) return;
+      const engine = this.getDataEngine();
+      if (!engine) return;
+      const SYSTEM_CTX = { isSystem: true, roles: [], permissions: [] };
+
+      if (providerId === 'credential') {
+        // Gained a local password → env-native. Only write if currently
+        // managed (avoids a no-op history row on every local signup).
+        const u = await engine.findOne('sys_user', {
+          filter: { id: userId }, fields: ['id', 'source'], context: SYSTEM_CTX,
+        } as any);
+        if (u && u.source === 'idp_provisioned') {
+          await engine.update('sys_user', { id: userId, source: 'env_native' }, { context: SYSTEM_CTX } as any);
+        }
+        return;
+      }
+
+      // Federated link → managed, unless a local credential already exists.
+      const credentialCount = await engine.count('sys_account', {
+        filter: { user_id: userId, provider_id: 'credential' },
+        context: SYSTEM_CTX,
+      } as any);
+      if (typeof credentialCount === 'number' && credentialCount > 0) return;
+      await engine.update('sys_user', { id: userId, source: 'idp_provisioned' }, { context: SYSTEM_CTX } as any);
+    } catch {
+      // Provenance stamp must never break federated login. Leave the prior value.
     }
   }
 
