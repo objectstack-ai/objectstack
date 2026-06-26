@@ -109,7 +109,13 @@ export const ACCOUNT_APP: App = {
           objectName: 'sys_member',
           viewName: 'mine',
           icon: 'building-2',
-          requiresObject: 'sys_member',
+          // Membership is a multi-org concept: in single-org mode the
+          // `mine` view is always empty (no sys_organization rows, no
+          // auto-stamped memberships). Gate on the org-scoping service so
+          // this entry disappears entirely — matching Organizations/
+          // Invitations in setup-nav. `requiresObject: 'sys_member'` was
+          // the wrong gate (the system object is always registered).
+          requiresService: 'org-scoping',
         },
       ],
     },

@@ -26,7 +26,10 @@ export const SysInvitation = ObjectSchema.create({
     docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
   },
   description: 'Organization invitations for user onboarding',
-  titleFormat: 'Invitation to {organization_id}',
+  // Title by invitee email rather than organization_id: the latter is null in
+  // single-org mode (renders "Invitation to null"), and the recipient email is
+  // the more useful identifier in both modes anyway.
+  titleFormat: 'Invitation for {email}',
   compactLayout: ['email', 'organization_id', 'status'],
 
   // Custom actions — generic CRUD is suppressed (better-auth-managed).
@@ -41,6 +44,13 @@ export const SysInvitation = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
+      // Inviting/managing invitations is a multi-org-only flow (the
+      // endpoint resolves an active org absent in single-org mode). Gate
+      // the admin-side actions on the multi-org flag (mirrors
+      // sys_organization.create_organization). The recipient-side
+      // accept/reject actions below stay record-gated — they are
+      // unreachable in single-org anyway (no invitation rows exist).
+      visible: 'features.multiOrgEnabled != false',
       successMessage: 'Invitation sent',
       refreshAfter: true,
       params: [
@@ -58,6 +68,7 @@ export const SysInvitation = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/cancel-invitation',
       recordIdParam: 'invitationId',
+      visible: 'features.multiOrgEnabled != false',
       confirmText: 'Cancel this invitation? The recipient will no longer be able to accept it.',
       successMessage: 'Invitation canceled',
       refreshAfter: true,
@@ -71,6 +82,7 @@ export const SysInvitation = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       bodyExtra: { resend: true },
+      visible: 'features.multiOrgEnabled != false',
       successMessage: 'Invitation resent',
       refreshAfter: true,
       params: [

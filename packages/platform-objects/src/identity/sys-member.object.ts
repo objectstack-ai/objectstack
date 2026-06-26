@@ -26,7 +26,10 @@ export const SysMember = ObjectSchema.create({
     docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
   },
   description: 'Organization membership records',
-  titleFormat: '{user_id} in {organization_id}',
+  // Org-independent title: organization_id is null in single-org mode, so a
+  // '{user_id} in {organization_id}' format renders "… in null". User + role
+  // identifies the membership in both single- and multi-org deployments.
+  titleFormat: '{user_id} ({role})',
   compactLayout: ['user_id', 'organization_id', 'role'],
 
   // Row-level actions: better-auth `organization/update-member-role` and
@@ -48,6 +51,11 @@ export const SysMember = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/add-member',
+      // Org-membership mutations are multi-org-only: the better-auth
+      // endpoints resolve an active org that does not exist in single-org
+      // mode, so these actions would fail at the API. Gate every one on
+      // the multi-org flag (mirrors sys_organization.create_organization).
+      visible: 'features.multiOrgEnabled != false',
       successMessage: 'Member added',
       refreshAfter: true,
       params: [
@@ -65,6 +73,7 @@ export const SysMember = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/update-member-role',
       recordIdParam: 'memberId',
+      visible: 'features.multiOrgEnabled != false',
       successMessage: 'Member role updated',
       refreshAfter: true,
       params: [
@@ -81,6 +90,7 @@ export const SysMember = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/remove-member',
       recordIdParam: 'memberIdOrEmail',
+      visible: 'features.multiOrgEnabled != false',
       confirmText: 'Remove this member from the organization? They will lose access to all org resources.',
       successMessage: 'Member removed',
       refreshAfter: true,
@@ -102,7 +112,7 @@ export const SysMember = ObjectSchema.create({
       target: '/api/v1/auth/organization/update-member-role',
       recordIdParam: 'memberId',
       bodyExtra: { role: 'owner' },
-      visible: "record.role != 'owner'",
+      visible: "record.role != 'owner' && features.multiOrgEnabled != false",
       confirmText: 'Transfer ownership of this organization to the selected member? You will be demoted to admin and lose owner-only privileges.',
       successMessage: 'Ownership transferred',
       refreshAfter: true,

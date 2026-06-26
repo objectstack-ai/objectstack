@@ -46,6 +46,13 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
+      // Org invitations are a multi-org-only flow (the endpoint resolves
+      // an active org that does not exist in single-org mode). Hide the
+      // affordance unless multi-org is enabled — matching the
+      // `create_organization` gate on sys_organization. This action is the
+      // most exposed of the set because the Users list is always reachable
+      // in single-org, unlike the org/membership lists.
+      visible: 'features.multiOrgEnabled != false',
       successMessage: 'Invitation sent',
       refreshAfter: true,
       params: [

@@ -44,6 +44,10 @@ export const SysTeam = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/create-team',
+      // Teams are nested inside organizations — a multi-org-only concept.
+      // Gate every team mutation on the multi-org flag so the affordances
+      // disappear in single-org (mirrors sys_organization.create_organization).
+      visible: 'features.multiOrgEnabled != false',
       successMessage: 'Team created',
       refreshAfter: true,
       params: [
@@ -64,6 +68,7 @@ export const SysTeam = ObjectSchema.create({
       target: '/api/v1/auth/organization/update-team',
       recordIdParam: 'teamId',
       bodyShape: { wrap: 'data' },
+      visible: 'features.multiOrgEnabled != false',
       successMessage: 'Team updated',
       refreshAfter: true,
       params: [
@@ -82,6 +87,7 @@ export const SysTeam = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/remove-team',
       recordIdParam: 'teamId',
+      visible: 'features.multiOrgEnabled != false',
       confirmText: 'Delete this team? Members will lose any team-scoped access. This cannot be undone.',
       successMessage: 'Team deleted',
       refreshAfter: true,

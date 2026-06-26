@@ -42,6 +42,10 @@ export const SysTeamMember = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/add-team-member',
+      // Team membership lives under organizations — multi-org-only. Gate
+      // both mutations so they vanish in single-org (mirrors
+      // sys_organization.create_organization).
+      visible: 'features.multiOrgEnabled != false',
       successMessage: 'Team member added',
       refreshAfter: true,
       params: [
@@ -62,6 +66,7 @@ export const SysTeamMember = ObjectSchema.create({
       locations: ['list_item'],
       type: 'api',
       target: '/api/v1/auth/organization/remove-team-member',
+      visible: 'features.multiOrgEnabled != false',
       confirmText: 'Remove this user from the team? They will lose any team-scoped access.',
       successMessage: 'Team member removed',
       refreshAfter: true,
