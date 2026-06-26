@@ -34,6 +34,18 @@ single-org deployments where it is pure noise or a broken affordance:
     (recipient-side accept/reject stay record-gated; they are unreachable in
     single-org anyway since no invitation rows exist)
 
+Also tightened the remaining single-org rough edges on these objects:
+
+- `sys_organization` admin actions (`update` / `delete` / `set_active` /
+  `leave` / `change_slug`) are now all gated on
+  `features.multiOrgEnabled != false`, joining the already-gated
+  `create_organization` — previously only create was gated.
+- `titleFormat` no longer renders a null organization: `sys_member` is titled
+  `'{user_id} ({role})'` (was `'… in {organization_id}'`) and `sys_invitation`
+  is titled `'Invitation for {email}'` (was `'Invitation to {organization_id}'`).
+  In single-org `organization_id` is null, so the old formats read "… in null".
+  The new fields are more useful identifiers in both modes.
+
 No behavior change in multi-org deployments (`OS_MULTI_ORG_ENABLED=true`):
 `features.multiOrgEnabled` is true and the `org-scoping` service is present, so
 every gate evaluates to visible exactly as before. This is metadata-only — no

@@ -26,7 +26,10 @@ export const SysMember = ObjectSchema.create({
     docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
   },
   description: 'Organization membership records',
-  titleFormat: '{user_id} in {organization_id}',
+  // Org-independent title: organization_id is null in single-org mode, so a
+  // '{user_id} in {organization_id}' format renders "… in null". User + role
+  // identifies the membership in both single- and multi-org deployments.
+  titleFormat: '{user_id} ({role})',
   compactLayout: ['user_id', 'organization_id', 'role'],
 
   // Row-level actions: better-auth `organization/update-member-role` and

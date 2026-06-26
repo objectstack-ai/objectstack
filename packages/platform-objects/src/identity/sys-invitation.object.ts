@@ -26,7 +26,10 @@ export const SysInvitation = ObjectSchema.create({
     docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
   },
   description: 'Organization invitations for user onboarding',
-  titleFormat: 'Invitation to {organization_id}',
+  // Title by invitee email rather than organization_id: the latter is null in
+  // single-org mode (renders "Invitation to null"), and the recipient email is
+  // the more useful identifier in both modes anyway.
+  titleFormat: 'Invitation for {email}',
   compactLayout: ['email', 'organization_id', 'status'],
 
   // Custom actions — generic CRUD is suppressed (better-auth-managed).
