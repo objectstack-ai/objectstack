@@ -3217,38 +3217,9 @@ export class HttpDispatcher {
             // for anonymous requests — the route's own `auth: true` guard
             // is enforced by upstream middleware.
             const ec: any = context.executionContext;
-            // Build the caller's permission set, then synthesize the env-side
-            // AI seat. The per-agent gate (evaluateAgentAccess → requires the
-            // `ai_seat` capability) reads `req.user.permissions`, but the
-            // dispatch ExecutionContext does NOT carry the seat — so a SEATED
-            // user (sys_user.ai_access=true) was denied (empty /ai/agents
-            // catalog). Read the boolean on the per-request (env) kernel via the
-            // env-scoped ObjectQL service and, when true, ADD `ai_seat`. Copy the
-            // array first so we never mutate the shared ec. Guarded system read →
-            // can only ever ADD access, never break auth (absent/false/error →
-            // no seat, unchanged).
-            const permissions: string[] = ec?.userId && Array.isArray(ec.permissions)
-                ? [...ec.permissions]
-                : [];
-            if (ec?.userId && !permissions.includes('ai_seat')) {
-                try {
-                    // Resolve via the DEFAULT (current per-request env) ObjectQL
-                    // service. Do NOT pass `context.environmentId`: in the cloud
-                    // runtime that is the control-plane env UUID, which keys a
-                    // DISTINCT, empty per-scope engine — the env's own `sys_user`
-                    // (where `ai_access` lives) is served by the default service.
-                    // Passing the id yields an empty result and the seat is lost.
-                    const ql: any = await this.getObjectQLService();
-                    if (ql && typeof ql.find === 'function') {
-                        const rows = await ql
-                            .find('sys_user', { where: { id: ec.userId }, limit: 1 }, { context: { isSystem: true } })
-                            .catch(() => []);
-                        if ((rows?.[0] as any)?.ai_access === true) permissions.push('ai_seat');
-                    }
-                } catch {
-                    /* no ai_access column / lookup failed → no seat (safe) */
-                }
-            }
+            // `ai_seat` is synthesized into ec.permissions by resolveExecutionContext
+            // (the single, scope-correct source — security/resolve-execution-context.ts),
+            // so it flows through here with no extra per-request lookup.
             const user = ec?.userId
                 ? {
                     userId: ec.userId,
@@ -3256,7 +3227,7 @@ export class HttpDispatcher {
                     displayName: ec.userDisplayName ?? ec.userName ?? ec.userId,
                     email: ec.userEmail,
                     roles: Array.isArray(ec.roles) ? ec.roles : [],
-                    permissions,
+                    permissions: Array.isArray(ec.permissions) ? ec.permissions : [],
                     organizationId: ec.tenantId,
                 }
                 : undefined;

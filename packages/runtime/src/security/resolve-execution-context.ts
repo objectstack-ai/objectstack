@@ -405,6 +405,20 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     ctx.roles!.unshift(BUILTIN_ROLE_PLATFORM_ADMIN);
   }
 
+  // [ADR-0024] Env-side AI seat. The per-agent gate (evaluateAgentAccess →
+  // requires the `ai_seat` capability) reads ctx.permissions. Synthesize it from
+  // the boolean `sys_user.ai_access`, read via the SAME scope-correct `ql` used
+  // for the permission sets above — so it resolves on single-env local AND on the
+  // sharded multi-tenant runtime, where only the per-request scope selects the
+  // right engine (a no-arg / wrong-scope lookup returns empty and loses the seat).
+  // Guarded (tryFind swallows errors) → can only ever ADD access, never break auth.
+  if (userId && !ctx.permissions!.includes('ai_seat')) {
+    const seatRows = await tryFind(ql, 'sys_user', { id: userId }, 1);
+    if ((seatRows?.[0] as { ai_access?: unknown } | undefined)?.ai_access === true) {
+      ctx.permissions!.push('ai_seat');
+    }
+  }
+
   // 4. Localization (ADR-0053 Phase 2) — reference timezone + locale resolved
   //    once per request from the `localization` settings and carried on the
   //    context. Consumers: formula today()/datetime, analytics date buckets,

@@ -971,35 +971,17 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     const sessionData = await api.getSession({ headers: headersInstance });
                     const userId: string | undefined = sessionData?.user?.id ?? sessionData?.session?.userId;
                     if (!userId) return undefined;
-                    // Env-side AI-seat synthesis (ADR-0024, sys_user.ai_access boolean
-                    // model). The per-agent gate (evaluateAgentAccess → requires the
-                    // `ai_seat` capability) reads `req.user.permissions`, which the AI
-                    // routes get from THIS resolver — but it previously returned an empty
-                    // permission set, so a SEATED user (ai_access=true) was still denied
-                    // (empty /ai/agents catalog). Mirror plugin-hono-server's data-route
-                    // resolveCtx: read the boolean with a GUARDED system query on the
-                    // per-request env kernel's `sys_user` and, when true, synthesize the
-                    // `ai_seat` capability. Absent/false/missing-column/error → no seat
-                    // (deny, unchanged) so this can only ever ADD access, never break auth.
-                    const permissions: string[] = [];
-                    try {
-                        const dataEngine: any = ctx.getService('data');
-                        if (dataEngine && typeof dataEngine.find === 'function') {
-                            const uRows = await dataEngine
-                                .find('sys_user', { where: { id: userId }, limit: 1 }, { context: { isSystem: true } })
-                                .catch(() => []);
-                            if ((uRows?.[0] as any)?.ai_access === true) permissions.push('ai_seat');
-                        }
-                    } catch {
-                        /* no ai_access column / query failed → no seat (safe) */
-                    }
+                    // AI-route req.user permissions (incl. the synthesized `ai_seat`) are
+                    // populated from the ExecutionContext by the /ai/* dispatch path
+                    // (http-dispatcher → resolveExecutionContext, the single scope-correct
+                    // source). This concrete-route resolver returns an empty set.
                     return {
                         userId,
                         id: userId,
                         displayName: sessionData?.user?.name ?? sessionData?.user?.email ?? userId,
                         email: sessionData?.user?.email,
                         roles: [],
-                        permissions,
+                        permissions: [],
                         organizationId: sessionData?.session?.activeOrganizationId,
                     };
                 } catch {
