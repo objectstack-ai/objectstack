@@ -41,6 +41,13 @@ export class SeedLoaderService implements ISeedLoaderService {
   private engine: IDataEngine;
   private metadata: IMetadataService;
   private logger: Logger;
+  /**
+   * Tenant org to stamp BUSINESS seed rows with when the caller pinned no
+   * explicit `config.organizationId` (resolved per {@link resolveSoleOrganizationId}).
+   * Set once per {@link load}; never applied to `sys_`/`cloud_`/`ai_` platform
+   * seeds (those stay intentionally global/cross-tenant).
+   */
+  private fallbackOrgId?: string;
 
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger) {
     this.engine = engine;
@@ -57,6 +64,16 @@ export class SeedLoaderService implements ISeedLoaderService {
     const config = request.config;
     const allErrors: ReferenceResolutionError[] = [];
     const allResults: SeedLoadResult[] = [];
+
+    // When the caller pinned no target org (an in-process publish has no active
+    // user session — the AI build agent's publish path), BUSINESS seed rows
+    // would land `organization_id = NULL` and then vanish under strict
+    // org-scoping. If the tenant has exactly ONE organization, adopt it as a
+    // fallback so business seeds carry the tenant key like a normal write.
+    // Zero/many orgs → leave unset (genuinely ambiguous → keep the historical
+    // global/cross-tenant behavior; the publisher must scope explicitly).
+    this.fallbackOrgId =
+      config.organizationId == null ? await this.resolveSoleOrganizationId() : undefined;
 
     // 1. Filter datasets by environment
     const datasets = this.filterByEnv(request.seeds, config.env);
@@ -265,13 +282,17 @@ export class SeedLoaderService implements ISeedLoaderService {
       }
       const record = { ...(seedResult.value as Record<string, unknown>) };
 
-      // Per-tenant tagging: when a target org is set, stamp every
-      // seeded row with it (unless the record itself already supplies
-      // an explicit organization_id — respect dataset author overrides).
-      // Skipped objects that don't declare `organization_id` will have
-      // the extra key silently ignored by the engine.
-      if (config.organizationId && record['organization_id'] == null) {
-        record['organization_id'] = config.organizationId;
+      // Per-tenant tagging: stamp every seeded row with the target org — the
+      // caller's explicit `config.organizationId`, or (when none was pinned) the
+      // single-org fallback for BUSINESS objects only. A `sys_`/`cloud_`/`ai_`
+      // platform seed never takes the fallback: those stay global/cross-tenant.
+      // A record that supplies its own `organization_id` always wins; objects
+      // without the column ignore the extra key at the engine.
+      const tenantOrg =
+        config.organizationId ??
+        (/^(sys_|cloud_|ai_)/.test(objectName) ? undefined : this.fallbackOrgId);
+      if (tenantOrg && record['organization_id'] == null) {
+        record['organization_id'] = tenantOrg;
       }
 
       // Resolve references
@@ -435,6 +456,32 @@ export class SeedLoaderService implements ISeedLoaderService {
   // ==========================================================================
   // Internal: Reference Resolution
   // ==========================================================================
+
+  /**
+   * Best-effort resolve the tenant's SOLE organization id — used to stamp
+   * business seed rows when the caller pinned no `config.organizationId` (an
+   * in-process publish has no active user session). A fresh env has exactly one
+   * org, so its seeds should carry it like a normal write instead of landing
+   * org-less (→ invisible under strict org-scoping). Returns undefined when
+   * there are zero or several orgs (genuinely ambiguous — keep the historical
+   * global/cross-tenant NULL) or when `sys_organization` is absent.
+   */
+  private async resolveSoleOrganizationId(): Promise<string | undefined> {
+    try {
+      const rows = await this.engine.find('sys_organization', {
+        fields: ['id'],
+        limit: 2,
+        context: { isSystem: true },
+      } as any);
+      if (Array.isArray(rows) && rows.length === 1) {
+        const id = (rows[0] as { id?: unknown; _id?: unknown })?.id ?? (rows[0] as { _id?: unknown })?._id;
+        return id ? String(id) : undefined;
+      }
+    } catch {
+      // sys_organization may not exist (single-tenant runtime) — ignore.
+    }
+    return undefined;
+  }
 
   private async resolveFromDatabase(
     targetObject: string,
