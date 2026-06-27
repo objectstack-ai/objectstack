@@ -303,6 +303,15 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   passwordHistoryCount?: number;
 
   /**
+   * ADR-0069 D1 — password expiry (days). When > 0, an authenticated user whose
+   * `sys_user.password_changed_at` is older than this is gated out of protected
+   * resources (`PASSWORD_EXPIRED`) until they change their password. Computed in
+   * `customSession` (→ `user.authGate`) and enforced at the transport seam. 0 =
+   * off. A null `password_changed_at` never expires (existing users on upgrade).
+   */
+  passwordExpiryDays?: number;
+
+  /**
    * ADR-0069 D2 — better-auth-native per-IP rate limiting, passed through to
    * better-auth's core `rateLimit`. The settings bind tightens `customRules`
    * for the auth endpoints (`/sign-in/email`, `/sign-up/email`,
@@ -623,6 +632,9 @@ export class AuthManager {
             ) {
               const userId = await this.resolvePasswordChangeUserId(ctx).catch(() => undefined);
               if (userId) {
+                // Stash for the after-hook (password_changed_at stamp), regardless
+                // of whether history is enabled.
+                ctx.context.__osPwChangeUserId = userId;
                 const pw = ctx?.context?.password;
                 const verify = typeof pw?.verify === 'function' ? pw.verify.bind(pw) : undefined;
                 const oldHash = await this.assertPasswordNotReused(userId, candidate, verify);
@@ -828,24 +840,41 @@ export class AuthManager {
             return;
           }
 
-          // ── ADR-0069 D1: commit password history on success ─────────
+          // ── ADR-0069 D1: on a successful change/reset — stamp
+          //    password_changed_at (expiry) and commit password history.
           if (ctx?.path === '/change-password' || ctx?.path === '/reset-password') {
-            const stash = ctx?.context?.__osPwHistory;
-            if (stash?.userId) {
-              let succeeded = true;
-              try {
-                const { isAPIError } = await import('better-auth/api');
-                succeeded = !isAPIError(ctx?.context?.returned);
-              } catch {
-                succeeded = !(ctx?.context?.returned instanceof Error);
-              }
-              if (succeeded) await this.recordPasswordHistory(stash.userId, stash.oldHash);
-              delete ctx.context.__osPwHistory;
+            let succeeded: boolean;
+            try {
+              const { isAPIError } = await import('better-auth/api');
+              succeeded = !isAPIError(ctx?.context?.returned);
+            } catch {
+              succeeded = !(ctx?.context?.returned instanceof Error);
             }
+            if (succeeded) {
+              const stampId = ctx?.context?.__osPwChangeUserId;
+              if (stampId) await this.stampPasswordChangedAt(stampId);
+              const stash = ctx?.context?.__osPwHistory;
+              if (stash?.userId) await this.recordPasswordHistory(stash.userId, stash.oldHash);
+            }
+            delete ctx.context.__osPwChangeUserId;
+            delete ctx.context.__osPwHistory;
             return;
           }
 
           if (ctx?.path !== '/sign-up/email') return;
+          // ADR-0069 D1 — stamp password_changed_at for a newly-created local
+          // user (expiry clock starts at sign-up). Best-effort.
+          {
+            const newUserId = ctx?.context?.returned?.user?.id;
+            let signupOk: boolean;
+            try {
+              const { isAPIError } = await import('better-auth/api');
+              signupOk = !isAPIError(ctx?.context?.returned);
+            } catch {
+              signupOk = !(ctx?.context?.returned instanceof Error);
+            }
+            if (signupOk && typeof newUserId === 'string') await this.stampPasswordChangedAt(newUserId);
+          }
           const ep = ctx?.context?.options?.emailAndPassword;
           if (ep && ctx.context.__osDisableSignUpOrig !== undefined) {
             ep.disableSignUp = ctx.context.__osDisableSignUpOrig;
@@ -1518,7 +1547,21 @@ export class AuthManager {
           ...orgRoles,
           ...(platformAdmin ? [BUILTIN_ROLE_PLATFORM_ADMIN] : []),
         ]));
-        return { user: { ...user, roles, isPlatformAdmin: platformAdmin }, session };
+
+        // ADR-0069 — authentication-policy gate posture (password expiry,
+        // enforced MFA). Computed only when a gate feature is enabled (else
+        // zero extra reads on the hot path); surfaced as `user.authGate` for
+        // the transport seams to enforce. See computeAuthGate().
+        const authGate = await this.computeAuthGate(
+          user.id,
+          (session as any)?.activeOrganizationId,
+          (user as any)?.twoFactorEnabled === true,
+        );
+
+        return {
+          user: { ...user, roles, isPlatformAdmin: platformAdmin, ...(authGate ? { authGate } : {}) },
+          session,
+        };
       }));
     }
 
@@ -2223,6 +2266,73 @@ export class AuthManager {
           'digit, symbol.',
         code: 'PASSWORD_POLICY_VIOLATION',
       });
+    }
+  }
+
+  /**
+   * ADR-0069 — is any authentication-policy gate enabled? Cheap, synchronous;
+   * lets the transport seams skip session lookups entirely when off (the
+   * default), keeping the gate zero-overhead until an admin opts in.
+   */
+  public isAuthGateActive(): boolean {
+    return (Math.floor(Number(this.config.passwordExpiryDays) || 0) > 0);
+  }
+
+  /**
+   * ADR-0069 — compute the auth-policy gate posture for a session. Returns an
+   * `{ code, message }` when the user is currently blocked (e.g. password
+   * expired), else undefined. No-op (and no DB read) when no gate feature is
+   * enabled. Fails OPEN on any lookup error — a transient hiccup must never lock
+   * a compliant user out.
+   */
+  private async computeAuthGate(
+    userId: string,
+    _activeOrgId: string | undefined,
+    _twoFactorEnabled: boolean,
+  ): Promise<{ code: string; message: string } | undefined> {
+    const expiryDays = Math.floor(Number(this.config.passwordExpiryDays) || 0);
+    if (expiryDays <= 0) return undefined; // no gate feature active
+    const engine = this.getDataEngine();
+    if (!engine || !userId) return undefined;
+    try {
+      const SYSTEM_CTX = { isSystem: true, roles: [], permissions: [] };
+      const u = await engine.findOne('sys_user', {
+        where: { id: userId }, fields: ['password_changed_at'], context: SYSTEM_CTX,
+      } as any);
+      const changed = u?.password_changed_at;
+      // Null = never expires (existing accounts on upgrade) until the next change.
+      if (changed) {
+        const ageMs = Date.now() - new Date(changed).getTime();
+        if (ageMs > expiryDays * 86_400_000) {
+          return {
+            code: 'PASSWORD_EXPIRED',
+            message: 'Your password has expired. Please change it to continue.',
+          };
+        }
+      }
+    } catch {
+      return undefined; // fail-open
+    }
+    return undefined;
+  }
+
+  /**
+   * ADR-0069 D1 — stamp `sys_user.password_changed_at = now` after a password is
+   * set (sign-up / change / reset). Best-effort; never throws. Written as a Date
+   * (never epoch-ms) per ADR-0074.
+   */
+  private async stampPasswordChangedAt(userId: string): Promise<void> {
+    const engine = this.getDataEngine();
+    if (!engine || !userId) return;
+    try {
+      const SYSTEM_CTX = { isSystem: true, roles: [], permissions: [] };
+      await engine.update(
+        'sys_user',
+        { id: userId, password_changed_at: new Date() },
+        { context: SYSTEM_CTX } as any,
+      );
+    } catch {
+      // audit stamp is best-effort — never break a valid password change
     }
   }
 

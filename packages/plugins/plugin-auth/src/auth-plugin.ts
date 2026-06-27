@@ -512,6 +512,11 @@ export class AuthPlugin implements Plugin {
           const n = Math.floor(Number(values.password_history_count));
           if (Number.isFinite(n) && n >= 0) patch.passwordHistoryCount = Math.min(24, n);
         }
+        if (isExplicit('password_expiry_days')) {
+          // 0 disables expiry → non-negative reader.
+          const n = Math.floor(Number(values.password_expiry_days));
+          if (Number.isFinite(n) && n >= 0) patch.passwordExpiryDays = Math.min(3650, n);
+        }
 
         // Session lifetime — days → seconds for better-auth's `session`
         // (`expiresIn` = absolute lifetime; `updateAge` = refresh threshold).

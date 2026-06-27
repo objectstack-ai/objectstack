@@ -447,6 +447,17 @@ export const SysUser = ObjectSchema.create({
       description: 'When set and in the future, sign-in is rejected (brute-force lockout). Auto-clears past this time; an admin can clear it early via Unlock.',
     }),
 
+    // ADR-0069 D1 — last password change; drives password-expiry enforcement.
+    // Stamped on sign-up / change-password / reset-password. Null = never
+    // expires (until the user next changes their password).
+    password_changed_at: Field.datetime({
+      label: 'Password Changed At',
+      required: false,
+      readonly: true,
+      group: 'Admin',
+      description: 'Timestamp of the last password change. Backs password_expiry_days; system-managed.',
+    }),
+
     ai_access: Field.boolean({
       label: 'AI Access',
       defaultValue: false,

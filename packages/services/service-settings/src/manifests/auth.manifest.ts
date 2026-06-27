@@ -117,6 +117,17 @@ const manifest = {
       description: 'Block reusing this many previous passwords on change/reset. 0 disables the check.',
       visible: "${data.email_password_enabled !== false}",
     },
+    {
+      type: 'number',
+      key: 'password_expiry_days',
+      label: 'Password expiry (days)',
+      required: false,
+      default: 0,
+      min: 0,
+      max: 3650,
+      description: 'Force a password change after this many days. 0 disables expiry. While expired, the user is blocked from data until they change their password.',
+      visible: "${data.email_password_enabled !== false}",
+    },
 
     {
       type: 'group',

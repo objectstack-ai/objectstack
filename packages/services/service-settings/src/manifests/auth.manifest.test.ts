@@ -65,6 +65,7 @@ describe('authSettingsManifest', () => {
     expect(byKey('rate_limit_max').default).toBe(10);
     expect(byKey('rate_limit_window_seconds').default).toBe(60);
     expect(byKey('password_history_count').default).toBe(0);
+    expect(byKey('password_expiry_days').default).toBe(0);
   });
 
   it('exposes encrypted Google OAuth credential fields', () => {

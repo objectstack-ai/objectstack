@@ -1850,4 +1850,62 @@ describe('AuthManager', () => {
       expect(written).toEqual(['hash:current', 'hash:old1']); // prepend + trim to 2
     });
   });
+
+  // ADR-0069 D1: password expiry posture + stamping (the session-gate infra).
+  describe('password expiry gate (ADR-0069 D1)', () => {
+    const SECRET = 'test-secret-at-least-32-chars-long';
+    const makeEngine = (user: any) => ({
+      findOne: vi.fn(async (_o: string, q: any) => {
+        const w = q?.where ?? {};
+        if (!user) return null;
+        return Object.entries(w).every(([k, v]) => (user as any)[k] === v) ? user : null;
+      }),
+      update: vi.fn(async () => ({})),
+    });
+    const mgr = (engine: any, extra: any = {}) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const m = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, ...extra });
+      warn.mockRestore();
+      return m;
+    };
+
+    it('isAuthGateActive reflects passwordExpiryDays', () => {
+      expect(mgr(makeEngine(null), { passwordExpiryDays: 0 }).isAuthGateActive()).toBe(false);
+      expect(mgr(makeEngine(null), { passwordExpiryDays: 90 }).isAuthGateActive()).toBe(true);
+    });
+
+    it('computeAuthGate is a no-op (no DB read) when expiry is off', async () => {
+      const engine = makeEngine({ id: 'u1', password_changed_at: new Date(0).toISOString() });
+      const m = mgr(engine, { passwordExpiryDays: 0 });
+      await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
+      expect(engine.findOne).not.toHaveBeenCalled();
+    });
+
+    it('returns PASSWORD_EXPIRED when password_changed_at is older than the window', async () => {
+      const old = new Date(Date.now() - 100 * 86_400_000).toISOString();
+      const m = mgr(makeEngine({ id: 'u1', password_changed_at: old }), { passwordExpiryDays: 90 });
+      const gate = await (m as any).computeAuthGate('u1', undefined, false);
+      expect(gate?.code).toBe('PASSWORD_EXPIRED');
+    });
+
+    it('does NOT expire when the password is within the window', async () => {
+      const recent = new Date(Date.now() - 10 * 86_400_000).toISOString();
+      const m = mgr(makeEngine({ id: 'u1', password_changed_at: recent }), { passwordExpiryDays: 90 });
+      await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
+    });
+
+    it('treats a null password_changed_at as never-expired (upgrade-safe)', async () => {
+      const m = mgr(makeEngine({ id: 'u1', password_changed_at: null }), { passwordExpiryDays: 1 });
+      await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
+    });
+
+    it('stampPasswordChangedAt writes a Date (never epoch-ms) to sys_user', async () => {
+      const engine = makeEngine({ id: 'u1' });
+      const m = mgr(engine);
+      await (m as any).stampPasswordChangedAt('u1');
+      const arg = engine.update.mock.calls[0][1];
+      expect(arg.id).toBe('u1');
+      expect(arg.password_changed_at instanceof Date).toBe(true);
+    });
+  });
 });

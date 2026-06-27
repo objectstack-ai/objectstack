@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { IHttpServer, resolveAuthzContext, resolveLocalizationContext } from '@objectstack/core';
+import { IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted } from '@objectstack/core';
 import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { ObjectStackProtocol } from '@objectstack/spec/api';
@@ -760,6 +760,15 @@ export class RestServer {
      * requests (they're internal-only), so they cannot bypass this gate.
      */
     private enforceAuth(req: any, res: any, context: any): boolean {
+        // ADR-0069 — authentication-policy gate (password expiry, enforced MFA).
+        // Independent of `requireAuth`: a gated session (carrying `authGate`) is
+        // blocked from protected resources, while the core allow-list keeps auth
+        // + remediation reachable. Runs before the anonymous check.
+        const gate = context?.authGate;
+        if (gate && req?.method !== 'OPTIONS' && !isAuthGateAllowlisted(req?.path)) {
+            res.status(403).json({ error: { code: gate.code, message: gate.message } });
+            return true;
+        }
         if (!this.config.api.requireAuth) return false;
         if (context?.userId) return false;
         if (req?.method === 'OPTIONS') return false;
@@ -944,6 +953,18 @@ export class RestServer {
                 userId: authz.userId,
             });
 
+            // ADR-0069 — authentication-policy gate posture. Only when a gate
+            // feature is active (cheap sync check) do we re-read the session for
+            // its `user.authGate` (computed in customSession). enforceAuth() then
+            // blocks protected resources for a gated user. Zero cost when off.
+            let authGate: any;
+            try {
+                if (typeof authService.isAuthGateActive === 'function' && authService.isAuthGateActive()) {
+                    const gatedSession: any = await getSession(headers).catch(() => undefined);
+                    if (gatedSession?.user?.authGate) authGate = gatedSession.user.authGate;
+                }
+            } catch { /* gate is best-effort — never break context resolution */ }
+
             return {
                 userId: authz.userId,
                 tenantId: authz.tenantId,
@@ -954,6 +975,7 @@ export class RestServer {
                 ...(authz.tabPermissions ? { tabPermissions: authz.tabPermissions } : {}),
                 isSystem: false,
                 org_user_ids: authz.org_user_ids,
+                ...(authGate ? { authGate } : {}),
                 ...(localization.timezone ? { timezone: localization.timezone } : {}),
                 ...(localization.locale ? { locale: localization.locale } : {}),
                 ...(localization.currency ? { currency: localization.currency } : {}),

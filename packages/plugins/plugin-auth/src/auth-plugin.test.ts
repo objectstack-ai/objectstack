@@ -688,6 +688,12 @@ describe('AuthPlugin', () => {
       expect((manager as any).config.passwordHistoryCount).toBe(0);
     });
 
+    it('binds password_expiry_days (ADR-0069 D1)', async () => {
+      const { manager } = await bootWithAuthSettings({ password_expiry_days: { value: 90, source: 'global' } });
+      expect((manager as any).config.passwordExpiryDays).toBe(90);
+      expect((manager as any).isAuthGateActive()).toBe(true);
+    });
+
     it('binds account-lockout settings (ADR-0069 D2)', async () => {
       const { manager } = await bootWithAuthSettings({
         lockout_threshold: { value: 5, source: 'global' },

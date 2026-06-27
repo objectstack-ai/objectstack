@@ -87,3 +87,4 @@ export {
   type ResolveAuthzInput,
   type ResolveLocalizationInput,
 } from './resolve-authz-context.js';
+export { isAuthGateAllowlisted, evaluateAuthGate, type AuthGate } from './auth-gate.js';
