@@ -347,8 +347,6 @@
     "ObjectOwnershipEnum (const)",
     "ObjectSchema (const)",
     "OperatorKey (type)",
-    "PartitioningConfig (type)",
-    "PartitioningConfigSchema (const)",
     "PoolConfig (type)",
     "PoolConfigSchema (const)",
     "QueryAST (type)",

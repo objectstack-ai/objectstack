@@ -201,12 +201,6 @@
       "authorWarn": true,
       "authorHint": "No record-versioning engine reads this block — setting it stores nothing and snapshots no history. Remove it (use Field.trackHistory for field-level history)."
     },
-    "partitioning": {
-      "status": "dead",
-      "evidence": "aspirational; no runtime",
-      "authorWarn": true,
-      "authorHint": "No table-partitioning is applied from this block. Remove it — it has no runtime effect."
-    },
     "softDelete": {
       "status": "dead",
       "evidence": "no runtime; duplicates the (also dead) enable.trash",
@@ -218,12 +212,6 @@
       "evidence": "SearchConfigSchema — no runtime; duplicates enable.searchable",
       "authorWarn": true,
       "authorHint": "No search-engine config is consumed. Remove it — records remain queryable via the normal data API regardless."
-    },
-    "defaultDetailForm": {
-      "status": "dead",
-      "evidence": "documented fallback chain unimplemented",
-      "authorWarn": true,
-      "authorHint": "The detail form is chosen by the view layer; this field's documented fallback chain is unimplemented and ignored. Remove it."
     },
     "recordName": {
       "status": "dead",

@@ -192,12 +192,6 @@
       "status": "live",
       "note": "objectui LookupField — opt-in inline quick-create (dataSource.create from typed text) (reads allowCreate || allow_create)."
     },
-    "maxRating": {
-      "status": "dead",
-      "evidence": "RatingField reads `max` (RatingField.tsx:13) — dead + redundant with max",
-      "authorWarn": true,
-      "authorHint": "The rating renderer reads `max`, not `maxRating` — set `max` instead; `maxRating` is ignored."
-    },
     "columnName": {
       "status": "dead",
       "evidence": "resolveColumnName (spec system-names.ts:182) has ZERO call sites; SQL driver hardcodes column = field key",
@@ -243,10 +237,6 @@
       "authorHint": "This nested block is not read — and note no size/type enforcement happens on write. Use the flat `multiple`/`accept`/`maxSize` siblings for the renderer."
     },
     "dependencies": {
-      "status": "dead",
-      "evidence": "no consumer"
-    },
-    "caseSensitive": {
       "status": "dead",
       "evidence": "no consumer"
     },

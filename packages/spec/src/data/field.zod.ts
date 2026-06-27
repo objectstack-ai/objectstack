@@ -509,7 +509,6 @@ export const FieldSchema = lazySchema(() => z.object({
   // addressFormat, color colorFormat/allowAlpha/presetColors, slider showValue/marks,
   // barcode/qr barcodeFormat/qrErrorCorrection/displayValue/allowScanning.
   language: z.string().optional().describe('Programming language for syntax highlighting (e.g., javascript, python, sql)'),
-  maxRating: z.number().optional().describe('Maximum rating value (default: 5)'),
   step: z.number().optional().describe('Step increment for slider (default: 1)'),
 
   // Currency field config
@@ -582,7 +581,6 @@ export const FieldSchema = lazySchema(() => z.object({
   system: z.boolean().optional().describe('Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag.'),
   sortable: z.boolean().optional().default(true).describe('Whether field is sortable in list views'),
   inlineHelpText: z.string().optional().describe('Help text displayed below the field in forms'),
-  caseSensitive: z.boolean().optional().describe('Whether text comparisons are case-sensitive'),
   /**
    * Auto-number display format. Literal text interleaved with `{...}` tokens:
    *

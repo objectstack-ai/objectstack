@@ -197,32 +197,6 @@ export const VersioningConfigSchema = lazySchema(() => z.object({
   versionField: z.string().default('version').describe('Field name for version number/timestamp'),
 }));
 
-/**
- * Partitioning Strategy Schema
- * Configures table partitioning for performance at scale
- * 
- * @example Range partitioning by date (monthly)
- * {
- *   enabled: true,
- *   strategy: 'range',
- *   key: 'created_at',
- *   interval: '1 month'
- * }
- */
-export const PartitioningConfigSchema = lazySchema(() => z.object({
-  enabled: z.boolean().describe('Enable table partitioning'),
-  strategy: z.enum(['range', 'hash', 'list']).describe('Partitioning strategy: range (date ranges), hash (consistent hashing), list (predefined values)'),
-  key: z.string().describe('Field name to partition by'),
-  interval: z.string().optional().describe('Partition interval for range strategy (e.g., "1 month", "1 year")'),
-}).refine((data) => {
-  // If strategy is 'range', interval must be provided
-  if (data.strategy === 'range' && !data.interval) {
-    return false;
-  }
-  return true;
-}, {
-  message: 'interval is required when strategy is "range"',
-}));
 
 /**
  * Object Field Group Schema — MVP (data-layer protocol)
@@ -540,7 +514,6 @@ const ObjectSchemaBase = z.object({
   versioning: VersioningConfigSchema.optional().describe('Record versioning and history tracking configuration'),
   
   // Partitioning strategy
-  partitioning: PartitioningConfigSchema.optional().describe('Table partitioning configuration for performance'),
   
   /**
    * Logic & Validation (Co-located)
@@ -620,7 +593,6 @@ const ObjectSchemaBase = z.object({
    * same metadata drives both the public collection form and the operator's
    * edit panel.
    */
-  defaultDetailForm: z.string().optional().describe('Name of the default FormView for record detail / edit screens'),
 
   /** 
    * Search Engine Config 
@@ -915,7 +887,6 @@ export type TenancyConfig = z.infer<typeof TenancyConfigSchema>;
 export type ObjectAccessConfig = z.infer<typeof ObjectAccessConfigSchema>;
 export type SoftDeleteConfig = z.infer<typeof SoftDeleteConfigSchema>;
 export type VersioningConfig = z.infer<typeof VersioningConfigSchema>;
-export type PartitioningConfig = z.infer<typeof PartitioningConfigSchema>;
 
 /**
  * Resolved CRUD affordance matrix for an object — what generic
