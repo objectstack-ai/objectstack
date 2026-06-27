@@ -12,7 +12,7 @@ import {
 } from '@objectstack/spec/data';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues } from '@objectstack/spec/data';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
-import { DriverInterface, IDataEngine, Logger, createLogger } from '@objectstack/core';
+import { IDataDriver, IDataEngine, Logger, createLogger } from '@objectstack/core';
 import { CoreServiceName, StorageNameMapping } from '@objectstack/spec/system';
 import { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import type { ICryptoProvider, CryptoHandle } from '@objectstack/spec/contracts';
@@ -268,7 +268,7 @@ export class ObjectQL implements IDataEngine {
    */
   private readonly txStore = new AsyncLocalStorage<{ transaction: unknown }>();
 
-  private drivers = new Map<string, DriverInterface>();
+  private drivers = new Map<string, IDataDriver>();
   private defaultDriver: string | null = null;
   private logger: Logger;
 
@@ -399,7 +399,7 @@ export class ObjectQL implements IDataEngine {
             logger: this.logger,
             // Expose the driver registry helper explicitly if needed
             drivers: {
-                register: (driver: DriverInterface) => this.registerDriver(driver)
+                register: (driver: IDataDriver) => this.registerDriver(driver)
             },
             ...this.hostContext
           };
@@ -1206,7 +1206,7 @@ export class ObjectQL implements IDataEngine {
   /**
    * Register a new storage driver
    */
-  registerDriver(driver: DriverInterface, isDefault: boolean = false) {
+  registerDriver(driver: IDataDriver, isDefault: boolean = false) {
     if (this.drivers.has(driver.name)) {
       this.logger.warn('Driver already registered, skipping', { driverName: driver.name });
       return;
@@ -1465,7 +1465,7 @@ export class ObjectQL implements IDataEngine {
    * 3. Package's `defaultDatasource` from manifest
    * 4. Global default driver
    */
-  private getDriver(objectName: string): DriverInterface {
+  private getDriver(objectName: string): IDataDriver {
     const object = this._registry.getObject(objectName);
 
     // 1. Object's explicit datasource field (highest priority)
@@ -2632,7 +2632,7 @@ export class ObjectQL implements IDataEngine {
       // This lets system services (e.g. PackageService, AuditService) issue raw
       // SQL against the control-plane / default DB without having to know the
       // object name behind every CREATE TABLE / SELECT statement.
-      let driver: DriverInterface | undefined;
+      let driver: IDataDriver | undefined;
       if (options?.object) {
           driver = this.getDriver(options.object);
       } else if (options?.datasource && this.drivers.has(options.datasource)) {
@@ -2787,7 +2787,7 @@ export class ObjectQL implements IDataEngine {
    * Unlike the private getDriver() (which resolves by object name),
    * this method directly looks up a driver by its registered name.
    */
-  getDriverByName(name: string): DriverInterface | undefined {
+  getDriverByName(name: string): IDataDriver | undefined {
     return this.drivers.get(name);
   }
 
@@ -2820,9 +2820,9 @@ export class ObjectQL implements IDataEngine {
    * the internal getDriver() used by CRUD operations.
    *
    * @param objectName - FQN or short name of the registered object.
-   * @returns The resolved DriverInterface, or undefined if no driver is available.
+   * @returns The resolved IDataDriver, or undefined if no driver is available.
    */
-  getDriverForObject(objectName: string): DriverInterface | undefined {
+  getDriverForObject(objectName: string): IDataDriver | undefined {
     try {
       return this.getDriver(objectName);
     } catch {
@@ -2907,7 +2907,7 @@ export class ObjectQL implements IDataEngine {
    *
    * @throws Error if the datasource is not found
    */
-  datasource(name: string): DriverInterface {
+  datasource(name: string): IDataDriver {
     const driver = this.drivers.get(name);
     if (!driver) {
       throw new Error(`[ObjectQL] Datasource '${name}' not found`);
@@ -2984,7 +2984,7 @@ export class ObjectQL implements IDataEngine {
    *   });
    */
   static async create(config: {
-    datasources?: Record<string, DriverInterface>;
+    datasources?: Record<string, IDataDriver>;
     objects?: Record<string, ServiceObject>;
     hooks?: Array<{ event: string; object: string; handler: (ctx: HookContext) => Promise<void> | void }>;
   }): Promise<ObjectQL> {

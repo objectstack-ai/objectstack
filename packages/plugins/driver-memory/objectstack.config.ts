@@ -14,7 +14,7 @@ const MemoryDriverPlugin: ObjectStackManifest = {
   version: '1.0.0',
   type: 'driver',
   scope: 'project',
-  description: 'A reference specification implementation of the DriverInterface using in-memory arrays. Suitable for testing and development.',
+  description: 'A reference specification implementation of the IDataDriver interface using in-memory arrays. Suitable for testing and development.',
   
   configuration: {
     title: 'Memory Driver Settings',
@@ -88,7 +88,7 @@ const MemoryDriverPlugin: ObjectStackManifest = {
     provides: [
       {
         id: 'com.objectstack.driver.memory.interface.driver',
-        name: 'DriverInterface',
+        name: 'IDataDriver',
         description: 'Standard ObjectStack driver interface for data operations',
         version: { major: 1, minor: 0, patch: 0 },
         stability: 'stable',

@@ -49,9 +49,4 @@ export interface IDataEngine {
   execute?(command: any, options?: Record<string, any>): Promise<any>;
 }
 
-/**
- * @deprecated Use `IDataDriver` from `@objectstack/spec/contracts` instead.
- * This type is re-exported from `@objectstack/spec/contracts` for backward compatibility only.
- */
-export type { DriverInterface } from '@objectstack/spec/contracts';
 

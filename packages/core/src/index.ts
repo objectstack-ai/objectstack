@@ -47,6 +47,4 @@ export type {
     Middleware,
     IDataEngine,
     IDataDriver,
-    /** @deprecated Use `IDataDriver` instead */
-    DriverInterface
 } from '@objectstack/spec/contracts';

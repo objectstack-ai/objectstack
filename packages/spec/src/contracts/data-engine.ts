@@ -10,7 +10,6 @@ import {
   DataEngineRequest,
 } from '../data/index.js';
 
-import type { IDataDriver } from './data-driver.js';
 
 /**
  * IDataEngine - Standard Data Engine Interface
@@ -51,11 +50,3 @@ export interface IDataEngine {
   execute?(command: any, options?: Record<string, any>): Promise<any>;
 }
 
-/**
- * @deprecated Use `IDataDriver` from `@objectstack/spec/contracts` instead.
- * `DriverInterface` is now a type alias for `IDataDriver` — the single authoritative
- * driver contract. All new driver implementations should use `IDataDriver` directly.
- *
- * @see IDataDriver in data-driver.ts for the full contract specification.
- */
-export type DriverInterface = IDataDriver;

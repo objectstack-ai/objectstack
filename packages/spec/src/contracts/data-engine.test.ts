@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { IDataEngine, DriverInterface } from './data-engine';
+import type { IDataEngine } from './data-engine';
 import type { IDataDriver } from './data-driver';
 
 /**
@@ -158,7 +158,7 @@ describe('Data Engine Contract', () => {
     });
   });
 
-  describe('DriverInterface (deprecated alias for IDataDriver)', () => {
+  describe('IDataDriver (driver contract)', () => {
     it('should be assignable from IDataDriver (type alias check)', () => {
       const driver: IDataDriver = {
         name: 'postgres',
@@ -186,8 +186,7 @@ describe('Data Engine Contract', () => {
         dropTable: async () => {},
       };
 
-      // DriverInterface is now a type alias for IDataDriver
-      const driverAsInterface: DriverInterface = driver;
+      const driverAsInterface: IDataDriver = driver;
 
       expect(driverAsInterface.name).toBe('postgres');
       expect(driverAsInterface.version).toBe('1.0.0');
@@ -200,7 +199,7 @@ describe('Data Engine Contract', () => {
     it('should support full IDataDriver lifecycle and CRUD', async () => {
       let connected = false;
 
-      const driver: DriverInterface = {
+      const driver: IDataDriver = {
         name: 'mongo',
         version: '2.0.0',
         supports: minimalCapabilities,
@@ -234,7 +233,7 @@ describe('Data Engine Contract', () => {
     });
 
     it('should support bulk, transaction, and schema operations', async () => {
-      const driver: DriverInterface = {
+      const driver: IDataDriver = {
         name: 'postgres',
         version: '1.0.0',
         supports: { ...minimalCapabilities, transactions: true, bulkCreate: true },
@@ -276,7 +275,7 @@ describe('Data Engine Contract', () => {
 
     it('should support findStream with yielded values', async () => {
       const records = [{ id: '1', name: 'Alice' }, { id: '2', name: 'Bob' }];
-      const driver: DriverInterface = {
+      const driver: IDataDriver = {
         name: 'streamer',
         version: '1.0.0',
         supports: { ...minimalCapabilities, streaming: true },

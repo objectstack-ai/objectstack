@@ -3423,7 +3423,6 @@
     "DefineSharingRuleInput (interface)",
     "DeployExecutionResult (interface)",
     "DriverCapabilities (interface)",
-    "DriverInterface (type)",
     "EMBEDDER_SERVICE (const)",
     "EmailAddress (type)",
     "EmailAttachment (interface)",

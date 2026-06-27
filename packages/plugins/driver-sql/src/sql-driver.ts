@@ -586,7 +586,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   // ===================================
-  // CRUD — DriverInterface core
+  // CRUD — IDataDriver core
   // ===================================
 
   async find(object: string, query: QueryAST, options?: DriverOptions): Promise<any[]> {
