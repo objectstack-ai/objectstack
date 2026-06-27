@@ -832,6 +832,32 @@ export class AuthManager {
           origins.push('http://*.localhost:*');
           origins.push('https://*.localhost:*');
         }
+        // ── ADR-0024: runtime self-service external-IdP registration ───────
+        // `@better-auth/sso`'s `validateDiscoveryUrl` requires the IdP's
+        // *discovery* origin to be in `trustedOrigins` — even for a publicly-
+        // routable IdP (stricter than its own sub-endpoint check, which allows
+        // any public host). Without help that breaks ADR-0024's "register your
+        // IdP at runtime, no boot config" promise for every real IdP
+        // (Okta/Entra/Google). When the SSO RP is enabled, expose
+        // `trustedOrigins` as a per-request FUNCTION that, for a
+        // `/sso/register` | `/sso/update-provider` POST, additionally trusts the
+        // PUBLIC-ROUTABLE issuer / discovery origins declared in the request
+        // body. Private / internal hosts are never auto-trusted — they still
+        // require explicit `trustedOrigins` config (the documented SSRF escape
+        // hatch), and better-auth's own DNS-resolution checks still apply.
+        if (this.isSsoWired()) {
+          return {
+            trustedOrigins: async (request?: Request) => {
+              const base = [...origins];
+              try {
+                for (const o of await this.ssoDiscoveryTrustedOrigins(request)) {
+                  if (!base.includes(o)) base.push(o);
+                }
+              } catch { /* never let trust resolution throw */ }
+              return base;
+            },
+          };
+        }
         return origins.length ? { trustedOrigins: origins } : {};
       })(),
 
@@ -1888,6 +1914,50 @@ export class AuthManager {
       return typeof count === 'number' ? count > 0 : true;
     } catch {
       return true; // provider introspection failed — keep the wired behaviour
+    }
+  }
+
+  /**
+   * Extra `trustedOrigins` entries derived from an external-SSO registration
+   * request. For a `POST /sso/register` | `/sso/update-provider`, parse the
+   * (cloned) body and return the PUBLIC-ROUTABLE origins of the declared
+   * `issuer` / `oidcConfig` endpoints so `@better-auth/sso`'s discovery
+   * validation accepts a customer IdP registered at runtime (ADR-0024) without
+   * the operator pre-listing it in boot config. Only public-routable hosts are
+   * returned — private / internal / loopback hosts are never auto-trusted
+   * (better-auth's `isPublicRoutableHost`, the same predicate its own
+   * sub-endpoint check uses). Best-effort: any parse error yields `[]`.
+   */
+  private async ssoDiscoveryTrustedOrigins(request: unknown): Promise<string[]> {
+    try {
+      const req = request as { url?: string; method?: string; clone?: () => Request } | undefined;
+      if (!req || typeof req.clone !== 'function' || !req.url) return [];
+      if ((req.method ?? 'GET').toUpperCase() !== 'POST') return [];
+      const path = new URL(req.url).pathname;
+      if (!/\/sso\/(register|update-provider)$/.test(path)) return [];
+      const body = await req.clone().json().catch(() => null);
+      if (!body || typeof body !== 'object') return [];
+      const oidc = (body as any).oidcConfig ?? {};
+      const candidates = [
+        (body as any).issuer,
+        oidc.discoveryEndpoint,
+        oidc.authorizationEndpoint,
+        oidc.tokenEndpoint,
+        oidc.jwksEndpoint,
+        oidc.userInfoEndpoint,
+      ].filter((v): v is string => typeof v === 'string' && v.length > 0);
+      if (!candidates.length) return [];
+      const { isPublicRoutableHost } = await import('@better-auth/core/utils/host');
+      const out: string[] = [];
+      for (const c of candidates) {
+        try {
+          const u = new URL(c);
+          if (isPublicRoutableHost(u.hostname) && !out.includes(u.origin)) out.push(u.origin);
+        } catch { /* skip malformed URL */ }
+      }
+      return out;
+    } catch {
+      return [];
     }
   }
 
