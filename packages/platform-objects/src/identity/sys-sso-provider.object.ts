@@ -93,6 +93,33 @@ export const SysSsoProvider = ObjectSchema.create({
       ],
     },
     {
+      name: 'register_saml_provider',
+      label: 'Register SAML Provider',
+      icon: 'shield',
+      variant: 'primary',
+      mode: 'create',
+      locations: ['list_toolbar'],
+      type: 'api',
+      method: 'POST',
+      // SAML 2.0 via @better-auth/sso (samlify-backed). Routed through the
+      // env-side bridge (plugin-auth `auth-plugin.ts` → register-saml), which
+      // reshapes these FLAT IdP fields into the nested `samlConfig` body that
+      // @better-auth/sso's /sso/register requires (entryPoint/cert/callbackUrl/
+      // spMetadata/identifierFormat), derives the per-provider ACS URL, and
+      // re-dispatches to /sso/register (admin gate runs). The response returns
+      // the SP ACS + metadata URLs to configure on the IdP.
+      target: '/api/v1/auth/admin/sso/register-saml',
+      refreshAfter: true,
+      params: [
+        { name: 'providerId', label: 'Provider ID', type: 'text', required: true, helpText: 'Stable identifier, e.g. "acme-saml".' },
+        { name: 'issuer', label: 'IdP Entity ID', type: 'text', required: true, helpText: 'The IdP’s SAML EntityID (issuer), e.g. https://saml.acme.com/entityid.' },
+        { name: 'domain', label: 'Email Domain', type: 'text', required: true, helpText: 'Users with this email domain are routed to this IdP, e.g. acme.com.' },
+        { name: 'entryPoint', label: 'IdP SSO URL', type: 'text', required: true, helpText: 'The IdP’s SAML single sign-on (redirect) endpoint that receives the SAMLRequest.' },
+        { name: 'cert', label: 'IdP Signing Certificate', type: 'textarea', required: true, helpText: 'The IdP’s X.509 signing certificate (PEM body). Used to verify assertion signatures.' },
+        { name: 'identifierFormat', label: 'NameID Format', type: 'text', required: false, placeholder: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress', helpText: 'Optional. Requested SAML NameID format. Defaults to the IdP’s configured format.' },
+      ],
+    },
+    {
       name: 'delete_sso_provider',
       label: 'Delete SSO Provider',
       icon: 'trash-2',
@@ -125,7 +152,7 @@ export const SysSsoProvider = ObjectSchema.create({
       // HAS a "Register SSO Provider" action. Point admins at it instead.
       emptyState: {
         title: 'No SSO providers yet',
-        message: 'Register your organization’s external OIDC IdP (Okta, Entra, Auth0, …) with “Register SSO Provider”. Members whose email domain matches can then sign in through it.',
+        message: 'Register your organization’s external IdP — OIDC (Okta, Entra, Auth0, …) with “Register SSO Provider”, or SAML 2.0 with “Register SAML Provider”. Members whose email domain matches can then sign in through it.',
         icon: 'log-in',
       },
     },

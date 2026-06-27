@@ -12,7 +12,7 @@ import {
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
 import { AuthManager, type AuthManagerOptions } from './auth-manager.js';
 import { runSetInitialPassword } from './set-initial-password.js';
-import { runRegisterSsoProviderFromForm } from './register-sso-provider.js';
+import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm } from './register-sso-provider.js';
 import {
   authIdentityObjects,
   authPluginManifestHeader,
@@ -1060,6 +1060,26 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] unlock-user failed', err);
+        return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // ADR-0069 P3 — register a SAML 2.0 IdP. Mirrors the OIDC bridge above:
+    // the metadata `register_saml_provider` action posts FLAT fields; the shared
+    // helper reshapes them into better-auth's nested `samlConfig` (deriving the
+    // per-provider ACS URL) and re-dispatches through /sso/register so the
+    // admin gate + provisioning all run. Returns SP ACS + metadata URLs.
+    rawApp.post(`${basePath}/admin/sso/register-saml`, async (c: any) => {
+      try {
+        const { status, body } = await runRegisterSamlProviderFromForm(
+          (req) => this.authManager!.handleRequest(req),
+          c.req.raw,
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/register-saml bridge failed', err);
         return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
       }
     });

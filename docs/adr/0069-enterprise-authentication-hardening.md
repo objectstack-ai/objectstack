@@ -149,3 +149,17 @@ Each row in D1-D6 names exactly one of these seams. No setting is introduced wit
 - **Adopt the settings fields now, wire enforcement later** — rejected: violates ADR-0049 (false surface). Fields and their enforcement land together.
 - **Outsource all of auth to an external IdP (Auth0/WorkOS)** — rejected as the default: the platform must be self-hostable and own its identity; external IdP is supported *through* D6 (OIDC), not instead of the local floor.
 - **Build SAML now** — deferred: no native better-auth support in 1.6.x; building it before an enforcing implementation exists would be an ADR-0049 violation.
+
+
+---
+
+## Addendum (2026-06): SAML is now better-auth-native — premise updated
+
+The original decision deferred SAML to "P3 / external" on the premise that **SAML is out of better-auth core (1.6.x exposes only `genericOAuth` + `oidcProvider`)**. That premise is **no longer true**: the already-installed **`@better-auth/sso@1.6.20`** (the same plugin wiring the OIDC trust list) ships **full SAML 2.0** — it bundles `samlify` + `fast-xml-parser` + `jose`, exposes `/sso/saml2/sp/metadata`, `/sso/saml2/sp/acs/:providerId`, `/sso/saml2/sp/slo/:providerId`, and registers SAML providers through the **same `/sso/register`** endpoint with a nested `samlConfig` (entryPoint, cert, callbackUrl, spMetadata, identifierFormat, …). Signature/timestamp/replay validation is handled by samlify.
+
+Consequently SAML did **not** require a custom plugin. What shipped (D6/P3):
+
+- A **`register_saml_provider`** action on `sys_sso_provider` (Setup → SSO Providers) collecting flat IdP fields (providerId, IdP EntityID, domain, IdP SSO URL, IdP signing cert, NameID format).
+- A shared **`runRegisterSamlProviderFromForm`** bridge (sibling of the OIDC one) that reshapes the flat form into the nested `samlConfig`, derives the per-provider ACS URL (`/sso/saml2/sp/acs/<providerId>`), defaults the SP descriptor, and re-dispatches through `/sso/register` so the admin gate runs. It returns the **SP ACS + metadata URLs** to configure on the IdP.
+
+Verified end-to-end against a test IdP: register → provider persisted with `saml_config`; SP metadata endpoint serves a valid `EntityDescriptor`/`SPSSODescriptor`; `/sign-in/sso` routes an email domain to the IdP with a valid `SAMLRequest` redirect. The IdP→ACS assertion round-trip is `@better-auth/sso` / samlify's responsibility.

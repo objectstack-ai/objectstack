@@ -134,3 +134,87 @@ export async function runRegisterSsoProviderFromForm(
   }
   return { status: 200, body: { success: true, data: { providerId: parsed?.providerId ?? providerId } } };
 }
+
+
+/**
+ * ADR-0069 P3 — SAML 2.0 sibling of {@link runRegisterSsoProviderFromForm}.
+ *
+ * `@better-auth/sso` (samlify-backed) registers a SAML IdP via the SAME
+ * `/sso/register` endpoint, with the protocol fields nested under `samlConfig`
+ * ({ entryPoint, cert, callbackUrl, identifierFormat? }) instead of `oidcConfig`.
+ * The UI action collects FLAT fields; this helper reshapes them, derives the
+ * per-provider ACS callback URL (`/sso/saml2/sp/acs/<providerId>`), and
+ * re-dispatches through `/sso/register` so the admin gate + provisioning run.
+ * Returns the SP ACS + metadata URLs the admin must configure on the IdP.
+ */
+export async function runRegisterSamlProviderFromForm(
+  handle: AuthRequestHandler,
+  request: Request,
+): Promise<RegisterSsoFormResult & { body: RegisterSsoFormResult['body'] & { acsUrl?: string; spMetadataUrl?: string } }> {
+  let body: any;
+  try { body = await request.json(); } catch { body = {}; }
+  const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  const providerId = str(body?.providerId);
+  const issuer = str(body?.issuer);
+  const domain = str(body?.domain);
+  const entryPoint = str(body?.entryPoint);
+  const cert = str(body?.cert);
+  const identifierFormat = str(body?.identifierFormat);
+
+  const missing = (
+    [
+      ['providerId', providerId],
+      ['issuer', issuer],
+      ['domain', domain],
+      ['entryPoint', entryPoint],
+      ['cert', cert],
+    ] as const
+  ).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) {
+    return { status: 400, body: { success: false, error: { code: 'invalid_request', message: `Missing required field(s): ${missing.join(', ')}` } } };
+  }
+
+  let origin: string;
+  let prefix: string;
+  let innerUrl: string;
+  try {
+    const url = new URL(request.url);
+    origin = url.origin;
+    prefix = url.pathname.replace(/\/admin\/sso\/register-saml$/, '');
+    innerUrl = `${origin}${prefix}/sso/register`;
+  } catch {
+    return { status: 400, body: { success: false, error: { code: 'invalid_request', message: 'Bad request URL' } } };
+  }
+  const acsUrl = `${origin}${prefix}/sso/saml2/sp/acs/${encodeURIComponent(providerId)}`;
+  const spMetadataUrl = `${origin}${prefix}/sso/saml2/sp/metadata?providerId=${encodeURIComponent(providerId)}`;
+
+  const samlConfig: Record<string, unknown> = {
+    entryPoint,
+    cert,
+    callbackUrl: acsUrl,
+    // better-auth requires an SP descriptor (its inner fields are optional). Use
+    // the SP metadata URL as our EntityID — the value the IdP keys this SP on.
+    spMetadata: { entityID: spMetadataUrl },
+  };
+  if (identifierFormat) samlConfig.identifierFormat = identifierFormat;
+
+  const headers = new Headers({ 'content-type': 'application/json' });
+  const cookie = request.headers.get('cookie');
+  if (cookie) headers.set('cookie', cookie);
+  const authz = request.headers.get('authorization');
+  if (authz) headers.set('authorization', authz);
+  headers.set('origin', request.headers.get('origin') || origin);
+
+  const innerReq = new Request(innerUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ providerId, issuer, domain, samlConfig }),
+  });
+  const resp = await handle(innerReq);
+  let parsed: any = {};
+  try { const t = await resp.text(); parsed = t ? JSON.parse(t) : {}; } catch { parsed = {}; }
+  if (!resp.ok) {
+    return { status: resp.status, body: { success: false, error: { code: 'saml_register_failed', message: parsed?.message || 'SAML provider registration failed' } } };
+  }
+  return { status: 200, body: { success: true, data: { providerId: parsed?.providerId ?? providerId }, acsUrl, spMetadataUrl } };
+}
