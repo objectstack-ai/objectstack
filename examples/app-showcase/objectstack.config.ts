@@ -33,7 +33,6 @@ import {
   allRoles,
   allPermissionSets,
   allSharingRules,
-  allPolicies,
 } from './src/security/index.js';
 import { allThemes } from './src/themes/index.js';
 import { ShowcaseTranslationBundle } from './src/translations/index.js';
@@ -174,7 +173,6 @@ export default defineStack({
   roles: allRoles,
   permissions: allPermissionSets,
   sharingRules: allSharingRules,
-  policies: allPolicies,
 
   // Seed data
   data: ShowcaseSeedData,

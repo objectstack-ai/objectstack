@@ -87,7 +87,6 @@ export { defineSkill } from './ai/skill.zod';
 // `any` (the #2023 failure mode). Input-shape config + runtime `.parse()`.
 export { defineDatasource } from './data/datasource.zod';
 export { defineConnector } from './integration/connector.zod';
-export { definePolicy } from './security/policy.zod';
 export { defineSharingRule } from './security/sharing.zod';
 export { defineRole } from './identity/role.zod';
 export { definePermissionSet } from './security/permission.zod';

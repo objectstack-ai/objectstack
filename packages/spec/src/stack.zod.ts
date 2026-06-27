@@ -32,7 +32,6 @@ import { JobSchema } from './system/job.zod';
 import { RoleSchema } from './identity/role.zod';
 import { PermissionSetSchema } from './security/permission.zod';
 import { SharingRuleSchema } from './security/sharing.zod';
-import { PolicySchema } from './security/policy.zod';
 
 import { ApiEndpointSchema } from './api/endpoint.zod';
 import { FeatureFlagSchema } from './kernel/feature.zod';
@@ -235,7 +234,6 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   roles: z.array(RoleSchema).optional().describe('User Roles hierarchy'),
   permissions: z.array(PermissionSetSchema).optional().describe('Permission Sets and Profiles'),
   sharingRules: z.array(SharingRuleSchema).optional().describe('Record Sharing Rules'),
-  policies: z.array(PolicySchema).optional().describe('Security & Compliance Policies'),
 
   /**
    * ObjectAPI: API Layer
@@ -949,7 +947,6 @@ const CONCAT_ARRAY_FIELDS = [
   'roles',
   'permissions',
   'sharingRules',
-  'policies',
   'apis',
   'webhooks',
   'agents',

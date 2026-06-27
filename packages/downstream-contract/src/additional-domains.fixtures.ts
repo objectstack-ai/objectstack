@@ -7,7 +7,7 @@
 // and DO NOT edit them to make a failing spec change pass — see the README.
 import type { DatasourceInput, MappingInput, CubeInput, ObjectExtensionInput } from '@objectstack/spec/data';
 import type { ConnectorInput } from '@objectstack/spec/integration';
-import type { PolicyInput, SharingRuleInput, PermissionSetInput } from '@objectstack/spec/security';
+import type { SharingRuleInput, PermissionSetInput } from '@objectstack/spec/security';
 import type { RoleInput } from '@objectstack/spec/identity';
 import type { EmailTemplateDefinitionInput, TranslationBundleInput } from '@objectstack/spec/system';
 import type { WebhookInput } from '@objectstack/spec/automation';
@@ -41,13 +41,6 @@ export const DcConnector: ConnectorInput = {
       inputSchema: { type: 'object', properties: { email: { type: 'string' } }, required: ['email'] },
     },
   ],
-};
-
-export const DcPolicy: PolicyInput = {
-  name: 'dc_default_policy',
-  isDefault: true,
-  password: { minLength: 12, requireUppercase: true, requireNumbers: true },
-  session: { idleTimeout: 30, absoluteTimeout: 480 },
 };
 
 export const DcSharingRule: SharingRuleInput = {

@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { ActionSchema, ReportSchema, PageSchema, ThemeSchema } from '@objectstack/spec/ui';
 import { DatasourceSchema, MappingSchema, CubeSchema, ObjectExtensionSchema } from '@objectstack/spec/data';
 import { ConnectorSchema } from '@objectstack/spec/integration';
-import { PolicySchema, SharingRuleSchema, PermissionSetSchema } from '@objectstack/spec/security';
+import { SharingRuleSchema, PermissionSetSchema } from '@objectstack/spec/security';
 import { RoleSchema } from '@objectstack/spec/identity';
 import { EmailTemplateDefinitionSchema, TranslationBundleSchema } from '@objectstack/spec/system';
 import { WebhookSchema } from '@objectstack/spec/automation';
@@ -35,7 +35,6 @@ describe('downstream consumer contract (#2035)', () => {
   const cases: Array<[string, { parse: (v: unknown) => unknown }, unknown]> = [
     ['Datasource', DatasourceSchema, more.DcDatasource],
     ['Connector', ConnectorSchema, more.DcConnector],
-    ['Policy', PolicySchema, more.DcPolicy],
     ['SharingRule', SharingRuleSchema, more.DcSharingRule],
     ['Role', RoleSchema, more.DcRole],
     ['PermissionSet', PermissionSetSchema, more.DcPermissionSet],

@@ -172,24 +172,7 @@ export const ContributorTaskSharingRule = {
   active: true,
 };
 
-// ── Org security policy ─────────────────────────────────────────────────────
-export const ShowcasePolicy = {
-  name: 'showcase_default_policy',
-  password: {
-    minLength: 12,
-    requireUppercase: true,
-    requireLowercase: true,
-    requireNumbers: true,
-    requireSymbols: true,
-    expirationDays: 90,
-    historyCount: 5,
-  },
-  session: { idleTimeout: 30, absoluteTimeout: 480, forceMfa: false },
-  audit: { logRetentionDays: 365, sensitiveFields: ['budget', 'spent'], captureRead: false },
-  isDefault: true,
-};
 
 export const allRoles = [ContributorRole, ManagerRole, ExecRole];
 export const allPermissionSets = [ContributorPermissionSet, MemberDefaultProfile];
 export const allSharingRules = [RedProjectSharingRule, HighValueRedProjectRule, ContributorTaskSharingRule];
-export const allPolicies = [ShowcasePolicy];

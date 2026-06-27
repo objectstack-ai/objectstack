@@ -22,8 +22,6 @@ import {
   HighValueOpportunitySharingRule,
   RepLeadSharingRule,
   WonDealActivitySharingRule,
-  CrmDefaultPolicy,
-  CrmFinancePolicy,
 } from './src/security/index.js';
 import { CrmSeedData } from './src/data/index.js';
 import { LeadCsvImportMapping, ContactJsonSyncMapping } from './src/data/crm-mappings.js';
@@ -118,7 +116,6 @@ export default defineStack({
     RepLeadSharingRule,
     WonDealActivitySharingRule,
   ],
-  policies: [CrmDefaultPolicy, CrmFinancePolicy],
 
   // API
   apis: [PipelineSummaryEndpoint, LeadConvertEndpoint, MarketingWebhookEndpoint],
