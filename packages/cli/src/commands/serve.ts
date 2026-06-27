@@ -859,8 +859,23 @@ export default class Serve extends Command {
                 if (!isPlatformHost) return next();
                 const sub = host === __rootDomain ? '' : host.slice(0, -(__rootDomain.length + 1));
                 const head = sub.split('.').pop() || '';
-                if (RESERVED.has(sub) || RESERVED.has(head)) return next();
                 const p = c.req.path;
+                if (RESERVED.has(sub) || RESERVED.has(head)) {
+                  // A browser loading the Console on a bare/reserved platform host
+                  // (the apex or `www`/`app`/… — none bind a tenant env) gets the
+                  // Console SPA, but its `/api/v1/auth/*` calls 404 (no env → no
+                  // auth) → a dead "Auth request failed with status 404" login.
+                  // When this runtime is cloud-connected (`OS_CLOUD_URL` set), send
+                  // Console requests to the cloud control plane to pick/open an
+                  // environment instead. A self-hosted single-env runtime (no
+                  // `OS_CLOUD_URL`) keeps the prior pass-through. Non-console paths
+                  // (infra, health, /api) fall through below unchanged.
+                  const cloudUrl = (process.env.OS_CLOUD_URL || '').trim();
+                  if (cloudUrl && (p === '/_console' || p.startsWith('/_console/'))) {
+                    return c.redirect(`${cloudUrl.replace(/\/+$/, '')}/_console/`, 302);
+                  }
+                  return next();
+                }
                 if (p.startsWith('/_admin/') || p === '/_admin' || p.startsWith('/.well-known/')) {
                   return next();
                 }
