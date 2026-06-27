@@ -1057,12 +1057,14 @@ export class AuthManager {
     // `OS_MULTI_ORG_ENABLED` / `OS_DISABLE_SIGNUP` pattern). When set, the
     // env var WINS over the config-file setting so platform operators can
     // override per-environment without touching the application bundle.
-    const oidcEnv = (globalThis as any)?.process?.env?.OS_OIDC_PROVIDER_ENABLED;
-    const oidcFromEnv = oidcEnv != null ? String(oidcEnv).toLowerCase() === 'true' : undefined;
-    const ssoEnv = (globalThis as any)?.process?.env?.OS_SSO_ENABLED;
-    const ssoFromEnv = ssoEnv != null ? String(ssoEnv).toLowerCase() === 'true' : undefined;
-    const scimEnv = (globalThis as any)?.process?.env?.OS_SCIM_ENABLED;
-    const scimFromEnv = scimEnv != null ? String(scimEnv).toLowerCase() === 'true' : undefined;
+    // Use the shared `readBooleanEnv` parser (same as OS_AUTH_TWO_FACTOR /
+    // OS_AUTH_PASSWORD_REJECT_BREACHED / OS_DISABLE_SIGNUP) so these accept the
+    // platform-standard truthy set (`true`/`1`/`yes`/`on`, case-insensitive)
+    // instead of only the literal string `'true'` — a repeated operator footgun
+    // (`OS_SSO_ENABLED=1` silently parsed as disabled).
+    const oidcFromEnv = readBooleanEnv('OS_OIDC_PROVIDER_ENABLED');
+    const ssoFromEnv = readBooleanEnv('OS_SSO_ENABLED');
+    const scimFromEnv = readBooleanEnv('OS_SCIM_ENABLED');
     // @better-auth/scim's `active:false` → ban runs through the admin plugin,
     // and org-scoped tokens need the organization plugin — so enabling SCIM
     // forces `admin` on (organization already defaults on). See ADR-0071.
@@ -2008,8 +2010,9 @@ export class AuthManager {
    * `planAllowsSso` config, since that arrives via `plugins.sso`).
    */
   public isSsoWired(): boolean {
-    const ssoEnv = (globalThis as any)?.process?.env?.OS_SSO_ENABLED;
-    const ssoFromEnv = ssoEnv != null ? String(ssoEnv).toLowerCase() === 'true' : undefined;
+    // Same parser as `buildPluginList` (`readBooleanEnv`) so the advertised
+    // capability can never disagree with the actually-mounted route.
+    const ssoFromEnv = readBooleanEnv('OS_SSO_ENABLED');
     return ssoFromEnv ?? (this.config.plugins as any)?.sso ?? false;
   }
 

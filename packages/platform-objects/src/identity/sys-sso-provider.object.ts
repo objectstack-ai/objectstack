@@ -120,6 +120,14 @@ export const SysSsoProvider = ObjectSchema.create({
       columns: ['provider_id', 'issuer', 'domain', 'created_at'],
       sort: [{ field: 'provider_id', order: 'asc' }],
       pagination: { pageSize: 50 },
+      // Per-object empty state — the shared identity-object copy ("created
+      // automatically … cannot be added here") is wrong for this object, which
+      // HAS a "Register SSO Provider" action. Point admins at it instead.
+      emptyState: {
+        title: 'No SSO providers yet',
+        message: 'Register your organization’s external OIDC IdP (Okta, Entra, Auth0, …) with “Register SSO Provider”. Members whose email domain matches can then sign in through it.',
+        icon: 'log-in',
+      },
     },
   },
 

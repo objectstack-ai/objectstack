@@ -1149,6 +1149,47 @@ describe('AuthManager', () => {
       }
     });
 
+    // ADR-0024 / cloud#551 — OS_SSO_ENABLED uses the shared `readBooleanEnv`
+    // parser, so the platform-standard truthy/falsy set works (not only the
+    // literal `'true'`). Operators kept setting `OS_SSO_ENABLED=1` and getting
+    // a silently-disabled RP.
+    it.each(['1', 'true', 'TRUE', 'yes', 'on'])(
+      'should treat OS_SSO_ENABLED=%s as enabled',
+      (val) => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const prev = process.env.OS_SSO_ENABLED;
+        process.env.OS_SSO_ENABLED = val;
+        try {
+          const manager = new AuthManager({ secret: 'test-secret-at-least-32-chars-long' });
+          expect(manager.getPublicConfig().features.sso).toBe(true);
+        } finally {
+          if (prev === undefined) delete process.env.OS_SSO_ENABLED;
+          else process.env.OS_SSO_ENABLED = prev;
+          warnSpy.mockRestore();
+        }
+      },
+    );
+
+    it.each(['0', 'false', 'off', 'no'])(
+      'should treat OS_SSO_ENABLED=%s as disabled even when plugins.sso=true',
+      (val) => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const prev = process.env.OS_SSO_ENABLED;
+        process.env.OS_SSO_ENABLED = val;
+        try {
+          const manager = new AuthManager({
+            secret: 'test-secret-at-least-32-chars-long',
+            plugins: { sso: true } as any,
+          });
+          expect(manager.getPublicConfig().features.sso).toBe(false);
+        } finally {
+          if (prev === undefined) delete process.env.OS_SSO_ENABLED;
+          else process.env.OS_SSO_ENABLED = prev;
+          warnSpy.mockRestore();
+        }
+      },
+    );
+
     it('should filter out disabled providers', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const manager = new AuthManager({
