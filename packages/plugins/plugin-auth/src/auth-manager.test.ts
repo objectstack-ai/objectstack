@@ -422,6 +422,53 @@ describe('AuthManager', () => {
       expect(orgPlugin._opts.schema.session.fields.activeOrganizationId).toBe('active_organization_id');
     });
 
+    // @better-auth/scim mounts the SCIM 2.0 Service Provider so an external IdP
+    // can auto-provision/deprovision this env's users (ADR-0071). It is opt-in
+    // via OS_SCIM_ENABLED and FORCES the admin plugin on (active:false → ban
+    // runs through admin).
+    it('should NOT register the scim plugin by default', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+      });
+      await manager.getAuthInstance();
+      warnSpy.mockRestore();
+
+      expect(capturedConfig.plugins.map((p: any) => p.id)).not.toContain('scim');
+    });
+
+    it('should register the scim plugin (and force admin on) when OS_SCIM_ENABLED is set', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      const prev = process.env.OS_SCIM_ENABLED;
+      process.env.OS_SCIM_ENABLED = 'true';
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+        });
+        await manager.getAuthInstance();
+        const ids = capturedConfig.plugins.map((p: any) => p.id);
+        expect(ids).toContain('scim');
+        // active:false → ban needs the admin plugin; SCIM forces it on.
+        expect(ids).toContain('admin');
+      } finally {
+        if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
+        else process.env.OS_SCIM_ENABLED = prev;
+        warnSpy.mockRestore();
+      }
+    });
+
     it('blocks slug change when the org has active environments', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
