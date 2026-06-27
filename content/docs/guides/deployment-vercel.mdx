@@ -1,6 +1,6 @@
 ---
 title: Deploy to Vercel
-description: Deploy ObjectStack applications to Vercel — Server mode (recommended) for real API endpoints or MSW mode for static demos
+description: Deploy ObjectStack applications to Vercel with the Hono server adapter.
 ---
 
 # Deploy to Vercel
@@ -8,179 +8,8 @@ description: Deploy ObjectStack applications to Vercel — Server mode (recommen
 ObjectStack 11 deploys to Vercel in **server mode** — serverless functions running the **Hono** adapter (`@objectstack/hono`). The published ObjectStack Studio/console ships as a static Vite SPA that points at a separate ObjectStack server (via `VITE_SERVER_URL`).
 
 <Callout type="warn">
-**Updated for 11.** The in-browser **MSW Mode** (`@objectstack/plugin-msw`) and the **Next.js adapter** (`@objectstack/nextjs`) were **removed in 11** and are no longer published. Use the Hono server path below. The "MSW Mode" how-to further down is retained for reference only and is slated for removal.
+**Removed in 11.** The in-browser MSW mode (`@objectstack/plugin-msw`) and the Next.js adapter (`@objectstack/nextjs`) are no longer published — use the Hono server path below.
 </Callout>
-
-| Mode | Runtime | Vercel Feature | Use Case |
-| :--- | :--- | :--- | :--- |
-| **Server** (default) | Node.js / Edge | Serverless Functions | Production apps, Studio, real database |
-
----
-
-## MSW Mode (Static SPA)
-
-In MSW mode the entire ObjectStack kernel runs **in the browser**. Mock Service Worker intercepts `fetch` calls and routes them to an in-memory ObjectQL engine — no backend required.
-
-### How It Works
-
-```
-┌─────────────────────────── Browser ───────────────────────────┐
-│  React App  →  fetch('/api/v1/data/task')                     │
-│       ↓                                                       │
-│  MSW Service Worker  (intercepts request)                     │
-│       ↓                                                       │
-│  ObjectKernel  →  ObjectQL  →  InMemoryDriver                 │
-│       ↓                                                       │
-│  JSON Response  →  React App                                  │
-└───────────────────────────────────────────────────────────────┘
-```
-
-### Project Setup
-
-```typescript
-// objectstack.config.ts
-import { defineStack } from '@objectstack/spec';
-import * as objects from './src/objects';
-
-export default defineStack({
-  manifest: {
-    id: 'com.example.myapp',
-    name: 'My App',
-    version: '1.0.0',
-    type: 'app',
-  },
-  objects: Object.values(objects),
-  data: [
-    {
-      object: 'task',
-      mode: 'upsert',
-      externalId: 'subject',
-      records: [
-        { subject: 'Learn ObjectStack', status: 'in_progress', priority: 'high' },
-      ],
-    },
-  ],
-});
-```
-
-### Kernel Bootstrap (Browser)
-
-Create a kernel factory that boots the entire stack in the browser:
-
-```typescript
-// src/mocks/createKernel.ts
-import { ObjectKernel, DriverPlugin, AppPlugin } from '@objectstack/runtime';
-import { ObjectQLPlugin } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
-import { MSWPlugin } from '@objectstack/plugin-msw';
-
-export async function createKernel(appConfigs: any[]) {
-  const kernel = new ObjectKernel();
-
-  await kernel.use(new ObjectQLPlugin());
-  await kernel.use(new DriverPlugin(new InMemoryDriver(), 'memory'));
-
-  for (const config of appConfigs) {
-    await kernel.use(new AppPlugin(config));
-  }
-
-  await kernel.use(new MSWPlugin({
-    enableBrowser: true,
-    baseUrl: '/api/v1',
-    logRequests: true,
-  }));
-
-  await kernel.bootstrap();
-  return kernel;
-}
-```
-
-### Entry Point
-
-```typescript
-// src/main.tsx
-import appConfig from '../objectstack.config';
-import { createKernel } from './mocks/createKernel';
-
-async function bootstrap() {
-  // Boot the in-browser kernel before rendering
-  await createKernel([appConfig]);
-
-  // Now render — all fetch('/api/v1/...') calls are intercepted by MSW
-  ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
-}
-
-bootstrap();
-```
-
-### Vite Configuration
-
-MSW requires the Service Worker file in your `public/` directory. Add the init script and configure Vite:
-
-```bash
-# Generate the MSW Service Worker file
-npx msw init public --save
-```
-
-```typescript
-// vite.config.ts
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-
-export default defineConfig({
-  plugins: [react()],
-  optimizeDeps: {
-    include: ['msw', 'msw/browser', '@objectstack/spec'],
-  },
-});
-```
-
-### `vercel.json`
-
-```json
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "vite",
-  "buildCommand": "vite build",
-  "outputDirectory": "dist",
-  "build": {
-    "env": {
-      "VITE_USE_MOCK_SERVER": "true"
-    }
-  },
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
-}
-```
-
-<Callout type="info">
-The `rewrites` rule is essential for SPA routing — it ensures all paths serve `index.html` so the client-side router can handle navigation.
-</Callout>
-
-### Monorepo Configuration
-
-If your project lives in a monorepo (e.g. pnpm workspaces + Turborepo), update the install and build commands:
-
-```json
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "vite",
-  "installCommand": "cd ../.. && pnpm install",
-  "buildCommand": "cd ../.. && pnpm turbo run build --filter=@myorg/my-app",
-  "outputDirectory": "dist",
-  "build": {
-    "env": {
-      "VITE_USE_MOCK_SERVER": "true"
-    }
-  },
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
-}
-```
-
-Set the **Root Directory** in Vercel project settings to the app's folder (e.g. `apps/my-app`).
 
 ---
 
@@ -302,7 +131,7 @@ Configure these in Vercel Project Settings → Environment Variables:
 
 | Variable | Description |
 | :--- | :--- |
-| `VITE_USE_MOCK_SERVER` | `true` = in-browser MSW kernel; `false` = real backend. A **build-time** flag baked into the SPA bundle. |
+| `VITE_USE_MOCK_SERVER` | Leave `false` — the SPA talks to a real backend at `VITE_SERVER_URL`. (The `true` in-browser mock mode was removed in 11.) A **build-time** flag baked into the SPA bundle. |
 | `VITE_SERVER_URL` | Backend API URL (empty for same-origin) |
 
 ### Cloud control plane
@@ -336,20 +165,7 @@ storage for artifacts.
 
 ---
 
-## Choosing the Mode
-
-The mode is selected at **build time** via the `VITE_USE_MOCK_SERVER` flag, which is baked into the SPA bundle:
-
-- `VITE_USE_MOCK_SERVER=true` → the in-browser MSW kernel (static demo).
-- `VITE_USE_MOCK_SERVER=false` → the SPA talks to a real backend at `VITE_SERVER_URL` (empty = same-origin).
-
-Because the flag is compiled into the bundle, there is no runtime `?mode=` URL switch — to change modes you must rebuild with the desired value.
-
----
-
 ## Deployment Checklist
-
-### Server Mode (Recommended)
 
 - [ ] `api/index.ts` Hono entrypoint exists with `handle(app)` export
 - [ ] `api/_kernel.ts` boots the kernel with the correct driver
@@ -358,32 +174,11 @@ Because the flag is compiled into the bundle, there is no runtime `?mode=` URL s
 - [ ] `DATABASE_URL` is configured in Vercel environment variables (for production drivers)
 - [ ] CORS is configured if frontend and API are on different origins
 
-### MSW Mode (Static Demo)
-
-- [ ] `msw init public --save` has been run (Service Worker in `public/`)
-- [ ] `vercel.json` specifies `"framework": "vite"` and SPA rewrites
-- [ ] `VITE_USE_MOCK_SERVER=true` is set in build environment
-- [ ] Seed data is defined in `objectstack.config.ts` (`data` array)
-
----
-
-## Comparison
-
-| Feature | MSW Mode | Server Mode |
-| :--- | :--- | :--- |
-| **Database** | In-memory (browser) | PostgreSQL, MongoDB, etc. |
-| **Data Persistence** | Per session (lost on refresh) | Persistent |
-| **Cold Start** | None (client-side) | ~200ms (Serverless) |
-| **Offline Support** | ✅ Full | ❌ Requires network |
-| **Multi-user** | ❌ Single user | ✅ Full |
-| **Cost** | Free (static hosting) | Pay per invocation |
-| **Best For** | Demos, prototypes, docs | Production applications |
-
 ---
 
 ## Related
 
-- [Plugin System](/docs/guides/plugins) — MSW and Hono server plugins
+- [Plugin System](/docs/guides/plugins) — the Hono server adapter
 - [Client SDK](/docs/guides/client-sdk) — Frontend data fetching
 - [Driver Configuration](/docs/guides/driver-configuration) — Database setup
 - [Architecture](/docs/getting-started/architecture) — Kernel and runtime overview
