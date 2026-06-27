@@ -518,6 +518,24 @@ export class AuthPlugin implements Plugin {
           if (Number.isFinite(n) && n >= 0) patch.passwordExpiryDays = Math.min(3650, n);
         }
 
+        // Enforced MFA (ADR-0069 D3). Enabling it also turns the twoFactor
+        // plugin on so the /two-factor/* enrollment endpoints exist — otherwise
+        // gated users would have no way to comply.
+        if (isExplicit('mfa_required')) {
+          const on = asBoolean(values.mfa_required, false);
+          patch.mfaRequired = on;
+          if (on) {
+            patch.plugins = {
+              ...(patch.plugins ?? {}),
+              twoFactor: true,
+            } as AuthManagerOptions['plugins'];
+          }
+        }
+        if (isExplicit('mfa_grace_period_days')) {
+          const n = Math.floor(Number(values.mfa_grace_period_days));
+          if (Number.isFinite(n) && n >= 0) patch.mfaGracePeriodDays = Math.min(90, n);
+        }
+
         // Session lifetime — days → seconds for better-auth's `session`
         // (`expiresIn` = absolute lifetime; `updateAge` = refresh threshold).
         const session: { expiresIn?: number; updateAge?: number } = {};

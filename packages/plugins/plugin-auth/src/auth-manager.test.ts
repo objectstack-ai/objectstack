@@ -1908,4 +1908,71 @@ describe('AuthManager', () => {
       expect(arg.password_changed_at instanceof Date).toBe(true);
     });
   });
+
+  // ADR-0069 D3: enforced MFA — reuses the auth-gate seam (same computeAuthGate).
+  describe('enforced MFA gate (ADR-0069 D3)', () => {
+    const SECRET = 'test-secret-at-least-32-chars-long';
+    const makeEngine = (user: any) => ({
+      findOne: vi.fn(async (_o: string, q: any) => {
+        const w = q?.where ?? {};
+        if (!user) return null;
+        return Object.entries(w).every(([k, v]) => (user as any)[k] === v) ? user : null;
+      }),
+      update: vi.fn(async () => ({})),
+    });
+    const mgr = (engine: any, extra: any = {}) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const m = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, ...extra });
+      warn.mockRestore();
+      return m;
+    };
+
+    it('isAuthGateActive is true when mfaRequired (even with expiry off)', () => {
+      expect(mgr(makeEngine(null), { mfaRequired: true }).isAuthGateActive()).toBe(true);
+      expect(mgr(makeEngine(null), {}).isAuthGateActive()).toBe(false);
+    });
+
+    it('blocks MFA_REQUIRED for an un-enrolled user past the grace window', async () => {
+      const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: old }), {
+        mfaRequired: true, mfaGracePeriodDays: 7,
+      });
+      const g = await (m as any).computeAuthGate('u1', undefined, false);
+      expect(g?.code).toBe('MFA_REQUIRED');
+    });
+
+    it('does NOT block within the grace window', async () => {
+      const recent = new Date(Date.now() - 1 * 86_400_000).toISOString();
+      const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: recent }), {
+        mfaRequired: true, mfaGracePeriodDays: 7,
+      });
+      await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
+    });
+
+    it('stamps mfa_required_at the first time (null) and does not block yet', async () => {
+      const engine = makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: null });
+      const m = mgr(engine, { mfaRequired: true, mfaGracePeriodDays: 7 });
+      await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
+      const wrote = engine.update.mock.calls.find((c: any[]) => 'mfa_required_at' in (c[1] ?? {}));
+      expect(wrote).toBeTruthy();
+      expect(wrote[1].mfa_required_at instanceof Date).toBe(true);
+    });
+
+    it('does NOT block an enrolled user (two_factor_enabled)', async () => {
+      const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: true, mfa_required_at: old }), {
+        mfaRequired: true, mfaGracePeriodDays: 7,
+      });
+      await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
+    });
+
+    it('grace 0 blocks an un-enrolled user immediately (after the clock is set)', async () => {
+      const past = new Date(Date.now() - 1000).toISOString();
+      const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: past }), {
+        mfaRequired: true, mfaGracePeriodDays: 0,
+      });
+      const g = await (m as any).computeAuthGate('u1', undefined, false);
+      expect(g?.code).toBe('MFA_REQUIRED');
+    });
+  });
 });

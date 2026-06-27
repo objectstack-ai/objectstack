@@ -458,6 +458,16 @@ export const SysUser = ObjectSchema.create({
       description: 'Timestamp of the last password change. Backs password_expiry_days; system-managed.',
     }),
 
+    // ADR-0069 D3 — when enforced MFA first applied to this user; starts the
+    // grace clock. Stamped lazily at session validation; system-managed.
+    mfa_required_at: Field.datetime({
+      label: 'MFA Required At',
+      required: false,
+      readonly: true,
+      group: 'Admin',
+      description: 'When enforced MFA first applied to this user (grace-period clock). Backs mfa_required; system-managed.',
+    }),
+
     ai_access: Field.boolean({
       label: 'AI Access',
       defaultValue: false,

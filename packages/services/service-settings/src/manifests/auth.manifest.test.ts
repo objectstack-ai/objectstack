@@ -25,6 +25,7 @@ describe('authSettingsManifest', () => {
     expect(keys).toEqual([
       'email_password_enabled',
       'google_enabled',
+      'mfa_required',
       'password_reject_breached',
       'password_require_complexity',
       'require_email_verification',
@@ -66,6 +67,7 @@ describe('authSettingsManifest', () => {
     expect(byKey('rate_limit_window_seconds').default).toBe(60);
     expect(byKey('password_history_count').default).toBe(0);
     expect(byKey('password_expiry_days').default).toBe(0);
+    expect(byKey('mfa_grace_period_days').default).toBe(7);
   });
 
   it('exposes encrypted Google OAuth credential fields', () => {

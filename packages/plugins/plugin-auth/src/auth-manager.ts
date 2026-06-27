@@ -312,6 +312,17 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   passwordExpiryDays?: number;
 
   /**
+   * ADR-0069 D3 — enforced MFA. When true, an authenticated user without TOTP
+   * enrolled (`sys_user.two_factor_enabled`) is gated out of protected resources
+   * (`MFA_REQUIRED`) once their grace window elapses, until they enroll. Shares
+   * the `customSession` → `user.authGate` seam with password expiry.
+   */
+  mfaRequired?: boolean;
+
+  /** Days a user may defer MFA enrollment before the hard block. Default 7. */
+  mfaGracePeriodDays?: number;
+
+  /**
    * ADR-0069 D2 — better-auth-native per-IP rate limiting, passed through to
    * better-auth's core `rateLimit`. The settings bind tightens `customRules`
    * for the auth endpoints (`/sign-in/email`, `/sign-up/email`,
@@ -2275,7 +2286,10 @@ export class AuthManager {
    * default), keeping the gate zero-overhead until an admin opts in.
    */
   public isAuthGateActive(): boolean {
-    return (Math.floor(Number(this.config.passwordExpiryDays) || 0) > 0);
+    return (
+      Math.floor(Number(this.config.passwordExpiryDays) || 0) > 0 ||
+      this.config.mfaRequired === true
+    );
   }
 
   /**
@@ -2288,25 +2302,53 @@ export class AuthManager {
   private async computeAuthGate(
     userId: string,
     _activeOrgId: string | undefined,
-    _twoFactorEnabled: boolean,
+    _twoFactorEnabledHint: boolean,
   ): Promise<{ code: string; message: string } | undefined> {
     const expiryDays = Math.floor(Number(this.config.passwordExpiryDays) || 0);
-    if (expiryDays <= 0) return undefined; // no gate feature active
+    const mfaRequired = this.config.mfaRequired === true;
+    if (expiryDays <= 0 && !mfaRequired) return undefined; // no gate feature active
     const engine = this.getDataEngine();
     if (!engine || !userId) return undefined;
     try {
       const SYSTEM_CTX = { isSystem: true, roles: [], permissions: [] };
       const u = await engine.findOne('sys_user', {
-        where: { id: userId }, fields: ['password_changed_at'], context: SYSTEM_CTX,
+        where: { id: userId },
+        fields: ['password_changed_at', 'two_factor_enabled', 'mfa_required_at'],
+        context: SYSTEM_CTX,
       } as any);
-      const changed = u?.password_changed_at;
-      // Null = never expires (existing accounts on upgrade) until the next change.
-      if (changed) {
-        const ageMs = Date.now() - new Date(changed).getTime();
-        if (ageMs > expiryDays * 86_400_000) {
+
+      // ── Password expiry ───────────────────────────────────────────────
+      if (expiryDays > 0) {
+        const changed = u?.password_changed_at;
+        // Null = never expires (existing accounts on upgrade) until next change.
+        if (changed && Date.now() - new Date(changed).getTime() > expiryDays * 86_400_000) {
           return {
             code: 'PASSWORD_EXPIRED',
             message: 'Your password has expired. Please change it to continue.',
+          };
+        }
+      }
+
+      // ── Enforced MFA ──────────────────────────────────────────────────
+      // A user without TOTP enrolled is blocked once their grace window
+      // elapses. The clock (`mfa_required_at`) starts the first time we see
+      // them required-but-unenrolled (stamped lazily, best-effort).
+      if (mfaRequired && !(u?.two_factor_enabled === true || u?.two_factor_enabled === 1)) {
+        const graceDays = Math.max(0, Math.floor(Number(this.config.mfaGracePeriodDays ?? 7)));
+        let requiredAt = u?.mfa_required_at;
+        if (!requiredAt) {
+          requiredAt = new Date();
+          // Best-effort: start the grace clock; never block on the write.
+          engine
+            .update('sys_user', { id: userId, mfa_required_at: requiredAt }, { context: SYSTEM_CTX } as any)
+            .catch(() => undefined);
+        }
+        const elapsedMs = Date.now() - new Date(requiredAt).getTime();
+        if (elapsedMs > graceDays * 86_400_000) {
+          return {
+            code: 'MFA_REQUIRED',
+            message:
+              'Multi-factor authentication is required. Please set up an authenticator app to continue.',
           };
         }
       }

@@ -694,6 +694,24 @@ describe('AuthPlugin', () => {
       expect((manager as any).isAuthGateActive()).toBe(true);
     });
 
+    it('binds mfa_required and force-enables the twoFactor plugin (ADR-0069 D3)', async () => {
+      const { manager } = await bootWithAuthSettings({ mfa_required: { value: true, source: 'global' } });
+      const cfg = (manager as any).config;
+      expect(cfg.mfaRequired).toBe(true);
+      expect(cfg.plugins?.twoFactor).toBe(true);
+      expect((manager as any).isAuthGateActive()).toBe(true);
+    });
+
+    it('binds mfa_grace_period_days', async () => {
+      const { manager } = await bootWithAuthSettings({ mfa_grace_period_days: { value: 14, source: 'global' } });
+      expect((manager as any).config.mfaGracePeriodDays).toBe(14);
+    });
+
+    it('clamps mfa_grace_period_days to a max of 90', async () => {
+      const { manager } = await bootWithAuthSettings({ mfa_grace_period_days: { value: 999, source: 'global' } });
+      expect((manager as any).config.mfaGracePeriodDays).toBe(90);
+    });
+
     it('binds account-lockout settings (ADR-0069 D2)', async () => {
       const { manager } = await bootWithAuthSettings({
         lockout_threshold: { value: 5, source: 'global' },
