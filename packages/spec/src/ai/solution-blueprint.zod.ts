@@ -72,6 +72,10 @@ export const BlueprintDashboardSchema = lazySchema(() => z.object({
     title: z.string().optional().describe('Widget title'),
     object: z.string().regex(SNAKE_CASE).optional().describe('Source object for the widget'),
     chart: z.enum(['metric', 'bar', 'line', 'pie', 'table']).optional().describe('Widget visualization'),
+    measure: z.string().regex(SNAKE_CASE).optional()
+      .describe('The field this widget aggregates (e.g. "amount", "probability"), or "count" to count records. The aggregation is chosen automatically from the field type — a money field SUMs, a percentage/rate AVERAGEs — so name the FIELD, not "total_amount". A "total revenue" widget sets measure:"amount"; an "average win rate" widget sets measure:"win_rate"; a "number of deals" widget sets measure:"count". Omit to let the builder infer from the title.'),
+    groupBy: z.string().regex(SNAKE_CASE).optional()
+      .describe('The field to break the widget down by — the category or time axis (e.g. "stage", "created_at"). A "by status" chart MUST set this to the status field; the title and this field MUST name the SAME field. Omit for a single-number metric.'),
   })).optional().describe('Widgets to place on the dashboard'),
 }));
 export type BlueprintDashboard = z.infer<typeof BlueprintDashboardSchema>;
@@ -197,6 +201,10 @@ const StrictDashboard = z.object({
     title: z.string().nullable().describe('Widget title, or null'),
     object: z.string().nullable().describe('Source object, or null'),
     chart: z.enum(['metric', 'bar', 'line', 'pie', 'table']).nullable().describe('Visualization, or null'),
+    measure: z.string().nullable()
+      .describe('The field this widget aggregates (e.g. "amount", "probability"), or "count" to count records, or null to infer from the title. The aggregation (sum vs average) is chosen automatically from the field type — name the FIELD, not "total_amount". "total revenue" → "amount"; "average win rate" → "win_rate"; "number of deals" → "count".'),
+    groupBy: z.string().nullable()
+      .describe('The field to break the widget down by — the category or time axis (e.g. "stage", "created_at"), or null for a single-number metric. A "by status" chart MUST set this to the status field; the title and this field MUST name the SAME field.'),
   })).nullable().describe('Widgets to place on the dashboard, or null'),
 });
 

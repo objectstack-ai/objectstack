@@ -136,6 +136,41 @@ describe('SolutionBlueprintSchema', () => {
       }),
     ).toThrow();
   });
+
+  it('accepts dashboard widgets that name an explicit measure + groupBy', () => {
+    const parsed = SolutionBlueprintSchema.parse({
+      ...validBlueprint,
+      dashboards: [
+        {
+          name: 'overview',
+          widgets: [
+            { id: 'revenue', title: 'Total revenue', object: 'task', chart: 'metric', measure: 'amount' },
+            { id: 'by_status', title: 'By status', object: 'task', chart: 'bar', measure: 'count', groupBy: 'status' },
+          ],
+        },
+      ],
+    });
+    expect(parsed.dashboards?.[0].widgets?.[0]).toMatchObject({ measure: 'amount' });
+    expect(parsed.dashboards?.[0].widgets?.[1]).toMatchObject({ measure: 'count', groupBy: 'status' });
+  });
+
+  it('allows a dashboard widget to omit measure + groupBy (builder infers them)', () => {
+    const parsed = SolutionBlueprintSchema.parse({
+      ...validBlueprint,
+      dashboards: [{ name: 'overview', widgets: [{ id: 'w1', title: 'Tasks', object: 'task', chart: 'metric' }] }],
+    });
+    expect(parsed.dashboards?.[0].widgets?.[0].measure).toBeUndefined();
+    expect(parsed.dashboards?.[0].widgets?.[0].groupBy).toBeUndefined();
+  });
+
+  it('rejects a non-snake_case widget measure / groupBy', () => {
+    expect(() =>
+      SolutionBlueprintSchema.parse({
+        ...validBlueprint,
+        dashboards: [{ name: 'd', widgets: [{ id: 'w', object: 'task', chart: 'bar', groupBy: 'By Status' }] }],
+      }),
+    ).toThrow();
+  });
 });
 
 // The strict mirror is what `generateObject` sends to OpenAI: every property
@@ -187,5 +222,32 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
 
   it('drops the un-strict-able seedData record (OpenAI strict cannot represent open key/value maps)', () => {
     expect('seedData' in SolutionBlueprintStrictSchema.shape).toBe(false);
+  });
+
+  it('accepts a dashboard widget carrying the (nullable) measure + groupBy keys', () => {
+    const parsed = SolutionBlueprintStrictSchema.parse({
+      ...strictBp,
+      dashboards: [
+        {
+          name: 'overview',
+          label: null,
+          widgets: [
+            { id: 'revenue', title: 'Total revenue', object: 'project', chart: 'metric', measure: 'amount', groupBy: null },
+            { id: 'w2', title: null, object: null, chart: null, measure: null, groupBy: null },
+          ],
+        },
+      ],
+    });
+    expect(parsed.dashboards?.[0].widgets?.[0]).toMatchObject({ measure: 'amount', groupBy: null });
+    expect(parsed.dashboards?.[0].widgets?.[1].measure).toBeNull();
+  });
+
+  it('requires the (nullable) measure + groupBy widget keys to be present (OpenAI strict)', () => {
+    const missingKeys = {
+      ...strictBp,
+      // widget omits `measure` and `groupBy` — strict mode needs every key in `required`.
+      dashboards: [{ name: 'd', label: null, widgets: [{ id: 'w', title: null, object: null, chart: null }] }],
+    };
+    expect(() => SolutionBlueprintStrictSchema.parse(missingKeys)).toThrow();
   });
 });
