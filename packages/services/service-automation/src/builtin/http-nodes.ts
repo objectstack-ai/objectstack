@@ -7,12 +7,11 @@ import type { AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
 
 /**
- * HTTP built-in node — canonical `http` (ADR-0018 M3) + deprecated aliases.
+ * HTTP built-in node — canonical `http` (ADR-0018 M3).
  *
  * `http` is the single outbound-callout verb the platform offers Flow, Workflow
- * Rules and Approval. It replaces the five divergent names (`http_request` /
- * `http_call` / `webhook` / …) which are kept as **deprecated aliases** of
- * `http` for back-compat (registered via {@link AutomationEngine.registerNodeAlias}).
+ * Rules and Approval. It supersedes the older divergent names (`http_request` /
+ * `http_call` / `webhook`), which were removed in 11.0 — author `http`.
  *
  * Two execution modes:
  *
@@ -159,13 +158,7 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
         },
     });
 
-    // ADR-0018 M3: collapse the divergent outbound verbs onto `http`. Old saved
-    // flows / workflow rules / approval actions keep running via these aliases.
-    engine.registerNodeAlias('http_request', HTTP_TYPE, { name: 'HTTP Request', needsOutbox: true });
-    engine.registerNodeAlias('http_call', HTTP_TYPE, { name: 'HTTP Call', needsOutbox: true });
-    engine.registerNodeAlias('webhook', HTTP_TYPE, { name: 'Webhook', needsOutbox: true });
-
-    ctx.logger.info('[HTTP] http executor registered (+ deprecated aliases: http_request, http_call, webhook)');
+    ctx.logger.info('[HTTP] http executor registered');
 }
 
 /** Read a response body as JSON, falling back to text (empty body → null). */

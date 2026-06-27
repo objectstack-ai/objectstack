@@ -50,8 +50,8 @@ describe('ExecutionStepLogSchema', () => {
 
   it('should accept a step log with error details', () => {
     const step = ExecutionStepLogSchema.parse({
-      nodeId: 'http_request',
-      nodeType: 'http_request',
+      nodeId: 'http',
+      nodeType: 'http',
       nodeLabel: 'Call External API',
       status: 'failure',
       startedAt: '2026-02-01T10:00:00Z',
@@ -178,7 +178,7 @@ describe('ExecutionErrorSchema', () => {
     const error = ExecutionErrorSchema.parse({
       id: 'err_001',
       executionId: 'exec_001',
-      nodeId: 'http_request',
+      nodeId: 'http',
       severity: 'error',
       code: 'HTTP_TIMEOUT',
       message: 'Request timed out after 30s',

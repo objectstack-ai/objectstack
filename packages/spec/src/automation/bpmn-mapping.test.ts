@@ -77,7 +77,7 @@ describe('exportConstructsToBpmn — try_catch', () => {
     nodes: [
       node('start', 'start'),
       node('tc', 'try_catch', {
-        try: { nodes: [node('charge', 'http_request')], edges: [] },
+        try: { nodes: [node('charge', 'http')], edges: [] },
         catch: { nodes: [node('flag', 'update_record')], edges: [] },
         errorVariable: '$error',
         retry: { maxRetries: 2, retryDelayMs: 100 },
@@ -179,7 +179,7 @@ describe('importBpmnToConstructs — foreign BPMN (no markers)', () => {
 
   it('warns (does not fold) a foreign boundary_event with no marker', () => {
     const foreign: MappableFlow = {
-      nodes: [node('host', 'http_request'), node('b', BPMN_BOUNDARY_EVENT)],
+      nodes: [node('host', 'http'), node('b', BPMN_BOUNDARY_EVENT)],
       edges: [],
     };
     const { diagnostics, unmappedCount } = importBpmnToConstructs(foreign);

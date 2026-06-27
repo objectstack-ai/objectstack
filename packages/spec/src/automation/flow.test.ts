@@ -17,7 +17,7 @@ describe('FlowNodeAction', () => {
     const actions = [
       'start', 'end', 'decision', 'assignment', 'loop',
       'create_record', 'update_record', 'delete_record', 'get_record',
-      'http_request', 'notify', 'script', 'screen', 'wait', 'subflow', 'connector_action',
+      'http', 'notify', 'script', 'screen', 'wait', 'subflow', 'connector_action',
       'parallel_gateway', 'join_gateway', 'boundary_event',
     ];
     
@@ -120,7 +120,7 @@ describe('FlowNodeSchema', () => {
     const types = [
       'start', 'end', 'decision', 'assignment', 'loop',
       'create_record', 'update_record', 'delete_record', 'get_record',
-      'http_request', 'notify', 'script', 'screen', 'wait', 'subflow', 'connector_action',
+      'http', 'notify', 'script', 'screen', 'wait', 'subflow', 'connector_action',
       'parallel_gateway', 'join_gateway', 'boundary_event',
     ] as const;
 
@@ -137,7 +137,7 @@ describe('FlowNodeSchema', () => {
   it('should accept node with timeoutMs', () => {
     const result = FlowNodeSchema.safeParse({
       id: 'http_1',
-      type: 'http_request',
+      type: 'http',
       label: 'Call API',
       timeoutMs: 5000,
     });
@@ -372,7 +372,7 @@ describe('FlowSchema', () => {
           },
           {
             id: 'send_approval_request',
-            type: 'http_request',
+            type: 'http',
             label: 'Send to Manager',
             config: {
               url: '/api/approvals',
@@ -528,7 +528,7 @@ describe('FlowSchema', () => {
           { id: 'start', type: 'start', label: 'Start' },
           {
             id: 'call_external_api',
-            type: 'http_request',
+            type: 'http',
             label: 'Call External API',
             config: {
               url: 'https://api.external.com/v1/data',
@@ -1041,7 +1041,7 @@ describe('BPMN — Boundary Event', () => {
       type: 'autolaunched',
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
-        { id: 'api_call', type: 'http_request', label: 'Call External API', timeoutMs: 5000 },
+        { id: 'api_call', type: 'http', label: 'Call External API', timeoutMs: 5000 },
         {
           id: 'api_error_boundary',
           type: 'boundary_event',

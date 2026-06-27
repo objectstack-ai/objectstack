@@ -30,7 +30,6 @@ export const FlowNodeAction = z.enum([
   'delete_record',      // CRUD: Delete
   'get_record',         // CRUD: Get/Query
   'http',               // Outbound HTTP callout (ADR-0018 M3) — canonical; outbox-backed when durable
-  'http_request',       // Deprecated alias of `http` (ADR-0018 M3)
   'notify',             // Outbound notification (ADR-0012) — dispatched via the messaging service
   'script',             // Custom action: a built-in side-effect (`config.actionType: 'email'|'slack'`)
                         //   or a registered function (`config.function: 'name'` + `config.inputs`),

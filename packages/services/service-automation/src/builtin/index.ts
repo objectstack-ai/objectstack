@@ -16,11 +16,11 @@
  *  - logic   — try_catch                         (structured try/catch/retry, ADR-0031)
  *  - data    — get/create/update/delete_record   (platform CRUD baseline)
  *  - human   — screen / script                   (core flow capability)
- *  - io      — http_request                       (foundational outbound I/O)
+ *  - io      — http                               (foundational outbound I/O)
  *  - io      — connector_action                   (generic integration dispatch)
  *  - io      — notify                              (outbound notification via messaging service)
  *
- * `connector_action` is the *generic dispatch* counterpart to `http_request`
+ * `connector_action` is the *generic dispatch* counterpart to `http`
  * (ADR-0018 §Addendum): the platform ships the node + an (initially empty)
  * connector registry on the engine, and *concrete* connectors populate it at
  * runtime via `engine.registerConnector()`. Third-party node types continue to

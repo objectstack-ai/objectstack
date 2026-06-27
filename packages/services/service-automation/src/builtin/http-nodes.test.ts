@@ -29,7 +29,7 @@ function createCtx(messaging?: HttpSurface) {
     } as any;
 }
 
-function httpFlow(type: 'http' | 'http_request' | 'http_call' | 'webhook', config: Record<string, unknown>) {
+function httpFlow(type: 'http', config: Record<string, unknown>) {
     return {
         name: 'http_flow',
         label: 'HTTP Flow',
@@ -50,7 +50,7 @@ function httpFlow(type: 'http' | 'http_request' | 'http_call' | 'webhook', confi
     };
 }
 
-describe('http (canonical node) + deprecated aliases', () => {
+describe('http (canonical node)', () => {
     it('publishes a builtin io descriptor flagged needsOutbox', () => {
         const engine = new AutomationEngine(createTestLogger());
         registerHttpNodes(engine, createCtx());
@@ -61,14 +61,12 @@ describe('http (canonical node) + deprecated aliases', () => {
         expect(d?.paradigms).toEqual(expect.arrayContaining(['flow', 'approval']));
     });
 
-    it('registers http_request/http_call/webhook as deprecated aliases of http', () => {
+    it('does NOT register the removed http_request/http_call/webhook aliases (11.0)', () => {
         const engine = new AutomationEngine(createTestLogger());
         registerHttpNodes(engine, createCtx());
-        for (const alias of ['http_request', 'http_call', 'webhook']) {
-            expect(engine.getRegisteredNodeTypes()).toContain(alias);
-            const d = engine.getActionDescriptor(alias);
-            expect(d?.deprecated).toBe(true);
-            expect(d?.aliasOf).toBe('http');
+        for (const removed of ['http_request', 'http_call', 'webhook']) {
+            expect(engine.getRegisteredNodeTypes()).not.toContain(removed);
+            expect(engine.getActionDescriptor(removed)).toBeUndefined();
         }
     });
 
@@ -149,13 +147,5 @@ describe('http (canonical node) + deprecated aliases', () => {
             expect(result.error).toContain('url');
         });
 
-        it('a legacy http_request node still runs (via the alias → http)', async () => {
-            const engine = new AutomationEngine(createTestLogger());
-            registerHttpNodes(engine, createCtx());
-            engine.registerFlow('http_flow', httpFlow('http_request', { url: 'https://legacy.test', method: 'GET' }));
-            const result = await engine.execute('http_flow');
-            expect(result.success).toBe(true);
-            expect(fetchMock).toHaveBeenCalledOnce();
-        });
     });
 });

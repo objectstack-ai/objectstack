@@ -36,7 +36,7 @@ function toStringList(value: unknown): string[] {
 /**
  * `notify` built-in node (ADR-0012) — outbound notification.
  *
- * Baseline node and the human-notification counterpart to `http_request`
+ * Baseline node and the human-notification counterpart to `http`
  * ("raw call") and `connector_action` ("call a registered integration"):
  * `notify` hands a topic + recipients + message to the platform's messaging
  * service, which fans it out across the user's channels (inbox by default).

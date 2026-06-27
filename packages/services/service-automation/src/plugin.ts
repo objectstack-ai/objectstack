@@ -39,7 +39,7 @@ export interface AutomationServicePluginOptions {
  * Responsibilities:
  * 1. init phase: Create engine instance, register as 'automation' service, and
  *    seed the platform's built-in node executors (logic / CRUD / screen-script /
- *    http_request) via {@link installBuiltinNodes}. Per ADR-0018, foundational
+ *    http) via {@link installBuiltinNodes}. Per ADR-0018, foundational
  *    capabilities are built into the core, not packaged as optional plugins.
  * 2. start phase: Trigger 'automation:ready' hook so third-party plugins can
  *    register additional node types, then pull flow definitions from the

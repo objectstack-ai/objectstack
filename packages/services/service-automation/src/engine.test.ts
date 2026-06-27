@@ -862,9 +862,9 @@ describe('AutomationServicePlugin (Kernel Integration)', () => {
         expect(nodeTypes).toContain('script');
 
         // HTTP node (foundational I/O)
-        expect(nodeTypes).toContain('http_request');
+        expect(nodeTypes).toContain('http');
 
-        // connector_action is the generic-dispatch sibling of http_request and is
+        // connector_action is the generic-dispatch sibling of http and is
         // baseline (ADR-0018 §Addendum): the engine ships the node + an empty
         // connector registry; concrete connectors are plugins.
         expect(nodeTypes).toContain('connector_action');
@@ -1067,9 +1067,9 @@ describe('Built-in HTTP node', () => {
         engine = kernel.getService<AutomationEngine>('automation');
     });
 
-    it('should register the http_request node type', () => {
+    it('should register the http node type', () => {
         const types = engine.getRegisteredNodeTypes();
-        expect(types).toContain('http_request');
+        expect(types).toContain('http');
     });
 
     it('should register connector_action in the built-in baseline', () => {
@@ -2175,11 +2175,11 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
         expect(byType.has('decision')).toBe(true);
         expect(byType.get('decision')?.category).toBe('logic');
         expect(byType.get('create_record')?.category).toBe('data');
-        expect(byType.get('http_request')?.category).toBe('io');
+        expect(byType.get('http')?.category).toBe('io');
 
         // All built-ins are tagged source: 'builtin'.
         expect(byType.get('decision')?.source).toBe('builtin');
-        expect(byType.get('http_request')?.source).toBe('builtin');
+        expect(byType.get('http')?.source).toBe('builtin');
     });
 });
 

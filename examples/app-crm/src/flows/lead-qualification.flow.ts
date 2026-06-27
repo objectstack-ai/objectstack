@@ -8,7 +8,7 @@ import type { Flow } from '@objectstack/spec/automation';
  * Exercises the full breadth of the Flow node type repertoire:
  *   • assignment      — initialise scoring variables
  *   • get_record      — fetch the related Account
- *   • http_request    — external enrichment API (with fault edge → error handler)
+ *   • http    — external enrichment API (with fault edge → error handler)
  *   • script          — calculate a composite lead score
  *   • decision        — branch on score threshold (conditional + isDefault edges)
  *   • parallel_gateway — AND-split: notify rep AND create Opportunity simultaneously
@@ -106,7 +106,7 @@ export const LeadQualificationFlow: Flow = {
     //    A fault edge connects this node to error_handler if it fails.
     {
       id: 'enrich_lead',
-      type: 'http_request',
+      type: 'http',
       label: 'Enrich Lead (External API)',
       config: {
         method: 'POST',

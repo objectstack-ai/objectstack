@@ -179,7 +179,7 @@ export const BUILT_IN_BPMN_MAPPINGS: BpmnElementMapping[] = [
   { bpmnType: 'bpmn:endEvent', flowNodeAction: 'end', bidirectional: true },
   { bpmnType: 'bpmn:exclusiveGateway', flowNodeAction: 'decision', bidirectional: true },
   { bpmnType: 'bpmn:parallelGateway', flowNodeAction: 'parallel_gateway', bidirectional: true },
-  { bpmnType: 'bpmn:serviceTask', flowNodeAction: 'http_request', bidirectional: true, notes: 'Maps HTTP/connector tasks' },
+  { bpmnType: 'bpmn:serviceTask', flowNodeAction: 'http', bidirectional: true, notes: 'Maps HTTP/connector tasks' },
   { bpmnType: 'bpmn:scriptTask', flowNodeAction: 'script', bidirectional: true },
   { bpmnType: 'bpmn:userTask', flowNodeAction: 'screen', bidirectional: true },
   { bpmnType: 'bpmn:callActivity', flowNodeAction: 'subflow', bidirectional: true },

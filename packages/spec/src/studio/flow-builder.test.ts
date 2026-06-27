@@ -237,7 +237,7 @@ describe('BUILT_IN_NODE_DESCRIPTORS', () => {
     expect(actions).toContain('update_record');
     expect(actions).toContain('delete_record');
     expect(actions).toContain('get_record');
-    expect(actions).toContain('http_request');
+    expect(actions).toContain('http');
     expect(actions).toContain('script');
     expect(actions).toContain('screen');
     expect(actions).toContain('loop');
@@ -266,7 +266,7 @@ describe('BUILT_IN_NODE_DESCRIPTORS', () => {
 
   it('should mark activity nodes as allowing boundary events', () => {
     const activities = BUILT_IN_NODE_DESCRIPTORS.filter(d =>
-      ['assignment', 'http_request', 'script', 'create_record', 'update_record', 'delete_record', 'get_record', 'loop', 'subflow', 'connector_action', 'wait'].includes(d.action)
+      ['assignment', 'http', 'script', 'create_record', 'update_record', 'delete_record', 'get_record', 'loop', 'subflow', 'connector_action', 'wait'].includes(d.action)
     );
     activities.forEach(a => {
       expect(a.allowBoundaryEvents).toBe(true);

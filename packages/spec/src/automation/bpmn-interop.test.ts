@@ -29,7 +29,7 @@ describe('BpmnElementMappingSchema', () => {
   it('should accept mapping with notes', () => {
     const mapping = BpmnElementMappingSchema.parse({
       bpmnType: 'bpmn:serviceTask',
-      flowNodeAction: 'http_request',
+      flowNodeAction: 'http',
       bidirectional: true,
       notes: 'Maps HTTP/connector tasks',
     });

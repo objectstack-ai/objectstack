@@ -126,7 +126,7 @@ export type WaitExecutorConfig = z.infer<typeof WaitExecutorConfigSchema>;
 
 /**
  * Generic node executor plugin descriptor.
- * Each node type (wait, script, http_request, etc.) can register
+ * Each node type (wait, script, http, etc.) can register
  * a custom executor via this descriptor.
  */
 export const NodeExecutorDescriptorSchema = lazySchema(() => z.object({

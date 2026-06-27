@@ -177,7 +177,7 @@ describe('NodeExecutorDescriptorSchema', () => {
     const desc = NodeExecutorDescriptorSchema.parse({
       id: 'objectstack:http-executor',
       name: 'HTTP Request Executor',
-      nodeTypes: ['http_request', 'connector_action'],
+      nodeTypes: ['http', 'connector_action'],
       version: '2.0.0',
       description: 'Executes HTTP requests and connector actions',
       supportsPause: false,
@@ -185,7 +185,7 @@ describe('NodeExecutorDescriptorSchema', () => {
       supportsRetry: true,
       configSchemaRef: '#/definitions/HttpExecutorConfig',
     });
-    expect(desc.nodeTypes).toContain('http_request');
+    expect(desc.nodeTypes).toContain('http');
     expect(desc.nodeTypes).toContain('connector_action');
     expect(desc.supportsCancellation).toBe(true);
   });

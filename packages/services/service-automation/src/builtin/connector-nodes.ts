@@ -7,8 +7,8 @@ import type { AutomationEngine, ConnectorActionContext } from '../engine.js';
 /**
  * Connector built-in node — `connector_action` (generic integration dispatch).
  *
- * Part of the platform baseline alongside `http_request` (ADR-0018 §Addendum):
- * where `http_request` calls *any raw URL*, `connector_action` invokes *any
+ * Part of the platform baseline alongside `http` (ADR-0018 §Addendum):
+ * where `http` calls *any raw URL*, `connector_action` invokes *any
  * registered connector's action*. The platform ships the generic dispatch node
  * + an (initially empty) connector registry on the engine; concrete connectors
  * — `connector-rest`, `connector-slack`, `connector-salesforce`, … — populate
@@ -16,7 +16,7 @@ import type { AutomationEngine, ConnectorActionContext } from '../engine.js';
  *
  * Because the registry starts empty, a flow referencing a connector that no
  * plugin has registered fails the *step* with a clear error rather than failing
- * to register — graceful degradation matching `http_request`'s fail-soft style.
+ * to register — graceful degradation matching `http`'s fail-soft style.
  */
 export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginContext): void {
     engine.registerNodeExecutor({

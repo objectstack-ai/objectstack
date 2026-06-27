@@ -44,7 +44,7 @@ export type ExecutionStatus = z.infer<typeof ExecutionStatus>;
  */
 export const ExecutionStepLogSchema = lazySchema(() => z.object({
   nodeId: z.string().describe('Node ID that was executed'),
-  nodeType: z.string().describe('Node action type (e.g., "decision", "http_request")'),
+  nodeType: z.string().describe('Node action type (e.g., "decision", "http")'),
   nodeLabel: z.string().optional().describe('Human-readable node label'),
   status: z.enum(['success', 'failure', 'skipped']).describe('Step execution result'),
   startedAt: z.string().datetime().describe('When the step started'),

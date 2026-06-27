@@ -824,7 +824,7 @@ export const ResilientSyncFlow = defineFlow({
           nodes: [
             {
               id: 'push',
-              type: 'http_request',
+              type: 'http',
               label: 'Push to CRM',
               config: {
                 url: 'https://api.example.com/v1/tasks',
@@ -1009,7 +1009,7 @@ export const ProjectEscalationFlow = defineFlow({
         retry: { maxRetries: 2, retryDelayMs: 500, backoffMultiplier: 2 },
         errorVariable: '$error',
         try: {
-          nodes: [{ id: 'push', type: 'http_request', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', body: { project: '{record.id}', severity: 'critical' } } }],
+          nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', body: { project: '{record.id}', severity: 'critical' } } }],
           edges: [],
         },
         catch: {
