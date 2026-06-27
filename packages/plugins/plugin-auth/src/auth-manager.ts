@@ -551,6 +551,35 @@ export class AuthManager {
       // sees `userCount > 0` and the toggle is enforced again.
       hooks: {
         before: createAuthMiddleware(async (ctx: any) => {
+          // ── ADR-0024: admin-gate self-service SSO provider registration ──
+          // `@better-auth/sso`'s POST /sso/register only checks org-admin when
+          // `body.organizationId` is present (index.mjs: `if (ctx.body
+          // .organizationId) { … hasOrgAdminRole … }`). A GLOBAL (org-less)
+          // provider therefore passes with nothing but a valid session — so any
+          // authenticated member can register an env-wide external IdP, a JIT-
+          // provisioning / login-routing vector. Require the caller to be a
+          // platform admin OR an owner/admin of their active org, regardless of
+          // whether `organizationId` is supplied. Unauthenticated requests fall
+          // through to better-auth's `sessionMiddleware` (→ 401). Fail-CLOSED:
+          // an unverifiable actor is denied. (D5.1's `/oauth2/authorize` gate is
+          // a different surface — the OP issuing codes, not the env's RP config.)
+          if (ctx?.path === '/sso/register') {
+            const actor = await this.resolveActor(ctx);
+            if (actor?.userId) {
+              const ok = await this.isOrgOrPlatformAdmin(actor.userId, actor.activeOrgId);
+              if (!ok) {
+                const { APIError } = await import('better-auth/api');
+                throw new APIError('FORBIDDEN', {
+                  message:
+                    'Only an organization owner/admin or a platform admin can ' +
+                    'register an SSO provider.',
+                  code: 'SSO_REGISTER_FORBIDDEN',
+                });
+              }
+            }
+            return;
+          }
+
           // ── D5.1: cloud-as-IdP authorization gate ───────────────────
           // On the OIDC OP's /oauth2/authorize, when a host gate is set
           // (cloud control plane), an AUTHENTICATED subject must be
@@ -1198,11 +1227,17 @@ export class AuthManager {
       // model and accepts NO `schema` option (verified against 1.6.20 — no
       // mergeSchema, runtime never reads options.schema). Its table mapping to
       // `sys_sso_provider` must therefore be resolved by the better-auth adapter
-      // / a global model map, not per-plugin here (see AUTH_SSO_PROVIDER_SCHEMA;
-      // TODO confirm the resolved table name in E2E).
-      // provisionUser / organizationProvisioning will assign a default env role
-      // on first federated login (ADR-0024 V1); JIT works via account linking.
-      plugins.push(sso());
+      // / a global model map, not per-plugin here (see AUTH_SSO_PROVIDER_SCHEMA).
+      //
+      // `organizationProvisioning.defaultRole` (ADR-0024 V1): a first-time
+      // federated login is JIT-provisioned into the user's domain-matched org
+      // with this role, so a member who arrives via an external IdP lands with
+      // an explicit default role (belt-and-suspenders over SecurityPlugin's
+      // `member_default` fallback, which already grants baseline access to any
+      // authenticated user). Requires the `organization` plugin — on by default.
+      plugins.push(sso({
+        organizationProvisioning: { defaultRole: 'member' },
+      }));
     }
 
     // External SCIM 2.0 Service Provider (@better-auth/scim, MIT) — lets an
@@ -1770,6 +1805,116 @@ export class AuthManager {
       return typeof count === 'number' ? count > 0 : true;
     } catch {
       return true; // provider introspection failed — keep the wired behaviour
+    }
+  }
+
+  /**
+   * Resolve the acting user (+ their active org) for a before-hook gate,
+   * hook-order-independent. Tries the standard cookie session first, then falls
+   * back to explicit token resolution (bearer or the session cookie's token
+   * part) — the bearer plugin may convert `Authorization: Bearer` to a session
+   * AFTER this global before-hook runs. Returns `null` when no valid session
+   * can be resolved (→ caller lets `sessionMiddleware` issue the 401).
+   */
+  private async resolveActor(
+    ctx: any,
+  ): Promise<{ userId: string; activeOrgId?: string } | null> {
+    try {
+      const { getSessionFromCtx } = await import('better-auth/api');
+      const s: any = await getSessionFromCtx(ctx as any);
+      const userId = s?.user?.id ?? s?.session?.userId;
+      if (userId) {
+        return {
+          userId: String(userId),
+          activeOrgId:
+            s?.session?.activeOrganizationId ?? s?.activeOrganizationId ?? undefined,
+        };
+      }
+    } catch { /* fall through to explicit token resolution */ }
+    try {
+      const hdr = (k: string): string =>
+        ((ctx?.headers?.get?.(k) ?? ctx?.request?.headers?.get?.(k)) as string) || '';
+      let token: string | undefined;
+      const bm = /^Bearer\s+(.+)$/i.exec(hdr('authorization'));
+      if (bm?.[1]) token = bm[1].trim();
+      if (!token) {
+        const cm = /(?:^|;\s*)(?:__Secure-|__Host-)?better-auth\.session_token=([^;]+)/.exec(hdr('cookie'));
+        if (cm?.[1]) token = decodeURIComponent(cm[1]).split('.')[0];
+      }
+      if (token) {
+        const sess: any = await (ctx as any).context.adapter.findOne({
+          model: 'session',
+          where: [{ field: 'token', value: token }],
+        });
+        const exp = sess?.expiresAt ?? sess?.expires_at;
+        if (sess && (!exp || new Date(exp).getTime() > Date.now())) {
+          const userId = String(sess.userId ?? sess.user_id ?? '');
+          if (userId) {
+            return {
+              userId,
+              activeOrgId:
+                sess.activeOrganizationId ?? sess.active_organization_id ?? undefined,
+            };
+          }
+        }
+      }
+    } catch { /* unresolved → null */ }
+    return null;
+  }
+
+  /**
+   * True when `userId` is a platform admin (a `sys_user_permission_set` row
+   * pointing at `admin_full_access` with `organization_id = null`) OR an
+   * owner/admin member of `activeOrgId` (any org membership with role
+   * owner/admin when no active org is set). Mirrors the role-derivation in
+   * `customSession`; reads through `withSystemReadContext` so the lookups are
+   * not themselves RLS-scoped to the acting (possibly non-privileged) user.
+   * Fails CLOSED (returns false) on any lookup error — this backs a security
+   * gate, so an unverifiable actor must never pass.
+   */
+  private async isOrgOrPlatformAdmin(
+    userId: string,
+    activeOrgId?: string,
+  ): Promise<boolean> {
+    const engine = this.getDataEngine();
+    if (!engine) return false;
+    const sys = withSystemReadContext(engine);
+    try {
+      // 1) platform admin — admin_full_access permission set, org-less link.
+      const links = await sys.find('sys_user_permission_set', {
+        where: { user_id: userId },
+        limit: 50,
+      });
+      const platformLinks = (Array.isArray(links) ? links : []).filter(
+        (l: any) => !l.organization_id,
+      );
+      if (platformLinks.length) {
+        const sets = await sys.find('sys_permission_set', { limit: 50 });
+        const adminSet = (Array.isArray(sets) ? sets : []).find(
+          (r: any) => r.name === 'admin_full_access',
+        );
+        if (adminSet && platformLinks.some((l: any) => l.permission_set_id === adminSet.id)) {
+          return true;
+        }
+      }
+      // 2) org owner/admin — membership role in the active org (or any org).
+      const where: any = { user_id: userId };
+      if (activeOrgId) where.organization_id = activeOrgId;
+      const members = await sys.find('sys_member', { where, limit: 10 });
+      for (const m of (Array.isArray(members) ? members : [])) {
+        const raw = typeof m?.role === 'string' ? m.role : '';
+        if (
+          raw
+            .split(',')
+            .map((s: string) => s.trim())
+            .some((r: string) => r === 'owner' || r === 'admin')
+        ) {
+          return true;
+        }
+      }
+      return false;
+    } catch {
+      return false;
     }
   }
 
