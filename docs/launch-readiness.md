@@ -175,7 +175,7 @@ fix or acceptance.**
   draining them. Replaced with: `server.close()` (stop new + drain active) +
   `closeIdleConnections()` (release idle keep-alive), and force-close only after a
   bounded **drain window** (default 10s, < the kernel's 60s). +2 integration tests.
-- **Residual (not blocking):** embedding framework adapters (express/fastify/…)
+- **Residual (not blocking):** the Hono adapter
   intentionally leave signal handling to the host app; cluster/Redis close should
   be registered via `kernel.onShutdown(...)` by the cluster plugin — confirm it is.
 - **Owner:** _______  ·  Verify ✅ (mostly false positive; drain bug fixed)  ·  Sign-off ☐  ·  Notes: Kernel shutdown already correct; hono drain fixed + tested. Awaiting human sign-off.

@@ -134,7 +134,7 @@ new AppPlugin(appConfig)
 
 #### IHttpServer
 
-Abstract interface for HTTP server capabilities. Allows plugins to work with any HTTP framework (Express, Fastify, Hono, etc.) without tight coupling.
+Abstract interface for HTTP server capabilities. Allows plugins to work with any HTTP framework (e.g. Hono) without tight coupling.
 
 ```typescript
 import { IHttpServer, IHttpRequest, IHttpResponse } from '@objectstack/runtime';
@@ -144,7 +144,7 @@ class MyHttpServerPlugin implements Plugin {
   name = 'http-server';
   
   async init(ctx: PluginContext) {
-    const server: IHttpServer = createMyServer(); // Express, Hono, etc.
+    const server: IHttpServer = createMyServer(); // Hono, or any framework via IHttpServer
     ctx.registerService('http-server', server);
   }
 }
@@ -599,7 +599,7 @@ createDispatcherPlugin({
 
 Token-bucket `RateLimiter` with pluggable `RateLimitStore` (in-memory default,
 Redis-friendly contract). Curated `DEFAULT_RATE_LIMITS` for auth / write / read
-buckets. Fastify / Hono / Express recipes in
+buckets. A Hono recipe in
 [`docs/HARDENING.md`](../../docs/HARDENING.md#rate-limiting).
 
 ```ts

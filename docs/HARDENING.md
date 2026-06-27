@@ -14,7 +14,7 @@ adapter layer for a production deployment.
 | Security response headers (CSP/XCTO/…) | **On**                | `@objectstack/runtime`         |
 | HSTS                                   | Off (opt-in)          | `securityHeaders.hsts: true`   |
 | Token-bucket rate limit                | Off (opt-in)          | `RateLimiter` primitive        |
-| CSRF                                   | Adapter-layer concern | helmet / @fastify/csrf-protection |
+| CSRF                                   | Adapter-layer concern | `hono/secure-headers` / `hono/csrf` |
 | Auth (better-auth)                     | On                    | `@objectstack/plugin-auth`     |
 | Project membership (RBAC)              | On when scoped        | dispatcher plugin              |
 | Field- and row-level perms             | On                    | SecurityPlugin                 |
@@ -71,16 +71,16 @@ const write = new RateLimiter(DEFAULT_RATE_LIMITS.write);  //  60 req / min / IP
 const read  = new RateLimiter(DEFAULT_RATE_LIMITS.read);   // 600 req / min / IP
 ```
 
-### Fastify recipe
+### Hono recipe
 
 ```ts
-import Fastify from 'fastify';
-import { objectStackPlugin } from '@objectstack/fastify';
+import { Hono } from 'hono';
+import { secureHeaders } from 'hono/secure-headers';
+import { objectStackMiddleware } from '@objectstack/hono';
 import { RateLimiter, DEFAULT_RATE_LIMITS } from '@objectstack/runtime';
-import helmet from '@fastify/helmet';
 
-const app = Fastify({ trustProxy: 1 });   // trust ONE upstream proxy hop
-await app.register(helmet, { contentSecurityPolicy: false });
+const app = new Hono();
+app.use('*', secureHeaders());   // CSP / X-Content-Type-Options / X-Frame-Options / …
 
 const buckets = {
     auth:  new RateLimiter(DEFAULT_RATE_LIMITS.auth),
@@ -88,20 +88,23 @@ const buckets = {
     read:  new RateLimiter(DEFAULT_RATE_LIMITS.read),
 };
 
-app.addHook('onRequest', async (req, reply) => {
-    const ip = req.ip;
-    const bucket = req.url.startsWith('/api/v1/auth/') ? 'auth'
-                 : ['POST','PUT','PATCH','DELETE'].includes(req.method) ? 'write'
+// Rate-limit BEFORE the dispatcher middleware so rejected requests never reach it.
+app.use('/api/v1/*', async (c, next) => {
+    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+    const bucket = c.req.path.startsWith('/api/v1/auth/') ? 'auth'
+                 : ['POST','PUT','PATCH','DELETE'].includes(c.req.method) ? 'write'
                  : 'read';
     const decision = buckets[bucket].consume(`${ip}:${bucket}`);
-    reply.header('X-RateLimit-Remaining', String(decision.remaining));
+    c.header('X-RateLimit-Remaining', String(decision.remaining));
     if (!decision.allowed) {
-        reply.header('Retry-After', String(Math.ceil(decision.retryAfterMs / 1000)));
-        return reply.code(429).send({ error: 'Too many requests' });
+        c.header('Retry-After', String(Math.ceil(decision.retryAfterMs / 1000)));
+        return c.json({ error: 'Too many requests' }, 429);
     }
+    await next();
 });
 
-app.register(objectStackPlugin, { kernel, prefix: '/api/v1' });
+app.use('/api/v1/*', objectStackMiddleware(kernel));   // dispatcher last
+export default app;   // Cloudflare Workers / Bun / Deno / Node (@hono/node-server)
 ```
 
 For multi-instance deploys, replace the default `MemoryStore` with a
@@ -131,8 +134,8 @@ Bearer …`. With bearer tokens stored in `localStorage` / memory there
 is no CSRF surface — browsers don't auto-attach the header.
 
 CSRF protection becomes required when you switch to **cookie-based
-session auth**. In that case wire `@fastify/csrf-protection` (or the
-equivalent for your adapter) and exempt only the auth callback routes.
+session auth**. In that case wire a CSRF middleware (e.g. `hono/csrf`)
+and exempt only the auth callback routes.
 
 ## JWT / session lifecycle
 
@@ -167,13 +170,18 @@ curl -H "Authorization: Bearer $TOK" $API/data/account
 
 CORS is intentionally **not** opinionated by the runtime — it's an
 app-level policy that depends on which origins host your front-end.
-Configure at the adapter:
+Configure it on the Hono adapter:
 
 ```ts
-import cors from '@fastify/cors';
-await app.register(cors, {
-    origin: ['https://app.example.com'],
-    credentials: true,
+import { createHonoApp } from '@objectstack/hono';
+
+const app = createHonoApp({
+    kernel,
+    prefix: '/api/v1',
+    cors: {
+        origin: ['https://app.example.com'],
+        credentials: true,
+    },
 });
 ```
 

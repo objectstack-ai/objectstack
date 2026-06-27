@@ -79,7 +79,6 @@ const driver = new InMemoryDriver({
 ## When to use
 
 - ✅ Development, unit tests, CI, Storybook.
-- ✅ Browser-only demos pairing with [`@objectstack/plugin-msw`](../plugin-msw).
 
 ## When not to use
 
@@ -90,7 +89,6 @@ const driver = new InMemoryDriver({
 
 - [`@objectstack/objectql`](../../objectql) — query engine.
 - [`@objectstack/driver-sql`](../driver-sql) — production driver (ObjectStack Cloud ships an additional `@objectstack/driver-turso` for edge/multi-tenant deployments).
-- [`@objectstack/plugin-msw`](../plugin-msw) — browser mock API.
 
 ## Links
 

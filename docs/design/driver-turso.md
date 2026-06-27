@@ -90,7 +90,7 @@ offline-capable desktop applications.
 | `@objectstack/rest` | 🟢 None | REST API is driver-agnostic |
 | `@objectstack/metadata` | 🟢 None | Metadata service is storage-agnostic |
 | `@objectstack/cli` | 🟡 Minor | Add `driver-turso` to `create-objectstack` templates |
-| Framework Adapters | 🟢 None | All adapters (Next.js, NestJS, Hono, etc.) are driver-agnostic |
+| Framework Adapters | 🟢 None | The Hono adapter is driver-agnostic |
 
 **Key Insight:** The microkernel architecture means adding a new driver has **zero impact** on
 the server-side stack. The `IDataDriver` contract completely decouples the data layer.
@@ -122,7 +122,6 @@ export default defineStack({
 |:---|:---:|:---|
 | `@objectstack/client` | 🟢 None | Client SDK communicates via REST/GraphQL; driver-agnostic |
 | `@objectstack/client-react` | 🟢 None | React hooks use client SDK; no changes |
-| `@objectstack/plugin-msw` | 🟢 None | MSW mocks REST endpoints; driver-irrelevant |
 
 **New Capability Unlocked:** With embedded replicas, a future `@objectstack/client-local` package
 could provide direct libSQL access in the browser (via WASM), enabling:
