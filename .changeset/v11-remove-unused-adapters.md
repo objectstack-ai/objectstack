@@ -1,5 +1,5 @@
 ---
-"@objectstack/client": major
+"@objectstack/client": minor
 "@objectstack/runtime": patch
 ---
 

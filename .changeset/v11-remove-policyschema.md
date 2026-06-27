@@ -1,5 +1,5 @@
 ---
-"@objectstack/spec": major
+"@objectstack/spec": minor
 ---
 
 Remove the dead `PolicySchema` / `definePolicy` and the stack `policies` collection (#1882, ADR-0049).

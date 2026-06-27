@@ -1,7 +1,7 @@
 ---
-"@objectstack/spec": major
-"@objectstack/core": major
-"@objectstack/objectql": major
+"@objectstack/spec": minor
+"@objectstack/core": minor
+"@objectstack/objectql": minor
 ---
 
 Remove the deprecated `DriverInterface` type alias — use `IDataDriver` (11.0).

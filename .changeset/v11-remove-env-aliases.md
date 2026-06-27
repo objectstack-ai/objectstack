@@ -1,7 +1,7 @@
 ---
-"@objectstack/types": major
-"@objectstack/objectql": major
-"@objectstack/cli": major
+"@objectstack/types": minor
+"@objectstack/objectql": minor
+"@objectstack/cli": minor
 ---
 
 Remove ObjectStack's own legacy env-var aliases (11.0); ecosystem-standard names stay.

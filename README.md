@@ -246,7 +246,6 @@ For the browser, the typed client SDK and React hooks (`useQuery` / `useMutation
 | [`@objectstack/plugin-webhooks`](packages/plugins/plugin-webhooks) | Outbound webhook delivery — fan-out `data.record.*` events |
 | [`@objectstack/plugin-reports`](packages/plugins/plugin-reports) | Saved reports + scheduled email digests |
 | [`@objectstack/plugin-dev`](packages/plugins/plugin-dev) | Developer mode — in-memory stubs for all services |
-| [`@objectstack/plugin-msw`](packages/plugins/plugin-msw) | Mock Service Worker plugin for browser testing |
 
 ### Services
 
@@ -268,13 +267,7 @@ For the browser, the typed client SDK and React hooks (`useQuery` / `useMutation
 
 | Package | Description |
 | :--- | :--- |
-| [`@objectstack/express`](packages/adapters/express) | Express adapter |
-| [`@objectstack/fastify`](packages/adapters/fastify) | Fastify adapter |
-| [`@objectstack/hono`](packages/adapters/hono) | Hono adapter (Node.js, Bun, Deno, Cloudflare Workers) |
-| [`@objectstack/nestjs`](packages/adapters/nestjs) | NestJS module integration |
-| [`@objectstack/nextjs`](packages/adapters/nextjs) | Next.js App Router adapter |
-| [`@objectstack/nuxt`](packages/adapters/nuxt) | Nuxt adapter (h3-based) |
-| [`@objectstack/sveltekit`](packages/adapters/sveltekit) | SvelteKit adapter |
+| [`@objectstack/hono`](packages/adapters/hono) | Hono adapter (Node.js, Bun, Deno, Cloudflare Workers) — the supported HTTP adapter |
 
 ### Tools & Apps
 
@@ -323,6 +316,8 @@ Key standards:
 ## Documentation
 
 Full documentation: **[https://docs.objectstack.ai](https://docs.objectstack.ai)**
+
+**Upgrading from 10.x?** See [Upgrading to ObjectStack 11](./docs/upgrading-to-11.md).
 
 Run locally: `pnpm docs:dev`
 
