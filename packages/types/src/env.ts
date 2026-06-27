@@ -104,6 +104,25 @@ export function resolveMultiOrgEnabled(): boolean {
 }
 
 /**
+ * Maximum number of organizations a single user may CREATE, from `OS_ORG_LIMIT`.
+ * The auth plugin forwards this as better-auth's `organizationLimit` in function
+ * form, counting only the caller's `role=owner` memberships — so it caps
+ * self-created orgs (each of which can auto-provision a free environment on the
+ * cloud control plane) without penalising a user invited into many orgs.
+ *
+ * Only meaningful when multi-org is enabled ({@link resolveMultiOrgEnabled}).
+ * Returns `undefined` when unset or non-positive → no limit (better-auth treats
+ * an absent `organizationLimit` as unlimited), preserving self-host behaviour.
+ * Deployments that let users self-create orgs SHOULD set a generous cap.
+ */
+export function resolveOrgLimit(): number | undefined {
+  const raw = readEnvWithDeprecation('OS_ORG_LIMIT', [], { silent: true });
+  if (raw == null || String(raw).trim() === '') return undefined;
+  const n = Number.parseInt(String(raw), 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
  * Internal: clear the dedupe set. Test-only; exposed so suite-wide
  * deprecation warnings don't bleed between tests.
  *

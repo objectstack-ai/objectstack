@@ -12,7 +12,7 @@ import type {
 } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
 import type { IEmailService } from '@objectstack/spec/contracts';
-import { readEnvWithDeprecation, resolveMultiOrgEnabled } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveOrgLimit } from '@objectstack/types';
 import { mapMembershipRole, BUILTIN_ROLE_PLATFORM_ADMIN } from '@objectstack/spec';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import {
@@ -910,6 +910,32 @@ export class AuthManager {
         // the built-in /accept-invitation route usable for pilots; operators
         // who wire a real mailer can re-enable downstream.
         requireEmailVerificationOnInvitation: false,
+        // Cap how many orgs a user can CREATE (OS_ORG_LIMIT). Counts only orgs
+        // the user OWNS (role=owner) — never orgs they were merely invited into —
+        // so a generous cap stops scripted org/free-env spam (each new org can
+        // auto-provision a free environment on the cloud control plane) WITHOUT
+        // ever blocking a collaborator who belongs to many orgs. Unset → no
+        // limit (self-host default). Fail-open: if the count can't be taken we
+        // allow creation rather than block a legitimate user on an infra hiccup.
+        organizationLimit: async (user: { id?: string }) => {
+          const limit = resolveOrgLimit();
+          if (limit == null) return false;
+          const engine = this.config.dataEngine;
+          const uid = typeof user?.id === 'string' ? user.id : '';
+          if (!engine || !uid) return false;
+          try {
+            // `sys_member` is tenant-scoped (organization_id). We need to count
+            // the user's owned orgs ACROSS tenants, so read with the system
+            // context (isSystem) to bypass org-scoping — otherwise the query
+            // returns nothing and the limit never fires.
+            const owned = await withSystemReadContext(engine).count('sys_member', {
+              where: { user_id: uid, role: 'owner' },
+            });
+            return (owned ?? 0) >= limit;
+          } catch {
+            return false;
+          }
+        },
         ...(customOrgRoles ? { roles: customOrgRoles } : {}),
         // ── Slug-change guard ─────────────────────────────────────
         // An org's slug is baked into every env hostname at creation
