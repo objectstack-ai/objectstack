@@ -673,6 +673,21 @@ describe('AuthPlugin', () => {
       expect((manager as any).config.passwordRequireComplexity).toBeUndefined();
     });
 
+    it('binds password_history_count (ADR-0069 D1)', async () => {
+      const { manager } = await bootWithAuthSettings({ password_history_count: { value: 5, source: 'global' } });
+      expect((manager as any).config.passwordHistoryCount).toBe(5);
+    });
+
+    it('clamps password_history_count to a max of 24', async () => {
+      const { manager } = await bootWithAuthSettings({ password_history_count: { value: 99, source: 'global' } });
+      expect((manager as any).config.passwordHistoryCount).toBe(24);
+    });
+
+    it('applies an explicit password_history_count of 0 (feature off)', async () => {
+      const { manager } = await bootWithAuthSettings({ password_history_count: { value: 0, source: 'global' } });
+      expect((manager as any).config.passwordHistoryCount).toBe(0);
+    });
+
     it('binds account-lockout settings (ADR-0069 D2)', async () => {
       const { manager } = await bootWithAuthSettings({
         lockout_threshold: { value: 5, source: 'global' },

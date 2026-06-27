@@ -192,6 +192,17 @@ export const SysAccount = ObjectSchema.create({
       required: false,
       description: 'Hashed password for email/password provider',
     }),
+
+    // ADR-0069 D1 — bounded ring of previous password hashes (JSON array of
+    // strings), used to reject password reuse on change/reset. Maintained by
+    // the auth manager; never exposed in UI.
+    previous_password_hashes: Field.textarea({
+      label: 'Previous Password Hashes',
+      required: false,
+      readonly: true,
+      hidden: true,
+      description: 'JSON array of prior password hashes (bounded by password_history_count); reuse-prevention only. System-managed.',
+    }),
   },
   
   indexes: [

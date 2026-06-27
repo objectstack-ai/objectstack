@@ -1778,4 +1778,76 @@ describe('AuthManager', () => {
       });
     });
   });
+
+  // ADR-0069 D1: password history (reject reuse). Custom logic, but reuses
+  // better-auth's native hash/verify — tested here with a stub verify + a
+  // where-aware sys_account mock.
+  describe('password history / reuse prevention (ADR-0069 D1)', () => {
+    const SECRET = 'test-secret-at-least-32-chars-long';
+    // verify() returns true when the candidate equals the plaintext that a hash
+    // encodes — we model hashes as `hash:<plaintext>` for the stub.
+    const stubVerify = async ({ password, hash }: { password: string; hash: string }) =>
+      hash === `hash:${password}`;
+    const makeEngine = (account: any) => ({
+      findOne: vi.fn(async (_o: string, q: any) => {
+        const w = q?.where ?? {};
+        if (!account) return null;
+        const ok = Object.entries(w).every(([k, v]) => (account as any)[k] === v);
+        return ok ? account : null;
+      }),
+      update: vi.fn(async () => ({})),
+    });
+    const mgr = (engine: any, extra: any = {}) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const m = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, ...extra });
+      warn.mockRestore();
+      return m;
+    };
+    const acct = (over: any = {}) => ({
+      id: 'a1', user_id: 'u1', provider_id: 'credential',
+      password: 'hash:current', previous_password_hashes: JSON.stringify(['hash:old1', 'hash:old2']),
+      ...over,
+    });
+
+    it('parseHashes tolerates null/garbage', () => {
+      const m = mgr(makeEngine(null));
+      expect((m as any).parseHashes(undefined)).toEqual([]);
+      expect((m as any).parseHashes('not json')).toEqual([]);
+      expect((m as any).parseHashes('["a","b"]')).toEqual(['a', 'b']);
+    });
+
+    it('is a no-op when history depth is 0', async () => {
+      const engine = makeEngine(acct());
+      const m = mgr(engine, { passwordHistoryCount: 0 });
+      await expect((m as any).assertPasswordNotReused('u1', 'current', stubVerify)).resolves.toBeUndefined();
+      expect(engine.findOne).not.toHaveBeenCalled();
+    });
+
+    it('rejects reuse of the CURRENT password', async () => {
+      const m = mgr(makeEngine(acct()), { passwordHistoryCount: 5 });
+      await expect((m as any).assertPasswordNotReused('u1', 'current', stubVerify)).rejects.toMatchObject({
+        body: { code: 'PASSWORD_REUSE' },
+      });
+    });
+
+    it('rejects reuse of a HISTORICAL password', async () => {
+      const m = mgr(makeEngine(acct()), { passwordHistoryCount: 5 });
+      await expect((m as any).assertPasswordNotReused('u1', 'old2', stubVerify)).rejects.toMatchObject({
+        body: { code: 'PASSWORD_REUSE' },
+      });
+    });
+
+    it('accepts a fresh password and returns the current hash for the after-hook', async () => {
+      const m = mgr(makeEngine(acct()), { passwordHistoryCount: 5 });
+      await expect((m as any).assertPasswordNotReused('u1', 'brandnew', stubVerify)).resolves.toBe('hash:current');
+    });
+
+    it('recordPasswordHistory prepends the old hash, dedupes, and trims to the depth', async () => {
+      const engine = makeEngine(acct({ previous_password_hashes: JSON.stringify(['hash:old1', 'hash:old2']) }));
+      const m = mgr(engine, { passwordHistoryCount: 2 });
+      await (m as any).recordPasswordHistory('u1', 'hash:current');
+      const written = JSON.parse(engine.update.mock.calls[0][1].previous_password_hashes);
+      expect(written).toEqual(['hash:current', 'hash:old1']); // prepend + trim to 2
+    });
+  });
 });

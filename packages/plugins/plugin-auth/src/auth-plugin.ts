@@ -506,6 +506,11 @@ export class AuthPlugin implements Plugin {
           const n = asPositiveInt(values.password_min_classes);
           if (n !== undefined) patch.passwordMinClasses = Math.min(4, Math.max(1, n));
         }
+        if (isExplicit('password_history_count')) {
+          // 0 disables → use a non-negative reader (asPositiveInt rejects 0).
+          const n = Math.floor(Number(values.password_history_count));
+          if (Number.isFinite(n) && n >= 0) patch.passwordHistoryCount = Math.min(24, n);
+        }
 
         // Session lifetime — days → seconds for better-auth's `session`
         // (`expiresIn` = absolute lifetime; `updateAge` = refresh threshold).

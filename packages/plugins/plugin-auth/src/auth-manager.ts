@@ -295,6 +295,14 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   passwordMinClasses?: number;
 
   /**
+   * ADR-0069 D1 — password history depth. When > 0, a password change/reset is
+   * rejected if the new password matches the current or any of the last
+   * `passwordHistoryCount` hashes (`sys_account.previous_password_hashes`).
+   * Reuses better-auth's native hash/verify — no bespoke crypto.
+   */
+  passwordHistoryCount?: number;
+
+  /**
    * ADR-0069 D2 — better-auth-native per-IP rate limiting, passed through to
    * better-auth's core `rateLimit`. The settings bind tightens `customRules`
    * for the auth endpoints (`/sign-in/email`, `/sign-up/email`,
@@ -603,6 +611,24 @@ export class AuthManager {
               (typeof ctx?.body?.newPassword === 'string' && ctx.body.newPassword) ||
               '';
             if (candidate) await this.assertPasswordComplexity(candidate);
+
+            // ── ADR-0069 D1: password history (reject reuse) ────────────
+            // change/reset only (sign-up has no prior history). Reuses
+            // better-auth's native password.verify — no bespoke crypto. Stashes
+            // the old hash so the after-hook appends it to the bounded ring on
+            // success.
+            if (
+              candidate &&
+              (ctx?.path === '/reset-password' || ctx?.path === '/change-password')
+            ) {
+              const userId = await this.resolvePasswordChangeUserId(ctx).catch(() => undefined);
+              if (userId) {
+                const pw = ctx?.context?.password;
+                const verify = typeof pw?.verify === 'function' ? pw.verify.bind(pw) : undefined;
+                const oldHash = await this.assertPasswordNotReused(userId, candidate, verify);
+                if (oldHash !== undefined) ctx.context.__osPwHistory = { userId, oldHash };
+              }
+            }
             // fall through to the path's own handling below
           }
 
@@ -798,6 +824,23 @@ export class AuthManager {
                 succeeded = !(ctx?.context?.returned instanceof Error);
               }
               await this.recordSignInOutcome(email, succeeded);
+            }
+            return;
+          }
+
+          // ── ADR-0069 D1: commit password history on success ─────────
+          if (ctx?.path === '/change-password' || ctx?.path === '/reset-password') {
+            const stash = ctx?.context?.__osPwHistory;
+            if (stash?.userId) {
+              let succeeded = true;
+              try {
+                const { isAPIError } = await import('better-auth/api');
+                succeeded = !isAPIError(ctx?.context?.returned);
+              } catch {
+                succeeded = !(ctx?.context?.returned instanceof Error);
+              }
+              if (succeeded) await this.recordPasswordHistory(stash.userId, stash.oldHash);
+              delete ctx.context.__osPwHistory;
             }
             return;
           }
@@ -2183,6 +2226,132 @@ export class AuthManager {
           'digit, symbol.',
         code: 'PASSWORD_POLICY_VIOLATION',
       });
+    }
+  }
+
+  /**
+   * ADR-0069 D1 — parse the bounded `previous_password_hashes` JSON column into
+   * a string[] of hashes, tolerating null / malformed values.
+   */
+  private parseHashes(raw: unknown): string[] {
+    if (typeof raw !== 'string' || !raw.trim()) return [];
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter((h): h is string => typeof h === 'string' && !!h) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * ADR-0069 D1 — resolve the user whose password is being changed. For
+   * `/change-password` the caller is authenticated (session); for
+   * `/reset-password` the user is carried by the reset token's verification
+   * value (the same lookup better-auth's own handler uses).
+   */
+  private async resolvePasswordChangeUserId(ctx: any): Promise<string | undefined> {
+    if (ctx?.path === '/change-password') {
+      const { getSessionFromCtx } = await import('better-auth/api');
+      const sess: any = await getSessionFromCtx(ctx).catch(() => null);
+      return sess?.user?.id ?? sess?.session?.userId ?? undefined;
+    }
+    if (ctx?.path === '/reset-password') {
+      const token = typeof ctx?.body?.token === 'string' ? ctx.body.token : '';
+      if (!token) return undefined;
+      try {
+        const v: any = await ctx.context.internalAdapter.findVerificationValue(`reset-password:${token}`);
+        const raw = v?.value;
+        if (!raw) return undefined;
+        if (typeof raw === 'string') {
+          const t = raw.trim();
+          if (t.startsWith('{') || t.startsWith('"')) {
+            try {
+              const o = JSON.parse(t);
+              return (typeof o === 'string' ? o : o?.userId) ?? undefined;
+            } catch {
+              return t;
+            }
+          }
+          return t;
+        }
+        return raw?.userId ?? undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * ADR-0069 D1 — throw `PASSWORD_REUSE` when `candidate` matches the user's
+   * current password or any hash in the bounded history. Reuses better-auth's
+   * native `password.verify` (passed in) rather than re-hashing. Returns the
+   * current hash (for the after-hook to append) when the candidate is fresh, or
+   * undefined when the feature is off / nothing to compare.
+   */
+  private async assertPasswordNotReused(
+    userId: string,
+    candidate: string,
+    verify?: (data: { password: string; hash: string }) => Promise<boolean>,
+  ): Promise<string | undefined> {
+    const count = Math.floor(Number(this.config.passwordHistoryCount) || 0);
+    if (count <= 0 || typeof verify !== 'function') return undefined;
+    const engine = this.getDataEngine();
+    if (!engine) return undefined;
+    const SYSTEM_CTX = { isSystem: true, roles: [], permissions: [] };
+    let account: any;
+    try {
+      account = await engine.findOne('sys_account', {
+        where: { user_id: userId, provider_id: 'credential' },
+        fields: ['id', 'password', 'previous_password_hashes'],
+        context: SYSTEM_CTX,
+      } as any);
+    } catch {
+      return undefined; // fail-open on lookup error
+    }
+    if (!account?.id) return undefined;
+    const currentHash = typeof account.password === 'string' ? account.password : '';
+    const compareList = [currentHash, ...this.parseHashes(account.previous_password_hashes)].filter(Boolean);
+    for (const h of compareList) {
+      let match = false;
+      try { match = await verify({ password: candidate, hash: h }); } catch { match = false; }
+      if (match) {
+        const { APIError } = await import('better-auth/api');
+        throw new APIError('BAD_REQUEST', {
+          message: `For security you can't reuse one of your last ${count} passwords. Please choose a different one.`,
+          code: 'PASSWORD_REUSE',
+        });
+      }
+    }
+    return currentHash;
+  }
+
+  /**
+   * ADR-0069 D1 — append `oldHash` to the bounded password-history ring after a
+   * successful change/reset. Best-effort; never throws.
+   */
+  private async recordPasswordHistory(userId: string, oldHash: string): Promise<void> {
+    const count = Math.floor(Number(this.config.passwordHistoryCount) || 0);
+    if (count <= 0 || !oldHash) return;
+    const engine = this.getDataEngine();
+    if (!engine) return;
+    try {
+      const SYSTEM_CTX = { isSystem: true, roles: [], permissions: [] };
+      const account = await engine.findOne('sys_account', {
+        where: { user_id: userId, provider_id: 'credential' },
+        fields: ['id', 'previous_password_hashes'],
+        context: SYSTEM_CTX,
+      } as any);
+      if (!account?.id) return;
+      const prev = this.parseHashes(account.previous_password_hashes);
+      const next = [oldHash, ...prev.filter((h) => h !== oldHash)].slice(0, count);
+      await engine.update(
+        'sys_account',
+        { id: account.id, previous_password_hashes: JSON.stringify(next) },
+        { context: SYSTEM_CTX } as any,
+      );
+    } catch {
+      // history maintenance is best-effort — never break a valid password change
     }
   }
 

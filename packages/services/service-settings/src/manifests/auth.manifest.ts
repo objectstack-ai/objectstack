@@ -106,6 +106,17 @@ const manifest = {
       description: 'How many of the four classes (upper / lower / digit / symbol) a password must include.',
       visible: "${data.email_password_enabled !== false && data.password_require_complexity === true}",
     },
+    {
+      type: 'number',
+      key: 'password_history_count',
+      label: 'Password history (no reuse)',
+      required: false,
+      default: 0,
+      min: 0,
+      max: 24,
+      description: 'Block reusing this many previous passwords on change/reset. 0 disables the check.',
+      visible: "${data.email_password_enabled !== false}",
+    },
 
     {
       type: 'group',
