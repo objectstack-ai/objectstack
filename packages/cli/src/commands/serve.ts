@@ -1243,6 +1243,12 @@ export default class Serve extends Command {
               plugins: {
                 admin: String(process.env.OS_AUTH_ADMIN ?? 'true').toLowerCase() !== 'false',
                 twoFactor: String(process.env.OS_AUTH_TWO_FACTOR ?? 'false').toLowerCase() === 'true',
+                // ADR-0069 D1: reject breached passwords (Have I Been Pwned).
+                // Opt-in; the auth Settings toggle (password_reject_breached) is
+                // the primary control, OS_AUTH_PASSWORD_REJECT_BREACHED the
+                // operator override (env wins in buildPluginList()).
+                passwordRejectBreached:
+                  String(process.env.OS_AUTH_PASSWORD_REJECT_BREACHED ?? 'false').toLowerCase() === 'true',
               },
               advanced: process.env.OS_COOKIE_DOMAIN
                 ? ({

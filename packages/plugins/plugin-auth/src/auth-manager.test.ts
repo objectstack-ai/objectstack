@@ -29,6 +29,10 @@ vi.mock('better-auth/plugins/custom-session', () => ({
   customSession: vi.fn((fn: any) => ({ id: 'custom-session', _fn: fn })),
 }));
 
+vi.mock('better-auth/plugins/haveibeenpwned', () => ({
+  haveIBeenPwned: vi.fn((opts: any) => ({ id: 'have-i-been-pwned', _opts: opts })),
+}));
+
 import { betterAuth } from 'better-auth';
 
 describe('AuthManager', () => {
@@ -1522,6 +1526,72 @@ describe('AuthManager', () => {
       const result = await callback({ user, session: {} });
       expect(result.user).toBe(user);
       expect(result.user.roles).toBeUndefined();
+    });
+  });
+
+  // ADR-0069 D1: breached-password rejection enables better-auth's native
+  // `haveibeenpwned` plugin. Default OFF (no false surface, ADR-0049); the
+  // settings toggle (`password_reject_breached`) and the
+  // `OS_AUTH_PASSWORD_REJECT_BREACHED` env override both gate it, with env
+  // winning over config — mirroring the twoFactor / scim gating pattern.
+  describe('haveibeenpwned plugin (ADR-0069 breached-password rejection)', () => {
+    const captureConfig = () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      return () => capturedConfig;
+    };
+
+    it('does NOT register the plugin by default (off by default)', async () => {
+      const get = captureConfig();
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+      });
+      await manager.getAuthInstance();
+      warnSpy.mockRestore();
+
+      expect(get().plugins.map((p: any) => p.id)).not.toContain('have-i-been-pwned');
+    });
+
+    it('registers the plugin when plugins.passwordRejectBreached is true', async () => {
+      const get = captureConfig();
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        plugins: { passwordRejectBreached: true } as any,
+      });
+      await manager.getAuthInstance();
+      warnSpy.mockRestore();
+
+      const hibp = get().plugins.find((p: any) => p.id === 'have-i-been-pwned');
+      expect(hibp).toBeDefined();
+      // A custom user-facing message is passed (the default error is generic).
+      expect(typeof hibp._opts.customPasswordCompromisedMessage).toBe('string');
+    });
+
+    it('lets OS_AUTH_PASSWORD_REJECT_BREACHED env override the config (env wins)', async () => {
+      const get = captureConfig();
+      const prev = process.env.OS_AUTH_PASSWORD_REJECT_BREACHED;
+      process.env.OS_AUTH_PASSWORD_REJECT_BREACHED = 'true';
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { passwordRejectBreached: false } as any,
+        });
+        await manager.getAuthInstance();
+        expect(get().plugins.map((p: any) => p.id)).toContain('have-i-been-pwned');
+      } finally {
+        if (prev === undefined) delete process.env.OS_AUTH_PASSWORD_REJECT_BREACHED;
+        else process.env.OS_AUTH_PASSWORD_REJECT_BREACHED = prev;
+        warnSpy.mockRestore();
+      }
     });
   });
 });

@@ -634,6 +634,20 @@ describe('AuthPlugin', () => {
       expect(cfg.session?.updateAge).toBeUndefined();
     });
 
+    it('binds password_reject_breached into plugins.passwordRejectBreached (ADR-0069 D1)', async () => {
+      const { manager } = await bootWithAuthSettings({
+        password_reject_breached: { value: true, source: 'global' },
+      });
+      expect((manager as any).config.plugins?.passwordRejectBreached).toBe(true);
+    });
+
+    it('does not set passwordRejectBreached when the setting is default-source (off by default)', async () => {
+      const { manager } = await bootWithAuthSettings({
+        password_reject_breached: { value: false, source: 'default' }, // not explicit → no patch
+      });
+      expect((manager as any).config.plugins?.passwordRejectBreached).toBeUndefined();
+    });
+
     it('enables Google from env credentials when google_enabled is explicit true', async () => {
       process.env.GOOGLE_CLIENT_ID = 'google-env-client-id';
       process.env.GOOGLE_CLIENT_SECRET = 'google-env-client-secret';

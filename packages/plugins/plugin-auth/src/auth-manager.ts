@@ -829,9 +829,11 @@ export class AuthManager {
     // forces `admin` on (organization already defaults on). See ADR-0071.
     const scimEffective = scimFromEnv ?? (pluginConfig as any).scim ?? false;
     const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
+    const hibpFromEnv = readBooleanEnv('OS_AUTH_PASSWORD_REJECT_BREACHED');
     const enabled = {
       organization: pluginConfig.organization ?? true,
       twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
+      passwordRejectBreached: hibpFromEnv ?? pluginConfig.passwordRejectBreached ?? false,
       passkeys: pluginConfig.passkeys ?? false,
       magicLink: pluginConfig.magicLink ?? false,
       oidcProvider: oidcFromEnv ?? pluginConfig.oidcProvider ?? false,
@@ -1074,6 +1076,19 @@ export class AuthManager {
       const { twoFactor } = await import('better-auth/plugins/two-factor');
       plugins.push(twoFactor({
         schema: buildTwoFactorPluginSchema(),
+      }));
+    }
+
+    // Breached-password rejection (ADR-0069 D1). Native, stateless: a
+    // k-anonymity range check against Have I Been Pwned on better-auth's
+    // password-mutating endpoints (sign-up / change / reset — the plugin's
+    // defaults). The plaintext password is never sent; only the first 5 SHA-1
+    // hex chars leave the process. Rejects with PASSWORD_COMPROMISED.
+    if (enabled.passwordRejectBreached) {
+      const { haveIBeenPwned } = await import('better-auth/plugins/haveibeenpwned');
+      plugins.push(haveIBeenPwned({
+        customPasswordCompromisedMessage:
+          'This password has appeared in a known data breach. Please choose a different one.',
       }));
     }
 

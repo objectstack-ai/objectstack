@@ -21,6 +21,9 @@ export const AuthPluginConfigSchema = lazySchema(() => z.object({
   organization: z.boolean().default(true).describe('Enable Organization/Teams support (frontend AuthProvider expects this enabled)'),
   twoFactor: z.boolean().default(false).describe('Enable 2FA'),
   passkeys: z.boolean().default(false).describe('Enable Passkey support'),
+  passwordRejectBreached: z.boolean().default(false).describe(
+    "Reject passwords found in the Have I Been Pwned breach corpus (enables better-auth's haveibeenpwned plugin)",
+  ),
   magicLink: z.boolean().default(false).describe('Enable Magic Link login'),
   /**
    * Enable better-auth's `oidc-provider` plugin so that ObjectStack itself

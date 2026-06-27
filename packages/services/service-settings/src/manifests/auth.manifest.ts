@@ -75,6 +75,16 @@ const manifest = {
       description: 'Upper bound guards against denial-of-service via very long password hashing.',
       visible: "${data.email_password_enabled !== false}",
     },
+    {
+      type: 'toggle',
+      key: 'password_reject_breached',
+      label: 'Reject breached passwords',
+      required: false,
+      default: false,
+      description:
+        'Block passwords found in public breach corpora via Have I Been Pwned (k-anonymity range check; the password is never sent in full).',
+      visible: "${data.email_password_enabled !== false}",
+    },
 
     {
       type: 'group',

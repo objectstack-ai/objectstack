@@ -25,6 +25,7 @@ describe('authSettingsManifest', () => {
     expect(keys).toEqual([
       'email_password_enabled',
       'google_enabled',
+      'password_reject_breached',
       'require_email_verification',
       'signup_enabled',
     ]);

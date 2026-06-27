@@ -486,6 +486,17 @@ export class AuthPlugin implements Plugin {
           patch.emailAndPassword = emailAndPassword as AuthManagerOptions['emailAndPassword'];
         }
 
+        // Breached-password rejection (ADR-0069 D1) — enables better-auth's
+        // native `haveibeenpwned` plugin via the plugin-config gate. Default
+        // off; only an explicit toggle applies (manifest defaults must not
+        // mask the deployment env var). See buildPluginList() for the seam.
+        if (isExplicit('password_reject_breached')) {
+          patch.plugins = {
+            ...(patch.plugins ?? {}),
+            passwordRejectBreached: asBoolean(values.password_reject_breached, false),
+          } as AuthManagerOptions['plugins'];
+        }
+
         // Session lifetime — days → seconds for better-auth's `session`
         // (`expiresIn` = absolute lifetime; `updateAge` = refresh threshold).
         const session: { expiresIn?: number; updateAge?: number } = {};
