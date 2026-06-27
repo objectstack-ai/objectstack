@@ -32,7 +32,12 @@ const ALLOW_SUFFIXES = ['/health', '/ready', '/discovery', '/me/apps', '/me/loca
 /** True when `path` is exempt from the auth gate (auth + remediation + health). */
 export function isAuthGateAllowlisted(rawPath: string | undefined | null): boolean {
   if (!rawPath) return true;
-  const path = (rawPath.split('?')[0] || '/').replace(/\/+$/, '') || '/';
+  // Strip query + trailing slashes WITHOUT a regex (avoids ReDoS on a
+  // path of many '/'). char 47 = '/'.
+  let path = rawPath.split('?')[0] || '/';
+  let end = path.length;
+  while (end > 1 && path.charCodeAt(end - 1) === 47) end--;
+  path = path.slice(0, end) || '/';
   // Any path with an `/auth/` segment is an auth endpoint (covers project-
   // scoped mounts like `/api/v1/environments/:env/auth/...`).
   if (path.includes('/auth/')) return true;

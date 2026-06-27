@@ -959,7 +959,7 @@ export class RestServer {
             // blocks protected resources for a gated user. Zero cost when off.
             let authGate: any;
             try {
-                if (authService && typeof authService.isAuthGateActive === 'function' && authService.isAuthGateActive()) {
+                if (typeof authService.isAuthGateActive === 'function' && authService.isAuthGateActive()) {
                     const gatedSession: any = await getSession(headers).catch(() => undefined);
                     if (gatedSession?.user?.authGate) authGate = gatedSession.user.authGate;
                 }

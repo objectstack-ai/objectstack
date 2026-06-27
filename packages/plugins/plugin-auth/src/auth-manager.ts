@@ -843,7 +843,7 @@ export class AuthManager {
           // ── ADR-0069 D1: on a successful change/reset — stamp
           //    password_changed_at (expiry) and commit password history.
           if (ctx?.path === '/change-password' || ctx?.path === '/reset-password') {
-            let succeeded = true;
+            let succeeded: boolean;
             try {
               const { isAPIError } = await import('better-auth/api');
               succeeded = !isAPIError(ctx?.context?.returned);
@@ -866,7 +866,7 @@ export class AuthManager {
           // user (expiry clock starts at sign-up). Best-effort.
           {
             const newUserId = ctx?.context?.returned?.user?.id;
-            let signupOk = true;
+            let signupOk: boolean;
             try {
               const { isAPIError } = await import('better-auth/api');
               signupOk = !isAPIError(ctx?.context?.returned);
