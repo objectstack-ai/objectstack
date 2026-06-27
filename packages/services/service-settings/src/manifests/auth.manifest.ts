@@ -268,6 +268,21 @@ const manifest = {
 
     {
       type: 'group',
+      id: 'network',
+      label: 'Network',
+      required: false,
+      description: 'Restrict where users can authenticate from.',
+    },
+    {
+      type: 'textarea',
+      key: 'allowed_ip_ranges',
+      label: 'Allowed IP ranges',
+      required: false,
+      description:
+        'CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, sign-in from outside these ranges is rejected. Empty = no restriction. Requires a trusted proxy to set X-Forwarded-For.',
+    },
+    {
+      type: 'group',
       id: 'social',
       label: 'Social sign-in',
       required: false,

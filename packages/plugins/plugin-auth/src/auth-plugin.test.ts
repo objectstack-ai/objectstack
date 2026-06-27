@@ -707,6 +707,13 @@ describe('AuthPlugin', () => {
       expect((manager as any).config.mfaGracePeriodDays).toBe(14);
     });
 
+    it('binds allowed_ip_ranges into a parsed list (ADR-0069 D5)', async () => {
+      const { manager } = await bootWithAuthSettings({
+        allowed_ip_ranges: { value: '203.0.113.0/24, 10.0.0.5\n192.168.1.1', source: 'global' },
+      });
+      expect((manager as any).config.allowedIpRanges).toEqual(['203.0.113.0/24', '10.0.0.5', '192.168.1.1']);
+    });
+
     it('binds session-control settings (ADR-0069 D4)', async () => {
       const { manager } = await bootWithAuthSettings({
         session_idle_timeout_minutes: { value: 15, source: 'global' },

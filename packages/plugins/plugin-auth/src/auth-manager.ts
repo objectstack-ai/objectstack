@@ -333,6 +333,15 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   maxConcurrentSessions?: number;
 
   /**
+   * ADR-0069 D5 — network gating. When non-empty, auth requests (sign-in,
+   * session) from a client IP outside these CIDR / exact ranges are rejected
+   * with `IP_NOT_ALLOWED` at the auth-route middleware. Requires a trusted proxy
+   * to set `x-forwarded-for` / `cf-connecting-ip`; fails OPEN when the client IP
+   * can't be determined (so a missing proxy header is a no-op, not a lockout).
+   */
+  allowedIpRanges?: string[];
+
+  /**
    * ADR-0069 D2 — better-auth-native per-IP rate limiting, passed through to
    * better-auth's core `rateLimit`. The settings bind tightens `customRules`
    * for the auth endpoints (`/sign-in/email`, `/sign-up/email`,
@@ -353,6 +362,33 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
  * - Passkeys
  * - Organization/teams
  */
+/** ADR-0069 D5 — parse a dotted-quad IPv4 to a uint32, or null when not IPv4. */
+function ipv4ToInt(ip: string): number | null {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip.trim());
+  if (!m) return null;
+  const p = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+  if (p.some((n) => n > 255)) return null;
+  return (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) >>> 0;
+}
+
+/** ADR-0069 D5 — does `ip` match `range` (IPv4 CIDR `a.b.c.d/n`, or exact IP)? */
+export function ipMatchesRange(ip: string, range: string): boolean {
+  const r = (range || '').trim();
+  if (!r) return false;
+  if (r.includes('/')) {
+    const [base, bitsStr] = r.split('/');
+    const bits = Number(bitsStr);
+    const ipInt = ipv4ToInt(ip);
+    const baseInt = ipv4ToInt(base);
+    if (ipInt === null || baseInt === null || !(bits >= 0 && bits <= 32)) {
+      return ip.trim() === base.trim(); // non-IPv4-CIDR → exact-match fallback
+    }
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    return ((ipInt & mask) >>> 0) === ((baseInt & mask) >>> 0);
+  }
+  return ip.trim() === r;
+}
+
 export class AuthManager {
   private auth: Auth<any> | null = null;
   private config: AuthManagerOptions;
@@ -2751,6 +2787,19 @@ export class AuthManager {
     } catch {
       // best-effort — never break a successful sign-in
     }
+  }
+
+  /**
+   * ADR-0069 D5 — is `ip` within the configured allow-list? True (allow) when no
+   * ranges are configured, OR when the IP can't be determined (fail-open so a
+   * misconfigured proxy never locks everyone out — an admin enabling this must
+   * ensure forwarded headers are trusted). Supports IPv4 CIDR + exact IPv4/IPv6.
+   */
+  public isClientIpAllowed(ip: string | undefined): boolean {
+    const ranges = this.config.allowedIpRanges;
+    if (!ranges || ranges.length === 0) return true;
+    if (!ip) return true; // undetermined → fail-open
+    return ranges.some((r) => ipMatchesRange(ip, r));
   }
 
   /**

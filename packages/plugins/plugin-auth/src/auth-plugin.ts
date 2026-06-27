@@ -598,6 +598,15 @@ export class AuthPlugin implements Plugin {
           if (n !== undefined) patch.maxConcurrentSessions = n;
         }
 
+        // Network gating (ADR-0069 D5) — parse the CIDR/IP textarea into a list.
+        if (isExplicit('allowed_ip_ranges')) {
+          const raw = asTrimmedString(values.allowed_ip_ranges) ?? '';
+          patch.allowedIpRanges = raw
+            .split(/[\n,]+/)
+            .map((r) => r.trim())
+            .filter(Boolean);
+        }
+
         // Anti-abuse (ADR-0069 D2) — account lockout (custom, per-identity)
         // and rate-limit tuning (better-auth-native, per-IP). `asPositiveInt`
         // rejects 0/malformed; lockout_threshold uses a non-negative reader so
@@ -795,6 +804,32 @@ export class AuthPlugin implements Plugin {
     }
 
     const rawApp = (httpServer as any).getRawApp();
+
+    // ── ADR-0069 D5 — network gating (IP allow-list) ──────────────────────
+    // Reject auth requests from a client IP outside the configured ranges,
+    // BEFORE they reach better-auth. Registered first so it runs ahead of the
+    // routes below. The public render helpers (/config, /bootstrap-status) are
+    // exempt so a blocked client still gets a clean login page + error. No-op
+    // (and no IP parse) when no ranges are configured.
+    if (typeof rawApp.use === 'function') rawApp.use(`${basePath}/*`, async (c: any, next: any) => {
+      const mgr = this.authManager;
+      if (!mgr || typeof mgr.isClientIpAllowed !== 'function') return next();
+      const path: string = c.req.path || '';
+      if (path.endsWith('/config') || path.endsWith('/bootstrap-status')) return next();
+      const fwd = c.req.header('x-forwarded-for');
+      const ip =
+        (typeof fwd === 'string' && fwd.split(',')[0].trim()) ||
+        c.req.header('cf-connecting-ip') ||
+        c.req.header('x-real-ip') ||
+        undefined;
+      if (!mgr.isClientIpAllowed(ip)) {
+        return c.json(
+          { success: false, error: { code: 'IP_NOT_ALLOWED', message: 'Sign-in is not allowed from your network.' } },
+          403,
+        );
+      }
+      return next();
+    });
 
     // Register /config before the wildcard so it takes precedence.
     // better-auth has no /config endpoint, so without this explicit route

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AuthManager } from './auth-manager';
+import { AuthManager, ipMatchesRange } from './auth-manager';
 
 // Mock better-auth so we can control the handler behaviour
 vi.mock('better-auth', () => ({
@@ -2119,6 +2119,45 @@ describe('AuthManager', () => {
       const m = mgr(engine, { maxConcurrentSessions: 0 });
       await (m as any).enforceConcurrentCap('u1');
       expect(engine.find).not.toHaveBeenCalled();
+    });
+  });
+
+  // ADR-0069 D5 — IP allow-list (network gating).
+  describe('IP allow-list (ADR-0069 D5)', () => {
+    const SECRET = 'test-secret-at-least-32-chars-long';
+    const mgr = (extra: any = {}) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const m = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', ...extra });
+      warn.mockRestore();
+      return m;
+    };
+
+    it('ipMatchesRange handles IPv4 CIDR + exact', () => {
+      expect(ipMatchesRange('203.0.113.5', '203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('203.0.114.5', '203.0.113.0/24')).toBe(false);
+      expect(ipMatchesRange('10.0.0.1', '10.0.0.1')).toBe(true);
+      expect(ipMatchesRange('10.0.0.2', '10.0.0.1')).toBe(false);
+      expect(ipMatchesRange('192.168.1.42', '192.168.1.42/32')).toBe(true);
+      expect(ipMatchesRange('1.2.3.4', '0.0.0.0/0')).toBe(true);
+    });
+
+    it('allows any IP when no ranges are configured', () => {
+      const m = mgr({});
+      expect(m.isClientIpAllowed('8.8.8.8')).toBe(true);
+      expect(m.isClientIpAllowed(undefined)).toBe(true);
+    });
+
+    it('allows an IP inside a configured range, blocks one outside', () => {
+      const m = mgr({ allowedIpRanges: ['203.0.113.0/24', '10.0.0.5'] });
+      expect(m.isClientIpAllowed('203.0.113.99')).toBe(true);
+      expect(m.isClientIpAllowed('10.0.0.5')).toBe(true);
+      expect(m.isClientIpAllowed('8.8.8.8')).toBe(false);
+    });
+
+    it('fails OPEN when the client IP cannot be determined (no proxy header)', () => {
+      const m = mgr({ allowedIpRanges: ['203.0.113.0/24'] });
+      expect(m.isClientIpAllowed(undefined)).toBe(true);
+      expect(m.isClientIpAllowed('')).toBe(true);
     });
   });
 });
