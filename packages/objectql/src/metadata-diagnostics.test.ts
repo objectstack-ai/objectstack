@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { computeViewReferenceDiagnostics } from './metadata-diagnostics.js';
+import { computeViewReferenceDiagnostics } from '@objectstack/metadata-protocol';
 
 const objectDef = {
   fields: {

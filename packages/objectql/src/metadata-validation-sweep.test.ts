@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { ObjectStackProtocolImplementation } from './protocol.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
 import {
     DEFAULT_METADATA_TYPE_REGISTRY,

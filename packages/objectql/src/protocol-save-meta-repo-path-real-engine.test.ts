@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ObjectStackProtocolImplementation } from './protocol.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQL } from './engine.js';
 
 const sysMetadataObject = {

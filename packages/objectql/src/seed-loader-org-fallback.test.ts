@@ -8,7 +8,7 @@
 // many orgs → leave rows org-less (genuinely ambiguous → historical behavior).
 
 import { describe, it, expect } from 'vitest';
-import { SeedLoaderService } from './seed-loader';
+import { SeedLoaderService } from '@objectstack/metadata-protocol';
 import { SeedLoaderConfigSchema } from '@objectstack/spec/data';
 
 function harness(orgRows: Array<{ id: string }>) {

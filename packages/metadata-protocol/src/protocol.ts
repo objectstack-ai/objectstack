@@ -3,7 +3,7 @@
 import { ObjectStackProtocol } from '@objectstack/spec/api';
 import { IDataEngine } from '@objectstack/core';
 import { readEnvWithDeprecation } from '@objectstack/types';
-import type { ObjectQL } from './engine.js';
+import type { MetadataHostEngine } from './host-engine.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import { ConflictError } from '@objectstack/metadata-core';
 import type {
@@ -667,7 +667,7 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
 }
 
 export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
-    private engine: ObjectQL;
+    private engine: MetadataHostEngine;
     private getServicesRegistry?: () => Map<string, any>;
     private getFeedService?: () => IFeedService | undefined;
     /**
@@ -694,7 +694,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         getFeedService?: () => IFeedService | undefined,
         environmentId?: string,
     ) {
-        this.engine = engine as ObjectQL;
+        this.engine = engine as MetadataHostEngine;
         this.getServicesRegistry = getServicesRegistry;
         this.getFeedService = getFeedService;
         this.environmentId = environmentId;

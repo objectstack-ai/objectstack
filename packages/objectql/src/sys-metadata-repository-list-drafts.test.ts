@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { SysMetadataRepository } from './sys-metadata-repository.js';
+import { SysMetadataRepository } from '@objectstack/metadata-protocol';
 
 /**
  * ADR-0033 — `listDrafts` surfaces pending DRAFT rows (what an AI authored but

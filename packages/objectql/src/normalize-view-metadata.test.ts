@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { normalizeViewMetadata } from './protocol.js';
+import { normalizeViewMetadata } from '@objectstack/metadata-protocol';
 
 /**
  * The `view` write path guarantees a top-level `name` on every view body so

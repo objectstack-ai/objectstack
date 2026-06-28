@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it, vi } from 'vitest';
-import { ObjectStackProtocolImplementation } from './protocol';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 
 /**
  * Protocol-level coverage for the per-item draft / publish / rollback /

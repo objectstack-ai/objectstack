@@ -13,11 +13,11 @@ export {
 export type { ObjectContributor, SchemaRegistryOptions } from './registry.js';
 
 // Export Protocol Implementation
-export { ObjectStackProtocolImplementation } from './protocol.js';
+export { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 
 // ADR-0008 PR-10b: MetadataRepository wrapper over the existing sys_metadata table.
-export { SysMetadataRepository } from './sys-metadata-repository.js';
-export type { SysMetadataEngine, SysMetadataRepositoryOptions } from './sys-metadata-repository.js';
+export { SysMetadataRepository } from '@objectstack/metadata-protocol';
+export type { SysMetadataEngine, SysMetadataRepositoryOptions } from '@objectstack/metadata-protocol';
 
 // Export Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
@@ -83,9 +83,9 @@ export type {
 
 // Seed loader — materializes `seed` metadata into rows (used by publishMetaItem
 // and the runtime dispatcher/app plugins).
-export { SeedLoaderService } from './seed-loader.js';
+export { SeedLoaderService } from '@objectstack/metadata-protocol';
 
 // ADR-0038 L3 — post-publish runtime probes (one real read per published
 // artifact); findings are BuildIssue-shaped with layer 'runtime'.
-export { runBuildProbes } from './build-probes.js';
-export type { RuntimeBuildIssue, BuildProbeReport, RunBuildProbesOptions } from './build-probes.js';
+export { runBuildProbes } from '@objectstack/metadata-protocol';
+export type { RuntimeBuildIssue, BuildProbeReport, RunBuildProbesOptions } from '@objectstack/metadata-protocol';

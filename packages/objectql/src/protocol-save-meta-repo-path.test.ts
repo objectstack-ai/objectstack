@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { hashSpec } from '@objectstack/metadata-core';
-import { ObjectStackProtocolImplementation } from './protocol';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 
 /**
  * Repository write-path coverage (post PR-10d.6).

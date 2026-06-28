@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ObjectStackProtocolImplementation } from './protocol.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQL } from './engine.js';
 
 // A clonable object: business fields + an engine-generated autonumber that

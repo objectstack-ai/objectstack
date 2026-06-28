@@ -1,8 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { runBuildProbes, type ProbeEngine } from './build-probes.js';
-import { ObjectStackProtocolImplementation } from './protocol.js';
+import { runBuildProbes, type ProbeEngine } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 
 /**
  * ADR-0038 L3 — runtime probes. Each probe is one real read; findings are

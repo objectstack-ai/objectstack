@@ -1,57 +1,60 @@
 {
-  "name": "@objectstack/objectql",
+  "name": "@objectstack/metadata-protocol",
   "version": "11.0.0",
   "license": "Apache-2.0",
-  "description": "Isomorphic ObjectQL Engine for ObjectStack",
+  "description": "ObjectStack metadata management protocol: sys_metadata CRUD, draft/publish, locks, package ownership, diagnostics (ADR-0076).",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
-    "build": "tsup --config ../../tsup.config.ts",
-    "test": "vitest run"
+    "build": "tsup",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
+  "keywords": [
+    "objectstack",
+    "metadata",
+    "protocol",
+    "sys-metadata"
+  ],
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
-    "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "ajv": "^8.20.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/node": "^26.0.0",
+    "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   },
-  "keywords": [
-    "objectstack",
-    "objectql",
-    "query-engine",
-    "orm",
-    "data-access"
-  ],
   "author": "ObjectStack",
   "repository": {
     "type": "git",
     "url": "https://github.com/objectstack-ai/framework.git",
-    "directory": "packages/objectql"
+    "directory": "packages/metadata-protocol"
   },
   "homepage": "https://objectstack.ai/docs",
   "bugs": "https://github.com/objectstack-ai/framework/issues",
   "publishConfig": {
     "access": "public"
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
   "engines": {
     "node": ">=18.0.0"
   }

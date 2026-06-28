@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ConflictError, hashSpec } from '@objectstack/metadata-core';
-import { SysMetadataRepository } from './sys-metadata-repository.js';
+import { SysMetadataRepository } from '@objectstack/metadata-protocol';
 
 interface Row {
     id: string;

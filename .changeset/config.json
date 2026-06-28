@@ -21,6 +21,7 @@
       "@objectstack/metadata-core",
       "@objectstack/metadata-fs",
       "@objectstack/objectql",
+      "@objectstack/metadata-protocol",
       "@objectstack/observability",
       "@objectstack/formula",
       "@objectstack/lint",

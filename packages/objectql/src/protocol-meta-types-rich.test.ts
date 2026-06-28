@@ -1,9 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ObjectStackProtocolImplementation } from './protocol.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
-import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
+import { resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 
 /**
  * Phase 3a-1 + 3a-env-writable tests.
