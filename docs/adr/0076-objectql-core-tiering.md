@@ -1,6 +1,6 @@
 # ADR-0076: objectql is the data engine — relocate metadata management (protocol) out of it; enforce the boundary; defer the engine repo-split
 
-**Status**: Proposed (2026-06-28, rev. 8) — D1–D11 below. D9 step-1 (interface segmentation) shipped in #2429. Open Question #7 resolved: keep the published `@objectstack/metadata-protocol` name (no rename). — v12 assessment
+**Status**: Proposed (2026-06-28, rev. 9) — D1–D12 below. D9 step-1 (interface segmentation) shipped in #2429; OQ#7 resolved (keep `metadata-protocol` name). rev.9 adds **D12 (honest capabilities** — discovery must not report stub/fallback services as real; the analytics fallback + dev stubs are marked honestly, not deleted) and corrects the D10 analytics note (deliberate fallback + `replaceService`, not a collision). — v12 assessment
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (sys_metadata overlay substrate), [ADR-0025](./0025-plugin-package-distribution.md) (plugin package distribution), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (open-core boundary), [ADR-0048](./0048-cross-package-metadata-collision.md) (package id is the addressing unit), [ADR-0066](./0066-unified-authorization-model.md) (secure-by-default, posture-gated bypass)
 **Consumers**: **new** `@objectstack/metadata-protocol` (receives `protocol` + `sys-metadata-repository` + `metadata-diagnostics`), `@objectstack/objectql` (loses protocol → becomes a lean data engine; keeps a back-compat re-export), `@objectstack/metadata-core` (gains the `SysMetadataEngine` interface), `@objectstack/plugin-security`, `@objectstack/plugin-sharing`, `@objectstack/spec`, and out-of-tree embedders — notably `../objectbase` (its `gateway`).
@@ -104,7 +104,7 @@ The segmentation is **spec/type-level and may start incrementally now** (define 
 
 A single `ObjectStackProtocolImplementation` facade — and any `*-protocol` *implementation* package — is the wrong end-state. Verified against source:
 - The facade implements only **4 of the 11** contract domains (data, metadata, analytics, feed). The other 7 (realtime / notifications / workflow / ai / i18n / views / permissions) are **not implemented in it** — they belong to their own services or aren't implemented at all.
-- **Analytics is duplicated and collides**: both `ObjectQLPlugin` (`objectql/src/plugin.ts`) and `AnalyticsServicePlugin` (`@objectstack/service-analytics`) register a service named `'analytics'` — the facade's ~66-line `analyticsQuery` versus service-analytics's ~1.8k-LOC engine (three strategies incl. native-SQL). Last-registered wins; the facade's copy is a strictly lesser duplicate.
+- **Analytics uses a deliberate fallback + `replaceService` pattern (NOT a collision/bug — corrected in rev.9)**: `registerService` throws on duplicate (`core/kernel.ts`), so `ObjectQLPlugin` registers a lightweight ~66-line analytics **fallback** (so `/analytics` doesn't 404 in minimal deployments), and `AnalyticsServicePlugin`, when installed, calls **`ctx.replaceService('analytics', …)`** to swap in the full ~1.8k-LOC engine (three strategies incl. native-SQL). With service-analytics present the real engine serves (no shadowing); without it the fallback serves. The fallback duplicates *logic* only (a minor maintenance cost) and is intentional and harmless.
 - **Feed is already delegated** to `IFeedService`; the facade only forwards.
 - The domain service packages already exist: `service-analytics`, `service-messaging`, `service-realtime`.
 
@@ -112,7 +112,7 @@ Target end-state:
 - **"protocol" names ONLY the contract** — the segmented interfaces in `@objectstack/spec/api` (D9). There is **no `*-protocol` implementation package**.
 - **`DataProtocol`** impl → engine-adjacent / transport (thin wire-normalizers).
 - **`MetadataProtocol`** impl → stays in **`@objectstack/metadata-protocol`** (name **retained** — already published; renaming churns downstream for ~0 benefit). The package's *content* converges to the metadata-management impl (it owns `sys_metadata`). The `protocol` in the name is a deliberate, low-cost naming exception from being published — the real contract lives in `@objectstack/spec/api`, not here. (Open Question #7, resolved.)
-- **Analytics / Feed / Realtime / Notification / …** → their existing service packages; **delete the facade's duplicated `analyticsQuery` + feed wrappers** and the `ObjectQLPlugin` `'analytics'` adapter (let `service-analytics` own the `'analytics'` service).
+- **Analytics / Feed / Realtime / Notification / …** → each domain's *full* impl lives in its existing service package. For analytics specifically, the `ObjectQLPlugin` fallback **must be preserved or consciously dropped** (it prevents `/analytics` 404 for deployments without service-analytics) — **not blindly deleted**. Feed already delegates to `IFeedService`. The engine keeps only the minimal fallback it deliberately provides.
 - **The transport/dispatcher routes each contract-slice to the owning service** (it already resolves services by name) — no central facade class.
 
 This **refines D1** (the `metadata-protocol` package was an intermediate, not the end-state) and **completes D9**. Executed at the cross-repo window with D7 / Step 2.
@@ -126,6 +126,27 @@ The transport layer repeats the kernel's recurring pattern — a **clean port wi
 Decision: each capability plugin registers its routes as a **normalized handler** into a thin dispatcher registry (the framework-agnostic port) — **not** as framework-specific routes. (Registering Hono `app.route` directly would couple plugins to Hono and break multi-adapter.) The central dispatcher / rest-server decompose into a thin core + per-domain contributions; adapters stay below, unchanged. Incremental (both mechanisms already coexist — migrate one domain at a time). Cross-repo window.
 
 **Caveats**: (1) multi-adapter is currently **unproven** — only the Hono adapter exists and the normalized context shows Hono-isms (e.g. backfilling host from `c.req.url`); writing a second adapter (even a thin Workers/Express one) is the only real validation that the port is clean. (2) `http-dispatcher` (~3.8k) and `rest-server` (~5.1k) appear to **overlap** (two central transport layers touching data-CRUD routes) — confirm whether that is redundancy to consolidate.
+
+### D12 — Honest capabilities: discovery must distinguish real services from stubs/fallbacks [new — kernel review]
+
+**Root cause of agents being misled.** Several plugins register stub / dev / fallback services under canonical names, and the discovery builder reports *any* present service as fully real: `runtime/http-dispatcher.ts`'s `svcAvailable` hardcodes `{ enabled: true, status: 'available', handlerReady: true }` for every registered service — it **ignores stub markers** (its own comment even says "handlerReady:false … may be served by a stub", but the code never computes it). So `discovery.services.*` claims capabilities that are only stubbed, and consumers (AI agents, the console) trust them. A dev AI stub advertised this way has already confused an agent.
+
+**Inventory of current fakes / mis-reports:**
+- `plugin-dev` registers ~8 dev stubs — `storage` / `search` / `automation` / `graphql` / `analytics` / `realtime` / `notification` / `ai` (they already carry a `_dev: true` marker that nothing respects).
+- `ObjectQLPlugin` registers a ~66-line `analytics` **fallback** (the D10 note — deliberate, but it reports as fully available).
+- `http-dispatcher.ts` `svcAvailable` — the hardcode above.
+
+**Decision — honest capabilities:**
+1. A registered service that is a stub / dev / fallback MUST self-identify with a **standard marker** (standardise one; `_dev` is the existing precedent).
+2. Discovery MUST respect it: such services report **`status: 'stub'` (or `'degraded'`) with `handlerReady: false`**, never `status: 'available'`. Add the status value to the discovery schema.
+3. Consumers (agents, console) treat **only `handlerReady: true` / `status: 'available'`** as a real capability; `stub`/`unavailable` ⇒ do not use for real work.
+
+This fixes the **whole class at once — without deleting any fallback** (no `/analytics` 404 regression): the analytics fallback and the dev stubs simply stop *lying*; they keep serving but are honestly labelled. It is the runtime enforcement of the D9-refinement principle (capabilities = what is actually installed, computed at runtime).
+
+**Supersedes the rev.9 analytics conclusion**: the fix for the analytics fallback is to **mark it honestly (this D12)**, not "preserve-or-delete".
+
+**Execution**: framework (marker convention + `svcAvailable` respects it + discovery schema `stub` status) and console (read the honest status) land **together at the cross-repo window** — the console reads `discovery.services`, so this is a cross-repo contract change.
+
 
 ## Feasibility (verified against current source)
 
@@ -185,3 +206,4 @@ import { SecurityPlugin } from '@objectstack/plugin-security';
 8. **Per-domain versioning** — once segmented, do capability protocols get independent version markers / a `getCapabilities()` discovery method?
 9. **dispatcher vs rest-server overlap** — are `runtime/http-dispatcher` (~3.8k) and `rest/rest-server` (~5.1k) redundant central transport layers? Consolidate or delineate (D11).
 10. **Validate multi-adapter** — write a second `IHttpServer` adapter (thin Workers/Express) to prove the port is free of Hono-isms before relying on it (D11).
+11. **D12 stub marker** — standardise the self-identifying marker: reuse `_dev`, introduce `__stub: true`, or a richer per-service capability descriptor? (Decide when D12 is implemented.)
