@@ -1,5 +1,19 @@
 # @objectstack/service-cache
 
+## 11.1.0
+
+### Patch Changes
+
+- Updated dependencies [ce0b4f6]
+- Updated dependencies [9ccfcd6]
+- Updated dependencies [dc2990f]
+- Updated dependencies [51bec81]
+- Updated dependencies [3e593a7]
+- Updated dependencies [63d5403]
+  - @objectstack/core@11.1.0
+  - @objectstack/observability@11.1.0
+  - @objectstack/spec@11.1.0
+
 ## 11.0.0
 
 ### Patch Changes

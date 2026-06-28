@@ -1,5 +1,28 @@
 # @objectstack/service-storage
 
+## 11.1.0
+
+### Patch Changes
+
+- Updated dependencies [cbc8c02]
+- Updated dependencies [07c2773]
+- Updated dependencies [d7a88df]
+- Updated dependencies [4f8f108]
+- Updated dependencies [ce0b4f6]
+- Updated dependencies [90bce88]
+- Updated dependencies [3209ec6]
+- Updated dependencies [e011d42]
+- Updated dependencies [6e5bdd5]
+- Updated dependencies [9ccfcd6]
+- Updated dependencies [dc2990f]
+- Updated dependencies [51bec81]
+- Updated dependencies [3e593a7]
+- Updated dependencies [63d5403]
+  - @objectstack/platform-objects@11.1.0
+  - @objectstack/core@11.1.0
+  - @objectstack/observability@11.1.0
+  - @objectstack/spec@11.1.0
+
 ## 11.0.0
 
 ### Patch Changes

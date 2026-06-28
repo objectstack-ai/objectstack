@@ -1,5 +1,53 @@
 # @objectstack/spec
 
+## 11.1.0
+
+### Minor Changes
+
+- 51bec81: Remove a first batch of dead (unenforced, unauthored) metadata properties (#2377, ADR-0049).
+
+  Verified set 0× / read 0× across framework + objectui + cloud + hotcrm + templates, with no test footprint outside `@objectstack/spec`:
+
+  - **field**: `caseSensitive`, `maxRating`
+  - **object**: `partitioning` (+ `PartitioningConfigSchema`), `defaultDetailForm`
+
+  Liveness ledgers (field/object) updated; api-surface regenerated (drops `PartitioningConfig`/`PartitioningConfigSchema` only). Folded into the 11 line (`minor`).
+
+  The remaining #2377 candidates are deliberately not in this batch: overloaded names (`tags`/`active`/`versioning`/`dependencies`/`index`/…) need per-occurrence handling, and `softDelete` / `measures.certified` turned out to be set in non-spec test fixtures (analytics, mcp) — both deferred. See the issue for the full split.
+
+- 3e593a7: Remove the deprecated `DriverInterface` type alias — use `IDataDriver` (11.0).
+
+  `DriverInterface` was a `@deprecated` alias of `IDataDriver` (the authoritative
+  driver contract). It is removed from `@objectstack/spec/contracts` and
+  `@objectstack/core`; `objectql`'s engine now types drivers as `IDataDriver`
+  directly (a type-identical change, since the alias _was_ `IDataDriver`).
+
+  Driver authors: replace `DriverInterface` with `IDataDriver` (same shape).
+
+  Note: this is unrelated to the live `IDataEngine` interface (engine-layer
+  contract, not deprecated) and to the separate zod-derived `DriverInterface` /
+  `DriverInterfaceSchema` in `@objectstack/spec/data` (the runtime driver schema),
+  both of which are unchanged.
+
+- 63d5403: Remove the dead `PolicySchema` / `definePolicy` and the stack `policies` collection (#1882, ADR-0049).
+
+  `PolicySchema` (password / network / session / audit "org security policy") was
+  **100% unenforced** — no runtime consumer ever read it. Per ADR-0049
+  (enforce-or-remove) it is removed rather than implemented:
+
+  - `@objectstack/spec`: delete `security/policy.zod.ts` (`PolicySchema`,
+    `Password/Network/Session/AuditPolicySchema`, `definePolicy`); drop the
+    `policies` field from the stack schema and the `policies` collection wiring
+    (`MAP_SUPPORTED_FIELDS`, `METADATA_ALIASES`).
+  - `@objectstack/downstream-contract`: drop the `DcPolicy` fixture/case (the
+    contract gate stays green — `SharingRule` / `PermissionSet` are unaffected).
+  - Examples (`app-crm`, `app-showcase`): drop their unused policy definitions.
+
+  No migration needed for consumers: `policies` was never enforced. `SharingRule`,
+  `PermissionSet`, RLS, and all `*PolicySchema` siblings (retry/retention/RLS/etc.)
+  are unrelated and unchanged. Verified: hotcrm + templates have zero Policy-API
+  usage; downstream-contract gate green.
+
 ## 11.0.0
 
 ### Major Changes

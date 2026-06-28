@@ -1,5 +1,97 @@
 # @objectstack/cli
 
+## 11.1.0
+
+### Minor Changes
+
+- fdb41c0: Remove ObjectStack's own legacy env-var aliases (11.0); ecosystem-standard names stay.
+
+  The framework's renamed env vars no longer accept their old ObjectStack names —
+  rename them:
+
+  | removed legacy name                 | use                    |
+  | ----------------------------------- | ---------------------- |
+  | `OS_MULTI_TENANT`                   | `OS_MULTI_ORG_ENABLED` |
+  | `OBJECTSTACK_METADATA_WRITABLE`     | `OS_METADATA_WRITABLE` |
+  | `OS_AUTH_BASE_URL`, `AUTH_BASE_URL` | `OS_AUTH_URL`          |
+
+  **Ecosystem-standard names are NOT removed** — they remain accepted (and no longer
+  emit a deprecation warning, since they are permanent conventions, not legacy):
+  `DATABASE_URL`, `AUTH_SECRET`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `PORT`,
+  `CORS_*`, `LOG_LEVEL`, `ROOT_DOMAIN`, `MCP_SERVER_*`. The generic
+  `readEnvWithDeprecation` helper is unchanged.
+
+### Patch Changes
+
+- Updated dependencies [574e7a3]
+- Updated dependencies [cbc8c02]
+- Updated dependencies [07c2773]
+- Updated dependencies [18f9713]
+- Updated dependencies [7cf81a7]
+- Updated dependencies [d7a88df]
+- Updated dependencies [4f8f108]
+- Updated dependencies [ce0b4f6]
+- Updated dependencies [90bce88]
+- Updated dependencies [3209ec6]
+- Updated dependencies [8c84c97]
+- Updated dependencies [e011d42]
+- Updated dependencies [6e5bdd5]
+- Updated dependencies [13dbcf2]
+- Updated dependencies [9ccfcd6]
+- Updated dependencies [dc2990f]
+- Updated dependencies [51bec81]
+- Updated dependencies [3e593a7]
+- Updated dependencies [fdb41c0]
+- Updated dependencies [63d5403]
+- Updated dependencies [7087cfe]
+- Updated dependencies [69ae136]
+  - @objectstack/plugin-security@11.1.0
+  - @objectstack/plugin-auth@11.1.0
+  - @objectstack/platform-objects@11.1.0
+  - @objectstack/core@11.1.0
+  - @objectstack/service-settings@11.1.0
+  - @objectstack/rest@11.1.0
+  - @objectstack/runtime@11.1.0
+  - @objectstack/objectql@11.1.0
+  - @objectstack/observability@11.1.0
+  - @objectstack/plugin-hono-server@11.1.0
+  - @objectstack/spec@11.1.0
+  - @objectstack/types@11.1.0
+  - @objectstack/client@11.1.0
+  - @objectstack/driver-memory@11.1.0
+  - @objectstack/verify@11.1.0
+  - @objectstack/account@11.1.0
+  - @objectstack/setup@11.1.0
+  - @objectstack/studio@11.1.0
+  - @objectstack/plugin-approvals@11.1.0
+  - @objectstack/plugin-audit@11.1.0
+  - @objectstack/plugin-email@11.1.0
+  - @objectstack/plugin-org-scoping@11.1.0
+  - @objectstack/plugin-reports@11.1.0
+  - @objectstack/plugin-sharing@11.1.0
+  - @objectstack/service-job@11.1.0
+  - @objectstack/service-queue@11.1.0
+  - @objectstack/service-realtime@11.1.0
+  - @objectstack/service-storage@11.1.0
+  - @objectstack/cloud-connection@11.1.0
+  - @objectstack/mcp@11.1.0
+  - @objectstack/driver-mongodb@11.1.0
+  - @objectstack/driver-sql@11.1.0
+  - @objectstack/driver-sqlite-wasm@11.1.0
+  - @objectstack/plugin-webhooks@11.1.0
+  - @objectstack/service-analytics@11.1.0
+  - @objectstack/service-automation@11.1.0
+  - @objectstack/service-cache@11.1.0
+  - @objectstack/service-datasource@11.1.0
+  - @objectstack/service-messaging@11.1.0
+  - @objectstack/service-package@11.1.0
+  - @objectstack/trigger-api@11.1.0
+  - @objectstack/trigger-record-change@11.1.0
+  - @objectstack/trigger-schedule@11.1.0
+  - @objectstack/formula@11.1.0
+  - @objectstack/lint@11.1.0
+  - @objectstack/console@11.1.0
+
 ## 11.0.0
 
 ### Minor Changes

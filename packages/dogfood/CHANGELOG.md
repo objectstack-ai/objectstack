@@ -1,5 +1,22 @@
 # @objectstack/dogfood
 
+## 0.0.8
+
+### Patch Changes
+
+- Updated dependencies [574e7a3]
+- Updated dependencies [13dbcf2]
+- Updated dependencies [51bec81]
+- Updated dependencies [3e593a7]
+- Updated dependencies [fdb41c0]
+- Updated dependencies [63d5403]
+  - @objectstack/plugin-security@11.1.0
+  - @objectstack/objectql@11.1.0
+  - @objectstack/spec@11.1.0
+  - @objectstack/verify@11.1.0
+  - @objectstack/example-crm@4.0.60
+  - @objectstack/example-showcase@0.2.6
+
 ## 0.0.7
 
 ### Patch Changes

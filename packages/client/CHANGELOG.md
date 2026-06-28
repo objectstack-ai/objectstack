@@ -1,5 +1,38 @@
 # @objectstack/client
 
+## 11.1.0
+
+### Minor Changes
+
+- 7087cfe: Remove the unused HTTP framework adapters and the MSW plugin — the open edition ships the **Hono** adapter only.
+
+  The `express` / `fastify` / `nextjs` / `nestjs` / `nuxt` / `sveltekit` adapters and
+  `@objectstack/plugin-msw` had **zero internal consumers** and were not dogfooded —
+  pure release/maintenance surface (and an untested-integration liability). They are
+  removed; `@objectstack/hono` (the adapter actually used, via `@objectstack/client`)
+  is kept.
+
+  - Deleted packages: `@objectstack/express`, `@objectstack/fastify`,
+    `@objectstack/nextjs`, `@objectstack/nestjs`, `@objectstack/nuxt`,
+    `@objectstack/sveltekit`, `@objectstack/plugin-msw` (fixed group 73 → 66).
+  - `@objectstack/client`: dropped the `plugin-msw` / `msw` dev usage (MSW test removed).
+  - `HttpDispatcher` (the dispatch engine) is now used only by the Hono adapter +
+    the internal dispatcher-plugin, so its misleading `@deprecated → createDispatcherPlugin`
+    note (createDispatcherPlugin is a kernel plugin, not a drop-in) is corrected.
+
+  Anyone needing another framework adapter can build one on the public
+  `HttpDispatcher` / `createDispatcherPlugin` API or maintain it out-of-tree.
+
+### Patch Changes
+
+- Updated dependencies [ce0b4f6]
+- Updated dependencies [9ccfcd6]
+- Updated dependencies [51bec81]
+- Updated dependencies [3e593a7]
+- Updated dependencies [63d5403]
+  - @objectstack/core@11.1.0
+  - @objectstack/spec@11.1.0
+
 ## 11.0.0
 
 ### Patch Changes

@@ -1,5 +1,79 @@
 # @objectstack/service-settings
 
+## 11.1.0
+
+### Minor Changes
+
+- ce0b4f6: Auth: password expiry — the session-validation gate (ADR-0069 D1, P1)
+
+  Builds the **authentication-policy session gate** ADR-0069 needs and uses it for password expiry. When `password_expiry_days` (new `auth` setting, 0 = off) is exceeded, an authenticated user is blocked from protected REST resources with `403 PASSWORD_EXPIRED` until they change their password — while auth + remediation paths stay reachable.
+
+  - **core**: new pure `evaluateAuthGate` / `isAuthGateAllowlisted` helper (`@objectstack/core/security`) — single source of truth for the allow-list (auth endpoints, change-password, health, UI-bootstrap reads).
+  - **plugin-auth**: `customSession` computes the gate posture once and attaches `user.authGate`; `computeAuthGate` reads `sys_user.password_changed_at` vs the configured window; `password_changed_at` is stamped on sign-up / change / reset; `isAuthGateActive()` keeps the gate **zero-overhead** when off.
+  - **platform-objects**: new `sys_user.password_changed_at` column.
+  - **rest**: `resolveExecCtx` carries `authGate`; `enforceAuth` blocks gated sessions (independent of `requireAuth`) using the core allow-list.
+  - **service-settings**: new `password_expiry_days` field.
+
+  Default-off / additive (no upgrade behavior change); a null `password_changed_at` never expires (existing users). Per ADR-0049 the setting ships with its enforcement; timestamps written as `Date` (ADR-0074).
+
+  This gate is the shared seam for **enforced MFA** (ADR-0069 D3), which lands next as a small addition (a second `authGate` branch). The dispatcher/MCP path is a follow-up (tracked in #2375); the REST surface the Console uses is fully gated here.
+
+- 90bce88: Auth: enforced MFA (ADR-0069 D3, P1)
+
+  Completes the session-validation gate: when `mfa_required` (new `auth` setting) is on, an authenticated user without TOTP enrolled is blocked from protected resources with `403 MFA_REQUIRED` once their `mfa_grace_period_days` (default 7) window elapses — while the two-factor enrollment endpoints stay reachable so they can comply. Reuses the `authGate` seam shipped in #2388 (a second posture branch in `computeAuthGate`).
+
+  - New `auth` settings `mfa_required` (toggle) + `mfa_grace_period_days`; enabling `mfa_required` also force-enables the `twoFactor` plugin so `/two-factor/*` enrollment exists.
+  - New `sys_user.mfa_required_at` column — the grace clock, stamped lazily the first time a user is seen required-but-unenrolled.
+  - `isAuthGateActive()` now also trips on `mfa_required` (still zero-overhead when off).
+
+  Default-off / additive (no upgrade behavior change); per ADR-0049 the setting ships with its enforcement.
+
+  **Needs an objectui follow-up**: the Console should handle a `403 MFA_REQUIRED` by showing the TOTP-enrollment prompt. Per-org `sys_organization.require_mfa` and the dispatcher/MCP gate remain follow-ups (#2375).
+
+- 3209ec6: Auth: session controls — idle timeout, absolute max lifetime, concurrent cap (ADR-0069 D4, P2)
+
+  Adds three `auth` session-control settings (all 0 = off):
+
+  - `session_idle_timeout_minutes` — sign a user out after inactivity. Enforced in `customSession`: touches `sys_session.last_activity_at` (throttled to once a minute) and, once the idle window is exceeded, revokes the session.
+  - `session_absolute_max_hours` — cap total session lifetime regardless of refresh; revoked once `created_at` is older than the cap.
+  - `max_concurrent_sessions_per_user` — on sign-in, keep the newest N live sessions and revoke the rest (oldest first).
+
+  Revocation expires the session in place (`expires_at` set to the past + `revoked_at` / `revoke_reason` stamped on new `sys_session` columns), so better-auth returns no session on the next request → the Console's existing 401 → login redirect handles it (no client change). Note: better-auth garbage-collects expired sessions, so the `revoke_reason` audit row is best-effort; the enforcement (session killed) is not.
+
+  Default-off / additive (no upgrade behavior change); per ADR-0049 each setting ships with its enforcement.
+
+- 8c84c97: Auth: IP allow-list — network gating on the auth routes (ADR-0069 D5, P2)
+
+  Adds an `allowed_ip_ranges` auth setting (CIDR ranges or exact IPs; empty = no restriction). A Hono middleware registered ahead of the better-auth handler in the auth-route registration rejects auth requests from a client IP outside the ranges with `403 IP_NOT_ALLOWED`, before they reach better-auth.
+
+  - Client IP is read trust-proxy-aware from `x-forwarded-for` (first hop) / `cf-connecting-ip` / `x-real-ip`.
+  - The public render helpers (`/config`, `/bootstrap-status`) are exempt so a blocked client still gets a clean login page + a clear error.
+  - **Fails OPEN** when the client IP can't be determined (no proxy header), so a misconfigured proxy is a no-op rather than a lockout — an admin enabling this must ensure forwarded headers are trusted.
+  - IPv4 CIDR (`a.b.c.d/n`) + exact IPv4/IPv6 matching.
+
+  Default-off / additive; per ADR-0049 the setting ships with its enforcement.
+
+### Patch Changes
+
+- Updated dependencies [cbc8c02]
+- Updated dependencies [07c2773]
+- Updated dependencies [d7a88df]
+- Updated dependencies [4f8f108]
+- Updated dependencies [ce0b4f6]
+- Updated dependencies [90bce88]
+- Updated dependencies [3209ec6]
+- Updated dependencies [e011d42]
+- Updated dependencies [6e5bdd5]
+- Updated dependencies [9ccfcd6]
+- Updated dependencies [51bec81]
+- Updated dependencies [3e593a7]
+- Updated dependencies [fdb41c0]
+- Updated dependencies [63d5403]
+  - @objectstack/platform-objects@11.1.0
+  - @objectstack/core@11.1.0
+  - @objectstack/spec@11.1.0
+  - @objectstack/types@11.1.0
+
 ## 11.0.0
 
 ### Minor Changes

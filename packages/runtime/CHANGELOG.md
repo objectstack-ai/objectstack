@@ -1,5 +1,85 @@
 # @objectstack/runtime
 
+## 11.1.0
+
+### Minor Changes
+
+- e011d42: Auth: per-org MFA + dispatcher/MCP gate — complete the ADR-0069 enforced-MFA story
+
+  Two follow-ups that make enforced MFA total:
+
+  - **Per-org `sys_organization.require_mfa`** — an org may require MFA above the global floor. `computeAuthGate` now treats the active org's `require_mfa` as an effective MFA requirement even when the global `mfa_required` is off; `isAuthGateActive()` stays cheap via a 60s-TTL "any org requires MFA" cache (lazy background refresh), so a brand-new per-org requirement activates the gate on the next request without per-request org queries.
+  - **Dispatcher/MCP gate** — the auth-policy gate now also runs in the runtime dispatcher (after `resolveExecutionContext`), so MCP / GraphQL / embedded data paths enforce `PASSWORD_EXPIRED` / `MFA_REQUIRED` consistently with the REST seam (reusing the shared `evaluateAuthGate` allow-list). Previously only the REST surface (the Console) was gated.
+
+  Default-off / additive. Per ADR-0049 each setting ships with its enforcement.
+
+### Patch Changes
+
+- 7087cfe: Remove the unused HTTP framework adapters and the MSW plugin — the open edition ships the **Hono** adapter only.
+
+  The `express` / `fastify` / `nextjs` / `nestjs` / `nuxt` / `sveltekit` adapters and
+  `@objectstack/plugin-msw` had **zero internal consumers** and were not dogfooded —
+  pure release/maintenance surface (and an untested-integration liability). They are
+  removed; `@objectstack/hono` (the adapter actually used, via `@objectstack/client`)
+  is kept.
+
+  - Deleted packages: `@objectstack/express`, `@objectstack/fastify`,
+    `@objectstack/nextjs`, `@objectstack/nestjs`, `@objectstack/nuxt`,
+    `@objectstack/sveltekit`, `@objectstack/plugin-msw` (fixed group 73 → 66).
+  - `@objectstack/client`: dropped the `plugin-msw` / `msw` dev usage (MSW test removed).
+  - `HttpDispatcher` (the dispatch engine) is now used only by the Hono adapter +
+    the internal dispatcher-plugin, so its misleading `@deprecated → createDispatcherPlugin`
+    note (createDispatcherPlugin is a kernel plugin, not a drop-in) is corrected.
+
+  Anyone needing another framework adapter can build one on the public
+  `HttpDispatcher` / `createDispatcherPlugin` API or maintain it out-of-tree.
+
+- 69ae136: docs: align hardening / driver docs with the Hono-only adapter surface (12.0)
+
+  Follow-up to the adapter trim (#2391): the hardening guide's rate-limit/CORS
+  recipes are rewritten from Fastify to **Hono** (the shipped adapter; the old
+  `@objectstack/fastify` import was broken), CSRF guidance points at `hono/csrf`,
+  and stale `@objectstack/plugin-msw` references are dropped from the driver-memory
+  and driver-turso docs. README framework lists narrowed to Hono.
+
+- Updated dependencies [574e7a3]
+- Updated dependencies [cbc8c02]
+- Updated dependencies [18f9713]
+- Updated dependencies [7cf81a7]
+- Updated dependencies [d7a88df]
+- Updated dependencies [4f8f108]
+- Updated dependencies [ce0b4f6]
+- Updated dependencies [90bce88]
+- Updated dependencies [3209ec6]
+- Updated dependencies [8c84c97]
+- Updated dependencies [e011d42]
+- Updated dependencies [6e5bdd5]
+- Updated dependencies [13dbcf2]
+- Updated dependencies [9ccfcd6]
+- Updated dependencies [dc2990f]
+- Updated dependencies [51bec81]
+- Updated dependencies [3e593a7]
+- Updated dependencies [fdb41c0]
+- Updated dependencies [63d5403]
+- Updated dependencies [69ae136]
+  - @objectstack/plugin-security@11.1.0
+  - @objectstack/plugin-auth@11.1.0
+  - @objectstack/core@11.1.0
+  - @objectstack/rest@11.1.0
+  - @objectstack/objectql@11.1.0
+  - @objectstack/observability@11.1.0
+  - @objectstack/spec@11.1.0
+  - @objectstack/types@11.1.0
+  - @objectstack/driver-memory@11.1.0
+  - @objectstack/metadata@11.1.0
+  - @objectstack/plugin-org-scoping@11.1.0
+  - @objectstack/driver-sql@11.1.0
+  - @objectstack/driver-sqlite-wasm@11.1.0
+  - @objectstack/service-cluster@11.1.0
+  - @objectstack/service-datasource@11.1.0
+  - @objectstack/service-i18n@11.1.0
+  - @objectstack/formula@11.1.0
+
 ## 11.0.0
 
 ### Minor Changes

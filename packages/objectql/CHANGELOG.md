@@ -1,5 +1,68 @@
 # @objectstack/objectql
 
+## 11.1.0
+
+### Minor Changes
+
+- 13dbcf2: Extract metadata management into `@objectstack/metadata-protocol` (ADR-0076)
+
+  `protocol.ts` (the `ObjectStackProtocol` implementation — sys_metadata CRUD, draft/publish, locks, package ownership, diagnostics) plus its `sys-metadata-repository`, `metadata-diagnostics`, `seed-loader`, and `build-probes` helpers were metadata-domain code that lived inside `@objectstack/objectql` for historical reasons. They now live in a dedicated **`@objectstack/metadata-protocol`** package.
+
+  The protocol no longer depends on the concrete `ObjectQL` class — it is typed against an injected `MetadataHostEngine` interface (the engine is still injected at runtime). Dependency direction is now one-way (`objectql → metadata-protocol`); there is no cycle.
+
+  **Non-breaking**: `@objectstack/objectql` re-exports every previously public symbol (`ObjectStackProtocolImplementation`, `SysMetadataRepository`, `SysMetadataEngine`, `SeedLoaderService`, `runBuildProbes`, …), so existing imports keep working.
+
+  This is Step 1 of ADR-0076. A later step turns the protocol into a capability plugin so `objectql` itself stops depending on it (making the engine lean by construction).
+
+  Also adds a lean **`@objectstack/objectql/core`** entry — the engine/registry/hooks/validation surface only, with no kernel plugin or metadata protocol — so a thin embedder can import just the engine and never pull `@objectstack/metadata-protocol` into its bundle. A boundary ratchet test guards the entry.
+
+- 3e593a7: Remove the deprecated `DriverInterface` type alias — use `IDataDriver` (11.0).
+
+  `DriverInterface` was a `@deprecated` alias of `IDataDriver` (the authoritative
+  driver contract). It is removed from `@objectstack/spec/contracts` and
+  `@objectstack/core`; `objectql`'s engine now types drivers as `IDataDriver`
+  directly (a type-identical change, since the alias _was_ `IDataDriver`).
+
+  Driver authors: replace `DriverInterface` with `IDataDriver` (same shape).
+
+  Note: this is unrelated to the live `IDataEngine` interface (engine-layer
+  contract, not deprecated) and to the separate zod-derived `DriverInterface` /
+  `DriverInterfaceSchema` in `@objectstack/spec/data` (the runtime driver schema),
+  both of which are unchanged.
+
+- fdb41c0: Remove ObjectStack's own legacy env-var aliases (11.0); ecosystem-standard names stay.
+
+  The framework's renamed env vars no longer accept their old ObjectStack names —
+  rename them:
+
+  | removed legacy name                 | use                    |
+  | ----------------------------------- | ---------------------- |
+  | `OS_MULTI_TENANT`                   | `OS_MULTI_ORG_ENABLED` |
+  | `OBJECTSTACK_METADATA_WRITABLE`     | `OS_METADATA_WRITABLE` |
+  | `OS_AUTH_BASE_URL`, `AUTH_BASE_URL` | `OS_AUTH_URL`          |
+
+  **Ecosystem-standard names are NOT removed** — they remain accepted (and no longer
+  emit a deprecation warning, since they are permanent conventions, not legacy):
+  `DATABASE_URL`, `AUTH_SECRET`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `PORT`,
+  `CORS_*`, `LOG_LEVEL`, `ROOT_DOMAIN`, `MCP_SERVER_*`. The generic
+  `readEnvWithDeprecation` helper is unchanged.
+
+### Patch Changes
+
+- Updated dependencies [ce0b4f6]
+- Updated dependencies [13dbcf2]
+- Updated dependencies [9ccfcd6]
+- Updated dependencies [51bec81]
+- Updated dependencies [3e593a7]
+- Updated dependencies [fdb41c0]
+- Updated dependencies [63d5403]
+  - @objectstack/core@11.1.0
+  - @objectstack/metadata-protocol@11.1.0
+  - @objectstack/spec@11.1.0
+  - @objectstack/types@11.1.0
+  - @objectstack/formula@11.1.0
+  - @objectstack/metadata-core@11.1.0
+
 ## 11.0.0
 
 ### Minor Changes

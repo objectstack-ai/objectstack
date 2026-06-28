@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-storage",
-  "version": "11.0.0",
+  "version": "11.1.0",
   "license": "Apache-2.0",
   "description": "Storage Service for ObjectStack — implements IStorageService with local filesystem and S3 adapter skeleton",
   "type": "module",

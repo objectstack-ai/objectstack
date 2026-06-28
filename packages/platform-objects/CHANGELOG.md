@@ -1,5 +1,120 @@
 # @objectstack/platform-objects
 
+## 11.1.0
+
+### Minor Changes
+
+- cbc8c02: feat(auth): opt-in SSO domain verification (ADR-0024 ②)
+
+  Add DNS-TXT domain-ownership verification for external SSO providers, gated
+  behind a new `OS_SSO_DOMAIN_VERIFICATION` flag (off by default — today's
+  register→login behavior is unchanged). When enabled, `@better-auth/sso` mounts
+  `/sso/request-domain-verification` + `/sso/verify-domain` and enforces that a
+  provider's email domain be DNS-verified before it may complete a login.
+
+  - `auth-manager.ts`: new `ssoDomainVerification` enabled-flag (readBooleanEnv) →
+    passes `domainVerification: { enabled: true }` to `sso()`; public
+    `isSsoDomainVerificationEnabled()` helper.
+  - `register-sso-provider.ts`: `runRequestDomainVerification` /
+    `runVerifyDomain` bridges — re-dispatch through the gated better-auth
+    endpoints and reshape the response into the `{ success, data }` envelope the
+    `sys_sso_provider` action `resultDialog` reads (request → ready-to-paste DNS
+    TXT record; verify → clear success/error). A bare 404 from the inner endpoint
+    is surfaced as "not enabled for this environment".
+  - `auth-plugin.ts`: mount the two bridges as rawApp routes
+    (`/admin/sso/{request-domain-verification,verify-domain}`).
+  - `sys_sso_provider`: `domain_verified` field + list column + the two actions;
+    `domainVerified` documented in `AUTH_SSO_PROVIDER_SCHEMA`.
+
+- ce0b4f6: Auth: password expiry — the session-validation gate (ADR-0069 D1, P1)
+
+  Builds the **authentication-policy session gate** ADR-0069 needs and uses it for password expiry. When `password_expiry_days` (new `auth` setting, 0 = off) is exceeded, an authenticated user is blocked from protected REST resources with `403 PASSWORD_EXPIRED` until they change their password — while auth + remediation paths stay reachable.
+
+  - **core**: new pure `evaluateAuthGate` / `isAuthGateAllowlisted` helper (`@objectstack/core/security`) — single source of truth for the allow-list (auth endpoints, change-password, health, UI-bootstrap reads).
+  - **plugin-auth**: `customSession` computes the gate posture once and attaches `user.authGate`; `computeAuthGate` reads `sys_user.password_changed_at` vs the configured window; `password_changed_at` is stamped on sign-up / change / reset; `isAuthGateActive()` keeps the gate **zero-overhead** when off.
+  - **platform-objects**: new `sys_user.password_changed_at` column.
+  - **rest**: `resolveExecCtx` carries `authGate`; `enforceAuth` blocks gated sessions (independent of `requireAuth`) using the core allow-list.
+  - **service-settings**: new `password_expiry_days` field.
+
+  Default-off / additive (no upgrade behavior change); a null `password_changed_at` never expires (existing users). Per ADR-0049 the setting ships with its enforcement; timestamps written as `Date` (ADR-0074).
+
+  This gate is the shared seam for **enforced MFA** (ADR-0069 D3), which lands next as a small addition (a second `authGate` branch). The dispatcher/MCP path is a follow-up (tracked in #2375); the REST surface the Console uses is fully gated here.
+
+- 90bce88: Auth: enforced MFA (ADR-0069 D3, P1)
+
+  Completes the session-validation gate: when `mfa_required` (new `auth` setting) is on, an authenticated user without TOTP enrolled is blocked from protected resources with `403 MFA_REQUIRED` once their `mfa_grace_period_days` (default 7) window elapses — while the two-factor enrollment endpoints stay reachable so they can comply. Reuses the `authGate` seam shipped in #2388 (a second posture branch in `computeAuthGate`).
+
+  - New `auth` settings `mfa_required` (toggle) + `mfa_grace_period_days`; enabling `mfa_required` also force-enables the `twoFactor` plugin so `/two-factor/*` enrollment exists.
+  - New `sys_user.mfa_required_at` column — the grace clock, stamped lazily the first time a user is seen required-but-unenrolled.
+  - `isAuthGateActive()` now also trips on `mfa_required` (still zero-overhead when off).
+
+  Default-off / additive (no upgrade behavior change); per ADR-0049 the setting ships with its enforcement.
+
+  **Needs an objectui follow-up**: the Console should handle a `403 MFA_REQUIRED` by showing the TOTP-enrollment prompt. Per-org `sys_organization.require_mfa` and the dispatcher/MCP gate remain follow-ups (#2375).
+
+- 3209ec6: Auth: session controls — idle timeout, absolute max lifetime, concurrent cap (ADR-0069 D4, P2)
+
+  Adds three `auth` session-control settings (all 0 = off):
+
+  - `session_idle_timeout_minutes` — sign a user out after inactivity. Enforced in `customSession`: touches `sys_session.last_activity_at` (throttled to once a minute) and, once the idle window is exceeded, revokes the session.
+  - `session_absolute_max_hours` — cap total session lifetime regardless of refresh; revoked once `created_at` is older than the cap.
+  - `max_concurrent_sessions_per_user` — on sign-in, keep the newest N live sessions and revoke the rest (oldest first).
+
+  Revocation expires the session in place (`expires_at` set to the past + `revoked_at` / `revoke_reason` stamped on new `sys_session` columns), so better-auth returns no session on the next request → the Console's existing 401 → login redirect handles it (no client change). Note: better-auth garbage-collects expired sessions, so the `revoke_reason` audit row is best-effort; the enforcement (session killed) is not.
+
+  Default-off / additive (no upgrade behavior change); per ADR-0049 each setting ships with its enforcement.
+
+- e011d42: Auth: per-org MFA + dispatcher/MCP gate — complete the ADR-0069 enforced-MFA story
+
+  Two follow-ups that make enforced MFA total:
+
+  - **Per-org `sys_organization.require_mfa`** — an org may require MFA above the global floor. `computeAuthGate` now treats the active org's `require_mfa` as an effective MFA requirement even when the global `mfa_required` is off; `isAuthGateActive()` stays cheap via a 60s-TTL "any org requires MFA" cache (lazy background refresh), so a brand-new per-org requirement activates the gate on the next request without per-request org queries.
+  - **Dispatcher/MCP gate** — the auth-policy gate now also runs in the runtime dispatcher (after `resolveExecutionContext`), so MCP / GraphQL / embedded data paths enforce `PASSWORD_EXPIRED` / `MFA_REQUIRED` consistently with the REST seam (reusing the shared `evaluateAuthGate` allow-list). Previously only the REST surface (the Console) was gated.
+
+  Default-off / additive. Per ADR-0049 each setting ships with its enforcement.
+
+- 6e5bdd5: feat(auth): SAML 2.0 SSO via @better-auth/sso (ADR-0069 P3)
+
+  `@better-auth/sso@1.6.20` ships full SAML 2.0 (samlify-backed), so SAML needs no
+  custom plugin. Adds a `register_saml_provider` action on `sys_sso_provider` and a
+  `runRegisterSamlProviderFromForm` bridge that reshapes the flat admin form into the
+  nested `samlConfig` and re-dispatches through `/sso/register` (admin gate enforced),
+  returning the SP ACS + metadata URLs to configure on the IdP. Updates ADR-0069 to
+  correct the stale "SAML is out of better-auth core" premise.
+
+### Patch Changes
+
+- 07c2773: Auth: make the SSO Providers list visible to admins (ADR-0024 / cloud#551)
+
+  The `sys_sso_provider` Setup list rendered empty even after an admin registered a provider: `member_default`'s wildcard `tenant_isolation` RLS (`organization_id == current_user.organization_id`) denied every row, because better-auth writes these via its adapter with no tenantId context so `organization_id` is never stamped, and the platform-admin `viewAllRecords` superuser bypass is gated to private/non-tenant objects.
+
+  `sys_sso_provider` is env-global, admin-only identity config, so it now declares:
+
+  - `tenancy: { enabled: false }` — opts out of multi-tenancy (the env IS the tenant; providers are env-wide), letting a platform admin's `viewAllRecords` bypass see every provider.
+  - `requiredPermissions: ['manage_platform_settings']` — object-level capability gate so ordinary members are denied (without it, tenancy-disabled + `member_default`'s `'*': allowRead` would expose providers to every authenticated user).
+
+  Verified E2E: an admin sees all env providers in the Setup → Access Control → SSO Providers list; a non-admin gets 403. (Env-only object — no control-plane cross-tenant impact. The sibling `sys_oauth_application` / `sys_account` nav entries share the same empty-list symptom but span the control plane and need separate per-object analysis.)
+
+- d7a88df: Auth: SSO quality polish (ADR-0024 / cloud#551)
+
+  - **plugin-auth**: `OS_OIDC_PROVIDER_ENABLED` / `OS_SSO_ENABLED` / `OS_SCIM_ENABLED` now parse with the shared `readBooleanEnv` helper (same as `OS_AUTH_TWO_FACTOR` etc.), so the platform-standard truthy set works (`true`/`1`/`yes`/`on`, case-insensitive) instead of only the literal `'true'` — a repeated operator footgun where `OS_SSO_ENABLED=1` silently parsed as disabled. Added unit tests.
+  - **platform-objects**: `sys_sso_provider`'s list view gets a per-object empty state ("No SSO providers yet" + a pointer to "Register SSO Provider"), replacing the shared identity-object copy ("records are created automatically … cannot be added here") which is wrong for this object — it HAS a register action.
+
+- 4f8f108: Auth: make the open-source SSO-provider registration form produce a usable IdP (ADR-0024 / cloud#551)
+
+  The `sys_sso_provider` `register_sso_provider` UI action posted FLAT form fields to `@better-auth/sso`'s `/sso/register`, which expects the OIDC fields NESTED under `oidcConfig`. The top-level `clientId`/`clientSecret` were Zod-stripped, so the form persisted an `oidc_config = null` provider that could never complete a login ("Invalid SSO provider").
+
+  - **plugin-auth**: new shared `runRegisterSsoProviderFromForm` helper reshapes the flat form body into the nested shape and re-dispatches it through the real `/sso/register` (so the admin gate, the public-routable `trustedOrigins` allowance, discovery hydration, and secret handling all still run). Exposed via a new `/admin/sso/register` bridge route on the host `AuthPlugin`. (The cloud per-env runtime mounts the same helper in its `AuthProxyPlugin` — mirrors `set-initial-password`.)
+  - **platform-objects**: `register_sso_provider` retargets to `/api/v1/auth/admin/sso/register` and gains `discoveryEndpoint`, `scopes`, and attribute-mapping (`mapId`/`mapEmail`/`mapName`) fields. Open mechanism — keeps runtime IdP registration self-service in the OSS edition.
+
+  Verified E2E: an admin registers an external OIDC IdP from the flat form → a member logs in through it (JIT-provisioned, `sys_account.provider_id` set); a non-admin is rejected (403) before discovery runs.
+
+- Updated dependencies [51bec81]
+- Updated dependencies [3e593a7]
+- Updated dependencies [63d5403]
+  - @objectstack/spec@11.1.0
+  - @objectstack/metadata-core@11.1.0
+
 ## 11.0.0
 
 ### Minor Changes

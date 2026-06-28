@@ -1,5 +1,71 @@
 # @objectstack/core
 
+## 11.1.0
+
+### Minor Changes
+
+- ce0b4f6: Auth: password expiry — the session-validation gate (ADR-0069 D1, P1)
+
+  Builds the **authentication-policy session gate** ADR-0069 needs and uses it for password expiry. When `password_expiry_days` (new `auth` setting, 0 = off) is exceeded, an authenticated user is blocked from protected REST resources with `403 PASSWORD_EXPIRED` until they change their password — while auth + remediation paths stay reachable.
+
+  - **core**: new pure `evaluateAuthGate` / `isAuthGateAllowlisted` helper (`@objectstack/core/security`) — single source of truth for the allow-list (auth endpoints, change-password, health, UI-bootstrap reads).
+  - **plugin-auth**: `customSession` computes the gate posture once and attaches `user.authGate`; `computeAuthGate` reads `sys_user.password_changed_at` vs the configured window; `password_changed_at` is stamped on sign-up / change / reset; `isAuthGateActive()` keeps the gate **zero-overhead** when off.
+  - **platform-objects**: new `sys_user.password_changed_at` column.
+  - **rest**: `resolveExecCtx` carries `authGate`; `enforceAuth` blocks gated sessions (independent of `requireAuth`) using the core allow-list.
+  - **service-settings**: new `password_expiry_days` field.
+
+  Default-off / additive (no upgrade behavior change); a null `password_changed_at` never expires (existing users). Per ADR-0049 the setting ships with its enforcement; timestamps written as `Date` (ADR-0074).
+
+  This gate is the shared seam for **enforced MFA** (ADR-0069 D3), which lands next as a small addition (a second `authGate` branch). The dispatcher/MCP path is a follow-up (tracked in #2375); the REST surface the Console uses is fully gated here.
+
+- 3e593a7: Remove the deprecated `DriverInterface` type alias — use `IDataDriver` (11.0).
+
+  `DriverInterface` was a `@deprecated` alias of `IDataDriver` (the authoritative
+  driver contract). It is removed from `@objectstack/spec/contracts` and
+  `@objectstack/core`; `objectql`'s engine now types drivers as `IDataDriver`
+  directly (a type-identical change, since the alias _was_ `IDataDriver`).
+
+  Driver authors: replace `DriverInterface` with `IDataDriver` (same shape).
+
+  Note: this is unrelated to the live `IDataEngine` interface (engine-layer
+  contract, not deprecated) and to the separate zod-derived `DriverInterface` /
+  `DriverInterfaceSchema` in `@objectstack/spec/data` (the runtime driver schema),
+  both of which are unchanged.
+
+### Patch Changes
+
+- 9ccfcd6: perf(core): authenticated requests issued ~16 sequential queries — duplicate authz + repeated localization — now request-scoped memoized
+
+  An authenticated REST request resolves its execution context (identity +
+  RBAC/RLS + localization) many times in a single handler — the data operation
+  itself, app-nav RBAC filtering, dashboard widget gating, the ADR-0069 auth gate.
+  Each `resolveExecCtx` pass is the full `resolveAuthzContext` aggregation plus the
+  localization read (~16 sequential queries), and nothing memoized it, so a request
+  that resolves twice paid for duplicate authz and repeated localization.
+
+  - **`@objectstack/rest`** — `resolveExecCtx` is now memoized per request, keyed by
+    the request object (a `WeakMap`, so the entry is collected with the request — no
+    TTL, no cross-request leak) and the input `environmentId`. The in-flight Promise
+    is cached so concurrent callers share one resolution. The heavy path moved to
+    `computeExecCtx`. Anonymous (`undefined`) resolutions are cached too.
+  - **`@objectstack/core`** — within a single `resolveAuthzContext` pass, `sys_user`
+    is now read at most once (the email fallback and the `ai_seat` synthesis shared a
+    duplicate query on the API-key path); `resolveLocalizationContext`'s direct-read
+    fallback batches `timezone`/`locale`/`currency` into one `sys_setting` query
+    (`$in` on `key`) instead of three sequential reads.
+
+  No authorization-behavior change — the same roles/permissions/RLS context is
+  resolved, just without the redundant reads. The `sys_member` reads (per-user roles
+  vs. all-org-members) are intentionally left distinct (different filters/limits).
+
+  Tests: query-counting regressions assert `sys_user` reads once and localization
+  reads once; new rest-server tests pin the per-request/per-environment memo contract.
+
+- Updated dependencies [51bec81]
+- Updated dependencies [3e593a7]
+- Updated dependencies [63d5403]
+  - @objectstack/spec@11.1.0
+
 ## 11.0.0
 
 ### Patch Changes
