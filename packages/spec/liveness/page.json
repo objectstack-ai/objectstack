@@ -2,6 +2,14 @@
   "type": "page",
   "_note": "PageSchema (UI). Renderers live in objectui, so consumers are cited as prose in `note` (not `evidence`, which resolves framework file:line). Seeded from the Studio page-design dogfood (framework#2254/#2261/#2265). Containers (variables/regions/interfaceConfig/slots/aria) classified at top level — one drill level, no divergent sub-statuses. The removed roadmap page types (record_review/blank) and their config fields (recordReview/blankLayout) were hard-removed — no longer authorable.",
   "props": {
+    "source": {
+      "status": "live",
+      "note": "JSX-source page authoring (ADR-0080). Consumer: objectui PageRenderer compiles `source` via @object-ui/sdui-parser into the SchemaNode tree (parse, never execute) and renders it — components/src/renderers/layout/page.tsx (kind:'jsx' branch). Browser-verified in the Command Center showcase."
+    },
+    "requires": {
+      "status": "planned",
+      "note": "Plugin namespaces the JSX `source` references (ADR-0080). Inferred at compile time; save/load enforcement of plugin presence is deferred (M3b) — declared, not enforced yet."
+    },
     "name": {
       "status": "live",
       "note": "page identity; objectui page renderer + runtime route/metadata key."
