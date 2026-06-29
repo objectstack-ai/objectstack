@@ -32,7 +32,7 @@
   "devDependencies": {
     "@objectstack/cli": "workspace:*",
     "@objectstack/objectql": "workspace:*",
-    "@playwright/test": "^1.61.0",
+    "@playwright/test": "^1.61.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   }
