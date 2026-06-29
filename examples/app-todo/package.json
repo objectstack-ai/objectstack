@@ -40,7 +40,7 @@
   "devDependencies": {
     "@ai-sdk/gateway": "^3.0.139",
     "@objectstack/cli": "workspace:*",
-    "ai": "^6.0.214",
+    "ai": "^7.0.4",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
