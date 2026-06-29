@@ -37,3 +37,10 @@ export {
 export type { StyleFinding, StyleSeverity } from './validate-responsive-styles.js';
 export { validateJsxPages } from './validate-jsx-pages.js';
 export type { JsxPageFinding, JsxPageSeverity } from './validate-jsx-pages.js';
+
+export {
+  validateRecordTitle,
+  TITLE_FORMAT_RETIRED,
+  TITLE_UNRESOLVABLE,
+} from './validate-record-title.js';
+export type { RecordTitleFinding, RecordTitleSeverity } from './validate-record-title.js';

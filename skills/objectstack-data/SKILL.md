@@ -76,7 +76,9 @@ database table and exposes automatic CRUD APIs.
 | `pluralLabel` | — | Plural form (e.g., "Accounts") |
 | `namespace` | — | **Deprecated** — ignored by the runtime. Embed prefix directly in `name` instead (e.g. `name: 'crm_account'`) |
 | `datasource` | `'default'` | Target datasource ID for virtualized data |
-| `displayNameField` | `'name'` | Field used as record display name |
+| `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field, or a formula field (`returnType: 'text'`) for a composite title |
+| `displayNameField` | — | **Deprecated** alias for `nameField` (still honored as a fallback) |
+| `titleFormat` | — | **Retired (ADR-0079)** — a render-only template the server can't return or query. Use `nameField`; for a composite title, designate a `returnType: 'text'` formula field as `nameField` |
 | `enable` | — | Capability flags (trackHistory, searchable, apiEnabled, etc.) |
 | `fieldGroups` | — | Ordered list of logical field groups for forms/detail pages (see [Field Groups](#field-groups-mvp)) |
 

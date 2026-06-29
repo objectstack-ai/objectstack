@@ -569,7 +569,7 @@ const ObjectSchemaBase = z.object({
     displayFormat: z.string().optional().describe('Auto-number format pattern (e.g., "CASE-{0000}", "INV-{YYYY}-{0000}")'),
     startNumber: z.number().int().min(0).optional().describe('Starting number for autonumber (default: 1)'),
   }).optional().describe('Record name generation configuration (Salesforce pattern)'),
-  titleFormat: TemplateExpressionInputSchema.optional().describe('Title template — supports {{record.field}} interpolation. Overrides displayNameField.'),
+  titleFormat: TemplateExpressionInputSchema.optional().describe('[DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField, a composite to a formula field designated as nameField.'),
   compactLayout: z.array(z.string()).optional().describe('Primary fields for hover/cards/lookups'),
 
   /**

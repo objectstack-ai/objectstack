@@ -8,6 +8,7 @@ import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { computeI18nCoverage } from '../utils/i18n-coverage.js';
 import { lintDataModel } from '../lint/data-model-rules.js';
 import { validateWidgetBindings } from '@objectstack/lint';
+import { validateRecordTitle } from '@objectstack/lint';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
@@ -300,6 +301,24 @@ export function lintConfig(config: any): LintIssue[] {
       message: `${w.where}: ${w.message}`,
       path: w.path,
       fix: w.hint,
+    });
+  }
+
+  // ── Record-title contract (ADR-0079) ──
+  // titleFormat is retired (render-only template the server can't return or
+  // query) in favour of nameField; and an object with no resolvable title
+  // (no nameField/displayNameField and nothing derivable) ships records with
+  // no meaningful name. Both are advisory warnings — the auto-provision
+  // transform and the `Record #<id>` floor keep a green build from ever
+  // shipping a fully title-less object (the ADR-0078 "not cloud-only" parity
+  // with cloud graph-lint).
+  for (const t of validateRecordTitle(config)) {
+    issues.push({
+      severity: t.severity,
+      rule: t.rule,
+      message: `${t.where}: ${t.message}`,
+      path: t.path,
+      fix: t.hint,
     });
   }
 
