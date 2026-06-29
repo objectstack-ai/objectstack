@@ -2051,6 +2051,7 @@ describe('UserActionsConfigSchema', () => {
     expect(config.filter).toBe(true);
     expect(config.rowHeight).toBe(true);
     expect(config.addRecordForm).toBe(false);
+    expect(config.editInline).toBe(false);
     expect(config.buttons).toBeUndefined();
   });
 
@@ -2061,11 +2062,13 @@ describe('UserActionsConfigSchema', () => {
       filter: false,
       rowHeight: true,
       addRecordForm: true,
+      editInline: true,
       buttons: ['btn_export', 'btn_archive'],
     });
     expect(config.sort).toBe(false);
     expect(config.filter).toBe(false);
     expect(config.addRecordForm).toBe(true);
+    expect(config.editInline).toBe(true);
     expect(config.buttons).toEqual(['btn_export', 'btn_archive']);
   });
 

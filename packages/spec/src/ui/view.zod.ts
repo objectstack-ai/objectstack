@@ -241,6 +241,7 @@ export const UserActionsConfigSchema = lazySchema(() => z.object({
   filter: z.boolean().default(true).describe('Allow users to filter records'),
   rowHeight: z.boolean().default(true).describe('Allow users to toggle row height/density'),
   addRecordForm: z.boolean().default(false).describe('Add records through a form instead of inline'),
+  editInline: z.boolean().default(false).describe('Allow users to edit records inline — click a cell to edit it with the field\'s type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in.'),
   buttons: z.array(z.string()).optional().describe('Custom action button IDs to show in the toolbar'),
 }).describe('User action toggles for the view toolbar'));
 
