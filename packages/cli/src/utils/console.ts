@@ -292,15 +292,15 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         return;
       }
 
-      // A deployment that does not trust its page authors disables the
-      // `kind:'react'` tier (which executes author JS in the main React tree)
-      // by setting `OS_DISABLE_REACT_PAGES`. We inject the disable global the
-      // console's capability gate reads; the flag is ON by default otherwise.
-      // Read per request (env can change without a rebuild — index.html is
-      // re-read on every fallback hit too).
+      // The `kind:'react'` page tier (executes author JS in the main React
+      // tree) is ON by default. A deployment that does not trust its page
+      // authors turns it off with `OS_PAGE_REACT=off`; we then inject the
+      // disable global the console's capability gate reads. Read per request
+      // (env can change without a rebuild — index.html is re-read on every
+      // fallback hit too).
       const reactPagesDisabled = (): boolean => {
-        const v = String(process.env.OS_DISABLE_REACT_PAGES ?? '').trim().toLowerCase();
-        return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+        const v = String(process.env.OS_PAGE_REACT ?? '').trim().toLowerCase();
+        return v === 'off' || v === '0' || v === 'false' || v === 'no' || v === 'disabled';
       };
 
       const readIndexHtml = () => {

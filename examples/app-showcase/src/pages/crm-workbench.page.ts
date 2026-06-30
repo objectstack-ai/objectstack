@@ -24,7 +24,7 @@ import { definePage } from '@objectstack/spec/ui';
  * NOTE: `kind:'react'` executes author code, so it is gated by the host
  * capability `CAP_REACT_PAGES`, which defaults ON (the platform trusts its
  * reviewed, draft-gated authors). A deployment that does not trust its authors
- * turns it off server-side by setting `OS_DISABLE_REACT_PAGES`, in which case
+ * turns it off server-side with `OS_PAGE_REACT=off`, in which case
  * this page renders a "disabled on this deployment" notice instead of executing.
  */
 export const CrmWorkbenchPage = definePage({

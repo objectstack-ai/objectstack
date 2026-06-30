@@ -365,7 +365,7 @@ export const PageSchema = lazySchema(() => z.object({
       "executed) to the tree (ADR-0080; the legacy value 'jsx' is a deprecated alias); " +
       "react = real-React source executed at render by the runtime (ADR-0081); it " +
       "runs author JS, so it is gated by a host capability that defaults ON and is " +
-      "disabled server-side via OS_DISABLE_REACT_PAGES.",
+      "disabled server-side via the OS_PAGE_REACT=off env toggle.",
     ),
 
   /**
