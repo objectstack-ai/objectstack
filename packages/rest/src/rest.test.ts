@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import ExcelJS from 'exceljs';
 import { RouteManager, RouteGroupBuilder } from './route-manager';
 import { RestServer, mapDataError } from './rest-server';
 import { createRestApiPlugin } from './rest-api-plugin';
@@ -905,6 +906,141 @@ describe('RestServer', () => {
       expect(lines.length).toBe(50_001);
     });
 
+    // Binary-aware response double for the xlsx path (chunks are Buffers).
+    function makeBinRes() {
+      const chunks: Buffer[] = [];
+      const headers: Record<string, string> = {};
+      const res: any = {
+        write: (c: any) => { chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)); return true; },
+        end: vi.fn(),
+        header: (n: string, v: string) => { headers[n] = v; return res; },
+        status: () => res,
+        json: vi.fn(),
+      };
+      return { res, getBuffer: () => Buffer.concat(chunks), headers };
+    }
+
+    // Schema exercising every formatted field type. The export route reads it via
+    // the real metadata accessor `getMetaItem({type:'object', name})`, which
+    // returns an envelope whose `.item` is the schema document (see
+    // export-integration.test.ts for the same path against a real engine).
+    const TASK_SCHEMA = {
+      fields: [
+        { name: 'id', type: 'text', label: 'ID' },
+        { name: 'title', type: 'text', label: '标题' },
+        { name: 'done', type: 'boolean', label: '完成' },
+        { name: 'priority', type: 'select', label: '优先级', options: [
+          { label: '高', value: 'high' }, { label: '低', value: 'low' },
+        ] },
+        { name: 'due', type: 'date', label: '截止' },
+        { name: 'owner', type: 'lookup', label: '负责人', reference: 'user', displayField: 'name' },
+      ],
+    };
+
+    function protocolWithSchema(rows: any[]) {
+      const p: any = createMockProtocol();
+      // Real accessor: getMetaItem returns the `{type, name, item}` envelope.
+      p.getMetaItem = vi.fn().mockResolvedValue({ type: 'object', name: 'task', item: TASK_SCHEMA });
+      p.findData = vi.fn()
+        .mockResolvedValueOnce({ data: rows })
+        .mockResolvedValue({ data: [] });
+      return p;
+    }
+
+    // The stored row carries raw values; `owner` is an $expand-ed record.
+    const RAW_TASK_ROW = {
+      id: '1', title: '写代码', done: true, priority: 'high',
+      due: '2026-06-30T00:00:00.000Z', owner: { id: 'u1', name: '张三' },
+    };
+
+    it('formats values readably in CSV using field metadata', async () => {
+      const p = protocolWithSchema([RAW_TASK_ROW]);
+      const rest = new RestServer(server as any, p as any);
+      rest.registerRoutes();
+      const route = getExportRoute(rest);
+
+      const { res, chunks, headers } = makeRes();
+      await route!.handler({ params: { object: 'task' }, query: { format: 'csv' } } as any, res);
+
+      expect(headers['Content-Type']).toBe('text/csv; charset=utf-8');
+      const lines = chunks.join('').split('\r\n');
+      // Header row uses schema labels, columns derived from the schema order.
+      expect(lines[0]).toBe('ID,标题,完成,优先级,截止,负责人');
+      // boolean→是, select→label, date→YYYY-MM-DD, lookup→displayField name.
+      expect(lines[1]).toBe('1,写代码,是,高,2026-06-30,张三');
+    });
+
+    it('omits the header row when header=false', async () => {
+      const p = protocolWithSchema([RAW_TASK_ROW]);
+      const rest = new RestServer(server as any, p as any);
+      rest.registerRoutes();
+      const route = getExportRoute(rest);
+
+      const { res, chunks } = makeRes();
+      await route!.handler({ params: { object: 'task' }, query: { format: 'csv', header: 'false' } } as any, res);
+
+      const lines = chunks.join('').split('\r\n').filter(Boolean);
+      // No label header — the first line is the data row.
+      expect(lines[0]).toBe('1,写代码,是,高,2026-06-30,张三');
+    });
+
+    it('injects $expand for reference fields into the findData query', async () => {
+      const p = protocolWithSchema([RAW_TASK_ROW]);
+      const rest = new RestServer(server as any, p as any);
+      rest.registerRoutes();
+      const route = getExportRoute(rest);
+
+      const { res } = makeRes();
+      await route!.handler({ params: { object: 'task' }, query: { format: 'csv' } } as any, res);
+
+      expect(p.findData).toHaveBeenCalled();
+      const firstQuery = p.findData.mock.calls[0][0].query;
+      expect(firstQuery.$expand).toBe('owner');
+    });
+
+    it('formats values readably in JSON, leaving unknown keys untouched', async () => {
+      const p = protocolWithSchema([{ ...RAW_TASK_ROW, extra: 'keep' }]);
+      const rest = new RestServer(server as any, p as any);
+      rest.registerRoutes();
+      const route = getExportRoute(rest);
+
+      const { res, chunks, headers } = makeRes();
+      await route!.handler({ params: { object: 'task' }, query: { format: 'json' } } as any, res);
+
+      expect(headers['Content-Type']).toBe('application/json; charset=utf-8');
+      const parsed = JSON.parse(chunks.join(''));
+      expect(parsed[0]).toMatchObject({
+        done: '是', priority: '高', due: '2026-06-30', owner: '张三', extra: 'keep',
+      });
+    });
+
+    it('streams a valid xlsx workbook with formatted cells', async () => {
+      const p = protocolWithSchema([RAW_TASK_ROW]);
+      const rest = new RestServer(server as any, p as any);
+      rest.registerRoutes();
+      const route = getExportRoute(rest);
+
+      const { res, getBuffer, headers } = makeBinRes();
+      await route!.handler({ params: { object: 'task' }, query: { format: 'xlsx' } } as any, res);
+
+      expect(headers['Content-Type']).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      expect(headers['Content-Disposition']).toMatch(/attachment; filename="task-\d{4}-\d{2}-\d{2}\.xlsx"/);
+      expect(headers['X-Export-Format']).toBe('xlsx');
+      expect(res.end).toHaveBeenCalled();
+
+      const buf = getBuffer();
+      // xlsx is a zip — verify the PK signature, then round-trip the content.
+      expect(buf.subarray(0, 2).toString('latin1')).toBe('PK');
+
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buf);
+      const ws = wb.getWorksheet('Export');
+      expect(ws).toBeDefined();
+      // row.values is 1-indexed (values[0] is empty).
+      expect(ws!.getRow(1).values).toEqual([undefined, 'ID', '标题', '完成', '优先级', '截止', '负责人']);
+      expect(ws!.getRow(2).values).toEqual([undefined, '1', '写代码', '是', '高', '2026-06-30', '张三']);
+    });
+
     // Regression: the router is first-match-wins with no specificity sorting,
     // so the static-literal `GET /data/:object/export` route MUST be registered
     // BEFORE the greedy `GET /data/:object/:id` matcher. Otherwise a request to
@@ -926,6 +1062,69 @@ describe('RestServer', () => {
       expect(getByIdIdx).toBeGreaterThanOrEqual(0);
       // First match wins → the more-specific export route must come first.
       expect(exportIdx).toBeLessThan(getByIdIdx);
+    });
+
+    // Regression: the header row must carry the same localized field labels the
+    // UI renders (Accept-Language / ?locale=), not the raw `field.label` from the
+    // object schema. The route translates the schema via `translateMetaItem`
+    // before building the header, so a locale switch flips the header language.
+    it('localizes the export header row to the request locale', async () => {
+      // Schema field labels are deliberately distinct from the bundle so a
+      // green assertion proves the bundle was applied (not the raw labels).
+      const NAMED_SCHEMA = {
+        name: 'task',
+        fields: [
+          { name: 'id', type: 'text', label: 'ID' },
+          { name: 'title', type: 'text', label: 'RawTitle' },
+          { name: 'done', type: 'boolean', label: 'RawDone' },
+        ],
+      };
+      const bundle: Record<string, any> = {
+        en: { objects: { task: { fields: { title: { label: 'Title' }, done: { label: 'Done' } } } } },
+        zh: { objects: { task: { fields: { title: { label: '标题' }, done: { label: '完成' } } } } },
+      };
+      const i18n = {
+        getLocales: () => ['en', 'zh'],
+        getTranslations: (l: string) => bundle[l],
+        getDefaultLocale: () => 'en',
+      };
+
+      const p: any = createMockProtocol();
+      p.getMetaItem = vi.fn().mockResolvedValue({ type: 'object', name: 'task', item: NAMED_SCHEMA });
+      // First page returns one row, subsequent pages are empty (ends the stream).
+      p.findData = vi.fn(async ({ query }: any) =>
+        (query?.$skip ?? 0) === 0 ? { data: [{ id: '1', title: 'x', done: true }] } : { data: [] },
+      );
+
+      // i18nServiceProvider is the 14th constructor arg (after server, protocol,
+      // config, and the 10 service providers preceding it).
+      const rest = new RestServer(
+        server as any, p as any, {},
+        undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined, undefined,
+        async () => i18n as any,
+      );
+      rest.registerRoutes();
+      const route = getExportRoute(rest);
+
+      // locale=zh → Chinese header; `id` has no override so it keeps its label.
+      const zh = makeRes();
+      await route!.handler({
+        params: { object: 'task' },
+        query: { format: 'csv', fields: 'id,title,done', locale: 'zh' },
+        headers: {},
+      } as any, zh.res);
+      expect(zh.chunks.join('').split('\r\n')[0]).toBe('ID,标题,完成');
+
+      // Default locale (en, no ?locale=) → English header from the bundle,
+      // i.e. 'Title'/'Done', never the raw 'RawTitle'/'RawDone'.
+      const en = makeRes();
+      await route!.handler({
+        params: { object: 'task' },
+        query: { format: 'csv', fields: 'id,title,done' },
+        headers: {},
+      } as any, en.res);
+      expect(en.chunks.join('').split('\r\n')[0]).toBe('ID,Title,Done');
     });
   });
 

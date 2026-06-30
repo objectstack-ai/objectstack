@@ -22,9 +22,13 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/service-package": "workspace:*",
     "@objectstack/spec": "workspace:*",
+    "exceljs": "^4.4.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@objectstack/metadata-protocol": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
+    "@types/node": "^26.0.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   },
