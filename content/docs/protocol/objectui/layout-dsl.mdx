@@ -32,7 +32,7 @@ write the page body as a string. Pick by what the page needs:
 | `kind` | You write | JavaScript | Use when |
 |:-------|:----------|:-----------|:---------|
 | `full` / `slotted` *(this doc)* | structured `regions` / `slots` | — | record, detail, home, and app layouts from the component catalogue |
-| `html` | constrained JSX = HTML + Tailwind + registered components, **parsed, never executed** | none | free-form layout, landing pages, or dashboards that *compose* blocks — no interactivity |
+| `html` | constrained JSX = registered components + safe native HTML, **parsed, never executed** | none | free-form layout, landing pages, or dashboards that *compose* blocks — no interactivity |
 | `react` | **real React** (hooks, `.map`, `onClick`, expressions) | executed in the app | complex interactive business UIs — master/detail, wizards, state-driven filters |
 
 For `html` / `react`, the page body is the `source` string (it is the

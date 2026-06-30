@@ -731,7 +731,7 @@ by what the page needs:
 | `kind` | Author writes | JS runs? | Use when |
 |:--|:--|:--|:--|
 | `full` / `slotted` | structured `regions` / `slots` (no `source`) | — | record/detail/home layouts from the component catalogue |
-| `html` | constrained JSX = HTML + Tailwind + registered components, **parsed, never executed** | no | free-form layout / landing / dashboard that just *composes* blocks — AI's HTML+Tailwind strength, no interactivity |
+| `html` | constrained JSX = registered components + safe native HTML, **parsed, never executed** | no | free-form layout / landing / dashboard that just *composes* blocks — no interactivity |
 | `react` | **real React** (hooks, `.map`, `onClick`, expressions) | yes (main React tree) | complex interactive business UIs — master/detail, wizards, state-driven filters |
 
 `source` is the source-of-truth in both source tiers; `regions` is ignored. A
@@ -753,10 +753,10 @@ on unknown tags / missing required props / forbidden constructs (event handlers,
 export const ReleaseNotesPage = definePage({
   name: 'release_notes', type: 'home', kind: 'html',
   source: `
-<section className="mx-auto max-w-3xl p-10">
-  <h1 className="text-4xl font-bold">Release Notes</h1>
-  <object-metric objectName="ticket" aggregate="count" label="Open tickets" className="mt-6" />
-</section>`,
+<flex direction="col" gap={6} style={{"maxWidth":"768px","margin":"0 auto","padding":"40px"}}>
+  <h1 style={{"fontSize":"32px","fontWeight":700,"color":"hsl(var(--foreground))"}}>Release Notes</h1>
+  <object-metric objectName="ticket" aggregate="count" label="Open tickets" />
+</flex>`,
 });
 ```
 
@@ -772,10 +772,12 @@ The source is real React executed at render by the runtime. The injected scope a
   component; `<Block type="…" …/>` is the escape hatch for any other type
 - `data` / `variables` / `page`
 
-Compose **layout with plain HTML + Tailwind** (React's strength); use the injected
-blocks for data. Real component props/callbacks flow through — e.g. `<ObjectForm>` honors
-`objectName` / `mode` / `recordId` / `onSuccess` / `onCancel`; `<ListView>` honors
-`objectName` / `fields` / `onRowClick` / `navigation`.
+Compose **layout with inline `style={{…}}`** (real CSS — see *Styling*, below); use the
+injected blocks for data. **Do NOT use Tailwind `className`** — page source is runtime
+metadata the build never scans, so utility classes silently do nothing. Real component
+props/callbacks flow through — e.g. `<ObjectForm>` honors `objectName` / `mode` / `recordId` /
+`formType` / `onSuccess` / `onCancel`; `<ListView>` honors `objectName` / `fields` /
+`onRowClick` / `navigation`.
 
 > **Do not guess props — read the contract.** Each injected block's full prop set
 > (name, type, `data`/`controlled`/`callback` kind, required, description) is the
@@ -797,18 +799,14 @@ function Page() {
   const [sel, setSel] = React.useState(null);
   const [reload, setReload] = React.useState(0);
   return (
-    <div className="grid grid-cols-5 gap-6 p-8">
-      <div className="col-span-3">
-        <ListView key={reload} objectName="project"
-          fields={['name','status','owner']} navigation={{ mode: 'none' }}
-          onRowClick={(r) => setSel(r)} />
-      </div>
-      <div className="col-span-2">
-        {sel
-          ? <ObjectForm objectName="project" mode="edit" recordId={sel.id}
-              onSuccess={() => { setSel(null); setReload((k) => k + 1); }} />
-          : <p className="text-slate-400">Select a project to edit.</p>}
-      </div>
+    <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 24, padding: 32, alignItems: 'start' }}>
+      <ListView key={reload} objectName="project"
+        fields={['name','status','owner']} navigation={{ mode: 'none' }}
+        onRowClick={(r) => setSel(r)} />
+      {sel
+        ? <ObjectForm objectName="project" mode="edit" recordId={sel.id}
+            onSuccess={() => { setSel(null); setReload((k) => k + 1); }} />
+        : <p style={{ color: 'hsl(var(--muted-foreground))' }}>Select a project to edit.</p>}
     </div>
   );
 }`,
@@ -882,6 +880,26 @@ spec field is `PageComponentSchema.responsiveStyles` (`@objectstack/spec`,
 `ResponsiveStylesSchema`). Full worked example:
 `examples/app-showcase/src/pages/styling-gallery.page.ts` (the "Styling
 (ADR-0065)" nav entry). See [ADR-0065](../../docs/adr/0065-sdui-styling-model.md).
+
+**In the source tiers (`kind:'html'` / `kind:'react'`) the same rule holds — no
+Tailwind `className` — but the primitive differs:**
+
+- **`kind:'html'`** — lay out with the registered components' own structured props
+  (`<flex direction="col" gap={6}>`, `<grid columns={4}>` compile their *own*,
+  already-shipped classes) and add CSS with a **`style` object written as JSON**
+  (quoted keys/values): `style={{"padding":"40px","color":"hsl(var(--foreground))"}}`.
+  A JS-style object (`{{padding: 40}}`) is parsed as a deferred expression and will
+  NOT apply — keys and string values must be double-quoted.
+- **`kind:'react'`** — it's real React, so style with an ordinary inline
+  **`style={{}}`** object using `hsl(var(--token))` theme colors:
+  `color: 'hsl(var(--foreground))'`, `background: 'hsl(var(--card))'`,
+  `border: '1px solid hsl(var(--border))'`, `borderRadius: 'var(--radius)'`. Tokens
+  are HSL **triplets**, so always wrap them: `hsl(var(--card))`, never bare
+  `var(--card)`; a translucent scrim is `hsl(0 0% 0% / 0.5)`. For a **drawer/modal**,
+  render `<ObjectForm formType="drawer"|"modal" open onOpenChange={…}>` — it ships a
+  pre-styled Sheet/Dialog with backdrop + animation; never hand-roll a
+  `fixed inset-0` overlay (its utility classes won't compile, so it renders as
+  unstyled boxes with no backdrop).
 
 ---
 

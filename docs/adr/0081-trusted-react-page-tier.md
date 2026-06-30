@@ -11,6 +11,8 @@
 
 ---
 
+> **Amendment (2026-06-30 — ADR-0065 styling correction).** The "HTML + **Tailwind**" framing for page `source` is **superseded on styling**. A page's `source` is *runtime metadata*, so the console's build-time Tailwind never scans it — authored utility `className`s silently produce no CSS (the exact failure ADR-0065 was written to prevent; the Task Desk modal's `bg-black/50` backdrop rendered transparent). The tiers themselves stand; only the styling **primitive** changes: `kind:'html'` styles via the registered components' structured props + a JSON `style` object; `kind:'react'` styles via inline `style={{}}` with `hsl(var(--token))` theme colors and renders drawer/modal overlays through `<ObjectForm formType="drawer"|"modal">` (never a hand-rolled `fixed inset-0`). **Do not author Tailwind classes in page source.** See [ADR-0065](./0065-sdui-styling-model.md).
+
 ## TL;DR
 
 1. **[rename] `kind:'jsx'` → `kind:'html'`.** The constrained, parse-never-execute tier (ADR-0080) is renamed to match what it is: author-written **HTML + Tailwind** (expressed as constrained JSX) compiled to the SDUI tree. `'jsx'` stays as a **deprecated alias** (already-saved pages keep loading); all authored examples/docs move to `'html'`.

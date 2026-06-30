@@ -2,7 +2,7 @@
   "version": 2,
   "adr": "ADR-0081",
   "source": "GENERATED from packages/spec/src/ui/react-blocks.ts — data props from the spec zod schemas, binding/controlled/callback from the React overlay.",
-  "note": "Props each component accepts in kind:'react' page source. Reference blocks by their PascalCase tag. kind: data=declarative config (from the spec schema) · binding=connects to data · controlled=React state · callback=React function. Layout = plain HTML+Tailwind; these blocks are for DATA. Live data: const adapter = useAdapter(); adapter.find/findOne/create/update.",
+  "note": "Props each component accepts in kind:'react' page source. Reference blocks by their PascalCase tag. kind: data=declarative config (from the spec schema) · binding=connects to data · controlled=React state · callback=React function. These blocks are for DATA. Live data: const adapter = useAdapter(); adapter.find/findOne/create/update. STYLING (ADR-0065) — a page's source is runtime metadata, so the console's build-time Tailwind NEVER scans it: utility classNAMES silently produce no CSS. Do NOT use Tailwind className in page source. (a) Layout/chrome: inline style={} with hsl(var(--token)) theme colors — e.g. color:'hsl(var(--foreground))', background:'hsl(var(--card))', border:'1px solid hsl(var(--border))', and px/flex for layout. (b) Overlays: render <ObjectForm formType='drawer'|'modal' open onOpenChange> (a pre-styled Sheet/Dialog) — never hand-roll a fixed inset-0 backdrop.",
   "blocks": [
     {
       "tag": "ObjectForm",

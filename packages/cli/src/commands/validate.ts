@@ -11,7 +11,7 @@ import { loadConfig } from '../utils/config.js';
 import { validateStackExpressions } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
-import { validateJsxPages, validateReactPages, validateReactPageProps } from '@objectstack/lint';
+import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import {
   printHeader,
   printKV,
@@ -271,6 +271,19 @@ export default class Validate extends Command {
           console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
         }
         this.exit(1);
+      }
+
+      // 3e. Source-tier page styling (ADR-0065): Tailwind className in a
+      //     kind:'html'/'react' page source silently no-ops (the build never
+      //     scans authored metadata) — warn with the inline-style fix.
+      if (!flags.json) printStep('Checking source-page styling (ADR-0065)...');
+      const sourceStyleFindings = validatePageSourceStyling(result.data as Record<string, unknown>);
+      const sourceStyleWarnings = sourceStyleFindings.filter((f) => f.severity === 'warning');
+      if (!flags.json) {
+        for (const w of sourceStyleWarnings.slice(0, 50)) {
+          console.log(chalk.yellow(`  \u26a0 ${w.where}: ${w.message}`));
+          console.log(chalk.dim(`      ${w.hint}`));
+        }
       }
 
       // 4. Collect and display stats

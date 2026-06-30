@@ -7,7 +7,7 @@ description: Props each injected component accepts in kind:'react' page source (
 
 # React-tier component contract (ADR-0081)
 
-Props each component accepts in kind:'react' page source. Reference blocks by their PascalCase tag. kind: data=declarative config (from the spec schema) · binding=connects to data · controlled=React state · callback=React function. Layout = plain HTML+Tailwind; these blocks are for DATA. Live data: const adapter = useAdapter(); adapter.find/findOne/create/update.
+Props each component accepts in kind:'react' page source. Reference blocks by their PascalCase tag. kind: data=declarative config (from the spec schema) · binding=connects to data · controlled=React state · callback=React function. These blocks are for DATA. Live data: const adapter = useAdapter(); adapter.find/findOne/create/update. STYLING (ADR-0065) — a page's source is runtime metadata, so the console's build-time Tailwind NEVER scans it: utility classNAMES silently produce no CSS. Do NOT use Tailwind className in page source. (a) Layout/chrome: inline style={} with hsl(var(--token)) theme colors — e.g. color:'hsl(var(--foreground))', background:'hsl(var(--card))', border:'1px solid hsl(var(--border))', and px/flex for layout. (b) Overlays: render <ObjectForm formType='drawer'|'modal' open onOpenChange> (a pre-styled Sheet/Dialog) — never hand-roll a fixed inset-0 backdrop.
 
 **kind**: `data` = declarative config (from the spec schema — the authoritative source) · `binding` = connects the block to data · `controlled` = drive from React state · `callback` = a React function the block calls.
 
