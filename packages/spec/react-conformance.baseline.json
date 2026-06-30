@@ -1,0 +1,38 @@
+{
+  "_comment": "Accepted spec↔frontend conformance baseline (react blocks). Per block: the frontend-only prop set (component exposes, spec does not declare) and whether the block is missing. Regenerate with: MANIFEST=… check:react-conformance --baseline <this> --update. The ratchet flags only NEW frontend-only props or newly-missing blocks.",
+  "blocks": {
+    "ObjectForm": {
+      "frontendOnly": [],
+      "missing": false
+    },
+    "ListView": {
+      "frontendOnly": [
+        "fields",
+        "options"
+      ],
+      "missing": false
+    },
+    "ObjectChart": {
+      "frontendOnly": [
+        "data"
+      ],
+      "missing": false
+    },
+    "RecordDetails": {
+      "frontendOnly": [],
+      "missing": false
+    },
+    "RecordHighlights": {
+      "frontendOnly": [],
+      "missing": false
+    },
+    "RecordRelatedList": {
+      "frontendOnly": [],
+      "missing": false
+    },
+    "RecordPath": {
+      "frontendOnly": [],
+      "missing": false
+    }
+  }
+}

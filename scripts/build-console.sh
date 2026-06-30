@@ -143,6 +143,19 @@ if [[ -f "$DUMP_PAGE" && -f "$DUMP_SCRIPT" ]]; then
   for _ in $(seq 1 90); do curl -sf "http://localhost:5180/" > /dev/null 2>&1 && break; sleep 1; done
   if BASE_URL="http://localhost:5180" OUT="${TARGET}/sdui.manifest.json" node scripts/dump-public-manifest.mjs; then
     echo "✓ wrote ${TARGET}/sdui.manifest.json"
+    # ADR-0081: ratchet the spec↔frontend react-block conformance against the
+    # committed baseline while the freshly-dumped manifest is here for free. This
+    # is the ONLY place the manifest exists, so it is the cheapest place to catch
+    # NEW divergence (a component exposing an undocumented prop, or a block
+    # vanishing). Warn-only — never fails the console build; run check:react-conformance
+    # --strict locally to gate intentionally.
+    if [[ -f "${FRAMEWORK_ROOT}/packages/spec/react-conformance.baseline.json" ]]; then
+      echo "→ Ratcheting spec↔frontend react-block conformance (ADR-0081)..."
+      ( cd "${FRAMEWORK_ROOT}" && MANIFEST="${TARGET}/sdui.manifest.json" \
+        pnpm --filter @objectstack/spec check:react-conformance \
+        --baseline react-conformance.baseline.json ) || \
+        echo "⚠ conformance ratchet reported new divergence (non-fatal) — see output above"
+    fi
   else
     echo "⚠ manifest generation failed — os-build JSX gate falls back to parse-level (non-fatal)"
   fi

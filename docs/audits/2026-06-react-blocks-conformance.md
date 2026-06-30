@@ -58,3 +58,29 @@ full config from the spec schema at render. So:
 MANIFEST=/path/to/sdui.manifest.json pnpm --filter @objectstack/spec check:react-conformance
 # add --strict to fail on divergence (once triaged).
 ```
+
+## Ratchet (implemented)
+
+Running this on every framework PR isn't worth it — the manifest only exists at
+console-build time. So the conformance check is wired in as a **baseline ratchet**
+at the one place the manifest is produced for free: `scripts/build-console.sh`,
+right after it dumps `sdui.manifest.json` from the freshly-built console registry.
+
+- The accepted state lives in `packages/spec/react-conformance.baseline.json`
+  (per block: the frontend-only prop set + whether the block is missing).
+- `--baseline <path>` compares the current dump against it and reports **only
+  regressions**: a component exposing a NEW undocumented prop, or a
+  previously-present block vanishing. The soft `spec-only` signal is not gated.
+- In `build-console.sh` it runs **warn-only** (never fails the console build).
+  Use `--strict` to gate intentionally (exit 1 on regression).
+
+```
+# accept the current frontend state as the new baseline (after an intentional change):
+MANIFEST=/path/to/sdui.manifest.json \
+  pnpm --filter @objectstack/spec check:react-conformance \
+  --baseline react-conformance.baseline.json --update
+```
+
+When the ratchet flags a new frontend-only prop, the fix is one of: declare it in
+the spec schema (`packages/spec/src/ui/*.zod.ts`), add it to the block overlay in
+`packages/spec/src/ui/react-blocks.ts`, or accept it via `--update`.
