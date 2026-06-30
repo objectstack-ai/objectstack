@@ -363,8 +363,9 @@ export const PageSchema = lazySchema(() => z.object({
       "Page override mode. full | slotted = structured authoring; " +
       "html = author-written constrained JSX/HTML+Tailwind compiled (parsed, never " +
       "executed) to the tree (ADR-0080; the legacy value 'jsx' is a deprecated alias); " +
-      "react = TRUSTED real-React source executed at render by the runtime (ADR-0081), " +
-      "gated to enterprise/private deployments.",
+      "react = real-React source executed at render by the runtime (ADR-0081); it " +
+      "runs author JS, so it is gated by a host capability that defaults ON and is " +
+      "disabled server-side via OS_DISABLE_REACT_PAGES.",
     ),
 
   /**

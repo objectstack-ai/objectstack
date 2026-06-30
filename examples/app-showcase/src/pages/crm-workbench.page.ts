@@ -21,11 +21,11 @@ import { definePage } from '@objectstack/spec/ui';
  * blocks as PascalCase components (`ListView`, `ObjectForm`, `ObjectMetric`, …),
  * each a real registered renderer. Layout is plain HTML + Tailwind.
  *
- * NOTE: `kind:'react'` executes author code, so it is gated behind the host
- * capability `CAP_REACT_PAGES` (default OFF). A trusted/enterprise deployment
- * enables it from its host bootstrap — e.g. `enableCapability('react-pages')`
- * or `globalThis.__OBJECTUI_CAPABILITIES__ = ['react-pages']`. Until then this
- * page renders an "enterprise capability required" notice rather than executing.
+ * NOTE: `kind:'react'` executes author code, so it is gated by the host
+ * capability `CAP_REACT_PAGES`, which defaults ON (the platform trusts its
+ * reviewed, draft-gated authors). A deployment that does not trust its authors
+ * turns it off server-side by setting `OS_DISABLE_REACT_PAGES`, in which case
+ * this page renders a "disabled on this deployment" notice instead of executing.
  */
 export const CrmWorkbenchPage = definePage({
   name: 'showcase_crm_workbench',

@@ -292,6 +292,17 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         return;
       }
 
+      // A deployment that does not trust its page authors disables the
+      // `kind:'react'` tier (which executes author JS in the main React tree)
+      // by setting `OS_DISABLE_REACT_PAGES`. We inject the disable global the
+      // console's capability gate reads; the flag is ON by default otherwise.
+      // Read per request (env can change without a rebuild — index.html is
+      // re-read on every fallback hit too).
+      const reactPagesDisabled = (): boolean => {
+        const v = String(process.env.OS_DISABLE_REACT_PAGES ?? '').trim().toLowerCase();
+        return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+      };
+
       const readIndexHtml = () => {
         const raw = fs.readFileSync(indexPath, 'utf-8');
         // Inject <base href="${CONSOLE_PATH}/"> so:
@@ -302,9 +313,17 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         //      build from being pinned to a specific mount.
         //
         // Idempotent — bails if the build already shipped a <base>.
-        if (/<base\s/i.test(raw)) return raw;
-        const baseTag = `<base href="${CONSOLE_PATH}/">`;
-        return raw.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${baseTag}`);
+        let html = raw;
+        if (!/<base\s/i.test(html)) {
+          const baseTag = `<base href="${CONSOLE_PATH}/">`;
+          html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${baseTag}`);
+        }
+        if (reactPagesDisabled()) {
+          const capTag =
+            `<script>window.__OBJECTUI_CAPABILITIES_DISABLED__=(window.__OBJECTUI_CAPABILITIES_DISABLED__||[]).concat('react-pages');</script>`;
+          html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${capTag}`);
+        }
+        return html;
       };
 
       // The Console is the default end-user surface — root `/` redirects
