@@ -1,0 +1,13 @@
+{
+  "title": "Solutions",
+  "icon": "Lightbulb",
+  "pages": [
+    "index",
+    "create-vs-edit-form",
+    "field-grouping-and-order",
+    "role-based-interfaces",
+    "data-automation-interface-access",
+    "public-data-collection",
+    "approval-workflow"
+  ]
+}

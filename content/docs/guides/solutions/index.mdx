@@ -1,0 +1,55 @@
+---
+title: Solutions (Scenario Cookbook)
+description: Goal-oriented recipes — given a concrete business scenario, the recommended way to solve it across objects, fields, forms, views, permissions and automation. Each recipe links to a runnable example and the decision record behind it.
+---
+
+# Solutions — Scenario Cookbook
+
+The rest of the guides answer **"how does feature X work"** (Field, View, Flow, Permission…). These recipes answer the other question: **"I have business problem Y — what's the recommended way to solve it?"** — and the answer usually cuts across several metadata types at once.
+
+<Callout type="info">
+**Why this section exists.** The mechanisms are all documented in the [references](/docs/references) and per-type [metadata guides](/docs/guides/metadata). What was missing is the *connective tissue*: which mechanisms to combine for a given goal, why, and what the anti-patterns are. These recipes are also the **few-shot corpus for AI authoring** — an AI that has seen the recipe generates the right shape (ADR-0047 §3.5: "zero examples is why zero AI generations use these features").
+</Callout>
+
+## How each recipe is structured
+
+1. **Scenario** — the business problem in one sentence.
+2. **Recommended solution** — the cross-cutting approach (objects + fields + forms + views + permissions as needed).
+3. **Why** — the reasoning, linked to the relevant ADR.
+4. **Runnable example** — a link into `examples/app-showcase`.
+5. **Anti-patterns** — what *not* to do, and why it bites later.
+
+## Recipes
+
+<Cards>
+  <Card
+    title="Create form ≠ edit form"
+    href="/docs/guides/solutions/create-vs-edit-form"
+    description="New-record form asks 5 fields; the edit form shows 40 grouped. Derive both from one field set; hand-shape create only when you must."
+  />
+  <Card
+    title="Field grouping & order"
+    href="/docs/guides/solutions/field-grouping-and-order"
+    description="The data model is flat but forms need sections. Where grouping lives, and why a table's 'group' is a different thing entirely."
+  />
+  <Card
+    title="Role-based interfaces"
+    href="/docs/guides/solutions/role-based-interfaces"
+    description="Same data, different audiences. Give end users a curated app/page; keep builder surfaces (Studio, raw tables) out of their view."
+  />
+  <Card
+    title="Who can see data / automation / interface"
+    href="/docs/guides/solutions/data-automation-interface-access"
+    description="Map a real access requirement onto object CRUD, FLS, RLS, capabilities, app gating and automation run-identity."
+  />
+  <Card
+    title="Collect data from the public"
+    href="/docs/guides/solutions/public-data-collection"
+    description="Expose one form to anonymous visitors without opening the base — declaration-derived authorization, field whitelist."
+  />
+  <Card
+    title="Approval workflow"
+    href="/docs/guides/solutions/approval-workflow"
+    description="Route a record for sign-off. Who can configure it, and the run-identity decision that keeps it safe."
+  />
+</Cards>

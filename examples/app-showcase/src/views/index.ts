@@ -4,3 +4,4 @@ export { TaskViews } from './task.view.js';
 export { ProjectViews } from './project.view.js';
 export { InquiryViews } from './inquiry.view.js';
 export { BusinessUnitViews } from './business-unit.view.js';
+export { ContactViews } from './contact.view.js';

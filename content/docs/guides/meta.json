@@ -4,6 +4,8 @@
   "root": true,
   "pages": [
     "index",
+    "---Solutions---",
+    "solutions",
     "---Foundations---",
     "packages",
     "metadata",

@@ -1,0 +1,78 @@
+---
+title: Who can see data / automation / interface
+description: Map a concrete access requirement onto the platform's layers — object CRUD, field-level security, row-level security, capabilities, app/nav gating, and the run-identity of automations.
+---
+
+# Who can see data / automation / interface
+
+## Scenario
+
+> I have a real access requirement — "sales reps see only their own deals; managers see the team's; finance can export; nobody but admins touches the automations." How do these map onto the platform's authorization layers?
+
+## Recommended solution
+
+Authorization splits into three decoupled concerns (ADR-0066): **capability** (what can be done), **assignment** (who holds it — permission sets / roles, maintained at runtime), and **requirement** (what a resource declares it needs). A resource declares *what is required*; it never bakes in *who*.
+
+Pick the layer that matches the requirement:
+
+| Requirement | Layer | Where |
+|---|---|---|
+| Can read/create/edit/delete an object type | Object CRUD | permission-set `objects.{allowCreate/Read/Edit/Delete}` |
+| Can see / edit a specific field | Field-level security (FLS) | permission-set `fields`, or field `requiredPermissions` |
+| Which *rows* a user sees | Row-level security (RLS) | permission-set `rowLevelSecurity` (CEL `using` / depth `readScope`) |
+| A functional capability (export, approve, manage) | Capability | `systemPermissions` ↔ resource `requiredPermissions` |
+| Can open an app / nav entry / page | Surface access | `App.requiredPermissions`, `tabPermissions`, nav gating |
+| Can run / configure an automation | Capability + run-identity | `manage_metadata` to edit; flow `runAs` to execute |
+
+### Data: CRUD + FLS + RLS, combined
+
+```ts
+definePermissionSet({
+  name: 'sales_rep',
+  objects: { deal: { allowRead: true, allowCreate: true, allowEdit: true } },
+  fields:  { 'deal.commission': { readable: false } },     // FLS: hide a field
+  rowLevelSecurity: [
+    { name: 'own_deals', object: 'deal', operation: 'all', using: 'owner_id == current_user.id' },
+  ],
+});
+```
+
+- **"My own"** vs **"my team's"** vs **"the org's"** is the RLS *depth* axis (`readScope` / `writeScope`: `own | own_and_reports | unit | unit_and_below | org`, ADR-0057). A manager set uses `unit`; a rep uses `own`.
+- Grants combine **most-permissively** across a user's sets; the tenant-isolation policy `AND`s on top; the superuser bypass (`viewAllRecords` / `modifyAllRecords`) short-circuits RLS where the object's posture allows it (ADR-0066).
+- For genuinely sensitive objects, set `access: { default: 'private' }` so they are **not** covered by blanket wildcard grants — access needs an explicit grant.
+
+### Automation: the run-identity is the safety decision
+
+Two separate questions:
+
+1. **Who can configure it?** Editing flows/automations needs `manage_metadata` (typically Studio users). Don't expose automation config to end users — see [role-based interfaces](/docs/guides/solutions/role-based-interfaces).
+2. **As whom does it run?** A flow's `runAs` (ADR-0049):
+   - `runAs: 'user'` (default) — runs as the triggering user; CRUD nodes respect that user's RLS. **Safer default.**
+   - `runAs: 'system'` — elevated, bypasses RLS. Make elevation *explicit*, and surface it in the UI as "runs as system".
+
+   A schedule-triggered run has no user, so under `user` it runs unscoped — declare `system` to make that intentional.
+
+### Interface: gate the app, the nav, and the action
+
+`App.requiredPermissions` gates the whole app; permission-set `tabPermissions` controls per-app/tab visibility; each nav item carries `requiredPermissions` / `visible` / `requiresObject`. Action gates are **dual-surface** (ADR-0066 D4): hidden/disabled in the UI **and** rejected by the server — UI gating is derived from the same declaration, server is the source of truth.
+
+## Why
+
+Keeping capability, assignment and requirement decoupled means resources stay stable (`requiredPermissions: ['export_data']`) while admins re-assign who holds `export_data` at runtime, with no code change. The fixed precedence (AND-gates → most-permissive grant union → RLS → explicit deny) is specified in ADR-0066, so combinations are predictable rather than ad-hoc.
+
+## Runnable example
+
+- Built-in profiles: [`default-permission-sets.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/plugins/plugin-security/src/objects/default-permission-sets.ts) (`member_default` shows owner-scoped RLS + tenant isolation).
+- Security objects: [`packages/plugins/plugin-security/src/objects`](https://github.com/objectstack-ai/framework/tree/main/packages/plugins/plugin-security/src/objects).
+
+## Anti-patterns
+
+- **UI-only action gating.** Always pair it with the server check — use a single `requiredPermissions` declaration (dual-surface), never hide a button while leaving the endpoint open.
+- **`runAs: 'system'` by reflex.** Default to `user`; elevate only where a step genuinely needs to bypass RLS, and say so.
+- **Baking "who" into a resource.** Declare the capability required; assign holders in permission sets at runtime.
+
+## See also
+
+- Decision records: **ADR-0066** (unified authorization), **ADR-0057** (access depth), **ADR-0049** (`runAs`).
+- Cheatsheet: [Permissions matrix](/docs/guides/cheatsheets/permissions-matrix); guide: [Security](/docs/guides/security).
+- Reference: [Permission](/docs/references/security/permission), [RLS](/docs/references/security/rls), [Sharing](/docs/references/security/sharing).
