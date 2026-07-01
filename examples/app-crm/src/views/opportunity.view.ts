@@ -16,6 +16,7 @@ export const OpportunityViews = defineView({
       { field: 'expected_revenue' },
       { field: 'close_date' },
     ],
+    exportOptions: ['csv', 'xlsx', 'json'],
   },
   listViews: {
     all: {
@@ -31,6 +32,7 @@ export const OpportunityViews = defineView({
         { field: 'expected_revenue' },
         { field: 'close_date' },
       ],
+      exportOptions: ['csv', 'xlsx', 'json'],
     },
     pipeline: {
       label: 'Pipeline (Kanban)',

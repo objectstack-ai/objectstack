@@ -4,6 +4,14 @@ import { IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGat
 import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { ObjectStackProtocol } from '@objectstack/spec/api';
+import {
+    buildFieldMetaMap,
+    referenceFieldNames,
+    headerLabel,
+    formatRowCells,
+    formatRowForJson,
+    type ExportFieldMeta,
+} from './export-format.js';
 
 // Node-safe logger — avoids importing 'console' which is absent from ES2020 lib typings.
 const logError = (...args: unknown[]) => (globalThis as any).console?.error(...args);
@@ -394,16 +402,65 @@ function formatCsvCell(value: any): string {
 }
 
 /**
- * Serialise a list of rows to RFC-4180 CSV text. Caller supplies the
- * ordered list of field names; unknown fields produce empty cells.
+ * Serialise a list of rows to RFC-4180 CSV text. Caller supplies the ordered
+ * list of field names and a (possibly empty) field-metadata map. With metadata,
+ * the header row uses field labels and cell values are formatted to readable
+ * display values (lookup names, select labels, 是/否, formatted dates). With an
+ * empty map the output is byte-identical to the raw, un-formatted behaviour.
  */
-function rowsToCsv(fields: string[], rows: Array<Record<string, any>>, includeHeader: boolean): string {
+function rowsToCsv(
+    fields: string[],
+    rows: Array<Record<string, any>>,
+    includeHeader: boolean,
+    metaMap: Map<string, ExportFieldMeta>,
+): string {
     const lines: string[] = [];
-    if (includeHeader) lines.push(fields.map(formatCsvCell).join(','));
+    if (includeHeader) lines.push(fields.map(f => formatCsvCell(headerLabel(f, metaMap))).join(','));
     for (const row of rows) {
-        lines.push(fields.map(f => formatCsvCell(row?.[f])).join(','));
+        lines.push(formatRowCells(row, fields, metaMap).map(formatCsvCell).join(','));
     }
     return lines.join('\r\n') + (lines.length > 0 ? '\r\n' : '');
+}
+
+/**
+ * Bridge exceljs' streaming workbook writer onto the chunked HTTP response.
+ *
+ * exceljs writes to a Node stream; we pipe a PassThrough's `data` events into
+ * `res.write` (which the hono server encodes — strings via TextEncoder, binary
+ * Buffers/Uint8Arrays enqueued verbatim) so the xlsx bytes stream straight to
+ * the client without buffering the whole workbook in memory. `useStyles:false`
+ * keeps the writer lean for large (20k+ row) exports.
+ *
+ * Returns the worksheet to append rows to and a `finalize()` that commits the
+ * workbook and resolves once the last byte has been flushed and the response
+ * ended. Dynamically imported so `node:stream` / `exceljs` stay out of the
+ * module's static graph.
+ */
+async function createXlsxStream(res: any): Promise<{
+    ws: any;
+    finalize: () => Promise<void>;
+}> {
+    const { PassThrough } = await import('node:stream');
+    const ExcelJS: any = (await import('exceljs')).default ?? (await import('exceljs'));
+
+    const passthrough = new PassThrough();
+    const done = new Promise<void>((resolve, reject) => {
+        passthrough.on('data', (chunk: Buffer) => { res.write(chunk); });
+        passthrough.on('end', () => { try { res.end(); } catch { /* swallow */ } resolve(); });
+        passthrough.on('error', reject);
+    });
+
+    const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: passthrough, useStyles: false });
+    const ws = wb.addWorksheet('Export');
+
+    return {
+        ws,
+        finalize: async () => {
+            await ws.commit();
+            await wb.commit();
+            await done;
+        },
+    };
 }
 
 /**
@@ -3232,14 +3289,21 @@ export class RestServer {
         // GET /data/:object/export  — streaming export (M10.21 / C.21)
         //
         // Query params:
-        //   format=csv|json     (default: csv. json emits a JSON array.)
+        //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.)
         //   fields=a,b,c        (default: derive from object schema; falls back to keys of the first row)
         //   filter=<json>       ($filter as URL-encoded JSON, same shape as list endpoint)
         //   orderby=field:desc  (optional ordering, mirrors $orderby semantics)
+        //   header=false        (omit the header row for csv / xlsx; default true)
         //   limit=<n>           (default 10000, hard cap 50000)
         //   page=<n>            (driver chunk size, default 500, max 5000)
         //
-        // Streams the response so 50k-row exports do not buffer in memory.
+        // Values are formatted for readability from the object schema: lookup /
+        // user fields resolve to a name (via injected $expand), select fields to
+        // their option label, booleans to 是/否, dates to YYYY-MM-DD. When the
+        // schema is unavailable the raw stored values stream through unchanged.
+        //
+        // Streams the response so 50k-row exports do not buffer in memory; the
+        // xlsx path pipes exceljs' streaming writer straight onto the response.
         // Filename suggests `${object}-${YYYY-MM-DD}.${ext}` for browsers.
         this.routeManager.register({
             method: 'GET',
@@ -3257,7 +3321,11 @@ export class RestServer {
                     }
                     if (await this.enforceApiAccess(req, res, p, environmentId, 'export')) return;
                     const q = req.query ?? {};
-                    const format = (String(q.format ?? 'csv')).toLowerCase() === 'json' ? 'json' : 'csv';
+                    const fmtRaw = String(q.format ?? 'csv').toLowerCase();
+                    const format: 'csv' | 'json' | 'xlsx' =
+                        fmtRaw === 'json' ? 'json' : fmtRaw === 'xlsx' ? 'xlsx' : 'csv';
+                    // Header row toggle (csv / xlsx). Default on; `header=false` omits it.
+                    const includeHeader = String(q.header ?? 'true').toLowerCase() !== 'false';
                     const HARD_CAP = 50_000;
                     const MAX_CHUNK = 5_000;
                     const requestedLimit = q.limit != null ? Math.max(1, Number(q.limit) || 0) : 10_000;
@@ -3297,15 +3365,43 @@ export class RestServer {
                     } else if (Array.isArray(q.fields)) {
                         fields = q.fields.filter((s: any) => typeof s === 'string' && s.length > 0);
                     }
-                    if (!fields || fields.length === 0) {
-                        try {
-                            const schema = await (p as any).getObjectSchema?.(objectName, environmentId);
-                            const schemaFields = schema?.fields;
-                            if (Array.isArray(schemaFields)) {
-                                fields = schemaFields.map((f: any) => f.name).filter((n: any) => typeof n === 'string');
-                            }
-                        } catch { /* fall back to first-row derivation */ }
-                    }
+
+                    // Field metadata drives readable formatting (lookup names, select
+                    // labels, 是/否, formatted dates) and the $expand that resolves
+                    // references. Best-effort: when the schema is unavailable the export
+                    // falls back to raw values, byte-identical to the un-formatted path.
+                    let metaMap = new Map<string, ExportFieldMeta>();
+                    try {
+                        // Field metadata comes from the same place `findData` resolves
+                        // the object: `getMetaItem` is registry-first (DB fallback), so
+                        // it returns the live `ObjectSchema` whose `fields` is an object
+                        // map. The read hands back an envelope `{ type, name, item }`;
+                        // the schema document lives at `.item` (a cached/bare read may
+                        // already be unwrapped). Legacy `getObjectSchema` is consulted
+                        // as a last resort so existing test doubles keep working.
+                        let schema: any = undefined;
+                        if (typeof (p as any).getMetaItem === 'function') {
+                            const res = await (p as any).getMetaItem({ type: 'object', name: objectName });
+                            schema = isMetaEnvelope(res) ? res.item : res;
+                        }
+                        if (!schema && typeof (p as any).getObjectSchema === 'function') {
+                            schema = await (p as any).getObjectSchema(objectName, environmentId);
+                        }
+                        // Localize field labels to the request locale (Accept-Language /
+                        // `?locale=`) the same way the metadata endpoints do, so the
+                        // export header row matches the UI column headers instead of
+                        // leaking the raw, untranslated `field.label` values.
+                        schema = await this.translateMetaItem(req, 'object', environmentId, schema);
+                        metaMap = buildFieldMetaMap(schema);
+                        if (!fields || fields.length === 0) {
+                            const names = [...metaMap.keys()];
+                            if (names.length > 0) fields = names;
+                        }
+                    } catch { /* fall back to first-row derivation + raw values */ }
+
+                    // Expand reference fields so lookup/user ids resolve to their record
+                    // (and thus a name). Batched $in inside findData — no N+1.
+                    const expandFields = referenceFieldNames(metaMap);
 
                     // Prepare streaming response. Set headers BEFORE first write.
                     const stamp = new Date().toISOString().slice(0, 10);
@@ -3313,6 +3409,9 @@ export class RestServer {
                     if (format === 'csv') {
                         res.header('Content-Type', 'text/csv; charset=utf-8');
                         res.header('Content-Disposition', `attachment; filename="${safeObj}-${stamp}.csv"`);
+                    } else if (format === 'xlsx') {
+                        res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                        res.header('Content-Disposition', `attachment; filename="${safeObj}-${stamp}.xlsx"`);
                     } else {
                         res.header('Content-Type', 'application/json; charset=utf-8');
                         res.header('Content-Disposition', `attachment; filename="${safeObj}-${stamp}.json"`);
@@ -3325,6 +3424,7 @@ export class RestServer {
                     let firstChunk = true;
                     let skip = 0;
                     if (format === 'json') res.write('[');
+                    const xlsx = format === 'xlsx' ? await createXlsxStream(res) : null;
 
                     while (exported < limit) {
                         const take = Math.min(chunkSize, limit - exported);
@@ -3333,6 +3433,7 @@ export class RestServer {
                             query: {
                                 ...(filter ? { $filter: filter } : {}),
                                 ...(orderby ? { $orderby: orderby } : {}),
+                                ...(expandFields.length > 0 ? { $expand: expandFields.join(',') } : {}),
                                 $top: take,
                                 $skip: skip,
                             },
@@ -3340,23 +3441,35 @@ export class RestServer {
                             ...(context ? { context } : {}),
                         };
                         const result: any = await (p as any).findData(findArgs);
-                        const rows: any[] = Array.isArray(result?.data) ? result.data
-                            : Array.isArray(result?.rows) ? result.rows
-                                : Array.isArray(result) ? result : [];
+                        // `findData` returns `{ object, records, total, hasMore }`;
+                        // accept the legacy `data` / `rows` aliases and a bare array
+                        // so test doubles and alternate protocols keep working.
+                        const rows: any[] = Array.isArray(result?.records) ? result.records
+                            : Array.isArray(result?.data) ? result.data
+                                : Array.isArray(result?.rows) ? result.rows
+                                    : Array.isArray(result) ? result : [];
 
                         if (rows.length === 0) break;
 
+                        // Derive fields from the first row if schema lookup failed.
+                        if ((!fields || fields.length === 0) && firstChunk) {
+                            fields = Object.keys(rows[0] ?? {});
+                        }
+
                         if (format === 'csv') {
-                            // Derive fields from the first row if schema lookup failed.
-                            if ((!fields || fields.length === 0) && firstChunk) {
-                                fields = Object.keys(rows[0] ?? {});
-                            }
-                            const text = rowsToCsv(fields ?? [], rows, firstChunk);
+                            const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap);
                             res.write(text);
+                        } else if (format === 'xlsx') {
+                            if (firstChunk && includeHeader) {
+                                xlsx!.ws.addRow((fields ?? []).map((f) => headerLabel(f, metaMap))).commit();
+                            }
+                            for (const row of rows) {
+                                xlsx!.ws.addRow(formatRowCells(row, fields ?? [], metaMap)).commit();
+                            }
                         } else {
                             for (let i = 0; i < rows.length; i++) {
                                 const prefix = (firstChunk && i === 0) ? '' : ',';
-                                res.write(prefix + JSON.stringify(rows[i]));
+                                res.write(prefix + JSON.stringify(formatRowForJson(rows[i], metaMap)));
                             }
                         }
                         firstChunk = false;
@@ -3364,8 +3477,14 @@ export class RestServer {
                         skip += rows.length;
                         if (rows.length < take) break;
                     }
-                    if (format === 'json') res.write(']');
-                    res.end();
+                    if (format === 'json') {
+                        res.write(']');
+                        res.end();
+                    } else if (format === 'xlsx') {
+                        await xlsx!.finalize();
+                    } else {
+                        res.end();
+                    }
                 } catch (error: any) {
                     logError('[REST] Unhandled error:', error);
                     // Best-effort error envelope; if headers already sent the
@@ -3375,7 +3494,7 @@ export class RestServer {
                 }
             },
             metadata: {
-                summary: 'Streaming export of object rows (CSV or JSON)',
+                summary: 'Streaming export of object rows (CSV, JSON, or XLSX)',
                 tags: ['data', 'export'],
             },
         });
