@@ -126,6 +126,13 @@ rm -rf "$TARGET"
 mkdir -p "$(dirname "$TARGET")"
 cp -R "$CONSOLE_DIST" "$TARGET"
 
+# Provenance stamp: record which objectui SHA this dist was built from, so
+# `pnpm check:console-sha` and the CLI serve-time guard can detect drift when
+# .objectui-sha later moves ahead of this gitignored, locally-built dist
+# (which `turbo run build` does NOT rebuild). Travels inside dist/ so a
+# cloud/objectos Docker overlay that replaces dist/ restamps it too.
+echo "$PINNED_SHA" > "${TARGET}/.objectui-sha"
+
 BYTES="$(du -sk "$TARGET" 2>/dev/null | awk '{print $1}')"
 echo "✓ @objectstack/console dist ready (${BYTES} KB) from objectui@${PINNED_SHA:0:12}"
 

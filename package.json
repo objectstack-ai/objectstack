@@ -5,10 +5,10 @@
   "description": "ObjectStack Protocol & Specification - Monorepo for TypeScript Interfaces, JSON Schemas, and Convention Configurations",
   "scripts": {
     "build": "turbo run build --filter=!@objectstack/docs",
-    "dev": "pnpm --filter @objectstack/example-showcase dev",
-    "dev:showcase": "pnpm --filter @objectstack/example-showcase dev",
-    "dev:crm": "pnpm --filter @objectstack/example-crm dev",
-    "dev:todo": "pnpm --filter @objectstack/example-todo dev",
+    "dev": "pnpm check:console-sha && pnpm --filter @objectstack/example-showcase dev",
+    "dev:showcase": "pnpm check:console-sha && pnpm --filter @objectstack/example-showcase dev",
+    "dev:crm": "pnpm check:console-sha && pnpm --filter @objectstack/example-crm dev",
+    "dev:todo": "pnpm check:console-sha && pnpm --filter @objectstack/example-todo dev",
     "spec:rebuild": "turbo run build --filter=...@objectstack/spec",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
@@ -27,7 +27,8 @@
     "objectui:clean": "rm -rf packages/console/dist .cache/objectui-*",
     "lint": "eslint . --no-inline-config",
     "check:doc-authoring": "node scripts/check-doc-authoring.mjs",
-    "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs"
+    "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs",
+    "check:console-sha": "node scripts/check-console-sha.mjs"
   },
   "keywords": [
     "objectstack",

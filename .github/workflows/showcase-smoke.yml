@@ -36,6 +36,11 @@ jobs:
       # not found" and the app shell never renders.
       - name: Vendor the pinned Console SPA
         run: bash scripts/build-console.sh
+      # Self-test the drift guard: a fresh build-console.sh must stamp the dist
+      # with the pinned SHA so `pnpm check:console-sha` reports in-sync. Catches
+      # a regression where the stamp step is dropped or the pin/stamp diverge.
+      - name: Verify Console SHA stamp matches pin
+        run: pnpm check:console-sha
       - name: Install Playwright Chromium
         working-directory: examples/app-showcase
         run: pnpm exec playwright install --with-deps chromium

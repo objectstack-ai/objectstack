@@ -240,7 +240,13 @@ export function resolveConsolePath(options?: ResolveConsoleOptions): string | nu
 
   // Pass 1: prefer a candidate that actually has a built dist.
   for (const dir of candidates) {
-    if (hasConsoleDist(dir)) return dir;
+    if (hasConsoleDist(dir)) {
+      // Loudly flag (but still serve) a dist built from a different objectui
+      // SHA than the framework pins — the silent-drift case the npm-major
+      // guard above can't see. No-op for published installs / unstamped dists.
+      warnOnConsoleShaDrift(dir, warn);
+      return dir;
+    }
   }
 
   // Pass 2: nothing built yet — return the highest-priority candidate so
@@ -254,6 +260,70 @@ export function resolveConsolePath(options?: ResolveConsoleOptions): string | nu
  */
 export function hasConsoleDist(consolePath: string): boolean {
   return fs.existsSync(path.join(consolePath, 'dist', 'index.html'));
+}
+
+// ─── objectui-SHA Drift Guard (dev monorepo only) ───────────────────
+
+/**
+ * The vendored console `dist/` is a locally-built, gitignored artifact
+ * rebuilt only by `scripts/build-console.sh` (pnpm objectui:build /
+ * objectui:refresh / release) — never by `turbo run build`. When a
+ * developer pulls a branch that bumps the framework's `.objectui-sha` pin
+ * without re-running `pnpm objectui:build`, the dist stays frozen at the
+ * previous objectui commit and would be served silently. The npm-major
+ * version guard above can't catch this: the objectui SHA moves underneath a
+ * single `@objectstack/console` version.
+ *
+ * build-console.sh stamps the built SHA into `dist/.objectui-sha`. Here we
+ * compare it against the framework's committed `.objectui-sha` pin, located
+ * by walking up from the resolved console package. This is inherently a
+ * monorepo/dev concern: a published install ships no `.objectui-sha` pin
+ * (so the stamped dist is authoritative), and the sibling-repo dev fallback
+ * writes no stamp — both cases are skipped silently.
+ */
+function findObjectuiPin(startDir: string): { pin: string; file: string } | null {
+  let dir = startDir;
+  for (let depth = 0; depth < 8; depth++) {
+    const file = path.join(dir, '.objectui-sha');
+    if (fs.existsSync(file)) {
+      try {
+        const pin = fs.readFileSync(file, 'utf-8').trim();
+        return pin ? { pin, file } : null;
+      } catch {
+        return null; // unreadable pin — fail open
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+export function warnOnConsoleShaDrift(
+  consoleDir: string,
+  warn: (message: string) => void,
+): void {
+  const found = findObjectuiPin(consoleDir);
+  if (!found) return; // published install / no monorepo pin — nothing to compare
+
+  const stampFile = path.join(consoleDir, 'dist', '.objectui-sha');
+  let stamp: string | null = null;
+  try {
+    if (fs.existsSync(stampFile)) stamp = fs.readFileSync(stampFile, 'utf-8').trim();
+  } catch {
+    return; // unreadable stamp — fail open
+  }
+  // Unstamped dist (pre-guard build or sibling-repo fallback): can't prove
+  // drift; `pnpm check:console-sha` surfaces it — don't nag on every boot.
+  if (!stamp || stamp === found.pin) return;
+
+  warn(
+    `  ⚠ Console version drift: serving @objectstack/console built from objectui@${stamp.slice(0, 12)}, ` +
+    `but ${found.file} pins objectui@${found.pin.slice(0, 12)}. ` +
+    `packages/console/dist is a gitignored local build that 'turbo run build' does not refresh — ` +
+    `rebuild it with 'pnpm objectui:build'.`,
+  );
 }
 
 // ─── Plugin Factory ─────────────────────────────────────────────────

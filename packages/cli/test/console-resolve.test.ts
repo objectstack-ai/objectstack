@@ -18,6 +18,7 @@ import { createRequire } from 'module';
 import {
   resolveConsolePath,
   isConsoleVersionCompatible,
+  warnOnConsoleShaDrift,
 } from '../src/utils/console.js';
 
 // resolveConsolePath() also discovers the real, version-locked workspace
@@ -154,5 +155,68 @@ describe('resolveConsolePath version guard', () => {
 
     expect(result).not.toBe(unversionedDir);
     expect(warnings.some((m) => m.includes('unknown'))).toBe(true);
+  });
+});
+
+describe('warnOnConsoleShaDrift', () => {
+  const SHA_A = '2b86379384f0f6e99d9a5bb81d73017fd6f99cef';
+  const SHA_B = '69d6b94419bcaa11223344556677889900aabbcc';
+
+  /**
+   * Lay out a monorepo-shaped tree: <root>/.objectui-sha is the pin, and
+   * <root>/packages/console/dist is the vendored, optionally-stamped build.
+   * Returns the console package dir (what resolveConsolePath would hand back).
+   */
+  function makePinnedTree(
+    pin: string,
+    stamp: string | null,
+  ): { root: string; consoleDir: string } {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'os-console-sha-')));
+    fs.writeFileSync(path.join(root, '.objectui-sha'), `${pin}\n`);
+    const consoleDir = path.join(root, 'packages', 'console');
+    fs.mkdirSync(path.join(consoleDir, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(consoleDir, 'dist', 'index.html'), '<html></html>');
+    if (stamp !== null) {
+      fs.writeFileSync(path.join(consoleDir, 'dist', '.objectui-sha'), `${stamp}\n`);
+    }
+    return { root, consoleDir };
+  }
+
+  it('warns when the dist stamp differs from the pin (the pull-without-rebuild case)', () => {
+    const { consoleDir } = makePinnedTree(SHA_A, SHA_B);
+    const warnings: string[] = [];
+    warnOnConsoleShaDrift(consoleDir, (m) => warnings.push(m));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(SHA_A.slice(0, 12));
+    expect(warnings[0]).toContain(SHA_B.slice(0, 12));
+    expect(warnings[0]).toContain('objectui:build');
+  });
+
+  it('is silent when the dist stamp matches the pin', () => {
+    const { consoleDir } = makePinnedTree(SHA_A, SHA_A);
+    const warnings: string[] = [];
+    warnOnConsoleShaDrift(consoleDir, (m) => warnings.push(m));
+    expect(warnings).toEqual([]);
+  });
+
+  it('is silent for an unstamped dist (pre-guard build / sibling-repo fallback)', () => {
+    const { consoleDir } = makePinnedTree(SHA_A, null);
+    const warnings: string[] = [];
+    warnOnConsoleShaDrift(consoleDir, (m) => warnings.push(m));
+    expect(warnings).toEqual([]);
+  });
+
+  it('is silent when no pin exists up-tree (published install)', () => {
+    // A console package with a stamped dist but NO .objectui-sha anywhere
+    // above it — the shape of a published npm install.
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'os-console-sha-pub-')));
+    const consoleDir = path.join(root, 'node_modules', '@objectstack', 'console');
+    fs.mkdirSync(path.join(consoleDir, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(consoleDir, 'dist', 'index.html'), '<html></html>');
+    fs.writeFileSync(path.join(consoleDir, 'dist', '.objectui-sha'), `${SHA_B}\n`);
+
+    const warnings: string[] = [];
+    warnOnConsoleShaDrift(consoleDir, (m) => warnings.push(m));
+    expect(warnings).toEqual([]);
   });
 });
