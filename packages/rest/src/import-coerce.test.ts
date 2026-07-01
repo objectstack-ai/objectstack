@@ -140,6 +140,24 @@ describe('coerceRow', () => {
     expect(bad.errors[0]).toMatchObject({ field: 'owner', code: 'reference_not_found' });
   });
 
+  it('accepts a structured resolver result and flags ambiguous matches', async () => {
+    const metaMap = meta({ owner: { type: 'lookup', reference: 'user', displayField: 'name' } });
+    const resolveRef = async (_obj: string, display: string) => {
+      if (display === '张三') return { id: 'u1', matchedField: 'name' };
+      if (display === '李四') return { ambiguous: true, matchedField: 'name' };
+      return {};
+    };
+    const ok = await coerceRow({ owner: '张三' }, metaMap, { resolveRef });
+    expect(ok.data).toEqual({ owner: 'u1' });
+
+    const dup = await coerceRow({ owner: '李四' }, metaMap, { resolveRef });
+    expect(dup.data.owner).toBeUndefined();
+    expect(dup.errors[0]).toMatchObject({ field: 'owner', code: 'reference_ambiguous' });
+
+    const none = await coerceRow({ owner: '无名' }, metaMap, { resolveRef });
+    expect(none.errors[0]).toMatchObject({ field: 'owner', code: 'reference_not_found' });
+  });
+
   it('reports coercion errors per field instead of throwing', async () => {
     const metaMap = meta({ n: { type: 'number' }, b: { type: 'boolean' } });
     const { data, errors } = await coerceRow({ n: 'abc', b: 'maybe' }, metaMap, {});

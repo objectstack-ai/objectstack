@@ -179,6 +179,32 @@ describe('import route — real engine + protocol integration', () => {
     expect(a.owner).toBe('u2');
   });
 
+  it('reports reference_ambiguous when a name matches more than one record', async () => {
+    // Second 张三 makes the name non-unique; the importer must refuse to guess.
+    await engine.insert('user', { id: 'u3', name: '张三', email: 'zhang2@x.com' });
+    const res = await call(route, {
+      format: 'json',
+      rows: [
+        { id: 'a', title: 'x', owner: '张三' },       // ambiguous name
+        { id: 'b', title: 'y', owner: 'zhang2@x.com' }, // unique email → resolves
+      ],
+    });
+    expect(res._json.errors).toBe(1);
+    expect(res._json.results.find((r: any) => !r.ok)).toMatchObject({ field: 'owner', code: 'reference_ambiguous' });
+    const b = await engine.findOne('task', { where: { id: 'b' } });
+    expect(b.owner).toBe('u3');
+  });
+
+  it('accepts a pasted record id directly via the id fast-path', async () => {
+    const res = await call(route, {
+      format: 'json',
+      rows: [{ id: 'c', title: 'z', owner: 'u1' }],
+    });
+    expect(res._json.errors).toBe(0);
+    const c = await engine.findOne('task', { where: { id: 'c' } });
+    expect(c.owner).toBe('u1');
+  });
+
   it('surfaces per-row coercion errors without aborting the batch', async () => {
     const res = await call(route, {
       format: 'json',

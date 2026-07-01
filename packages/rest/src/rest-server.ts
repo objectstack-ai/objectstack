@@ -12,7 +12,7 @@ import {
     formatRowForJson,
     type ExportFieldMeta,
 } from './export-format.js';
-import { coerceRow, type RefResolver } from './import-coerce.js';
+import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
 
 // Node-safe logger — avoids importing 'console' which is absent from ES2020 lib typings.
 const logError = (...args: unknown[]) => (globalThis as any).console?.error(...args);
@@ -3398,18 +3398,22 @@ export class RestServer {
 
                     // Reference resolver: name/email/id → referenced record id. Cached
                     // per (object, display) so a name repeated across rows costs one query.
-                    const refCache = new Map<string, string | undefined>();
+                    const refCache = new Map<string, RefMatch>();
                     const resolveRef: RefResolver = async (referenceObject, display, meta) => {
                         const cacheKey = `${referenceObject}::${display}`;
-                        if (refCache.has(cacheKey)) return refCache.get(cacheKey);
-                        // Try the configured display field first, then fall back to the
-                        // usual human identifiers (name/email/id): users paste whichever
-                        // uniquely names the record. De-dupe so displayField isn't retried.
+                        const cached = refCache.get(cacheKey);
+                        if (cached) return cached;
+                        // Try an exact id first (authoritative + unique when the user pasted
+                        // an id), then the configured display field, then the usual human
+                        // identifiers. De-dupe so a field isn't queried twice. The first
+                        // candidate field to match wins; if that field matches >1 record we
+                        // stop and report ambiguity rather than silently linking the first.
                         const candidates = [...new Set([
+                            'id',
                             ...(meta.displayField ? [meta.displayField] : []),
-                            'name', 'title', 'label', 'full_name', 'email', 'username', 'id',
+                            'name', 'title', 'label', 'full_name', 'email', 'username',
                         ])];
-                        let id: string | undefined;
+                        let match: RefMatch = {};
                         for (const f of candidates) {
                             try {
                                 const r = await (p as any).findData({
@@ -3417,11 +3421,13 @@ export class RestServer {
                                     object: referenceObject,
                                 });
                                 const recs = findRows(r);
-                                if (recs.length > 0 && recs[0]?.id != null) { id = String(recs[0].id); break; }
-                            } catch { /* try next candidate field */ }
+                                if (recs.length === 0) continue;
+                                if (recs.length > 1) { match = { ambiguous: true, matchedField: f }; break; }
+                                if (recs[0]?.id != null) { match = { id: String(recs[0].id), matchedField: f }; break; }
+                            } catch { /* field absent on target object — try the next candidate */ }
                         }
-                        refCache.set(cacheKey, id);
-                        return id;
+                        refCache.set(cacheKey, match);
+                        return match;
                     };
 
                     // Locate an existing record for update/upsert by matchFields. Returns

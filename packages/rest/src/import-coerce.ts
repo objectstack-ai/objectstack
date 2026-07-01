@@ -39,16 +39,39 @@ const NUMBER_TYPES = new Set(['number', 'currency', 'percent', 'rating', 'slider
 const BOOL_TYPES = new Set(['boolean', 'toggle']);
 
 /**
+ * Structured outcome of a reference lookup. `id` set → a single record matched.
+ * `ambiguous` → the display value matched more than one record, so linking any
+ * one of them would be a guess the importer refuses to make. `matchedField`
+ * names the field the match came from (for diagnostics). An empty object means
+ * nothing matched. A bare `string | undefined` is still accepted from legacy
+ * resolvers and normalised to this shape.
+ */
+export interface RefMatch {
+  id?: string;
+  ambiguous?: boolean;
+  matchedField?: string;
+}
+
+/**
  * Resolve a reference field's display value (a name / email / id typed by the
- * user) to the referenced record's id. Returns `undefined` when nothing matches
- * so the caller can surface a per-row "not found" error. Implementations are
+ * user) to the referenced record's id. Return `undefined` / `{}` when nothing
+ * matches (caller surfaces "not found"), a bare id string / `{ id }` on a unique
+ * hit, or `{ ambiguous: true }` when several records share the value. Legacy
+ * resolvers that return `string | undefined` keep working. Implementations are
  * expected to cache — the same name shows up on many rows.
  */
 export type RefResolver = (
   referenceObject: string,
   displayValue: string,
   meta: ExportFieldMeta,
-) => Promise<string | undefined>;
+) => Promise<string | undefined | RefMatch>;
+
+/** Normalise a resolver result (legacy string or structured) to a RefMatch. */
+function normalizeRefMatch(result: string | undefined | RefMatch): RefMatch {
+  if (result == null) return {};
+  if (typeof result === 'string') return result ? { id: result } : {};
+  return result;
+}
 
 export interface CoerceContext {
   /** Trim leading/trailing whitespace from string-ish cells (default true). */
@@ -285,11 +308,14 @@ export async function coerceFieldValue(
     // no target object, store the raw value and let referential integrity be
     // enforced downstream.
     if (!ctx.resolveRef || !meta?.reference) return { value: display };
-    const id = await ctx.resolveRef(meta.reference, display, meta);
-    if (id === undefined) {
+    const match = normalizeRefMatch(await ctx.resolveRef(meta.reference, display, meta));
+    if (match.ambiguous) {
+      return { error: { field, code: 'reference_ambiguous', message: `${field}: "${display}" matches more than one ${meta.reference} — use a unique value or the record id` } };
+    }
+    if (match.id === undefined) {
       return { error: { field, code: 'reference_not_found', message: `${field}: no ${meta.reference} matches "${display}"` } };
     }
-    return { value: id };
+    return { value: match.id };
   }
 
   // Everything else (text, email, phone, json, html, file, …): pass through,
