@@ -905,7 +905,12 @@ function normalizeNameFieldAlias(input: unknown): unknown {
  * (same pattern as `normalizeNameFieldAlias`; deprecated keys are PRESERVED
  * on output for cross-repo back-compat):
  *
- * - `compactLayout` → `highlightFields` when the canonical key is absent.
+ * - `compactLayout` ⇄ `highlightFields`: whichever key is present is mirrored
+ *   onto the other (canonical wins when both exist). The BACK-fill
+ *   (highlightFields → compactLayout) is a transition mirror so renderers
+ *   that still read the old key (current objectui / vendored console) keep
+ *   their default columns for metadata authored with the new name; it is
+ *   removed together with the alias.
  * - `fieldGroups[].collapse` derived from the deprecated flags when absent:
  *   the UI-dialect `collapsible`/`collapsed` pair wins over the old
  *   `defaultExpanded` (it is what designer-authored metadata actually
@@ -920,6 +925,9 @@ function normalizeSemanticRoleAliases(input: unknown): unknown {
 
   if (obj.highlightFields == null && Array.isArray(obj.compactLayout)) {
     out = { ...out, highlightFields: obj.compactLayout };
+  } else if (obj.compactLayout == null && Array.isArray(obj.highlightFields)) {
+    // Transition mirror for old-key readers (see doc comment above).
+    out = { ...out, compactLayout: obj.highlightFields };
   }
 
   if (Array.isArray(obj.fieldGroups)) {

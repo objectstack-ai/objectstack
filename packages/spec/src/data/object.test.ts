@@ -902,6 +902,9 @@ describe('ObjectSchema semantic roles (ADR-0085)', () => {
       name: 'account', fields: {}, highlightFields: ['name', 'industry'],
     });
     expect(direct.highlightFields).toEqual(['name', 'industry']);
+    // Transition mirror: old-key readers (current objectui) still see
+    // compactLayout for metadata authored with the canonical name.
+    expect(direct.compactLayout).toEqual(['name', 'industry']);
 
     const aliased = ObjectSchema.parse({
       name: 'account', fields: {}, compactLayout: ['name', 'industry'],
