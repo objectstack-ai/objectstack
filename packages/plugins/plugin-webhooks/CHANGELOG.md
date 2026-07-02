@@ -1,5 +1,14 @@
 # @objectstack/plugin-webhooks
 
+## 11.7.0
+
+### Patch Changes
+
+- Updated dependencies [5178906]
+  - @objectstack/spec@11.7.0
+  - @objectstack/core@11.7.0
+  - @objectstack/service-messaging@11.7.0
+
 ## 11.6.0
 
 ### Patch Changes

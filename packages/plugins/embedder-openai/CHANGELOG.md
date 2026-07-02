@@ -1,5 +1,12 @@
 # @objectstack/embedder-openai
 
+## 11.7.0
+
+### Patch Changes
+
+- Updated dependencies [5178906]
+  - @objectstack/spec@11.7.0
+
 ## 11.6.0
 
 ### Patch Changes

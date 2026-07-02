@@ -1,5 +1,26 @@
 # @objectstack/plugin-dev
 
+## 11.7.0
+
+### Patch Changes
+
+- Updated dependencies [5178906]
+  - @objectstack/spec@11.7.0
+  - @objectstack/account@11.7.0
+  - @objectstack/setup@11.7.0
+  - @objectstack/studio@11.7.0
+  - @objectstack/core@11.7.0
+  - @objectstack/objectql@11.7.0
+  - @objectstack/driver-memory@11.7.0
+  - @objectstack/plugin-auth@11.7.0
+  - @objectstack/plugin-hono-server@11.7.0
+  - @objectstack/plugin-org-scoping@11.7.0
+  - @objectstack/plugin-security@11.7.0
+  - @objectstack/rest@11.7.0
+  - @objectstack/runtime@11.7.0
+  - @objectstack/service-i18n@11.7.0
+  - @objectstack/types@11.7.0
+
 ## 11.6.0
 
 ### Patch Changes

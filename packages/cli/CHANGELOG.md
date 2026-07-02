@@ -1,5 +1,104 @@
 # @objectstack/cli
 
+## 11.7.0
+
+### Patch Changes
+
+- 5178906: ADR-0085: object presentation intent is declared as cross-surface semantic
+  roles, never as per-surface hint blocks.
+
+  **@objectstack/spec**
+
+  - New top-level `stageField: string | false` — names the object's linear
+    lifecycle field (`false` declares the status-like field non-linear and
+    suppresses every consumer's stage heuristics). Legitimizes the key the UI
+    runtime already read but the schema rejected.
+  - `compactLayout` → **`highlightFields`** (the value is an ordered field
+    list, not a layout; "highlight" is already the renderer-side term of art).
+    `compactLayout` stays accepted as a parse-time alias and is preserved on
+    output — the ADR-0079 `displayNameField → nameField` pattern.
+  - `fieldGroups[].collapse: 'none' | 'expanded' | 'collapsed'` replaces
+    `defaultExpanded` AND the UI-dialect `collapsible`/`collapsed` boolean pair
+    (which had drifted two ways: spec declared a key no renderer read, renderers
+    read keys the spec rejected). Old keys map onto the enum at parse and remain
+    accepted for one minor.
+  - `fieldGroups[].visibleOn` removed (no consumer anywhere — ADR-0049
+    enforce-or-remove; re-add together with its enforcement when a surface
+    evaluates it).
+  - The `detail: { … }.passthrough()` UI-hints block is **removed**. Every key
+    in it was either unauthorable, a proven no-op for spec authors
+    (`hideReferenceRail` — the rail is default-off and its enabling key was
+    never typed), or a per-page toggle that belongs to an assigned Page. Zero
+    authors existed across framework and objectui (evidence in ADR-0085); the
+    removal ships as a minor under the documented dead-surface exception
+    (PR #2272 precedent).
+  - New `deriveFieldGroupLayout(def)` in `@objectstack/spec/data` — the single
+    source of the fieldGroups rendering semantics (declared order, empty groups
+    dropped, ungrouped trailing bucket minus audit/system fields, collapse
+    passthrough incl. deprecated aliases). UI renderers consume this instead of
+    their two pre-existing near-identical local copies.
+
+  **@objectstack/lint / @objectstack/cli**
+
+  - New `validateSemanticRoles` (wired into `os lint`): warns on
+    `Field.group` → undeclared group, declared-but-unreferenced groups, and
+    `stageField`/`highlightFields` entries naming non-existent fields — the
+    dangling-pointer shapes that are Zod-valid but silently inert at render
+    time (ADR-0078 completeness gate).
+
+  **@objectstack/platform-objects**
+
+  - All 35 system objects renamed `compactLayout:` → `highlightFields:`
+    (behaviour unchanged via the alias).
+
+- Updated dependencies [5178906]
+  - @objectstack/spec@11.7.0
+  - @objectstack/lint@11.7.0
+  - @objectstack/platform-objects@11.7.0
+  - @objectstack/account@11.7.0
+  - @objectstack/setup@11.7.0
+  - @objectstack/studio@11.7.0
+  - @objectstack/client@11.7.0
+  - @objectstack/cloud-connection@11.7.0
+  - @objectstack/core@11.7.0
+  - @objectstack/formula@11.7.0
+  - @objectstack/mcp@11.7.0
+  - @objectstack/objectql@11.7.0
+  - @objectstack/observability@11.7.0
+  - @objectstack/driver-memory@11.7.0
+  - @objectstack/driver-mongodb@11.7.0
+  - @objectstack/driver-sql@11.7.0
+  - @objectstack/driver-sqlite-wasm@11.7.0
+  - @objectstack/plugin-approvals@11.7.0
+  - @objectstack/plugin-audit@11.7.0
+  - @objectstack/plugin-auth@11.7.0
+  - @objectstack/plugin-email@11.7.0
+  - @objectstack/plugin-hono-server@11.7.0
+  - @objectstack/plugin-org-scoping@11.7.0
+  - @objectstack/plugin-reports@11.7.0
+  - @objectstack/plugin-security@11.7.0
+  - @objectstack/plugin-sharing@11.7.0
+  - @objectstack/plugin-webhooks@11.7.0
+  - @objectstack/rest@11.7.0
+  - @objectstack/runtime@11.7.0
+  - @objectstack/service-analytics@11.7.0
+  - @objectstack/service-automation@11.7.0
+  - @objectstack/service-cache@11.7.0
+  - @objectstack/service-datasource@11.7.0
+  - @objectstack/service-job@11.7.0
+  - @objectstack/service-messaging@11.7.0
+  - @objectstack/service-package@11.7.0
+  - @objectstack/service-queue@11.7.0
+  - @objectstack/service-realtime@11.7.0
+  - @objectstack/service-settings@11.7.0
+  - @objectstack/service-storage@11.7.0
+  - @objectstack/trigger-api@11.7.0
+  - @objectstack/trigger-record-change@11.7.0
+  - @objectstack/trigger-schedule@11.7.0
+  - @objectstack/types@11.7.0
+  - @objectstack/verify@11.7.0
+  - @objectstack/console@11.7.0
+
 ## 11.6.0
 
 ### Patch Changes

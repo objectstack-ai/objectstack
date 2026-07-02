@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-reports",
-  "version": "11.6.0",
+  "version": "11.7.0",
   "license": "Apache-2.0",
   "description": "Saved reports + scheduled email digests for ObjectStack — sys_saved_report + sys_report_schedule + IReportService.",
   "main": "dist/index.js",

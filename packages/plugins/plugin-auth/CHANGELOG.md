@@ -1,5 +1,15 @@
 # Changelog
 
+## 11.7.0
+
+### Patch Changes
+
+- Updated dependencies [5178906]
+  - @objectstack/spec@11.7.0
+  - @objectstack/platform-objects@11.7.0
+  - @objectstack/core@11.7.0
+  - @objectstack/types@11.7.0
+
 ## 11.6.0
 
 ### Patch Changes
