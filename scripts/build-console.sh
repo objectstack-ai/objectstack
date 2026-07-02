@@ -19,9 +19,11 @@
 #   scripts/build-console.sh
 #
 # Env:
-#   OBJECTUI_ROOT          override path to objectui checkout
-#   OBJECTUI_REPO_URL      override clone URL (default: https://github.com/objectstack-ai/objectui.git)
-#   OBJECTUI_BUILD_CMD     override build command (default: pnpm exec turbo run build --filter=@object-ui/console)
+#   OBJECTUI_ROOT           override path to objectui checkout
+#   OBJECTUI_REPO_URL       override clone URL (default: https://github.com/objectstack-ai/objectui.git)
+#   OBJECTUI_DEPS_BUILD_CMD override deps build (default: pnpm exec turbo run build --filter=@object-ui/console^...)
+#   OBJECTUI_BUILD_CMD      override console build (default: pnpm --filter @object-ui/console run build)
+#   CONSOLE_BUNDLE_CANARY   literal asserted in the built assets (default: import/jobs)
 
 set -euo pipefail
 
@@ -40,7 +42,18 @@ if [[ -z "$PINNED_SHA" ]]; then
 fi
 
 REPO_URL="${OBJECTUI_REPO_URL:-https://github.com/objectstack-ai/objectui.git}"
-BUILD_CMD="${OBJECTUI_BUILD_CMD:-pnpm exec turbo run build --filter=@object-ui/console}"
+# The console app itself must NOT build through turbo: turbo v2 runs tasks in
+# strict env mode and strips undeclared vars, so OBJECTSTACK_CLIENT_DIST
+# (exported below) never reaches vite unless the pinned objectui SHA happens
+# to declare it in turbo.json. Build the workspace deps through turbo
+# (cacheable, env-independent), then invoke the console's own build script
+# directly so the env survives.
+DEPS_BUILD_CMD="${OBJECTUI_DEPS_BUILD_CMD:-pnpm exec turbo run build --filter=@object-ui/console^...}"
+BUILD_CMD="${OBJECTUI_BUILD_CMD:-pnpm --filter @object-ui/console run build}"
+# Post-build canary: a literal that only exists in an up-to-date bundled
+# client. Guards against any future mechanism (turbo env stripping, a removed
+# vite hook, chunking changes) silently shipping a stale client again.
+BUNDLE_CANARY="${CONSOLE_BUNDLE_CANARY:-import/jobs}"
 
 # Resolve a source checkout of objectui.
 SOURCE_ROOT=""
@@ -101,6 +114,32 @@ if [[ "$ACTUAL" != "$PINNED_SHA" ]]; then
 fi
 
 echo "→ Building @object-ui/console at ${PINNED_SHA:0:12}..."
+
+# ── Bundle THIS framework's client ───────────────────────────────────
+# The console SPA inlines @objectstack/client. Left to itself, the objectui
+# build resolves the client from objectui's own lockfile — which lags the
+# framework whenever a release adds new client APIs (the lockfile can't point
+# at a client that isn't published yet). That shipped 11.5.0 with the new
+# import UI bundled against client 11.2.0, so the console threw "does not
+# support async import jobs" at runtime. Alias the build to the client in
+# THIS tree instead: the bundled client then always matches the framework
+# release being published, with no objectui pin-bump round-trip.
+# objectui honors OBJECTSTACK_CLIENT_DIST in apps/console/vite.config.ts;
+# fail hard if the pinned SHA predates that hook rather than silently drift.
+CLIENT_PKG="${FRAMEWORK_ROOT}/packages/client"
+if ! grep -q "OBJECTSTACK_CLIENT_DIST" "${BUILD_ROOT}/apps/console/vite.config.ts"; then
+  echo "✗ objectui@${PINNED_SHA:0:12} has no OBJECTSTACK_CLIENT_DIST hook in apps/console/vite.config.ts —"
+  echo "  the bundled client would come from objectui's lockfile, not this framework."
+  echo "  Bump .objectui-sha to a commit that includes the hook."
+  exit 1
+fi
+if [[ ! -f "${CLIENT_PKG}/dist/index.mjs" ]]; then
+  echo "→ @objectstack/client dist missing — building it first..."
+  (cd "$CLIENT_PKG" && pnpm build)
+fi
+export OBJECTSTACK_CLIENT_DIST="$CLIENT_PKG"
+echo "→ Console will bundle @objectstack/client from ${CLIENT_PKG}"
+
 pushd "$BUILD_ROOT" > /dev/null
 
 # objectui's root package.json may pin packages that aren't available on
@@ -109,7 +148,9 @@ NPM_CONFIG_REGISTRY_OVERRIDE="${OBJECTUI_NPM_REGISTRY:-https://registry.npmjs.or
 npm_config_registry="$NPM_CONFIG_REGISTRY_OVERRIDE" \
   pnpm install --frozen-lockfile --prefer-offline --prod=false
 
-# Build only the console SPA (turbo will pull in workspace deps).
+# Build the console's workspace deps via turbo, then the SPA itself directly
+# (see DEPS_BUILD_CMD/BUILD_CMD above for why these are split).
+eval "$DEPS_BUILD_CMD"
 eval "$BUILD_CMD"
 
 popd > /dev/null
@@ -132,6 +173,14 @@ cp -R "$CONSOLE_DIST" "$TARGET"
 # (which `turbo run build` does NOT rebuild). Travels inside dist/ so a
 # cloud/objectos Docker overlay that replaces dist/ restamps it too.
 echo "$PINNED_SHA" > "${TARGET}/.objectui-sha"
+
+# Assert the injected client actually landed in the bundle (see BUNDLE_CANARY).
+if ! grep -rq "$BUNDLE_CANARY" "${TARGET}/assets"; then
+  echo "✗ Built console dist does not contain '${BUNDLE_CANARY}' — the bundled"
+  echo "  @objectstack/client is stale (OBJECTSTACK_CLIENT_DIST injection failed)."
+  exit 1
+fi
+echo "✓ Bundle canary '${BUNDLE_CANARY}' present — framework client is in the bundle."
 
 BYTES="$(du -sk "$TARGET" 2>/dev/null | awk '{print $1}')"
 echo "✓ @objectstack/console dist ready (${BYTES} KB) from objectui@${PINNED_SHA:0:12}"
