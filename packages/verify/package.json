@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/verify",
-  "version": "11.4.0",
+  "version": "11.5.0",
   "license": "Apache-2.0",
   "description": "Boot any ObjectStack app in-process and verify it through the real HTTP stack — auto-derived CRUD round-trip fidelity plus the cross-owner RLS invariant. Catches runtime regressions that static checks miss.",
   "type": "module",

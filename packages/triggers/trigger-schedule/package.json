@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/trigger-schedule",
-  "version": "11.4.0",
+  "version": "11.5.0",
   "license": "Apache-2.0",
   "description": "Schedule flow trigger for ObjectStack — auto-launches flows on a cron/interval/once schedule via the IJobService (ADR-0018)",
   "main": "dist/index.js",

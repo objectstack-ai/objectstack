@@ -1,5 +1,16 @@
 # @objectstack/cloud-connection
 
+## 11.5.0
+
+### Patch Changes
+
+- Updated dependencies [6ee4f04]
+- Updated dependencies [c1e3a65]
+  - @objectstack/spec@11.5.0
+  - @objectstack/core@11.5.0
+  - @objectstack/runtime@11.5.0
+  - @objectstack/types@11.5.0
+
 ## 11.4.0
 
 ### Patch Changes

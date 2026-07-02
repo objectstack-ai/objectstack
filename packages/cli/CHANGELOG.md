@@ -1,5 +1,78 @@
 # @objectstack/cli
 
+## 11.5.0
+
+### Minor Changes
+
+- 5a5bf61: ADR-0081 Phase 2: a build-time prop check for `kind:'react'` pages. After the
+  syntax gate, `validateReactPageProps` parses the real JSX (TypeScript compiler)
+  and checks each usage of an injected block (`<ObjectForm>`, `<ListView>`, …)
+  against the react-tier contract (`REACT_BLOCKS` from `@objectstack/spec/ui`):
+  missing a required binding (e.g. `<ObjectForm>` with no `objectName`) is an
+  error; a near-miss prop (`onSucces` → `onSuccess`) is a warning. Wired into
+  `os validate`. Curated data props are not flagged (low false-positive); a spread
+  `{...props}` escapes the required check. (`typescript` moves to `@objectstack/lint`
+  dependencies so it externalizes instead of bundling into the CLI.)
+- ec7175d: Add the source-page styling guardrail (ADR-0065): `os validate`/`os build` now flags Tailwind `className` in `kind:'html'`/`kind:'react'` page source, which silently produces no CSS because the build never scans authored metadata. New `validatePageSourceStyling` rule with an actionable inline-style/`hsl(var(--token))` fix; also corrects the react-blocks contract, the objectstack-ui skill, the layout-dsl docs, and ADR-0080/0081 away from the "HTML + Tailwind" framing.
+
+### Patch Changes
+
+- c77a8f5: Guard against `@objectstack/console` version drift. The vendored Console SPA in `packages/console/dist` is a gitignored, locally-built artifact that only `scripts/build-console.sh` (`pnpm objectui:build` / `objectui:refresh` / `release` / CI) produces — `turbo run build` never rebuilds it. Pulling a branch that bumps the committed `.objectui-sha` pin therefore left a stale dist in place, and the CLI would silently serve a Console built from a different objectui commit (the npm-major version guard can't see a SHA move under one package version).
+
+  `build-console.sh` now stamps the built objectui SHA into `dist/.objectui-sha`. A new `pnpm check:console-sha` compares that stamp against the pin and fails loudly on drift (hard-gating `pnpm dev` / `dev:crm` / `dev:todo`), and `resolveConsolePath` warns at serve time when it selects a drifted dist. Remediation is `pnpm objectui:build` (rebuild at the pinned SHA). Published installs ship no pin, so their stamped dist stays authoritative and the guard is a no-op.
+
+- Updated dependencies [6ee4f04]
+- Updated dependencies [cabce27]
+- Updated dependencies [c1e3a65]
+- Updated dependencies [5a5bf61]
+- Updated dependencies [ec7175d]
+  - @objectstack/spec@11.5.0
+  - @objectstack/console@11.5.0
+  - @objectstack/lint@11.5.0
+  - @objectstack/account@11.5.0
+  - @objectstack/setup@11.5.0
+  - @objectstack/studio@11.5.0
+  - @objectstack/client@11.5.0
+  - @objectstack/cloud-connection@11.5.0
+  - @objectstack/core@11.5.0
+  - @objectstack/formula@11.5.0
+  - @objectstack/mcp@11.5.0
+  - @objectstack/objectql@11.5.0
+  - @objectstack/observability@11.5.0
+  - @objectstack/platform-objects@11.5.0
+  - @objectstack/driver-memory@11.5.0
+  - @objectstack/driver-mongodb@11.5.0
+  - @objectstack/driver-sql@11.5.0
+  - @objectstack/driver-sqlite-wasm@11.5.0
+  - @objectstack/plugin-approvals@11.5.0
+  - @objectstack/plugin-audit@11.5.0
+  - @objectstack/plugin-auth@11.5.0
+  - @objectstack/plugin-email@11.5.0
+  - @objectstack/plugin-hono-server@11.5.0
+  - @objectstack/plugin-org-scoping@11.5.0
+  - @objectstack/plugin-reports@11.5.0
+  - @objectstack/plugin-security@11.5.0
+  - @objectstack/plugin-sharing@11.5.0
+  - @objectstack/plugin-webhooks@11.5.0
+  - @objectstack/rest@11.5.0
+  - @objectstack/runtime@11.5.0
+  - @objectstack/service-analytics@11.5.0
+  - @objectstack/service-automation@11.5.0
+  - @objectstack/service-cache@11.5.0
+  - @objectstack/service-datasource@11.5.0
+  - @objectstack/service-job@11.5.0
+  - @objectstack/service-messaging@11.5.0
+  - @objectstack/service-package@11.5.0
+  - @objectstack/service-queue@11.5.0
+  - @objectstack/service-realtime@11.5.0
+  - @objectstack/service-settings@11.5.0
+  - @objectstack/service-storage@11.5.0
+  - @objectstack/trigger-api@11.5.0
+  - @objectstack/trigger-record-change@11.5.0
+  - @objectstack/trigger-schedule@11.5.0
+  - @objectstack/types@11.5.0
+  - @objectstack/verify@11.5.0
+
 ## 11.4.0
 
 ### Minor Changes
