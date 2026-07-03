@@ -209,7 +209,8 @@ describe('SqlDriver auto_number format tokens', () => {
     await driver.initObjects([
       { name: 'invoice', fields: { invoice_number: { type: 'autonumber', format: 'INV-{0000}' } } },
     ]);
-    // First create triggers the lazy table-ensure → in-place migration.
+    // initObjects pre-ensures the table → the in-place migration runs at init,
+    // before any write; the first create then reads the already-migrated counter.
     const r = await driver.create('invoice', {});
 
     const cols = await k('_objectstack_sequences').columnInfo();

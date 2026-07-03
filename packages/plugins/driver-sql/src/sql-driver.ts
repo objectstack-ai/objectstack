@@ -776,7 +776,13 @@ export class SqlDriver implements IDataDriver {
         // Pre-existing table may predate the `key_hash`/`scope` shape. Migrate.
         await this.ensureSequencesKeyHashShape(runner);
       }
-      this.sequencesTableReady = true;
+      // Cache "ready" only when the DDL ran on a durable connection. If it rode
+      // the caller's transaction (the SQLite in-tx fallback above), the table is
+      // commit-conditional — a rollback would drop it — so leave the flag unset
+      // and re-verify (a cheap `hasTable`) on the next write rather than trusting
+      // a stale process-level flag. `initObjects` sets it durably up front, so
+      // the hot path is unaffected.
+      if (runner === this.knex) this.sequencesTableReady = true;
     })();
     try {
       await this.sequencesTableEnsurePromise;
