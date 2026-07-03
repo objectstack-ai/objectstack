@@ -4546,12 +4546,17 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
 
         if (srcPkg?.manifest && typeof registry?.installPackage === 'function') {
             try {
-                registry.installPackage({
-                    ...srcPkg.manifest,
-                    id: request.targetPackageId,
-                    name: request.targetName ?? `${srcPkg.manifest.name ?? request.sourcePackageId} (copy)`,
-                    namespace: targetNs,
-                });
+                // Route through installPackage (not a bare registry write) so the
+                // duplicated base ALSO lands in sys_packages — otherwise the copy
+                // would vanish from GET /packages on the next restart (#2532).
+                await this.installPackage({
+                    manifest: {
+                        ...srcPkg.manifest,
+                        id: request.targetPackageId,
+                        name: request.targetName ?? `${srcPkg.manifest.name ?? request.sourcePackageId} (copy)`,
+                        namespace: targetNs,
+                    },
+                } as InstallPackageRequest);
             } catch {
                 /* best-effort — the per-item package binding still works without a manifest row */
             }
