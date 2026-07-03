@@ -650,17 +650,6 @@ const ObjectSchemaBase = z.object({
   listViews: z.record(z.string(), ListViewSchema).optional().describe('Built-in named list views (segmented tabs) shipped with the object schema'),
 
   /**
-   * Default FormView used when displaying a single record's detail page.
-   *
-   * Matches the named FormView under the same object's `ViewSchema.formViews`.
-   * When unset, the runtime falls back to the unnamed `form` view, then to
-   * an auto-generated layout. This is the Airtable-style "Interface form"
-   * binding — every record-detail screen renders through a FormView, so the
-   * same metadata drives both the public collection form and the operator's
-   * edit panel.
-   */
-
-  /** 
    * Search Engine Config 
    */
   searchableFields: z.array(z.string()).optional().describe('Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields.'),

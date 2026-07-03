@@ -61,9 +61,9 @@ export const PageCardProps = z.object({
 
 export const RecordDetailsProps = z.object({
   columns: z.enum(['1', '2', '3', '4']).default('2').describe('Number of columns for field layout (1-4)'),
-  layout: z.enum(['auto', 'custom']).default('auto').describe('Layout mode: auto uses object compactLayout, custom uses explicit sections'),
+  layout: z.enum(['auto', 'custom']).default('auto').describe('Layout mode: auto uses object highlightFields, custom uses explicit sections'),
   sections: z.array(z.string()).optional().describe('Section IDs to show (required when layout is "custom")'),
-  fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides compactLayout)'),
+  fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });

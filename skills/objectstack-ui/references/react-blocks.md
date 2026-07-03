@@ -89,9 +89,9 @@ Field-detail panel for the bound record. Config props from the spec RecordDetail
 | `objectName` | `string` | binding |  | The record’s object. |
 | `recordId` | `string \| number` | controlled |  | The record to show. |
 | `columns` | `'1' \| '2' \| '3' \| '4'` | data | ✓ | Number of columns for field layout (1-4) |
-| `layout` | `'auto' \| 'custom'` | data | ✓ | Layout mode: auto uses object compactLayout, custom uses explicit sections |
+| `layout` | `'auto' \| 'custom'` | data | ✓ | Layout mode: auto uses object highlightFields, custom uses explicit sections |
 | `sections` | `string[]` | data |  | Section IDs to show (required when layout is "custom") |
-| `fields` | `string[]` | data |  | Explicit field list to display (optional, overrides compactLayout) |
+| `fields` | `string[]` | data |  | Explicit field list to display (optional, overrides highlightFields) |
 
 ## `<RecordHighlights>` — `record:highlights`
 

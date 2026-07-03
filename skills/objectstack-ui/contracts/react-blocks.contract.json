@@ -396,7 +396,7 @@
           "type": "'auto' | 'custom'",
           "kind": "data",
           "required": true,
-          "description": "Layout mode: auto uses object compactLayout, custom uses explicit sections"
+          "description": "Layout mode: auto uses object highlightFields, custom uses explicit sections"
         },
         {
           "name": "sections",
@@ -410,7 +410,7 @@
           "type": "string[]",
           "kind": "data",
           "required": false,
-          "description": "Explicit field list to display (optional, overrides compactLayout)"
+          "description": "Explicit field list to display (optional, overrides highlightFields)"
         }
       ]
     },
