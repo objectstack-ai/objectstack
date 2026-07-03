@@ -145,10 +145,16 @@ describe('protocol.duplicatePackage (ADR-0070 D4)', () => {
             sourcePackageId: 'app.iojn', targetPackageId: 'app.iojn2', targetNamespace: 'iojn2',
         });
 
-        // target package installed as a writable copy (new id + namespace, scope kept)
-        expect(installPackage).toHaveBeenCalledWith(
-            expect.objectContaining({ id: 'app.iojn2', namespace: 'iojn2', scope: 'environment' }),
-        );
+        // #2540: the copy routes through installPackage (not a bare registry
+        // write) so it ALSO lands in sys_packages and survives a restart. And
+        // the copy is SCOPE-LESS on purpose — the source carries scope
+        // 'environment', but branding that onto the duplicate would make it
+        // read-only in the writability heuristics; a duplicate must be a
+        // writable base.
+        expect(installPackage).toHaveBeenCalledTimes(1);
+        const dupManifest = (installPackage as any).mock.calls[0][0];
+        expect(dupManifest).toMatchObject({ id: 'app.iojn2', namespace: 'iojn2' });
+        expect(dupManifest.scope).toBeUndefined();
 
         const calls = (saveMetaItem as any).mock.calls.map((c: any) => c[0]);
         const ticket = calls.find((c: any) => c.name === 'iojn2_repair_ticket');

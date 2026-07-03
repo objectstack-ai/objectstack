@@ -694,6 +694,72 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 }
             });
 
+            // The dispatcher's handlePackages grew branches that were never
+            // mounted here, so they 404'd at the HTTP layer on every serve
+            // stack (hono notFound) despite working handler code: duplicate
+            // (ADR-0070 D4), adopt-orphans (D5), discard-drafts, and the
+            // ADR-0067 commit-history / rollback family. Mount them all —
+            // the handlers already exist; this is routing only.
+            server.post(`${prefix}/packages/:id/duplicate`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.handlePackages(`/${req.params.id}/duplicate`, 'POST', req.body, {}, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+
+            server.post(`${prefix}/packages/:id/adopt-orphans`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.handlePackages(`/${req.params.id}/adopt-orphans`, 'POST', req.body, {}, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+
+            server.post(`${prefix}/packages/:id/discard-drafts`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.handlePackages(`/${req.params.id}/discard-drafts`, 'POST', req.body, {}, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+
+            server.get(`${prefix}/packages/:id/commits`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.handlePackages(`/${req.params.id}/commits`, 'GET', undefined, req.query ?? {}, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+
+            server.post(`${prefix}/packages/:id/commits/:commitId/revert`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.handlePackages(
+                        `/${req.params.id}/commits/${req.params.commitId}/revert`,
+                        'POST',
+                        req.body,
+                        {},
+                        { request: req },
+                    );
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+
+            server.post(`${prefix}/packages/:id/rollback`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.handlePackages(`/${req.params.id}/rollback`, 'POST', req.body, {}, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+
             // ── Storage ─────────────────────────────────────────────────
             server.post(`${prefix}/storage/upload`, async (req: any, res: any) => {
                 try {

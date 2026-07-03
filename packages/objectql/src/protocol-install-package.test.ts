@@ -81,7 +81,10 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
     warn.mockRestore();
   });
 
-  it('skips persistence when the manifest has no version (cannot key sys_packages)', async () => {
+  it('persists a versionless manifest with a defaulted version (#2540: base packages must survive restart)', async () => {
+    // Builder/Setup create base packages as bare { id, name } with no version.
+    // Pre-#2540 these were skipped for persistence and vanished on restart (#2532).
+    // Now installPackage defaults version to '0.1.0' so they key into sys_packages.
     const publish = vi.fn(async () => ({ success: true }));
     const { protocol, registry } = makeProtocol({ pkgSvc: { publish } });
     const manifest = { id: 'app.nov', name: 'NoVer', type: 'application' };
@@ -89,6 +92,9 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
     await protocol.installPackage({ manifest } as never);
 
     expect(registry.installPackage).toHaveBeenCalledOnce();
-    expect(publish).not.toHaveBeenCalled();
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect((publish.mock.calls[0] as unknown[])[0]).toMatchObject({
+      manifest: { id: 'app.nov', version: '0.1.0' },
+    });
   });
 });
