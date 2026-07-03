@@ -549,8 +549,8 @@ export const Account = ObjectSchema.create({
 
   fieldGroups: [
     { key: 'contact_info', label: 'Contact Information', icon: 'user' },
-    { key: 'billing',      label: 'Billing', defaultExpanded: false },
-    { key: 'system',       label: 'System',  visibleOn: '$user.isAdmin' },
+    { key: 'billing',      label: 'Billing', collapse: 'collapsed' },
+    { key: 'system',       label: 'System' },
   ],
 
   fields: {
@@ -573,8 +573,7 @@ export const Account = ObjectSchema.create({
 | `label` | `string` | Human-readable group header |
 | `icon` | `string?` | Lucide/Material icon name for the group header |
 | `description` | `string?` | Optional description under the header |
-| `defaultExpanded` | `boolean` (default `true`) | Whether the group is expanded initially |
-| `visibleOn` | `string?` | Expression controlling group-level visibility |
+| `collapse` | `'none' \| 'expanded' \| 'collapsed'` (default `'none'`) | Collapse behaviour on every surface: `'none'` = always open (no toggle), `'expanded'` = collapsible and starts open, `'collapsed'` = collapsible and starts closed (ADR-0085; replaces the deprecated `defaultExpanded` flag, which is still accepted as an alias) |
 
 ### Supported Migrations (MVP)
 
@@ -582,7 +581,10 @@ export const Account = ObjectSchema.create({
 ✅ Assign an existing field to a group — set `Field.group`.
 
 ⏳ Deferred (future iterations): explicit per-field in-group ordering, nested
-groups, permission-scoped group visibility beyond `visibleOn`.
+groups, group-level visibility predicates. Groups render identically on forms,
+modals, and detail pages; when a single page needs a bespoke layout beyond
+groups, assign it a custom Page schema instead of adding per-surface hints
+here (ADR-0085).
 
 ---
 

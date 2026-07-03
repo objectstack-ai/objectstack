@@ -1,6 +1,6 @@
 ---
 title: Forms (Public + Internal)
-description: Render any FormView either publicly (anonymous, /f/:slug) or internally (authed operators, /forms/:name). The same metadata drives both, with URL prefill, configurable post-submit behavior, defaultDetailForm record binding, and declarative open-form actions.
+description: Render any FormView either publicly (anonymous, /f/:slug) or internally (authed operators, /forms/:name). The same metadata drives both, with URL prefill, configurable post-submit behavior, and declarative open-form actions.
 ---
 
 # Forms
@@ -359,29 +359,26 @@ export default Action.create({
 
 Compared to `{ type: 'url', target: '/console/forms/quick_create' }`, the `'form'` variant is portable across runtimes — Studio/console/native shells can route it through their own form renderer instead of a raw navigation.
 
-## 10. `defaultDetailForm` — bind a FormView to record detail
+## 10. Record detail is driven by semantic roles, not a form binding
 
-Set `defaultDetailForm` on an object schema to pin the FormView used by the record-detail / edit screen. This is the Airtable Interface-form binding pattern.
+There is **no** object-level key that pins a FormView to the record-detail /
+edit screen (the once-documented `defaultDetailForm` was never implemented and
+has been removed from `ObjectSchema`). Record-detail rendering is derived from
+the object's **cross-surface semantic roles** (ADR-0085):
 
-```ts
-// hotcrm/src/objects/lead.object.ts
-import { ObjectSchema } from '@objectstack/spec/data';
+- `nameField` — which field is the record's display name.
+- `highlightFields` — the most important fields (detail highlight strip,
+  default list columns, cards).
+- `stageField` — the linear-lifecycle field behind the detail progress
+  stepper (`false` suppresses detection).
+- `fieldGroups` + `Field.group` — semantic grouping, rendered identically on
+  forms, modals, and detail pages.
 
-export default ObjectSchema.create({
-  name: 'lead',
-  label: 'Lead',
-  defaultDetailForm: 'quick_create', // → views.formViews.quick_create
-  fields: { /* … */ },
-});
-```
-
-Resolution order at runtime:
-
-1. `views.formViews[defaultDetailForm]` if set
-2. `views.form` (the unnamed default form view)
-3. Auto-generated grid layout from object fields
-
-The same FormView can therefore drive **three** experiences — public collection, internal quick-create, and record-detail editing — without duplicating layout metadata.
+When a record page needs a bespoke layout beyond what the roles derive, assign
+the object a **custom Page schema** — that is the supported per-page
+customization path. FormViews remain the metadata for the two form
+experiences this guide covers: public collection (`/f/:slug`) and internal
+entry (`/forms/:name`).
 
 ## 11. Security checklist (public mode)
 

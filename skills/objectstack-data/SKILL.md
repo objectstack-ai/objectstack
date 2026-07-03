@@ -111,6 +111,12 @@ Organize fields into logical groups (e.g., "Contact Information", "Billing",
   `ObjectFieldGroup.key`. In-group display order equals the traversal order
   of `fields`.
 - Group keys must be `snake_case`; group labels are human-readable.
+- Optional per-group: `icon`, `description`, and `collapse`
+  (`'none'` always open · `'expanded'` collapsible, starts open ·
+  `'collapsed'` collapsible, starts closed — replaces the deprecated
+  `defaultExpanded` flag, ADR-0085). Groups render identically on forms,
+  modals, and detail pages; for a bespoke single-page layout assign a
+  custom Page instead.
 
 ```typescript
 import { ObjectSchema } from '@objectstack/spec';
@@ -121,8 +127,8 @@ export default ObjectSchema.create({
 
   fieldGroups: [
     { key: 'contact_info', label: 'Contact Information', icon: 'user' },
-    { key: 'billing',      label: 'Billing', defaultExpanded: false },
-    { key: 'system',       label: 'System',  visibleOn: P`os.user.isAdmin == true` },
+    { key: 'billing',      label: 'Billing', collapse: 'collapsed' },
+    { key: 'system',       label: 'System' },
   ],
 
   fields: {

@@ -304,7 +304,6 @@ to the envelope.
 | `Field` | `visibleOn` | cel |
 | `Field` | `defaultValue` (M9.9b) | cel |
 | `ConditionalValidation` | `when` | cel |
-| `ObjectFieldGroup` | `visibleOn` | cel |
 | `View` | `visibleOn` | cel |
 | `View.criteria` | filter expression | cel |
 | `Action` | `disabled` | cel (or boolean) |

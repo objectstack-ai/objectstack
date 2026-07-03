@@ -151,23 +151,16 @@ columns (see objectstack-data → Relationships → Detail-page related lists).
 Authored record pages can still place an explicit `record:related_list` (or
 inline-editable `record:line_items`) when they need bespoke placement.
 
-**Related-list layout — `detail.relatedLayout` (`'stack'` | `'tabs'`).** By
-default every related list stacks under a single **Related** tab on the record
-detail page (`relatedLayout: 'stack'`). To promote each related table to its own
-**peer tab** — sitting alongside *Details* / *Activity* instead of nested under
-*Related* — set `relatedLayout: 'tabs'` in the object's `detail` block:
-
-```typescript
-detail: { relatedLayout: 'tabs' }   // Details · Tasks · Risks · Milestones …
-```
-
-Pure config — no custom record page needed; the synthesized detail page emits
-one peer tab per related entry (label falls back to the object name, the
-relationship's icon carries through), with Activity/History ordered after them.
-Omit it (or `'stack'`) for the default single-Related-tab behavior — zero
-regression. Use `tabs` when a record has several substantial child tables that
-each deserve first-class navigation; keep `stack` when related lists are
-secondary to the main record body.
+**Related-list layout.** Every related list stacks under a single **Related**
+tab on the synthesized record detail page — that is the only built-in layout.
+The old `detail.relatedLayout` (`'stack'` | `'tabs'`) toggle — like the whole
+object-level `detail: {...}` block — was **removed** (ADR-0085): an object
+declares no per-surface layout hints. When a record's child tables deserve
+first-class navigation (their own tabs, bespoke placement), assign the object a
+**custom record Page** and lay it out explicitly with `record:related_list`
+(or inline-editable `record:line_items`) blocks. For lighter tweaks stay at the
+relationship layer: `relatedList: false` to suppress a noisy child,
+`relatedListTitle` / `relatedListColumns` to override title / columns.
 
 ### Field Conditional Rules in Forms
 
