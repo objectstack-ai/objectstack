@@ -20,3 +20,10 @@ Fixes:
   transaction on SQLite instead of grabbing a second connection. It deliberately
   does not route DDL through the caller's transaction on MySQL, where DDL would
   implicitly commit the caller's in-flight transaction.
+- Added a dev/test guard (`assertBareKnexSafe`): on SQLite, issuing a bare
+  `this.knex` query while a transaction holds the single pooled connection now
+  fails fast with an actionable error instead of hanging until the opaque
+  `Knex: Timeout acquiring a connection`. No-op in production and on non-SQLite
+  dialects, so it adds no runtime cost on the hot path — it just turns this whole
+  class of "forgot to thread the transaction through" bug into an immediate,
+  self-explaining failure at the call site.

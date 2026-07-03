@@ -371,6 +371,19 @@ export class SqlDriver implements IDataDriver {
   protected sequencesTableEnsurePromise: Promise<void> | null = null;
 
   /**
+   * Count of transactions currently open through `beginTransaction`. On SQLite
+   * the pool holds a single connection, so while this is > 0 that connection is
+   * busy and any bare `this.knex` query would dead-lock acquiring a second one.
+   * Used only by the dev/test guard `assertBareKnexSafe`. Incremented in
+   * `beginTransaction`, decremented in `commit`/`rollback`; the `openTransactions`
+   * set makes the decrement idempotent so a double commit/rollback can't drive
+   * the count negative or double-count.
+   */
+  protected activeTransactions = 0;
+  /** Transactions counted in `activeTransactions` and not yet released. */
+  protected openTransactions = new WeakSet<object>();
+
+  /**
    * Per-table tenant-isolation column. Populated during `initObjects` by
    * detecting an `organization_id` field. When set and the caller passes
    * `DriverOptions.tenantId`, the driver automatically:
@@ -758,6 +771,11 @@ export class SqlDriver implements IDataDriver {
     // on MySQL, where DDL implicitly commits the caller's transaction; there the
     // roomy pool (max=10) lets a fresh connection create the table safely.
     const runner: Knex | Knex.Transaction = parentTrx && this.isSqlite ? parentTrx : this.knex;
+    // If we are about to run DDL on a fresh pooled connection while a SQLite
+    // transaction holds the only one, fail fast with a clear message instead of
+    // dead-locking. This catches the "caller opened a transaction but did not
+    // thread it through as parentTrx" regression at the call site (dev/test only).
+    if (runner === this.knex) this.assertBareKnexSafe('ensureSequencesTable');
     this.sequencesTableEnsurePromise = (async () => {
       const exists = await runner.schema.hasTable(SEQUENCES_TABLE);
       if (!exists) {
@@ -1270,17 +1288,63 @@ export class SqlDriver implements IDataDriver {
   // ===================================
 
   async beginTransaction(): Promise<Knex.Transaction> {
-    return await this.knex.transaction();
+    const trx = await this.knex.transaction();
+    this.openTransactions.add(trx as unknown as object);
+    this.activeTransactions++;
+    return trx;
+  }
+
+  /** Idempotently drop a transaction from the open-count (safe on double close). */
+  protected releaseTransaction(transaction: unknown): void {
+    const key = transaction as object;
+    if (key && this.openTransactions.has(key)) {
+      this.openTransactions.delete(key);
+      this.activeTransactions = Math.max(0, this.activeTransactions - 1);
+    }
+  }
+
+  /**
+   * Dev/test guard against the SQLite single-connection dead-lock. SQLite's pool
+   * hands out exactly one connection, so issuing a bare `this.knex` query while a
+   * transaction holds that connection blocks forever acquiring a second one and
+   * finally fails with an opaque `Knex: Timeout acquiring a connection`. This
+   * turns that into an immediate, actionable error at the call site.
+   *
+   * No-op in production (zero overhead on the hot path) and on every non-SQLite
+   * dialect, whose roomy pools (max ≥ 10) cannot exhibit the single-connection
+   * dead-lock. Callers that legitimately need the connection during a
+   * transaction must bind the operation to that transaction instead of
+   * `this.knex`.
+   */
+  protected assertBareKnexSafe(op: string): void {
+    if (this.isProductionEnv()) return;
+    if (!this.isSqlite) return;
+    if (this.activeTransactions === 0) return;
+    throw new Error(
+      `[driver-sql] refusing to run '${op}' on a fresh pooled connection while a ` +
+        `transaction is open: SQLite's pool has a single connection, so acquiring a ` +
+        `second one would dead-lock (surfacing later as "Knex: Timeout acquiring a ` +
+        `connection"). Bind this operation to the active transaction instead of using ` +
+        `this.knex.`,
+    );
   }
 
   /** IDataDriver standard */
   async commit(transaction: unknown): Promise<void> {
-    await (transaction as Knex.Transaction).commit();
+    try {
+      await (transaction as Knex.Transaction).commit();
+    } finally {
+      this.releaseTransaction(transaction);
+    }
   }
 
   /** IDataDriver standard */
   async rollback(transaction: unknown): Promise<void> {
-    await (transaction as Knex.Transaction).rollback();
+    try {
+      await (transaction as Knex.Transaction).rollback();
+    } finally {
+      this.releaseTransaction(transaction);
+    }
   }
 
   /** @deprecated Use commit() instead */
