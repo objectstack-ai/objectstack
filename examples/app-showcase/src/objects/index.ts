@@ -13,3 +13,4 @@ export { PrivateNote } from './private-note.object.js';
 export { Announcement } from './announcement.object.js';
 export { Inquiry } from './inquiry.object.js';
 export { Contact } from './contact.object.js';
+export { SemanticZoo, SemanticZooLegacy } from './semantic-zoo.object.js';
