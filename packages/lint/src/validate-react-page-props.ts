@@ -15,8 +15,43 @@
 //     unknown props (the contract's data props are a curated subset) — only the
 //     likely typos, to keep false positives near zero.
 
-import ts from 'typescript';
+import { createRequire } from 'node:module';
+import type ts from 'typescript';
 import { REACT_BLOCKS } from '@objectstack/spec/ui';
+
+// The TypeScript compiler must NOT be imported at module top level: it is
+// ~9 MB of CJS (~70 ms+ to parse, worse on container cold starts), and
+// @objectstack/lint sits on the kernel boot path — while this gate only runs
+// when a `kind:'react'` page is actually validated (rare, trusted tier). An
+// eager import also hard-crashes boot in deployments that prune the package
+// from the image (cloud's Docker pruner did exactly that). So the compiler is
+// loaded lazily, on first use, and stays a regular dependency in package.json.
+// Guarded by lazy-typescript.test.ts.
+//
+// `node:module` is a Node builtin, untouched by esbuild/tsup, so the static
+// `createRequire` import survives bundling; the `createRequire(...)` call is
+// deferred because `import.meta.url` is rewritten to an empty stub in the CJS
+// build (same pattern as driver-sqlite-wasm's knex-wasm-dialect).
+let cachedTs: typeof ts | null = null;
+function loadTypeScript(): typeof ts {
+  if (cachedTs) return cachedTs;
+  const anchor =
+    typeof import.meta !== 'undefined' && import.meta.url
+      ? import.meta.url
+      : typeof __filename !== 'undefined'
+        ? __filename
+        : process.cwd() + '/';
+  try {
+    cachedTs = createRequire(anchor)('typescript') as typeof ts;
+  } catch (err) {
+    throw new Error(
+      `@objectstack/lint: validating a kind:'react' page requires the "typescript" package, which could not be loaded ` +
+        `(${err instanceof Error ? err.message : String(err)}). It is a declared dependency of @objectstack/lint — ` +
+        `if this deployment prunes packages, keep "typescript" in the image; it is only loaded when a react-source page is validated.`,
+    );
+  }
+  return cachedTs;
+}
 
 export type ReactPropSeverity = 'error' | 'warning';
 
@@ -82,23 +117,27 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
     if (typeof source !== 'string' || source.trim() === '') continue;
     const name = String(page.name ?? `#${p}`);
 
+    // Outside the try below on purpose: a missing compiler must surface as an
+    // error, not be swallowed as "unparseable source".
+    const tsc = loadTypeScript();
+
     let sf: ts.SourceFile;
     try {
-      sf = ts.createSourceFile('page.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+      sf = tsc.createSourceFile('page.tsx', source, tsc.ScriptTarget.Latest, true, tsc.ScriptKind.TSX);
     } catch {
       continue; // the syntax gate reports unparseable sources
     }
 
     const visit = (node: ts.Node): void => {
-      if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      if (tsc.isJsxOpeningElement(node) || tsc.isJsxSelfClosingElement(node)) {
         const tag = node.tagName.getText(sf);
         const block = BLOCKS.get(tag);
         if (block) {
           let hasSpread = false;
           const used = new Set<string>();
           for (const a of node.attributes.properties) {
-            if (ts.isJsxSpreadAttribute(a)) { hasSpread = true; continue; }
-            if (ts.isJsxAttribute(a)) used.add(a.name.getText(sf));
+            if (tsc.isJsxSpreadAttribute(a)) { hasSpread = true; continue; }
+            if (tsc.isJsxAttribute(a)) used.add(a.name.getText(sf));
           }
           const where = `page "${name}" › <${tag}>`;
           const path = `pages[${p}].source`;
@@ -129,7 +168,7 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
           }
         }
       }
-      ts.forEachChild(node, visit);
+      tsc.forEachChild(node, visit);
     };
     visit(sf);
   }
