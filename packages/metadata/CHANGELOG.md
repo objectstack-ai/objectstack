@@ -1,5 +1,18 @@
 # @objectstack/metadata
 
+## 11.10.0
+
+### Patch Changes
+
+- Updated dependencies [6a9397e]
+- Updated dependencies [c0efe5d]
+  - @objectstack/spec@11.10.0
+  - @objectstack/core@11.10.0
+  - @objectstack/metadata-core@11.10.0
+  - @objectstack/platform-objects@11.10.0
+  - @objectstack/types@11.10.0
+  - @objectstack/metadata-fs@11.10.0
+
 ## 11.9.0
 
 ### Patch Changes

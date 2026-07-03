@@ -1,5 +1,25 @@
 # @objectstack/spec
 
+## 11.10.0
+
+### Minor Changes
+
+- 6a9397e: Retire the deprecated `compactLayout` alias for `highlightFields` (framework#2536, closes the ADR-0085 deprecation window).
+
+  - `ObjectSchema` no longer declares `compactLayout`: `create()` rejects it like any unknown key; lenient `parse()` strips it (no silent aliasing).
+  - The parse-time alias AND the `highlightFields → compactLayout` back-fill transition mirror are removed from `normalizeSemanticRoleAliases`. Served metadata now carries the canonical key only.
+  - All remaining first-party authors (27 system objects across plugin-audit / approvals / security / sharing / webhooks / service-storage / automation / messaging / realtime — missed by the #2521 sweep, caught by the type gate) renamed to `highlightFields`.
+  - The downstream smoke pin moves to hotcrm v1.2.2 (hotcrm#424: same rename + deps ^11.7.0).
+  - Consumers were switched in objectui#2168 and shipped via the console pin bump (#2526); this closes the window scheduled there. The dogfood mirror assertion (#2528) flips to `compactLayout: undefined` in this same change, per the plan it carried.
+
+  Version note: minor, not major — the key was deprecated-with-alias for a full release window, all first-party consumers/authors are migrated, and the spec api-surface gate reports no export changes (same documented-exception path as the ADR-0085 removals in 11.7.0). External metadata still authoring `compactLayout` will now fail `create()` loudly with the standard unknown-key error naming the key.
+
+- c0efe5d: Upgrade path for retired spec keys — the error IS the guide:
+
+  - **Tombstone entries** in `UNKNOWN_KEY_GUIDANCE`: `create()` rejecting a retired key (`compactLayout`, the `detail` block, object-level `views`, `defaultDetailForm`) now names the replacement, the version/decision that removed it, and the one-line fix — instead of a bare unknown-key error. Tombstones age out ~two majors after the removal.
+  - **`CHANGELOG.md` now ships inside the npm package** (`files` allowlist): every breaking entry's migration notes travel with the exact version installed, greppable offline from `node_modules/@objectstack/spec/CHANGELOG.md`.
+  - **`llms.txt` gains an "Upgrading Across Spec Versions" section** teaching agents the two-step protocol: read the tombstone, then grep the shipped CHANGELOG — and never to re-add rejected keys or downgrade to silence errors.
+
 ## 11.9.0
 
 ### Patch Changes

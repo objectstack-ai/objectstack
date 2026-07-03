@@ -1,5 +1,11 @@
 # @objectstack/metadata-fs
 
+## 11.10.0
+
+### Patch Changes
+
+- @objectstack/metadata-core@11.10.0
+
 ## 11.9.0
 
 ### Patch Changes

@@ -1,5 +1,61 @@
 # @objectstack/cli
 
+## 11.10.0
+
+### Patch Changes
+
+- Updated dependencies [996c548]
+- Updated dependencies [e82a495]
+- Updated dependencies [3500820]
+- Updated dependencies [6a9397e]
+- Updated dependencies [c0efe5d]
+  - @objectstack/lint@11.10.0
+  - @objectstack/console@11.10.0
+  - @objectstack/spec@11.10.0
+  - @objectstack/plugin-audit@11.10.0
+  - @objectstack/plugin-approvals@11.10.0
+  - @objectstack/plugin-security@11.10.0
+  - @objectstack/plugin-sharing@11.10.0
+  - @objectstack/plugin-webhooks@11.10.0
+  - @objectstack/service-storage@11.10.0
+  - @objectstack/service-automation@11.10.0
+  - @objectstack/service-messaging@11.10.0
+  - @objectstack/service-realtime@11.10.0
+  - @objectstack/account@11.10.0
+  - @objectstack/setup@11.10.0
+  - @objectstack/studio@11.10.0
+  - @objectstack/client@11.10.0
+  - @objectstack/cloud-connection@11.10.0
+  - @objectstack/core@11.10.0
+  - @objectstack/formula@11.10.0
+  - @objectstack/mcp@11.10.0
+  - @objectstack/objectql@11.10.0
+  - @objectstack/observability@11.10.0
+  - @objectstack/platform-objects@11.10.0
+  - @objectstack/driver-memory@11.10.0
+  - @objectstack/driver-mongodb@11.10.0
+  - @objectstack/driver-sql@11.10.0
+  - @objectstack/driver-sqlite-wasm@11.10.0
+  - @objectstack/plugin-auth@11.10.0
+  - @objectstack/plugin-email@11.10.0
+  - @objectstack/plugin-hono-server@11.10.0
+  - @objectstack/plugin-org-scoping@11.10.0
+  - @objectstack/plugin-reports@11.10.0
+  - @objectstack/rest@11.10.0
+  - @objectstack/runtime@11.10.0
+  - @objectstack/service-analytics@11.10.0
+  - @objectstack/service-cache@11.10.0
+  - @objectstack/service-datasource@11.10.0
+  - @objectstack/service-job@11.10.0
+  - @objectstack/service-package@11.10.0
+  - @objectstack/service-queue@11.10.0
+  - @objectstack/service-settings@11.10.0
+  - @objectstack/trigger-api@11.10.0
+  - @objectstack/trigger-record-change@11.10.0
+  - @objectstack/trigger-schedule@11.10.0
+  - @objectstack/types@11.10.0
+  - @objectstack/verify@11.10.0
+
 ## 11.9.0
 
 ### Patch Changes
