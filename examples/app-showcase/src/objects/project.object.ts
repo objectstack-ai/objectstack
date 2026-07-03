@@ -56,6 +56,24 @@ export const Project = ObjectSchema.create({
     start_date: Field.date({ label: 'Start Date' }),
     end_date: Field.date({ label: 'Target End Date' }),
     owner: Field.text({ label: 'Owner', maxLength: 200 }),
+    // Multi-value fields — the payload for the grid's *bulk-edit* showcase. A
+    // multiselect (fixed options) and a multi-user field are exactly the two
+    // shapes that, before #2185, the bulk dialog could not set: its people /
+    // select picker collapsed to a single value and overwrote the array. The
+    // list view's `bulkActionDefs` below now sets both with real multi-select
+    // controls, writing an array patch.
+    labels: {
+      type: 'multiselect',
+      label: 'Labels',
+      options: [
+        { label: 'Frontend', value: 'frontend', color: '#3B82F6' },
+        { label: 'Backend', value: 'backend', color: '#8B5CF6' },
+        { label: 'Design', value: 'design', color: '#EC4899' },
+        { label: 'QA', value: 'qa', color: '#F59E0B' },
+        { label: 'DevOps', value: 'devops', color: '#10B981' },
+      ],
+    },
+    team_members: Field.user({ label: 'Team Members', multiple: true }),
     // Roll-up summaries — recomputed server-side whenever a child task is
     // inserted / updated / deleted (FK auto-detected: showcase_task.project).
     task_count: Field.summary({
