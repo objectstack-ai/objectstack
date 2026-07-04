@@ -239,6 +239,26 @@ export class AutomationServicePlugin implements Plugin {
             await this.resyncFlowsFromMetadata(ctx);
         });
 
+        // ── Cold-boot bind via the PROTOCOL's flattened flow view ─────────────
+        // The boot pull above reads `ql.registry.listItems('flow')`, which is
+        // EMPTY for flows defined inline in an app manifest: registerApp stores
+        // the app under type 'app' and never promotes its inline flows to
+        // standalone registry 'flow' items. The 'metadata:reloaded' re-sync
+        // below can't cover the cold boot either — that hook fires only on a dev
+        // HMR reload (and `os dev` restarts the process on recompile rather than
+        // firing it), never on a fresh boot or in production. Net effect:
+        // record-triggered flows silently never bound on a cold start, so their
+        // automations never fired.
+        //
+        // The canonical flattened flow view — the one `GET /meta/flow` serves —
+        // is `protocol.getMetaItems({ type: 'flow' })`; it surfaces inline app
+        // flows on-demand from the registry. Bind from THAT at kernel:ready,
+        // once every plugin has finished init()/start() (so the app — hence its
+        // flows — is registered). registerFlow is idempotent with the boot pull.
+        ctx.hook('kernel:ready', async () => {
+            await this.syncFlowsFromProtocol(ctx);
+        });
+
         // ADR-0019 follow-up: re-arm auto-resume timers for runs that were
         // suspended at a timer-`wait` node when the process went down. Must run
         // *after* the flow pull above — resume() needs the flow definitions
@@ -329,6 +349,60 @@ export class AutomationServicePlugin implements Plugin {
 
         if (resynced > 0) {
             ctx.logger.info(`[Automation] Re-synced ${resynced} flow(s) after metadata reload`);
+        }
+    }
+
+    /**
+     * Bind flows from the protocol's flattened flow view — `getMetaItems({ type:
+     * 'flow' })`, the same source `GET /meta/flow` serves. Unlike
+     * `registry.listItems('flow')` (the boot pull) this surfaces flows defined
+     * inline in an app manifest, and unlike `metadata.list('flow')` (the
+     * `metadata:reloaded` re-sync) it is populated on a cold boot once the app
+     * is registered. Called at kernel:ready so record-triggered automations
+     * actually bind on a fresh start. registerFlow is idempotent, so re-binding
+     * a flow the boot pull already registered is harmless.
+     */
+    private async syncFlowsFromProtocol(ctx: PluginContext): Promise<void> {
+        if (!this.engine) return;
+        let protocol: { getMetaItems?(q: { type: string }): Promise<unknown> } | undefined;
+        try {
+            protocol = ctx.getService('protocol');
+        } catch {
+            return; // no protocol service (bare engine / tests) — nothing to sync
+        }
+        if (!protocol || typeof protocol.getMetaItems !== 'function') return;
+
+        let raw: unknown;
+        try {
+            raw = await protocol.getMetaItems({ type: 'flow' });
+        } catch (err) {
+            ctx.logger.warn(
+                `[Automation] cold-boot flow bind skipped: getMetaItems('flow') failed: ${(err as Error).message}`,
+            );
+            return;
+        }
+
+        // getMetaItems hands back a bare array or an `{ items: [...] }` envelope,
+        // and each entry is either the flow doc or an `{ item: <flow> }` wrapper.
+        const list = Array.isArray(raw) ? raw : (((raw as { items?: unknown[] })?.items) ?? []);
+        let bound = 0;
+        for (const entry of list) {
+            const def = (
+                entry && typeof entry === 'object' && 'item' in entry ? (entry as { item: unknown }).item : entry
+            ) as { name?: string } | undefined;
+            if (!def?.name) continue; // registerFlow is idempotent, so re-binding is safe
+            try {
+                this.engine.registerFlow(def.name, def as never);
+                this.syncedFlowNames.add(def.name);
+                bound++;
+            } catch (err) {
+                ctx.logger.warn(
+                    `[Automation] cold-boot flow bind: failed to register ${def.name}: ${(err as Error).message}`,
+                );
+            }
+        }
+        if (bound > 0) {
+            ctx.logger.info(`[Automation] Bound ${bound} flow(s) from the protocol at kernel:ready`);
         }
     }
 
