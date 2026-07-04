@@ -614,6 +614,38 @@ export const TaskWorkbenchPage = definePage({
 
 ---
 
+## Record Presentation — surface, width & columns are auto-derived
+
+A record's create / edit / detail **presents itself adaptively**. You do **not**
+author the surface, the overlay width, or the column count — all three are derived
+at runtime from how heavy the record is + the client viewport, because an author
+(especially an AI) cannot know the client's screen. **Write the data (fields,
+`fieldGroups`); let the platform lay it out.**
+
+- **Surface (page vs drawer).** Derived from field count: a field-heavy object
+  opens create/edit/detail as a **full page**; a light one as a **drawer**. Mobile
+  always pages. Don't set it. To force it for a specific object, set
+  `navigation.mode` (`page` | `drawer` | `modal`) on the list view (or object) — or,
+  for bespoke layout, assign a record `Page` (below).
+- **Field width.** Use the relative **`span: 'full'`** to make a field take the
+  whole row; otherwise **omit it** (`auto` sizes by widget type × current columns —
+  textarea / rich-text / file take the row automatically). Do **not** use the
+  absolute `colSpan` — it only lines up at one width and is deprecated.
+- **Overlay width.** Never author pixels. If you must nudge, use the **`size`**
+  bucket (`sm` | `md` | `lg` | `xl` | `full`) on `navigation`; the pixel
+  `width` / `drawerWidth` are deprecated (they can't be chosen without knowing the
+  client viewport).
+- **Column count.** Not authored. The form grid follows its **real rendered width**
+  via container queries — the same form is 1 column in a narrow drawer and up to 4
+  on a wide page. Author *grouping* with `fieldGroups` + `Field.group`; the columns
+  adapt themselves.
+
+> **Rule of thumb: presentation (surface / width / columns) is not metadata.**
+> Write fields + semantic roles; the renderer decides the pixels. Reach for
+> `navigation.mode` / `size` / a `Page` only to *override* — never as the default.
+
+---
+
 ## Pages — Lightning-Style Page Layouts
 
 A **Page** is a Salesforce-Lightning-style layout composed of **regions**
