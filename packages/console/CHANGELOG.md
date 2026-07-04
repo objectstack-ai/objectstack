@@ -1,5 +1,7 @@
 # @objectstack/console
 
+## 12.0.0
+
 ## 11.10.0
 
 ### Minor Changes

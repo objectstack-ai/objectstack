@@ -1,5 +1,118 @@
 # @objectstack/service-automation
 
+## 12.0.0
+
+### Minor Changes
+
+- ffafb30: feat(automation): durable run history — every terminal run leaves a queryable record with its failure reason
+
+  Automation runs were observable **only in memory**: the engine kept the last N
+  `ExecutionLogEntry` records in a ring buffer, so "did this flow run, and why did
+  it fail?" could not be answered after a process restart (or once the buffer
+  evicted the entry), and a failed run surfaced no reason at all. This was the
+  biggest silent-trust gap for anyone authoring automations — a flow could stop
+  firing or start failing with nothing durable to inspect.
+
+  `sys_automation_run` — previously the ADR-0019 store for _live suspended_ runs
+  only — becomes a durable **run-history** table. On every terminal run the engine
+  mirrors a row through the `SuspendedRunStore` (`recordTerminal`): `status`
+  (`completed` / `failed`), `finished_at`, `duration_ms`, and, for a failure, the
+  `error` message a designer needs to fix it. `listRuns()` merges this durable
+  history with the in-memory buffer (in-memory wins on id, newest-first) so the
+  Studio "Runs" surface shows runs that predate the current process.
+
+  The design is **safe and additive**. Terminal history rows use a `run_`-prefixed
+  id, disjoint from live suspended runs (which key on the raw `runId` with
+  `status: 'paused'`), so the suspend save/load/delete/list path is untouched and
+  resume sweeps (`list()` filters `status: 'paused'`) never see history rows.
+  Persisting is **best-effort and fire-and-forget** — a history-write failure is
+  logged and swallowed, never breaking the run that produced it. New object fields
+  (`finished_at`, `duration_ms`, `error`) are all optional and the `status` enum
+  gains `running` / `completed` / `failed` alongside the existing `paused`.
+
+  Verified end-to-end on a clean showcase instance: a schedule-triggered flow and
+  seven task-completion flows each left durable `completed` rows; a genuinely
+  failing flow (`showcase_resilient_sync`) left a `failed` row carrying its
+  `try_catch` failure reason; a live `paused` suspended run coexisted without
+  collision; and after a full process restart the `failed` row — reason intact —
+  was still queryable via `/api/v1/data/sys_automation_run`. New `run-history.test.ts`
+  covers completed/failed persistence, read-across-restart, and best-effort isolation.
+
+### Patch Changes
+
+- f84f8d5: fix(automation): bind flow triggers on a cold boot, not just after an HMR reload
+
+  Record-triggered (and other trigger-typed) flows silently never fired on a
+  fresh process start — in dev and in production. The automation service's
+  boot-time flow pull reads `ql.registry.listItems('flow')`, which is **empty for
+  flows defined inline in an app manifest** — `registry.registerApp()` stores the
+  app under type `'app'` and never promotes its inline flows to standalone
+  registry `'flow'` items. The re-sync that _could_ see them only ran on the
+  `metadata:reloaded` hook, which never fires on a cold boot (`os dev` restarts
+  the process on recompile rather than firing it, and production never reloads).
+
+  Net effect: after any real restart, **no flow bound its trigger**, so
+  record-change automations did not fire at all.
+
+  Fix: bind flows at `kernel:ready` from `protocol.getMetaItems({ type: 'flow' })`
+  — the canonical flattened flow view that `GET /meta/flow` serves and that does
+  surface inline app flows — once every plugin has finished `init()`/`start()`
+  (so the app, hence its flows, is registered). `registerFlow` is idempotent, so
+  re-binding a flow the boot pull already registered is harmless.
+
+  Verified end-to-end on a clean instance: before the fix, updating a record
+  fired **0** flows (0 bound at boot); after, a cold boot binds all flows and a
+  single record update fires every matching record-triggered flow. Regression
+  test boots a kernel with an inline-app record-triggered flow served only via
+  `protocol.getMetaItems` and asserts it is bound after `bootstrap()` alone with
+  no `metadata:reloaded` fired — it fails on the pre-fix code.
+
+- 9693a36: fix(automation): bind a flow published while the server runs, without a restart
+
+  Follow-up to #2560 (cold-boot flow binding). A flow **published while the server
+  is running** — the Studio online-authoring journey: author a record-triggered
+  automation, publish it, immediately update a matching record — did **not** fire.
+  Its trigger only bound on the next process restart.
+
+  Two gaps, both fixed:
+
+  1. **The publish path fired no rebind signal.** `POST /packages/:id/publish-drafts`
+     → `protocol.publishPackageDrafts` promotes the drafts to active but emitted no
+     event the automation service listens to. The runtime dispatcher now announces
+     `metadata:reloaded` after a successful publish — the same signal a dev artifact
+     reload fires (`MetadataPlugin._reloadAndAnnounce`) — so boot-cached consumers
+     re-sync without a restart.
+
+  2. **The runtime re-sync read the wrong source.** The automation service's
+     `metadata:reloaded` re-sync pulled `metadata.list('flow')`, which returns 0 in a
+     real running server (it does not surface inline app flows), so even when the
+     hook fired it bound nothing. It now reads `protocol.getMetaItems({ type: 'flow' })`
+     — the same flattened flow view #2560's cold-boot bind and `GET /meta/flow` use —
+     while keeping the teardown of flows removed from the artifact. A failed or
+     unavailable protocol read is a no-op and never tears down live flows.
+
+  Production is largely unaffected (a deploy reboots the process, so #2560's
+  cold-boot bind covers it); this closes the gap for dev and single-instance
+  Studio authoring.
+
+  Verified end-to-end on a clean instance: authored a record-triggered flow in a
+  package, published it via `POST /packages/:id/publish-drafts` **without
+  restarting**, then updated a matching record and observed the flow fire (before
+  the fix it did not). New regression tests boot a kernel whose protocol serves a
+  flow only after boot and assert `metadata:reloaded` binds it — and that the
+  re-sync reads the protocol, not `metadata.list` — both failing on the pre-fix code.
+
+- Updated dependencies [e695fe0]
+- Updated dependencies [7c09621]
+- Updated dependencies [7709db4]
+- Updated dependencies [2082109]
+- Updated dependencies [7c09621]
+- Updated dependencies [9860de4]
+- Updated dependencies [069c205]
+  - @objectstack/spec@12.0.0
+  - @objectstack/core@12.0.0
+  - @objectstack/formula@12.0.0
+
 ## 11.10.0
 
 ### Patch Changes

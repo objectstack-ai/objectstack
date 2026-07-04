@@ -1,5 +1,57 @@
 # @objectstack/objectql
 
+## 12.0.0
+
+### Patch Changes
+
+- 24b62ee: Enforce array shape for multi-value fields in the write pipeline (#2552). Lone scalars sent at a `multiselect` / `checkboxes` / `tags` field — or at a `select` / `radio` / `lookup` / `user` / `file` / `image` field flagged `multiple: true` — are now normalized into single-element arrays before validation instead of being stored verbatim (which silently corrupted the column shape), un-wrappable shapes are rejected with a new `invalid_type` validation code, and a legal array at a `select`+`multiple` field is no longer mis-rejected as `invalid_option`.
+- c2fdbf9: fix(objectql): surface the human validation message in `ValidationError.message`, not a `field (code)` digest
+
+  When an object-level validation rule (ADR-0020 `validations[]`) rejected a
+  save, the console toast showed the generic English string
+  `Validation failed for 1 field(s): _record (rule_violation)` instead of the
+  rule author's own `message` (often localized, e.g. 最小水深不能大于最大水深。).
+
+  The author's message was always transported in `ValidationError.fields[].message`
+  through the whole chain (rule-validator → REST envelope `fields[]` → client SDK
+  `error.details`), but every generic UI surface displays the top-level
+  `Error.message`, which only contained the `field (code)` pairs.
+
+  Fix at the single choke point — the `ValidationError` constructor now builds its
+  top-level message from the per-field human messages (joined with `; `), falling
+  back to `field (code)` only when a field error has no message. Machine-readable
+  `code` and `fields[]` are unchanged, so programmatic consumers and the REST
+  envelope shape are unaffected; every client (console toast, CLI, SDK callers)
+  now sees the author-written message with no client-side change needed.
+
+- 9860de4: Surface view-key collisions during view container expansion instead of renaming silently.
+
+  `expandViewContainer` keeps its backward-compatible rename behaviour (`<object>.<key>` →
+  `<object>.<key>_2` on collision) but now stamps a machine-readable
+  `_diagnostics.warnings` entry on the renamed `ExpandedViewItem`, explaining that
+  references targeting the requested name (form action targets, navigation `viewName`s)
+  will resolve to the _other_ view. Both flattening loaders — the ObjectQL engine and the
+  MetadataPlugin — log these warnings at boot so the collision is visible instead of
+  manifesting as a form action opening a list view (#2554).
+
+- Updated dependencies [e695fe0]
+- Updated dependencies [9796e7c]
+- Updated dependencies [7c09621]
+- Updated dependencies [b5be479]
+- Updated dependencies [e3498fb]
+- Updated dependencies [7709db4]
+- Updated dependencies [2082109]
+- Updated dependencies [7c09621]
+- Updated dependencies [9860de4]
+- Updated dependencies [806a40a]
+- Updated dependencies [069c205]
+  - @objectstack/spec@12.0.0
+  - @objectstack/metadata-protocol@12.0.0
+  - @objectstack/core@12.0.0
+  - @objectstack/formula@12.0.0
+  - @objectstack/metadata-core@12.0.0
+  - @objectstack/types@12.0.0
+
 ## 11.10.0
 
 ### Patch Changes

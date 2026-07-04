@@ -1,5 +1,20 @@
 # @objectstack/driver-sql
 
+## 12.0.0
+
+### Patch Changes
+
+- Updated dependencies [e695fe0]
+- Updated dependencies [7c09621]
+- Updated dependencies [7709db4]
+- Updated dependencies [2082109]
+- Updated dependencies [7c09621]
+- Updated dependencies [9860de4]
+- Updated dependencies [069c205]
+  - @objectstack/spec@12.0.0
+  - @objectstack/core@12.0.0
+  - @objectstack/types@12.0.0
+
 ## 11.10.0
 
 ### Patch Changes

@@ -1,5 +1,104 @@
 # @objectstack/runtime
 
+## 12.0.0
+
+### Patch Changes
+
+- 9693a36: fix(automation): bind a flow published while the server runs, without a restart
+
+  Follow-up to #2560 (cold-boot flow binding). A flow **published while the server
+  is running** — the Studio online-authoring journey: author a record-triggered
+  automation, publish it, immediately update a matching record — did **not** fire.
+  Its trigger only bound on the next process restart.
+
+  Two gaps, both fixed:
+
+  1. **The publish path fired no rebind signal.** `POST /packages/:id/publish-drafts`
+     → `protocol.publishPackageDrafts` promotes the drafts to active but emitted no
+     event the automation service listens to. The runtime dispatcher now announces
+     `metadata:reloaded` after a successful publish — the same signal a dev artifact
+     reload fires (`MetadataPlugin._reloadAndAnnounce`) — so boot-cached consumers
+     re-sync without a restart.
+
+  2. **The runtime re-sync read the wrong source.** The automation service's
+     `metadata:reloaded` re-sync pulled `metadata.list('flow')`, which returns 0 in a
+     real running server (it does not surface inline app flows), so even when the
+     hook fired it bound nothing. It now reads `protocol.getMetaItems({ type: 'flow' })`
+     — the same flattened flow view #2560's cold-boot bind and `GET /meta/flow` use —
+     while keeping the teardown of flows removed from the artifact. A failed or
+     unavailable protocol read is a no-op and never tears down live flows.
+
+  Production is largely unaffected (a deploy reboots the process, so #2560's
+  cold-boot bind covers it); this closes the gap for dev and single-instance
+  Studio authoring.
+
+  Verified end-to-end on a clean instance: authored a record-triggered flow in a
+  package, published it via `POST /packages/:id/publish-drafts` **without
+  restarting**, then updated a matching record and observed the flow fire (before
+  the fix it did not). New regression tests boot a kernel whose protocol serves a
+  flow only after boot and assert `metadata:reloaded` binds it — and that the
+  re-sync reads the protocol, not `metadata.list` — both failing on the pre-fix code.
+
+- e3498fb: fix(runtime): carry spec-validation issues (and the 422 status) through metadata save/publish errors
+
+  `protocol.saveMetaItem` already validates a metadata draft against its spec Zod
+  schema and, on failure, throws a rich error: HTTP `status: 422`, `code:
+'invalid_metadata'`, and a structured `issues: [{ path, message, code }]` array
+  (field-anchored, `superRefine` issues included). But the HTTP dispatcher's catch
+  blocks collapsed all of that to a single message — the save path even hardcoded
+  `400` — so a client could only show a generic "failed validation" banner with no
+  way to point at the offending field. The publish path was worse: the per-draft
+  catch in `publishPackageDrafts` flattened each failure into `{ type, name, error
+}` and **dropped `issues` entirely**.
+
+  Now:
+
+  - A new `errorFromThrown(e, fallbackStatus)` dispatcher helper preserves the
+    error's own `status` (so validation surfaces as **422**, not a downgraded 400)
+    and attaches `{ code, issues }` under `error.details` when present. Errors that
+    carry neither behave exactly as before. Used by the metadata **save** (`PUT
+/meta/:type/:name`) and **publish** (`POST /packages/:id/publish-drafts`)
+    catch sites.
+  - `publishPackageDrafts` now carries `issues` into each `failed[]` entry, so a
+    validation failure during publish is field-anchored too (it previously kept
+    only the message).
+
+  This is the server half of "surface validation at the save/publish moment, on
+  the field" — the Studio can now map each issue back to its input instead of
+  showing a wall-of-text banner. Purely additive to the error payload; the only
+  behavior change is the more-correct 422 (was 400) for a failed metadata save.
+
+- Updated dependencies [e695fe0]
+- Updated dependencies [07f055c]
+- Updated dependencies [1b1b34e]
+- Updated dependencies [9796e7c]
+- Updated dependencies [7c09621]
+- Updated dependencies [24b62ee]
+- Updated dependencies [7709db4]
+- Updated dependencies [48ad533]
+- Updated dependencies [2082109]
+- Updated dependencies [7c09621]
+- Updated dependencies [c2fdbf9]
+- Updated dependencies [9860de4]
+- Updated dependencies [069c205]
+  - @objectstack/spec@12.0.0
+  - @objectstack/plugin-auth@12.0.0
+  - @objectstack/plugin-security@12.0.0
+  - @objectstack/objectql@12.0.0
+  - @objectstack/rest@12.0.0
+  - @objectstack/metadata@12.0.0
+  - @objectstack/core@12.0.0
+  - @objectstack/formula@12.0.0
+  - @objectstack/observability@12.0.0
+  - @objectstack/driver-memory@12.0.0
+  - @objectstack/driver-sql@12.0.0
+  - @objectstack/driver-sqlite-wasm@12.0.0
+  - @objectstack/plugin-org-scoping@12.0.0
+  - @objectstack/service-cluster@12.0.0
+  - @objectstack/service-datasource@12.0.0
+  - @objectstack/service-i18n@12.0.0
+  - @objectstack/types@12.0.0
+
 ## 11.10.0
 
 ### Patch Changes

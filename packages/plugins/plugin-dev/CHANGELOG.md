@@ -1,5 +1,40 @@
 # @objectstack/plugin-dev
 
+## 12.0.0
+
+### Patch Changes
+
+- Updated dependencies [e695fe0]
+- Updated dependencies [07f055c]
+- Updated dependencies [1b1b34e]
+- Updated dependencies [9796e7c]
+- Updated dependencies [9693a36]
+- Updated dependencies [7c09621]
+- Updated dependencies [e3498fb]
+- Updated dependencies [24b62ee]
+- Updated dependencies [7709db4]
+- Updated dependencies [48ad533]
+- Updated dependencies [2082109]
+- Updated dependencies [7c09621]
+- Updated dependencies [c2fdbf9]
+- Updated dependencies [9860de4]
+- Updated dependencies [069c205]
+  - @objectstack/spec@12.0.0
+  - @objectstack/plugin-auth@12.0.0
+  - @objectstack/plugin-security@12.0.0
+  - @objectstack/runtime@12.0.0
+  - @objectstack/objectql@12.0.0
+  - @objectstack/rest@12.0.0
+  - @objectstack/account@12.0.0
+  - @objectstack/setup@12.0.0
+  - @objectstack/studio@12.0.0
+  - @objectstack/core@12.0.0
+  - @objectstack/driver-memory@12.0.0
+  - @objectstack/plugin-hono-server@12.0.0
+  - @objectstack/plugin-org-scoping@12.0.0
+  - @objectstack/service-i18n@12.0.0
+  - @objectstack/types@12.0.0
+
 ## 11.10.0
 
 ### Patch Changes

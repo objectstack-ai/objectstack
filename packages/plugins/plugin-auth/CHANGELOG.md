@@ -1,5 +1,61 @@
 # Changelog
 
+## 12.0.0
+
+### Minor Changes
+
+- 07f055c: feat(auth): last-login audit fields — sys_user.last_login_at / last_login_ip (ADR-0069 D7)
+
+  Completes the ADR-0069 D7 identity-field set: `sys_user.last_login_at` and
+  `sys_user.last_login_ip` are stamped on every successful `/sign-in/email` by
+  `AuthManager.stampLastLogin` (a best-effort after-hook, independent of the
+  lockout-accounting path so it runs even when lockout is disabled). The IP is
+  taken from the trusted forwarded headers (`x-forwarded-for` →
+  `cf-connecting-ip` → `x-real-ip`), the same precedence as the D5 IP allow-list
+  middleware, and capped to the 45-char column width. Both fields are
+  system-managed, read-only, and land in the Admin group of `sys_user`.
+
+  The rest of ADR-0069 P1 (password complexity/history/expiry, HIBP, account
+  lockout, enforced MFA) was already implemented; this fills the one missing D7
+  field pair. ADR-0069 status updated Proposed → Accepted (P1/P2 implemented)
+  with an implementation-status matrix reflecting what is landed vs the remaining
+  P2 gaps (per-org IP ranges, shared-store rate limiting).
+
+- 1b1b34e: feat(auth): shared cross-node rate-limit + session store via the cache service (ADR-0069 D2)
+
+  Multi-node deployments previously rate-limited **per process** — better-auth's
+  default `rateLimit` store is in-memory, so each node counted independently and
+  an attacker could rotate nodes to bypass the limit. `AuthPlugin` now wires the
+  kernel `cache` service as better-auth's `secondaryStorage` and flips
+  `rateLimit.storage` to `'secondary-storage'`, so rate-limit counters (and the
+  session cache) are enforced against **one shared store across every node** —
+  shared iff the cache service is (Redis adapter in a cluster; memory single-node,
+  where behavior is unchanged). When no cache service is registered the plugin
+  logs a warning that a multi-node deployment needs a shared cache (ADR-0069
+  honesty — no silent per-process limiting presented as global).
+
+  New `cacheSecondaryStorage(cache)` adapter (`ICacheService` → better-auth
+  `SecondaryStorage`). Note: the cache has no atomic increment, so under high
+  concurrency the get→set counter path can slightly over-count — acceptable for a
+  rate limiter and strictly better than independent per-node counters; a future
+  cache adapter exposing atomic INCR can add an `increment` method for exact
+  counting.
+
+### Patch Changes
+
+- Updated dependencies [e695fe0]
+- Updated dependencies [07f055c]
+- Updated dependencies [7c09621]
+- Updated dependencies [7709db4]
+- Updated dependencies [2082109]
+- Updated dependencies [7c09621]
+- Updated dependencies [9860de4]
+- Updated dependencies [069c205]
+  - @objectstack/spec@12.0.0
+  - @objectstack/platform-objects@12.0.0
+  - @objectstack/core@12.0.0
+  - @objectstack/types@12.0.0
+
 ## 11.10.0
 
 ### Patch Changes

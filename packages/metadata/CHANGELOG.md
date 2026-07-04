@@ -1,5 +1,34 @@
 # @objectstack/metadata
 
+## 12.0.0
+
+### Patch Changes
+
+- 9860de4: Surface view-key collisions during view container expansion instead of renaming silently.
+
+  `expandViewContainer` keeps its backward-compatible rename behaviour (`<object>.<key>` →
+  `<object>.<key>_2` on collision) but now stamps a machine-readable
+  `_diagnostics.warnings` entry on the renamed `ExpandedViewItem`, explaining that
+  references targeting the requested name (form action targets, navigation `viewName`s)
+  will resolve to the _other_ view. Both flattening loaders — the ObjectQL engine and the
+  MetadataPlugin — log these warnings at boot so the collision is visible instead of
+  manifesting as a form action opening a list view (#2554).
+
+- Updated dependencies [e695fe0]
+- Updated dependencies [07f055c]
+- Updated dependencies [7c09621]
+- Updated dependencies [7709db4]
+- Updated dependencies [2082109]
+- Updated dependencies [7c09621]
+- Updated dependencies [9860de4]
+- Updated dependencies [069c205]
+  - @objectstack/spec@12.0.0
+  - @objectstack/platform-objects@12.0.0
+  - @objectstack/core@12.0.0
+  - @objectstack/metadata-core@12.0.0
+  - @objectstack/types@12.0.0
+  - @objectstack/metadata-fs@12.0.0
+
 ## 11.10.0
 
 ### Patch Changes

@@ -1,5 +1,100 @@
 # @objectstack/plugin-security
 
+## 12.0.0
+
+### Minor Changes
+
+- 9796e7c: feat(security): two-doors separation for permission sets (ADR-0086 P2)
+
+  Splits who may change a permission set into two non-overlapping doors, enforced
+  at the data layer instead of by convention:
+
+  **块 1 — the package door (publish-time materialization).**
+  `ObjectStackProtocolImplementation` gains a generic publish-time materializer
+  registry (`registerPublishMaterializer(type, fn)`). When a draft of a registered
+  type is published, its body is projected into a data-plane row and the result is
+  surfaced on the publish response as `materializeApplied` (best-effort, never
+  thrown — same contract as `seedApplied`). `promoteDraft` now returns the draft's
+  `packageId` so the materializer can stamp the owning package. `plugin-security`
+  registers a `permission` materializer that upserts the published set into
+  `sys_permission_set` with `managed_by:'package'` + `package_id` — so a set
+  authored through the studio package door (saved as a `permission` draft, then
+  published) lands in the admin surface with the exact provenance the boot seeder
+  already stamps, now on the runtime publish path too. The single-set upsert is
+  shared with `bootstrapDeclaredPermissions` (`upsertPackagePermissionSet`), so
+  both paths apply the same own-row / foreign-package / env-authored rules.
+
+  **块 2 — the admin door (data-layer write gate).**
+  The security middleware now refuses any admin-door write
+  (`update`/`delete`/`transfer`/`restore`/`purge`) to a `sys_permission_set` row
+  with `managed_by:'package'`, and refuses an `insert` that forges
+  `managed_by:'package'`. The gate fails closed regardless of the caller's grants
+  (a platform admin with `modifyAllRecords` is blocked just the same), so it is a
+  real data-layer boundary rather than a UI hint. System/boot writes carry
+  `isSystem` and bypass the whole middleware, so the boot seeder and the publish
+  materializer are unaffected. Env-authored sets (`managed_by` `user`/`platform`
+  or absent) stay freely editable through the admin door — the two doors never
+  overwrite each other.
+
+- 7c09621: feat(security): pre-map `transfer`/`restore`/`purge` to their RBAC bits (#1883)
+
+  The permission evaluator now maps the destructive record-lifecycle operations
+  to their spec permission bits (`transfer` → `allowTransfer`, `restore` →
+  `allowRestore`, `purge` → `allowPurge`) and extends the `modifyAllRecords`
+  super-user bypass to cover them. The ObjectQL operations themselves are still
+  roadmap M2 — but the gate now exists ahead of them: the moment such an
+  operation is dispatched through the security middleware it is denied unless a
+  resolved permission set grants the matching bit. Unmapped destructive
+  operations continue to fail closed (ADR-0049). Spec descriptions updated from
+  `[EXPERIMENTAL — not enforced]` to `[RBAC-gated; operation pending M2]`.
+
+- 7709db4: feat(security): permission-set package provenance + declared-permission seeding (ADR-0086 P1)
+
+  Packages now ship working default access for their own objects, with a
+  machine-checkable metadata↔config boundary:
+
+  - **Spec (ADR-0086 D3)**: `PermissionSetSchema.packageId` (owning package for
+    a package-shipped set; absent = env-authored) and per-record provenance
+    `managedBy: 'package' | 'platform' | 'user'` on the existing
+    metadata-persistence axis. Persisted on `sys_permission_set` as
+    `package_id` / `managed_by` (new columns + `package_id` index).
+  - **Seeding (ADR-0086 D5)**: new `bootstrapDeclaredPermissions` — the sibling
+    of `bootstrapDeclaredRoles` — materializes `stack.permissions` into
+    `sys_permission_set` at boot with `managed_by:'package'` + `package_id`.
+    Idempotent and upgrade-aware: rows the seeder owns are re-seeded to the
+    shipped declaration on every boot; rows owned by a different package are
+    refused loudly; env-authored `platform`/`user`/legacy rows are never
+    clobbered. Closes the ADR-0078 inert-metadata violation for
+    `stack.permissions` (declared sets were runtime-enforced but never
+    materialized — invisible to the admin surface, uninstall undefined).
+  - Conformance matrix row `declarative-permission-seeding` (ADR-0056 D10) +
+    dogfood proof pin the behavior so it cannot regress to inert.
+
+### Patch Changes
+
+- 48ad533: fix(security): surface swallowed permission-set resolution failures (#2565)
+
+  `PermissionEvaluator.resolvePermissionSets` swallowed metadata `list()` and
+  `sys_permission_set` dbLoader failures silently — fail-closed (unresolvable
+  sets grant nothing), but a transient DB error made custom permission sets
+  vanish with no trace, leaving the resulting 403s undiagnosable. The evaluator
+  now accepts an optional `{ logger }` and emits one `warn` per failed source,
+  naming the unresolved permission sets and the error. SecurityPlugin wires its
+  plugin logger into both call sites. Resolution behavior is byte-identical.
+
+- Updated dependencies [e695fe0]
+- Updated dependencies [07f055c]
+- Updated dependencies [7c09621]
+- Updated dependencies [7709db4]
+- Updated dependencies [2082109]
+- Updated dependencies [7c09621]
+- Updated dependencies [9860de4]
+- Updated dependencies [069c205]
+  - @objectstack/spec@12.0.0
+  - @objectstack/platform-objects@12.0.0
+  - @objectstack/core@12.0.0
+  - @objectstack/formula@12.0.0
+
 ## 11.10.0
 
 ### Patch Changes

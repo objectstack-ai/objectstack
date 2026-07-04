@@ -1,5 +1,153 @@
 # @objectstack/spec
 
+## 12.0.0
+
+### Major Changes
+
+- 7c09621: feat(security)!: `api.requireAuth` now defaults to `true` — anonymous access to the data API is denied by default (ADR-0056 D2 flip)
+
+  **BREAKING.** The global `requireAuth` default flipped FROM `false` TO `true`
+  (`RestApiConfigSchema.requireAuth` in `@objectstack/spec`, mirrored by
+  `RestServer.normalizeConfig` in `@objectstack/rest`). Anonymous requests to
+  the `/data/*` CRUD + batch endpoints are now rejected with HTTP 401 unless the
+  deployment explicitly opts out. (Scope note: this gate covers the REST
+  `/data/*` surface — the metadata read/write endpoints and the dispatcher
+  GraphQL route have their own pre-existing anonymous posture, tracked
+  separately; this flip does not change them.)
+
+  **Migration (one line):** a deployment that intentionally serves data publicly
+  (demo / playground / kiosk) sets the flag on the stack config — now a declared
+  `ObjectStackDefinitionSchema.api` field, so it survives `defineStack` strict
+  parsing (previously an undeclared top-level `api` key was silently stripped):
+
+  ```ts
+  export default defineStack({
+    // …
+    api: { requireAuth: false },
+  });
+  ```
+
+  The REST plugin logs a boot warning for the explicit opt-out so a fail-open
+  posture is always visible. A misplaced `api.requireAuth` at the plugin level
+  (one nesting short) is now also called out with a boot warning instead of
+  being silently ignored.
+
+  **What keeps working with no action:**
+
+  - **Share links** — validate their token, then read under a system context.
+  - **Public forms** — self-authorizing via the declaration-derived
+    `publicFormGrant` (create + read-back on the declared target object only);
+    no `guest_portal` profile needed.
+  - **Control plane** — `/auth`, `/health`, `/discovery` are exempt.
+  - **`objectstack serve` with an auth-less stack** — the CLI passes an explicit
+    `requireAuth: false` for stacks whose tier set has no `auth` (nothing could
+    authenticate against them), with the boot warning.
+
+### Minor Changes
+
+- e695fe0: feat(spec,lint): reject userFilters on object list views (ADR-0053 phase 4)
+
+  ADR-0053 reserves `userFilters`/`quickFilters` for page lists ("filters" mode);
+  on an object list view ("views" mode — where the `ViewTabBar` is the only nav
+  control) they are silently dropped. This lands the phase-4 guardrail as a
+  layered defence, so the wrong-context authoring mistake is caught without
+  breaking existing metadata:
+
+  - **Type-level (author time):** new `ObjectListViewSchema` = `ListViewSchema`
+    minus `userFilters`. Object built-in `listViews` and `defineView`
+    `list`/`listViews` now use it, so `userFilters` on an object list view is a
+    `tsc` error. The full `ListViewSchema` (page "filters" mode) is untouched.
+  - **Runtime (back-compat):** the field is STRIPPED at parse (default strip, no
+    throw), so existing metadata keeps loading — `ObjectSchema.parse` never fails
+    on a stray `userFilters`.
+  - **Author/CI (actionable):** new `@objectstack/lint` rule
+    `validateListViewMode`, wired into `os validate`, reports the wrong-context
+    field PRE-parse (before the schema strips it) with a fix hint.
+
+  Closes the schema half of objectui #2219; supersedes the interim runtime warn in
+  objectui #2220.
+
+- 7709db4: feat(security): permission-set package provenance + declared-permission seeding (ADR-0086 P1)
+
+  Packages now ship working default access for their own objects, with a
+  machine-checkable metadata↔config boundary:
+
+  - **Spec (ADR-0086 D3)**: `PermissionSetSchema.packageId` (owning package for
+    a package-shipped set; absent = env-authored) and per-record provenance
+    `managedBy: 'package' | 'platform' | 'user'` on the existing
+    metadata-persistence axis. Persisted on `sys_permission_set` as
+    `package_id` / `managed_by` (new columns + `package_id` index).
+  - **Seeding (ADR-0086 D5)**: new `bootstrapDeclaredPermissions` — the sibling
+    of `bootstrapDeclaredRoles` — materializes `stack.permissions` into
+    `sys_permission_set` at boot with `managed_by:'package'` + `package_id`.
+    Idempotent and upgrade-aware: rows the seeder owns are re-seeded to the
+    shipped declaration on every boot; rows owned by a different package are
+    refused loudly; env-authored `platform`/`user`/legacy rows are never
+    clobbered. Closes the ADR-0078 inert-metadata violation for
+    `stack.permissions` (declared sets were runtime-enforced but never
+    materialized — invisible to the admin surface, uninstall undefined).
+  - Conformance matrix row `declarative-permission-seeding` (ADR-0056 D10) +
+    dogfood proof pin the behavior so it cannot regress to inert.
+
+- 2082109: Detail-page related lists: `relatedList: 'primary'` prominence + optional related-list columns (#2579).
+
+  `Field.relatedList` on a child's `lookup`/`master_detail` FK becomes a tri-state
+  `boolean | 'primary'`. `'primary'` marks a CORE relationship — a prominence hint
+  (ADR-0085), not a layout switch — that the detail page promotes to its own tab,
+  while non-primary children collapse into a single shared "Related" tab.
+  `false`/`true` keep their meaning (suppress / show in the derived default), so
+  the change is additive and opt-in per relationship (no primary anywhere → the
+  detail page is byte-for-byte the legacy stacked default).
+
+  `RecordRelatedListProps.columns` becomes optional: when omitted the related list
+  derives its columns from the child object's `highlightFields` / default list
+  columns — a related list is just another surface that lists that object.
+  Required → optional is back-compat.
+
+  Renderer + derivation changes ship in objectui: `relatedList: 'primary'` → own
+  tab; one related list per eligible FK (a child that references the parent
+  through several relationships now surfaces each, previously only the first);
+  self-referential relationships (hierarchies) surface a "child" list; and the
+  lookup-picker default columns are unified onto the same `highlightFields`
+  source so a picker and a related list of the same object agree with zero
+  per-surface config.
+
+- 069c205: Add a build-time view-reference lint that fails `os compile` on a broken form-view reference, and surfaces the previously-silent `_2` rename collision as a warning (#2554).
+
+  `expandViewContainer` gains a behaviour-preserving companion `expandViewContainerWithDiagnostics` that also reports every `<object>.<key>` name collision. List and form views share one namespace during expansion, and the default `list` implicitly claims `<object>.default`; a colliding key was previously renamed to `<object>.<key>_2` **silently**, so references (form action `target`s, navigation `viewName`s) resolved to the _other_ view.
+
+  The new `lint-view-refs` build lint consumes those diagnostics with a broken/fragile severity split, tuned so an upgrade does NOT break existing apps that merely have a colliding key:
+
+  - **view-ref-form-target-kind** — ERROR (fails the build): a `type:'form'` action whose `target` resolves to an existing LIST view — the concrete #2554 breakage (a blank form, a silently no-op submit). High-confidence, so it fails.
+  - **view-key-collision** — WARNING: a key silently renamed on collision. Fragile, not broken — it breaks something only if the requested name is referenced — so it warns.
+  - **view-ref-form-target-missing** — WARNING: a form target resolving to no view; probably a typo, but possibly a view the lint failed to collect, so it warns rather than risk a false-positive build failure.
+
+  This shifts objectui's runtime `viewKind` guard left to compile time: the author — very often an AI generating templates — discovers the mistake on `os compile` instead of when an end user clicks. It mirrors the existing broken/fragile two-level authoring lints (flow-patterns, autonumber, liveness). `expandViewContainer`'s runtime behaviour is unchanged; the fix is diagnostics-only plus the build gate.
+
+### Patch Changes
+
+- 7c09621: feat(security): pre-map `transfer`/`restore`/`purge` to their RBAC bits (#1883)
+
+  The permission evaluator now maps the destructive record-lifecycle operations
+  to their spec permission bits (`transfer` → `allowTransfer`, `restore` →
+  `allowRestore`, `purge` → `allowPurge`) and extends the `modifyAllRecords`
+  super-user bypass to cover them. The ObjectQL operations themselves are still
+  roadmap M2 — but the gate now exists ahead of them: the moment such an
+  operation is dispatched through the security middleware it is denied unless a
+  resolved permission set grants the matching bit. Unmapped destructive
+  operations continue to fail closed (ADR-0049). Spec descriptions updated from
+  `[EXPERIMENTAL — not enforced]` to `[RBAC-gated; operation pending M2]`.
+
+- 9860de4: Surface view-key collisions during view container expansion instead of renaming silently.
+
+  `expandViewContainer` keeps its backward-compatible rename behaviour (`<object>.<key>` →
+  `<object>.<key>_2` on collision) but now stamps a machine-readable
+  `_diagnostics.warnings` entry on the renamed `ExpandedViewItem`, explaining that
+  references targeting the requested name (form action targets, navigation `viewName`s)
+  will resolve to the _other_ view. Both flattening loaders — the ObjectQL engine and the
+  MetadataPlugin — log these warnings at boot so the collision is visible instead of
+  manifesting as a form action opening a list view (#2554).
+
 ## 11.10.0
 
 ### Minor Changes
