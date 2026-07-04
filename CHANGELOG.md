@@ -1569,6 +1569,261 @@ Followup to M10.30a. Walked every Setup menu in a real tenant; produced verdict 
 - 176 service-ai tests passing (18 new tests for stream encoder, route
   dual-mode, systemPrompt, flat options, array content)
 
+> **Versioning note (protocol releases).** From `10.0.0` onward the protocol version is
+> the published version of **`@objectstack/spec`** (per-package changesets releases; the
+> full raw per-release record lives in `packages/spec/CHANGELOG.md`, which also ships
+> inside the npm artifact as of 11.10.0). The sections below backfill the
+> **protocol-facing** changes of the `10.x`–`11.x` line — breaking changes,
+> deprecations/retirements, and additions to the authorable surface — so this file again
+> does what its header promises. Releases `4.0.2`–`9.11.0` remain documented in the
+> per-package changelogs. For every `10.x → 11.x` migration step see
+> [docs/upgrading-to-11.md](./docs/upgrading-to-11.md); the compatibility gates that
+> govern what may break and when are ADR-0059, and the upgrade-communication contract is
+> ADR-0087.
+
+## [11.10.0] — 2026-07-03
+
+### Removed — deprecation window closed
+- **`compactLayout` alias retired** (deprecated since 11.7.0, ADR-0085; #2536): the
+  canonical key is `highlightFields`. `ObjectSchema.create()` now rejects
+  `compactLayout` as an unknown key (with tombstone guidance, below); lenient `parse()`
+  strips it; the parse-time alias and the back-fill transition mirror are removed —
+  served metadata carries the canonical key only.
+
+### Added
+- **Tombstone guidance for retired keys** (#2543): `create()` rejecting a retired key
+  (`compactLayout`, the `detail` block, object-level `views`, `defaultDetailForm`) names
+  the replacement, the version/decision that removed it, and the one-line fix — the
+  error *is* the upgrade guide. Tombstones age out ~two majors after removal.
+- **`CHANGELOG.md` ships inside the npm package** and `llms.txt` gains an "Upgrading
+  Across Spec Versions" section for agent consumers (#2543).
+
+## [11.9.0] — 2026-07-03
+
+- Doc-text only: stale `compactLayout` / `defaultDetailForm` teachings scrubbed from
+  schema descriptions (#2530). No schema shape or behavior change.
+
+## [11.8.0] — 2026-07-03
+
+- No protocol-facing changes.
+
+## [11.7.0] — 2026-07-02
+
+ADR-0085: object presentation intent is declared as cross-surface **semantic roles**,
+never as per-surface hint blocks (#2521).
+
+### Added
+- **`stageField: string | false`** — names the object's linear lifecycle field (`false`
+  suppresses every consumer's stage heuristics).
+- **`deriveFieldGroupLayout(def)`** in `@objectstack/spec/data` — the single source of
+  fieldGroups rendering semantics.
+- `validateSemanticRoles` lint (via `os lint`): flags dangling `Field.group` /
+  `stageField` / `highlightFields` pointers that are Zod-valid but silently inert
+  (ADR-0078).
+
+### Changed / Deprecated
+- **`compactLayout` → `highlightFields`** (the value is an ordered field list, not a
+  layout). `compactLayout` stays accepted as a parse-time alias for one release window
+  (closed in 11.10.0).
+- **`fieldGroups[].collapse: 'none' | 'expanded' | 'collapsed'`** replaces
+  `defaultExpanded` and the UI-dialect `collapsible`/`collapsed` boolean pair; old keys
+  map onto the enum at parse and remain accepted for one minor.
+
+### Removed
+- `fieldGroups[].visibleOn` (no consumer anywhere — ADR-0049 enforce-or-remove).
+- The `detail: { … }.passthrough()` UI-hints block (zero authors across framework and
+  objectui; documented dead-surface exception, evidence in ADR-0085).
+
+## [11.6.0] — 2026-07-02
+
+- No protocol-facing changes.
+
+## [11.5.0] — 2026-07-02
+
+### Added
+- **FormView presentation options completed**: `FormViewSchema` gains the per-`type`
+  (tabbed/wizard/split/drawer/modal) presentation config the renderer already accepted —
+  `layout`, `columns`, `title`, `description`, `defaultTab`, `tabPosition`, `allowSkip`,
+  `showStepIndicator`, `splitDirection`, `splitSize`, `splitResizable`, `drawerSide`,
+  `drawerWidth`, `modalSize`. Spec↔frontend conformance for object-form: 14 → 0
+  frontend-only props.
+- **`REACT_BLOCKS`** react-tier component contract index (ADR-0081): maps each curated
+  public block of `kind:'react'` pages to its spec zod schema; the AI-facing contract is
+  generated from it.
+
+## [11.4.0] — 2026-06-30
+
+### Added
+- **`PageSchema.kind` gains `'html'` and `'react'`** (ADR-0081 honest tiers): `'html'`
+  is the constrained parse-never-execute tier (the renamed `'jsx'`); `'react'` is the
+  real-React tier, gated server-side by `OS_PAGE_REACT=off`. `source` is required for
+  all three kinds; react source is transpile-checked at `os build`.
+- `userActions.editInline` toggle (inline record editing; default `false`).
+
+### Deprecated
+- `kind: 'jsx'` — kept as a deprecated alias of `'html'`.
+
+## [11.3.0] — 2026-06-29
+
+### Changed
+- The optional `ai` peer dependency moves `^6` → `^7` (all re-exported message/stream
+  types verified present in `ai@7`).
+
+### Deprecated
+- **`titleFormat`** (ADR-0079): a render-only template the server can neither return nor
+  query — use **`nameField`** (canonical; `displayNameField` is the deprecated alias).
+  New advisory lints `title-format-retired` / `title-unresolvable` in `os build` /
+  `os lint`; the schema still parses existing metadata.
+
+## [11.2.0] — 2026-06-29
+
+### Added
+- **`ObjectStackProtocol` segmented into per-domain interfaces** (ADR-0076 D9):
+  `DataProtocol`, `MetadataProtocol`, `AnalyticsProtocol`, `AutomationProtocol`,
+  `PackageProtocol`, `ViewProtocol`, `PermissionProtocol`, `WorkflowProtocol`,
+  `RealtimeProtocol`, `NotificationProtocol`, `AiProtocol`, `I18nProtocol`,
+  `FeedProtocol` — all newly exported. The composed interface is shape-identical to the
+  previous flat one (non-breaking); new code should depend on the narrowest slice.
+- `PageSchema` gains `kind: 'jsx'` + `source` (authoritative JSX text) + `requires`,
+  with a completeness `superRefine` (ADR-0080; superseded by the 11.4.0 tier split).
+
+## [11.1.0] — 2026-06-28
+
+Completes the 11.0 breaking line (see
+[docs/upgrading-to-11.md](./docs/upgrading-to-11.md)).
+
+### Removed
+- **`DriverInterface` type alias** (deprecated in 11.0) — use `IDataDriver` (same
+  shape). Unrelated to the live `IDataEngine` and to the zod-derived runtime driver
+  schema in `/data`, both unchanged.
+- **`PolicySchema` / `definePolicy` and the stack `policies` collection** (#1882,
+  ADR-0049): 100% unenforced — no runtime consumer ever read it. No migration needed;
+  `SharingRule`, `PermissionSet`, RLS and the `*PolicySchema` siblings are unaffected.
+- **Dead, unauthored properties** (#2377, ADR-0049): field `caseSensitive` / `maxRating`;
+  object `partitioning` (+ `PartitioningConfigSchema`) / `defaultDetailForm`.
+
+### Added
+- **`ActionSchema.openIn: 'self' | 'new-tab'`** — declarative new-tab control for static
+  `type:'url'` actions (previously stripped as an unknown key; now preserved
+  end-to-end).
+
+## [11.0.0] — 2026-06-27
+
+**Major.** Every breaking change of the 11 line, each with a concrete migration, is in
+[docs/upgrading-to-11.md](./docs/upgrading-to-11.md) (also covering the package-level
+breaks outside the spec surface: Hono-only HTTP adapters, `client-react` canonical query
+fields, `OS_*` env renames).
+
+### Breaking
+- **Open edition is MCP-only** (ADR-0025 S2): the bundled AI authoring service
+  (`@objectstack/service-ai`) is no longer part of the open distribution; AI integrates
+  through `@objectstack/mcp` plus the documented opt-in seam (a host app that
+  *declares* `@objectstack/service-ai` still loads it).
+- **Flow-node aliases `http_request` / `http_call` / `webhook` removed** (ADR-0018 M3
+  cleanup): author `type: 'http'` (identical behavior — durable outbox when
+  `config.durable`, inline fetch otherwise). Authoring a removed type now fails fast at
+  parse. The trigger `eventType: 'webhook'` and the `webhook` resume event are
+  unaffected.
+- **`IUIService` removed** — use `IMetadataService` (views/dashboards are metadata).
+
+### Changed — behavior
+- **`flow.runAs` is now enforced** (#1888; the `[EXPERIMENTAL — not enforced]` marker is
+  removed): `runAs:'user'` (the default) runs CRUD nodes under the triggering user's
+  identity and RLS; `runAs:'system'` runs elevated. **Declare `runAs:'system'` on any
+  flow that must read or write beyond the triggering user's access.** A
+  schedule-triggered user-mode data run (no trigger user ⇒ unscoped) is now audible: a
+  `flow-schedule-runas-unscoped` author-time lint plus a one-per-run runtime warning.
+- **`PageTypeSchema` is the live set** (`record`, `home`, `app`, `utility`, `list`):
+  the six renderless roadmap types (`dashboard`, `form`, `record_detail`,
+  `record_review`, `overview`, `blank`) are removed from the enum and tracked in
+  `PAGE_TYPE_ROADMAP`; the dead `blank`/`record_review` config schemas are hard-removed
+  (documented ADR-0059 §4 exception — authoring them already failed at runtime).
+- **AI service is opt-in via a declared dependency** (resolvability is no longer
+  enough), and `config.tiers` is now honored by `defineStack`.
+
+### Added
+- **Field type `'user'`** (person picker) — a semantic specialization of
+  `lookup('sys_user')` with `Field.user()`, `multiple`, and
+  `defaultValue: 'current_user'`; storage identical to lookup (zero migration).
+- **Formula typing**: `FieldSchema.returnType` + `inferExpressionType()`.
+- **Datasets**: multi-hop to-one relationship joins (≤3 hops, per-hop read-scope
+  enforced; ADR-0071); `aggregate` optional for derived measures; a `defineForm`
+  authoring layout for datasets.
+- **Authoritative create seeds**: `getMetadataCreateSeed(type)` + `createSeed` exposed
+  via `/meta/types` — designers derive create defaults from the spec instead of
+  hardcoding them.
+- `passwordRejectBreached` auth setting (default off; ADR-0069 D1);
+  `RecordRelatedListProps.add` (add-existing-via-picker); `element:text_input`;
+  `ChartConfig.colors` accepts a palette or a value→color map.
+
+### Fixed
+- Dashboard widget `layout` optional (auto-flow); page `regions` / component
+  `properties` / slotted `slots` optional — Studio-authored pages and dashboards no
+  longer 422 on save.
+
+## [10.3.0] — 2026-06-23
+
+- No protocol-facing changes recorded.
+
+## [10.2.0] — 2026-06-22
+
+### Added
+- **`responsiveStyles`** on the UI page-component envelope (ADR-0065): per-breakpoint
+  CSS-property maps compiled to id-scoped CSS — the build-independent styling channel
+  for metadata-authored pages.
+
+## [10.1.0] — 2026-06-22
+
+### Added
+- **`datasource.autoConnect`** (ADR-0062 Phase 1): a declared external datasource
+  connects to a live driver and its federated objects are queryable with zero app code;
+  auto-connect is gated (external, explicitly bound, or `autoConnect: true`) so existing
+  apps are byte-for-byte unchanged.
+- Federated analytics correctness: `NativeSQLStrategy` declines federated objects and
+  routes them through the driver's physical-table resolution (additive
+  `StrategyContext.isExternalObject` hook).
+
+## [10.0.0] — 2026-06-22
+
+**Major.**
+
+### Breaking
+- **`sys_department` renamed to `sys_business_unit`** — object, member table
+  (`sys_department_member` → `sys_business_unit_member`), fields, and i18n, with **no
+  compatibility alias**. Any deployment holding `sys_department` rows or metadata
+  referencing the object by name (lookups, list views, queries, sharing/approval
+  scopes) must migrate. Verified against the ADR-0059 pre-publish hotcrm gate.
+
+### Added
+- **ADR-0057 ERP authorization core**: permission-grant access **depth**
+  (`own` / `own_and_reports` / `unit` / `unit_and_below` / `org`); the platform-owned
+  `sys_user_role` assignment; stack-declared `roles` / `sharingRules` seeded into
+  `sys_role` / `sys_sharing_rule` at boot. Hierarchy-relative scopes delegate to a
+  pluggable `IHierarchyScopeResolver` (open edition fails closed to owner-only).
+- **`defineX` factories for the remaining 16 writable domains** + 6 missing `XInput`
+  aliases (#2035) — one consistent, validated authoring entry per domain; purely
+  additive. (The foundation of the ADR-0059 author-time gate.)
+- `ListView.type: 'tree'` (+ `TreeConfigSchema`); `SkillSchema.surface` /
+  `AgentSchema.surface` (`ask`/`build`, ADR-0063/0064 — the `agent` type is closed to
+  third-party authoring); `DatasetMeasure.currency` and `ExecutionContext.currency`
+  (ISO 4217).
+
+### Changed
+- **`script` actions must declare an executable binding** (`body` or `target`,
+  enforced via `superRefine`) — rejects only configurations that were already
+  non-functional at runtime.
+- **RLS predicates are canonical CEL** (`==`, `in`; ADR-0058 D1): all seeded predicates
+  migrated; a stored SQL-style predicate still compiles through the **deprecated**
+  `sqlPredicateToCel` shim with a warning (no silent deny on legacy data).
+
+### Deprecated
+- The `sqlPredicateToCel` transitional bridge (author canonical CEL).
+
+### Fixed
+- Federation reads honor `external.remoteName` / `external.remoteSchema` (ADR-0015);
+  a nested `where` inside `expand` is honored (AND-merged); `GanttConfigSchema` is
+  `.passthrough()` (renderer knobs no longer stripped by the bundled console copy).
+
 ## [4.0.1] — 2026-03-31
 
 ### Fixed
