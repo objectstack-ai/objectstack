@@ -404,6 +404,10 @@ export class AutomationEngine implements IAutomationService {
 
     private flows = new Map<string, FlowParsed>();
     private flowEnabled = new Map<string, boolean>();
+    /** Flows the persisted deployment `status` currently marks disabled
+     *  (`obsolete`/`invalid`), tracked so a status flip back to active/draft
+     *  re-enables on the next (re)register even if the flow had been turned off. */
+    private flowStatusDisabled = new Map<string, boolean>();
     private flowVersionHistory = new Map<string, Array<{ version: number; definition: FlowParsed; createdAt: string }>>();
     private nodeExecutors = new Map<string, NodeExecutor>();
     private actionDescriptors = new Map<string, ActionDescriptor>();
@@ -872,7 +876,20 @@ export class AutomationEngine implements IAutomationService {
         this.flowVersionHistory.set(name, history);
 
         this.flows.set(name, parsed);
-        if (!this.flowEnabled.has(name)) {
+        // Enable/disable from the persisted deployment `status`. `obsolete`/`invalid`
+        // flows are DISABLED (unbound + guarded in execute); `draft`/`active` — and
+        // any legacy flow with no explicit status — stay enabled, so existing flows
+        // are unaffected (zero regression). This is how the Studio's on/off switch
+        // persists: it flips `status` active↔obsolete, applied on the next publish
+        // rebind. A flip back OUT of a disabled status re-enables even if turned off;
+        // a runtime toggleFlow() override on a still-enabled flow is preserved.
+        const flowStatus = (parsed as { status?: string }).status;
+        const disabledByStatus = flowStatus === 'obsolete' || flowStatus === 'invalid';
+        const wasStatusDisabled = this.flowStatusDisabled.get(name) === true;
+        this.flowStatusDisabled.set(name, disabledByStatus);
+        if (disabledByStatus) {
+            this.flowEnabled.set(name, false);
+        } else if (wasStatusDisabled || !this.flowEnabled.has(name)) {
             this.flowEnabled.set(name, true);
         }
         this.logger.info(`Flow registered: ${name} (version ${parsed.version})`);
@@ -888,8 +905,25 @@ export class AutomationEngine implements IAutomationService {
         this.deactivateFlowTrigger(name);
         this.flows.delete(name);
         this.flowEnabled.delete(name);
+        this.flowStatusDisabled.delete(name);
         this.flowVersionHistory.delete(name);
         this.logger.info(`Flow unregistered: ${name}`);
+    }
+
+    /**
+     * Runtime enable/bound state for every registered flow — the truth behind the
+     * Studio's status badges. The persisted `status` is metadata; whether a flow
+     * is actually **enabled** (allowed to run) and **bound** (wired to its trigger,
+     * so it fires) is engine state. `enabled: false` ⇒ status is obsolete/invalid
+     * or a runtime toggle turned it off; `bound: false` on an enabled flow ⇒ it has
+     * no trigger (e.g. a manually-invoked/screen flow).
+     */
+    getFlowRuntimeStates(): Array<{ name: string; enabled: boolean; bound: boolean }> {
+        return [...this.flows.keys()].map((name) => ({
+            name,
+            enabled: this.flowEnabled.get(name) !== false,
+            bound: this.boundFlowTriggers.has(name),
+        }));
     }
 
     async listFlows(): Promise<string[]> {

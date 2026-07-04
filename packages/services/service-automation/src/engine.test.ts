@@ -2350,6 +2350,48 @@ describe('AutomationEngine - Flow Trigger Wiring', () => {
     });
 });
 
+describe('AutomationEngine - flow status enable/disable gate', () => {
+    let engine: AutomationEngine;
+    beforeEach(() => { engine = new AutomationEngine(createTestLogger()); });
+
+    it('binds + enables draft/active flows — existing flows are unaffected', () => {
+        const rec = recordingTrigger('record_change');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('rc_draft', recordChangeFlow('rc_draft')); // status defaults to 'draft'
+        engine.registerFlow('rc_active', { ...recordChangeFlow('rc_active'), status: 'active' });
+        const states = engine.getFlowRuntimeStates();
+        expect(states.find((s) => s.name === 'rc_draft')).toEqual({ name: 'rc_draft', enabled: true, bound: true });
+        expect(states.find((s) => s.name === 'rc_active')).toEqual({ name: 'rc_active', enabled: true, bound: true });
+        expect(engine.getActiveTriggerBindings()).toHaveLength(2);
+    });
+
+    it('does NOT bind or enable a flow whose status is obsolete', () => {
+        const rec = recordingTrigger('record_change');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('rc_obsolete', { ...recordChangeFlow('rc_obsolete'), status: 'obsolete' });
+        expect(engine.getActiveTriggerBindings()).toHaveLength(0);
+        expect(engine.getFlowRuntimeStates().find((s) => s.name === 'rc_obsolete'))
+            .toEqual({ name: 'rc_obsolete', enabled: false, bound: false });
+    });
+
+    it('refuses to execute a disabled (obsolete) flow', async () => {
+        engine.registerFlow('x', { ...recordChangeFlow('x'), status: 'obsolete' });
+        const res = await engine.execute('x', { event: 'test' } as never);
+        expect(res.success).toBe(false);
+        expect(res.error).toContain('disabled');
+    });
+
+    it('flipping status obsolete → active re-enables + re-binds on re-register', () => {
+        const rec = recordingTrigger('record_change');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('flip', { ...recordChangeFlow('flip'), status: 'obsolete' });
+        expect(engine.getFlowRuntimeStates().find((s) => s.name === 'flip')).toMatchObject({ enabled: false, bound: false });
+        // Re-author to active and re-register (what a publish rebind does).
+        engine.registerFlow('flip', { ...recordChangeFlow('flip'), status: 'active' });
+        expect(engine.getFlowRuntimeStates().find((s) => s.name === 'flip')).toMatchObject({ enabled: true, bound: true });
+    });
+});
+
 describe('AutomationEngine - Start Condition Gate', () => {
     let engine: AutomationEngine;
 

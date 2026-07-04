@@ -2868,6 +2868,21 @@ export class HttpDispatcher {
             return { handled: true, response: this.success({ connectors: [], total: 0 }) };
         }
 
+        // GET /_status → runtime enable/bound state for every flow (backs the
+        // Studio's Automations status badges: persisted `status` is metadata, but
+        // whether a flow is actually enabled + bound to its trigger is engine
+        // state). Underscore-prefixed so no flow name can shadow it; MUST precede
+        // the `/:name → getFlow` catch-all.
+        if (parts[0] === '_status' && parts.length === 1 && m === 'GET') {
+            const svc = automationService as { getFlowRuntimeStates?: () => Array<{ name: string; enabled: boolean; bound: boolean }> };
+            if (typeof svc.getFlowRuntimeStates === 'function') {
+                const flows = svc.getFlowRuntimeStates();
+                return { handled: true, response: this.success({ flows, total: flows.length }) };
+            }
+            // Service present but older / does not implement the method.
+            return { handled: true, response: this.success({ flows: [], total: 0 }) };
+        }
+
         // Routes with :name
         if (parts.length >= 1) {
             const name = parts[0];

@@ -178,6 +178,10 @@ describe('HttpDispatcher', () => {
                     { name: 'slack', label: 'Slack', type: 'api', actions: [{ key: 'chat.postMessage', label: 'Post Message' }] },
                     { name: 'pg', label: 'Postgres', type: 'database', actions: [] },
                 ]),
+                getFlowRuntimeStates: vi.fn().mockReturnValue([
+                    { name: 'flow_a', enabled: true, bound: true },
+                    { name: 'flow_b', enabled: false, bound: false },
+                ]),
             };
 
             // Set up kernel services to include automation
@@ -190,6 +194,17 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleAutomation('', 'GET', {}, { request: {} });
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.flows).toEqual(['flow_a', 'flow_b']);
+        });
+
+        it('should return per-flow runtime enable/bound state via GET /_status', async () => {
+            const result = await dispatcher.handleAutomation('_status', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(result.response?.body?.data?.flows).toEqual([
+                { name: 'flow_a', enabled: true, bound: true },
+                { name: 'flow_b', enabled: false, bound: false },
+            ]);
+            // `_status` must NOT be treated as a flow name (getFlow catch-all).
+            expect(mockAutomationService.getFlow).not.toHaveBeenCalledWith('_status');
         });
 
         it('should get a flow via GET /:name', async () => {
