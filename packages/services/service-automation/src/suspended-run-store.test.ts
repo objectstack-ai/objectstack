@@ -144,7 +144,12 @@ describe('ObjectStoreSuspendedRunStore', () => {
         expect(resumed.success).toBe(true);
         expect(ran).toContain('rejected');
         expect(ran).not.toContain('approved');
-        // Row removed on terminal completion.
-        expect(engine.rows.size).toBe(0);
+        // The live suspended row is removed on terminal completion; a durable
+        // terminal run-history row is kept in its place (run observability).
+        await new Promise((r) => setTimeout(r, 0)); // recordTerminal is fire-and-forget
+        const finalRows = [...engine.rows.values()];
+        expect(finalRows.filter((r) => r.status === 'paused')).toHaveLength(0);
+        expect(finalRows).toHaveLength(1);
+        expect(finalRows[0].status).toBe('completed');
     });
 });

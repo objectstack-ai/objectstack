@@ -353,6 +353,25 @@ export interface SuspendedRun {
  * serverless deployments where the process hibernates between suspend and
  * resume.
  */
+/**
+ * A terminal run summary persisted as durable run history (completed / failed)
+ * for the "Runs" observability surface — distinct from a live {@link SuspendedRun}.
+ */
+export interface RunRecord {
+    runId: string;
+    flowName: string;
+    flowVersion?: number;
+    status: 'completed' | 'failed';
+    startedAt: string;
+    startTime?: number;
+    durationMs?: number;
+    /** Failure reason for a `failed` run — what a designer needs to fix it. */
+    error?: string;
+    nodeId?: string;
+    organizationId?: string | null;
+    userId?: string | null;
+}
+
 export interface SuspendedRunStore {
     /** Persist (insert or replace) a suspended run. */
     save(run: SuspendedRun): Promise<void>;
@@ -362,6 +381,16 @@ export interface SuspendedRunStore {
     delete(runId: string): Promise<void>;
     /** List all currently-stored suspended runs. */
     list(): Promise<SuspendedRun[]>;
+    /**
+     * Persist a TERMINAL run (completed / failed) as durable history for the
+     * "Runs" observability surface. Optional — the in-memory / test defaults
+     * still work without it. Implementations MUST key history rows separately
+     * from live suspended runs (which are keyed by raw `runId`, status
+     * `paused`, and deleted on completion) so the two lifecycles never collide.
+     */
+    recordTerminal?(record: RunRecord): Promise<void>;
+    /** Newest terminal run-history records for a flow (for the Runs tab). */
+    listHistory?(flowName: string, limit: number): Promise<RunRecord[]>;
 }
 
 export class AutomationEngine implements IAutomationService {
@@ -908,8 +937,45 @@ export class AutomationEngine implements IAutomationService {
 
     async listRuns(flowName: string, options?: { limit?: number; cursor?: string }): Promise<ExecutionLogEntry[]> {
         const limit = options?.limit ?? 20;
-        const logs = this.executionLogs.filter(l => l.flowName === flowName);
-        return logs.slice(-limit).reverse();
+        const inMem = this.executionLogs.filter(l => l.flowName === flowName);
+
+        // Merge durable run history so the "Runs" view survives a restart and
+        // ring-buffer eviction. In-memory entries are the freshest (they carry
+        // full step detail); durable rows backfill runs the process no longer
+        // holds. Best-effort: a history-read failure degrades to in-memory only.
+        let durable: ExecutionLogEntry[] = [];
+        if (this.store?.listHistory) {
+            try {
+                const rows = await this.store.listHistory(flowName, limit);
+                durable = rows.map(r => this.runRecordToLogEntry(r));
+            } catch (err) {
+                this.logger.warn(
+                    `[Automation] run-history read failed for '${flowName}': ${(err as Error)?.message}`,
+                );
+            }
+        }
+        const byId = new Map<string, ExecutionLogEntry>();
+        for (const e of durable) byId.set(e.id, e);
+        for (const e of inMem) byId.set(e.id, e); // freshest wins
+        return [...byId.values()]
+            .sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
+            .slice(0, limit);
+    }
+
+    /** Rehydrate a durable {@link RunRecord} into an {@link ExecutionLogEntry}
+     *  for the Runs list. Step-level detail isn't persisted in the summary. */
+    private runRecordToLogEntry(r: RunRecord): ExecutionLogEntry {
+        return {
+            id: r.runId,
+            flowName: r.flowName,
+            flowVersion: r.flowVersion,
+            status: r.status, // 'completed' | 'failed' — both valid ExecutionLog statuses
+            startedAt: r.startedAt,
+            durationMs: r.durationMs,
+            trigger: { type: '', userId: r.userId ?? undefined },
+            steps: [],
+            error: r.error,
+        };
     }
 
     async getRun(runId: string): Promise<ExecutionLogEntry | null> {
@@ -1580,6 +1646,32 @@ export class AutomationEngine implements IAutomationService {
         // Evict oldest logs when exceeding max size
         if (this.executionLogs.length > this.maxLogSize) {
             this.executionLogs.splice(0, this.executionLogs.length - this.maxLogSize);
+        }
+        // Durable run history (observability): mirror every TERMINAL run to the
+        // store so "did it run / fail, and why?" survives a restart and the
+        // in-memory ring-buffer eviction. Best-effort + fire-and-forget: a
+        // history write must NEVER block or break the run that produced it.
+        const terminal =
+            entry.status === 'completed' ||
+            entry.status === 'failed' ||
+            entry.status === 'cancelled' ||
+            entry.status === 'timed_out';
+        if (terminal && this.store?.recordTerminal) {
+            const record: RunRecord = {
+                runId: entry.id,
+                flowName: entry.flowName,
+                flowVersion: entry.flowVersion,
+                status: entry.status === 'completed' ? 'completed' : 'failed',
+                startedAt: entry.startedAt,
+                durationMs: entry.durationMs,
+                error: entry.error,
+                userId: entry.trigger?.userId,
+            };
+            void this.store.recordTerminal(record).catch((err) => {
+                this.logger.warn(
+                    `[Automation] run-history persist failed for '${entry.flowName}': ${(err as Error)?.message}`,
+                );
+            });
         }
     }
 

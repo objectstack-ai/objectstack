@@ -35,7 +35,7 @@ export const SysAutomationRun = ObjectSchema.create({
   icon: 'pause-circle',
   isSystem: true,
   managedBy: 'system',
-  description: 'Durable state of a suspended automation flow run (ADR-0019)',
+  description: 'Durable automation run state: live suspended runs (resumable, ADR-0019) and terminal run history (completed / failed, for observability).',
   displayNameField: 'id',
   nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{flow_name} · {node_id}',
@@ -62,20 +62,20 @@ export const SysAutomationRun = ObjectSchema.create({
     flow_version: Field.number({ label: 'Flow Version', required: false, group: 'Identity' }),
 
     node_id: Field.text({
-      label: 'Paused Node',
-      required: true,
+      label: 'Node',
+      required: false,
       maxLength: 255,
-      description: 'Node the run is suspended at; resume continues from its out-edges.',
+      description: 'For a suspended run, the node it is paused at (resume continues from its out-edges); for a terminal run, the last node reached.',
       group: 'State',
     }),
 
     status: Field.select(
-      ['paused'],
+      ['running', 'paused', 'completed', 'failed'],
       {
         label: 'Status',
         required: true,
         defaultValue: 'paused',
-        description: 'Only suspended runs are persisted; the row is deleted on terminal completion.',
+        description: 'paused = a live suspended run (resumable); completed / failed = a terminal run kept as durable history.',
         group: 'State',
       },
     ),
@@ -133,6 +133,27 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'State',
     }),
 
+    finished_at: Field.datetime({
+      label: 'Finished At',
+      required: false,
+      description: 'When a terminal run (completed / failed) ended. Null while running / paused.',
+      group: 'Outcome',
+    }),
+
+    duration_ms: Field.number({
+      label: 'Duration (ms)',
+      required: false,
+      description: 'Wall-clock duration of a terminal run.',
+      group: 'Outcome',
+    }),
+
+    error: Field.textarea({
+      label: 'Error',
+      required: false,
+      description: 'Failure reason for a `failed` run — the message a designer needs to fix it.',
+      group: 'Outcome',
+    }),
+
     created_at: Field.datetime({
       label: 'Created At',
       required: true,
@@ -148,6 +169,8 @@ export const SysAutomationRun = ObjectSchema.create({
     // "Which runs are suspended for this flow?" — operability / resume sweeps.
     { fields: ['flow_name', 'status'] },
     { fields: ['status', 'updated_at'] },
+    // Run-history reads for the Studio "Runs" tab: newest terminal runs per flow.
+    { fields: ['flow_name', 'started_at'] },
     // Look up a suspended run by the pausing node's correlation key.
     { fields: ['correlation'] },
   ],
