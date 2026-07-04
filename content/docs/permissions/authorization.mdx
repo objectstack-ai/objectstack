@@ -106,6 +106,35 @@ package (metadata); subject bindings and env-specific values stay as config.**
   (`bootstrapDeclaredRoles`, ADR-0057 D6) — a declarable-but-never-seeded
   array is exactly the inert-metadata smell ADR-0078 prohibits.
 
+### Two doors, one metadata (ADR-0086 D6/D7)
+
+The `managedBy` provenance axis is not just descriptive — the platform
+**populates and gates on it**, so editing a permission set flows through exactly
+one of two doors, each writing only what it owns:
+
+- **Package door** (studio `/studio/:packageId/access`) — a package's own set is
+  **metadata**, so edits are saved as a **draft** stamped with the `packageId`
+  (`saveMetaItem` `mode:'draft'`) and go live with the package's atomic
+  **Publish**, exactly like Data and Interfaces. On publish, a registered
+  materializer (`registerPublishMaterializer`) projects the published body into
+  `sys_permission_set` as `managedBy:'package'` + `packageId`, reusing the same
+  upsert as the boot seeder (`upsertPackagePermissionSet`). Enforcement is
+  unaffected while a set is still a draft (drafts never enter the active
+  resolve).
+- **Environment-admin door** (`metadata-admin`) — the cross-package all-objects
+  matrix plus subject **assignment** (`sys_user_permission_set`,
+  `sys_role_permission_set`), edited **live** (config). It owns env-authored
+  sets (`managedBy` `platform`/`user`) and assignments — not package sets.
+- **Data-layer write gate** — the security middleware **refuses** any admin-door
+  write to a `managedBy:'package'` `sys_permission_set` row, and refuses a
+  payload that forges that provenance (insert or update, single or array). It
+  fails closed ahead of the CRUD check — even a `modifyAllRecords` super-user is
+  blocked — so the door separation is a real boundary, not a UI hint. System /
+  boot writes carry `isSystem` and bypass it, so the seeder and materializer are
+  never self-blocked. An environment adjusts a packaged set through the
+  ADR-0005 overlay / muting subtract layer (below), never by editing the base
+  record.
+
 ## Lifecycle coverage (five stages)
 
 | Stage | What holds today | Owned by |
@@ -145,10 +174,13 @@ The complete, prioritized gap map lives in issue **#2561** (the production
   references (ADR-0066 ⑨).
 - **Per-operation `requiredPermissions`** (ADR-0066 ⑤) — read-open /
   write-gated objects.
-- **Enterprise authentication** (ADR-0069) — password policy, lockout,
-  enforced MFA (P1); session lifecycle, IP allowlists (P2); SSO/SCIM (P3).
-- **Two doors** (ADR-0086 D6/D7) — package Access door under draft/publish;
-  env-admin door live, cross-package.
+- **Deny/muting subtract layer** (ADR-0005 overlay; ADR-0066 precedence step 4)
+  — how an environment adjusts a *packaged* set without forking it; deferred
+  until proven need (ADR-0086 P2).
+- **Enterprise authentication** (ADR-0069) — password policy, lockout, enforced
+  MFA (P1) and session lifecycle + global IP allowlist + shared multi-node
+  rate-limit store (P2) are **landed**; the remaining gap is per-org
+  `allowed_ip_ranges` (#2571). SSO/SCIM is P3.
 
 ## ADR index
 
