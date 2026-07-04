@@ -1,0 +1,131 @@
+---
+title: Environment-Scoped Routing
+description: Route REST, metadata, automation, AI, and package calls through /api/v1/environments/:environmentId/....
+---
+
+# Environment-Scoped Routing
+
+Environment-scoped routing makes the target runtime explicit in the URL:
+
+```text
+/api/v1/environments/:environmentId/data/:object
+/api/v1/environments/:environmentId/meta
+/api/v1/environments/:environmentId/automation/...
+/api/v1/environments/:environmentId/ai/...
+```
+
+The scoped URL wins over hostname, header, session, and default-environment
+resolution. Use it when a caller must address a specific environment without
+depending on request context.
+
+---
+
+## Server configuration
+
+Enable scoped route registration in `objectstack.config.ts`:
+
+```typescript
+import { defineStack } from '@objectstack/spec';
+
+const stack = defineStack({
+  // ...your manifest, objects, apis, etc.
+});
+
+export default {
+  ...stack,
+  api: {
+    enableProjectScoping: true,
+    projectResolution: 'auto',
+  },
+};
+```
+
+<Callout type="warn">
+`defineStack` validates against a schema that has no top-level `api` field, so
+unknown keys are stripped — passing `api` *inside* `defineStack({ ... })` is
+silently dropped and scoping stays disabled. Attach the `api` block to the
+exported config object instead, as shown above. The CLI reads it from the
+exported config (`config.api`) when registering the REST and dispatcher plugins.
+</Callout>
+
+The option names are historical for compatibility with existing config files;
+the route, header, env var, and request context all use `environment`.
+
+| Strategy | Behavior | When to use |
+|:---|:---|:---|
+| `auto` | Registers both unscoped `/api/v1/...` and scoped `/api/v1/environments/:environmentId/...` routes. | Default migration mode. |
+| `optional` | Same route surface as `auto`; resolution may come from URL, hostname, header, session, or default. | Multi-environment hosts that still accept unscoped callers. |
+| `required` | Registers only environment-scoped routes for data/meta/AI/automation/package handlers. | Hardened clients that always pass an environment id. |
+
+---
+
+## Client SDK
+
+The client keeps the legacy factory name `project(id)`, but the value is an
+environment id and the generated URLs are environment-scoped:
+
+```typescript
+import { ObjectStackClient } from '@objectstack/client';
+
+const client = new ObjectStackClient({
+  baseUrl: 'https://api.example.com',
+});
+
+const env = client.project('env_prod');
+
+await env.data.find('customer', { top: 20 });
+await env.meta.getItems('object');
+await env.packages.list();
+```
+
+The top-level client can also set a default environment header:
+
+```typescript
+const client = new ObjectStackClient({
+  baseUrl: 'https://api.example.com',
+  environmentId: 'env_prod',
+});
+```
+
+That sends `X-Environment-Id: env_prod` on unscoped requests.
+
+---
+
+## Resolution order
+
+The open-source `HttpDispatcher` only parses the scoped URL for an
+environment-id hint (`extractEnvironmentIdFromPath`) and forwards it via
+`prepareResolverHints`. Actual resolution is owned by the host's
+`KernelResolver` (`resolveKernel`, per ADR-0006 Phase 5), which resolves the
+environment in this order:
+
+1. `:environmentId` from `/api/v1/environments/:environmentId/...`
+2. Hostname through the configured environment registry
+3. `X-Environment-Id`
+4. `session.activeEnvironmentId`
+5. A configured default environment
+6. A single available environment, when the registry can prove the choice is unambiguous
+
+Control-plane endpoints remain unscoped. Requests such as
+`/api/v1/cloud/environments/:id` manage environments rather than running inside
+one, so they are intentionally excluded from data-plane resolution.
+
+---
+
+## Migration checklist
+
+1. Replace `/api/v1/projects/:projectId/...` with
+   `/api/v1/environments/:environmentId/...`.
+2. Replace `X-Project-Id` with `X-Environment-Id`.
+3. Replace `OS_PROJECT_ID` with `OS_ENVIRONMENT_ID`.
+4. Store runtime rows under `environment_id`.
+5. Keep the SDK `client.project(id)` call only as a compatibility method name;
+   pass an environment id to it.
+
+---
+
+## Related
+
+- [Single-Environment Mode](/docs/deployment/single-project-mode)
+- [Deployment Modes](/docs/deployment)
+- [Client SDK](/docs/api/client-sdk)

@@ -1,0 +1,219 @@
+---
+title: "Permissions & Identity"
+description: "Authentication, authorization, and record- and field-level access control in ObjectStack — a cross-protocol capability enforced by the ObjectOS runtime and declared as ObjectQL security metadata."
+---
+
+# Permissions & Identity
+
+This module covers authentication, authorization, and record- and field-level
+access control. It is a cross-protocol capability: enforced by the ObjectOS
+runtime, declared as ObjectQL security metadata.
+
+> **Implementation status — Phase-1 RBAC is live.** REST → ObjectQL now propagates a populated `ExecutionContext` (userId, tenantId, roles, permissions) into the SecurityPlugin middleware, so CRUD / FLS / RLS checks actually fire on every authenticated request. The default `member_default` permission set ships a wildcard RLS rule `organization_id == current_user.organization_id` plus explicit per-object overrides `sys_organization_self` (`id == current_user.organization_id`) and `sys_user_self` (`id == current_user.id`) for the two global tables that lack an `organization_id` column. RLS expressions, the physical column, and `RLSUserContext.organization_id` all use the same canonical name — there is no `tenantField` rewrite indirection (schemas with a different physical tenant column should fork the defaults). The legacy `objectql.registerTenantMiddleware` has been removed; SecurityPlugin is the sole authority for tenant isolation. Analytics also reuses the same read scope: `@objectstack/service-analytics` auto-bridges to `security.getReadFilter(object, context)` when the security service is registered, so dataset-bound dashboards/reports do not bypass RLS. End-to-end verified on `pnpm dev:crm` across `sys_organization`, `sys_member`, `sys_user`, `sys_user_permission_set`, `sys_role_permission_set`. **Anonymous traffic is denied by default** (the ADR-0056 D2 default-deny flip landed: `requireAuth` defaults to `true`); an explicit `requireAuth: false` opt-out logs a boot-time warning, and public forms self-authorize via a declaration-derived `publicFormGrant` (ADR-0056 Option A — see [Public Forms](/docs/ui/forms)). Organization-Wide Defaults (`private` / `public_read` / `public_read_write` / `controlled_by_parent`) and Sharing Rules (owner + criteria, with `role_and_subordinates` hierarchy widening) are live and dogfood-proven (ADR-0056); the Studio RLS visual editor, per-user×org permission cache, and audit UI for denied access are queued. See `CHANGELOG.md` and `concepts/implementation-status.mdx` for the latest matrix.
+
+## What's in this module
+
+- [Authentication](/docs/permissions/authentication)
+- [Social & Enterprise SSO](/docs/permissions/sso)
+- [Authorization Architecture](/docs/permissions/authorization)
+- [Profiles](/docs/permissions/profiles)
+- [Permission Sets](/docs/permissions/permission-sets)
+- [Role Hierarchy](/docs/permissions/roles)
+- [Sharing Rules](/docs/permissions/sharing-rules)
+- [Field-Level Security](/docs/permissions/field-level-security)
+- [Permission Metadata](/docs/permissions/permission-metadata)
+- [Security Permissions Matrix](/docs/permissions/permissions-matrix)
+- [Access Recipes](/docs/permissions/access-recipes)
+
+Spec: [Security & Access Control](/docs/protocol/objectql/security) ·
+Schema reference: [Security](/docs/references/security), [Identity](/docs/references/identity)
+
+---
+
+## Security Architecture
+
+> **Authentication is the first layer.** This guide covers *authorization* —
+> who can see and do what once signed in (RBAC, RLS, FLS, sharing). Harden
+> *authentication* first — password policy, enforced MFA, account lockout,
+> session controls, and IP allowlist — in
+> [Enterprise Authentication Hardening](/docs/permissions/authentication#enterprise-authentication-hardening-adr-0069).
+
+ObjectStack implements a multi-layered security model:
+
+```
+┌─────────────────────────────────────┐
+│   Application Visibility            │ ← Which apps can users access?
+├─────────────────────────────────────┤
+│   Object Permissions                │ ← CRUD on objects
+├─────────────────────────────────────┤
+│   Record-Level Security             │ ← Which records can be accessed?
+│   - Organization-Wide Defaults      │
+│   - Role Hierarchy                  │
+│   - Sharing Rules                   │
+│   - Manual Sharing                  │
+├─────────────────────────────────────┤
+│   Field-Level Security              │ ← Read/Write specific fields
+└─────────────────────────────────────┘
+```
+
+### Security Layers
+
+1. **Object Permissions**: Control create, read, update, delete on entire objects
+2. **Record-Level Security**: Control access to specific records
+3. **Field-Level Security**: Control visibility and editability of fields
+4. **Row-Level Security**: Control access based on data values
+
+---
+
+## Best Practices
+
+### 1. Profile Design
+
+✅ **DO:**
+- Create minimal profiles (start restrictive, extend with permission sets)
+- Use descriptive names
+- Document the purpose of each profile
+- Assign one profile per user
+
+❌ **DON'T:**
+- Create too many profiles
+- Give excessive permissions "just in case"
+- Mix unrelated permissions in one profile
+
+### 2. Permission Sets
+
+✅ **DO:**
+- Use for temporary or special access
+- Group related permissions
+- Name clearly (e.g., "Advanced Reporting", "Bulk Data Access")
+- Remove when no longer needed
+
+❌ **DON'T:**
+- Use as a replacement for profiles
+- Grant system-wide permissions unnecessarily
+
+### 3. Role Hierarchy
+
+✅ **DO:**
+- Mirror your organizational structure
+- Keep hierarchies simple
+- Document reporting relationships
+- Review regularly
+
+❌ **DON'T:**
+- Create overly deep hierarchies
+- Mix different org structures
+- Grant too much upward access
+
+### 4. Sharing Rules
+
+✅ **DO:**
+- Start with most restrictive OWD
+- Use sharing rules to open up access
+- Document business justification
+- Test thoroughly
+
+❌ **DON'T:**
+- Set OWD to Public unless necessary
+- Create redundant sharing rules
+- Grant more access than needed
+
+### 5. Field-Level Security
+
+✅ **DO:**
+- Protect sensitive data (SSN, salary, etc.)
+- Use read-only for calculated fields
+- Document security classifications
+- Audit regularly
+
+❌ **DON'T:**
+- Hide required fields
+- Restrict access unnecessarily
+- Forget about API access
+
+---
+
+## Security Checklist
+
+### Initial Setup
+
+- [ ] Harden authentication (password policy, enforced MFA, lockout, session controls, IP allowlist) — see [Authentication Hardening](/docs/permissions/authentication#enterprise-authentication-hardening-adr-0069)
+- [ ] Define user roles and hierarchies
+- [ ] Create profiles for each role
+- [ ] Set organization-wide defaults
+- [ ] Configure field-level security
+- [ ] Create sharing rules
+
+### Ongoing Maintenance
+
+- [ ] Review user access quarterly
+- [ ] Audit permission changes
+- [ ] Remove inactive users promptly
+- [ ] Update sharing rules as needed
+- [ ] Monitor security health checks
+
+### Compliance
+
+- [ ] Document security model
+- [ ] Maintain access request process
+- [ ] Log security changes
+- [ ] Conduct security reviews
+- [ ] Train users on security policies
+
+---
+
+## Real-World Example
+
+Complete security setup for a sales team:
+
+```typescript
+// 1. Organization-Wide Defaults (one OWDModel value per object)
+const OrganizationDefaults = {
+  account: 'private',
+  opportunity: 'private',
+  contact: 'controlled_by_parent',
+};
+
+// 2. Role Hierarchy (flat roles linked by `parent`)
+const roles = [
+  { name: 'sales_vp', label: 'Sales VP' },
+  { name: 'sales_manager', label: 'Sales Manager', parent: 'sales_vp' },
+  { name: 'sales_rep', label: 'Sales Rep', parent: 'sales_manager' },
+];
+
+// 3. Profile (a PermissionSet with isProfile: true)
+const SalesRepProfile = {
+  name: 'sales_rep',
+  isProfile: true,
+  objects: {
+    account: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
+    opportunity: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
+  },
+  fields: {
+    'account.annual_revenue': { readable: true, editable: false }, // Read-only
+  },
+};
+
+// 4. Sharing Rule (criteria type with a CEL condition)
+const AccountSharingRule = {
+  name: 'high_value_accounts',
+  type: 'criteria',
+  object: 'account',
+  // Share high-value accounts with sales reps
+  condition: P`record.annual_revenue >= 1000000`,
+  sharedWith: { type: 'role', value: 'sales_rep' },
+  accessLevel: 'read',
+};
+
+// 5. Permission Set (systemPermissions is a string array)
+const AdvancedReportingPermissionSet = {
+  name: 'advanced_reporting',
+  objects: {},
+  // For sales analysts
+  systemPermissions: ['run_reports', 'export_reports', 'view_all_data'],
+};
+```
+
+---
+
+**Next:** [Automation →](/docs/automation)

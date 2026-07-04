@@ -1,0 +1,22 @@
+{
+  "title": "Data Modeling",
+  "icon": "Database",
+  "pages": [
+    "index",
+    "schema-design",
+    "objects",
+    "fields",
+    "field-types",
+    "field-type-decision-tree",
+    "relationships",
+    "validation",
+    "validation-rules",
+    "formulas",
+    "queries",
+    "indexing",
+    "seed-data",
+    "external-datasources",
+    "drivers",
+    "analytics"
+  ]
+}

@@ -80,7 +80,7 @@ export const ServiceMetadataSchema = lazySchema(() => z.object({
    * multi-node deployment. Optional — omitting it is equivalent to
    * `{ clusterScope: 'node' }`, which is correct on a single machine.
    *
-   * @see content/docs/concepts/cluster-semantics.mdx §5
+   * @see content/docs/kernel/cluster.mdx §5
    */
   cluster: ServiceClusterAnnotationsSchema.optional()
     .describe('Cluster scope & leader strategy. See cluster-semantics.mdx §5.'),

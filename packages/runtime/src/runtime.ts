@@ -30,7 +30,7 @@ export interface RuntimeConfig {
      * - `ClusterCapabilityConfigInput`: forwarded to `defineCluster()`.
      * - `{ cluster: IClusterService }`: bring your own instance.
      *
-     * See `content/docs/concepts/cluster-semantics.mdx` for driver options.
+     * See `content/docs/kernel/cluster.mdx` for driver options.
      */
     cluster?: false | ClusterCapabilityConfigInput | ClusterServicePluginOptions;
 }

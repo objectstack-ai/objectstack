@@ -1,0 +1,34 @@
+---
+title: Kernel & Services
+description: The ObjectKernel runtime — plugin host, event bus, service registry, and the services.* APIs your hooks and plugins call.
+---
+
+# Kernel & Services
+
+The kernel is ObjectStack's runtime: it loads your metadata artifact, hosts plugins, wires up services, and enforces the lifecycle that keeps the system stable. This module documents the **ObjectOS layer** in practice — the [System Protocol](/docs/protocol/objectos) is its normative spec. If you write hooks or plugins, this is where the APIs you call (`services.data`, `services.email`, `services.queue`, …) and the contracts they implement are documented.
+
+## How it fits together
+
+- The **ObjectKernel** boots through a strict lifecycle and exposes a **service registry**; everything else — data engine, auth, storage — is a service registered by a plugin.
+- **Events & hooks** are the kernel-level extension points plugins use to react to system activity.
+- **Runtime services** (`services.*`) are the stable, versioned API surface exposed to hook and action bodies.
+- **Service contracts** (`IDataEngine`, `IAuthService`, `ICacheService`, `IMetadataService`, `IStorageService`) define what any implementation must provide, so services are swappable.
+- **Cluster semantics** describe how the runtime behaves when scaled beyond a single node.
+
+## What's in this module
+
+<Cards>
+  <Card href="/docs/kernel/architecture" title="Kernel Architecture" description="ObjectKernel lifecycle and design" />
+  <Card href="/docs/kernel/events" title="Events & Hooks" description="Kernel-level extension points" />
+  <Card href="/docs/kernel/services" title="Service Registry" description="How services are registered and resolved" />
+  <Card href="/docs/kernel/services-checklist" title="Kernel Services Checklist" description="Every kernel service at a glance" />
+  <Card href="/docs/kernel/runtime-services" title="Runtime Service APIs" description="services.data, email, queue, storage, sharing, settings, audit" />
+  <Card href="/docs/kernel/contracts" title="Service Contracts" description="The interfaces services implement" />
+  <Card href="/docs/kernel/cluster" title="Cluster Semantics" description="Multi-node runtime behavior" />
+</Cards>
+
+## Related
+
+- **Spec:** [System Lifecycle](/docs/protocol/objectos/lifecycle), [Runtime Capabilities](/docs/protocol/objectos/runtime-capabilities), [Metadata Service](/docs/protocol/objectos/metadata-service)
+- **Schema reference:** [Kernel](/docs/references/kernel), [System](/docs/references/system), [Contracts](/docs/references/contracts)
+- **Neighbors:** building and packaging plugins is covered in [Plugins & Packages](/docs/plugins); running the kernel in production is covered in [Deployment & Operations](/docs/deployment).

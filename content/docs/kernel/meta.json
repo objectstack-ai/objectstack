@@ -1,0 +1,14 @@
+{
+  "title": "Kernel & Services",
+  "icon": "Cpu",
+  "pages": [
+    "index",
+    "architecture",
+    "events",
+    "services",
+    "services-checklist",
+    "runtime-services",
+    "contracts",
+    "cluster"
+  ]
+}

@@ -97,7 +97,7 @@ computeFQN('base', 'user'); // => 'user' (reserved namespace)
 ## Migrating from `@objectql/core`
 
 If you are migrating from the downstream `@objectql/core` package, see the
-[Migration Guide](../../content/docs/guides/objectql-migration.mdx) for
+[Migration Guide](../../content/docs/deployment/migration-from-objectql.mdx) for
 step-by-step instructions.
 
 **Quick summary:**

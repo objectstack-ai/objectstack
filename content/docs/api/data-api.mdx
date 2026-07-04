@@ -1,0 +1,208 @@
+---
+title: Data API
+description: REST endpoints for CRUD, batch operations, record cloning, and analytics queries.
+---
+
+# Data API
+
+Record CRUD, batch operations, and analytics queries over REST. All paths are relative to the base URL (defaults to `/api/v1`) — see the [API Overview](/docs/api) for discovery and service availability.
+
+## Data Operations
+
+CRUD operations on any object. Always available — provided by the kernel.
+
+### `GET /data/:object`
+
+Query records with filtering, sorting, selection, and pagination.
+
+| Parameter | Location | Description |
+|:----------|:---------|:------------|
+| `object` | path | Object name |
+| `select` | query | Comma-separated field names |
+| `filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. |
+| `sort` | query | Sort expression (e.g. `name asc` or `-created_at`) |
+| `top` | query | Limit (default: 20) |
+| `skip` | query | Offset |
+| `expand` | query | Comma-separated list of relations to eager-load |
+| `search` | query | Full-text search query |
+
+> **Note:** OData-style `$`-prefixed parameters (`$filter`, `$select`, `$orderby`, `$top`, `$skip`) are supported via the [OData endpoint](/docs/references/api/odata). The standard REST API uses unprefixed parameter names.
+
+**Response**:
+```json
+{
+  "object": "account",
+  "records": [{ "id": "1", "name": "Acme Corp", ... }],
+  "total": 42,
+  "hasMore": true
+}
+```
+
+### `GET /data/:object/:id`
+
+Get a single record by ID. Only `select` and `expand` query parameters are allowed; all other parameters are discarded.
+
+| Parameter | Location | Description |
+|:----------|:---------|:------------|
+| `object` | path | Object name |
+| `id` | path | Record ID |
+| `select` | query | Comma-separated field names to include |
+| `expand` | query | Comma-separated list of relations to eager-load |
+
+**Response**: `{ object: "account", id: "1", record: { ... } }`
+
+### `POST /data/:object`
+
+Create a new record.
+
+**Body**: `{ name: "Acme Corp", industry: "Technology" }`  
+**Response**: `{ object: "account", id: "1", record: { ... } }`
+
+### `PATCH /data/:object/:id`
+
+Update an existing record (partial update).
+
+**Body**: `{ industry: "Healthcare" }`  
+**Response**: `{ object: "account", id: "1", record: { ... } }`
+
+### `DELETE /data/:object/:id`
+
+Delete a record.
+
+**Response**: `{ object: "account", id: "1", success: true }`
+
+---
+
+## Batch Operations
+
+Efficient bulk operations. Always available.
+
+### `POST /data/:object/batch`
+
+Execute a batch operation (create / update / upsert / delete) on multiple records.
+
+**Body**:
+```json
+{
+  "operation": "update",
+  "records": [
+    { "id": "1", "data": { "status": "active" } },
+    { "id": "2", "data": { "status": "active" } }
+  ],
+  "options": {
+    "atomic": true,
+    "returnRecords": true,
+    "continueOnError": false,
+    "validateOnly": false
+  }
+}
+```
+
+**Response**: `BatchUpdateResponse` with `succeeded`, `failed`, `total`, and a per-record `results` array. Each entry in `results` has `id`, `success`, an optional `errors` array, and optional `data` (the full record, present when `returnRecords` is `true`).
+
+### `POST /data/:object/createMany`
+
+Batch create multiple records.
+
+**Body**: a bare array of records — `[{ name: "A" }, { name: "B" }]`. The REST handler reads the request body directly as the records array, so do **not** wrap it in `{ records: [...] }`.  
+**Response**: `{ object: "account", records: [...], count: 2 }`
+
+### `POST /data/:object/updateMany`
+
+Batch update multiple records.
+
+**Body**:
+```json
+{
+  "records": [
+    { "id": "1", "data": { "status": "active" } },
+    { "id": "2", "data": { "status": "closed" } }
+  ],
+  "options": { "atomic": false }
+}
+```
+
+### `POST /data/:object/deleteMany`
+
+Batch delete records by ID list.
+
+**Body**: `{ ids: ["1", "2", "3"] }`
+
+---
+
+### `POST /data/:object/:id/clone`
+
+Clone a record. Reads the source, drops engine-owned columns (`id`, the audit
+fields, autonumbers, and computed `formula`/`summary` values) so they are
+re-derived, applies any caller `overrides`, and inserts the copy. Shallow by
+design — it duplicates the record's own fields, not its child records.
+
+Gated by the object's `enable.clone` capability (default `true`); an object with
+`enable.clone: false` returns `403 CLONE_DISABLED`.
+
+**Body** (optional): `{ "overrides": { "name": "Acme (Copy)" } }` — applied on
+top of the copied values (a bare field map is also accepted). The natural place
+to set a new name or clear a unique field.
+
+**Response** `201`: `{ object, id, sourceId, record }`
+
+---
+
+## Analytics
+
+Semantic BI queries using a cube-style API. Available when the analytics service is enabled.
+
+### `POST /analytics/query`
+
+Execute an analytics query.
+
+**Body**:
+```json
+{
+  "cube": "account",
+  "measures": ["revenue.sum", "count"],
+  "dimensions": ["industry"],
+  "where": { "status": "active" },
+  "limit": 100
+}
+```
+
+<Callout type="info">
+Filtering uses the canonical Query DSL `where` object (the same MongoDB-style `FilterCondition` accepted by `find()`), not a `filters` array.
+</Callout>
+
+**Response**: the runtime dispatcher wraps the `AnalyticsResult` as `{ success: true, data: { rows, fields, sql?, totals? } }`:
+```json
+{
+  "success": true,
+  "data": {
+    "rows": [
+      { "industry": "Technology", "revenue.sum": 150000, "count": 5 },
+      { "industry": "Healthcare", "revenue.sum": 80000, "count": 3 }
+    ],
+    "fields": [
+      { "name": "industry", "type": "string", "label": "Industry" },
+      { "name": "revenue.sum", "type": "number", "label": "Revenue Sum", "format": "$0,0" },
+      { "name": "count", "type": "number", "label": "Count" }
+    ],
+    "sql": "SELECT ..."
+  }
+}
+```
+
+### `GET /analytics/meta`
+
+Get auto-generated cube metadata for all objects.
+
+**Response**: Array of cube definitions with measures, dimensions, and time dimensions.
+
+### `POST /analytics/sql`
+
+Execute a raw SQL analytics query (if supported by driver).
+
+---
+
+## See also
+
+- [API Overview](/docs/api) — discovery, error handling, and protocol types
+- [Metadata & Package API](/docs/api/metadata-api) — schemas, views, and package management

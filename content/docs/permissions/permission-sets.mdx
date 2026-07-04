@@ -1,0 +1,132 @@
+---
+title: "Permission Sets"
+description: "Extend profile permissions without changing the profile — custom sets, the four built-in permission sets, auto-granting for org admins, and how grants are assigned as data rows."
+---
+
+# Permission Sets
+
+Permission sets extend profile permissions without changing the profile.
+
+```typescript
+import { definePermissionSet } from '@objectstack/spec/security';
+
+export const AdvancedReportingPermissionSet = definePermissionSet({
+  name: 'advanced_reporting',
+  label: 'Advanced Reporting',
+
+  objects: {
+    opportunity: {
+      viewAllRecords: true,  // Override profile restriction
+    },
+    account: {
+      viewAllRecords: true,
+    },
+  },
+
+  fields: {
+    'opportunity.amount': { readable: true },
+    'opportunity.probability': { readable: true },
+  },
+
+  // System permissions are a flat array of capability strings
+  systemPermissions: ['run_reports', 'export_reports', 'create_dashboards'],
+});
+
+export const BulkDataPermissionSet = definePermissionSet({
+  name: 'bulk_data_access',
+  label: 'Bulk Data Access',
+
+  objects: {},
+  systemPermissions: ['bulk_api', 'view_all_data'],
+});
+```
+
+## Built-in Permission Sets
+
+The framework ships four canonical permission sets that are auto-seeded on
+boot by `plugin-security` (see
+`packages/plugins/plugin-security/src/objects/default-permission-sets.ts`). Use
+these as the baseline for any new org — tier custom sets on top rather
+than redefining the basics.
+
+| Name | Scope | What it unlocks | Notes |
+|:--|:--|:--|:--|
+| `admin_full_access` | Platform (no RLS) | All objects, all system permissions, Studio + Setup, cross-org reads | Reserved for platform operators. Auto-granted to the bootstrap admin (`bootstrapPlatformAdmin`) — the **first registered human**. The non-loginable seed-data identity `usr_system` (role `system`, provisioned before the first sign-up to own seeded rows) is deliberately skipped, so the real admin wins the promotion. |
+| `organization_admin` | Per-org (`tenant_isolation` RLS, only active when `@objectstack/plugin-org-scoping` is loaded) | Wildcard CRUD inside the org, `manage_org_users`, Setup app shell (only org-scoped entries visible), invite members, manage roles assignment | **Read-only** on `sys_role`, `sys_permission_set`, `sys_role_permission_set`, `sys_user_permission_set`, `sys_user_role` to prevent self-elevation. Does **not** see Studio. |
+| `member_default` | Per-org | Standard end-user CRUD on org records; **writes are owner-scoped** | Default profile for invited members. |
+| `viewer_readonly` | Per-org | Read access only | For auditors / read-only stakeholders. |
+
+> **Owner-scoped writes.** `member_default` grants read/create on org records but
+> restricts **edit and delete to the records the user created** — via the
+> `owner_only_writes` / `owner_only_deletes` RLS policies, keyed on `created_by`
+> (the ownership column the engine stamps on every row). These are enforced on
+> single-id `update`/`delete` by a **pre-image authorization check**: before the
+> mutation the middleware re-reads the target row through the write-operation RLS
+> filter, and a member attempting to modify another user's record gets `403`.
+> A permission set with `modifyAllRecords` (or no RLS, e.g. `admin_full_access`)
+> bypasses this. An object that opts out of audit fields (`systemFields.audit:
+> false`, no `created_by`) fails **closed** for member writes — grant
+> `modifyAllRecords` or a per-object policy, or model transferable ownership with
+> a dedicated owner field + custom policy.
+
+> **Single-org vs. multi-org runtimes.** The wildcard `tenant_isolation`
+> RLS row above only takes effect when `@objectstack/plugin-org-scoping`
+> is registered (typically via `OS_MULTI_ORG_ENABLED=true`). In single-org
+> mode `plugin-security` detects the missing `org-scoping` service and
+> strips the wildcard policy so reads / writes aren't accidentally
+> filtered by an unset `current_user.organization_id`. See the
+> [Org-Scoping Plugin README](https://github.com/objectstack-ai/framework/blob/main/packages/plugins/plugin-org-scoping/README.md)
+> for boot order and per-org seed-replay details.
+
+### Auto-grant for organization admins
+
+Any user whose `sys_member.role` is `owner`, `admin`, or comma-set
+`"owner,admin"` automatically receives an org-scoped grant of
+`organization_admin` (one `sys_user_permission_set` row per `(user, org)`
+pair). The grant is reconciled by a lifecycle hook in `plugin-security`
+on every `sys_member` insert / update / delete, and a `kernel:ready`
+backfill sweep cleans up orphans on boot. Demoting a member to `member`
+revokes the grant in the same transaction; you do not manage these rows
+by hand.
+
+### Setup app gating
+
+Setup nav items and the corresponding global settings manifests
+(`ai`, `knowledge`, `mail`, `storage`) require the new
+`manage_platform_settings` system permission, which is granted **only** to
+`admin_full_access`. `organization_admin` sees the Setup shell —
+Apps, People & Organization, Roles (read-only) — but not platform-wide
+configuration. Tenant-scoped settings (`branding`, `feature_flags`)
+remain gated by `setup.access` so org admins can manage them.
+
+## Assigning Permission Sets
+
+Permission-set grants are plain data rows, not helper-function calls. Assign a
+set to a user by inserting a `sys_user_permission_set` row, or to a role by
+inserting a `sys_role_permission_set` row:
+
+```typescript
+// Grant a permission set to a single user
+await objectql.object('sys_user_permission_set').insert({
+  user_id: 'user123',
+  permission_set: 'advanced_reporting',
+});
+
+// Grant a permission set to everyone in a role
+await objectql.object('sys_role_permission_set').insert({
+  role: 'data_analysts',
+  permission_set: 'bulk_data_access',
+});
+```
+
+Org-admin grants are reconciled automatically by a `plugin-security` lifecycle
+hook (see [Auto-grant for organization admins](#auto-grant-for-organization-admins))
+— you do not insert those rows by hand.
+
+---
+
+## See also
+
+- [Permissions & Identity overview](/docs/permissions)
+- [Profiles](/docs/permissions/profiles)
+- [Security Permissions Matrix](/docs/permissions/permissions-matrix)

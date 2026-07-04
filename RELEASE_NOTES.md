@@ -32,8 +32,8 @@ Prepare all 42 packages under `@objectstack/*` for formal public release on npm 
 - [x] `service-tenant` and `service-package` version-aligned to `4.0.4`.
 - [x] `packages/services/service-package/README.md` authored.
 - [x] Thin READMEs rewritten: `core`, `rest`, `driver-memory`, `plugin-security`, all 7 adapters.
-- [x] `content/docs/guides/packages.mdx` updated to 42-package inventory including `service-package` and `service-tenant`.
-- [x] `content/docs/concepts/packages.mdx` updated to 42-package inventory.
+- [x] `content/docs/plugins/packages.mdx` updated to 42-package inventory including `service-package` and `service-tenant`.
+- [x] `content/docs/plugins/packages.mdx` updated to 42-package inventory.
 - [x] `CHANGELOG.md` carries a release-prep entry.
 - [ ] `pnpm build` passes for every publishable package.
 - [ ] `pnpm test` passes.

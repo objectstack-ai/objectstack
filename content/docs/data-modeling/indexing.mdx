@@ -1,0 +1,45 @@
+---
+title: Database Indexing
+description: Optimize query performance with single-field, unique, compound, and lookup indexes
+---
+
+# Database Indexing
+
+Optimize query performance with indexes:
+
+```typescript
+indexes: [
+  // Single field index
+  { fields: ['name'], unique: false },
+  
+  // Unique index
+  { fields: ['email'], unique: true },
+  
+  // Compound index
+  { fields: ['type', 'is_active'], unique: false },
+  
+  // Lookup field index
+  { fields: ['owner'], unique: false },
+]
+```
+
+### When to Add Indexes
+
+✅ **Add indexes for:**
+- Lookup/reference fields
+- Fields used in filters
+- Fields used for sorting
+- Fields in WHERE clauses
+- High-cardinality fields
+
+❌ **Avoid indexes for:**
+- Low-cardinality fields (e.g., boolean)
+- Fields rarely queried
+- Frequently updated fields
+
+---
+
+## See also
+
+- [Data Modeling overview](/docs/data-modeling)
+- [Schema Design](/docs/data-modeling/schema-design)

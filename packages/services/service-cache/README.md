@@ -291,4 +291,4 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 - [Redis Documentation](https://redis.io/documentation)
 - [@objectstack/spec/contracts](../../spec/src/contracts/)
-- [Caching Best Practices](/content/docs/guides/caching/)
+- [Caching Best Practices](/content/docs/kernel/contracts/cache-service.mdx)

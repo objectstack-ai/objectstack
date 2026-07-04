@@ -3,7 +3,7 @@ title: Export
 description: Export protocol schemas
 ---
 
-{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 Data Export & Import Protocol
 
@@ -24,8 +24,8 @@ Base path: /api/v1/data/\{object\}/export
 ## TypeScript Usage
 
 ```typescript
-import { CreateExportJobRequest, CreateExportJobResponse, DeduplicationStrategy, ExportFormat, ExportImportTemplate, ExportJobProgress, ExportJobStatus, ExportJobSummary, FieldMappingEntry, GetExportJobDownloadRequest, GetExportJobDownloadResponse, ImportValidationConfig, ImportValidationMode, ImportValidationResult, ListExportJobsRequest, ListExportJobsResponse, ScheduleExportResponse } from '@objectstack/spec/api';
-import type { CreateExportJobRequest, CreateExportJobResponse, DeduplicationStrategy, ExportFormat, ExportImportTemplate, ExportJobProgress, ExportJobStatus, ExportJobSummary, FieldMappingEntry, GetExportJobDownloadRequest, GetExportJobDownloadResponse, ImportValidationConfig, ImportValidationMode, ImportValidationResult, ListExportJobsRequest, ListExportJobsResponse, ScheduleExportResponse } from '@objectstack/spec/api';
+import { CreateExportJobRequest, CreateExportJobResponse, CreateImportJobRequest, CreateImportJobResponse, DeduplicationStrategy, ExportFormat, ExportImportTemplate, ExportJobProgress, ExportJobStatus, ExportJobSummary, FieldMappingEntry, GetExportJobDownloadRequest, GetExportJobDownloadResponse, ImportJobProgress, ImportJobResults, ImportJobStatus, ImportJobSummary, ImportMapping, ImportRequest, ImportResponse, ImportRowResult, ImportValidationConfig, ImportValidationMode, ImportValidationResult, ImportWriteMode, ListExportJobsRequest, ListExportJobsResponse, ListImportJobsRequest, ListImportJobsResponse, ScheduleExportResponse, UndoImportJobResponse } from '@objectstack/spec/api';
+import type { CreateExportJobRequest, CreateExportJobResponse, CreateImportJobRequest, CreateImportJobResponse, DeduplicationStrategy, ExportFormat, ExportImportTemplate, ExportJobProgress, ExportJobStatus, ExportJobSummary, FieldMappingEntry, GetExportJobDownloadRequest, GetExportJobDownloadResponse, ImportJobProgress, ImportJobResults, ImportJobStatus, ImportJobSummary, ImportMapping, ImportRequest, ImportResponse, ImportRowResult, ImportValidationConfig, ImportValidationMode, ImportValidationResult, ImportWriteMode, ListExportJobsRequest, ListExportJobsResponse, ListImportJobsRequest, ListImportJobsResponse, ScheduleExportResponse, UndoImportJobResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = CreateExportJobRequest.parse(data);
@@ -62,6 +62,45 @@ const result = CreateExportJobRequest.parse(data);
 | **error** | `Object` | optional | Error details if success is false |
 | **meta** | `Object` | optional | Response metadata |
 | **data** | `Object` | ✅ |  |
+
+
+---
+
+## CreateImportJobRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **format** | `Enum<'csv' \| 'json' \| 'xlsx'>` | optional | Payload shape: csv text, a rows[] array, or a base64 xlsx (inferred when omitted) |
+| **csv** | `string` | optional | CSV text (when format = csv) |
+| **rows** | `Record<string, any>[]` | optional | Row objects (when format = json) |
+| **xlsxBase64** | `string` | optional | Base64-encoded .xlsx workbook bytes (when format = xlsx); parsed server-side |
+| **sheet** | `string \| integer` | optional | Worksheet name or 1-based index to read (xlsx; defaults to the first sheet) |
+| **mapping** | `Record<string, string> \| Object[]` | optional | Source column → target field mapping |
+| **dryRun** | `boolean` | ✅ | Validate + coerce every row without persisting |
+| **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | insert / update / upsert semantics |
+| **matchFields** | `string[]` | optional | Fields that identify an existing record (required for update/upsert) |
+| **runAutomations** | `boolean` | ✅ | Fire triggers/hooks for each imported row (off by default for bulk) |
+| **trimWhitespace** | `boolean` | ✅ | Trim leading/trailing whitespace from string cells |
+| **nullValues** | `string[]` | optional | Strings treated as null/blank (besides empty string) |
+| **createMissingOptions** | `boolean` | ✅ | Keep unmatched select values instead of failing the row |
+| **skipBlankMatchKey** | `boolean` | ✅ | Skip rows whose matchFields are blank (default: upsert creates them, update skips them) |
+
+
+---
+
+## CreateImportJobResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **jobId** | `string` | ✅ | Import job id — poll progress/results with this |
+| **object** | `string` | ✅ | Target object name |
+| **status** | `Enum<'pending' \| 'running' \| 'succeeded' \| 'failed' \| 'cancelled'>` | ✅ | Initial job status (usually "pending") |
+| **total** | `integer` | ✅ | Rows accepted for processing |
+| **createdAt** | `string` | ✅ | Job creation timestamp (ISO 8601) |
 
 
 ---
@@ -200,6 +239,182 @@ const result = CreateExportJobRequest.parse(data);
 
 ---
 
+## ImportJobProgress
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **jobId** | `string` | ✅ | Import job id |
+| **object** | `string` | ✅ | Target object name |
+| **status** | `Enum<'pending' \| 'running' \| 'succeeded' \| 'failed' \| 'cancelled'>` | ✅ | Current job status |
+| **dryRun** | `boolean` | ✅ | Whether this is a validate-only pass |
+| **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | Write mode used |
+| **total** | `integer` | ✅ | Total rows to process |
+| **processed** | `integer` | ✅ | Rows processed so far |
+| **created** | `integer` | ✅ | Rows that created a new record |
+| **updated** | `integer` | ✅ | Rows that updated an existing record |
+| **skipped** | `integer` | ✅ | Rows skipped |
+| **errors** | `integer` | ✅ | Rows that failed |
+| **percentComplete** | `number` | ✅ | processed / total as a percentage |
+| **undoable** | `boolean` | ✅ | Whether this job can still be logically rolled back (undo log captured, terminal state, not yet reverted) |
+| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601) |
+| **error** | `string` | optional | Fatal error message (when status = failed) |
+| **startedAt** | `string` | optional | Processing start timestamp (ISO 8601) |
+| **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
+| **createdAt** | `string` | ✅ | Job creation timestamp (ISO 8601) |
+
+
+---
+
+## ImportJobResults
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **jobId** | `string` | ✅ | Import job id |
+| **object** | `string` | ✅ | Target object name |
+| **status** | `Enum<'pending' \| 'running' \| 'succeeded' \| 'failed' \| 'cancelled'>` | ✅ | Current job status |
+| **dryRun** | `boolean` | ✅ | Whether this is a validate-only pass |
+| **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | Write mode used |
+| **total** | `integer` | ✅ | Total rows to process |
+| **processed** | `integer` | ✅ | Rows processed so far |
+| **created** | `integer` | ✅ | Rows that created a new record |
+| **updated** | `integer` | ✅ | Rows that updated an existing record |
+| **skipped** | `integer` | ✅ | Rows skipped |
+| **errors** | `integer` | ✅ | Rows that failed |
+| **percentComplete** | `number` | ✅ | processed / total as a percentage |
+| **undoable** | `boolean` | ✅ | Whether this job can still be logically rolled back (undo log captured, terminal state, not yet reverted) |
+| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601) |
+| **error** | `string` | optional | Fatal error message (when status = failed) |
+| **startedAt** | `string` | optional | Processing start timestamp (ISO 8601) |
+| **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
+| **createdAt** | `string` | ✅ | Job creation timestamp (ISO 8601) |
+| **results** | `Object[]` | ✅ | Capped sample of per-row outcomes (failures first) |
+| **resultsTruncated** | `boolean` | ✅ | Whether `results` is a capped sample of a larger set |
+
+
+---
+
+## ImportJobStatus
+
+### Allowed Values
+
+* `pending`
+* `running`
+* `succeeded`
+* `failed`
+* `cancelled`
+
+
+---
+
+## ImportJobSummary
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **jobId** | `string` | ✅ | Import job id |
+| **object** | `string` | ✅ | Target object name |
+| **status** | `Enum<'pending' \| 'running' \| 'succeeded' \| 'failed' \| 'cancelled'>` | ✅ | Job status |
+| **total** | `integer` | ✅ | Total rows |
+| **processed** | `integer` | ✅ | Rows processed |
+| **created** | `integer` | ✅ | Rows created |
+| **updated** | `integer` | ✅ | Rows updated |
+| **skipped** | `integer` | ✅ | Rows skipped |
+| **errors** | `integer` | ✅ | Rows failed |
+| **createdAt** | `string` | ✅ | Job creation timestamp (ISO 8601) |
+| **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
+| **undoable** | `boolean` | ✅ | Whether this job can still be logically rolled back |
+| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601) |
+
+
+---
+
+## ImportMapping
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Type: `Record<string, string>`
+
+---
+
+#### Option 2
+
+Type: `Object[]`
+
+---
+
+
+---
+
+## ImportRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **format** | `Enum<'csv' \| 'json' \| 'xlsx'>` | optional | Payload shape: csv text, a rows[] array, or a base64 xlsx (inferred when omitted) |
+| **csv** | `string` | optional | CSV text (when format = csv) |
+| **rows** | `Record<string, any>[]` | optional | Row objects (when format = json) |
+| **xlsxBase64** | `string` | optional | Base64-encoded .xlsx workbook bytes (when format = xlsx); parsed server-side |
+| **sheet** | `string \| integer` | optional | Worksheet name or 1-based index to read (xlsx; defaults to the first sheet) |
+| **mapping** | `Record<string, string> \| Object[]` | optional | Source column → target field mapping |
+| **dryRun** | `boolean` | ✅ | Validate + coerce every row without persisting |
+| **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | insert / update / upsert semantics |
+| **matchFields** | `string[]` | optional | Fields that identify an existing record (required for update/upsert) |
+| **runAutomations** | `boolean` | ✅ | Fire triggers/hooks for each imported row (off by default for bulk) |
+| **trimWhitespace** | `boolean` | ✅ | Trim leading/trailing whitespace from string cells |
+| **nullValues** | `string[]` | optional | Strings treated as null/blank (besides empty string) |
+| **createMissingOptions** | `boolean` | ✅ | Keep unmatched select values instead of failing the row |
+| **skipBlankMatchKey** | `boolean` | ✅ | Skip rows whose matchFields are blank (default: upsert creates them, update skips them) |
+
+
+---
+
+## ImportResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Target object name |
+| **dryRun** | `boolean` | ✅ | Whether this was a validate-only pass |
+| **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | Write mode used |
+| **total** | `integer` | ✅ | Rows processed |
+| **ok** | `integer` | ✅ | Rows that succeeded |
+| **errors** | `integer` | ✅ | Rows that failed |
+| **created** | `integer` | ✅ | Rows that created a new record |
+| **updated** | `integer` | ✅ | Rows that updated an existing record |
+| **skipped** | `integer` | ✅ | Rows skipped (no match in update mode, etc.) |
+| **results** | `Object[]` | ✅ | Per-row outcomes |
+
+
+---
+
+## ImportRowResult
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **row** | `integer` | ✅ | 1-based row number in the source data |
+| **ok** | `boolean` | ✅ | Whether the row succeeded |
+| **action** | `Enum<'created' \| 'updated' \| 'skipped' \| 'failed'>` | ✅ | What happened to the row |
+| **id** | `string` | optional | Record id (created/updated rows) |
+| **field** | `string` | optional | Field that caused a coercion/validation error |
+| **code** | `string` | optional | Error code (failed rows) |
+| **error** | `string` | optional | Human-readable error message (failed rows) |
+
+
+---
+
 ## ImportValidationConfig
 
 ### Properties
@@ -241,6 +456,17 @@ const result = CreateExportJobRequest.parse(data);
 
 ---
 
+## ImportWriteMode
+
+### Allowed Values
+
+* `insert`
+* `update`
+* `upsert`
+
+
+---
+
 ## ListExportJobsRequest
 
 ### Properties
@@ -269,6 +495,31 @@ const result = CreateExportJobRequest.parse(data);
 
 ---
 
+## ListImportJobsRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | optional | Filter to one target object |
+| **status** | `Enum<'pending' \| 'running' \| 'succeeded' \| 'failed' \| 'cancelled'>` | optional | Filter by job status |
+| **limit** | `integer` | ✅ | Max rows to return |
+| **offset** | `integer` | ✅ | Pagination offset |
+
+
+---
+
+## ListImportJobsResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **jobs** | `Object[]` | ✅ | Import jobs, newest first |
+
+
+---
+
 ## ScheduleExportResponse
 
 ### Properties
@@ -279,6 +530,22 @@ const result = CreateExportJobRequest.parse(data);
 | **error** | `Object` | optional | Error details if success is false |
 | **meta** | `Object` | optional | Response metadata |
 | **data** | `Object` | ✅ |  |
+
+
+---
+
+## UndoImportJobResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | Whether the undo completed |
+| **jobId** | `string` | ✅ | Import job id |
+| **object** | `string` | ✅ | Target object name |
+| **deleted** | `integer` | ✅ | Created records deleted |
+| **restored** | `integer` | ✅ | Updated records restored to pre-import values |
+| **failed** | `integer` | ✅ | Reversal operations that failed |
 
 
 ---

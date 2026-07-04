@@ -1,0 +1,236 @@
+---
+title: Actions as Tools
+description: Expose declarative Action metadata as AI-callable tools with explicit opt-in, HITL approval, and permission-aware execution
+---
+
+# Actions as Tools
+
+Part of the [AI module](/docs/ai) — how existing Action metadata becomes LLM-callable, and the guardrails around it.
+
+Declarative `Action` metadata can be exposed as AI-callable tools, named
+`action_<actionName>`, but exposure is **explicit opt-in**. Add an `ai:` block
+with `exposed: true` and an LLM-facing `description`; otherwise the action stays
+human/UI-only.
+
+```typescript
+export const triageCaseAction = {
+  name: 'triage_case',
+  label: 'Triage Case',
+  objectName: 'case',
+  type: 'flow',
+  target: 'case_triage',
+  ai: {
+    exposed: true,
+    description: 'Triage a support case, suggest priority, and assign the next support queue.',
+    category: 'action',
+    requiresConfirmation: false,
+  },
+};
+```
+
+When the LLM picks an exposed action, the AI runtime dispatches to the same
+handler the Console row toolbar would invoke, so your business logic stays in
+one place.
+
+## What gets exposed
+
+The AI runtime walks every registered object's `actions[]` and registers only
+actions with `ai.exposed === true` that also pass safety and wiring checks.
+Three action types are supported:
+
+| `action.type` | Dispatch path | Wiring needed |
+|:---|:---|:---|
+| `script` | `IDataEngine.executeAction(object, target, ctx)` — the same call Studio makes | none beyond the metadata service |
+| `api` | HTTP call to `action.target` via `ApiActionClient` (default: `fetch`) | `apiBaseUrl` (or a custom `apiClient`) |
+| `flow` | `IAutomationService.execute(target, { triggerData })` | `automation` service registered |
+
+Console-only types (`url`, `modal`, `form`) are always skipped. Dangerous
+actions — those with `confirmText`, `mode: 'delete'`, `variant: 'danger'`, or
+`ai.requiresConfirmation: true` — are skipped unless the
+[HITL approval queue](#human-in-the-loop-approval) is wired. To assert that a
+destructive-looking action is safe for autonomous execution, set
+`ai.requiresConfirmation: false`.
+
+## Wiring it up
+
+```typescript
+import { AIServicePlugin } from '@objectstack/service-ai';
+
+kernel.use(
+  new AIServicePlugin({
+    // Enables type:'api' action dispatch. Relative `target` paths
+    // ('/api/v1/...') are resolved against this base URL.
+    apiActionBaseUrl: process.env.OS_AI_ACTION_API_BASE_URL,
+    // Forwarded on every api-action HTTP call (auth, environment id, ...).
+    apiActionHeaders: { Authorization: `Bearer ${process.env.SERVICE_TOKEN}` },
+  }),
+);
+```
+
+If `automation` is already registered with the kernel, `type:'flow'` actions are picked up automatically — no extra wiring needed.
+
+## `type:'api'` body assembly
+
+For api actions, the request body is built from three sources (last wins):
+
+1. **User-collected params** (the keys the LLM filled in).
+2. **`recordIdParam`** — when row-context, the id is placed flat at `action.recordIdParam`, using `recordIdField` (default `'id'`) to pick the value off the record.
+3. **`bodyExtra`** — constant fields that always override.
+
+`bodyShape: { wrap: 'data' }` nests the user params under `data` while keeping `recordIdParam` flat — matching shapes like better-auth's `organization/update`.
+
+## Diagnostics
+
+`registerActionsAsTools()` returns `{ registered, skipped, warnings }`. The
+diagnostics include reasons such as `"not AI-exposed"`,
+`"no apiClient or apiBaseUrl configured"`, or
+`"requires confirmation ... wire HITL approval"` so action authors can see
+whether their action will be LLM-callable.
+
+## Human-In-The-Loop approval
+
+Destructive actions are too risky to let the LLM execute autonomously, but locking them away entirely defeats agentic UX. The HITL queue strikes the balance: the LLM gets to **propose** the call, a human gets to **approve** it.
+
+Enable the queue via the plugin option (default: off):
+
+```typescript
+kernel.use(
+  new AIServicePlugin({
+    enableActionApproval: true,
+    apiActionBaseUrl: process.env.OS_AI_ACTION_API_BASE_URL,
+  }),
+);
+```
+
+When the LLM picks an approval-gated tool (e.g. `action_delete_task`), the runtime:
+
+1. Persists an `ai_pending_actions` row with `status:'pending'`, `tool_input`, `proposed_by`, etc.
+2. Returns `{ status: 'pending_approval', pendingActionId }` to the model so it can summarise (e.g. "I've requested approval to delete task #42.").
+3. The operator sees the proposal in the **AI Pending Actions** Studio inbox.
+4. Clicking **Approve** calls `POST /api/v1/ai/pending-actions/:id/approve` (`ai:approve` permission). The service looks up the pre-registered dispatcher and executes the action with HITL routing disabled, so the same code path runs. The row transitions to `executed` (or `failed` if dispatch threw).
+5. Clicking **Reject** calls `POST /api/v1/ai/pending-actions/:id/reject` with an optional reason.
+
+The queue is exposed via four REST endpoints (`GET`, `GET/:id`, `POST/:id/approve`, `POST/:id/reject`) and via `IAIService.{proposePendingAction,approvePendingAction,rejectPendingAction,listPendingActions}` for programmatic use.
+
+**Why a dedicated queue (not the multi-step `IApprovalService`)?** AI tool-call HITL is ephemeral: subject is the proposed *call*, not a stable record state; there's no predefined process; operators expect single-click yes/no. The pending-action queue is a thin write log + dispatcher map that delivers that UX without dragging in process-engine overhead.
+
+### End-to-end example
+
+Two runnable demos live in `examples/app-todo/test/`:
+
+- **`ai-hitl.test.ts`** — drives the tool registry directly (no LLM dependency). Asserts the full lifecycle: `variant:'danger'` action registered as a tool → invocation returns `pending_approval` without executing → row persisted → `approvePendingAction(id, actor)` re-runs the handler → row transitions to `executed`. Reject path is also covered.
+
+  ```bash
+  pnpm --filter @example/app-todo test:hitl
+  ```
+
+- **`ai-hitl-llm.test.ts`** — same scenario but with a real model behind Vercel AI Gateway. The LLM is given the auto-generated tool description and asked to "delete all completed tasks"; the framework returns `pending_approval` so the model summarises the wait instead of retrying. After we call approve from the test, the deletion completes.
+
+  ```bash
+  AI_GATEWAY_API_KEY=vck_... pnpm --filter @example/app-todo test:hitl:llm
+  ```
+
+  Gated on `AI_GATEWAY_API_KEY` (or `OPENAI_API_KEY`); exits 0 with a notice if no key is provided, so it can be wired into CI without leaking spend.
+
+A trimmed view of the integration path:
+
+```typescript
+// 1. Plugin boots with approval gating enabled
+new AIServicePlugin({
+  adapter: new VercelLLMAdapter({ model }),
+  enableActionApproval: true, // ← opt-in
+})
+
+// 2. LLM picks the gated tool — handler short-circuits to pending
+const result = await aiService.toolRegistry.execute({
+  type: 'tool-call',
+  toolName: 'action_delete_completed',
+  input: {},
+} as never);
+const envelope = JSON.parse((result.output as { value: string }).value);
+// → { ok: true, status: 'pending_approval', pendingActionId: 'pa_...' }
+
+// 3. Operator approves (REST or programmatic)
+const outcome = await ai.approvePendingAction(envelope.pendingActionId, 'alice@example.com');
+// → { status: 'executed', result: <handler return> }
+```
+
+## Permission-aware execution (RLS for agents)
+
+Every AI tool call now runs with the **end-user's** `ExecutionContext`,
+so the same row-level-security rules that protect the REST API
+automatically scope what an agent can see and do. There is no separate
+"agent permission" surface to maintain — if a user can't read account
+`acc_42` through ObjectQL, neither can the LLM acting on their behalf.
+
+**How it works:**
+
+1. The REST routes for `/api/v1/ai/assistant/chat` and
+   `/api/v1/ai/agents/:id/chat` pull the authenticated principal out of
+   `req.user` and forward it to `aiService.chatWithTools(...)` as
+   `toolExecutionContext: { actor, conversationId, environmentId }`.
+   Both **cookie session** (`better-auth.session_token`) and **Bearer
+   token** auth are resolved automatically by the dispatcher — your
+   browser chats and your scripted API calls land in the same RLS
+   context as a plain ObjectQL request from the same user.
+2. The tool registry threads that context into every handler invocation.
+3. Built-in data tools (`query_records`, `get_record`,
+   `aggregate_data`) and auto-generated `action_*` tools convert the
+   actor into a `{ userId, roles, permissions, isSystem: false }`
+   engine context on each `IDataEngine` call. RLS engages exactly as
+   it would for a hand-rolled API endpoint.
+4. Action audit logs attribute the dispatch to the real user instead of
+   a generic "AI Assistant" principal.
+
+When you invoke `chatWithTools` from a custom server route, opt in by
+passing the actor explicitly:
+
+```typescript
+await aiService.chatWithTools(messages, tools, {
+  toolExecutionContext: {
+    actor: {
+      id: currentUser.id,
+      name: currentUser.displayName,
+      roles: currentUser.roles,
+      permissions: currentUser.permissions,
+    },
+    conversationId,
+    environmentId,
+  },
+});
+```
+
+Omit `toolExecutionContext` to keep the previous system-level behaviour
+(used by cron jobs, internal callers, and the existing test suite).
+
+## LLM-generated conversation titles
+
+Auto-titling is **opt-in** (disabled by default; enable it via the `ai`
+settings namespace from Console → Settings → AI). Once enabled, after a
+conversation has at least one user + assistant exchange (≥ 2 messages) and
+still has no title, the AI service fires a short, out-of-band LLM call
+(default cap **16 characters**, single-line, no quotes) to summarise what the
+user is asking about and writes the result back to `ai_conversations.title`.
+The summarise call:
+
+- Reuses the **active chat provider** (so it works with any
+  `provider/model` you configured via Console → Settings → AI), and
+  honours the same `${provider}_base_url` you wired for chat —
+  including custom OpenAI-compatible endpoints (SiliconFlow, DeepSeek,
+  a local OpenAI proxy, …).
+- Runs as a fire-and-forget task with a short timeout — if the title
+  call fails, the chat reply is unaffected and the conversation simply
+  keeps its placeholder name.
+- Skips re-titling once `title` is set, so manual edits via the
+  conversation API are never overwritten.
+
+The Console sidebar groups conversations by recency and displays the
+title; if you ever need to force a regenerate, clear the field via the
+`ai_conversations` REST API and send another message.
+
+---
+
+## See also
+
+- [AI Overview](/docs/ai)
+- [AI Agents](/docs/ai/agents)

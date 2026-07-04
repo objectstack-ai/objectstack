@@ -20,7 +20,7 @@ import type { IClusterService } from '@objectstack/spec/contracts';
  * Channel: `metadata.changed` — payload shape defined by
  * `ClusterMetadataChangedPayload` in `@objectstack/metadata`.
  *
- * See `content/docs/concepts/cluster-semantics.mdx` §5.
+ * See `content/docs/kernel/cluster.mdx` §5.
  */
 export class MetadataClusterBridgePlugin implements Plugin {
     name = 'com.objectstack.service.metadata-cluster-bridge';

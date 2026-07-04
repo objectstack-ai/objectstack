@@ -6,7 +6,7 @@ connection to a data store. Objects route to one via their `datasource` field
 to read/write a **separate** or **external** database.
 
 Full field reference: `node_modules/@objectstack/spec/src/data/datasource.zod.ts`.
-Narrative guide: `content/docs/guides/external-datasources.mdx`.
+Narrative guide: `content/docs/data-modeling/external-datasources.mdx`.
 
 ## `schemaMode` — who owns the schema
 

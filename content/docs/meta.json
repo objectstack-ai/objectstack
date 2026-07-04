@@ -3,9 +3,17 @@
   "pages": [
     "getting-started",
     "concepts",
-    "guides",
-    "references",
+    "data-modeling",
+    "automation",
+    "permissions",
+    "ui",
+    "api",
+    "ai",
+    "plugins",
+    "kernel",
+    "deployment",
     "protocol",
+    "references",
     "releases"
   ]
 }

@@ -196,7 +196,7 @@ artifact persistence (`artifacts/${projectId}/${commitId}.json`).
 - [x] `MetadataPlugin` consumes published artifacts via the
       `artifactSource: { mode: 'artifact-api' }` source — no direct S3
       coupling needed in the metadata layer.
-- See [Publish, Versioning & Preview](../../content/docs/guides/publish-and-preview.mdx).
+- See [Publish, Versioning & Preview](../../content/docs/deployment/publish-and-preview.mdx).
 
 ---
 

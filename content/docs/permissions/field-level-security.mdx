@@ -1,0 +1,93 @@
+---
+title: "Field-Level Security"
+description: "Control visibility and editability of specific fields — readable/editable rules, hidden vs. read-only semantics, and fail-closed server-side enforcement."
+---
+
+# Field-Level Security
+
+Control visibility and editability of specific fields.
+
+## Field Permissions in Profiles
+
+Field permissions are keyed `<object>.<field>` and use `readable` / `editable`:
+
+```typescript
+fields: {
+  // Read-only: visible but not editable
+  'account.annual_revenue': { readable: true, editable: false },
+  'account.description': { readable: true, editable: true },
+  // Hidden: not visible at all
+  'account.ssn': { readable: false, editable: false },
+  'opportunity.amount': { readable: true, editable: true },
+  'opportunity.probability': { readable: true, editable: false },
+}
+```
+
+## Hidden vs. Read-Only
+
+```typescript
+// Hidden: Field not visible at all
+{ readable: false, editable: false }
+
+// Read-Only: Field visible but not editable
+{ readable: true, editable: false }
+
+// Editable: Field visible and editable
+{ readable: true, editable: true }
+```
+
+## Server-side enforcement (fail-closed)
+
+The client-side ObjectForm / inline grid hides non-editable fields from
+the UI — but that is a **UX layer only**. The SecurityPlugin middleware
+enforces field-level write rules on the server, regardless of how the
+request arrived (REST, GraphQL, raw ObjectQL call).
+
+**On read** — `find` / `findOne` results have non-readable fields
+stripped from every record before the response leaves the engine.
+
+**On write** — `insert` / `update` requests are checked **before** the
+operation reaches the driver. If the payload contains any field the
+caller is not permitted to edit, the engine throws
+`PermissionDeniedError` (mapped to HTTP 403) with the offending field
+names in `details.forbiddenFields`:
+
+```json
+{
+  "error": {
+    "code": "PERMISSION_DENIED",
+    "message": "[Security] Field write denied: not permitted to edit [salary, ssn] on 'employee'",
+    "details": {
+      "operation": "insert",
+      "object": "employee",
+      "forbiddenFields": ["salary", "ssn"]
+    }
+  }
+}
+```
+
+**Why throw instead of silently stripping?** Silent strip hides the
+security boundary from honest clients (their update "doesn't save" and
+they cannot tell why) AND gives a probing client no signal that the
+field exists. Throwing makes the boundary observable in both directions
+— legitimate UIs get an actionable error to fix; probing clients learn
+nothing they could not already infer.
+
+**Allow-list semantics.** Fields without an explicit rule pass through
+untouched. Permission sets only constrain fields they explicitly
+enumerate.
+
+**Bulk inserts.** Arrays are checked row-by-row; a single offending
+field in any row rejects the whole batch atomically.
+
+**System operations.** `ExecutionContext { isSystem: true }` bypasses
+the check entirely — used for migrations, seed loading, and audit log
+writes.
+
+---
+
+## See also
+
+- [Permissions & Identity overview](/docs/permissions)
+- [Profiles](/docs/permissions/profiles)
+- [Permission Sets](/docs/permissions/permission-sets)

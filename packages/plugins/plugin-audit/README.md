@@ -411,4 +411,4 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 - [GDPR Requirements](https://gdpr.eu/)
 - [HIPAA Compliance](https://www.hhs.gov/hipaa/)
 - [@objectstack/plugin-security](../plugin-security/)
-- [Audit Logging Best Practices](/content/docs/guides/audit/)
+- [Audit Logging Best Practices](/content/docs/kernel/runtime-services/audit-service.mdx)

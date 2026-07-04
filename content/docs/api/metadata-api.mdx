@@ -1,0 +1,98 @@
+---
+title: Metadata & Package API
+description: REST endpoints for object schemas, metadata types, UI views, and package management.
+---
+
+# Metadata & Package API
+
+Manage object schemas, metadata types, UI views, and installed packages over REST. All paths are relative to the base URL (defaults to `/api/v1`) — see the [API Overview](/docs/api) for discovery and service availability.
+
+## Metadata
+
+Retrieve and manage object schemas, metadata types, and UI views. Always available — provided by the kernel.
+
+### `GET /meta`
+
+List all registered metadata types.
+
+**Response**: `{ types: ["object", "view", "plugin", ...] }`
+
+### `GET /meta/:type`
+
+List all items of a metadata type.
+
+| Parameter | Location | Description |
+|:----------|:---------|:------------|
+| `type` | path | Metadata type name (e.g. `object`, `view`) |
+
+**Response**: `{ type: "object", items: [{ name: "account", ... }, ...] }`
+
+### `GET /meta/:type/:name`
+
+Get a specific metadata item with optional ETag caching.
+
+| Parameter | Location | Description |
+|:----------|:---------|:------------|
+| `type` | path | Metadata type name |
+| `name` | path | Item name (snake_case) |
+| `If-None-Match` | header | ETag for conditional request |
+
+**Response**: `{ type: "object", name: "account", item: { ... } }`  
+**304** if ETag matches (not modified).
+
+### `PUT /meta/:type/:name`
+
+Create or update a metadata item.
+
+**Body**: `{ type: "object", name: "account", item: { ... } }`  
+**Response**: `{ success: true }`
+
+### `GET /ui/view/:object/:type`
+
+Get an auto-generated UI view for an object.
+
+| Parameter | Location | Description |
+|:----------|:---------|:------------|
+| `object` | path | Object name (snake_case) |
+| `type` | path | `list` or `form` |
+
+**Response**: Full `ViewSchema` definition with columns/fields derived from the object schema.
+
+---
+
+## Package Management
+
+Manage installed plugins/packages.
+
+### `GET /packages`
+
+List installed packages.
+
+### `POST /packages`
+
+Install a package from manifest.
+
+**Body**: `{ manifest: { name: "plugin-auth", version: "1.0.0", ... } }`
+
+### `GET /packages/:id`
+
+Get package details.
+
+### `DELETE /packages/:id`
+
+Uninstall a package.
+
+### `PATCH /packages/:id/enable`
+
+Enable a disabled package.
+
+### `PATCH /packages/:id/disable`
+
+Disable a package without uninstalling.
+
+---
+
+## See also
+
+- [API Overview](/docs/api) — discovery, error handling, and protocol types
+- [Data API](/docs/api/data-api) — CRUD, batch operations, and analytics

@@ -18,7 +18,7 @@
  * locks/counters; pub/sub does not fan out across processes). Use a
  * remote driver for any multi-replica deployment.
  *
- * See `content/docs/concepts/cluster-semantics.mdx` for the protocol.
+ * See `content/docs/kernel/cluster.mdx` for the protocol.
  */
 
 export {

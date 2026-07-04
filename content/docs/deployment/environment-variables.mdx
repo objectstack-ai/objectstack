@@ -1,0 +1,299 @@
+---
+title: Environment Variables
+description: Canonical list of OS_* environment variables read by the ObjectStack runtime, CLI, and built-in plugins.
+---
+
+# Environment Variables
+
+All ObjectStack-owned environment variables use the `OS_` prefix. Variables are
+read at startup unless noted otherwise. Boolean variables accept `true` / `false`
+(case-insensitive); flag-style variables also accept `1` / `0` where noted.
+
+> **Legacy names.** Pre-1.0 unprefixed names (`PORT`, `DATABASE_URL`,
+> `BETTER_AUTH_SECRET`, …) still work this release and emit a one-shot
+> deprecation warning. See [Legacy aliases](#legacy-aliases) at the bottom of
+> this page. Industry-standard third-party names (`NODE_ENV`, `HOME`,
+> `OPENAI_API_KEY`, `TURSO_*`, OAuth `*_CLIENT_ID` / `*_CLIENT_SECRET`,
+> `RESEND_API_KEY`, `POSTMARK_TOKEN`, `AI_GATEWAY_*`, `SMTP_*`) are **not**
+> renamed and are read as-is by their respective libraries.
+
+---
+
+## Runtime & Server
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_PORT` | number | `3000` | HTTP listener port for `os serve` / `os dev` / `os start`. Resolution: `--port` › `OS_PORT` › `PORT` › `3000`. |
+| `OS_HOME` | path | `$HOME/.objectstack` | ObjectStack config / state directory. |
+| `OS_MODE` | enum | `standalone` | Runtime mode. `standalone` \| `cloud`. |
+| `OS_BOOT_EMPTY` | flag | `0` | When `1`, boot the kernel with no metadata artifact (CLI internal). |
+| `OS_MIGRATE_AND_EXIT` | flag | `0` | When `1`, run pending migrations and exit (suitable for one-shot jobs). |
+
+> **Port conflicts behave differently by mode.** In **dev** (`os dev`, or
+> `NODE_ENV=development`) a busy port auto-hops to the next free one (up to
+> +100) and the banner prints the actual bound port. In **production**
+> (`os start`) a busy port is a hard error (exit 1) — it never silently
+> drifts, because a shifted port breaks reverse-proxy upstreams, `OS_AUTH_URL`
+> callbacks, and `OS_TRUSTED_ORIGINS` (CORS). Pin the port explicitly in
+> production (`PORT=8080 os start`) and keep `OS_AUTH_URL` / `OS_TRUSTED_ORIGINS`
+> in sync with it.
+| `OS_DISABLE_CONSOLE` | flag | `0` | When `1`, do not mount the Console portal under `/_console`. |
+| `OS_EAGER_SCHEMAS` | flag | `0` | When `1`, eagerly materialise all object schemas at boot (slower start, faster first request). |
+| `OS_SKIP_SCHEMA_SYNC` | flag | `0` | When `1`, skip the implicit `db:sync` on boot. Use after running migrations manually. |
+
+---
+
+## Database & Storage
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_DATABASE_URL` | url | — | Database connection string (e.g. `file:./data.sqlite`, `postgres://…`, `libsql://…`). |
+| `OS_DATABASE_DRIVER` | enum | inferred | Force a specific driver when the URL is ambiguous. `sqlite` \| `postgres` \| `libsql`. |
+| `OS_STORAGE_ROOT` | path | `<OS_HOME>/storage` | Root directory for the local file storage adapter. |
+| `OS_ARTIFACT_PATH` | path | — | Path or `http(s)://` URL to a compiled `objectstack.json` artifact to boot the kernel from. |
+
+---
+
+## Authentication
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_AUTH_URL` | url | `http://localhost:<OS_PORT>` | Public base URL of the auth server. Required behind a proxy or in production. |
+| `OS_AUTH_SECRET` | string | auto-generated (dev) | Secret used to sign sessions and cookies. **Required** in production. |
+| `OS_AUTH_TWO_FACTOR` | boolean | `false` | Enable the low-level better-auth two-factor plugin. Keep disabled unless your UI handles enrollment, login challenge, and backup-code recovery. |
+| `OS_DISABLE_SIGNUP` | boolean | `false` | When `true`, block new email/password sign-ups. The very first user can still sign up to bootstrap admin. |
+| `OS_AUTH_EMAIL_PASSWORD_ENABLED` | boolean | settings default | Settings env override for `auth.email_password_enabled`. Controls local email/password login. |
+| `OS_AUTH_SIGNUP_ENABLED` | boolean | settings default | Settings env override for `auth.signup_enabled`. Takes precedence over UI settings and is preferred over `OS_DISABLE_SIGNUP`. |
+| `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` | boolean | settings default | Settings env override for `auth.require_email_verification`. |
+| `OS_AUTH_GOOGLE_ENABLED` | boolean | settings default | Settings env override for `auth.google_enabled`. Requires Google OAuth credentials from Settings or env. |
+| `GOOGLE_CLIENT_ID` | string | — | Deployment-level Google OAuth client id for the open-source Google login implementation. |
+| `GOOGLE_CLIENT_SECRET` | string | — | Deployment-level Google OAuth client secret for the open-source Google login implementation. |
+| `OS_MULTI_ORG_ENABLED` | boolean | `false` | When `true`, expose organization creation/switching UI. When `false`, run in single-tenant mode. |
+| `OS_OIDC_PROVIDER_ENABLED` | boolean | `false` | When `true`, expose this instance as an OIDC identity provider. |
+| `OS_COOKIE_DOMAIN` | string | — | Cookie domain for cross-subdomain session sharing (e.g. `.example.com`). |
+| `OS_TRUSTED_ORIGINS` | csv | — | Comma-separated list of origins permitted for auth callbacks / CSRF. |
+| `OS_TERMS_URL` | url | — | URL shown next to the "Terms of Service" link on the sign-up form. Empty string hides the link. |
+| `OS_PRIVACY_URL` | url | — | URL shown next to the "Privacy Policy" link on the sign-up form. Empty string hides the link. |
+
+Auth settings precedence:
+
+1. Environment variables win over values saved in the Setup UI.
+2. `OS_AUTH_<SETTING_KEY>` settings env vars are the canonical form for settings-backed auth controls.
+3. Existing deployment toggles such as `OS_AUTH_TWO_FACTOR` and `OS_DISABLE_SIGNUP` remain supported.
+4. Google credentials can be saved in Setup → Authentication. `google_client_secret` is encrypted at rest.
+5. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` remain supported for deployment-level Google OAuth configuration.
+
+---
+
+## CORS
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_CORS_ENABLED` | boolean | `true` | Enable CORS middleware. |
+| `OS_CORS_ORIGIN` | csv | `*` | Allowed origins (comma-separated, or `*`). |
+| `OS_CORS_CREDENTIALS` | boolean | `true` | Allow credentialed cross-origin requests. |
+| `OS_CORS_MAX_AGE` | number | `86400` | Preflight cache TTL in seconds. |
+
+---
+
+## Branding (single-tenant)
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_PRODUCT_NAME` | string | `ObjectStack` | Product name shown in the UI chrome and emails. |
+| `OS_PRODUCT_SHORT_NAME` | string | `OS` | Short name used in compact UI surfaces (favicons, mobile titles). |
+| `OS_APP_NAME` | string | — | Application name surfaced to auth providers (used as the OAuth app display name). |
+
+---
+
+## Email
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_EMAIL_PROVIDER` | enum | `log` | Transport. `log` \| `resend` \| `postmark`. `log` (default) prints to stdout without sending. Real SMTP delivery requires the separate `@objectstack/plugin-mail-smtp` package. |
+| `OS_EMAIL_API_KEY` | string | — | API key for `resend` / `postmark`. |
+| `OS_EMAIL_FROM` | email | — | Default `From:` address. |
+| `OS_EMAIL_RETRIES` | number | `3` | Retry count for transient send failures. |
+
+> No SMTP transport ships in the open-core runtime — `OS_EMAIL_PROVIDER`
+> only materialises `log`, `resend`, or `postmark`. Real SMTP delivery
+> requires the separate `@objectstack/plugin-mail-smtp` package, which reads
+> its own SMTP settings (configured in **Settings → Mail** or via the
+> plugin's constructor options).
+
+---
+
+## AI
+
+<Callout type="warning">
+These variables configure the **cloud / Enterprise** in-UI AI runtime
+(`@objectstack/service-ai`), which moved out of the open framework — see cloud
+ADR-0025 (`service-ai → cloud; open = MCP-only`). The **open edition** has no
+in-UI AI runtime to configure: it exposes AI through `@objectstack/mcp` (BYO-AI),
+where the model and provider are configured in your own MCP client (Claude,
+Cursor, a local model, …). See the [AI Capabilities guide](/docs/ai).
+</Callout>
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `AI_GATEWAY_MODEL` | string | — | Vercel AI Gateway model id (for example `openai/gpt-4.1-mini` or `anthropic/claude-sonnet-4-5`). When set, the AI service boots with the gateway adapter before trying direct providers. |
+| `AI_GATEWAY_API_KEY` | string | — | Vercel AI Gateway API key. Required by the gateway SDK for real gateway calls; by itself it does not select the gateway adapter. Pair it with `AI_GATEWAY_MODEL`. |
+| `OPENAI_API_KEY` | string | — | Selects the direct OpenAI adapter when no gateway model is configured. Default model: `gpt-4o`. |
+| `ANTHROPIC_API_KEY` | string | — | Selects the direct Anthropic adapter when gateway and OpenAI are not configured. Default model: `claude-sonnet-4-20250514`. |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | string | — | Selects the direct Google Gemini adapter when gateway, OpenAI, and Anthropic are not configured. Default model: `gemini-2.0-flash`. |
+| `OS_AI_MODEL` | string | provider default | Overrides the model id for direct OpenAI / Anthropic / Google provider detection. Does not override `AI_GATEWAY_MODEL`; gateway model ids already include the provider prefix. |
+| `OS_AI_ACTION_API_BASE_URL` | url | — | Base URL prepended to relative `type: 'api'` action targets exposed as AI tools. Without this or a plugin `apiActionBaseUrl`, relative API actions are skipped for AI exposure. |
+| `OS_AI_PROVIDER` | enum | — | Settings override for the AI provider. Supported values include `gateway`, `openai`, `anthropic`, `google`, `deepseek`, `dashscope`, `cloudflare`, `siliconflow`, and `openrouter`. When set, it locks the Settings UI value. |
+| `OS_AI_GATEWAY_MODEL` | string | — | Settings override for the Vercel AI Gateway model id. Use with `OS_AI_PROVIDER=gateway`. |
+| `OS_AI_GATEWAY_API_KEY` | string | — | Settings override for the Vercel AI Gateway API key. Use with `OS_AI_PROVIDER=gateway`. |
+| `OS_AI_OPENAI_BASE_URL` | url | — | Settings override for the OpenAI-compatible chat base URL. Use with `OS_AI_PROVIDER=openai` for Azure, local gateways, or third-party OpenAI-shaped APIs. |
+| `OS_AI_OPENAI_API_KEY` | string | — | Settings override for the OpenAI-compatible API key. Stored only in env; the Settings UI cannot overwrite it while present. |
+| `OS_AI_OPENAI_MODEL` | string | `gpt-4o` | Settings override for the OpenAI-compatible chat model id. |
+| `OS_AI_ANTHROPIC_API_KEY` | string | — | Settings override for the Anthropic API key. Use with `OS_AI_PROVIDER=anthropic`. |
+| `OS_AI_ANTHROPIC_MODEL` | string | `claude-sonnet-4-20250514` | Settings override for the Anthropic model id. |
+| `OS_AI_GOOGLE_API_KEY` | string | — | Settings override for the Google Generative AI API key. Use with `OS_AI_PROVIDER=google`. |
+| `OS_AI_GOOGLE_MODEL` | string | `gemini-2.0-flash` | Settings override for the Google model id. |
+| `OS_AI_<PROVIDER>_API_KEY` | string | — | Settings override for preset OpenAI-compatible providers, for example `OS_AI_DEEPSEEK_API_KEY`, `OS_AI_DASHSCOPE_API_KEY`, `OS_AI_SILICONFLOW_API_KEY`, or `OS_AI_OPENROUTER_API_KEY`. |
+| `OS_AI_<PROVIDER>_MODEL` | string | provider default | Settings override for preset provider model ids, for example `OS_AI_DEEPSEEK_MODEL=deepseek-chat`. |
+
+The boot-time LLM adapter priority is:
+
+1. Explicit `AIServicePlugin({ adapter })` or per-plugin `gatewayModel` option.
+2. `AI_GATEWAY_MODEL` using `@ai-sdk/gateway`.
+3. `OPENAI_API_KEY` using `@ai-sdk/openai`.
+4. `ANTHROPIC_API_KEY` using `@ai-sdk/anthropic`.
+5. `GOOGLE_GENERATIVE_AI_API_KEY` using `@ai-sdk/google`.
+6. `MemoryLLMAdapter` echo mode when no real provider is configured.
+
+After boot, if the Settings service is mounted, `@objectstack/service-ai`
+reads the `ai` Settings namespace and swaps the adapter when the provider
+comes from env or a stored Settings UI value. The manifest default
+`provider=memory` is ignored so it does not mask boot-time auto-detection;
+an explicit `OS_AI_PROVIDER=memory` or stored UI value does switch the runtime
+back to memory. Settings values resolve as:
+
+```text
+env (`OS_<NAMESPACE>_<KEY>`) > stored Settings UI value > default
+```
+
+That means `OS_AI_PROVIDER=openai` plus `OS_AI_OPENAI_BASE_URL=...` wins over
+both the Settings UI and the boot-time provider auto-detection. ObjectStack
+does not read unprefixed settings override names such as `AI_PROVIDER` or
+`AI_OPENAI_BASE_URL`.
+
+For example, a third-party OpenAI-compatible provider can be deployment-locked
+without using the Settings UI:
+
+```bash
+OS_AI_PROVIDER=openai
+OS_AI_OPENAI_API_KEY=sk-...
+OS_AI_OPENAI_MODEL=your-model
+OS_AI_OPENAI_BASE_URL=https://your-provider.example.com/v1
+```
+
+Provider credentials keep their upstream names. ObjectStack does not rename
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, or
+`AI_GATEWAY_*` to `OS_*`.
+
+> **OpenAI-compatible base URLs.** Use `OS_AI_OPENAI_BASE_URL` with
+> `OS_AI_PROVIDER=openai`, configure the same fields in **Settings → AI**, or
+> pass an explicit adapter in code. Do not rely on `OPENAI_BASE_URL` as a
+> platform-level environment variable.
+
+---
+
+## MCP Server
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_MCP_SERVER_ENABLED` | boolean | `false` | When `true`, start the Model Context Protocol server at boot. |
+| `OS_MCP_SERVER_NAME` | string | `objectstack` | Server name advertised to MCP clients. |
+| `OS_MCP_SERVER_TRANSPORT` | enum | `stdio` | `stdio` \| `http`. |
+
+---
+
+## Marketplace & Metadata
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_MARKETPLACE_CACHE` | enum | `on` | `off` disables the in-memory marketplace listing cache. |
+| `OS_MARKETPLACE_PUBLIC_BASE_URL` | url | — | Public base URL of the marketplace registry (proxied from this runtime when set). |
+| `OS_METADATA_WRITABLE` | boolean | `true` (dev) / `false` (prod) | Allow PATCH / PUT on `/api/v1/metadata/*` at runtime. |
+
+---
+
+## Multi-tenant / Cloud control plane
+
+These variables are only meaningful when running in `OS_MODE=cloud` or against
+the hosted ObjectStack Cloud control plane.
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_BASE_URL` | url | — | Public base URL of this runtime, used in generated webhooks and links. |
+| `OS_ROOT_DOMAIN` | string | — | Root domain for multi-tenant subdomain routing (e.g. `example.com`). |
+| `OS_ORGANIZATION_ID` | string | — | Pin the runtime to a single organization id (per-process scope). |
+| `OS_ENVIRONMENT_ID` | string | — | Pin the runtime to a single environment id (per-process scope). |
+| `OS_CLOUD_URL` | url | `https://cloud.objectos.ai` | Base URL of the cloud control plane the CLI / runtime talks to. Set to `off` / `local` / `none` / `disabled` to disable cloud. |
+| `OS_CLOUD_API_KEY` | string | — | Shared secret authenticating runtime → cloud SSO handoffs. |
+| `OS_CLI_CLIENT_ID` | string | — | OAuth client id used by `os login`. |
+| `OS_TOKEN` | string | — | Personal access token used by the CLI in non-interactive contexts (CI). |
+| `OS_PLATFORM_SSO` | boolean | `true` | When `false`, fall back to local auth instead of the platform SSO handshake. |
+| `OS_PROVISION_SYNC` | flag | `0` | When `1`, force synchronous provisioning of artifact kernels (slower boot, deterministic). |
+| `OS_RUNTIME_PORT` | number | — | Port the cloud control plane uses to reach this runtime (distinct from public `OS_PORT`). |
+| `OS_PREVIEW_MODE` | enum | — | Preview deployment routing mode. |
+| `OS_PREVIEW_BASE_DOMAINS` | csv | — | Comma-separated base domains used to resolve preview hostnames. |
+
+---
+
+## Observability
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_OBS_EXPORTER` | enum | `noop` | OpenTelemetry exporter. `noop` \| `console` \| `json` \| `otlp`. `noop` (default) imposes no runtime cost. |
+| `OS_OBS_SERVICE_NAME` | string | `objectstack` | `service.name` resource attribute. |
+| `OS_OBS_DEPLOYMENT_ENV` | string | `production` | `deployment.environment` resource attribute. |
+| `OS_OTLP_ENDPOINT` | url | — | OTLP/HTTP collector endpoint. Required when `OS_OBS_EXPORTER=otlp`. |
+| `OS_OTLP_HEADERS` | csv | — | Comma-separated `key=value` pairs added to every OTLP export. |
+| `OS_OTLP_FLUSH_MS` | number | `10000` | OTLP batch flush interval. |
+
+---
+
+## Tuning (advanced)
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_KERNEL_CACHE_SIZE` | number | `32` | Max in-memory artifact kernels per process (cloud mode). |
+| `OS_KERNEL_TTL_MS` | number | `900000` | Idle TTL for cached kernels in ms. |
+| `OS_ENV_CACHE_TTL_MS` | number | `300000` | Env-record cache TTL in ms. |
+| `OS_ARTIFACT_CACHE_TTL_MS` | number | `300000` | Artifact-record cache TTL in ms. |
+| `OS_ARTIFACT_FETCH_TIMEOUT_MS` | number | `30000` | Timeout for remote artifact fetches. `0` disables the timeout. |
+| `OS_INLINE_SEED_BUDGET_MS` | number | `8000` | Time budget for synchronous seed execution at boot before deferring to a worker. |
+| `OS_TENANT_AUDIT` | flag | `1` | Set to `0` to silence the tenant-isolation audit warnings emitted by the SQL driver. |
+| `OS_NODE_ID` | string | hostname | Stable node id used by the webhook outbox for distributed locking. |
+
+---
+
+## Legacy aliases
+
+Some env vars accept a legacy alias for compatibility. **Ecosystem-standard names** (e.g. `DATABASE_URL`, `AUTH_SECRET`, `BETTER_AUTH_*`, `PORT`, `CORS_*`, `MCP_SERVER_*`) are permanently accepted and no longer warn. ObjectStack's own former names are deprecated — prefer the canonical `OS_*`.
+
+> **Removed in 11** (rename required): `OS_MULTI_TENANT` → `OS_MULTI_ORG_ENABLED`, `OBJECTSTACK_METADATA_WRITABLE` → `OS_METADATA_WRITABLE`, `AUTH_BASE_URL`/`OS_AUTH_BASE_URL` → `OS_AUTH_URL`.
+
+| Canonical | Legacy |
+|:---|:---|
+| `OS_PORT` | `PORT` |
+| `OS_DATABASE_URL` | `DATABASE_URL` |
+| `OS_AUTH_URL` | `BETTER_AUTH_URL` |
+| `OS_AUTH_SECRET` | `BETTER_AUTH_SECRET`, `AUTH_SECRET` |
+| `OS_ROOT_DOMAIN` | `ROOT_DOMAIN` |
+| `OS_CORS_ENABLED` | `CORS_ENABLED` |
+| `OS_CORS_ORIGIN` | `CORS_ORIGIN` |
+| `OS_CORS_CREDENTIALS` | `CORS_CREDENTIALS` |
+| `OS_CORS_MAX_AGE` | `CORS_MAX_AGE` |
+| `OS_AI_MODEL` | `AI_MODEL` |
+| `OS_MCP_SERVER_ENABLED` | `MCP_SERVER_ENABLED` |
+| `OS_MCP_SERVER_NAME` | `MCP_SERVER_NAME` |
+| `OS_MCP_SERVER_TRANSPORT` | `MCP_SERVER_TRANSPORT` |
+| `OS_NODE_ID` | `OBJECTSTACK_NODE_ID` |
+| `OS_HOME` | `OBJECTSTACK_HOME` |
+| `OS_DEV_CRYPTO_KEY` | `OBJECTSTACK_DEV_CRYPTO_KEY` |

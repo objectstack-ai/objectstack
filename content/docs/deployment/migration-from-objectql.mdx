@@ -1,0 +1,179 @@
+---
+title: Migrating from @objectql/core
+description: Step-by-step guide for migrating from @objectql/core to @objectstack/objectql
+---
+
+# Migrating from `@objectql/core` to `@objectstack/objectql`
+
+Starting with `@objectstack/objectql` v3.1, all core functionality previously provided by `@objectql/core` is now available upstream. This guide walks you through migrating your project so that `@objectql/core` can be removed.
+
+## Why Migrate?
+
+| | `@objectql/core` (deprecated) | `@objectstack/objectql` (recommended) |
+| :--- | :--- | :--- |
+| **Engine** | Bridge class extending upstream `ObjectQL` | Canonical `ObjectQL` engine |
+| **Kernel Factory** | `createObjectQLKernel()` | `createObjectQLKernel()` (identical API) |
+| **Introspection** | `toTitleCase`, `convertIntrospectedSchemaToObjects` | Same functions, same signatures |
+| **Registry** | Re-exports from upstream | Direct exports |
+| **MetadataRegistry** | `@objectql/types` `MetadataRegistry` class | `MetadataFacade` (async `IMetadataService`) |
+| **Maintenance** | Planned deprecation | Actively maintained |
+
+## Step 1 — Update Dependencies
+
+```diff
+  // package.json
+  {
+    "dependencies": {
+-     "@objectql/core": "^4.x",
+-     "@objectql/types": "^4.x",
++     "@objectstack/objectql": "^3.1.0"
+    }
+  }
+```
+
+Then re-install:
+
+```bash
+pnpm install
+```
+
+## Step 2 — Update Imports
+
+### Engine, Repository & Context
+
+```diff
+- import { ObjectQL, ObjectRepository, ScopedContext } from '@objectql/core';
++ import { ObjectQL, ObjectRepository, ScopedContext } from '@objectstack/objectql';
+```
+
+```diff
+- import type { HookHandler, HookEntry, OperationContext, EngineMiddleware } from '@objectql/core';
++ import type { HookHandler, HookEntry, OperationContext, EngineMiddleware } from '@objectstack/objectql';
+```
+
+### Schema Registry
+
+```diff
+- import { SchemaRegistry } from '@objectql/core';
++ import { SchemaRegistry } from '@objectstack/objectql';
+```
+
+### Kernel Factory
+
+```diff
+- import { createObjectQLKernel } from '@objectql/core';
+- import type { ObjectQLKernelOptions } from '@objectql/core';
++ import { createObjectQLKernel } from '@objectstack/objectql';
++ import type { ObjectQLKernelOptions } from '@objectstack/objectql';
+```
+
+### Utility Functions
+
+```diff
+- import { toTitleCase, convertIntrospectedSchemaToObjects } from '@objectql/core';
++ import { toTitleCase, convertIntrospectedSchemaToObjects } from '@objectstack/objectql';
+```
+
+### Introspection Types
+
+```diff
+- import type { IntrospectedSchema, IntrospectedTable } from '@objectql/types';
++ import type { IntrospectedSchema, IntrospectedTable } from '@objectstack/objectql';
+```
+
+```diff
+- import type { IntrospectedColumn, IntrospectedForeignKey } from '@objectql/types';
++ import type { IntrospectedColumn, IntrospectedForeignKey } from '@objectstack/objectql';
+```
+
+## Step 3 — API Differences
+
+### `createObjectQLKernel()`
+
+The function signature is identical. The only change is the return type uses the upstream `ObjectKernel`:
+
+```typescript
+import { createObjectQLKernel } from '@objectstack/objectql';
+
+const kernel = await createObjectQLKernel({
+  plugins: [myDriverPlugin],
+});
+await kernel.bootstrap();
+```
+
+### `convertIntrospectedSchemaToObjects()`
+
+Same signature and behavior:
+
+```typescript
+import { convertIntrospectedSchemaToObjects } from '@objectstack/objectql';
+
+const objects = convertIntrospectedSchemaToObjects(schema, {
+  excludeTables: ['migrations'],
+  includeTables: undefined,      // optional: whitelist
+  skipSystemColumns: true,       // default: skips id, created_at, updated_at
+});
+```
+
+### MetadataRegistry → MetadataFacade
+
+If you were using `MetadataRegistry` from `@objectql/types`, the upstream equivalent is `MetadataFacade`. There are two differences: `MetadataFacade` is constructed over a `SchemaRegistry` instance, and its methods are **async** (returns `Promise`):
+
+```diff
+- import { MetadataRegistry } from '@objectql/types';
+- const registry = new MetadataRegistry();
+- registry.register('object', myObject);
+- const obj = registry.get('object', 'account');
++ import { MetadataFacade, SchemaRegistry } from '@objectstack/objectql';
++ const facade = new MetadataFacade(new SchemaRegistry());
++ await facade.register('object', 'account', myObject);
++ const obj = await facade.get('object', 'account');
+```
+
+### ObjectQLPlugin
+
+Both packages export an `ObjectQLPlugin`, but they serve different roles:
+
+| | `@objectql/core` `ObjectQLPlugin` | `@objectstack/objectql` `ObjectQLPlugin` |
+| :--- | :--- | :--- |
+| Interface | `RuntimePlugin` (from `@objectql/types`) | `Plugin` (from `@objectstack/core`) |
+| Role | Orchestrator composing sub-plugins (validator, formula, query) | Kernel plugin registering ObjectQL as core services |
+| Methods | `install()`, `onStart()`, `init()`, `start()` | `init()`, `start()` |
+
+If you were using the `@objectql/core` `ObjectQLPlugin` to compose sub-plugins (`ValidatorPlugin`, `FormulaPlugin`, `QueryPlugin`), those downstream plugins are **not** part of this migration — they remain in the `@objectql` ecosystem.
+
+## Step 4 — Type Mapping Reference
+
+The `convertIntrospectedSchemaToObjects()` utility maps database column types as follows:
+
+| Database Type | ObjectStack FieldType |
+| :--- | :--- |
+| `varchar`, `char` | `text` |
+| `text` | `textarea` |
+| `integer`, `int`, `bigint`, `smallint` | `number` |
+| `float`, `double`, `decimal`, `numeric`, `real` | `number` |
+| `boolean`, `bool` | `boolean` |
+| `timestamp`, `datetime` | `datetime` |
+| `date` | `date` |
+| `time` | `time` |
+| `json`, `jsonb` | `json` |
+| Foreign key column | `lookup` (with `reference` set to target table) |
+| _anything else_ | `text` (fallback) |
+
+## Step 5 — Remove `@objectql/core`
+
+Once all imports are updated and tests pass:
+
+```bash
+pnpm remove @objectql/core @objectql/types
+```
+
+## Checklist
+
+- [ ] Replace `@objectql/core` dependency with `@objectstack/objectql` in `package.json`
+- [ ] Update all `import` statements (engine, registry, kernel factory, utilities, types)
+- [ ] Replace `MetadataRegistry` usage with `MetadataFacade` (add `await`)
+- [ ] Verify `ObjectQLPlugin` usage matches the upstream interface
+- [ ] Run `pnpm build` and fix any remaining type errors
+- [ ] Run `pnpm test` to verify behavior
+- [ ] Remove `@objectql/core` and `@objectql/types` from dependencies

@@ -433,5 +433,5 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 ## See Also
 
 - [@objectstack/spec/automation](../../spec/src/automation/)
-- [Flow Builder Guide](/content/docs/guides/automation/)
+- [Flow Builder Guide](/content/docs/automation/)
 - [Trigger Reference](/content/docs/references/automation/)

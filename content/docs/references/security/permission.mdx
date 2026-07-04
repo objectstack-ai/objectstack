@@ -3,7 +3,7 @@ title: Permission
 description: Permission protocol schemas
 ---
 
-{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 Entity (Object) Level Permissions
 
@@ -87,6 +87,8 @@ const result = FieldPermission.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Permission set unique name (lowercase snake_case) |
 | **label** | `string` | optional | Display label |
+| **packageId** | `string` | optional | [ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored) |
+| **managedBy** | `Enum<'package' \| 'platform' \| 'user'>` | optional | [ADR-0086 D3] Record provenance: package (upgrade-owned metadata) vs platform/user (env config) |
 | **isProfile** | `boolean` | ✅ | Whether this is a user profile |
 | **isDefault** | `boolean` | ✅ | [ADR-0056 D7] When true, this profile is the FALLBACK assigned to authenticated users who have no explicit grants — an app declares its default access posture here instead of relying on the built-in member_default. Foundation for SSO/JIT provisioning. |
 | **objects** | `Record<string, Object>` | ✅ | Entity permissions |

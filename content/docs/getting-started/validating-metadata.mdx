@@ -1,0 +1,104 @@
+---
+title: Validating Metadata
+description: Why ObjectStack metadata mistakes fail silently at runtime, and the one command that catches them at author time — run it after every metadata edit.
+---
+
+# Validating Metadata
+
+ObjectStack metadata is data, not code paths — so most mistakes are **not** caught
+by the TypeScript compiler. They pass `tsc`, load fine, and then fail **silently
+at runtime**. The fix is one command you run after every metadata edit:
+
+```bash
+os validate     # schema + CEL predicates + widget bindings — no artifact
+```
+
+In a scaffolded project this is wired as `npm run validate`. Your generated
+`AGENTS.md` instructs coding agents (Claude Code, Cursor, Copilot) to run it
+after editing metadata.
+
+## Why typecheck isn't enough
+
+Two classes of bug type-check cleanly but break at runtime:
+
+### 1. Bare-field predicates
+
+Predicates — an action's `visible`/`disabled`, a field's `requiredWhen`, a
+validation rule, a flow condition, a sharing rule — are **CEL expressions**, and
+they reference record fields through the `record.` scope:
+
+```ts
+// ✗ Wrong — `done` is a bare reference. It type-checks (it's just a string),
+//   but at runtime it resolves to null → the action is hidden on EVERY record.
+{ name: 'mark_done', visible: '!done' }
+
+// ✓ Right
+{ name: 'mark_done', visible: '!record.done' }
+```
+
+This is the trap behind the recurring "the button never shows / the rule never
+fires" bugs (#2183/#2185). `os validate` parses every predicate and checks that
+each `record.<field>` exists on the target object, so the bare ref fails the
+gate with a located, did-you-mean message instead of shipping.
+
+### 2. Dangling widget bindings
+
+A dashboard widget points at a `dataset` and reads `dimensions`/`values` from it.
+If a name doesn't resolve, the chart renders **empty** — no error (ADR-0021).
+`os validate` resolves every binding against the declared datasets and fails on a
+dangling one.
+
+## The one gate, two entry points
+
+`os validate` and `os build` (alias `os compile`) run the **same** validator:
+
+| | `os validate` | `os build` |
+|---|---|---|
+| Protocol schema (Zod) | ✓ | ✓ |
+| CEL / predicate validation | ✓ | ✓ |
+| Widget-binding integrity | ✓ | ✓ |
+| Emits `dist/objectstack.json` | — | ✓ |
+
+So `os validate` is the fast inner-loop check (no artifact); `os build` is what
+you run when you need the deployable artifact. A config that passes `os validate`
+will not fail `os build` on schema/predicate/binding grounds.
+
+<Callout type="info">
+`os lint` is a **separate** pass — style and convention checks (snake_case
+naming, required labels, namespace prefixes, data-model patterns). Run it too,
+but it does not replace `os validate`, and `os validate` does not replace it.
+</Callout>
+
+## The workflow
+
+```bash
+# after editing any *.object.ts / *.view.ts / *.action.ts / *.flow.ts / *.dashboard.ts
+npm run validate     # os validate — schema + predicates + bindings
+npm run typecheck    # tsc --noEmit — types against @objectstack/spec
+```
+
+**Rule of thumb: never report a metadata change as done until `npm run validate`
+passes.** In the example apps the equivalent is `pnpm --filter <pkg> validate`
+(`pnpm verify` in `app-showcase`, which chains validate + typecheck + test).
+
+### Checking a single expression
+
+To validate one CEL expression *before* you write it into a file — for example
+inside an AI build loop — call the `validate_expression` agent tool, which runs
+the same predicate validator inline. See the
+[objectstack-formula skill](/docs/data-modeling/formulas).
+
+## In CI
+
+Both commands support `--json` and exit non-zero on failure:
+
+```yaml
+- name: Validate ObjectStack metadata
+  run: npx objectstack validate --strict --json
+```
+
+## See also
+
+- [Command Line Interface](/docs/getting-started/cli) — full `os validate` / `os build` reference
+- [Formula & Predicates](/docs/data-modeling/formulas) — the CEL surface and `record.` scope
+- [Data Modeling](/docs/data-modeling) — objects, fields, validations, sharing

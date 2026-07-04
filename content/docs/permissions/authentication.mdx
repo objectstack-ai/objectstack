@@ -1,0 +1,776 @@
+---
+title: Authentication
+description: "Complete guide to implementing authentication in ObjectStack using plugin-auth with Better-Auth"
+---
+
+# Authentication Guide
+
+Complete guide to implementing authentication in ObjectStack applications using the `@objectstack/plugin-auth` package powered by Better-Auth.
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Installation](#installation)
+3. [Basic Setup](#basic-setup)
+4. [Authentication Methods](#authentication-methods)
+5. [OAuth Providers](#oauth-providers)
+6. [Advanced Features](#advanced-features)
+7. [Client Integration](#client-integration)
+8. [API Reference](#api-reference)
+9. [Best Practices](#best-practices)
+10. [MSW/Mock Mode](#mswmock-mode)
+
+---
+
+## Overview
+
+The `@objectstack/plugin-auth` package provides enterprise-grade authentication and identity management for ObjectStack applications. It's built on top of [Better-Auth](https://www.better-auth.com/), a modern authentication library, and seamlessly integrates with ObjectStack's kernel architecture.
+
+### Key Features
+
+- ✅ **Email/Password Authentication** - Traditional username/password login
+- ✅ **OAuth Providers** - Google, GitHub, and more
+- ✅ **Session Management** - Automatic session handling with configurable expiry
+- ✅ **Password Reset** - Email-based password reset flow
+- ✅ **Email Verification** - Email verification workflow
+- ✅ **Multi-Factor Authentication** - TOTP two-factor, plus org-wide **enforced MFA** with a grace period and a Console enrollment/remediation flow (ADR-0069)
+- ✅ **Magic Links** - Passwordless authentication
+- ✅ **Organizations** - Multi-tenant support
+- ✅ **ObjectQL Integration** - Native ObjectStack data persistence (no ORM required)
+
+**Enterprise hardening (ADR-0069)** — configured from **Setup → Authentication**, each setting backed by real runtime enforcement:
+
+- ✅ **Password policy** - Complexity (min character classes), history (no-reuse), expiry, and breached-password rejection via Have I Been Pwned (k-anonymity)
+- ✅ **Account lockout & rate-limiting** - Per-account lockout after N failed sign-ins (admin **Unlock** action) and per-IP throttling
+- ✅ **Enforced MFA** - Org-wide `require_mfa` with a configurable grace period; the session is gated from data access until the user enrolls
+- ✅ **Session controls** - Idle timeout, absolute lifetime cap, and concurrent-session limit per user
+- ✅ **IP allowlist** - Restrict authenticated access to CIDR ranges
+- ✅ **Enterprise SSO** - Admin-managed OIDC and SAML 2.0 trust list (see [Social & Enterprise SSO](/docs/permissions/sso))
+
+See [Enterprise Authentication Hardening](#enterprise-authentication-hardening-adr-0069) for the full settings reference.
+
+### Architecture
+
+The plugin uses a **direct forwarding** architecture where all authentication requests are forwarded to Better-Auth's universal handler. This ensures:
+
+- Full compatibility with all Better-Auth features
+- Minimal custom code to maintain
+- Easy updates when Better-Auth releases new features
+- Type-safe API access via `await authManager.getApi()`
+
+### CLI device flow
+
+`os login` uses a browser-based device flow in interactive terminals. The
+CLI requests a one-time code from `POST /api/v1/auth/device/code`, opens the
+Console approval page at `/_console/auth/device?user_code=...`, and polls
+`POST /api/v1/auth/device/token` until the user approves access. Device codes
+expire after the server-configured TTL (the CLI assumes a 10-minute / 600s
+default). The device flow requires `plugins: { deviceAuthorization: true }` in
+your `AuthPlugin` configuration.
+
+The email/password path is still supported for CI and non-interactive shells:
+
+```bash
+os login --email user@example.com --password secret
+```
+
+New accounts can be created with:
+
+```bash
+os register
+os register --email user@example.com --name "Jane Doe" --password secret
+```
+
+---
+
+## Installation
+
+Install the plugin in your ObjectStack project:
+
+```bash
+pnpm add @objectstack/plugin-auth
+```
+
+The plugin requires Better-Auth as a peer dependency, which will be automatically installed.
+
+---
+
+## Basic Setup
+
+### 1. Environment Variables
+
+Set up your authentication secret in `.env`:
+
+```bash
+# Required: Secret for session token encryption
+OS_AUTH_SECRET=your-super-secret-key-min-32-chars
+
+# Optional: open-source Google login
+# You can also configure these in Setup → Authentication.
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+# Optional: lock auth settings from env. Env wins over Setup UI values.
+OS_AUTH_SIGNUP_ENABLED=false
+OS_AUTH_GOOGLE_ENABLED=true
+```
+
+> **Important**: Never commit `OS_AUTH_SECRET` to version control. Use a strong random string (minimum 32 characters).
+
+### 2. Plugin Configuration
+
+Add the plugin to your kernel configuration:
+
+```typescript
+import { ObjectKernel } from '@objectstack/core';
+import { ObjectQLPlugin } from '@objectstack/objectql';
+import { DriverPlugin } from '@objectstack/runtime';
+import { InMemoryDriver } from '@objectstack/driver-memory';
+import { AuthPlugin } from '@objectstack/plugin-auth';
+import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
+
+const kernel = new ObjectKernel();
+
+// AuthPlugin depends on the ObjectQL engine for data persistence,
+// so register ObjectQLPlugin and a driver first.
+await kernel.use(new ObjectQLPlugin());
+await kernel.use(new DriverPlugin(new InMemoryDriver(), 'memory'));
+
+// HTTP server (optional — auth works without it in MSW/mock mode)
+await kernel.use(new HonoServerPlugin({
+  port: 3000,
+}));
+
+// Authentication plugin
+await kernel.use(new AuthPlugin({
+  secret: process.env.OS_AUTH_SECRET,
+  baseUrl: 'http://localhost:3000',
+}));
+
+await kernel.bootstrap();
+```
+
+That's it! Your authentication endpoints are now available at `/api/v1/auth/*`.
+
+> **MSW/Mock Mode:** AuthPlugin does **not** require an HTTP server. When HonoServerPlugin
+> is absent, the plugin gracefully skips route registration and still registers the `auth`
+> service. See [MSW/Mock Mode](#mswmock-mode) below for details.
+
+### 3. ObjectQL Data Persistence
+
+The plugin automatically uses ObjectQL for data persistence. No additional database configuration is required - it works with your existing ObjectQL setup.
+
+The plugin creates the following auth objects (using ObjectStack `sys_` protocol names):
+- `sys_user` - User accounts (mapped from better-auth's `user` model)
+- `sys_session` - Active sessions (mapped from better-auth's `session` model)
+- `sys_account` - OAuth provider accounts (mapped from better-auth's `account` model)
+- `sys_verification` - Email/phone verification tokens (mapped from better-auth's `verification` model)
+
+> **Note:** better-auth uses hardcoded model names (`user`, `session`, etc.). The ObjectQL adapter
+> automatically maps these to `sys_`-prefixed protocol names via `AUTH_MODEL_TO_PROTOCOL`.
+> Client-side API routes (`/api/v1/auth/*`) are **not affected** — they do not expose object names.
+
+---
+
+## Authentication Methods
+
+### Email/Password Authentication
+
+#### Sign Up
+
+```typescript
+// Client-side (using @objectstack/client)
+import { ObjectStackClient } from '@objectstack/client';
+
+const client = new ObjectStackClient({
+  baseUrl: 'http://localhost:3000'
+});
+
+const result = await client.auth.register({
+  email: 'user@example.com',
+  password: 'securePassword123',
+  name: 'John Doe'
+});
+
+console.log('User created:', result.data.user);
+console.log('Access token:', result.data.token);
+```
+
+#### Sign In
+
+```typescript
+const session = await client.auth.login({
+  type: 'email',
+  email: 'user@example.com',
+  password: 'securePassword123'
+});
+
+console.log('Logged in:', session.data.user);
+```
+
+#### Sign Out
+
+```typescript
+await client.auth.logout();
+```
+
+#### Get Current Session
+
+```typescript
+const session = await client.auth.me();
+console.log('Current user:', session.data.user);
+```
+
+### Password Management
+
+#### Request Password Reset
+
+```typescript
+// Direct API call
+const response = await fetch('http://localhost:3000/api/v1/auth/request-password-reset', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email: 'user@example.com'
+  })
+});
+```
+
+#### Reset Password with Token
+
+```typescript
+const response = await fetch('http://localhost:3000/api/v1/auth/reset-password', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    token: 'reset-token-from-email',
+    password: 'newSecurePassword456'
+  })
+});
+```
+
+### Email Verification
+
+#### Send Verification Email
+
+```typescript
+const response = await fetch('http://localhost:3000/api/v1/auth/send-verification-email', {
+  method: 'POST',
+  headers: { 
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${accessToken}`
+  }
+});
+```
+
+#### Verify Email
+
+```typescript
+// User clicks link in email with token
+const response = await fetch(`http://localhost:3000/api/v1/auth/verify-email?token=${token}`);
+```
+
+---
+
+## OAuth Providers
+
+### Configuration
+
+Enable OAuth providers in your plugin configuration:
+
+```typescript
+new AuthPlugin({
+  secret: process.env.OS_AUTH_SECRET,
+  baseUrl: 'http://localhost:3000',
+  // socialProviders is a record keyed by provider id (forwarded to better-auth).
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    },
+    github: {
+      clientId: process.env.GITHUB_CLIENT_ID!,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+    },
+  },
+})
+```
+
+> **Note:** Use the `socialProviders` record above. The legacy `providers: [...]`
+> array still type-checks but is **not** wired up at runtime — only `socialProviders`
+> is forwarded to better-auth, so a `providers` array produces no working OAuth.
+
+#### Zero-config Google (env only)
+
+You can enable Google sign-in without any code by setting `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` (and leaving `OS_AUTH_GOOGLE_ENABLED` unset or not `false`).
+The plugin auto-registers Google as a social provider from these environment
+variables. Use the explicit `socialProviders` record for other providers or to
+override the env-derived configuration.
+
+### OAuth Flow
+
+#### 1. Initiate OAuth Login
+
+```typescript
+// Recommended: use the client SDK, which posts to /sign-in/social and redirects.
+await client.auth.signInWithProvider('google');
+
+// Equivalent direct API call: POST /sign-in/social returns a redirect URL.
+const response = await fetch('http://localhost:3000/api/v1/auth/sign-in/social', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    provider: 'google',
+    callbackURL: window.location.origin + '/login',
+  }),
+});
+const data = await response.json();
+window.location.href = data.url ?? data.data.url;
+```
+
+#### 2. Handle Callback
+
+Better-Auth automatically handles the OAuth callback at `/api/v1/auth/callback/google` and redirects the user back to your application with a session.
+
+---
+
+## Enterprise Authentication Hardening (ADR-0069)
+
+Beyond the core flows above, `@objectstack/plugin-auth` ships an enterprise
+hardening layer. Every toggle is configured from **Setup → Authentication** and
+is wired to real runtime enforcement (ADR-0049 — no setting ships without the
+code that reads it). Changes take effect immediately; no restart is required.
+
+### Password policy
+
+| Setting | Effect |
+|---|---|
+| `password_reject_breached` | Reject passwords found in the Have I Been Pwned corpus (k-anonymity range check — the password is never sent in full). |
+| `password_require_complexity` / `password_min_classes` | Require a minimum number of character classes (upper / lower / digit / symbol). |
+| `password_history_count` | Block reuse of the last *N* passwords. |
+| `password_expiry_days` | Force a password change after *N* days; expired sessions are gated until the password is rotated. |
+
+### Anti-abuse (lockout & rate-limiting)
+
+| Setting | Effect |
+|---|---|
+| `lockout_threshold` | Lock an account after this many consecutive failed sign-ins. |
+| `lockout_duration_minutes` | How long a lockout lasts. Admins can clear it early with the **Unlock** action on the user record. |
+| `rate_limit_max` / `rate_limit_window_seconds` | Per-IP request throttle on auth endpoints. |
+
+### Multi-factor (enforced MFA)
+
+| Setting | Effect |
+|---|---|
+| `mfa_required` | Require MFA org-wide (also settable per organization via `require_mfa`). |
+| `mfa_grace_period_days` | Grace window for existing users to enroll. After it elapses, the session is allowed to sign in but **gated from data access** until TOTP is enrolled — the Console surfaces a remediation overlay that walks the user through enrollment. |
+
+### Sessions
+
+| Setting | Effect |
+|---|---|
+| `session_idle_timeout_minutes` | Expire a session after inactivity. |
+| `session_absolute_max_hours` | Hard cap on total session lifetime regardless of activity. |
+| `max_concurrent_sessions_per_user` | Cap simultaneous sessions; the oldest is revoked (expired in place) when the cap is exceeded. |
+
+### Network
+
+| Setting | Effect |
+|---|---|
+| `allowed_ip_ranges` | Restrict authenticated access to one or more IPv4 CIDR ranges. IP is extracted with trust-proxy awareness (`x-forwarded-for` / `cf-connecting-ip` / `x-real-ip`); requests whose IP can't be determined fail open. |
+
+> **How enforcement works.** Password expiry and enforced MFA share a single
+> *session-validation gate*: `customSession` stamps the session with an
+> `authGate` posture, and the REST server + runtime dispatcher block gated
+> sessions from data access (auth, health, and a small allowlist still pass so
+> the user can remediate). This is why a non-compliant user can sign in but
+> can't read data until they fix the issue.
+
+---
+
+## Advanced Features
+
+### Two-Factor Authentication (2FA)
+
+ObjectStack wires the better-auth two-factor (TOTP) plugin at the backend layer.
+The endpoints below let you build an **opt-in** 2FA experience in a custom account
+UI; for **organization-wide enforced MFA**, see
+[Enterprise Authentication Hardening](#enterprise-authentication-hardening-adr-0069)
+— the Console ships an enrollment/remediation flow for that path.
+
+A complete opt-in 2FA UX still needs to handle:
+
+- enrollment (`/two-factor/enable`),
+- TOTP confirmation (`/two-factor/verify-totp`),
+- the `twoFactorRedirect` response returned by password sign-in, and
+- backup-code recovery.
+
+For custom account UIs, enable the backend plugin in configuration:
+
+```typescript
+new AuthPlugin({
+  secret: process.env.OS_AUTH_SECRET,
+  baseUrl: 'http://localhost:3000',
+  plugins: {
+    twoFactor: true,  // Enable backend two-factor endpoints
+  }
+})
+```
+
+#### Enable 2FA for User
+
+```typescript
+const response = await fetch('http://localhost:3000/api/v1/auth/two-factor/enable', {
+  method: 'POST',
+  headers: { 
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: JSON.stringify({
+    password: currentPassword,
+  }),
+});
+
+const { totpURI, backupCodes } = await response.json();
+// Display totpURI as a QR code and show backupCodes once.
+```
+
+#### Verify 2FA Code
+
+```typescript
+const response = await fetch('http://localhost:3000/api/v1/auth/two-factor/verify-totp', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    code: '123456'  // Code from authenticator app
+  })
+});
+```
+
+### Passkeys (WebAuthn)
+
+> **Not yet implemented.** Passkey/WebAuthn support is not currently wired into
+> `AuthPlugin`. The `plugins: { passkeys: true }` flag is accepted but no
+> passkey plugin is registered, so `/passkey/*` endpoints are not available.
+> This section will be updated once passkey support ships.
+
+### Magic Links
+
+Enable passwordless magic link authentication:
+
+```typescript
+new AuthPlugin({
+  secret: process.env.OS_AUTH_SECRET,
+  baseUrl: 'http://localhost:3000',
+  plugins: {
+    magicLink: true,  // Enable magic links
+  }
+})
+```
+
+#### Send Magic Link
+
+```typescript
+const response = await fetch('http://localhost:3000/api/v1/auth/magic-link/send', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email: 'user@example.com'
+  })
+});
+```
+
+#### Verify Magic Link
+
+```typescript
+// User clicks link in email
+const response = await fetch(`http://localhost:3000/api/v1/auth/magic-link/verify?token=${token}`);
+```
+
+### Organizations (Multi-Tenant)
+
+Enable organization/team support:
+
+```typescript
+new AuthPlugin({
+  secret: process.env.OS_AUTH_SECRET,
+  baseUrl: 'http://localhost:3000',
+  plugins: {
+    organization: true,  // Enable organizations
+  }
+})
+```
+
+---
+
+## Client Integration
+
+### Using @objectstack/client
+
+The official ObjectStack client has built-in auth methods:
+
+```typescript
+import { ObjectStackClient } from '@objectstack/client';
+
+const client = new ObjectStackClient({
+  baseUrl: 'http://localhost:3000'
+});
+
+// Register
+await client.auth.register({
+  email: 'user@example.com',
+  password: 'password123',
+  name: 'John Doe'
+});
+
+// Login (auto-sets token)
+await client.auth.login({
+  type: 'email',
+  email: 'user@example.com',
+  password: 'password123'
+});
+
+// Now all subsequent requests include the auth token
+const tasks = await client.data.find('task', {});
+
+// Logout (clears token)
+await client.auth.logout();
+
+// Get current user
+const session = await client.auth.me();
+
+// Refresh token
+await client.auth.refreshToken('refresh-token-value');
+```
+
+### Direct API Calls
+
+All endpoints are available at `/api/v1/auth/*`:
+
+```typescript
+// Example: Login
+const response = await fetch('http://localhost:3000/api/v1/auth/sign-in/email', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email: 'user@example.com',
+    password: 'password123'
+  })
+});
+
+const data = await response.json();
+const token = data.data.token;
+
+// Use token in subsequent requests
+const protectedResponse = await fetch('http://localhost:3000/api/v1/data/task', {
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+});
+```
+
+---
+
+## API Reference
+
+### Authentication Endpoints
+
+All endpoints are available under `/api/v1/auth/*`:
+
+#### Email/Password
+
+- `POST /api/v1/auth/sign-in/email` - Sign in with email and password
+- `POST /api/v1/auth/sign-up/email` - Register new user
+- `POST /api/v1/auth/sign-out` - Sign out current user
+
+#### Session
+
+- `GET /api/v1/auth/get-session` - Get current user session
+
+#### Password Management
+
+- `POST /api/v1/auth/request-password-reset` - Request password reset email
+- `POST /api/v1/auth/reset-password` - Reset password with token
+
+#### Email Verification
+
+- `POST /api/v1/auth/send-verification-email` - Send verification email
+- `GET /api/v1/auth/verify-email` - Verify email with token
+
+#### OAuth
+
+- `POST /api/v1/auth/sign-in/social` - Start OAuth flow (body `{ provider, callbackURL }`; returns a redirect URL)
+- `GET /api/v1/auth/callback/[provider]` - OAuth callback handler
+
+#### Two-Factor Authentication
+
+- `POST /api/v1/auth/two-factor/enable` - Start 2FA enrollment for the current user
+- `POST /api/v1/auth/two-factor/verify-totp` - Verify a TOTP code
+
+#### Magic Links
+
+- `POST /api/v1/auth/magic-link/send` - Send magic link email
+- `GET /api/v1/auth/magic-link/verify` - Verify magic link
+
+For complete API documentation, see the [Better-Auth API Reference](https://www.better-auth.com/docs).
+
+---
+
+## Best Practices
+
+### Security
+
+1. **Use Strong Secrets**: Generate a strong random secret for `OS_AUTH_SECRET` (minimum 32 characters)
+   ```bash
+   # Generate a secure secret
+   openssl rand -base64 32
+   ```
+
+2. **HTTPS in Production**: Always use HTTPS for authentication endpoints in production
+   ```typescript
+   new AuthPlugin({
+     baseUrl: process.env.NODE_ENV === 'production' 
+       ? 'https://api.example.com'
+       : 'http://localhost:3000',
+   })
+   ```
+
+3. **Environment Variables**: Never commit secrets to version control
+   ```bash
+   # .env (not committed)
+   OS_AUTH_SECRET=your-secret-here
+   GOOGLE_CLIENT_ID=your-client-id
+   ```
+
+4. **Session Expiry**: Configure appropriate session expiry times
+   ```typescript
+   new AuthPlugin({
+     secret: process.env.OS_AUTH_SECRET,
+     baseUrl: 'http://localhost:3000',
+     session: {
+       expiresIn: 60 * 60 * 24 * 7,  // 7 days
+       updateAge: 60 * 60 * 24,       // Update every 24 hours
+     }
+   })
+   ```
+
+### User Experience
+
+1. **Email Verification**: Require email verification for sensitive operations
+2. **Password Requirements**: Enforce strong password policies
+3. **2FA for Admin**: Require 2FA only after your UI supports the full TOTP challenge and recovery flow
+4. **OAuth Options**: Provide multiple OAuth providers for convenience
+
+### Error Handling
+
+```typescript
+try {
+  await client.auth.login({
+    type: 'email',
+    email: 'user@example.com',
+    password: 'wrong-password'
+  });
+} catch (error) {
+  if (error.response?.status === 401) {
+    console.error('Invalid credentials');
+  } else {
+    console.error('Login failed:', error.message);
+  }
+}
+```
+
+### ObjectStack Field Naming
+
+The plugin uses ObjectStack's `sys_` prefix convention for protocol object names and snake_case for field names, which is required by the ObjectStack protocol:
+
+- Object names: `sys_user`, `sys_session`, `sys_account`, `sys_verification` (protocol names)
+- Field names: `email_verified`, `created_at`, `user_id` (snake_case)
+
+better-auth internally uses camelCase model and field names (`user`, `emailVerified`, `userId`).
+The plugin bridges this gap using better-auth's official **`modelName` / `fields` schema customisation API**:
+
+```typescript
+// Declared in the betterAuth() config via AUTH_*_CONFIG constants:
+user:         { modelName: 'sys_user',         fields: { emailVerified: 'email_verified', … } },
+session:      { modelName: 'sys_session',      fields: { userId: 'user_id', expiresAt: 'expires_at', … } },
+account:      { modelName: 'sys_account',      fields: { providerId: 'provider_id', accountId: 'account_id', … } },
+verification: { modelName: 'sys_verification', fields: { expiresAt: 'expires_at', … } },
+```
+
+The ObjectQL adapter factory (`createObjectQLAdapterFactory`) then uses better-auth's `createAdapterFactory`
+which automatically transforms all data and where-clauses using these mappings — no manual
+camelCase ↔ snake_case conversion is needed in the adapter.
+
+> **Upgrade note:** If you have custom adapters or plugins that reference auth objects by name,
+> update them to use `sys_user`, `sys_session`, `sys_account`, `sys_verification`
+> (or import from `SystemObjectName` constants).
+
+---
+
+## MSW/Mock Mode
+
+AuthPlugin is designed to work in **both** server and MSW/mock (browser-only) environments. This means you can develop and test authentication flows without running a real HTTP server.
+
+### How It Works
+
+- **Server mode** (HonoServerPlugin active): AuthPlugin registers HTTP routes at `/api/v1/auth/*` and forwards all requests to better-auth.
+- **MSW/mock mode** (no HTTP server): AuthPlugin gracefully skips route registration but still registers the `auth` service. The `HttpDispatcher` provides mock fallback responses for core auth endpoints.
+
+### Minimal Configuration for Mock Mode
+
+```typescript
+import { ObjectKernel, DriverPlugin, AppPlugin } from '@objectstack/runtime';
+import { ObjectQLPlugin } from '@objectstack/objectql';
+import { InMemoryDriver } from '@objectstack/driver-memory';
+import { AuthPlugin } from '@objectstack/plugin-auth';
+
+const kernel = new ObjectKernel();
+
+await kernel.use(new ObjectQLPlugin());
+await kernel.use(new DriverPlugin(new InMemoryDriver(), 'memory'));
+
+// AuthPlugin works without HonoServerPlugin — no HTTP server needed
+await kernel.use(new AuthPlugin({
+  secret: 'INSECURE_DEV_ONLY_mock_secret_do_not_use_in_production',
+  baseUrl: 'http://localhost:5173',
+}));
+
+await kernel.bootstrap();
+```
+
+> ⚠️ **Warning:** The secret above is for **local development only**. In production, always use a strong random secret from an environment variable (`process.env.OS_AUTH_SECRET`).
+
+### Mock Fallback Endpoints
+
+When no auth service handler is registered and the legacy broker login is unavailable, `HttpDispatcher.handleAuth()` automatically provides mock responses for:
+
+| Endpoint | Method | Description |
+|:---|:---:|:---|
+| `sign-up/email` | POST | Returns mock user + session |
+| `sign-in/email` | POST | Returns mock user + session |
+| `login` | POST | Legacy login — returns mock user + session |
+| `register` | POST | Alias for sign-up |
+| `get-session` | GET | Returns `{ session: null, user: null }` |
+| `sign-out` | POST | Returns `{ success: true }` |
+
+This ensures that registration and sign-in flows do not return 404 errors in MSW/browser-only environments.
+
+> **Note:** In server mode with AuthPlugin loaded, the auth service handler takes priority and the mock fallback is never reached. The mock fallback only activates when AuthPlugin is not loaded (e.g. browser-only Console/MSW builds where `better-auth` is unavailable).
+
+## Next Steps
+
+- See [Security Guide](/docs/permissions) for authorization and permissions
+- See [Client SDK Guide](/docs/api/client-sdk) for client-side integration
+- See [API Reference](/docs/api) for complete API documentation
+- Visit [Better-Auth Documentation](https://www.better-auth.com/docs) for advanced features
+
+---
+
+## Examples
+
+Complete working examples are available in the repository:
+
+- [Basic Auth Example](https://github.com/objectstack-ai/framework/tree/main/packages/plugins/plugin-auth/examples/basic-usage.ts)
+- [Todo App with Auth](https://github.com/objectstack-ai/framework/tree/main/examples/app-todo)
+- [CRM App with Auth](https://github.com/objectstack-ai/hotcrm)

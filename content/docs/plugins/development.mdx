@@ -1,0 +1,447 @@
+---
+title: Plugin Development
+description: Step-by-step guide to creating, testing, and publishing ObjectStack plugins
+---
+
+# Plugin Development Tutorial
+
+This guide walks you through creating an ObjectStack plugin from scratch — from project setup to testing and registration.
+
+<Callout type="info">
+**Source:** `packages/core/src/types.ts` (the runtime `Plugin` interface)  
+**Import:** `import type { Plugin, PluginContext } from '@objectstack/core'`
+</Callout>
+
+---
+
+## What is a Plugin?
+
+A plugin is a self-contained module that extends the ObjectStack kernel with:
+- **Services** — Add new capabilities (email, payment, analytics)
+- **Hooks** — React to lifecycle events (before/after record create, update, delete)
+- **Objects** — Register new data objects and fields
+- **UI Components** — Add custom views, widgets, or actions
+- **API Endpoints** — Expose new REST or GraphQL endpoints
+
+---
+
+## Step 1: Create the Plugin Project
+
+```bash
+mkdir objectstack-plugin-hello
+cd objectstack-plugin-hello
+npm init -y
+npm install @objectstack/spec
+npm install -D typescript vitest @types/node
+```
+
+Create `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}
+```
+
+---
+
+## Step 2: Define the Package Manifest
+
+A plugin package describes itself with a manifest validated by `ManifestSchema`. Create `src/manifest.ts`:
+
+```typescript
+import { ManifestSchema } from '@objectstack/spec/kernel';
+
+export const manifest = ManifestSchema.parse({
+  name: 'objectstack-plugin-hello',
+  version: '1.0.0',
+  description: 'A simple example plugin that adds a greeting service.',
+  type: 'plugin',
+});
+```
+
+<Callout type="info">
+A runtime plugin's behaviour (services, hooks, objects) is declared in code via the `Plugin` interface — see Step 3. The manifest only describes package metadata.
+</Callout>
+
+---
+
+## Step 3: Implement the Plugin
+
+Create `src/index.ts`. A runtime plugin implements the `Plugin` interface: services are registered inside `init(ctx)` via `ctx.registerService`, and lifecycle hooks are wired with `ctx.hook(...)`.
+
+```typescript
+import type { Plugin, PluginContext } from '@objectstack/core';
+
+export interface GreetingService {
+  greet(name: string): string;
+}
+
+export function createHelloPlugin(): Plugin {
+  const greetingService: GreetingService = {
+    greet(name: string): string {
+      return `Hello, ${name}! Welcome to ObjectStack.`;
+    }
+  };
+
+  return {
+    name: 'hello_world',
+    version: '1.0.0',
+
+    init(ctx: PluginContext) {
+      // Register services so other plugins can consume them
+      ctx.registerService('greeting', greetingService);
+
+      // Hook into record lifecycle
+      ctx.hook('data:beforeInsert', (context: { object: string; data: Record<string, unknown> }) => {
+        if (context.object === 'contact' && context.data.first_name) {
+          // Auto-generate a greeting field
+          context.data.welcome_message = greetingService.greet(
+            context.data.first_name as string
+          );
+        }
+      });
+    }
+  };
+}
+```
+
+---
+
+## Step 4: Add Custom Objects (Optional)
+
+Plugins can register new objects:
+
+```typescript
+import { ObjectSchema } from '@objectstack/spec/data';
+
+export const greetingLogObject = ObjectSchema.create({
+  name: 'greeting_log',
+  label: 'Greeting Log',
+  fields: {
+    recipient: { label: 'Recipient', type: 'text', required: true },
+    message: { label: 'Message', type: 'text', required: true },
+    sent_at: { label: 'Sent At', type: 'datetime' },
+    channel: { label: 'Channel', type: 'select', options: [
+      { label: 'Email', value: 'email' },
+      { label: 'SMS', value: 'sms' },
+      { label: 'In-App', value: 'in_app', default: true }
+    ]}
+  }
+});
+```
+
+---
+
+## Step 5: Write Tests
+
+Create `src/index.test.ts`:
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import type { PluginContext } from '@objectstack/core';
+import { createHelloPlugin } from './index';
+
+// Minimal fake PluginContext that captures registered services and hooks.
+function createFakeContext() {
+  const services: Record<string, unknown> = {};
+  const hooks: Record<string, (...args: any[]) => void> = {};
+  const ctx = {
+    registerService: (name: string, service: unknown) => { services[name] = service; },
+    hook: (name: string, handler: (...args: any[]) => void) => { hooks[name] = handler; },
+  } as unknown as PluginContext;
+  return { ctx, services, hooks };
+}
+
+describe('HelloPlugin', () => {
+  it('should have the correct name', () => {
+    expect(createHelloPlugin().name).toBe('hello_world');
+  });
+
+  it('should register the greeting service', () => {
+    const { ctx, services } = createFakeContext();
+    createHelloPlugin().init(ctx);
+    expect(services).toHaveProperty('greeting');
+  });
+
+  it('should greet by name', () => {
+    const { ctx, services } = createFakeContext();
+    createHelloPlugin().init(ctx);
+    const greeting = services.greeting as { greet: (name: string) => string };
+    expect(greeting.greet('Alice')).toBe('Hello, Alice! Welcome to ObjectStack.');
+  });
+
+  it('should add welcome message on contact create', () => {
+    const { ctx, hooks } = createFakeContext();
+    createHelloPlugin().init(ctx);
+    const context = { object: 'contact', data: { first_name: 'Bob' } as Record<string, unknown> };
+    hooks['data:beforeInsert'](context);
+    expect(context.data.welcome_message).toBe('Hello, Bob! Welcome to ObjectStack.');
+  });
+
+  it('should not modify non-contact objects', () => {
+    const { ctx, hooks } = createFakeContext();
+    createHelloPlugin().init(ctx);
+    const context = { object: 'task', data: { title: 'Test' } as Record<string, unknown> };
+    hooks['data:beforeInsert'](context);
+    expect(context.data).not.toHaveProperty('welcome_message');
+  });
+});
+```
+
+Run tests:
+
+```bash
+npx vitest run
+```
+
+---
+
+## Step 6: Register with the Kernel
+
+In your application's `objectstack.config.ts`:
+
+```typescript
+import { defineStack } from '@objectstack/spec';
+import { createHelloPlugin } from 'objectstack-plugin-hello';
+
+export default defineStack({
+  objects: [/* your objects */],
+  plugins: [
+    createHelloPlugin()
+  ]
+});
+```
+
+The kernel loads plugins in dependency order, calling each plugin's `init(ctx)` first (where services and hooks are registered) and then `start(ctx)` once all plugins have initialized.
+
+---
+
+## Plugin Best Practices
+
+### Naming Conventions
+
+| Item | Convention | Example |
+|:---|:---|:---|
+| Plugin name | `snake_case` | `hello_world` |
+| Service name | `snake_case` | `greeting` |
+| Object names | `snake_case` | `greeting_log` |
+| npm package | `kebab-case` | `objectstack-plugin-hello` |
+
+### Permission Model
+
+Only request the minimum permissions your plugin needs:
+
+| Permission | Description |
+|:---|:---|
+| `object:read` | Read records from objects |
+| `object:write` | Create, update, delete records |
+| `object:admin` | Create/modify object schemas |
+| `system:read` | Read system configuration |
+| `system:admin` | Modify system configuration |
+
+### Error Handling
+
+Always use structured errors:
+
+```typescript
+import type { EnhancedApiError } from '@objectstack/spec/api';
+
+function handlePluginError(error: unknown): EnhancedApiError {
+  return {
+    code: 'internal_error',
+    message: `Hello plugin error: ${String(error)}`,
+    category: 'server',
+    httpStatus: 500,
+    retryable: false
+  };
+}
+```
+
+### Testing Checklist
+
+- [ ] Manifest validates against `ManifestSchema`
+- [ ] Services register correctly
+- [ ] Hooks fire on expected events
+- [ ] Custom objects validate against `ObjectSchema`
+- [ ] Error cases are handled gracefully
+- [ ] No side effects in service constructors
+
+---
+
+## Plugin Directory Structure
+
+```
+objectstack-plugin-hello/
+├── src/
+│   ├── index.ts              # Plugin entry point
+│   ├── index.test.ts         # Tests
+│   ├── manifest.ts           # Plugin manifest
+│   └── services/
+│       └── greeting.ts       # Service implementation
+├── package.json
+├── tsconfig.json
+└── README.md
+```
+
+---
+
+## Studio Plugin Manifests with `defineStudioPlugin`
+
+For plugins that extend the **ObjectStack Studio IDE**, use `defineStudioPlugin` to declare UI contribution points — metadata viewers, sidebar groups, toolbar actions, panels, and commands. This follows a VS Code-like extension model.
+
+<Callout type="info">
+**Source:** `packages/spec/src/studio/plugin.zod.ts`  
+**Import:** `import { defineStudioPlugin } from '@objectstack/spec/studio'`
+</Callout>
+
+### Basic Studio Plugin
+
+```typescript
+import { defineStudioPlugin } from '@objectstack/spec/studio';
+
+export const manifest = defineStudioPlugin({
+  id: 'mycompany.crm-designer',
+  name: 'CRM Designer',
+  version: '1.0.0',
+  description: 'Custom object designer for CRM modules',
+  author: 'Your Name',
+  contributes: {
+    metadataViewers: [{
+      id: 'crm-object-explorer',
+      metadataTypes: ['object', 'objects'],
+      label: 'CRM Object Explorer',
+      priority: 100,
+      modes: ['preview', 'design', 'data'],
+    }],
+  },
+});
+```
+
+### Plugin ID Format
+
+Plugin IDs use reverse-domain notation and must match the pattern `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$`:
+
+```typescript
+// ✅ Valid IDs
+'objectstack.flow-designer'
+'mycompany.crm-tools'
+'acme.billing-plugin'
+
+// ❌ Invalid IDs
+'MyPlugin'         // uppercase
+'my plugin'        // spaces
+'my_plugin'        // underscores (use hyphens)
+```
+
+### Contribution Points
+
+Studio plugins can declare six types of contributions:
+
+| Contribution | Purpose | Example |
+|:---|:---|:---|
+| `metadataViewers` | Custom viewers/designers for metadata types | Object explorer, Flow canvas |
+| `sidebarGroups` | Sidebar navigation groups | "CRM Objects", "Automation" |
+| `actions` | Toolbar, context menu, and command palette actions | "Deploy", "Validate Schema" |
+| `metadataIcons` | Icons and labels for metadata types | Database icon for objects |
+| `panels` | Auxiliary panels (bottom, right, modal) | Output log, Problems panel |
+| `commands` | Command palette entries with keyboard shortcuts | "Open Settings" (Ctrl+,) |
+
+### Full Example with All Contributions
+
+```typescript
+import { defineStudioPlugin } from '@objectstack/spec/studio';
+
+export const manifest = defineStudioPlugin({
+  id: 'objectstack.flow-designer',
+  name: 'Flow Designer',
+  version: '2.0.0',
+  description: 'Visual flow builder for automation workflows',
+  activationEvents: ['onMetadataType:flow'],
+
+  contributes: {
+    metadataViewers: [{
+      id: 'flow-canvas',
+      metadataTypes: ['flow', 'flows'],
+      label: 'Flow Canvas',
+      priority: 100,
+      modes: ['design', 'code'],
+    }],
+
+    sidebarGroups: [{
+      key: 'automation',
+      label: 'Automation',
+      icon: 'workflow',
+      metadataTypes: ['flow', 'trigger', 'workflow'],
+      order: 30,
+    }],
+
+    actions: [{
+      id: 'validate-flow',
+      label: 'Validate Flow',
+      icon: 'check-circle',
+      location: 'toolbar',
+      metadataTypes: ['flow'],
+    }],
+
+    metadataIcons: [{
+      metadataType: 'flow',
+      label: 'Flow',
+      icon: 'git-branch',
+    }],
+
+    panels: [{
+      id: 'flow-debug',
+      label: 'Flow Debugger',
+      icon: 'bug',
+      location: 'bottom',
+    }],
+
+    commands: [{
+      id: 'objectstack.flow-designer.run',
+      label: 'Run Flow',
+      shortcut: 'Ctrl+Shift+R',
+      icon: 'play',
+    }],
+  },
+});
+```
+
+### Activation Events
+
+Control when your plugin loads with activation events:
+
+| Pattern | Trigger |
+|:---|:---|
+| `*` | Activate immediately (eager, default) |
+| `onMetadataType:object` | When metadata type "object" is loaded |
+| `onCommand:myPlugin.doSomething` | When command is invoked |
+| `onView:myPlugin.myPanel` | When panel is opened |
+
+### View Modes
+
+Metadata viewers declare which modes they support:
+
+| Mode | Description |
+|:---|:---|
+| `preview` | Read-only rendered preview |
+| `design` | Visual drag-and-drop designer |
+| `code` | Raw schema/code editor |
+| `data` | Live data browser |
+
+---
+
+## Next Steps
+
+- [Common Patterns](/docs/getting-started/common-patterns) — See how plugins fit into the application architecture
+- [Error Catalog](/docs/api/error-catalog) — Return proper error codes from your plugin
+- [Field Type Gallery](/docs/data-modeling/field-types) — Define custom objects with the right field types

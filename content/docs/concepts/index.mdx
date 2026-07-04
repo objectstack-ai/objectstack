@@ -1,654 +1,191 @@
 ---
-title: Protocol Architecture
-description: How the Data, System, and UI protocols work together as one cohesive system
+title: Core Concepts
+description: The foundational ideas behind ObjectStack — metadata-driven development, protocol-first design, and the principles that shape every decision
 ---
 
-import { Database, Layout, Cpu, ArrowRight, CheckCircle, Workflow, Bot, Cloud } from 'lucide-react';
+import { Scale, Code2, Database, ScrollText, Laptop } from 'lucide-react';
 
-# The Protocol Stack
+# Core Concepts
 
-The architecture is built on foundational protocols that work together as a unified system:
+Before diving into code, understanding these foundational ideas will make everything else click.
+
+## Metadata-Driven Development
+
+Metadata-driven development is a paradigm shift where **application logic is defined by declarative data (metadata), not imperative code.**
+
+### The Problem with Code-First
+
+In traditional development, the "Intent" (e.g., *"This field is a required email address"*) is scattered across multiple layers:
+
+1. **Database:** SQL constraints (`NOT NULL`, `CHECK`)
+2. **Backend:** ORM validation (TypeORM decorators, Prisma schemas)
+3. **Frontend:** UI validation (React Hook Form + Zod)
+4. **Documentation:** API specs (OpenAPI/Swagger)
+
+When a business requirement changes, you must update code in **three or four places**. This is **Implementation Coupling**.
+
+### The ObjectStack Way
+
+ObjectStack centralizes the "Intent" into a **single Protocol Definition**:
+
+<Tabs items={['Array Format', 'Map Format']}>
+<Tab value="Array Format">
+```typescript
+// ONE definition — everything else derives from it
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  objects: [{
+    name: 'user',
+    label: 'User',
+    fields: {
+      phone: { label: 'Phone Number', type: 'phone', required: true },
+    },
+  }],
+});
+```
+</Tab>
+<Tab value="Map Format">
+```typescript
+// Map keys become the `name` field automatically
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  objects: {
+    user: {
+      label: 'User',
+      fields: {
+        phone: { label: 'Phone Number', type: 'phone', required: true },
+      },
+    },
+  },
+});
+```
+</Tab>
+</Tabs>
+
+<Callout type="info">
+**Array or Map?** `defineStack()` accepts both formats for all named metadata collections (`objects`, `apps`, `flows`, etc.). Map keys are injected as the `name` field — pick whichever style you prefer.
+</Callout>
+
+From this single definition, ObjectStack automatically:
+
+✅ Generates database schema
+✅ Creates validation rules
+✅ Builds CRUD APIs
+✅ Renders form fields
+✅ Produces API documentation
+
+### The Three Truths
+
+1. **The UI is a Projection** — The form is generated from the schema, not hand-coded
+2. **The API is a Consequence** — REST/GraphQL endpoints appear automatically from object definitions
+3. **The Schema is the Application** — Your entire business logic lives in metadata files
+
+### When to Use Metadata-Driven
+
+✅ **Great for:** CRUD apps, SaaS platforms, admin panels, rapid prototyping, multi-tenant systems
+
+❌ **Not ideal for:** Pixel-perfect custom UIs, real-time 3D/games, highly unique domains
+
+---
+
+## Design Principles
+
+ObjectStack is governed by four unshakable principles:
 
 <Cards>
   <Card
+    icon={<Scale />}
+    title="I. Protocol Neutrality"
+    description="The Protocol is law. The Implementation is merely an opinion."
+  />
+  <Card
+    icon={<Code2 />}
+    title="II. Mechanism over Policy"
+    description="Provide the tools to build rules, do not hardcode the rules themselves."
+  />
+  <Card
     icon={<Database />}
-    title="Data Protocol"
-    description="ObjectQL: Structure, queries, and constraints."
+    title="III. Single Source of Truth"
+    description="There is no 'Code'. There is only Schema."
   />
   <Card
-    icon={<Layout />}
-    title="UI Protocol"
-    description="ObjectUI: Presentation, interaction, and routing."
-  />
-  <Card
-    icon={<Cpu />}
-    title="System Protocol"
-    description="ObjectOS: Control, runtime, and governance."
-  />
-  <Card
-    icon={<Workflow />}
-    title="Automation Protocol"
-    description="Business Logic: Flow, Workflow, Triggers."
-  />
-  <Card
-    icon={<Bot />}
-    title="AI Protocol"
-    description="Intelligence: Agents, RAG, Models."
-  />
-  <Card
-    icon={<Cloud />}
-    title="Cloud Protocol"
-    description="Management: Multi-tenancy, Marketplace, Licensing."
+    icon={<ScrollText />}
+    title="IV. Agent-Ready Boundaries"
+    description="Agents may act only through typed, permission-aware, auditable surfaces."
   />
 </Cards>
 
-## Why Separated Layers?
+### Protocol Neutrality
 
-Traditional applications tightly couple data, business logic, and presentation. This creates **Implementation Coupling** — changing one layer forces changes across the entire stack.
+**"The Protocol is neutral. The Engine is replaceable."**
 
-ObjectStack enforces **Separation of Concerns** through protocol boundaries:
+- **Spec before Engine:** Features must be defined in the Specification layer before any engine code is written
+- **Zero Leakage:** Implementation details (React, SQL, etc.) never leak into Protocol definitions
 
-```
-┌───────────────────────────────────────────────────────────┐
-│              UI Protocol & AI Protocol                    │
-│  Apps, Views, Dashboards, Agents, RAG                     │
-│  "How do users and agents interact?"                       │
-└───────────────────────────┬───────────────────────────────┘
-                            │ Interface
-┌───────────────────────────┴───────────────────────────────┐
-│    System Protocol & Automation Protocol & Cloud Protocol │
-│  Auth, Permissions, Orchestration, Multi-tenancy          │
-│  "Who/What can do what, when, and where?"                  │
-└───────────────────────────┬───────────────────────────────┘
-                            │ Control
-┌───────────────────────────┴───────────────────────────────┐
-│                     Data Protocol                         │
-│  Objects, Fields, Queries, Drivers                        │
-│  "What is the data structure?"                             │
-└───────────────────────────────────────────────────────────┘
-```
+This ensures ObjectStack apps can run on Node.js + PostgreSQL today, Python + SQLite tomorrow, or Rust WASM in the browser.
 
-## Layer 1: ObjectQL (Data Protocol)
+### Mechanism over Policy
 
-**Role:** Define the **Structure** and **Intent** of data.
+**"Give them the physics, not the simulation."**
 
-**Responsibilities:**
-- Object schema definitions (what is a "Customer"?)
-- Field types and validation rules
-- Query language (filtering, sorting, aggregation)
-- Database drivers (Postgres, MongoDB, SQLite)
-
-**Key Principle:** ObjectQL knows **nothing** about users, permissions, or UI. It only cares about data structure and queries.
-
-### Example: Defining a Customer Object
-
-```typescript
-// packages/crm/src/objects/customer.object.ts
-import { ObjectSchema, Field } from '@objectstack/spec/data';
-
-export const Customer = ObjectSchema.create({
-  name: 'customer',
-  label: 'Customer',
-  icon: 'building',
-  
-  fields: {
-    name: Field.text({
-      label: 'Company Name',
-      required: true,
-      maxLength: 120,
-    }),
-    
-    industry: Field.select({
-      label: 'Industry',
-      options: [
-        { label: 'Technology', value: 'technology' },
-        { label: 'Finance', value: 'finance' },
-        { label: 'Healthcare', value: 'healthcare' },
-        { label: 'Retail', value: 'retail' },
-      ],
-    }),
-    
-    annual_revenue: Field.currency({
-      label: 'Annual Revenue',
-      scale: 2,
-    }),
-    
-    primary_contact: Field.lookup('contact', {
-      label: 'Primary Contact',
-    }),
-  },
-});
-```
+| Layer | Responsibility | Example |
+| :--- | :--- | :--- |
+| **Protocol** | Defines capabilities | A row-level-security policy slot (`operation` + `using` clause) |
+| **App** | Defines business logic | `{ operation: 'select', using: "role = 'admin'" }` |
+| **Engine** | Enforces the logic | Compiles the `using` condition into a SQL `WHERE` clause |
 
 <Callout type="info">
-The object names on this page (`customer`, `opportunity`, `contact`) are illustrative. In a real package, object names carry their domain/package prefix directly in the name (e.g. `crm_customer`, `sys_user`) — there is no separate `namespace` field.
+CRUD permissions (`allowRead`, `allowEdit`, …) are simple booleans — they grant or deny an operation. Record-level *conditional* access is a separate mechanism: [Row-Level Security](/docs/concepts/architecture) policies, whose `using` clause is a SQL-like (PostgreSQL-compatible) predicate over context variables such as `current_user.roles` and `current_user.id`.
 </Callout>
 
-This definition is **pure metadata**. It doesn't know:
-- Who can see this data
-- How to render a form
-- When to trigger workflows
+### Single Source of Truth
 
-That's the job of the other layers.
+In ObjectStack, **the Object Protocol is the only truth:**
 
-## Layer 2: ObjectOS (Control Protocol)
+- The Database is a *derivative* of the Protocol
+- The UI is a *projection* of the Protocol
+- The API is a *consequence* of the Protocol
+- The Agent tool surface is a *bounded capability set* derived from the Protocol
 
-**Role:** Manage the **Lifecycle** and **Governance** of requests.
+Change the Protocol → the entire system adapts automatically.
 
-**Responsibilities:**
-- Authentication (who is this user?)
-- Authorization (can they access this field?)
-- Workflows and automations (what happens after save?)
-- Event processing (audit logs, notifications)
-- Multi-tenancy and data isolation
+### Agent-Ready Boundaries
 
-**Key Principle:** ObjectOS acts as the **Gateway**. No layer can directly access the database; all requests must pass through the OS Kernel.
-
-### Example: Permission Rules
-
-Access control is declared as **permission set** metadata (the `PermissionSet` shape from `@objectstack/spec`). A permission set maps each object to its CRUD/lifecycle flags and, optionally, per-field read/edit flags keyed by `<object>.<field>`:
-
-```typescript
-// packages/crm/src/permissions/sales_rep.permission.ts
-import { definePermissionSet } from '@objectstack/spec';
-
-export const salesRep = definePermissionSet({
-  name: 'sales_rep',
-  label: 'Sales Rep',
-  isProfile: true,
-  objects: {
-    customer: {
-      allowCreate: true,
-      allowRead: true,
-      allowEdit: true,
-      allowDelete: false, // Only managers can delete
-    },
-  },
-  fields: {
-    'customer.annual_revenue': { readable: true, editable: false }, // Read-only
-  },
-});
-
-// packages/crm/src/permissions/sales_manager.permission.ts
-export const salesManager = definePermissionSet({
-  name: 'sales_manager',
-  label: 'Sales Manager',
-  isProfile: true,
-  objects: {
-    customer: {
-      allowCreate: true,
-      allowRead: true,
-      allowEdit: true,
-      allowDelete: true,
-    },
-  },
-});
-```
-
-### Example: Flow Automation
-
-Business logic is authored as a **Flow** — a graph of nodes and edges — via `defineFlow`. A `record_change` flow runs when a record is written; a `decision` node branches on a bare CEL condition (reference fields directly, e.g. `record.annual_revenue`, and do **not** wrap them in `{…}`):
-
-```typescript
-// packages/crm/src/flows/high_value_customer.flow.ts
-import { defineFlow } from '@objectstack/spec';
-
-export const highValueCustomerFlow = defineFlow({
-  name: 'high_value_customer',
-  label: 'High-Value Customer Alert',
-  type: 'record_change',
-  status: 'active',
-  nodes: [
-    { id: 'start', type: 'start', label: 'On Create' },
-    { id: 'check', type: 'decision', label: 'Is High Value?' },
-    { id: 'assign', type: 'update_record', label: 'Assign Enterprise Team' },
-    { id: 'notify', type: 'notify', label: 'Email Leadership' },
-    { id: 'end', type: 'end', label: 'End' },
-  ],
-  edges: [
-    { id: 'e1', source: 'start', target: 'check' },
-    { id: 'e2', source: 'check', target: 'assign', condition: 'record.annual_revenue > 1000000' },
-    { id: 'e3', source: 'assign', target: 'notify' },
-    { id: 'e4', source: 'notify', target: 'end' },
-  ],
-});
-```
-
-ObjectOS **orchestrates** these rules at runtime, independent of the data structure or UI.
-
-## Layer 3: ObjectUI (View Protocol)
-
-**Role:** Render the **Presentation** and handle **User Interaction**.
-
-**Responsibilities:**
-- App navigation and branding
-- List views (grid, kanban, calendar)
-- Form layouts (simple, tabbed, wizard)
-- Dashboards and reports
-- Actions and buttons
-
-**Key Principle:** ObjectUI is a **Rendering Engine**, not a hardcoded interface. It asks ObjectQL *"What is the schema?"* and dynamically generates the UI.
-
-### Example: List View
-
-Views are authored with `defineView`, which aggregates an object's `list` and `form` views into one document. A list view binds to its data source (`provider: 'object'`), names its columns, and declares any default sort:
-
-```typescript
-// packages/crm/src/views/customer.view.ts
-import { defineView } from '@objectstack/spec';
-
-export const customerViews = defineView({
-  list: {
-    label: 'All Customers',
-    type: 'grid',
-    data: { provider: 'object', object: 'customer' },
-    columns: ['name', 'industry', 'annual_revenue', 'primary_contact'],
-    filter: [
-      { field: 'annual_revenue', operator: 'greaterThan', value: 0 },
-    ],
-    sort: [{ field: 'name', order: 'asc' }],
-  },
-});
-```
-
-### Example: Form View
-
-The same `defineView` document carries the `form` view. A form is laid out as **sections** of fields (each section can span 1-4 columns):
-
-```typescript
-// packages/crm/src/views/customer.view.ts
-import { defineView } from '@objectstack/spec';
-
-export const customerViews = defineView({
-  form: {
-    type: 'simple',
-    data: { provider: 'object', object: 'customer' },
-    sections: [
-      {
-        label: 'Company Information',
-        columns: 2,
-        fields: ['name', 'industry', 'annual_revenue'],
-      },
-      {
-        label: 'Contact',
-        fields: ['primary_contact'],
-      },
-    ],
-  },
-});
-```
-
-The UI doesn't "know" the field types. It asks ObjectQL for the schema and renders accordingly:
-- `Field.text` → Text input
-- `Field.select` → Dropdown
-- `Field.lookup` → Autocomplete lookup
-- `Field.currency` → Number input with currency formatting
-
-## How They Work Together
-
-Let's trace a **real-world scenario**: A sales rep creates a new high-value customer.
-
-<Callout type="info">
-The runtime snippets in Steps 3-6 below are **conceptual pseudo-code** — names like `Auth.getCurrentUser()`, `Permission.check()`, `ObjectQL.getSchema()`, and `Workflow.getTriggersFor()` illustrate *what each layer does at runtime*; they are not importable APIs from `@objectstack/spec`. The schema, view, permission-set, and flow snippets elsewhere on this page are the real authoring surface.
-</Callout>
-
-### Step 1: User Action (ObjectUI)
+AI agents should not bypass the application model by calling raw SQL, scraping UI state, or executing arbitrary glue code. They should act through typed, permission-aware capabilities derived from the same metadata artifact that powers the application.
 
 ```
-User fills out the "Create Customer" form:
-- Name: "Acme Corp"
-- Industry: "Technology"
-- Annual Revenue: $5,000,000
-- Primary Contact: "John Doe"
-
-User clicks "Save"
+Traditional AI app: Database schema -> App code -> Custom query -> Hand-written MCP tool
+ObjectStack: Zod metadata -> Metadata registry -> ObjectStack runtime -> API / UI / MCP tools
 ```
-
-### Step 2: UI Layer Sends Request
-
-```typescript
-// ObjectUI dispatches an action to ObjectOS
-const request = {
-  action: 'create',
-  object: 'customer',
-  data: {
-    name: 'Acme Corp',
-    industry: 'technology',
-    annual_revenue: 5000000,
-    primary_contact: 'contact_12345',
-  },
-};
-```
-
-### Step 3: ObjectOS Validates Permissions
-
-```typescript
-// Kernel checks: Does this user have permission?
-const user = await Auth.getCurrentUser();
-const canCreate = await Permission.check({
-  user,
-  object: 'customer',
-  operation: 'create',
-});
-
-if (!canCreate) {
-  throw new Error('Permission denied');
-}
-```
-
-### Step 4: ObjectOS Validates Data
-
-```typescript
-// Kernel asks ObjectQL: Is this data valid?
-const schema = ObjectQL.getSchema('customer');
-const validation = schema.validate(request.data);
-
-if (!validation.success) {
-  throw new ValidationError(validation.errors);
-}
-```
-
-### Step 5: ObjectQL Writes to Database
-
-```typescript
-// ObjectQL compiles the request into a database operation
-const driver = ObjectQL.getDriver(); // Postgres, MongoDB, etc.
-const result = await driver.insert('customer', {
-  name: 'Acme Corp',
-  industry: 'technology',
-  annual_revenue: 5000000,
-  primary_contact_id: 'contact_12345',
-});
-```
-
-### Step 6: ObjectOS Triggers Workflows
-
-```typescript
-// Kernel checks: Are there any workflows for this event?
-const workflows = Workflow.getTriggersFor('customer', 'after_create');
-
-for (const workflow of workflows) {
-  if (workflow.conditionsMet(result)) {
-    await workflow.execute(result);
-  }
-}
-
-// In this case:
-// ✅ Annual revenue > $1M
-// → Assign to enterprise sales team
-// → Send alert email to leadership
-```
-
-### Step 7: ObjectUI Updates Display
-
-```typescript
-// Kernel returns success response
-// UI optimistically updates the screen
-// UI shows toast notification: "Customer created successfully"
-// UI navigates to the new customer detail page
-```
-
-## The Full Stack in Action
-
-Here's how all three protocols collaborate for a **Kanban Board** feature:
-
-### 1. ObjectQL: Define the Data
-
-```typescript
-import { ObjectSchema, Field } from '@objectstack/spec/data';
-
-export const Opportunity = ObjectSchema.create({
-  name: 'opportunity',
-  label: 'Opportunity',
-  icon: 'target',
-  
-  fields: {
-    title: Field.text({ 
-      label: 'Title',
-      required: true,
-    }),
-    
-    stage: Field.select({
-      label: 'Stage',
-      options: [
-        { label: 'Prospecting', value: 'prospecting', default: true },
-        { label: 'Qualification', value: 'qualification' },
-        { label: 'Proposal', value: 'proposal' },
-        { label: 'Closed Won', value: 'closed_won' },
-      ],
-    }),
-    
-    amount: Field.currency({
-      label: 'Amount',
-      scale: 2,
-    }),
-    
-    customer: Field.lookup('customer', {
-      label: 'Customer',
-    }),
-  },
-});
-```
-
-### 2. ObjectOS: Define Business Rules
-
-```typescript
-import { defineFlow } from '@objectstack/spec';
-
-export const opportunityWonFlow = defineFlow({
-  name: 'opportunity_won',
-  label: 'Opportunity Won',
-  type: 'record_change',
-  status: 'active',
-  nodes: [
-    { id: 'start', type: 'start', label: 'On Change' },
-    { id: 'check', type: 'decision', label: 'Closed Won?' },
-    { id: 'invoice', type: 'create_record', label: 'Create Invoice' },
-    { id: 'notify', type: 'notify', label: 'Notify Sales Team' },
-    { id: 'end', type: 'end', label: 'End' },
-  ],
-  edges: [
-    { id: 'e1', source: 'start', target: 'check' },
-    { id: 'e2', source: 'check', target: 'invoice', condition: "record.stage == 'closed_won'" },
-    { id: 'e3', source: 'invoice', target: 'notify' },
-    { id: 'e4', source: 'notify', target: 'end' },
-  ],
-});
-```
-
-### 3. ObjectUI: Define the Kanban View
-
-```typescript
-import { defineView } from '@objectstack/spec';
-
-export const opportunityViews = defineView({
-  list: {
-    type: 'kanban',
-    data: { provider: 'object', object: 'opportunity' },
-    columns: ['title', 'amount', 'customer'],
-    kanban: {
-      groupByField: 'stage',
-      summarizeField: 'amount',
-      columns: ['title', 'amount', 'customer'],
-    },
-  },
-});
-```
-
-### The Result
-
-When a user **drags an opportunity card** from "Proposal" to "Closed Won":
-
-1. **ObjectUI** captures the drag-drop event
-2. **ObjectOS** checks if the user has permission to update the `stage` field
-3. **ObjectQL** validates that `"closed_won"` is a valid option
-4. **ObjectQL** writes the update to the database
-5. **ObjectOS** triggers the workflow (create invoice, send notification)
-6. **ObjectUI** updates the kanban board to reflect the new state
-
-**All from metadata. Zero hardcoded logic.**
-
-## Benefits of the Three-Layer Architecture
-
-### 1. Technology Independence
-
-Swap implementations without breaking the system:
-
-```
-Same Metadata Definitions
-          ↓
-┌─────────┼─────────┐
-ObjectQL: │         │
-Postgres  │    MongoDB
-          │
-ObjectOS: │
-Node.js   │    Python
-          │
-ObjectUI: │
-React     │    Flutter
-```
-
-### 2. Parallel Development
-
-Teams can work independently on each layer:
-
-- **Data Team:** Define objects in ObjectQL
-- **Backend Team:** Build workflows in ObjectOS
-- **Frontend Team:** Create views in ObjectUI
-
-All communicate through **protocol contracts**, not code dependencies.
-
-### 3. Incremental Migration
-
-Adopt ObjectStack gradually:
-
-- **Phase 1:** Use ObjectQL as an ORM replacement
-- **Phase 2:** Add ObjectOS for permissions and workflows
-- **Phase 3:** Build ObjectUI views to replace custom forms
-
-Each layer is independently useful.
-
-### 4. Testability
-
-Mock any layer for testing:
-
-```typescript
-// Test ObjectOS workflows without a real database
-const mockObjectQL = {
-  getSchema: () => CustomerSchema,
-  insert: jest.fn(),
-};
-
-// Test ObjectUI rendering without a real backend
-const mockObjectOS = {
-  checkPermission: () => true,
-  executeQuery: () => mockData,
-};
-```
-
-## Summary
-
-| Layer | Role | Knows About | Doesn't Know About |
-| :--- | :--- | :--- | :--- |
-| **ObjectQL** | Data structure & queries | Schema, fields, drivers | Users, permissions, UI |
-| **ObjectOS** | Runtime & governance | Auth, workflows, events | Data structure, UI layout |
-| **ObjectUI** | Presentation & interaction | Layout, navigation, actions | Business logic, data storage |
-
-The three protocols are **loosely coupled** but **tightly integrated**:
-- They communicate through **standard contracts** (Zod schemas)
-- They can be **swapped or upgraded** independently
-- They form a **complete system** when combined
-
-## Next Steps
-
-- [ObjectQL: Data Protocol](/docs/protocol/objectql) - Full data protocol specification
-- [ObjectUI: UI Protocol](/docs/protocol/objectui) - Full view protocol specification
-- [ObjectOS: System Protocol](/docs/protocol/objectos) - Full control protocol specification
-- [Developer Guide](/docs/getting-started/quick-start) - Build your first ObjectStack application
 
 ---
 
-## Appendix: Protocol Dependencies
+## Naming Conventions
 
-Understanding the dependency chain helps you design applications correctly.
+ObjectStack enforces strict naming rules for consistency:
 
-### Data Layer (ObjectQL)
+| Element | Convention | Examples |
+|---------|-----------|----------|
+| **Object names** (machine) | `snake_case` | `todo_task`, `user_profile` |
+| **Field names** (machine) | `snake_case` | `first_name`, `is_active` |
+| **Export names** (constants) | `PascalCase` | `TodoTask`, `UserProfile` |
+| **Config keys** (properties) | `camelCase` | `maxLength`, `defaultValue` |
 
-```
-Field Protocol (Core)
-    ↓
-    ├→ Object Protocol (uses Fields)
-    ├→ Query Protocol (references Fields)
-    ├→ Filter Protocol (filters on Fields)
-    └→ Validation Protocol (validates Fields)
-         ↓
-         └→ Hook Protocol (extends validation with code)
-```
+## Summary
 
-### UI Layer (ObjectUI)
+| Aspect | Traditional | Metadata-Driven |
+| :--- | :--- | :--- |
+| **Definition** | Code in multiple files | Single metadata definition |
+| **Changes** | Update 3-4 places | Update once |
+| **Type Safety** | Manual synchronization | Automatic from Zod |
+| **Flexibility** | Locked to tech stack | Technology agnostic |
+| **Boilerplate** | High (300+ lines) | Low (30 lines) |
+| **Agent Tools** | Hand-written and drift-prone | Generated from metadata and permissions |
 
-```
-Theme Protocol (Foundation)
-    ↓
-View Protocol (uses Object, Query)
-    ├→ ListView (uses Query, Filter)
-    ├→ FormView (uses Object, Field)
-    └→ Dashboard (uses View, Widget)
-         ↓
-         ├→ Page Protocol (composes Views)
-         └→ App Protocol (organizes Pages)
-              ↓
-              └→ Action Protocol (UI interactions)
-```
+## Next Steps
 
-### System Layer (ObjectOS)
-
-```
-Data Driver Contracts (Database Abstraction)
-    ↓
-Datasource Protocol (Connection Config)
-    ↓
-    ├→ Context Protocol (Runtime State)
-    ├→ Events Protocol (Event Bus)
-    └→ Plugin Protocol (Extensibility)
-         ↓
-         ├→ Security Protocol (Access Control)
-         ├→ API Protocol (External Access)
-         └→ Automation Protocol (Workflows)
-              ↓
-              └→ AI Protocol (Intelligence)
-```
-
-## Appendix: Usage Patterns
-
-### Pattern 1: Data-Driven UI
-
-UI auto-generated from data definitions:
-
-```
-Object → Field → View → Page → App
-```
-
-### Pattern 2: Custom UI with Data Binding
-
-Custom UI connected to data:
-
-```
-Page → Component → View (Custom) → Query → Object
-```
-
-### Pattern 3: Automation & Integration
-
-Business logic automation:
-
-```
-Object → Hook → Flow → Automation → API/Webhook
-```
-
-### Pattern 4: AI-Enhanced Applications
-
-AI capabilities on top of data:
-
-```
-Object → RAG Pipeline → Agent → Conversation → UI
-```
+- [Architecture](/docs/concepts/architecture) — How the protocol layers work together
+- [Quick Start](/docs/getting-started/quick-start) — Build your first app in 5 minutes
+- [Glossary](/docs/getting-started/glossary) — Key terminology

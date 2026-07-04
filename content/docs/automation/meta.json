@@ -1,0 +1,13 @@
+{
+  "title": "Automation",
+  "icon": "Workflow",
+  "pages": [
+    "index",
+    "hooks",
+    "hook-bodies",
+    "flows",
+    "workflows",
+    "approvals",
+    "webhooks"
+  ]
+}

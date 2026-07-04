@@ -1,0 +1,113 @@
+---
+title: Plugin Endpoints
+description: REST endpoints that become available when the corresponding plugin is installed — auth, workflow, automation, views, realtime, notifications, AI, i18n, GraphQL, and file storage.
+---
+
+# Plugin Endpoints
+
+These REST endpoints are only available when the corresponding plugin is installed. Check the [discovery manifest](/docs/api#discovery) `services` map before calling them; all paths are relative to the base URL (defaults to `/api/v1`).
+
+## Authentication (Plugin Required)
+
+<Callout type="warn">
+These endpoints are only available when an auth plugin is installed. Check `discovery.services.auth.enabled` first.
+</Callout>
+
+### `POST /auth/login`
+
+Authenticate and receive a session token.
+
+**Body**: `{ username: "admin", password: "secret" }`  
+**Response**: `{ token: "jwt...", expiresAt: "...", user: { ... } }`
+
+---
+
+## Plugin-Provided Service Endpoints
+
+The following endpoints become available when the corresponding plugin is installed and registered with the kernel. Use the discovery `services` map to check availability.
+
+### Workflow (`/workflow`) — Plugin Required
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| GET | `/workflow/:object/config` | Get workflow configuration |
+| GET | `/workflow/:object/:recordId/state` | Get record's workflow state |
+| POST | `/workflow/:object/:recordId/transition` | Execute state transition |
+| POST | `/workflow/:object/:recordId/approve` | Approve workflow step |
+| POST | `/workflow/:object/:recordId/reject` | Reject workflow step |
+
+### Automation (`/automation`) — Plugin Required
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| POST | `/automation/trigger/:name` | Trigger an automation flow by name |
+
+### Views (`/ui`) — Plugin Required
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| GET | `/ui/views?object=:object` | List views for an object |
+| GET | `/ui/views/:viewId` | Get a view definition |
+| POST | `/ui/views` | Create a new view |
+| PATCH | `/ui/views/:viewId` | Update a view |
+| DELETE | `/ui/views/:viewId` | Delete a view |
+
+### Realtime (`/realtime`) — Plugin Required
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| POST | `/realtime/connect` | Establish WebSocket/SSE connection |
+| POST | `/realtime/disconnect` | Close connection |
+| POST | `/realtime/subscribe` | Subscribe to channel |
+| POST | `/realtime/unsubscribe` | Unsubscribe |
+| POST | `/realtime/presence` | Set presence |
+| GET | `/realtime/presence/:channel` | Get channel presence |
+
+### Notifications (`/notifications`) — Plugin Required
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| GET | `/notifications` | List notifications (inbox) |
+| POST | `/notifications/read` | Mark notifications as read (body: `{ ids: string[] }`) |
+| POST | `/notifications/read/all` | Mark all as read |
+
+<Callout type="info">
+The core dispatcher implements only the list / read / read-all routes above. Device-registration and preference endpoints are provided by specific notification plugins, if any.
+</Callout>
+
+### AI (`/ai`) — Plugin Required
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| POST | `/ai/nlq` | Natural language → query |
+| POST | `/ai/chat` | AI chat conversation |
+| POST | `/ai/suggest` | Get value suggestions |
+| POST | `/ai/insights` | Get data insights |
+
+### i18n (`/i18n`) — Plugin Required
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| GET | `/i18n/locales` | List available locales |
+| GET | `/i18n/translations/:locale` | Get translation bundle |
+| GET | `/i18n/labels/:object/:locale` | Get field labels |
+
+### GraphQL (`/graphql`) — Plugin Required
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| POST | `/graphql` | Execute GraphQL query/mutation |
+
+### File Storage (`/storage`) — Plugin Required
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| POST | `/storage/upload` | Upload a file |
+| GET | `/storage/file/:id` | Download a file |
+
+---
+
+## See also
+
+- [API Overview](/docs/api) — discovery, error handling, and protocol types
+- [Client SDK](/docs/api/client-sdk) — service-aware TypeScript client that adapts to installed plugins

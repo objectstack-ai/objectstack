@@ -3,7 +3,7 @@ title: Object
 description: Object protocol schemas
 ---
 
-{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 API Operations Enum
 
@@ -14,8 +14,8 @@ API Operations Enum
 ## TypeScript Usage
 
 ```typescript
-import { ApiMethod, Index, ObjectAccessConfig, ObjectCapabilities, ObjectExternalBinding, ObjectOwnershipEnum, PartitioningConfig, SoftDeleteConfig, TenancyConfig, VersioningConfig } from '@objectstack/spec/data';
-import type { ApiMethod, Index, ObjectAccessConfig, ObjectCapabilities, ObjectExternalBinding, ObjectOwnershipEnum, PartitioningConfig, SoftDeleteConfig, TenancyConfig, VersioningConfig } from '@objectstack/spec/data';
+import { ApiMethod, Index, ObjectAccessConfig, ObjectCapabilities, ObjectExternalBinding, ObjectFieldGroup, ObjectOwnershipEnum, SoftDeleteConfig, TenancyConfig, VersioningConfig } from '@objectstack/spec/data';
+import type { ApiMethod, Index, ObjectAccessConfig, ObjectCapabilities, ObjectExternalBinding, ObjectFieldGroup, ObjectOwnershipEnum, SoftDeleteConfig, TenancyConfig, VersioningConfig } from '@objectstack/spec/data';
 
 // Validate data
 const result = ApiMethod.parse(data);
@@ -109,26 +109,30 @@ External datasource binding (ADR-0015)
 
 ---
 
+## ObjectFieldGroup
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **key** | `string` | ✅ | Group machine key (snake_case). Referenced by Field.group. |
+| **label** | `string` | ✅ | Group display label |
+| **icon** | `string` | optional | Icon name (Lucide/Material) for the group header |
+| **description** | `string` | optional | Optional description shown under the group header |
+| **collapse** | `Enum<'none' \| 'expanded' \| 'collapsed'>` | ✅ | [ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed). |
+| **defaultExpanded** | `boolean` | optional | [DEPRECATED → collapse] true → 'expanded', false → 'collapsed'. |
+| **collapsible** | `boolean` | optional | [DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum. |
+| **collapsed** | `boolean` | optional | [DEPRECATED → collapse] Boolean pair with `collapsible`; use the `collapse` enum. |
+
+
+---
+
 ## ObjectOwnershipEnum
 
 ### Allowed Values
 
 * `own`
 * `extend`
-
-
----
-
-## PartitioningConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable table partitioning |
-| **strategy** | `Enum<'range' \| 'hash' \| 'list'>` | ✅ | Partitioning strategy: range (date ranges), hash (consistent hashing), list (predefined values) |
-| **key** | `string` | ✅ | Field name to partition by |
-| **interval** | `string` | optional | Partition interval for range strategy (e.g., "1 month", "1 year") |
 
 
 ---

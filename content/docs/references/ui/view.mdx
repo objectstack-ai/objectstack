@@ -3,7 +3,7 @@ title: View
 description: View protocol schemas
 ---
 
-{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 HTTP Method Enum & HTTP Request Schema
 
@@ -353,6 +353,7 @@ User action toggles for the view toolbar
 | **filter** | `boolean` | ✅ | Allow users to filter records |
 | **rowHeight** | `boolean` | ✅ | Allow users to toggle row height/density |
 | **addRecordForm** | `boolean` | ✅ | Add records through a form instead of inline |
+| **editInline** | `boolean` | ✅ | Allow users to edit records inline — click a cell to edit it with the field's type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in. |
 | **buttons** | `string[]` | optional | Custom action button IDs to show in the toolbar |
 
 

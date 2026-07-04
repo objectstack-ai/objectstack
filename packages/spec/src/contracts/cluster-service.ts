@@ -4,7 +4,7 @@
  * Cluster Service Contracts
  *
  * Runtime interfaces for the four cluster primitives defined in
- * `content/docs/concepts/cluster-semantics.mdx` §3:
+ * `content/docs/kernel/cluster.mdx` §3:
  *
  *   - IPubSub   — fan-out messaging across nodes
  *   - ILock     — distributed mutual exclusion with TTL fencing

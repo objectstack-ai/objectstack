@@ -19,7 +19,7 @@ import { join } from 'node:path';
 const ROOTS = ['skills', 'content'];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'references']);
 // Generated from spec/frontmatter — not hand-authored, don't police.
-const SKIP_FILES = new Set(['content/docs/guides/skills.mdx']);
+const SKIP_FILES = new Set(['content/docs/ai/skills-reference.mdx']);
 
 const DOMAINS = [
   'Datasource', 'Connector', 'Policy', 'SharingRule', 'Role', 'PermissionSet',

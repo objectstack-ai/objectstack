@@ -1,0 +1,69 @@
+---
+title: Knowledge & RAG
+description: The Knowledge Protocol — permission-aware RAG for agents via pluggable adapter plugins (memory, RAGFlow, custom)
+---
+
+# Knowledge & RAG
+
+Part of the [AI module](/docs/ai) — how agents retrieve knowledge through the Knowledge Protocol and its adapter plugins.
+
+ObjectStack ships a Knowledge Protocol that lets agents call `search_knowledge(query, sourceIds?, topK?)` against pluggable backends (RAGFlow, LlamaIndex, Dify, custom pgvector, …). The framework defines the contract and runs permission-aware filtering; the adapter plugin does the actual retrieval. See [the protocol design](/docs/protocol/knowledge) for the rationale.
+
+## Wiring
+
+```ts
+import { ObjectKernel } from '@objectstack/core';
+import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
+import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';
+// or, for prod:
+// import { KnowledgeRagflowPlugin } from '@objectstack/knowledge-ragflow';
+
+const kernel = new ObjectKernel();
+kernel.use(new KnowledgeServicePlugin({
+  sources: [
+    {
+      id: 'task_notes',
+      label: 'Task notes',
+      adapter: 'memory',
+      source: { kind: 'object', object: 'task', contentFields: ['title', 'notes'] },
+    },
+    {
+      id: 'product_docs',
+      label: 'Product docs',
+      adapter: 'ragflow',
+      source: { kind: 'http', urls: ['https://docs.example.com/sitemap.xml'] },
+      options: { datasetId: 'rgf_doc_dataset' },
+    },
+  ],
+}));
+kernel.use(new KnowledgeMemoryPlugin());
+// kernel.use(new KnowledgeRagflowPlugin({ endpoint, apiKey }));
+```
+
+Then register the AI tool so agents can call it:
+
+```ts
+import { registerKnowledgeTools } from '@objectstack/service-ai';
+
+ctx.hook('ai:ready', async (ai) => {
+  const knowledge = ctx.getService('knowledge');
+  registerKnowledgeTools(ai.toolRegistry, { knowledgeService: knowledge });
+});
+```
+
+## What you get for free
+
+- **Permission-aware retrieval.** Every hit with a `sourceRecordId` is re-checked against the caller's `ExecutionContext` via `IDataEngine` — the same RLS that gates plain ObjectQL queries. A salesperson asking "find proposals about ACME" only sees the proposals they could already read directly. File / HTTP hits pass through (ACL is the adapter's problem).
+- **Inline event sync.** When records on indexed objects change, the kernel's `IRealtimeService` events drive `KnowledgeService.handleRecordUpsert/Delete` automatically. No cron, no queue (yet — Phase 2).
+- **Adapter swap, zero LLM changes.** Move from `memory` to `ragflow` to a custom adapter without touching the `search_knowledge` tool or any agent prompt.
+
+## Why we did not build a vector DB
+
+Mature OSS (RAGFlow, LlamaIndex, Dify) already nail chunking, embedding, hybrid retrieval, rerank, and OCR. ObjectStack's value is **the metadata-native source declaration + the permission-aware filter on top of those engines** — not yet-another-RAG-stack. Customers pick the retrieval engine that matches their data; we make sure it talks to ObjectStack the same way every time.
+
+---
+
+## See also
+
+- [AI Overview](/docs/ai)
+- [Natural Language Queries](/docs/ai/natural-language-queries)

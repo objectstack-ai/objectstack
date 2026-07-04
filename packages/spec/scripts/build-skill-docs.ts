@@ -12,7 +12,7 @@
  * Derived listings (rewritten between `<!-- BEGIN/END GENERATED: skills -->`
  * markers; prose outside the markers is preserved):
  *   - skills/README.md                      → the Index table
- *   - content/docs/guides/skills.mdx        → Quick Reference table + per-skill cards
+ *   - content/docs/ai/skills-reference.mdx        → Quick Reference table + per-skill cards
  *
  * Usage:
  *   tsx scripts/build-skill-docs.ts            # write
@@ -27,7 +27,7 @@ import path from 'path';
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const SKILLS_DIR = path.resolve(REPO_ROOT, 'skills');
 const README = path.resolve(SKILLS_DIR, 'README.md');
-const GUIDE = path.resolve(REPO_ROOT, 'content/docs/guides/skills.mdx');
+const GUIDE = path.resolve(REPO_ROOT, 'content/docs/ai/skills-reference.mdx');
 
 // Marker comments delimit the generated region. MDX does not support HTML
 // comments (`<!-- -->`) — it needs `{/* */}` — so the syntax is per file type.

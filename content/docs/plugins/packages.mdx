@@ -1,0 +1,500 @@
+---
+title: Package Overview
+description: Complete guide to all ObjectStack packages, services, drivers, plugins, and adapters
+---
+
+# Package Overview
+
+ObjectStack is organized into **70 package manifests** across multiple categories. This guide provides an overview of the framework packages, services, drivers, plugins, and adapters in the [framework repository](https://github.com/objectstack-ai/framework/tree/main/packages).
+
+### Package categories at a glance
+
+| Category | Count | Packages |
+|:---|:---:|:---|
+| **Core runtime** | 9 | `spec`, `core`, `runtime`, `types`, `metadata`, `objectql`, `rest`, `formula`, `platform-objects` |
+| **Client / DX** | 5 | `client`, `client-react`, `cli`, `create-objectstack`, `vscode-objectstack` |
+| **Framework adapters** | 7 | `express`, `fastify`, `hono`, `nestjs`, `nextjs`, `nuxt`, `sveltekit` |
+| **Drivers** | 4 | `driver-memory`, `driver-sql`, `driver-sqlite-wasm`, `driver-mongodb` |
+| **Plugins** | 22 | `plugin-auth`, `plugin-security`, `plugin-org-scoping`, `plugin-audit`, `plugin-approvals`, `plugin-sharing`, `plugin-email`, `plugin-webhooks`, `plugin-reports`, `plugin-hono-server`, `mcp`, `plugin-msw`, `plugin-dev`, trigger plugins, and knowledge/embedder plugins |
+| **Platform services** | 16 | `service-analytics`, `service-automation`, `service-cache`, `service-cluster`, `service-cluster-redis`, `service-datasource`, `service-feed`, `service-i18n`, `service-job`, `service-knowledge`, `service-messaging`, `service-package`, `service-queue`, `service-realtime`, `service-settings`, `service-storage` |
+
+
+## Core Packages
+
+### @objectstack/spec
+
+**The Constitution** — Protocol schemas, types, and constants for the entire ObjectStack ecosystem.
+
+- **Purpose**: Zod-first schema definitions for all 15 protocol domains
+- **Exports**: Builder functions (`defineStack`, `defineView`, `defineApp`, `defineFlow`, `defineAgent`, `defineTool`, `defineSkill`) plus `ObjectSchema.create()` for objects. Protocol namespaces (Data, UI, System, Automation, AI, API, Identity, Security, Kernel, Cloud, QA, Contracts, Integration, Studio, Shared) are not re-exported from the top-level entry for tree-shaking reasons — import them from subpaths such as `@objectstack/spec/data` and `@objectstack/spec/ui`.
+- **When to use**: Import types, schemas, and builder functions when authoring metadata.
+- **Documentation**: [Protocol Reference](/docs/references)
+
+```typescript
+import { defineStack, defineView } from '@objectstack/spec';
+import * as Data from '@objectstack/spec/data';
+import * as UI from '@objectstack/spec/ui';
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+```
+
+### @objectstack/core
+
+**The Microkernel** — DI container, plugin manager, and service registry.
+
+- **Purpose**: ObjectKernel with dependency injection, lifecycle hooks, and event bus
+- **Exports**: `ObjectKernel`, `LiteKernel`, `Plugin` interface, service management
+- **When to use**: Bootstrap your application, manage plugins and services
+- **README**: [View README](/packages/core/README.md)
+
+```typescript
+import { ObjectKernel } from '@objectstack/core';
+const kernel = new ObjectKernel();
+```
+
+### @objectstack/runtime
+
+**Runtime Bootstrap** — DriverPlugin, AppPlugin, and capability contracts.
+
+- **Purpose**: High-level runtime bootstrap and plugin composition
+- **Exports**: Runtime configuration, plugin loaders, capability system
+- **When to use**: Use with `defineStack()` for application setup
+- **README**: [View README](/packages/runtime/README.md)
+
+### @objectstack/objectql
+
+**Data Query Engine** — MongoDB-style queries with SQL execution.
+
+- **Purpose**: ObjectQL query engine with filters, aggregations, and window functions
+- **Exports**: Query parser, filter engine, schema registry
+- **When to use**: Advanced query operations, custom data access patterns
+- **README**: [View README](/packages/objectql/README.md)
+
+### @objectstack/metadata
+
+**Metadata Management** — Loaders, serializers, and overlay system.
+
+- **Purpose**: Load, validate, and manage metadata from files or runtime
+- **Exports**: Metadata loaders, serializers, overlay system, validation
+- **When to use**: Dynamic metadata loading, multi-source metadata composition
+- **README**: [View README](/packages/metadata/README.md)
+
+### @objectstack/rest
+
+**REST API Layer** — Auto-generated REST endpoints from metadata.
+
+- **Purpose**: Automatic REST API generation based on object definitions
+- **Exports**: REST server, route generators, middleware
+- **When to use**: Expose ObjectStack data via REST API
+- **README**: [View README](/packages/rest/README.md)
+
+### @objectstack/formula
+
+**Formula Engine** — CEL-based formula compiler/runtime shared by validation, predicates, conditions, and dynamic seed values.
+
+- **Purpose**: One expression language across hooks, predicates, formula fields, and seed templates
+- **When to use**: Anywhere you write a CEL expression in metadata
+- **Learn more**: [Formula skill](/docs/data-modeling/formulas)
+
+### @objectstack/platform-objects
+
+**Platform Objects Library** — The canonical set of `sys_*` objects shipped with every ObjectOS runtime (users, sessions, approvals, sharing, audit, …).
+
+- **Purpose**: Standard system tables and their metadata, so apps don't redefine identity, audit, or approvals
+- **When to use**: Always — bundled into the runtime
+
+---
+
+## Client Packages
+
+### @objectstack/client
+
+**Framework-Agnostic SDK** — Universal TypeScript client for ObjectStack.
+
+- **Purpose**: Type-safe client for ObjectStack REST API with batching and error handling
+- **Exports**: `ObjectStackClient`, query builders, error classes
+- **When to use**: Any JavaScript/TypeScript application (Node, React, Vue, Angular, etc.)
+- **README**: [View README](/packages/client/README.md)
+
+```typescript
+import { ObjectStackClient } from '@objectstack/client';
+const client = new ObjectStackClient({ baseUrl: 'https://api.example.com' });
+```
+
+### @objectstack/client-react
+
+**React Hooks & Bindings** — React hooks for ObjectStack.
+
+- **Purpose**: React hooks for queries, mutations, real-time subscriptions
+- **Exports**: `useQuery`, `useMutation`, `useRealtimeConnection`, `useView`, `useObject`, `useMetadata`, etc.
+- **When to use**: React applications
+- **README**: [View README](/packages/client-react/README.md)
+
+```typescript
+import { useQuery, useMutation } from '@objectstack/client-react';
+```
+
+---
+
+## Data Drivers
+
+### @objectstack/driver-memory
+
+**In-Memory Driver** — Ephemeral storage for development and testing.
+
+- **Purpose**: Fast in-memory data storage with full ObjectQL support
+- **When to use**: Development, testing, demos (data is lost on restart)
+- **README**: [View README](/packages/plugins/driver-memory/README.md)
+
+```typescript
+import { InMemoryDriver } from '@objectstack/driver-memory';
+```
+
+### @objectstack/driver-sql
+
+**SQL Driver** — PostgreSQL, MySQL, SQLite support via Knex.js.
+
+- **Purpose**: Production-ready SQL database support with migrations
+- **Supports**: PostgreSQL, MySQL, SQLite, and all Knex-compatible databases
+- **When to use**: Traditional relational database deployments
+- **README**: [View README](/packages/plugins/driver-sql/README.md)
+
+```typescript
+import { SqlDriver } from '@objectstack/driver-sql';
+const driver = new SqlDriver({
+  client: 'pg',
+  connection: { /* PostgreSQL config */ },
+});
+```
+
+### @objectstack/driver-sqlite-wasm
+
+**WASM SQLite Driver** — Edge/browser-friendly SQLite via sql.js (WebAssembly).
+
+- **Purpose**: SQLite running entirely in WebAssembly (no native bindings), with optional `fs`-backed persistence
+- **Modes**: In-memory (`:memory:`) or a file path persisted via the `persist` option
+- **When to use**: Environments without native SQLite, edge/browser runtimes, lightweight local-first storage
+- **README**: [View README](/packages/plugins/driver-sqlite-wasm/README.md)
+
+```typescript
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+const driver = new SqliteWasmDriver({ filename: ':memory:' });
+```
+
+### @objectstack/driver-mongodb
+
+**MongoDB Driver** — Document-oriented storage backend.
+
+- **Purpose**: Native MongoDB driver for ObjectQL with document-flavored objects
+- **When to use**: Existing MongoDB infrastructure, document-shaped data
+- **README**: [View README](/packages/plugins/driver-mongodb/README.md)
+
+---
+
+## Platform Services
+
+All services implement contracts from `@objectstack/spec/contracts` and are kernel-managed singletons.
+
+### @objectstack/service-analytics
+
+**Analytics Service** — Multi-driver analytics with NativeSQL, ObjectQL, InMemory strategies.
+
+- **Features**: Aggregations, time series, funnels, dashboards
+- **When to use**: Business intelligence, reporting, metrics dashboards
+- **README**: [View README](/packages/services/service-analytics/README.md)
+
+### @objectstack/service-automation
+
+**Automation Service** — DAG flow execution engine for workflows.
+
+- **Features**: Autolaunched, screen, and scheduled flows with visual builder support
+- **When to use**: Business process automation, approval workflows, scheduled tasks
+- **README**: [View README](/packages/services/service-automation/README.md)
+
+### @objectstack/service-cache
+
+**Cache Service** — In-memory and Redis caching.
+
+- **Adapters**: Memory (dev), Redis (production)
+- **Features**: TTL, namespaces, pattern matching, statistics
+- **When to use**: Performance optimization, reduce database load
+- **README**: [View README](/packages/services/service-cache/README.md)
+
+### @objectstack/service-feed
+
+**Feed/Chatter Service** — Activity feed with comments, reactions, subscriptions.
+
+- **Features**: Comments, @mentions, reactions, field change tracking, presence
+- **When to use**: Collaboration features, activity streams, social features
+- **README**: [View README](/packages/services/service-feed/README.md)
+
+### @objectstack/service-i18n
+
+**I18n Service** — Internationalization with file-based locales.
+
+- **Features**: Multi-language support, interpolation, pluralization, fallback chains
+- **When to use**: Multi-language applications, global deployments
+- **README**: [View README](/packages/services/service-i18n/README.md)
+
+### @objectstack/service-job
+
+**Job Service** — Cron and interval-based job scheduling.
+
+- **Features**: Cron expressions, intervals, one-time jobs, retry logic, history
+- **When to use**: Background tasks, scheduled reports, cleanup jobs
+- **README**: [View README](/packages/services/service-job/README.md)
+
+### @objectstack/service-queue
+
+**Queue Service** — Job queues with in-memory and BullMQ adapters.
+
+- **Features**: Priority queues, retry, rate limiting, worker pools, job events
+- **When to use**: Async processing, email sending, report generation, webhooks
+- **README**: [View README](/packages/services/service-queue/README.md)
+
+### @objectstack/service-realtime
+
+**Realtime Service** — WebSocket pub/sub for live updates.
+
+- **Features**: Channels, presence, broadcasting, typing indicators, cursor tracking
+- **When to use**: Real-time dashboards, collaborative editing, live notifications
+- **README**: [View README](/packages/services/service-realtime/README.md)
+
+### @objectstack/service-storage
+
+**Storage Service** — File storage with local filesystem and S3 adapters.
+
+- **Features**: Upload, download, signed URLs, multipart uploads, metadata
+- **When to use**: File attachments, document management, media storage
+- **README**: [View README](/packages/services/service-storage/README.md)
+
+### @objectstack/service-package
+
+**Package Registry Service** — Publish, version, and retrieve ObjectStack metadata packages from the `sys_packages` table.
+
+- **Features**: Upsert by `(id, version)`, SHA-256 integrity hash, `latest` resolution, bulk list/delete
+- **When to use**: Marketplace backends, internal tenant-facing registries, CI-driven metadata distribution
+- **README**: [View README](/packages/services/service-package/README.md)
+
+### @objectstack/service-settings
+
+**Settings Service** — Hierarchical, validated application settings backed by metadata.
+
+- **Features**: Per-org / per-user settings, Zod-validated namespaces, default fallbacks
+- **When to use**: Application/feature configuration that must be editable at runtime
+- **README**: [View README](/packages/services/service-settings/README.md)
+
+---
+
+## Official Plugins
+
+### @objectstack/plugin-auth
+
+**Authentication Plugin** — Better-auth integration with ObjectQL.
+
+- **Features**: Email/password, OAuth providers, session management, RBAC
+- **When to use**: User authentication and authorization
+- **README**: [View README](/packages/plugins/plugin-auth/README.md)
+
+### @objectstack/plugin-security
+
+**Security Plugin** — RBAC, permissions, field-level security.
+
+- **Features**: Role-based access control, object/field permissions, row-level security, `owner_id` auto-stamp
+- **When to use**: Multi-user applications with access control requirements
+- **README**: [View README](/packages/plugins/plugin-security/README.md)
+
+### @objectstack/plugin-org-scoping
+
+**Organization Scoping Plugin** — Multi-org (a.k.a. "soft" multi-tenant) row-level scoping built on top of `plugin-security`.
+
+- **Features**: `organization_id` auto-stamp on insert, per-org seed-data replay, default-org bootstrap, orphan-row claim hook
+- **When to use**: Multi-organization SaaS where every row is scoped to an `sys_organization`. Enable by setting `OS_MULTI_ORG_ENABLED=true`; registered automatically before `plugin-security`
+- **README**: [View README](/packages/plugins/plugin-org-scoping/README.md)
+
+### @objectstack/plugin-audit
+
+**Audit Plugin** — Compliance audit trail and activity logging.
+
+- **Features**: CRUD audit logs, field-level changes, security events, compliance reports
+- **When to use**: SOC 2, HIPAA, GDPR compliance, security monitoring
+- **README**: [View README](/packages/plugins/plugin-audit/README.md)
+
+### @objectstack/mcp
+
+**MCP Server Plugin** — Expose ObjectStack via Model Context Protocol.
+
+- **Features**: AI tools, data resources, prompt templates for Claude, Cursor, Cline
+- **When to use**: AI agent integration, MCP-compatible tools
+- **README**: [View README](/packages/mcp/README.md)
+
+### @objectstack/plugin-hono-server
+
+**Hono Server Plugin** — HTTP server with Hono framework.
+
+- **Features**: Lightweight HTTP server, middleware support, edge-compatible
+- **When to use**: Serve ObjectStack REST API with Hono
+- **README**: [View README](/packages/plugins/plugin-hono-server/README.md)
+
+### @objectstack/plugin-dev
+
+**Developer Tools Plugin** — Development-time utilities.
+
+- **Features**: Metadata validation, schema introspection, debugging tools
+- **When to use**: Development and debugging
+- **README**: [View README](/packages/plugins/plugin-dev/README.md)
+
+### @objectstack/plugin-approvals
+
+**Approvals Plugin** — Contributes the `approval` flow node (ADR-0019): an approval runs on the one automation engine as a durable-pause node, backed by `sys_approval_request` / `sys_approval_action`.
+
+- **Features**: Approver resolution (user/role/team/department/manager/field/queue), `first_response` / `unanimous`, record lock, status mirror, per-node SLA escalation, audit trail
+- **When to use**: Any flow that needs human sign-off (expense, quote, contract, …) — add an `approval` node and branch on `approve` / `reject`
+
+### @objectstack/plugin-sharing
+
+**Sharing Plugin** — Record-level sharing engine for collaborative access.
+
+- **Features**: Manual shares, sharing rules, team-based access, `sys_record_share`
+- **When to use**: Teams that need to grant per-record access beyond RBAC
+
+### @objectstack/plugin-email
+
+**Email Plugin** — Outbound email channel and templates.
+
+- **Features**: Provider adapters, MJML templates, delivery tracking
+- **When to use**: Transactional and workflow-driven email
+
+### @objectstack/plugin-webhooks
+
+**Webhooks Plugin** — Outbound HTTP webhook delivery.
+
+- **Features**: Subscriptions, retries, signed payloads, delivery logs
+- **When to use**: Integrating ObjectStack events with external systems
+
+### @objectstack/plugin-reports
+
+**Reports Plugin** — Metadata-driven report rendering and scheduling.
+
+- **Features**: Tabular/aggregate reports, scheduled delivery, exports
+- **When to use**: Operational reporting on top of business objects
+
+---
+
+## Framework Adapters
+
+The open edition ships the **Hono** adapter. Hono runs on Node.js, Bun, Deno, and edge runtimes (Cloudflare Workers, Vercel Edge), covering most deployments. For another framework, build a thin adapter on the public `HttpDispatcher` API (the previous Express/Fastify/Next/Nest/Nuxt/SvelteKit adapters were ~50-line wrappers and can be vendored out-of-tree).
+
+### @objectstack/hono
+
+**Hono Adapter** — the supported HTTP adapter; edge-native and multi-runtime.
+
+- **Use case**: Node.js, Bun, Deno, Cloudflare Workers, Vercel Edge
+- **README**: [View README](/packages/adapters/hono/README.md)
+
+---
+
+## Developer Tools
+
+### @objectstack/cli
+
+**CLI Tool** — Command-line interface for ObjectStack.
+
+- **Commands**: `serve`, `dev`, `start`, `doctor`, `compile`, `build`, `validate`, `generate`, `package`, `meta`, … (binary is `os` / `objectstack`)
+- **When to use**: Development, deployment, project management
+- **README**: [View README](/packages/cli/README.md)
+
+```bash
+npx os serve --dev
+```
+
+### @objectstack/create-objectstack
+
+**Project Scaffolding** — Create new ObjectStack projects.
+
+- **Templates**: `blank` (default, bundled), plus remote templates `todo`, `compliance`, `content`, `contracts`, `procurement`
+- **When to use**: Start a new ObjectStack project
+- **README**: [View README](/packages/create-objectstack/README.md)
+
+```bash
+npx create-objectstack my-app
+```
+
+### @objectstack/vscode-objectstack
+
+**VS Code Extension** — IDE support for ObjectStack.
+
+- **Features**: Syntax highlighting, autocomplete, validation for metadata files
+- **When to use**: Enhanced development experience in VS Code
+- **README**: [View README](/packages/vscode-objectstack/README.md)
+
+---
+
+## Utility Packages
+
+### @objectstack/types
+
+**Shared Type Utilities** — Common TypeScript types and utilities.
+
+- **Exports**: Type helpers, utility types, branded types
+- **When to use**: Imported automatically by other packages
+- **README**: [View README](/packages/types/README.md)
+
+---
+
+## Package Selection Guide
+
+ObjectStack composes packages at two layers:
+
+1. **Metadata** is declared inside `defineStack({...})` (objects, views, flows, agents, …) and lives in `objectstack.config.ts`.
+2. **Runtime** plugins/services/drivers are wired into the host kernel through `kernel.use(...)`, `@objectstack/runtime`, or a custom adapter host.
+
+The snippets below illustrate which **runtime** packages you typically reach for in each scenario. See the [Quick Start](/docs/getting-started/quick-start) and [CLI guide](/docs/getting-started/cli) for the full bootstrap pattern.
+
+### For New Projects (edge / AI-native)
+
+```typescript
+// Host bootstrap (pseudocode — exact shape depends on adapter)
+import { ObjectKernel } from '@objectstack/core';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+// Open edition: AI is exposed via @objectstack/mcp (BYO-AI), not an in-process plugin.
+
+const kernel = new ObjectKernel();
+await kernel.use(new SqliteWasmDriver({ filename: ':memory:' }));
+// Point your own AI (Claude/Cursor/local model) at objects, queries & actions over MCP.
+await kernel.bootstrap();
+```
+
+### For Traditional Web Apps
+
+```typescript
+import { createDriverPlugin } from '@objectstack/driver-sql';
+import { createAuthPlugin } from '@objectstack/plugin-auth';
+import { createServiceQueuePlugin } from '@objectstack/service-queue';
+
+await kernel.use(createDriverPlugin({ client: 'pg', /* … */ }));
+await kernel.use(createAuthPlugin({ /* … */ }));
+await kernel.use(createServiceQueuePlugin({ /* … */ }));
+```
+
+### For Enterprise Applications
+
+```typescript
+import { createSecurityPlugin } from '@objectstack/plugin-security';
+import { createAuditPlugin } from '@objectstack/plugin-audit';
+import { createServiceAnalyticsPlugin } from '@objectstack/service-analytics';
+
+await kernel.use(createSecurityPlugin({ /* … */ }));
+await kernel.use(createAuditPlugin({ /* … */ }));
+await kernel.use(createServiceAnalyticsPlugin({ /* … */ }));
+```
+
+> The exact factory names follow each package's `README.md` — they all return a plugin object compatible with `kernel.use()`.
+
+---
+
+## Next Steps
+
+- **Architecture Overview**: [Learn the architecture](/docs/concepts/architecture)
+- **Quick Start**: [Build your first app](/docs/getting-started/quick-start)
+- **API Reference**: [Explore the API](/docs/references)
+- **Examples**: [Browse examples](/docs/getting-started/examples)

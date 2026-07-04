@@ -1,0 +1,406 @@
+---
+title: Dashboard Metadata
+description: Build analytics dashboards with chart widgets, global filters, and auto-refresh
+---
+
+# Dashboard Metadata
+
+A **Dashboard** defines an analytics page with chart widgets, key metrics, and data visualizations. Dashboards support configurable layouts, global date filters, and auto-refresh.
+
+## Basic Structure
+
+Every widget binds to a **dataset** (the semantic layer, ADR-0021) and selects
+the dataset's `dimensions` and `values` by name. The dataset owns the base
+object, joins, and certified measures, so the same numbers stay consistent
+across every dashboard and report.
+
+```typescript
+const salesDashboard = {
+  name: 'sales_overview',
+  label: 'Sales Overview',
+  description: 'Key sales metrics and pipeline analysis',
+  refreshInterval: 300,     // Refresh every 5 minutes
+
+  dateRange: {
+    field: 'close_date',
+    defaultRange: 'this_quarter',
+    allowCustomRange: true,
+  },
+
+  widgets: [
+    {
+      id: 'total_revenue',
+      title: 'Total Revenue',
+      type: 'metric',
+      dataset: 'sales',
+      values: ['revenue'],
+      layout: { x: 0, y: 0, w: 3, h: 2 },
+    },
+    {
+      id: 'revenue_by_region',
+      title: 'Revenue by Region',
+      type: 'bar',
+      dataset: 'sales',
+      dimensions: ['region'],
+      values: ['revenue'],
+      layout: { x: 3, y: 0, w: 6, h: 4 },
+    },
+    {
+      id: 'deals_by_month',
+      title: 'Deals by Month',
+      type: 'pie',
+      dataset: 'sales',
+      dimensions: ['close_month'],
+      values: ['deal_count'],
+      layout: { x: 9, y: 0, w: 3, h: 4 },
+    },
+  ],
+};
+```
+
+## Dashboard Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | `string` | ✅ | Machine name (`snake_case`) |
+| `label` | `string` | ✅ | Display label |
+| `description` | `string` | optional | Dashboard description |
+| `widgets` | `DashboardWidget[]` | ✅ | Chart and metric widgets |
+| `refreshInterval` | `number` | optional | Auto-refresh interval (seconds) |
+| `dateRange` | `object` | optional | Global date range filter |
+| `globalFilters` | `GlobalFilter[]` | optional | Global filter controls |
+
+## Widgets
+
+Each widget defines a data visualization. A widget binds to a `dataset` and
+selects `dimensions` (X / group / split) and `values` (the measures to plot):
+
+```typescript
+{
+  id: 'monthly_revenue',
+  title: 'Monthly Revenue',
+  type: 'line',
+  dataset: 'invoicing',
+  dimensions: ['invoice_month'],
+  values: ['paid_total'],
+  filter: { status: 'paid' },
+  layout: { x: 0, y: 0, w: 6, h: 4 },
+}
+```
+
+### Widget Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `string` | ✅ | Unique widget id (`snake_case`) |
+| `dataset` | `string` | ✅ | Dataset name to bind |
+| `values` | `string[]` | ✅ | Measure names (at least one) |
+| `dimensions` | `string[]` | optional | Dimension names — X / group / split |
+| `type` | `ChartType` | optional | Visualization type (default `metric`, see below) |
+| `title` | `string` | optional | Widget display title |
+| `description` | `string` | optional | Text shown below the title |
+| `filter` | `FilterCondition` | optional | Presentation-scope filter (`runtimeFilter`) |
+| `layout` | `object` | ✅ | Grid position and size |
+| `chartConfig` | `object` | optional | Advanced chart configuration |
+| `colorVariant` | `enum` | optional | KPI/card accent color |
+| `compareTo` | `enum \| object` | optional | Period-over-period comparison window |
+| `options` | `object` | optional | Additional display options |
+| `responsive` | `object` | optional | Responsive behavior |
+
+## Datasets
+
+Every widget binds to a **dataset** — the single semantic layer (ADR-0021).
+A dataset defines the base object, allowed relationship joins, reusable
+dimensions, certified measures, and intrinsic filters once; dashboards and
+reports then reference the same names so "revenue", "pipeline", or "win rate"
+stay consistent across surfaces.
+
+> The legacy inline-query shape (`object` + `categoryField` + `valueField` +
+> `aggregate` directly on the widget) was removed in the ADR-0021 single-form
+> cutover. Define a dataset and bind widgets to it instead.
+
+```typescript
+import { defineDataset } from '@objectstack/spec/ui';
+
+export const salesDataset = defineDataset({
+  name: 'sales',
+  label: 'Sales',
+  object: 'opportunity',
+  include: ['account'],
+  dimensions: [
+    { name: 'region', field: 'account.region', type: 'string' },
+    { name: 'close_month', field: 'close_date', type: 'date', dateGranularity: 'month' },
+  ],
+  measures: [
+    { name: 'revenue', field: 'amount', aggregate: 'sum', certified: true },
+    { name: 'deal_count', aggregate: 'count' },
+  ],
+});
+
+export const salesDashboard = {
+  name: 'sales_overview',
+  label: 'Sales Overview',
+  widgets: [
+    {
+      id: 'revenue_by_region',
+      title: 'Revenue by Region',
+      type: 'bar',
+      dataset: 'sales',
+      dimensions: ['region'],
+      values: ['revenue'],
+      layout: { x: 0, y: 0, w: 6, h: 4 },
+    },
+  ],
+};
+```
+
+Each widget requires a `dataset` and at least one `values` entry. The widget's
+`dimensions` and `values` must reference names declared on the bound dataset.
+
+At runtime, dataset queries are executed through the analytics service. When
+`@objectstack/plugin-security` is registered, analytics auto-bridges to
+`security.getReadFilter(object, context)` and applies the caller's RLS scope to
+the base object and joined objects.
+
+ObjectUI currently renders dataset-backed metric, chart,
+table/list, pivot, funnel, and gauge-style widgets with type-aware cells,
+field/option labels, date bucketing, and numeric/currency formatting.
+`table` and `pivot` widgets are also **drill-through** (see
+[Drill-down](#drill-down) below); the dataset preserves raw group keys so the
+generated filter navigates to the exact underlying records.
+
+### Chart Types
+
+| Type | Description | Best For |
+| :--- | :--- | :--- |
+| `metric` | Single number KPI | Revenue, count, percentage |
+| `bar` | Bar chart (vertical/horizontal) | Category comparison |
+| `line` | Line chart | Trends over time |
+| `pie` | Pie/donut chart | Distribution |
+| `area` | Area chart | Volume over time |
+| `scatter` | Scatter plot | Correlation |
+| `radar` | Radar chart | Multi-dimensional comparison |
+| `funnel` | Funnel chart | Conversion stages |
+| `gauge` | Gauge (single value) | Progress toward goal |
+| `treemap` | Tree map | Hierarchical proportions |
+| `table` | Data table widget | Detailed records |
+| `pivot` | Pivot table | Cross-tab summaries |
+
+Additional types: `horizontal-bar`, `column`, `donut`, `sankey`, `solid-gauge`,
+`kpi`, and `bullet`. The default type is `metric`.
+
+### Drill-down
+
+`table` and `pivot` widgets are **drill-through**: clicking an aggregated row
+(table) or cell (pivot) opens a side drawer listing the **underlying records**
+behind that group. Because the dataset preserves each grouped row's raw group
+keys, the drawer's filter matches the exact records — no label-to-id guessing.
+
+The drilled record list is itself **drill-to-record**: click any row in the
+drawer to open that single record's detail. This completes the
+**group → records → record** chain (e.g. *Revenue by Region* → the orders in
+the *West* bucket → one order).
+
+The drawer also offers an **"Open in list →"** escape hatch — escalate the peek
+to the object's full list page (sort / bulk-select / export / shareable URL),
+scoped by the same drill filter. In-place drawer is the default (keep context);
+the escape hatch is there when you need the full surface. **Reports drill
+identically**: a `summary` / `matrix` report opens the same in-place drawer on
+row/cell click, so dashboard and report drill behave the same.
+
+```typescript
+// A drill-through table widget. No drill configuration is required — it is
+// automatic whenever the dataset exposes the base object and the widget groups
+// by at least one dimension.
+{
+  id: 'orders_by_region',
+  title: 'Orders by Region',
+  type: 'table',
+  dataset: 'sales',
+  dimensions: ['region'],
+  values: ['revenue', 'deal_count'],
+  layout: { x: 0, y: 0, w: 6, h: 4 },
+}
+```
+
+Drill-through is automatic — there is no per-widget drill configuration in the
+dataset form. `metric` and `chart` widgets render the aggregate only and are not
+click-drillable; expose the detail through a `table`/`pivot` widget instead.
+
+> **Renderer note.** Object/record-backed list and table surfaces (and the
+> ObjectUI renderer's `options.drillDown` block) support a richer drill model —
+> a `mode: 'filter' | 'record'` discriminator, a `target` of `'drawer'` /
+> `'dialog'` / `'navigate'` (the last opens the list page directly), a column
+> whitelist, and chart-segment drill for the `scatter` / `treemap` / `sankey`
+> families. Those knobs live in the renderer; dataset-bound dashboards drill
+> through the semantic layer as described above (and get the "Open in list →"
+> escape hatch from the host app, e.g. the console).
+
+### Aggregation Functions
+
+Aggregation is declared on the dataset's **measures** (via `aggregate`), not on
+the widget. Supported functions:
+
+| Function | Description |
+| :--- | :--- |
+| `count` | Count records |
+| `sum` | Sum values |
+| `avg` | Average values |
+| `min` | Minimum value |
+| `max` | Maximum value |
+| `count_distinct` | Count unique values |
+| `array_agg` | Aggregate values into an array |
+| `string_agg` | Concatenate values |
+
+### Widget Layout
+
+Widgets are positioned on a 12-column grid:
+
+```typescript
+layout: {
+  x: 0,    // Column position (0-11)
+  y: 0,    // Row position
+  w: 6,    // Width in columns (1-12)
+  h: 4,    // Height in rows
+}
+```
+
+## Date Range
+
+Configure a global time filter that applies to all widgets:
+
+```typescript
+dateRange: {
+  field: 'created_at',
+  defaultRange: 'this_month',
+  allowCustomRange: true,
+}
+```
+
+### Preset Ranges
+
+| Range | Description |
+| :--- | :--- |
+| `today` | Current day |
+| `yesterday` | Previous day |
+| `this_week` | Current week |
+| `last_week` | Previous week |
+| `this_month` | Current month |
+| `last_month` | Previous month |
+| `this_quarter` | Current quarter |
+| `last_quarter` | Previous quarter |
+| `this_year` | Current year |
+| `last_year` | Previous year |
+| `last_7_days` | Rolling 7 days |
+| `last_30_days` | Rolling 30 days |
+| `last_90_days` | Rolling 90 days |
+| `custom` | User-defined range |
+
+## Global Filters
+
+Add interactive filter controls that apply to all widgets:
+
+```typescript
+globalFilters: [
+  { field: 'region', label: 'Region', type: 'select' },
+  { field: 'owner', label: 'Sales Rep', type: 'lookup' },
+]
+```
+
+## Complete Example
+
+First define the dataset the widgets bind to:
+
+```typescript
+import { defineDataset } from '@objectstack/spec/ui';
+
+export const projectTasksDataset = defineDataset({
+  name: 'project_tasks',
+  label: 'Project Tasks',
+  object: 'project_task',
+  dimensions: [
+    { name: 'status', field: 'status', type: 'string' },
+    { name: 'priority', field: 'priority', type: 'string' },
+    { name: 'completed_month', field: 'completed_at', type: 'date', dateGranularity: 'month' },
+  ],
+  measures: [
+    { name: 'open_count', aggregate: 'count', filter: { status: { $ne: 'done' } } },
+    { name: 'done_count', aggregate: 'count', filter: { status: 'done' } },
+    { name: 'task_count', aggregate: 'count' },
+  ],
+});
+```
+
+Then bind the dashboard widgets to it:
+
+```typescript
+const projectDashboard = {
+  name: 'project_overview',
+  label: 'Project Overview',
+  description: 'Real-time project health metrics',
+  refreshInterval: 60,
+
+  dateRange: {
+    field: 'created_at',
+    defaultRange: 'this_month',
+    allowCustomRange: true,
+  },
+
+  globalFilters: [
+    { field: 'project', label: 'Project', type: 'lookup' },
+    { field: 'assignee', label: 'Team Member', type: 'lookup' },
+  ],
+
+  widgets: [
+    {
+      id: 'open_tasks',
+      title: 'Open Tasks',
+      type: 'metric',
+      dataset: 'project_tasks',
+      values: ['open_count'],
+      layout: { x: 0, y: 0, w: 3, h: 2 },
+    },
+    {
+      id: 'completed_this_week',
+      title: 'Completed This Week',
+      type: 'metric',
+      dataset: 'project_tasks',
+      values: ['done_count'],
+      layout: { x: 3, y: 0, w: 3, h: 2 },
+    },
+    {
+      id: 'tasks_by_status',
+      title: 'Tasks by Status',
+      type: 'pie',
+      dataset: 'project_tasks',
+      dimensions: ['status'],
+      values: ['task_count'],
+      layout: { x: 6, y: 0, w: 3, h: 4 },
+    },
+    {
+      id: 'tasks_by_priority',
+      title: 'Tasks by Priority',
+      type: 'bar',
+      dataset: 'project_tasks',
+      dimensions: ['priority'],
+      values: ['task_count'],
+      layout: { x: 9, y: 0, w: 3, h: 4 },
+    },
+    {
+      id: 'completion_trend',
+      title: 'Completion Trend',
+      type: 'line',
+      dataset: 'project_tasks',
+      dimensions: ['completed_month'],
+      values: ['task_count'],
+      layout: { x: 0, y: 4, w: 12, h: 4 },
+    },
+  ],
+};
+```
+
+## Related
+
+- [App Metadata](/docs/ui/apps) — Reference dashboards in app navigation
+- [View Metadata](/docs/ui/views) — List views for record browsing
+- [Page Metadata](/docs/ui/pages) — Custom pages with component layouts

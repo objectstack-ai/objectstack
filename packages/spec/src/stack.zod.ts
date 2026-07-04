@@ -1281,7 +1281,7 @@ export const ObjectOSCapabilitiesSchema = lazySchema(() => z.object({
    * event scope & delivery semantics; service leader election. Optional;
    * when absent the kernel uses the in-memory driver (single-process).
    *
-   * @see content/docs/concepts/cluster-semantics.mdx
+   * @see content/docs/kernel/cluster.mdx
    */
   cluster: ClusterCapabilityConfigSchema.optional()
     .describe('Cluster transport & semantics configuration.'),

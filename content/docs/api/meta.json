@@ -1,0 +1,17 @@
+{
+  "title": "API & SDK",
+  "icon": "Plug",
+  "pages": [
+    "index",
+    "data-api",
+    "metadata-api",
+    "plugin-endpoints",
+    "client-sdk",
+    "environment-routing",
+    "data-flow",
+    "error-handling-client",
+    "error-handling-server",
+    "error-catalog",
+    "wire-format"
+  ]
+}

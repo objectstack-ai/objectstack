@@ -34,7 +34,7 @@ Removed from the spec:
 
 1. For each inline query, create a dataset with `defineDataset(...)` declaring
    its dimensions and measures. See the
-   [Analytics Datasets guide](/docs/guides/analytics-datasets).
+   [Analytics Datasets guide](/docs/data-modeling/analytics).
 2. Point the widget/report/chart at it: `dataset: "<name>"`, pick `values`
    (measure names) and `dimensions`/`rows` (dimension names).
 3. Presentation-scope filtering goes through the widget's `filter`, which is
@@ -75,7 +75,7 @@ settings-namespace environment overrides. Rename your deployment variables:
 | `FEATURE_FLAGS_AI_ENABLED` | `OS_FEATURE_FLAGS_AI_ENABLED` |
 
 The general rule: `OS_` + namespace + key, upper-snake-cased. See the
-[Environment Variables guide](/docs/guides/environment-variables).
+[Environment Variables guide](/docs/deployment/environment-variables).
 
 ### 4. `@object-ui/plugin-workflow` removed
 
@@ -141,7 +141,7 @@ Existing tools that never emit behave exactly as before.
 runtime configuration and exposes an extension hook for provider packages.
 Google sign-in works out of the box — configure it in **Setup →
 Authentication** or via deployment-level `GOOGLE_CLIENT_ID` /
-`GOOGLE_CLIENT_SECRET`. See [Auth & SSO](/docs/guides/auth-sso).
+`GOOGLE_CLIENT_SECRET`. See [Auth & SSO](/docs/permissions/sso).
 
 ### CLI: AI provider SDKs bundled
 
@@ -212,7 +212,7 @@ distribution.
 1. Update all `@objectstack/*` dependencies to `^9.0.0` (they are
    version-locked — upgrade them together).
 2. Migrate inline dashboard widgets, reports, and list charts to named
-   datasets ([guide](/docs/guides/analytics-datasets)).
+   datasets ([guide](/docs/data-modeling/analytics)).
 3. Replace removed chart types with their base family (table above).
 4. Rename settings env vars to the `OS_<NAMESPACE>_<KEY>` form.
 5. Re-run your app's spec validation (`os validate`) — it will flag any

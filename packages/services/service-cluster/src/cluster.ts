@@ -76,7 +76,7 @@ export function defineCluster(
             `Cluster driver "${parsed.driver}" is not registered. ` +
                 `Did you forget to import @objectstack/service-cluster-${parsed.driver} ` +
                 `or call registerClusterDriver()? ` +
-                `See content/docs/concepts/cluster-semantics.mdx §6.`,
+                `See content/docs/kernel/cluster.mdx §6.`,
         );
     }
     return factory({ ...parsed, nodeId });

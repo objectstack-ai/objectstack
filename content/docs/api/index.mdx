@@ -1,0 +1,184 @@
+---
+title: API Overview
+description: How ObjectStack generates its API surface from metadata — discovery, error handling wire formats, protocol types, and a map of the API & SDK docs.
+---
+
+# API Overview
+
+ObjectStack generates its entire API surface — REST endpoints, realtime protocols, and the client SDK — from your metadata: define an object once and its endpoints exist. This module documents those surfaces and how to consume them.
+
+ObjectStack exposes a fully typed REST API. All endpoints use JSON request/response bodies. The API is **service-driven** — routes are only available when the corresponding plugin is installed. Use the [Discovery endpoint](#discovery) to determine what services are available at runtime.
+
+<Callout type="info">
+**Base URL**: Configurable, defaults to `/api/v1`. All paths below are relative to the base URL.
+</Callout>
+
+## What's in this module
+
+- [Data API](/docs/api/data-api) — CRUD, batch operations, record cloning, and analytics queries
+- [Metadata & Package API](/docs/api/metadata-api) — object schemas, metadata types, UI views, and package management
+- [Plugin Endpoints](/docs/api/plugin-endpoints) — auth, workflow, realtime, and other plugin-provided routes
+- [Client SDK](/docs/api/client-sdk) — the official TypeScript client
+- [Environment Routing](/docs/api/environment-routing) — routing requests across environments
+- [Data Flow](/docs/api/data-flow) — how a request travels through the stack
+- [Error Handling (Client)](/docs/api/error-handling-client) — handling API errors in client code
+- [Error Handling (Server)](/docs/api/error-handling-server) — raising and shaping errors on the server
+- [Error Catalog](/docs/api/error-catalog) — the full list of error codes
+- [Wire Format](/docs/api/wire-format) — request/response envelopes on the wire
+
+Spec: [HTTP API](/docs/protocol/objectos/http-protocol), [Real-Time Protocols](/docs/protocol/objectos/realtime-protocol)
+
+Schema reference: [API](/docs/references/api)
+
+---
+
+## Discovery
+
+The discovery endpoint is the entry point for all clients. It returns the API version, available routes, service capabilities, and per-service status.
+
+### `GET /api/v1`
+
+Returns the full discovery manifest.
+
+**Response**:
+```json
+{
+  "name": "ObjectOS",
+  "version": "1.0.0",
+  "environment": "development",
+  "routes": {
+    "data": "/api/v1/data",
+    "metadata": "/api/v1/meta",
+    "analytics": "/api/v1/analytics",
+    "auth": null,
+    "workflow": null
+  },
+  "features": {
+    "graphql": false,
+    "search": false,
+    "websockets": false,
+    "files": false,
+    "analytics": true,
+    "ai": false,
+    "workflow": false,
+    "notifications": false,
+    "i18n": false
+  },
+  "services": {
+    "metadata": {
+      "enabled": true,
+      "status": "degraded",
+      "route": "/api/v1/meta",
+      "provider": "kernel",
+      "message": "In-memory registry; DB persistence pending"
+    },
+    "data": { "enabled": true, "status": "available", "route": "/api/v1/data", "provider": "kernel" },
+    "analytics": { "enabled": true, "status": "available", "route": "/api/v1/analytics" },
+    "auth": { "enabled": false, "status": "unavailable", "message": "Install an auth plugin to enable" }
+  },
+  "locale": {
+    "default": "en",
+    "supported": ["en", "zh-CN"],
+    "timezone": "UTC"
+  }
+}
+```
+
+### `GET /.well-known/objectstack`
+
+Alias for the discovery endpoint used by auto-discovery in the client SDK.
+
+<Callout type="info">
+**Service Status Values**: `available` (fully operational), `registered` (route declared but handler unverified — may return 501), `degraded` (partial functionality), `unavailable` (not installed), `stub` (placeholder that throws errors)
+</Callout>
+
+---
+
+## Error Handling
+
+Error responses depend on which HTTP server is in front of the kernel. There are two wire formats in use today.
+
+**Kernel REST server** (`@objectstack/rest`) emits a string `error` message plus a SCREAMING_SNAKE `code`:
+
+```json
+{
+  "error": "Record not found: account/123",
+  "code": "RECORD_NOT_FOUND"
+}
+```
+
+Validation failures additionally include an `issues` array. Common codes emitted by the kernel REST server:
+
+| Code | HTTP | Description |
+|:-----|:-----|:------------|
+| `VALIDATION_FAILED` | 400 | Input validation failed (includes `issues`) |
+| `PERMISSION_DENIED` | 403 | Insufficient permissions |
+| `RECORD_NOT_FOUND` | 404 | Resource does not exist |
+| `CONCURRENT_UPDATE` | 409 | Record was modified by another user |
+
+**Runtime dispatcher** (`@objectstack/runtime`) wraps errors in the `{ success: false, ... }` envelope, where `code` is the numeric HTTP status:
+
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Record not found: account/123",
+    "code": 404,
+    "details": {}
+  }
+}
+```
+
+<Callout type="info">
+The richer `ErrorResponseSchema` in `@objectstack/spec/api` (with `category`, `retryable`, etc.) is the aspirational spec envelope, not the current wire format. Its `category` values are drawn from the `ErrorCategory` enum: `validation`, `authentication`, `authorization`, `not_found`, `conflict`, `rate_limit`, `server`, `external`, `maintenance`.
+</Callout>
+
+---
+
+## Protocol Types (Zod)
+
+All request/response schemas are defined as Zod schemas in `@objectstack/spec/api` and can be used for both runtime validation and TypeScript type inference.
+
+```typescript
+import { 
+  FindDataRequestSchema, 
+  FindDataResponseSchema,
+  type FindDataRequest,
+  type FindDataResponse,
+} from '@objectstack/spec/api';
+
+// Runtime validation
+const request = FindDataRequestSchema.parse({ object: 'account', query: { ... } });
+
+// TypeScript type
+const response: FindDataResponse = await protocol.findData(request);
+```
+
+See the [Protocol Reference](/docs/references/api/protocol) for the full list of protocol methods and their Zod schemas.
+
+---
+
+## Next Steps
+
+<Cards>
+  <Card 
+    href="/docs/api/data-api" 
+    title="Data API"
+    description="CRUD, batch operations, and analytics endpoints"
+  />
+  <Card 
+    href="/docs/api/client-sdk" 
+    title="Client SDK"
+    description="TypeScript client that wraps this API"
+  />
+  <Card 
+    href="/docs/kernel/services-checklist" 
+    title="Kernel Services"
+    description="Service implementation checklist for plugin authors"
+  />
+  <Card 
+    href="/docs/releases/implementation-status" 
+    title="Implementation Status"
+    description="What is implemented today"
+  />
+</Cards>

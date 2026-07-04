@@ -1,0 +1,537 @@
+---
+title: Implementation Status Matrix
+description: Detailed status of protocol implementations across ObjectStack packages
+---
+
+# Implementation Status Matrix
+
+This document provides a comprehensive overview of which protocols from `@objectstack/spec` have been implemented in the ObjectStack packages.
+
+<Callout type="info">
+**Last Updated**: June 2026
+
+This matrix is generated from actual codebase analysis and represents the current implementation status.
+</Callout>
+
+## Status Legend
+
+| Symbol | Status | Description |
+|:------:|:-------|:------------|
+| ✅ | **Fully Implemented** | Production-ready implementation with all core features |
+| ⚠️ | **Partially Implemented** | Basic implementation, missing advanced features |
+| 🚧 | **In Progress** | Currently being developed |
+| 📋 | **Planned** | Scheduled for future implementation |
+| ❌ | **Not Implemented** | Protocol defined but not yet implemented |
+
+---
+
+## Core Infrastructure (ObjectOS)
+
+### Runtime & Kernel
+
+| Protocol | @objectstack/core | @objectstack/runtime | @objectstack/objectql | Status |
+|:---------|:-----------------:|:--------------------:|:---------------------:|:------:|
+| **Manifest** | ✅ | ✅ | ✅ | ✅ Full |
+| **Context** | ✅ | ✅ | ✅ | ✅ Full |
+| **Plugin** | ✅ | ✅ | ❌ | ✅ Full |
+| **Plugin Lifecycle** | ✅ | ❌ | ❌ | ✅ Full |
+| **Plugin Capability** | ✅ | ❌ | ❌ | ✅ Full |
+| **Service Registry** | ✅ | ❌ | ❌ | ✅ Full |
+| **Startup Orchestrator** | ✅ | ❌ | ❌ | ✅ Full |
+| **Events** | ✅ | ❌ | ❌ | ✅ Full |
+
+**Notes:**
+- Core package provides complete microkernel implementation
+- Plugin system supports lifecycle hooks, dependency resolution, and service injection
+- Event bus enables inter-plugin communication
+- ObjectQL serves as the **example kernel** — a reference implementation that will be modularized into plugins
+
+### Data Infrastructure
+
+| Protocol | @objectstack/objectql | @objectstack/runtime | @objectstack/driver-memory | Status |
+|:---------|:---------------------:|:--------------------:|:--------------------------:|:------:|
+| **Driver** | ✅ | ✅ | ⚠️ | ✅ Interface |
+| **Datasource** | ✅ | ✅ | ❌ | ✅ Full |
+| **Data Engine** | ✅ | ❌ | ❌ | ✅ Full |
+| **Query** | ✅ | ⚠️ | ⚠️ | ⚠️ Partial |
+| **Filter** | ✅ | ⚠️ | ⚠️ | ⚠️ Partial |
+
+**Notes:**
+- ObjectQL implements complete IDataEngine interface
+- Memory driver is reference implementation (basic CRUD only)
+- Advanced query features (aggregations, window functions) require production drivers
+- Memory driver supports aggregations (groupBy, count, sum, avg, min, max)
+
+### Metadata Framework
+
+<Callout type="info">
+**Runtime Boundary** — ObjectOS metadata is file/artifact-backed and read-only at boot. Database-backed metadata persistence exists for explicitly configured control-plane services, not as an automatic ObjectOS project-DB bridge.
+</Callout>
+
+- Metadata API (list types, list items, get item) is fully functional
+- Metadata is loaded from config files or `dist/objectstack.json` at startup and held in memory
+- `MetadataPlugin` no longer registers `sys_metadata` / `sys_metadata_history` into ObjectOS or auto-bridges ObjectQL to `DatabaseLoader`
+- Future: production Artifact API loader and durable local artifact cache
+
+### System Services
+
+| Protocol | Implementation Package | Status | Notes |
+|:---------|:----------------------|:------:|:------|
+| **Logging** | @objectstack/core | ✅ | Cross-platform logger (browser + server) |
+| **API Registry** | @objectstack/core | ✅ | Central endpoint registry |
+| **Metrics** | @objectstack/observability | ✅ | Metrics exporters shipped (`metrics-exporters.ts`) |
+| **Tracing** | @objectstack/observability | ⚠️ | Error/exporter pipeline shipped (`error-exporters.ts`); full distributed tracing in progress |
+| **Audit** | @objectstack/plugin-audit | ✅ | Audit writers + audit objects shipped |
+| **Job** | @objectstack/service-job | ✅ | Job service with cron/db/interval adapters |
+| **Cache** | ⚠️ | ⚠️ | HTTP caching implemented, in-memory cache partial |
+| **Translation** | @objectstack/service-i18n | ✅ | i18n/translation service with file adapter |
+| **Feature Flags** | ❌ | 📋 | Planned |
+| **Encryption** | ❌ | 📋 | Planned |
+| **Compliance** | ❌ | 📋 | Planned |
+| **Masking** | ❌ | 📋 | Planned |
+| **Notification** | @objectstack/service-messaging, @objectstack/service-feed | 🟡 | Framework pipeline shipped; objectui bell cut-over remains |
+| **Change Management** | ❌ | 📋 | Planned |
+| **Collaboration** | ❌ | 📋 | Planned |
+
+---
+
+## Data Layer (ObjectQL)
+
+### Core Data Modeling
+
+| Protocol | @objectstack/spec | @objectstack/objectql | @objectstack/client | Status |
+|:---------|:-----------------:|:---------------------:|:-------------------:|:------:|
+| **Field** | ✅ | ✅ | ✅ | ✅ Full |
+| **Object** | ✅ | ✅ | ✅ | ✅ Full |
+| **Validation** | ✅ | ⚠️ | ❌ | ⚠️ Partial |
+| **Hook** | ✅ | ✅ | ❌ | ✅ Full |
+| **Dataset** | ✅ | ❌ | ❌ | ❌ Not Impl |
+| **Mapping** | ✅ | ❌ | ❌ | ❌ Not Impl |
+| **Document** | ✅ | ❌ | ❌ | ❌ Not Impl |
+| **External Lookup** | ✅ | ❌ | ❌ | ❌ Not Impl |
+
+**Field Type Support:**
+
+| Field Type | Implementation | Notes |
+|:-----------|:-------------:|:------|
+| text, textarea, email, url, phone | ✅ | Full support |
+| number, currency, percent | ✅ | Full support |
+| boolean, checkbox | ✅ | Full support |
+| date, datetime, time | ✅ | Full support |
+| select, multiselect | ✅ | Full support |
+| lookup, master_detail | ✅ | Full support in spec, partial in memory driver |
+| formula | ✅ | CEL-backed formula fields are implemented |
+| summary | ✅ | Server-side rollups for count/sum/min/max/avg on child records |
+| json, array | ✅ | Full support |
+| file, image | 📋 | Protocol defined, not implemented |
+
+### Query Engine
+
+| Protocol | @objectstack/objectql | @objectstack/client | @objectstack/driver-memory | Status |
+|:---------|:---------------------:|:-------------------:|:--------------------------:|:------:|
+| **Query AST** | ✅ | ✅ | ⚠️ | ✅ Full |
+| **Query Builder** | ❌ | ✅ | ❌ | ✅ Client |
+| **Filter Operators** | ✅ | ✅ | ⚠️ | ⚠️ Partial |
+| **Aggregations** | ✅ | ✅ | ✅ | ✅ Full |
+| **Joins** | ✅ | ✅ | ❌ | ⚠️ Spec only |
+| **Sorting** | ✅ | ✅ | ❌ | ⚠️ Spec only |
+| **Pagination** | ✅ | ✅ | ✅ | ✅ Full |
+| **Window Functions** | ✅ | ❌ | ❌ | ❌ Spec only |
+| **Subqueries** | ✅ | ❌ | ❌ | ❌ Spec only |
+
+**Notes:**
+- Full query protocol is defined and implemented in ObjectQL engine
+- Actual query capability depends on driver implementation
+- Memory driver supports basic queries only
+- Client SDK provides query builder utilities
+
+---
+
+## API Layer (Transport)
+
+### HTTP & REST
+
+| Protocol | @objectstack/rest | @objectstack/runtime | @objectstack/plugin-hono-server | @objectstack/client | Status |
+|:---------|:-----------------:|:--------------------:|:-------------------------------:|:-------------------:|:------:|
+| **REST Server** | ✅ | ✅ (re-export) | ✅ | ❌ | ✅ Full |
+| **HTTP Server** | ❌ | ✅ | ✅ | ❌ | ✅ Full |
+| **Endpoint** | ✅ | ❌ | ✅ | ❌ | ✅ Full |
+| **Router** | ✅ | ✅ | ✅ | ❌ | ✅ Full |
+| **Discovery** | ❌ | ✅ | ✅ | ✅ | ✅ Full |
+| **Contract** | ✅ | ✅ | ❌ | ❌ | ⚠️ Partial |
+| **Protocol** | ❌ | ✅ | ❌ | ✅ | ✅ Full |
+| **Errors** | ✅ | ✅ | ✅ | ✅ | ✅ Full |
+| **HTTP Cache** | ✅ | ✅ | ✅ | ✅ | ✅ Full |
+| **Batch** | ✅ | ✅ | ✅ | ✅ | ✅ Full |
+
+The data (`/data`), metadata (`/meta`), and batch endpoints are implemented in `@objectstack/rest` (`rest-server.ts`); `@objectstack/runtime` re-exports `RestServer` from that package and provides the underlying HTTP server/dispatcher.
+
+**REST Endpoints Implemented:**
+
+| Endpoint Pattern | Method | Purpose | Status |
+|:----------------|:------:|:--------|:------:|
+| `/api/v1` | GET | API discovery | ✅ |
+| `/meta` | GET | List metadata types | ✅ |
+| `/meta/{type}` | GET | List items of type | ✅ |
+| `/meta/{type}/{name}` | GET | Get specific metadata item | ✅ |
+| `/data/{object}` | GET | List records | ✅ |
+| `/data/{object}/{id}` | GET | Get single record | ✅ |
+| `/data/{object}` | POST | Create record | ✅ |
+| `/data/{object}/{id}` | PATCH | Update record | ✅ |
+| `/data/{object}/{id}` | DELETE | Delete record | ✅ |
+| `/data/{object}/createMany` | POST | Batch create | ✅ |
+| `/data/{object}/updateMany` | POST | Batch update | ✅ |
+| `/data/{object}/deleteMany` | POST | Batch delete | ✅ |
+| `/data/{object}/{id}/clone` | POST | Clone a record (gated by `enable.clone`) | ✅ |
+| `/data/{object}/batch` | POST | Atomic batch operations | ✅ |
+
+### Advanced Protocols
+
+| Protocol | Implementation | Status | Notes |
+|:---------|:-------------:|:------:|:------|
+| **Analytics** | ✅ | ✅ | ObjectQL aggregation plus `@objectstack/service-analytics` dataset execution; analytics read scope auto-bridges to `security.getReadFilter` for RLS-aware dashboards/reports |
+| **OData** | ❌ | 📋 | Protocol defined, not implemented |
+| **GraphQL** | ❌ | 📋 | Protocol defined, not implemented |
+| **Realtime** | @objectstack/service-realtime | ⚠️ | Realtime service with in-memory adapter shipped; production adapters in progress |
+| **WebSocket** | @objectstack/service-realtime | ⚠️ | Transport provided via the realtime service in-memory adapter |
+
+---
+
+## UI Layer (ObjectUI)
+
+### View System
+
+| Protocol | @objectstack/spec | Implementation | Status |
+|:---------|:-----------------:|:-------------:|:------:|
+| **View** | ✅ | 🟡 | 🟡 Studio/ObjectUI renders authored metadata surfaces; general-purpose renderer coverage is still incomplete |
+| **ListView** | ✅ | 🟡 | 🟡 ObjectUI grid/list surfaces support per-view persistence, filters, row actions, density, galleries, and permission-aware affordances; full protocol parity is ongoing |
+| **FormView** | ✅ | 🟡 | 🟡 ObjectUI forms support live field rules (`visibleWhen` / `readonlyWhen` / `requiredWhen`), inline-grid row rules, and server-aligned required enforcement |
+| **Page** | ✅ | 🟡 | 🟡 Record-page authoring, page create flows, block canvas editing, slotted record pages, and selected page blocks are implemented in ObjectUI; full component catalogue remains in progress |
+| **App** | ✅ | 🟡 | 🟡 Navigation metadata is consumed by the console/app shell; full renderer parity remains in progress |
+| **Dashboard** | ✅ | 🟡 | 🟡 ObjectUI renders metric/chart/list/pivot/funnel/table widgets, drill-downs (group → records → record chain), type-aware cells, and dataset-bound widgets; Studio can author per-widget dataset bindings (`dataset` / `dimensions` / `values`) |
+| **Report** | ✅ | 🟡 | 🟡 ObjectUI renders spec-native tabular/summary/matrix/joined reports, chart/KPI blocks, drill-downs, and dataset-bound reports |
+| **Action** | ✅ | 🟡 | 🟡 ObjectUI supports row/global/header actions, action modal transport, parameter collection, visibility CEL, and nested action runners |
+| **Component** | ✅ | 🟡 | 🟡 Selected page/record components render in ObjectUI (`record:alert`, related lists, highlights, page blocks); catalogue parity remains in progress |
+| **Theme** | ✅ | ❌ | ❌ Spec only |
+| **Widget** | ✅ | 🟡 | 🟡 Dashboard/report/list/form widgets render in ObjectUI; custom widget manifest/runtime parity remains in progress |
+| **Chart** | ✅ | 🟡 | 🟡 Recharts-backed dashboard/report charts cover bar/line/pie/area/scatter/funnel/gauge/treemap/sankey with formatting and field-coverage guards |
+
+**Notes:**
+- All UI protocols are fully defined in spec
+- Metadata API can retrieve UI definitions (views, apps, pages, dashboards,
+  reports, actions)
+- Active Studio/ObjectUI source lives in the sibling `../objectui` repo and is
+  bundled into `packages/console` via the objectui refresh workflow
+- Metadata-admin curated forms now merge server-only fields back into the save
+  payload, so a Studio form that exposes only part of a metadata type should
+  not strip newer protocol properties
+- The 2026-05-08 → 2026-06-08 ObjectUI scan covered 910 non-merge frontend
+  commits. The largest functional clusters were metadata-admin/Studio,
+  master-detail forms, reports/dashboards, record detail/related lists,
+  action transport, flow designer, developer/API pages, AI draft publishing,
+  and i18n.
+- React SDK provides data hooks; the cross-surface renderer is still being
+  completed in ObjectUI rather than in this backend repo
+
+---
+
+## Automation Layer
+
+<Callout type="warn">
+**Plugin-Provided Service** — The kernel does NOT include an automation engine. Flow, workflow, and approval services are provided by plugins — the flow engine ships in `@objectstack/service-automation`, with approval nodes in `@objectstack/plugin-approvals`.
+</Callout>
+
+| Protocol | @objectstack/spec | Kernel | Plugin Required | Status |
+|:---------|:-----------------:|:------:|:---------------:|:------:|
+| **Flow** | ✅ | ❌ | ✅ | ✅ `@objectstack/service-automation` |
+| **Workflow** | ✅ | ❌ | ✅ | ✅ `@objectstack/service-automation` |
+| **Approval** | ✅ | ❌ | ✅ | ✅ `@objectstack/plugin-approvals` |
+| **Webhook** | ✅ | ❌ | ✅ | ✅ `@objectstack/plugin-webhooks` |
+| **ETL** | ✅ | ❌ | ✅ | 📋 Plugin |
+| **Sync** | ✅ | ❌ | ✅ | 📋 Plugin |
+| **Trigger Registry** | ✅ | ❌ | ✅ | ✅ `plugin-trigger-record-change` / `plugin-trigger-schedule` |
+
+**Notes:**
+- Hook system is implemented in ObjectQL (beforeFind, afterInsert, etc.) — this is data-layer eventing, not workflow automation
+- The flow/workflow engine ships in `@objectstack/service-automation` (`engine.ts`, builtin nodes, `plugin.ts`); approvals, webhooks, and triggers ship as `plugin-approvals`, `plugin-webhooks`, `plugin-trigger-record-change`, and `plugin-trigger-schedule`
+- ETL and Sync protocols are defined but not yet implemented as plugins
+- Discovery API reports automation service as `unavailable` until a plugin is registered
+
+---
+
+## Security Layer
+
+<Callout type="warn">
+**Plugin-Provided Service** — The kernel does NOT handle authentication or authorization. Security services must be provided by plugins (e.g., `@objectstack/plugin-auth`). The Discovery API reports auth as `unavailable` until a plugin is registered.
+</Callout>
+
+### Auth Service (`plugin-auth`)
+
+The `auth` service in `CoreServiceName` covers both **authentication** (identity) and **authorization** (permissions). There is no separate `permission` service — it is part of `auth`.
+
+| Protocol | Area | @objectstack/spec | Kernel | Plugin Required | Status |
+|:---------|:-----|:-----------------:|:------:|:---------------:|:------:|
+| **Identity** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
+| **Auth Config** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
+| **Role** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
+| **Organization** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
+| **Policy** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
+| **SCIM** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
+| **Permission** | Authorization | ✅ | ✅ Phase-1 | ✅ | ✅ `plugin-security` |
+| **Sharing** | Authorization | ✅ | ❌ | ✅ | 📋 Plugin |
+| **RLS** | Authorization | ✅ | ✅ Phase-1 (tenant + owner) | ✅ | ✅ `plugin-security` |
+| **Territory** | Authorization | ✅ | ❌ | ✅ | 📋 Plugin |
+
+**Notes:**
+- All security protocols (identity + permission) are delivered by a single `auth` plugin — matching `CoreServiceName`
+- Client SDK supports bearer token header — but token validation requires the auth plugin
+- Auth route (`/auth/*`) only appears in Discovery when the auth plugin is registered
+- Fine-grained authorization (RLS, sharing, territory) is internal to the auth plugin
+- **Phase-1 RBAC enforcement is live end-to-end**: REST → ObjectQL → SecurityPlugin middleware now receives a populated `ExecutionContext` (userId, tenantId, roles, permissions). Default `member_default` permission set ships a wildcard RLS rule `organization_id == current_user.organization_id` plus per-object overrides `sys_organization_self` (`id == current_user.organization_id`) and `sys_user_self` (`id == current_user.id`) for the global tables that lack an `organization_id` column. The earlier `tenantField` indirection (RLS expressions written against an abstract `tenant_id` column then rewritten to the configured physical column at compile time) was removed — the placeholder, the column name, and `RLSUserContext.organization_id` are now the same name end-to-end. The legacy `objectql.registerTenantMiddleware` (hardcoded `where.tenant_id` injection that pre-dated SecurityPlugin) has been removed; SecurityPlugin is the sole authority for tenant isolation. Analytics now uses the same reusable read scope via `security.getReadFilter`, so dataset-bound dashboards/reports do not bypass RLS. Verified cross-organization isolation on `pnpm dev:crm` across `sys_organization`, `sys_member`, `sys_user`, `sys_user_permission_set`, `sys_role_permission_set`. **Anonymous traffic is denied by default** (the ADR-0056 D2 default-deny flip landed: `requireAuth` defaults to `true`); an explicit `requireAuth: false` opt-out logs a boot-time warning, and public forms do not depend on any fall-open — they carry a declaration-derived `publicFormGrant` (ADR-0056 Option A).
+- **OWD / sharing-model enforcement is live and proven end-to-end (ADR-0056)**: `private`, `public_read`, `public_read_write`, and `controlled_by_parent` are enforced through `plugin-sharing` + `plugin-security` and verified by dogfood proofs over the real HTTP stack. `object.sharingModel` now accepts the canonical OWD vocabulary (`private` / `public_read` / `public_read_write` / `controlled_by_parent`) alongside the legacy `read` / `read_write` / `full` spellings (D1). RLS owner policies resolve `current_user.email` in addition to `id` / `organization_id` / `roles` (#2054). Permission sets may declare `isDefault: true` to act as the app-declared fallback profile (D7).
+
+---
+
+## AI Layer
+
+<Callout type="warning">
+The in-UI AI **runtime** below (`@objectstack/service-ai`) moved to the **cloud /
+Enterprise** distribution — see cloud ADR-0025 (`service-ai → cloud; open =
+MCP-only`). The agent / skill / tool **schemas** stay open in `@objectstack/spec/ai`;
+the **open edition** exposes AI via [`@objectstack/mcp`](/docs/ai)
+(BYO-AI). The Implementation / Status columns describe the runtime as it ships in
+cloud / EE.
+</Callout>
+
+| Protocol | @objectstack/spec | Implementation | Status |
+|:---------|:-----------------:|:-------------:|:------:|
+| **Agent** | ✅ | @objectstack/service-ai | ✅ Agent runtime (`agent-runtime.ts`, `agents/`) |
+| **Model Registry** | ✅ | @objectstack/service-ai | ✅ `model-registry.ts` |
+| **RAG Pipeline** | ✅ | @objectstack/service-knowledge | ⚠️ Knowledge service + `knowledge-memory` / `knowledge-ragflow` / `embedder-openai` plugins |
+| **NLQ** | ✅ | @objectstack/service-ai | ⚠️ `tools/query-data`, `schema-retriever.ts` |
+| **Conversation** | ✅ | @objectstack/service-ai | ✅ In-memory + ObjectQL conversation services (`conversation/`) |
+| **Agent Action** | ✅ | @objectstack/service-ai | ⚠️ Action/data/knowledge tools (`tools/`) |
+| **Cost** | ✅ | ❌ | ❌ Spec only |
+| **Predictive** | ✅ | ❌ | ❌ Spec only |
+| **Orchestration** | ✅ | @objectstack/service-ai | ⚠️ Agent tool orchestration |
+| **Feedback Loop** | ✅ | @objectstack/service-ai | ⚠️ Eval harness (`eval/`) |
+| **DevOps Agent** | ✅ | ❌ | ❌ Spec only |
+
+**Notes:**
+- Complete AI protocol suite defined
+- `@objectstack/service-ai` ships agents, model registry, conversation, tools, skills, and an eval harness
+- RAG/embedding is provided by `@objectstack/service-knowledge` plus the `knowledge-memory`, `knowledge-ragflow`, and `embedder-openai` plugins
+- Cost tracking, predictive, and the DevOps agent protocols remain spec-only
+
+---
+
+## Integration Layer
+
+| Protocol | @objectstack/spec | Implementation | Status |
+|:---------|:-----------------:|:-------------:|:------:|
+| **Connector** | ✅ | connector-rest, connector-openapi, connector-mcp, connector-slack | ✅ REST/OpenAPI/MCP/Slack connectors shipped |
+| **SaaS Connector** | ✅ | connector-slack | ⚠️ Slack connector shipped; broader SaaS catalogue in progress |
+| **Database Connector** | ✅ | @objectstack/driver-sql, driver-mongodb | ✅ Delivered via the database drivers |
+| **File Storage** | ✅ | @objectstack/service-storage | ✅ File storage service with local + S3 adapters and storage routes |
+| **Message Queue** | ✅ | @objectstack/service-queue | ⚠️ Queue service shipped |
+| **GitHub Connector** | ✅ | ❌ | ❌ Spec only |
+| **Vercel Connector** | ✅ | ❌ | ❌ Spec only |
+
+---
+
+## QA & Testing
+
+| Protocol | @objectstack/spec | @objectstack/core | @objectstack/verify | Status |
+|:---------|:-----------------:|:-----------------:|:-----------------------:|:------:|
+| **Testing** | ✅ | ✅ | ✅ | ✅ Full |
+
+**Features Implemented:**
+- TestSuite, TestScenario, TestStep schemas ✅
+- HTTP adapter for testing ✅
+- MSW integration for browser mocking ✅
+- QA runner in core ✅
+
+---
+
+## Implementation Roadmap
+
+### Phase 1: Core Infrastructure ✅ **COMPLETE**
+- [x] Microkernel & Plugin System
+- [x] Logging System
+- [x] Service Registry
+- [x] Event Bus
+- [x] API Registry
+
+### Phase 2: Data Layer ✅ **COMPLETE**
+- [x] ObjectQL Engine
+- [x] Schema Registry
+- [x] Protocol Implementation
+- [x] Basic Query Support
+- [x] CRUD Operations
+- [x] Hook System
+
+### Phase 3: API Layer ✅ **COMPLETE**
+- [x] REST Server
+- [x] HTTP Server (Hono)
+- [x] Endpoint Generation
+- [x] Discovery API
+- [x] Metadata API
+- [x] Batch Operations
+- [x] HTTP Caching
+
+### Phase 4: Client SDKs ✅ **COMPLETE**
+- [x] TypeScript Client
+- [x] React Hooks
+- [x] Query Builder
+- [x] Error Handling
+
+### Phase 5: Developer Tools ✅ **COMPLETE**
+- [x] CLI Tools
+- [x] Config Validation
+- [x] Development Server
+- [x] Metadata Management
+
+### Phase 6: Advanced Features 🚧 **IN PROGRESS**
+- [x] Production Database Drivers — `@objectstack/driver-sql` (PostgreSQL/MySQL dialects), `@objectstack/driver-mongodb`, and `@objectstack/driver-sqlite-wasm` ship; additional dialect coverage ongoing
+- [ ] GraphQL API
+- [ ] OData Support
+- [ ] Realtime Subscriptions
+- [ ] WebSocket Support
+
+### Phase 7: UI Layer 🟡 **IN PROGRESS**
+- [ ] UI Renderer
+- [x] Studio metadata-admin engine — generic metadata list/detail/edit surfaces, live preview, draft/publish/rollback, create-mode forms, server-side diagnostics, package scoping, and skew-safe curated inspectors
+- [x] Form conditional rules — ObjectUI supports `visibleWhen`, `readonlyWhen`, `requiredWhen`, row-scoped inline-grid rules, and required-on-submit enforcement
+- [x] Master-detail forms — inline subforms, spreadsheet-style line items, atomic batch create/edit, lookup auto-fill, line ordering, duplicate/reorder, and subtotal/tax/total stack
+- [x] Record detail + related lists — derived related lists, record-page assignment, action slots, system/audit sections, and opt-in reference rail
+- [x] Dashboard renderer/editor — widget layout persistence, drill-downs, pivot/funnel/table/list widgets, type-aware cells, and per-widget dataset binding authoring (`dataset`, `dimensions`, `values`)
+- [x] Report renderer/editor — spec-native summary/matrix/joined reports, chart/KPI blocks, drill-downs, dataset-bound reports, and i18n labels
+- [x] Flow/page designers — typed flow node config panels, simulator/debug runner, page block canvas, slotted record pages, and schema-driven block inspectors
+- [x] Action transport — row/global/header actions, modal parameter collection, visible CEL, popup-safe open actions, and nested action runner sharing
+- [x] Developer/admin console surfaces — Integrations & APIs, public forms, flow runs, approvals inbox, settings, marketplace/package management, AI draft review/publish
+- [ ] List View Renderer full protocol parity
+- [ ] Cross-surface UI Renderer full protocol parity
+- [ ] Theme Engine
+
+### Phase 8: Automation (Plugin) 🟡 **IN PROGRESS**
+- [x] Flow Engine Plugin
+- [x] Approval Node Plugin
+- [ ] ETL Pipeline Plugin
+- [ ] Trigger Registry Plugin
+
+### Phase 9: Security (Plugin) 🟡 **PHASE-1 LANDED**
+- [x] Authentication Plugin (`@objectstack/plugin-auth`, better-auth)
+- [x] Authorization Plugin — `@objectstack/plugin-security` enforces CRUD/FLS/RLS in the ObjectQL middleware chain; REST → ObjectQL now propagates `ExecutionContext` end-to-end (Phase-1)
+- [x] Row-Level Security — default `member_default` permission set applies a wildcard `organization_id == current_user.organization_id` rule plus per-object overrides `sys_organization_self` / `sys_user_self`. The earlier `tenantField` rewrite indirection was removed: RLS column, placeholder, and `RLSUserContext.organization_id` use the same canonical name end-to-end
+- [x] Analytics RLS bridge — `@objectstack/service-analytics` auto-bridges to `security.getReadFilter(object, context)` and fails closed when read-scope resolution cannot be safely applied
+- [x] Multi-tenancy — verified cross-organization isolation on `pnpm dev:crm` (Alice@OrgAlpha vs. Bob@OrgBeta only see their own records across `sys_organization`, `sys_member`, `sys_user`, and `sys_*_permission_set` link tables)
+- [x] Legacy `objectql.registerTenantMiddleware` removed — SecurityPlugin is now the sole tenant-isolation authority
+- [x] Organization-Wide Defaults / sharing model — `private`, `public_read`, `public_read_write`, and `controlled_by_parent` enforced via `plugin-sharing` + `plugin-security`, proven by dogfood over the real HTTP stack (ADR-0056). `object.sharingModel` accepts the canonical OWD vocabulary alongside the legacy `read` / `read_write` / `full` spellings (D1)
+- [x] Sharing Rule evaluator — owner + criteria rules re-evaluated on `afterInsert` / `afterUpdate` (`plugin-sharing/rule-hooks.ts`); recipients include user / role / group and configurable `role_and_subordinates` role-hierarchy widening (ADR-0056 D6)
+- [x] App-declarable default profile — a permission set may set `isDefault: true` to be the fallback profile for unassigned users (ADR-0056 D7)
+- [x] Default-deny for anonymous traffic — the global default-deny **flip landed** (ADR-0056 D2): `requireAuth` defaults to `true`, explicit `requireAuth: false` opt-outs warn at boot, and public forms self-authorize via `publicFormGrant` (Option A)
+- [ ] Studio RLS visual editor
+- [ ] Per-user×org permission cache
+- [ ] Audit UI / denied-access logging
+
+### Phase 10: AI Integration 📋 **PLANNED**
+- [ ] Agent Framework
+- [ ] RAG Pipeline
+- [ ] NLQ Engine
+- [ ] Model Registry
+
+---
+
+## Summary Statistics
+
+### Overall Implementation Status
+
+| Category | Total Protocols | Status |
+|:---------|:---------------:|:-------|
+| **Data** | 16 | Core modeling, hooks, and query engine fully implemented; document/mapping/external-lookup still pending |
+| **UI** | 10 | Studio/ObjectUI render most authored surfaces (🟡); full cross-surface renderer parity in progress |
+| **API** | 14 | REST/HTTP/discovery/batch fully implemented; OData/GraphQL pending |
+| **System** | 39 | Logging, audit, job, translation, metrics, notification implemented; several governance services pending |
+| **Auth** (plugin) | 10 | Permission + RLS live (`plugin-security`); identity/sharing/territory still plugin-pending |
+| **Automation** (plugin) | 7 | Flow, workflow, approval, webhook, and triggers implemented; ETL/Sync pending |
+| **AI** | 12 | Agents, model registry, conversation, tools, RAG implemented (`service-ai` + knowledge plugins); cost/predictive/DevOps-agent pending |
+| **Integration** | 7 | REST/OpenAPI/MCP/Slack connectors, file storage, and queue implemented; GitHub/Vercel connectors pending |
+| **QA** | 1 | Fully implemented |
+
+### Implementation Coverage
+
+Implementation spans every layer of the platform. Core infrastructure, data modeling, the REST API, client SDKs, security (Phase-1), automation, AI, and integration all have shipping implementations. Remaining gaps are concentrated in specific protocols (OData/GraphQL, cross-surface UI renderer parity, sharing/territory authorization, ETL/Sync, and a handful of governance and AI-cost services) rather than entire layers. Refer to the per-layer tables above for protocol-level status.
+
+### Core Functionality Status
+
+| Feature Area | Status | Production Ready |
+|:-------------|:------:|:----------------:|
+| **Kernel & Plugins** | ✅ | Yes |
+| **Data Modeling** | ✅ | Yes |
+| **Query Engine** | ⚠️ | Partial (depends on driver) |
+| **REST API** | ✅ | Yes |
+| **Client SDKs** | ✅ | Yes |
+| **Metadata System** | ⚠️ | Partial (in-memory only, DB persistence pending) |
+| **HTTP Caching** | ✅ | Yes |
+| **Testing Tools** | ✅ | Yes |
+| **UI Rendering** | ❌ | No |
+| **Workflows** | ✅ | Yes (plugin: `service-automation`) |
+| **Security** | ⚠️ | Partial (Phase-1 RBAC/RLS via `plugin-security`) |
+| **AI Features** | ⚠️ | Partial (`service-ai` + knowledge plugins) |
+
+---
+
+## Package Feature Matrix
+
+| Feature | spec | core | objectql | runtime | client | client-react | cli | metadata | hono | memory | msw |
+|:--------|:----:|:----:|:--------:|:-------:|:------:|:------------:|:---:|:--------:|:----:|:------:|:---:|
+| **Protocol Definitions** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Microkernel** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Plugin System** | ❌ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Service Registry** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Event Bus** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Logging** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Schema Registry** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **ObjectQL Engine** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Protocol Implementation** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **REST Server** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Endpoint Generation** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **HTTP Server** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| **Client SDK** | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Query Builder** | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **React Hooks** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **CLI Commands** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Config Validation** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Metadata Loading** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **File Watching** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **Database Driver** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ |
+| **API Mocking** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+> The REST server, endpoint generation, and data/meta/batch endpoints are implemented in the `@objectstack/rest` package (not shown as a column above); `@objectstack/runtime` re-exports `RestServer` from it.
+
+---
+
+## Next Steps
+
+<Cards>
+  <Card 
+    href="./packages" 
+    title="Package Reference"
+    description="Detailed documentation for each package"
+  />
+  <Card 
+    href="./architecture" 
+    title="Protocol Architecture"
+    description="How protocols relate to each other"
+  />
+  <Card 
+    href="../guides" 
+    title="Developer Guide"
+    description="Build with ObjectStack"
+  />
+  <Card 
+    href="https://github.com/objectstack-ai/spec" 
+    title="Contribute"
+    description="Help implement missing protocols"
+  />
+</Cards>

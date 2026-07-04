@@ -1,0 +1,84 @@
+---
+title: Field grouping & order
+description: The data model is a flat field set, but forms need sections. Where grouping actually lives — semantic field.group vs form sections vs a table's row grouping — and why those three "groups" are different things.
+---
+
+# Field grouping & order
+
+## Scenario
+
+> From the object-definition angle, fields are **flat**. In a table they're flat columns too. But a form needs them **grouped** into sections. Where does the grouping live — on the field, or on the form? And do I have to re-group on every form?
+
+## Recommended solution
+
+**Grouping is a property of a *presentation*, not of the field set. The model stays flat; a form imposes grouping; a table doesn't.** The same fields, three lenses:
+
+| Lens | Field shape | Why |
+|---|---|---|
+| **Object definition** | flat field set | the model describes *what data exists*, not how to arrange it |
+| **Table / grid** | flat columns | a grid is a record × field matrix; the field axis is naturally flat |
+| **Form / record page** | grouped into sections | a form shows one record to a human, who needs visual chunking |
+
+So "flat vs grouped" is not a contradiction — it's one flat set seen through different lenses.
+
+### You declare grouping once; surfaces inherit it
+
+There are **two** grouping concepts. Keep them distinct:
+
+**1. Semantic grouping — `field.group` (on the object).** A field's logical home ("billing", "contact_info", "system"). It travels with the model. The Studio field editor folds fields by it, and auto-generated forms use it as the **default** sectioning — so you are not starting from zero.
+
+```ts
+fields: {
+  name:  Field.text({ label: 'Full name', group: 'contact' }),
+  email: Field.email({ label: 'Email',    group: 'contact' }),
+  stage: Field.select({ label: 'Stage',   group: 'status', options: [/* … */] }),
+}
+```
+
+**2. Layout grouping — form `sections` (on a view).** A specific form's explicit arrangement: which fields, which section, how many columns, collapsible. It can **inherit** `field.group` as the default or **override** it per form.
+
+```ts
+form: {
+  type: 'simple',
+  sections: [
+    { name: 'contact', label: 'Contact', columns: 2, fields: ['name', 'email', 'phone'] },
+    { name: 'status',  label: 'Status',  columns: 2, fields: ['stage'] },
+  ],
+}
+```
+
+### Order is the order you author in
+
+There is **no `field.order`**. The order you declare fields in the object **is** the default display order everywhere — and form `sections` (and the fields within them) are themselves an ordered list, so group order and intra-group order are captured at authoring time. Both the create and edit projections inherit that order, which keeps "quick-create subset" and "full form" visually continuous (see [Create form ≠ edit form](/docs/ui/create-vs-edit-form)).
+
+## The trap: a table's "group" is a *different thing*
+
+A grid view also has `grouping` / `groupByField` — but that groups **records (rows)** by a field's **value** (all `stage = qualified` rows together), not **fields (columns)** into sections. The word "group" means two unrelated axes:
+
+| Surface | "group" means | Axis |
+|---|---|---|
+| Form | fields → sections | columns (visual chunking) |
+| Grid | records → buckets by value | rows (data pivot) |
+
+Conflating these two is the single most common source of exactly this confusion. They share a word and nothing else.
+
+## Why
+
+Keeping grouping off the field (beyond an optional semantic hint) is what lets **one model project to many surfaces**: a create form, a full edit form, a mobile form, a public intake form, role-specific layouts, a flat table, and an API — each arranging the *same* fields differently. Weld a single layout onto the field and you get exactly one arrangement everywhere, which every surface must then share. The semantic `field.group` is the deliberate middle ground: a default that travels, without dictating layout.
+
+## Runnable example
+
+- [`examples/app-showcase/src/objects/contact.object.ts`](https://github.com/objectstack-ai/framework/blob/main/examples/app-showcase/src/objects/contact.object.ts) — fields tagged with `group`.
+- [`examples/app-showcase/src/views/contact.view.ts`](https://github.com/objectstack-ai/framework/blob/main/examples/app-showcase/src/views/contact.view.ts) — sections that materialise those groups.
+
+## Anti-patterns
+
+- **Adding structural nesting to the data model to satisfy a form.** The model is flat; let the form group.
+- **Re-typing the grouping in every form.** Declare `field.group` once; forms inherit and only override on real divergence.
+- **Assuming a grid "group" will section your form fields.** It buckets rows by value — a different axis entirely.
+
+## See also
+
+- [Create form ≠ edit form](/docs/ui/create-vs-edit-form).
+- Reference: [Field schema](/docs/references/data/field) (`group`), [View schema](/docs/references/ui/view) (`sections`, `grouping`).
+- Studio: [Object Designer](/docs/references/studio/object-designer) — field editor groups by `field.group`.

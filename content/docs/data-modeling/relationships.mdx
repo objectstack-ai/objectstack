@@ -1,0 +1,58 @@
+---
+title: "Relationships & Lookups"
+description: Model relationships between objects — lookups, filtered lookups, self-referencing hierarchies, and related lists
+---
+
+# Relationships & Lookups
+
+### Lookup (Many-to-One)
+
+Creates a reference to another object:
+
+```typescript
+fields: {
+  account: Field.lookup('account', {
+    label: 'Account',
+    required: true,
+  }),
+}
+```
+
+**Naming Convention:** Use the object name directly (e.g., `account`, not `account_id`)
+
+### Filtered Lookups
+
+Reference records that meet criteria:
+
+```typescript
+contact: Field.lookup('contact', {
+  label: 'Contact',
+  referenceFilters: ['account = {account}', 'is_active = true'],
+})
+```
+
+### Self-Referencing Lookups
+
+Create hierarchies:
+
+```typescript
+parent_account: Field.lookup('account', {
+  label: 'Parent Account',
+  description: 'Parent company in hierarchy',
+})
+```
+
+### Related Lists
+
+Child records automatically appear in related lists when a lookup points to the parent.
+
+**Example:**
+- Account has many Contacts (Contact.account → Account)
+- Account detail page shows "Contacts" related list
+
+---
+
+## See also
+
+- [Data Modeling overview](/docs/data-modeling)
+- [Schema Design](/docs/data-modeling/schema-design)

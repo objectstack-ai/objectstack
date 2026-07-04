@@ -1,0 +1,11 @@
+{
+  "title": "Plugins & Packages",
+  "icon": "Puzzle",
+  "pages": [
+    "index",
+    "anatomy",
+    "development",
+    "packages",
+    "adding-a-metadata-type"
+  ]
+}

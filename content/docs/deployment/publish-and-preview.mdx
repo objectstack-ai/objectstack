@@ -1,0 +1,104 @@
+---
+title: Publish, Versioning & Preview
+description: Compile metadata into an artifact, publish it as a versioned package to your Cloud catalog, optionally install it into an environment, and preview locally.
+---
+
+# Publish, Versioning & Preview
+
+ObjectStack treats compiled metadata as an immutable artifact. The local loop is:
+
+```text
+objectstack.config.ts -> os compile -> dist/objectstack.json -> os package publish -> Cloud package version (optionally installed into an environment)
+```
+
+The framework CLI owns `compile` and `package publish`. The Cloud control plane
+that stores package versions, installs them into environments, and serves them to
+runtime nodes lives outside this framework repo.
+
+<Callout type="warning">
+The legacy direct-to-environment `os publish` / `os rollback` commands (which wrote
+`sys_environment_revision`) were **removed** (#2237). Publishing now goes through the
+**package catalog**: `os package publish` uploads a versioned package, and an
+environment is updated by **installing** a version into it. Revision-style rollback
+is no longer a framework CLI command — version and environment management are a
+Cloud control-plane concern.
+</Callout>
+
+---
+
+## 1. Compile
+
+```bash
+os compile
+# -> dist/objectstack.json
+```
+
+The artifact contains metadata, manifest requirements, and packaged function code.
+Deployment config stays outside the artifact: database URLs, secrets, runtime
+credentials, and environment identity are host inputs.
+
+---
+
+## 2. Publish a package version
+
+```bash
+# upload dist/objectstack.json as a new version in your org catalog
+os package publish
+
+# explicit artifact + install into an environment in one step
+os package publish ./dist/objectstack.json --env env_prod --install
+```
+
+The CLI:
+
+1. `POST /api/v1/cloud/packages` — ensure a `sys_package` row exists (id derived from `artifact.manifest.id`, or `--manifest-id`).
+2. `POST /api/v1/cloud/packages/:id/versions` — snapshot `dist/objectstack.json` into `sys_package_version.manifest_json` (status `published`).
+3. (optional) install the new version into `--env`.
+
+Common flags:
+
+| Flag | Env var | Purpose |
+|:---|:---|:---|
+| `artifact` (positional) | — | Path to the compiled artifact (default `dist/objectstack.json`) |
+| `--server`, `-s` | `OS_CLOUD_URL` | Cloud control-plane URL |
+| `--token`, `-t` | `OS_CLOUD_API_KEY` | Bearer token (service mode) |
+| `--version`, `-v` | — | Semver version (default: `artifact.manifest.version`) |
+| `--visibility` | — | `org` (default) · `private` · `marketplace` |
+| `--org` | `OS_ORG_ID` | Owner org id (service mode) |
+| `--env` | `OS_ENVIRONMENT_ID` | Environment to install the new version into |
+| `--install` | — | Auto-install the new version into `--env` after publishing |
+
+In user mode the package is owned by your active organization; in service mode
+(bearer key) pass `--org`. See [Packages](/docs/plugins/packages) for the package model and the
+[Cloud Environment Artifact API](/docs/deployment/cloud-artifact-api) for the
+control-plane endpoints.
+
+---
+
+## 3. Install / update an environment
+
+An environment is updated by **installing a package version** into it — either at
+publish time with `--env --install`, or separately via the Cloud control plane /
+Marketplace. To "roll back," install the prior version; there is no
+revision-activate CLI command anymore.
+
+---
+
+## 4. Preview patterns
+
+Use one of these shapes:
+
+| Pattern | Command |
+|:---|:---|
+| Local artifact preview | `os dev --artifact ./dist/objectstack.json --ui` |
+| Production artifact host | `OS_ARTIFACT_PATH=./dist/objectstack.json os start` |
+| Cloud environment preview | Install to a preview environment, then route clients to it via `/api/v1/environments/:environmentId/...` or `X-Environment-Id`. |
+
+---
+
+## Related
+
+- [Packages](/docs/plugins/packages)
+- [Deployment Modes](/docs/deployment)
+- [Environment-Scoped Routing](/docs/api/environment-routing)
+- [Cloud Environment Artifact API](/docs/deployment/cloud-artifact-api)

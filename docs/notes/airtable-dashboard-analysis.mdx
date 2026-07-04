@@ -1,0 +1,1161 @@
+---
+title: Airtable Dashboard Gap Analysis
+description: Comprehensive gap analysis comparing ObjectStack Dashboard protocol and components against Airtable's Sales Performance Dashboard
+---
+
+# Airtable Dashboard Gap Analysis
+
+> **Created:** 2026-02-18  
+> **Context:** Sales Performance & Team Dashboard UI benchmarking  
+> **Scope:** Protocol enhancements (spec) + Component implementations (objectui)  
+> **Related Issues:** [#712](https://github.com/objectstack-ai/spec/issues/712), [#713](https://github.com/objectstack-ai/spec/issues/713), [#714](https://github.com/objectstack-ai/spec/issues/714), [objectui#585](https://github.com/objectstack-ai/objectui/issues/585), [objectui#586](https://github.com/objectstack-ai/objectui/issues/586), [objectui#587](https://github.com/objectstack-ai/objectui/issues/587), [objectui#588](https://github.com/objectstack-ai/objectui/issues/588)
+
+<Callout type="warn" title="Historical snapshot — partly superseded">
+This is a point-in-time benchmark (Feb 2026). Two later decisions supersede parts
+of it; treat the **Analytics Datasets** guide and the generated **UI references**
+as the current source of truth:
+
+- **ADR-0021 single-form** removed the inline widget/report query
+  (`object` / `valueField` / `aggregate` / `categoryField` / `categoryGranularity`,
+  report `columns` / `groupings`). Widgets and reports now bind a semantic
+  **`dataset`** and select dimensions/measures by name. The inline-form examples
+  below are illustrative of the original analysis, not current authoring.
+- **`ChartTypeSchema` was trimmed** to families the renderer draws distinctly.
+  The `grouped-bar` / `stacked-bar` (and `bi-polar-bar` / `stacked-area` /
+  `step-line` / `spline` / `pyramid` / `bubble`) types this doc lists as
+  "defined, renderer pending" were **removed** rather than implemented — a type
+  that only renders as its base chart is no longer advertised. They can return
+  via an opt-in renderer once a real renderer + data model backs them.
+</Callout>
+
+---
+
+## Table of Contents
+
+- [1. Executive Summary](#1-executive-summary)
+- [2. Target Interface Breakdown](#2-target-interface-breakdown)
+- [3. Protocol Enhancements (spec)](#3-protocol-enhancements-spec)
+- [4. Component Enhancements (objectui)](#4-component-enhancements-objectui)
+- [5. Complete Implementation Example](#5-complete-implementation-example)
+- [6. Implementation Roadmap](#6-implementation-roadmap)
+- [7. Related Resources](#7-related-resources)
+
+---
+
+## 1. Executive Summary
+
+This document provides a comprehensive gap analysis comparing the ObjectStack Dashboard protocol and ObjectUI components against **Airtable's "Sales Performance & Team Dashboard"** interface. The analysis identifies missing protocol features, component gaps, and provides a prioritized implementation roadmap.
+
+### Key Findings
+
+| Area | Status | Summary |
+|:-----|:-------|:--------|
+| **Core Protocol** | 🟡 **Mostly Complete** | Dashboard & widget schemas exist; need enhancements for color variants, actions, and header configuration |
+| **Global Filters** | ⚠️ **Protocol Only** | `globalFilters` defined in schema but lacks dynamic data binding (`optionsFrom`) and no component implementation |
+| **Chart Types** | ✅ **Complete** | All basic chart types (line, bar, pie) supported; advanced types (funnel, grouped-bar) defined in `ChartTypeSchema` |
+| **Pivot Table** | ❌ **Missing** | Widget type defined in protocol but no component implementation |
+| **KPI Cards** | ⚠️ **Partial** | `MetricCard` exists but lacks color variants and action buttons |
+| **Widget Actions** | ❌ **Missing** | No support for external links or action buttons on widgets |
+| **Dashboard Header** | ⚠️ **Partial** | No structured configuration for title, description, and actions |
+
+---
+
+## 2. Target Interface Breakdown
+
+The Airtable Sales Performance Dashboard contains the following UI zones:
+
+### Zone A: Global Filter Bar
+
+**Airtable Feature:** Time period, team, and product line dropdown filters at the top of the dashboard.
+
+**Current Coverage:**
+- ✅ Protocol defined (`DashboardSchema.globalFilters`)
+- ❌ No dynamic options support (`optionsFrom` for lookup fields)
+- ❌ No component implementation (`DashboardFilterBar`)
+
+**Required Changes:**
+```typescript
+// Enhanced protocol
+globalFilters: [
+  {
+    field: 'time_period',
+    label: 'Time Period',
+    type: 'select',
+    options: [
+      { value: 'this_month', label: 'This Month' },
+      { value: 'last_month', label: 'Last Month' },
+      { value: 'this_quarter', label: 'This Quarter' }
+    ],
+    defaultValue: 'this_quarter',
+    scope: 'dashboard',       // NEW: Filter scope
+    targetWidgets: ['*']      // NEW: Which widgets to filter
+  },
+  {
+    field: 'team',
+    label: 'Team',
+    type: 'lookup',
+    optionsFrom: {            // NEW: Dynamic data binding
+      object: 'team',
+      valueField: 'id',
+      labelField: 'name'
+    },
+    defaultValue: null
+  }
+]
+```
+
+---
+
+### Zone B: KPI Card Row
+
+**Airtable Feature:** 3 colored KPI cards (orange, teal, blue) with metric values and external-link icons.
+
+**Current Coverage:**
+- ✅ `MetricCard` component exists
+- ❌ No color variant support
+- ❌ No action button/link support
+
+**Required Changes:**
+```typescript
+// Enhanced widget schema
+{
+  title: 'Total Revenue',
+  type: 'metric',
+  object: 'opportunity',
+  valueField: 'amount',
+  aggregate: 'sum',
+  layout: { x: 0, y: 0, w: 4, h: 2 },
+  
+  // NEW properties
+  colorVariant: 'orange',           // orange | teal | blue | purple | green
+  actionUrl: '/reports/revenue',    // External link or internal route
+  actionType: 'external',           // external | internal | custom
+  description: 'YTD revenue across all regions'
+}
+```
+
+---
+
+### Zone C-E: Chart Widgets
+
+**Airtable Features:**
+- **C:** Line chart (monthly revenue trend)
+- **D:** Bar chart (funnel stage distribution)
+- **E:** Pie/Donut chart (conversion rate by stage)
+
+**Current Coverage:**
+- ✅ All supported in `ChartTypeSchema` (line, bar, pie, donut)
+- ✅ Chart configuration via `ChartConfigSchema`
+
+**No changes needed** — these are already fully supported.
+
+---
+
+### Zone F: Grouped Bar Chart
+
+**Airtable Feature:** Team performance comparison with grouped bars (multiple series per category).
+
+**Current Coverage:**
+- ✅ `grouped-bar` defined in `ChartTypeSchema`
+- ❌ No component implementation in ObjectUI
+
+**Required Changes:**
+```typescript
+// Widget definition (protocol already supports this)
+{
+  title: 'Team Performance',
+  type: 'grouped-bar',
+  object: 'opportunity',
+  categoryField: 'team',
+  valueField: 'amount',
+  aggregate: 'sum',
+  chartConfig: {
+    series: [
+      { name: 'closed_won', label: 'Won', color: '#10b981' },
+      { name: 'closed_lost', label: 'Lost', color: '#ef4444' }
+    ]
+  },
+  layout: { x: 0, y: 6, w: 6, h: 4 }
+}
+```
+
+**Action:** Implement `grouped-bar` renderer in `plugin-charts`.
+
+---
+
+### Zone G: Pivot Table
+
+**Airtable Feature:** Owner × Stage cross-tabulation with sum rows and columns.
+
+**Current Coverage:**
+- ✅ `pivot` defined in `ChartTypeSchema`
+- ❌ No `PivotTable` component
+- ❌ No multi-measure support
+
+**Required Changes:**
+```typescript
+// Enhanced protocol for pivot widgets
+{
+  title: 'Revenue by Owner & Stage',
+  type: 'pivot',
+  object: 'opportunity',
+  
+  // NEW: Structured pivot configuration
+  pivotConfig: {
+    rows: ['owner'],          // Row dimensions
+    columns: ['stage'],       // Column dimensions
+    measures: [               // NEW: Support multiple measures
+      {
+        field: 'amount',
+        aggregate: 'sum',
+        label: 'Total Amount',
+        format: '$0,0'
+      },
+      {
+        field: 'id',
+        aggregate: 'count',
+        label: 'Count',
+        format: '0,0'
+      }
+    ],
+    showRowTotals: true,
+    showColumnTotals: true,
+    showGrandTotal: true
+  },
+  layout: { x: 6, y: 6, w: 6, h: 4 }
+}
+```
+
+**Action:** 
+1. Add `pivotConfig` and `measures` to `DashboardWidgetSchema`
+2. Implement `PivotTable` component in `plugin-report`
+
+---
+
+### Zone H: Widget Action Button
+
+**Airtable Feature:** External-link icon on each widget header for drill-down or navigation.
+
+**Current Coverage:**
+- ❌ Widget headers do not support action buttons
+- ❌ No `description` field for widgets
+
+**Required Changes:**
+```typescript
+// Enhanced widget schema
+{
+  title: 'Monthly Revenue',
+  description: 'YTD revenue trend by month',  // NEW
+  actionUrl: '/reports/revenue-detail',       // NEW
+  actionType: 'internal',                     // NEW
+  actionIcon: 'external-link',                // NEW
+  
+  // ... rest of widget config
+}
+```
+
+---
+
+### Zone I: Dashboard Title/Description
+
+**Airtable Feature:** Page header with title, subtitle, and optional action buttons.
+
+**Current Coverage:**
+- ✅ `DashboardSchema.label` and `DashboardSchema.description` exist
+- ❌ No structured header configuration
+- ❌ No support for header actions
+
+**Required Changes:**
+```typescript
+// Enhanced DashboardSchema
+export const DashboardSchema = z.object({
+  name: SnakeCaseIdentifierSchema,
+  label: I18nLabelSchema,
+  description: I18nLabelSchema.optional(),
+  
+  // NEW: Structured header configuration
+  header: z.object({
+    showTitle: z.boolean().default(true),
+    showDescription: z.boolean().default(true),
+    actions: z.array(z.object({
+      label: I18nLabelSchema,
+      icon: z.string().optional(),
+      url: z.string().optional(),
+      type: z.enum(['primary', 'secondary', 'ghost']).default('secondary')
+    })).optional().describe('Header action buttons')
+  }).optional(),
+  
+  widgets: z.array(DashboardWidgetSchema),
+  // ...
+});
+```
+
+---
+
+## 3. Protocol Enhancements (spec)
+
+The following enhancements are needed in `packages/spec/src/ui/dashboard.zod.ts`:
+
+### 3.1 Widget Color Variants & Actions
+
+```typescript
+export const DashboardWidgetSchema = z.object({
+  title: I18nLabelSchema.optional(),
+  type: ChartTypeSchema.default('metric'),
+  
+  // NEW: Visual styling
+  colorVariant: z.enum([
+    'default', 'orange', 'teal', 'blue', 'purple', 
+    'green', 'red', 'yellow', 'indigo', 'pink'
+  ]).optional().describe('Color variant for metric cards'),
+  
+  // NEW: Widget description
+  description: I18nLabelSchema.optional().describe('Widget description or subtitle'),
+  
+  // NEW: Widget actions
+  actionUrl: z.string().optional().describe('Action URL (external link or route)'),
+  actionType: z.enum(['external', 'internal', 'custom']).optional().describe('Action type'),
+  actionIcon: z.string().optional().describe('Action icon identifier'),
+  
+  // Existing fields
+  chartConfig: ChartConfigSchema.optional(),
+  object: z.string().optional(),
+  filter: FilterConditionSchema.optional(),
+  categoryField: z.string().optional(),
+  valueField: z.string().optional(),
+  aggregate: z.enum(['count', 'sum', 'avg', 'min', 'max']).optional().default('count'),
+  layout: z.object({
+    x: z.number(),
+    y: z.number(),
+    w: z.number(),
+    h: z.number(),
+  }),
+  options: z.unknown().optional(),
+  responsive: ResponsiveConfigSchema.optional(),
+  aria: AriaPropsSchema.optional(),
+});
+```
+
+**Related Issue:** [#713](https://github.com/objectstack-ai/spec/issues/713)
+
+---
+
+### 3.2 Enhanced Global Filters
+
+```typescript
+export const GlobalFilterSchema = z.object({
+  field: z.string().describe('Field name to filter on'),
+  label: I18nLabelSchema.optional().describe('Display label for the filter'),
+  type: z.enum(['text', 'select', 'date', 'number', 'lookup']).optional().describe('Filter input type'),
+  
+  // NEW: Static options (for select type)
+  options: z.array(z.object({
+    value: z.any(),
+    label: I18nLabelSchema
+  })).optional().describe('Static filter options'),
+  
+  // NEW: Dynamic data binding (for lookup type)
+  optionsFrom: z.object({
+    object: z.string().describe('Source object name'),
+    valueField: z.string().describe('Field to use as option value'),
+    labelField: z.string().describe('Field to use as option label'),
+    filter: FilterConditionSchema.optional().describe('Filter to apply to source object')
+  }).optional().describe('Dynamic filter options from object'),
+  
+  // NEW: Default value
+  defaultValue: z.any().optional().describe('Default filter value'),
+  
+  // NEW: Filter scope
+  scope: z.enum(['dashboard', 'widget']).default('dashboard').describe('Filter application scope'),
+  
+  // NEW: Target widgets (for selective filtering)
+  targetWidgets: z.array(z.string()).optional().describe('Widget IDs to apply this filter to (* for all)')
+});
+
+export const DashboardSchema = z.object({
+  // ... existing fields
+  globalFilters: z.array(GlobalFilterSchema).optional(),
+  // ...
+});
+```
+
+**Related Issue:** [#712](https://github.com/objectstack-ai/spec/issues/712)
+
+---
+
+### 3.3 Dashboard Header Configuration
+
+```typescript
+export const DashboardHeaderSchema = z.object({
+  showTitle: z.boolean().default(true).describe('Show dashboard title'),
+  showDescription: z.boolean().default(true).describe('Show dashboard description'),
+  
+  actions: z.array(z.object({
+    label: I18nLabelSchema.describe('Action button label'),
+    icon: z.string().optional().describe('Action button icon'),
+    url: z.string().optional().describe('Action URL'),
+    onClick: z.string().optional().describe('Custom action handler ID'),
+    type: z.enum(['primary', 'secondary', 'ghost']).default('secondary').describe('Button variant'),
+    permission: z.string().optional().describe('Required permission to show action')
+  })).optional().describe('Header action buttons')
+});
+
+export const DashboardSchema = z.object({
+  // ... existing fields
+  header: DashboardHeaderSchema.optional().describe('Dashboard header configuration'),
+  // ...
+});
+```
+
+**Related Issue:** [#714](https://github.com/objectstack-ai/spec/issues/714)
+
+---
+
+### 3.4 Pivot Configuration & Multi-Measure Support
+
+```typescript
+export const PivotConfigSchema = z.object({
+  rows: z.array(z.string()).describe('Row dimension fields'),
+  columns: z.array(z.string()).describe('Column dimension fields'),
+  
+  // NEW: Multi-measure support
+  measures: z.array(z.object({
+    field: z.string().describe('Field to aggregate'),
+    aggregate: z.enum(['count', 'sum', 'avg', 'min', 'max']).describe('Aggregation function'),
+    label: I18nLabelSchema.optional().describe('Measure display label'),
+    format: z.string().optional().describe('Value format string')
+  })).describe('Measures to calculate in pivot'),
+  
+  showRowTotals: z.boolean().default(true).describe('Show row totals'),
+  showColumnTotals: z.boolean().default(true).describe('Show column totals'),
+  showGrandTotal: z.boolean().default(true).describe('Show grand total'),
+  
+  sortRows: z.array(z.object({
+    field: z.string(),
+    order: z.enum(['asc', 'desc']).default('asc')
+  })).optional().describe('Row sorting configuration'),
+  
+  sortColumns: z.array(z.object({
+    field: z.string(),
+    order: z.enum(['asc', 'desc']).default('asc')
+  })).optional().describe('Column sorting configuration')
+});
+
+export const DashboardWidgetSchema = z.object({
+  // ... existing fields
+  
+  // NEW: Pivot-specific configuration
+  pivotConfig: PivotConfigSchema.optional().describe('Pivot table configuration (when type=pivot)')
+});
+```
+
+**Related Issue:** [#714](https://github.com/objectstack-ai/spec/issues/714)
+
+---
+
+## 4. Component Enhancements (objectui)
+
+The following components need to be implemented or enhanced in the ObjectUI ecosystem:
+
+### 4.1 DashboardFilterBar Component
+
+**Purpose:** Render global filter controls at the top of dashboards.
+
+**Package:** `@objectstack/plugin-dashboard`
+
+**Interface:**
+```typescript
+interface DashboardFilterBarProps {
+  filters: GlobalFilter[];
+  values: Record<string, any>;
+  onChange: (field: string, value: any) => void;
+  variant?: 'default' | 'compact' | 'inline';
+}
+
+export const DashboardFilterBar: React.FC<DashboardFilterBarProps> = ({
+  filters,
+  values,
+  onChange,
+  variant = 'default'
+}) => {
+  // Render filter controls (select, date picker, lookup, etc.)
+  // Support dynamic options via optionsFrom
+  // Handle filter value changes
+};
+```
+
+**Related Issue:** [objectui#588](https://github.com/objectstack-ai/objectui/issues/588)
+
+---
+
+### 4.2 MetricCard Color Variants & Actions
+
+**Purpose:** Enhance `MetricCard` with color variants and action buttons.
+
+**Package:** `@objectstack/plugin-dashboard`
+
+**Changes:**
+```typescript
+interface MetricCardProps {
+  title: string;
+  value: number | string;
+  
+  // NEW
+  colorVariant?: 'default' | 'orange' | 'teal' | 'blue' | 'purple' | 'green' | 'red';
+  description?: string;
+  actionUrl?: string;
+  actionType?: 'external' | 'internal' | 'custom';
+  actionIcon?: string;
+  onAction?: () => void;
+  
+  // Existing
+  format?: string;
+  trend?: { value: number; direction: 'up' | 'down' };
+  loading?: boolean;
+}
+
+export const MetricCard: React.FC<MetricCardProps> = ({
+  title,
+  value,
+  colorVariant = 'default',
+  description,
+  actionUrl,
+  actionType,
+  actionIcon = 'external-link',
+  onAction,
+  ...rest
+}) => {
+  // Apply color variant styling
+  // Render action button if actionUrl or onAction provided
+  // Support description subtitle
+};
+```
+
+**Related Issue:** [objectui#587](https://github.com/objectstack-ai/objectui/issues/587)
+
+---
+
+### 4.3 PivotTable Component
+
+**Purpose:** Render cross-tabulation matrices with row/column totals.
+
+**Package:** `@objectstack/plugin-report`
+
+**Interface:**
+```typescript
+interface PivotTableProps {
+  data: any[];
+  config: PivotConfig;
+  loading?: boolean;
+  onCellClick?: (row: any, column: any, measure: any) => void;
+}
+
+export const PivotTable: React.FC<PivotTableProps> = ({
+  data,
+  config,
+  loading,
+  onCellClick
+}) => {
+  // Compute pivot matrix from flat data
+  // Render row headers (left sticky column)
+  // Render column headers (top sticky row)
+  // Render cells with measures
+  // Render row/column/grand totals
+  // Support multi-measure display (stacked or side-by-side)
+};
+```
+
+**Related Issue:** [objectui#585](https://github.com/objectstack-ai/objectui/issues/585)
+
+---
+
+### 4.4 Widget Header with Description & Action
+
+**Purpose:** Standardize widget headers with optional description and action button.
+
+**Package:** `@objectstack/plugin-dashboard`
+
+**Interface:**
+```typescript
+interface WidgetHeaderProps {
+  title: string;
+  description?: string;
+  actionUrl?: string;
+  actionType?: 'external' | 'internal' | 'custom';
+  actionIcon?: string;
+  onAction?: () => void;
+}
+
+export const WidgetHeader: React.FC<WidgetHeaderProps> = ({
+  title,
+  description,
+  actionUrl,
+  actionType,
+  actionIcon = 'external-link',
+  onAction
+}) => {
+  // Render title
+  // Render optional description (smaller, muted text)
+  // Render action button (icon only, top-right)
+};
+```
+
+**Related Issue:** [objectui#586](https://github.com/objectstack-ai/objectui/issues/586)
+
+---
+
+### 4.5 Advanced Chart Types
+
+**Purpose:** Implement missing chart types in `AdvancedChartImpl`.
+
+**Package:** `@objectstack/plugin-charts`
+
+**Missing Types:**
+- `funnel` — Funnel chart for conversion stages
+- `grouped-bar` — Grouped bar chart for multi-series comparison
+- `stacked-bar` — Stacked bar chart for composition
+- `horizontal-bar` — Horizontal bar chart variant
+- `gauge` — Gauge/speedometer for progress metrics
+
+**Related Issue:** [#713](https://github.com/objectstack-ai/spec/issues/713)
+
+---
+
+### 4.6 DashboardHeader Component
+
+**Purpose:** Render dashboard page header with title, description, and actions.
+
+**Package:** `@objectstack/plugin-dashboard`
+
+**Interface:**
+```typescript
+interface DashboardHeaderProps {
+  title: string;
+  description?: string;
+  actions?: Array<{
+    label: string;
+    icon?: string;
+    url?: string;
+    onClick?: () => void;
+    type?: 'primary' | 'secondary' | 'ghost';
+  }>;
+  showTitle?: boolean;
+  showDescription?: boolean;
+}
+
+export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
+  title,
+  description,
+  actions = [],
+  showTitle = true,
+  showDescription = true
+}) => {
+  // Render title (h1 or h2)
+  // Render description (muted paragraph)
+  // Render action buttons (right-aligned)
+};
+```
+
+**Related Issue:** [objectui#586](https://github.com/objectstack-ai/objectui/issues/586)
+
+---
+
+## 5. Complete Implementation Example
+
+### 5.1 Full Dashboard Definition (TypeScript)
+
+```typescript
+import { Dashboard } from '@objectstack/spec/ui';
+
+export const salesPerformanceDashboard = Dashboard.create({
+  name: 'sales_performance',
+  label: 'Sales Performance & Team Dashboard',
+  description: 'Executive overview of sales metrics and team performance',
+  
+  // Dashboard header configuration
+  header: {
+    showTitle: true,
+    showDescription: true,
+    actions: [
+      {
+        label: 'Export PDF',
+        icon: 'download',
+        onClick: 'exportDashboard',
+        type: 'secondary'
+      },
+      {
+        label: 'Configure',
+        icon: 'settings',
+        url: '/settings/dashboards/sales_performance',
+        type: 'ghost'
+      }
+    ]
+  },
+  
+  // Global filters
+  globalFilters: [
+    {
+      field: 'time_period',
+      label: 'Time Period',
+      type: 'select',
+      options: [
+        { value: 'this_month', label: 'This Month' },
+        { value: 'last_month', label: 'Last Month' },
+        { value: 'this_quarter', label: 'This Quarter' },
+        { value: 'last_quarter', label: 'Last Quarter' }
+      ],
+      defaultValue: 'this_quarter',
+      scope: 'dashboard'
+    },
+    {
+      field: 'team',
+      label: 'Team',
+      type: 'lookup',
+      optionsFrom: {
+        object: 'team',
+        valueField: 'id',
+        labelField: 'name',
+        filter: { field: 'active', operator: 'eq', value: true }
+      },
+      scope: 'dashboard'
+    },
+    {
+      field: 'product_line',
+      label: 'Product Line',
+      type: 'select',
+      optionsFrom: {
+        object: 'product',
+        valueField: 'category',
+        labelField: 'category'
+      },
+      scope: 'dashboard'
+    }
+  ],
+  
+  // Widgets
+  widgets: [
+    // Row 1: KPI Cards
+    {
+      title: 'Total Revenue',
+      description: 'YTD revenue across all regions',
+      type: 'metric',
+      object: 'opportunity',
+      valueField: 'amount',
+      aggregate: 'sum',
+      filter: { field: 'stage', operator: 'eq', value: 'closed_won' },
+      colorVariant: 'orange',
+      actionUrl: '/reports/revenue-detail',
+      actionType: 'internal',
+      layout: { x: 0, y: 0, w: 4, h: 2 }
+    },
+    {
+      title: 'Win Rate',
+      description: 'Percentage of opportunities closed won',
+      type: 'kpi',
+      object: 'opportunity',
+      valueField: 'stage',
+      aggregate: 'count',
+      colorVariant: 'teal',
+      actionUrl: '/reports/win-rate',
+      actionType: 'internal',
+      layout: { x: 4, y: 0, w: 4, h: 2 }
+    },
+    {
+      title: 'Active Deals',
+      description: 'Opportunities in pipeline',
+      type: 'metric',
+      object: 'opportunity',
+      valueField: 'id',
+      aggregate: 'count',
+      filter: { 
+        field: 'stage', 
+        operator: 'nin', 
+        value: ['closed_won', 'closed_lost'] 
+      },
+      colorVariant: 'blue',
+      actionUrl: '/views/active-deals',
+      actionType: 'internal',
+      layout: { x: 8, y: 0, w: 4, h: 2 }
+    },
+    
+    // Row 2: Line Chart - Monthly Revenue Trend
+    {
+      title: 'Monthly Revenue Trend',
+      description: 'Revenue by month for selected period',
+      type: 'line',
+      object: 'opportunity',
+      categoryField: 'close_date',
+      valueField: 'amount',
+      aggregate: 'sum',
+      filter: { field: 'stage', operator: 'eq', value: 'closed_won' },
+      chartConfig: {
+        xAxis: { field: 'close_date', format: 'MMM YYYY' },
+        yAxis: { field: 'amount', format: '$0,0' },
+        series: [
+          { name: 'amount', label: 'Revenue', color: '#fb923c' }
+        ]
+      },
+      actionUrl: '/reports/revenue-trend',
+      actionType: 'internal',
+      layout: { x: 0, y: 2, w: 6, h: 4 }
+    },
+    
+    // Row 2: Bar Chart - Funnel Stage Distribution
+    {
+      title: 'Pipeline by Stage',
+      description: 'Deal distribution across stages',
+      type: 'bar',
+      object: 'opportunity',
+      categoryField: 'stage',
+      valueField: 'amount',
+      aggregate: 'sum',
+      chartConfig: {
+        xAxis: { field: 'stage' },
+        yAxis: { field: 'amount', format: '$0,0.0a' }
+      },
+      actionUrl: '/reports/pipeline',
+      actionType: 'internal',
+      layout: { x: 6, y: 2, w: 6, h: 4 }
+    },
+    
+    // Row 3: Pie Chart - Conversion Rate
+    {
+      title: 'Conversion Rate by Stage',
+      description: 'Win/loss distribution',
+      type: 'donut',
+      object: 'opportunity',
+      categoryField: 'stage',
+      valueField: 'id',
+      aggregate: 'count',
+      chartConfig: {
+        colors: ['#10b981', '#ef4444', '#f59e0b', '#6366f1']
+      },
+      layout: { x: 0, y: 6, w: 6, h: 4 }
+    },
+    
+    // Row 3: Grouped Bar Chart - Team Performance
+    {
+      title: 'Team Performance Comparison',
+      description: 'Won vs. lost by team',
+      type: 'grouped-bar',
+      object: 'opportunity',
+      categoryField: 'team',
+      valueField: 'amount',
+      aggregate: 'sum',
+      chartConfig: {
+        series: [
+          { name: 'closed_won', label: 'Won', color: '#10b981' },
+          { name: 'closed_lost', label: 'Lost', color: '#ef4444' }
+        ]
+      },
+      actionUrl: '/reports/team-performance',
+      actionType: 'internal',
+      layout: { x: 6, y: 6, w: 6, h: 4 }
+    },
+    
+    // Row 4: Pivot Table - Owner × Stage
+    {
+      title: 'Revenue by Owner & Stage',
+      description: 'Cross-tabulation of deals',
+      type: 'pivot',
+      object: 'opportunity',
+      pivotConfig: {
+        rows: ['owner'],
+        columns: ['stage'],
+        measures: [
+          {
+            field: 'amount',
+            aggregate: 'sum',
+            label: 'Total Amount',
+            format: '$0,0'
+          },
+          {
+            field: 'id',
+            aggregate: 'count',
+            label: 'Count',
+            format: '0,0'
+          }
+        ],
+        showRowTotals: true,
+        showColumnTotals: true,
+        showGrandTotal: true
+      },
+      actionUrl: '/reports/pivot-detail',
+      actionType: 'internal',
+      layout: { x: 0, y: 10, w: 12, h: 6 }
+    }
+  ],
+  
+  // Auto-refresh every 5 minutes
+  refreshInterval: 300,
+  
+  // Performance optimization
+  performance: {
+    lazyLoad: true,
+    cacheTimeout: 300
+  }
+});
+```
+
+---
+
+### 5.2 JSON Schema Example
+
+For reference, here's the same dashboard definition in pure JSON format:
+
+```json
+{
+  "name": "sales_performance",
+  "label": "Sales Performance & Team Dashboard",
+  "description": "Executive overview of sales metrics and team performance",
+  
+  "header": {
+    "showTitle": true,
+    "showDescription": true,
+    "actions": [
+      {
+        "label": "Export PDF",
+        "icon": "download",
+        "onClick": "exportDashboard",
+        "type": "secondary"
+      },
+      {
+        "label": "Configure",
+        "icon": "settings",
+        "url": "/settings/dashboards/sales_performance",
+        "type": "ghost"
+      }
+    ]
+  },
+  
+  "globalFilters": [
+    {
+      "field": "time_period",
+      "label": "Time Period",
+      "type": "select",
+      "options": [
+        { "value": "this_month", "label": "This Month" },
+        { "value": "last_month", "label": "Last Month" },
+        { "value": "this_quarter", "label": "This Quarter" },
+        { "value": "last_quarter", "label": "Last Quarter" }
+      ],
+      "defaultValue": "this_quarter",
+      "scope": "dashboard"
+    },
+    {
+      "field": "team",
+      "label": "Team",
+      "type": "lookup",
+      "optionsFrom": {
+        "object": "team",
+        "valueField": "id",
+        "labelField": "name",
+        "filter": { "field": "active", "operator": "eq", "value": true }
+      },
+      "scope": "dashboard"
+    }
+  ],
+  
+  "widgets": [
+    {
+      "title": "Total Revenue",
+      "description": "YTD revenue across all regions",
+      "type": "metric",
+      "object": "opportunity",
+      "valueField": "amount",
+      "aggregate": "sum",
+      "filter": { "field": "stage", "operator": "eq", "value": "closed_won" },
+      "colorVariant": "orange",
+      "actionUrl": "/reports/revenue-detail",
+      "actionType": "internal",
+      "layout": { "x": 0, "y": 0, "w": 4, "h": 2 }
+    },
+    {
+      "title": "Monthly Revenue Trend",
+      "type": "line",
+      "object": "opportunity",
+      "categoryField": "close_date",
+      "valueField": "amount",
+      "aggregate": "sum",
+      "layout": { "x": 0, "y": 2, "w": 6, "h": 4 }
+    }
+  ],
+  
+  "refreshInterval": 300
+}
+```
+
+---
+
+## 6. Implementation Roadmap
+
+### Priority Classification
+
+- 🔴 **P0 (Critical):** Required for Airtable feature parity; blocking user workflows
+- 🟡 **P1 (Important):** Enhances user experience; should be in next release
+- 🟢 **P2 (Nice-to-have):** Polishing; can be deferred
+
+---
+
+### Phase 1: Foundation (Sprint 1-2) — 2 weeks
+
+| Priority | Task | Package | Effort | Issue |
+|:--------:|:-----|:--------|:-------|:------|
+| 🔴 P0 | Add `colorVariant`, `actionUrl`, `description` to `DashboardWidgetSchema` | `spec` | 0.5d | [#713](https://github.com/objectstack-ai/spec/issues/713) |
+| 🔴 P0 | Enhance `globalFilters` with `options`, `optionsFrom`, `defaultValue`, `scope`, `targetWidgets` | `spec` | 0.5d | [#712](https://github.com/objectstack-ai/spec/issues/712) |
+| 🔴 P0 | Add `header` configuration to `DashboardSchema` | `spec` | 0.5d | [#714](https://github.com/objectstack-ai/spec/issues/714) |
+| 🔴 P0 | Add `pivotConfig` and `measures` to `DashboardWidgetSchema` | `spec` | 0.5d | [#714](https://github.com/objectstack-ai/spec/issues/714) |
+| 🔴 P0 | Implement `DashboardFilterBar` component | `plugin-dashboard` | 3d | [objectui#588](https://github.com/objectstack-ai/objectui/issues/588) |
+| 🔴 P0 | Add color variants + action button to `MetricCard` | `plugin-dashboard` | 1d | [objectui#587](https://github.com/objectstack-ai/objectui/issues/587) |
+| 🔴 P0 | Add description + action button to widget headers | `plugin-dashboard` | 1d | [objectui#586](https://github.com/objectstack-ai/objectui/issues/586) |
+
+**Total Effort:** ~7.5 days
+
+---
+
+### Phase 2: Advanced Widgets (Sprint 3-4) — 2 weeks
+
+| Priority | Task | Package | Effort | Issue |
+|:--------:|:-----|:--------|:-------|:------|
+| 🔴 P0 | Implement `PivotTable` component | `plugin-report` | 5d | [objectui#585](https://github.com/objectstack-ai/objectui/issues/585) |
+| 🟡 P1 | Implement `funnel` chart type | `plugin-charts` | 1d | [#713](https://github.com/objectstack-ai/spec/issues/713) |
+| 🟡 P1 | Implement `grouped-bar` chart type | `plugin-charts` | 1d | [#713](https://github.com/objectstack-ai/spec/issues/713) |
+| 🟡 P1 | Implement `stacked-bar` chart type | `plugin-charts` | 1d | [#713](https://github.com/objectstack-ai/spec/issues/713) |
+| 🟡 P1 | Implement `horizontal-bar` chart type | `plugin-charts` | 0.5d | [#713](https://github.com/objectstack-ai/spec/issues/713) |
+
+**Total Effort:** ~8.5 days
+
+---
+
+### Phase 3: Polish & Enhancement (Sprint 5) — 1 week
+
+| Priority | Task | Package | Effort | Issue |
+|:--------:|:-----|:--------|:-------|:------|
+| 🟡 P1 | Implement `DashboardHeader` composite component | `plugin-dashboard` | 1d | [objectui#586](https://github.com/objectstack-ai/objectui/issues/586) |
+| 🟢 P2 | Implement `gauge` chart type | `plugin-charts` | 2d | [#713](https://github.com/objectstack-ai/spec/issues/713) |
+| 🟢 P2 | Add dashboard export (PDF/Image) action | `plugin-dashboard` | 3d | N/A |
+
+**Total Effort:** ~6 days
+
+---
+
+### Total Project Timeline
+
+- **Total Effort:** ~22 days (4.5 weeks)
+- **Recommended Team:** 2 engineers (1 spec + 1 objectui)
+- **Target Completion:** End of Q1 2026
+
+---
+
+## 7. Related Resources
+
+### GitHub Issues
+
+**Spec Repository (objectstack-ai/spec):**
+- [#712](https://github.com/objectstack-ai/spec/issues/712) — DashboardSchema.globalFilters 协议支持动态选项与数据绑定高级配置
+- [#713](https://github.com/objectstack-ai/spec/issues/713) — DashboardWidget type 支持 pivot/funnel/grouped-bar等类型（协议+objectui实现协同）
+- [#714](https://github.com/objectstack-ai/spec/issues/714) — Spec: DashboardSchema 支持自定义 header 和 multi-measure 分析配置
+
+**ObjectUI Repository (objectstack-ai/objectui):**
+- [#585](https://github.com/objectstack-ai/objectui/issues/585) — PivotTable 组件（交叉矩阵/透视表）支持
+- [#586](https://github.com/objectstack-ai/objectui/issues/586) — 新增支持 widget header 描述与操作按钮
+- [#587](https://github.com/objectstack-ai/objectui/issues/587) — MetricCard KPI 卡支持彩色变体和操作按钮
+- [#588](https://github.com/objectstack-ai/objectui/issues/588) — DashboardFilterBar 组件：实现全局筛选条渲染协议
+
+---
+
+### Internal Documentation
+
+- [Dashboard Metadata Guide](/docs/ui/dashboards) — Current dashboard protocol documentation
+- [Chart Configuration Reference](/docs/references/ui/chart) — Chart type taxonomy and configuration
+
+---
+
+### External References
+
+- [Airtable Interfaces Documentation](https://support.airtable.com/docs/creating-interfaces) — Official Airtable interface builder guide
+- [React Grid Layout](https://github.com/react-grid-layout/react-grid-layout) — Dashboard grid layout library
+- [Recharts Documentation](https://recharts.org/) — Chart visualization library
+
+---
+
+## Appendix: Protocol Migration Guide
+
+If you have existing dashboard definitions, here's how to migrate to the new protocol:
+
+### Before (v3.0)
+
+```typescript
+{
+  name: 'sales_dashboard',
+  label: 'Sales Dashboard',
+  globalFilters: [
+    { field: 'region', label: 'Region', type: 'select' }
+  ],
+  widgets: [
+    {
+      title: 'Revenue',
+      type: 'metric',
+      object: 'opportunity',
+      valueField: 'amount',
+      aggregate: 'sum',
+      layout: { x: 0, y: 0, w: 4, h: 2 }
+    }
+  ]
+}
+```
+
+### After (v3.2+)
+
+```typescript
+{
+  name: 'sales_dashboard',
+  label: 'Sales Dashboard',
+  
+  // NEW: Header configuration
+  header: {
+    showTitle: true,
+    showDescription: true,
+    actions: [
+      { label: 'Export', icon: 'download', onClick: 'export', type: 'secondary' }
+    ]
+  },
+  
+  // ENHANCED: Global filters with dynamic options
+  globalFilters: [
+    {
+      field: 'region',
+      label: 'Region',
+      type: 'select',
+      optionsFrom: {
+        object: 'region',
+        valueField: 'id',
+        labelField: 'name'
+      },
+      defaultValue: null,
+      scope: 'dashboard'
+    }
+  ],
+  
+  widgets: [
+    {
+      title: 'Revenue',
+      description: 'YTD revenue across all regions',  // NEW
+      type: 'metric',
+      object: 'opportunity',
+      valueField: 'amount',
+      aggregate: 'sum',
+      colorVariant: 'orange',                        // NEW
+      actionUrl: '/reports/revenue',                 // NEW
+      actionType: 'internal',                        // NEW
+      layout: { x: 0, y: 0, w: 4, h: 2 }
+    }
+  ]
+}
+```
+
+---
+
+**Document Version:** 1.0  
+**Last Updated:** 2026-02-18  
+**Maintainer:** ObjectStack Core Team

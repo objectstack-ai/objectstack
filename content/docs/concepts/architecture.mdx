@@ -83,7 +83,7 @@ ObjectStack enforces **Separation of Concerns** through protocol boundaries:
 ### Example: Defining a Customer Object
 
 ```typescript
-// packages/crm/src/objects/customer.object.ts
+// src/objects/customer.object.ts
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Customer = ObjectSchema.create({
@@ -143,14 +143,13 @@ That's the job of the other layers.
 ### Example: Permission Rules
 
 ```typescript
-// packages/crm/src/permissions/sales_rep.permission.ts
-import { definePermissionSet } from '@objectstack/spec/security';
+// src/permissions/sales_rep.permission.ts
+import { definePermissionSet } from '@objectstack/spec';
 
-// A permission set is keyed by object name. Each object grants the four
-// CRUD verbs (allowCreate / allowRead / allowEdit / allowDelete), and
-// optional field-level security keyed by "object.field".
-export const SalesRep = definePermissionSet({
+// A permission set (here used as a profile) keyed by object and field.
+export const SalesRepPermission = definePermissionSet({
   name: 'sales_rep',
+  label: 'Sales Rep',
   isProfile: true,
   objects: {
     customer: {
@@ -161,6 +160,7 @@ export const SalesRep = definePermissionSet({
     },
   },
   fields: {
+    // <object>.<field> -> field-level security
     'customer.annual_revenue': { readable: true, editable: false }, // Read-only
   },
 });
@@ -168,26 +168,26 @@ export const SalesRep = definePermissionSet({
 
 ### Example: Workflow Automation
 
-Automations are authored with `defineFlow`. A flow is a **node graph** —
-a typed `start`/`end` plus decision and action nodes wired together by
-`edges` — driven by a trigger `type` (here `record_change`):
-
 ```typescript
-// packages/crm/src/flows/high_value_customer.flow.ts
+// src/flows/high_value_customer.flow.ts
 import { defineFlow } from '@objectstack/spec';
 
-export const HighValueCustomer = defineFlow({
+// Automation is authored as a Flow: a graph of nodes connected by edges.
+// A record_change flow runs when records of its target object change; branch
+// edges carry CEL conditions evaluated against the changed record.
+export const HighValueCustomerFlow = defineFlow({
   name: 'high_value_customer',
-  label: 'High-Value Customer Routing',
-  type: 'record_change', // runs when a customer record changes
+  label: 'High-Value Customer Alert',
+  type: 'record_change',
+  status: 'active',
   nodes: [
     { id: 'start', type: 'start', label: 'Customer created' },
-    { id: 'assign', type: 'action', label: 'Assign to enterprise team' },
-    { id: 'notify', type: 'action', label: 'Alert sales leadership' },
+    { id: 'assign', type: 'update_record', label: 'Assign owner' },
+    { id: 'notify', type: 'send_email', label: 'Alert leadership' },
     { id: 'end', type: 'end', label: 'End' },
   ],
   edges: [
-    // Only branch when annual_revenue > 1,000,000 (CEL condition)
+    // Only continue when annual revenue exceeds $1M.
     { id: 'e1', source: 'start', target: 'assign', condition: 'record.annual_revenue > 1000000' },
     { id: 'e2', source: 'assign', target: 'notify' },
     { id: 'e3', source: 'notify', target: 'end' },
@@ -195,12 +195,7 @@ export const HighValueCustomer = defineFlow({
 });
 ```
 
-<Callout type="info">
-The node/edge wiring above is illustrative. For the full set of node types,
-trigger semantics, and condition syntax, see the
-[automation skill](/docs/protocol/objectos) and the `defineFlow` schema in
-`@objectstack/spec/automation`.
-</Callout>
+See the [Automation Protocol](/docs/protocol/objectos) for the full Flow node and edge reference.
 
 ObjectOS **orchestrates** these rules at runtime, independent of the data structure or UI.
 
@@ -220,17 +215,22 @@ ObjectOS **orchestrates** these rules at runtime, independent of the data struct
 ### Example: List View
 
 ```typescript
-// packages/crm/src/views/customer.view.ts
+// src/views/customer.view.ts
 import { defineView } from '@objectstack/spec';
 
-// A view is a container bound to an object; its `list` slot holds the
-// list-view config. Columns are field names; sort is { field, order }.
+// A view is authored with defineView({ list, form }); the list/form configs
+// are nested, and the data source declares which object the view reads.
 export const CustomerView = defineView({
-  object: 'customer',
   list: {
-    label: 'All Customers',
     type: 'grid',
-    columns: ['name', 'industry', 'annual_revenue', 'primary_contact'],
+    data: { provider: 'object', object: 'customer' },
+    columns: [
+      { field: 'name' },
+      { field: 'industry' },
+      { field: 'annual_revenue' },
+      { field: 'primary_contact' },
+    ],
+    filterableFields: ['industry', 'annual_revenue'],
     sort: [{ field: 'name', order: 'asc' }],
   },
 });
@@ -239,20 +239,18 @@ export const CustomerView = defineView({
 ### Example: Form View
 
 ```typescript
-// packages/crm/src/views/customer.view.ts
+// src/views/customer.view.ts
 import { defineView } from '@objectstack/spec';
 
-// The same view container can also carry a `form` slot. A form is laid out
-// with `sections`, each section listing the fields it renders.
+// The same defineView container also carries the form layout. A form is a
+// list of sections, each holding fields.
 export const CustomerView = defineView({
-  object: 'customer',
   form: {
-    label: 'Customer Details',
-    type: 'tabbed',
+    type: 'simple',
+    data: { provider: 'object', object: 'customer' },
     sections: [
       {
         label: 'Company Information',
-        columns: 2,
         fields: ['name', 'industry', 'annual_revenue'],
       },
       {
@@ -275,10 +273,10 @@ The UI doesn't "know" the field types. It asks ObjectQL for the schema and rende
 Let's trace a **real-world scenario**: A sales rep creates a new high-value customer.
 
 <Callout type="info">
-The snippets in this walkthrough (`Auth.getCurrentUser`, `Permission.check`,
-`ObjectQL.getSchema`, `driver.insert`, `Workflow.getTriggersFor`, …) are
-**conceptual pseudo-code** that illustrate the control flow between layers.
-They are not literal exported APIs — don't search for these exact symbols.
+The TypeScript in Steps 2–6 below is **conceptual pseudo-code** illustrating the
+flow of control between layers. Calls like `Auth.getCurrentUser()`,
+`Permission.check()`, `ObjectQL.getSchema()`, and `Workflow.getTriggersFor()` are
+not real exported APIs — they stand in for the kernel's internal orchestration.
 </Callout>
 
 ### Step 1: User Action (ObjectUI)
@@ -424,14 +422,15 @@ export const Opportunity = ObjectSchema.create({
 ```typescript
 import { defineFlow } from '@objectstack/spec';
 
-export const OpportunityWon = defineFlow({
+export const OpportunityWonFlow = defineFlow({
   name: 'opportunity_won',
-  label: 'On Opportunity Won',
+  label: 'Opportunity Closed Won',
   type: 'record_change',
+  status: 'active',
   nodes: [
     { id: 'start', type: 'start', label: 'Stage changed' },
-    { id: 'invoice', type: 'action', label: 'Create invoice' },
-    { id: 'notify', type: 'action', label: 'Notify sales team' },
+    { id: 'invoice', type: 'create_record', label: 'Create invoice' },
+    { id: 'notify', type: 'send_email', label: 'Notify sales team' },
     { id: 'end', type: 'end', label: 'End' },
   ],
   edges: [
@@ -447,18 +446,19 @@ export const OpportunityWon = defineFlow({
 ```typescript
 import { defineView } from '@objectstack/spec';
 
-// For a kanban list, set type: 'kanban' and put the board config under
-// `kanban` (groupByField selects the column axis). `columns` is the list
-// of card fields. Drag-and-drop between columns is built in.
-export const OpportunityBoard = defineView({
-  object: 'opportunity',
+export const OpportunityKanbanView = defineView({
   list: {
     type: 'kanban',
-    columns: ['title', 'amount', 'customer'],
+    data: { provider: 'object', object: 'opportunity' },
+    columns: [
+      { field: 'title' },
+      { field: 'amount' },
+      { field: 'customer' },
+    ],
+    // Kanban-specific config: group columns by the stage field.
     kanban: {
       groupByField: 'stage',
       summarizeField: 'amount',
-      columns: ['title', 'amount'],
     },
   },
 });

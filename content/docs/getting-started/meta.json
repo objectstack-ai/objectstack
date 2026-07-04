@@ -1,6 +1,15 @@
 {
-  "title": "Getting Started",
+  "title": "Get Started",
   "icon": "Rocket",
-  "root": true,
-  "pages": ["index", "quick-start", "core-concepts", "architecture", "examples", "cli", "glossary"]
+  "defaultOpen": true,
+  "pages": [
+    "index",
+    "quick-start",
+    "examples",
+    "cli",
+    "validating-metadata",
+    "common-patterns",
+    "quick-reference",
+    "glossary"
+  ]
 }

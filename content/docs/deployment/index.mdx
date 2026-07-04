@@ -1,0 +1,161 @@
+---
+title: Deployment Modes
+description: Choose between local standalone runtime and Cloud-managed environment deployment.
+---
+
+# Deployment Modes
+
+This repository ships the framework runtime, examples, adapters, CLI, docs, and
+the published console bundle. Local development is a single-environment runtime.
+Cloud deployment uses a separate ObjectStack Cloud control plane plus the
+environment-aware runtime seams exported from `@objectstack/runtime`.
+
+| Mode | Runs from this repo | Environment selection | Typical use |
+|:---|:---:|:---|:---|
+| Local example | Yes | One active `OS_ENVIRONMENT_ID` | Framework development and smoke tests |
+| Standalone app | Yes | One compiled artifact or stack config | Self-hosted app backend |
+| Cloud-managed environment | Runtime seams only | Cloud control plane, hostname, scoped URL, header, or session | SaaS and multi-environment deployments |
+
+---
+
+## Local runtime
+
+Use the repo scripts for framework development:
+
+```bash
+OS_PORT=3000 pnpm dev
+pnpm dev:crm -- --fresh -p 38421
+pnpm docs:dev
+```
+
+`pnpm dev` starts the showcase kitchen-sink example. It is the best local
+exercise path for objects, views, flows, AI metadata, security, and the console
+bundle.
+
+For a generated app:
+
+```bash
+os dev
+os start
+os start --artifact ./dist/objectstack.json
+```
+
+The active environment is selected with `OS_ENVIRONMENT_ID`.
+
+---
+
+## Standalone artifact runtime
+
+Any directory with a compiled `dist/objectstack.json` can boot through the CLI
+or `@objectstack/runtime` helpers:
+
+```bash
+os compile
+OS_ENVIRONMENT_ID=env_prod OS_ARTIFACT_PATH=./dist/objectstack.json os serve
+```
+
+Deployment config stays outside the artifact. Database URLs, auth secrets,
+runtime credentials, and environment identity are injected through process env
+or the host's deployment config.
+
+---
+
+## Cloud-managed deployment
+
+Publishing and installing are **separate steps**. The CLI publishes a
+**versioned package** to your organization's catalog — it does not touch any
+environment, and you never pass an environment id:
+
+```bash
+os cloud login        # once: stores a cloud token
+os package publish     # → sys_package + immutable, checksummed sys_package_version
+```
+
+See the cloud [package](/docs/references/cloud/package) and
+[package-version](/docs/references/cloud/package-version) references.
+
+Installing then happens **inside the target environment**: sign in to that
+environment's Console → **Marketplace** → pick the package → **Install**. The
+install is authorized by your environment login and applied to that environment
+(metadata + sample data); the kernel is evicted so it is live on the next
+request — no restart, and no environment id to remember.
+
+> **CI shortcut.** A pipeline deploying to a *known* environment can publish and
+> install in one call: `os package publish --env <id> --install`. This is for
+> automation only — interactive installs happen in the environment Marketplace.
+
+> **Removed: the legacy env-revision path.** The direct-to-environment `os publish`
+> / `os rollback` commands (which wrote `sys_environment_revision`) were **removed**
+> (#2237, ADR-0006 v4). All publishing now goes through the package flow above
+> (`os package publish`); to change what an environment runs, install a package
+> version into it.
+
+Cloud control-plane hosts, database provisioning, billing, and public SaaS
+deployment are outside this framework repository. The framework runtime exposes
+the environment registry, marketplace proxy, and runtime-config seams consumed
+by that distribution.
+
+---
+
+## Routing precedence
+
+Environment-aware hosts resolve requests in this order:
+
+1. `/api/v1/environments/:environmentId/...`
+2. Hostname through the environment registry
+3. `X-Environment-Id`
+4. `session.activeEnvironmentId`
+5. Configured default environment
+6. Single unambiguous environment
+
+Control-plane paths under `/api/v1/cloud/environments/...` are not data-plane
+requests and do not run through a target environment kernel.
+
+---
+
+## Environment variables
+
+| Variable | Purpose |
+|:---|:---|
+| `OS_ENVIRONMENT_ID` | Active local or publish target environment. |
+| `OS_CLOUD_URL` | Cloud control-plane base URL used by publish/package commands. |
+| `OS_ARTIFACT_PATH` | Artifact path for `os serve` and standalone hosts. |
+| `OS_DATABASE_URL` | Local runtime business database URL. |
+| `OS_DATABASE_DRIVER` | Local runtime driver id. |
+| `OS_AUTH_SECRET` | Better Auth session secret for hosted runtimes. |
+| `OS_SECRET_KEY` | 32-byte master key for `sys_secret` encryption (encrypted settings, `secret` fields, datasource credentials). 64 hex chars or base64 of 32 bytes. |
+| `OS_CLUSTER_DRIVER` | Cluster coordination driver. When set, the runtime treats the deployment as multi-node. |
+| `OS_PORT` | HTTP listen port. |
+
+Third-party provider variables such as `OPENAI_API_KEY`, `TURSO_*`,
+`SMTP_*`, `RESEND_API_KEY`, and OAuth client secrets keep their provider names.
+
+<Callout type="warn">
+**Set `OS_SECRET_KEY` for any containerized or multi-node deployment.** The
+default `LocalCryptoProvider` encrypts every `sys_secret` value under one
+32-byte key. On a single host, `os start` mints and persists that key to
+`~/.objectstack/dev-crypto-key` automatically, so the zero-config quickstart
+just works. But on an **ephemeral filesystem (containers)** the minted key is
+lost on restart, and across **multiple nodes** each node would mint a
+*different* key — in both cases previously-encrypted secrets become
+undecryptable.
+
+Provision one stable key shared by every node and every restart:
+
+```bash
+OS_SECRET_KEY=$(openssl rand -hex 32)
+```
+
+When `OS_CLUSTER_DRIVER` is set (multi-node), `os start` will **not** auto-mint
+a key — it fails loud at boot until `OS_SECRET_KEY` is provided, rather than
+silently running under a key that won't survive. For production, prefer a
+managed KMS / Vault provider behind the same `ICryptoProvider` seam.
+</Callout>
+
+---
+
+## Related
+
+- [Single-Environment Mode](/docs/deployment/single-project-mode)
+- [Environment-Scoped Routing](/docs/api/environment-routing)
+- [Publish, Versioning & Preview](/docs/deployment/publish-and-preview)

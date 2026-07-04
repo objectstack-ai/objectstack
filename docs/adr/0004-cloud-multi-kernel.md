@@ -130,4 +130,4 @@ Custom domains and multi-hostname binding (ACME certificates, `sys_domain` table
 
 - Plan: `apps-server-sleepy-newell` (the plan this ADR crystallizes).
 - Code: `packages/runtime/src/kernel-manager.ts`, `packages/runtime/src/project-kernel-factory.ts`, `packages/runtime/src/http-dispatcher.ts`, `apps/objectos/server/bootstrap.ts`, `apps/cloud/objectstack.config.ts`.
-- Related guide: [Cloud vs Self-Hosted deployment](../../content/docs/guides/cloud-deployment.mdx).
+- Related guide: [Cloud vs Self-Hosted deployment](../../content/docs/deployment/index.mdx).

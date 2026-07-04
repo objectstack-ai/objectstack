@@ -12,7 +12,7 @@ import { lazySchema } from '../shared/lazy-schema';
  * (`memory`, `redis`, `postgres`, `nats`) live in `@objectstack/service-cluster`.
  *
  * The full design rationale is in
- * `content/docs/concepts/cluster-semantics.mdx`. Read it before changing
+ * `content/docs/kernel/cluster.mdx`. Read it before changing
  * any of the enums here — every value has a precise contract that other
  * subsystems depend on.
  */
@@ -37,7 +37,7 @@ import { lazySchema } from '../shared/lazy-schema';
  *               by tenant id so only nodes currently serving the tenant
  *               receive it.
  *
- * @see content/docs/concepts/cluster-semantics.mdx §4.1
+ * @see content/docs/kernel/cluster.mdx §4.1
  */
 export const EventScopeSchema = z.enum(['local', 'cluster', 'tenant'])
   .describe('Where the event must be delivered: local process, whole cluster, or tenant-scoped.');
@@ -60,7 +60,7 @@ export type EventScope = z.infer<typeof EventScopeSchema>;
  *                      clear error. Accepted in the schema so future
  *                      runtimes can add it without a breaking change.
  *
- * @see content/docs/concepts/cluster-semantics.mdx §4.2
+ * @see content/docs/kernel/cluster.mdx §4.2
  */
 export const EventDeliverySemanticsSchema = z.enum([
   'best-effort',
@@ -122,7 +122,7 @@ export type EventClusterOptions = z.infer<typeof EventClusterOptionsSchema>;
  * - `cluster` — Logically one instance across the whole cluster. Must
  *               declare a `leaderStrategy` for how the invariant is held.
  *
- * @see content/docs/concepts/cluster-semantics.mdx §5
+ * @see content/docs/kernel/cluster.mdx §5
  */
 export const ServiceClusterScopeSchema = z.enum(['node', 'cluster'])
   .describe('Whether this service runs on every node or as a cluster singleton.');
@@ -145,7 +145,7 @@ export type ServiceClusterScope = z.infer<typeof ServiceClusterScopeSchema>;
  *                             and the work itself is idempotent. Use for
  *                             cache invalidation and projection rebuilders.
  *
- * @see content/docs/concepts/cluster-semantics.mdx §5
+ * @see content/docs/kernel/cluster.mdx §5
  */
 export const ServiceLeaderStrategySchema = z.enum([
   'leader-elected',
@@ -201,7 +201,7 @@ export type ServiceClusterAnnotations = z.infer<typeof ServiceClusterAnnotations
  * KV, Counter). The protocol enumerates the drivers we expect to ship;
  * additional drivers can be registered at runtime by plugins.
  *
- * @see content/docs/concepts/cluster-semantics.mdx §8
+ * @see content/docs/kernel/cluster.mdx §8
  */
 export const ClusterDriverSchema = z.enum([
   'memory',    // single-process; in-EventEmitter + Map + mutex + int
@@ -339,7 +339,7 @@ export type MetadataChangeOperation = z.infer<typeof MetadataChangeOperationSche
  * subscribe to it and compare `version` with their cached value before
  * applying the invalidation — out-of-order older versions are ignored.
  *
- * @see content/docs/concepts/cluster-semantics.mdx §6
+ * @see content/docs/kernel/cluster.mdx §6
  */
 export const MetadataChangedEventPayloadSchema = lazySchema(() => z.object({
   /**

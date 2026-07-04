@@ -102,7 +102,7 @@ Rules:
 
 ## CTA wiring
 
-The optional `action.actionName` resolves against the object's `actions[]` (the same array that backs `record:quick_actions`). When clicked, the renderer dispatches the resolved action, which means it inherits the action's declared behavior from the [action schema](../../references/ui/action):
+The optional `action.actionName` resolves against the object's `actions[]` (the same array that backs `record:quick_actions`). When clicked, the renderer dispatches the resolved action, which means it inherits the action's declared behavior from the [action schema](/docs/references/ui/action):
 
 - Confirm dialog (`confirmText`)
 - Param collection (`params: [...]`)
@@ -150,5 +150,5 @@ Pick a stable `dismissKey` when the title is i18n'd — otherwise translation ch
 
 ## Related
 
-- [`record:quick_actions`](./actions) — action toolbar that pairs naturally with `record:alert` (the alert nudges the user; the toolbar lets them act).
-- [`ui/page.zod.ts`](../../references/ui/page) — the slotted page schema definition, including the `alerts` slot.
+- [`record:quick_actions`](/docs/protocol/objectui/actions) — action toolbar that pairs naturally with `record:alert` (the alert nudges the user; the toolbar lets them act).
+- [`ui/page.zod.ts`](/docs/references/ui/page) — the slotted page schema definition, including the `alerts` slot.

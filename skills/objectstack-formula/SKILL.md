@@ -435,7 +435,7 @@ validator inline.
 
 ## See also
 
-- [`content/docs/guides/formula.mdx`](../../content/docs/guides/formula.mdx) — human-facing guide
+- [`content/docs/data-modeling/formulas.mdx`](../../content/docs/data-modeling/formulas.mdx) — human-facing guide
 - [`packages/formula/`](../../packages/formula/) — engine + stdlib
 - [`packages/spec/src/shared/expression.zod.ts`](../../packages/spec/src/shared/expression.zod.ts) — `Expression`, `ExpressionInput`, `cel` / `F` / `P`
 - ROADMAP M9 — Expression Unification milestone

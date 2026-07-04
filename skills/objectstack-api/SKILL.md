@@ -98,7 +98,7 @@ are intended for Web-to-Lead / Web-to-Case style flows. The framework
 strips fields outside the form's `sections[].fields[]` list; a
 `beforeInsert` hook on the target object should stamp safe defaults
 (`status='new'`, `lead_source='web'`, …) and `delete` privileged keys
-(`owner`, `internal_notes`, …). See `content/docs/guides/public-forms.mdx`
+(`owner`, `internal_notes`, …). See `content/docs/ui/forms.mdx`
 for the full contract.
 
 ### Custom Endpoints

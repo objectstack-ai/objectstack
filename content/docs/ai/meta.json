@@ -1,0 +1,14 @@
+{
+  "title": "AI",
+  "icon": "Bot",
+  "pages": [
+    "index",
+    "agents",
+    "actions-as-tools",
+    "knowledge-rag",
+    "natural-language-queries",
+    "skills",
+    "skills-reference",
+    "chatbot-integration"
+  ]
+}

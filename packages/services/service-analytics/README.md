@@ -392,4 +392,4 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 - [@objectstack/objectql](../../objectql/)
 - [@objectstack/spec/contracts](../../spec/src/contracts/)
-- [Analytics Guide](/content/docs/guides/analytics/)
+- [Analytics Guide](/content/docs/data-modeling/analytics.mdx)

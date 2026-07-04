@@ -1,0 +1,225 @@
+---
+title: App Metadata
+description: Define application containers with navigation, branding, and access control
+---
+
+# App Metadata
+
+An **App** is a logical container that bundles objects, views, pages, and dashboards into a cohesive application experience. It defines the navigation structure, branding, and access permissions.
+
+## Basic Structure
+
+```typescript
+const crmApp = {
+  name: 'crm',
+  label: 'CRM',
+  version: '1.0.0',
+  description: 'Customer Relationship Management',
+  icon: 'briefcase',
+  active: true,
+
+  branding: {
+    primaryColor: '#1a73e8',
+    logo: '/assets/crm-logo.svg',
+    favicon: '/assets/favicon.ico',
+  },
+
+  navigation: [
+    { id: 'nav_accounts', type: 'object', label: 'Accounts', objectName: 'account', icon: 'building' },
+    { id: 'nav_contacts', type: 'object', label: 'Contacts', objectName: 'contact', icon: 'users' },
+    { id: 'nav_opportunities', type: 'object', label: 'Opportunities', objectName: 'opportunity', icon: 'trending-up' },
+    { id: 'nav_sales_dashboard', type: 'dashboard', label: 'Sales Dashboard', dashboardName: 'sales_overview', icon: 'bar-chart' },
+  ],
+
+  requiredPermissions: ['crm_access'],
+};
+```
+
+## App Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | `string` | ✅ | Machine name (`snake_case`) |
+| `label` | `string` | ✅ | Display name |
+| `version` | `string` | optional | App version |
+| `description` | `string` | optional | App description |
+| `icon` | `string` | optional | App icon (Lucide) |
+| `active` | `boolean` | optional | Is app active (default: `true`) |
+| `isDefault` | `boolean` | optional | Is default app |
+| `navigation` | `NavigationItem[]` | optional | Navigation tree |
+| `branding` | `AppBranding` | optional | Visual customization |
+| `requiredPermissions` | `string[]` | optional | Required permissions to access |
+| `homePageId` | `string` | optional | ID of the navigation item to serve as the landing page |
+| `objects` | `string[]` | optional | Objects included in this app |
+| `apis` | `string[]` | optional | API endpoints included |
+| `mobileNavigation` | `object` | optional | Mobile-specific navigation |
+
+## Navigation Items
+
+The navigation tree supports eight item types, combined to create rich menu structures. The most common are shown below (`object`, `dashboard`, `page`, `url`, `group`); the spec also defines `report`, `action`, and `component` items.
+
+### Object Navigation
+
+Links to an object's list view:
+
+```typescript
+{ id: 'nav_accounts', type: 'object', label: 'Accounts', objectName: 'account', icon: 'building', viewName: 'all_accounts' }
+```
+
+### Dashboard Navigation
+
+Links to a dashboard:
+
+```typescript
+{ id: 'nav_analytics', type: 'dashboard', label: 'Analytics', dashboardName: 'sales_overview', icon: 'bar-chart' }
+```
+
+### Page Navigation
+
+Links to a custom page:
+
+```typescript
+{ id: 'nav_settings', type: 'page', label: 'Settings', pageName: 'app_settings', icon: 'settings', params: { tab: 'general' } }
+```
+
+### URL Navigation
+
+Links to an external URL:
+
+```typescript
+{ id: 'nav_help', type: 'url', label: 'Help Center', url: 'https://help.example.com', icon: 'help-circle', target: '_blank' }
+```
+
+### Group Navigation
+
+Groups items into collapsible sections with children:
+
+```typescript
+{
+  id: 'grp_sales',
+  type: 'group',
+  label: 'Sales',
+  icon: 'dollar-sign',
+  expanded: true,
+  children: [
+    { id: 'nav_accounts', type: 'object', label: 'Accounts', objectName: 'account', icon: 'building' },
+    { id: 'nav_contacts', type: 'object', label: 'Contacts', objectName: 'contact', icon: 'users' },
+    { id: 'nav_opportunities', type: 'object', label: 'Opportunities', objectName: 'opportunity', icon: 'trending-up' },
+  ],
+}
+```
+
+### Common Navigation Properties
+
+All navigation items share these base properties. Every item **must** declare a unique `id` (lowercase `snake_case`) — it is required by the schema and is referenced by `homePageId` and `mobileNavigation.bottomNavItems`:
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `id` | `string` | Unique identifier (`snake_case`, required) |
+| `label` | `string` | Display label |
+| `icon` | `string` | Icon name (Lucide) |
+| `order` | `number` | Sort order within the same level (lower = first) |
+| `badge` | `string \| number` | Badge text or count displayed on the item |
+| `visible` | `Expression` | Visibility predicate (CEL expression) |
+| `requiredPermissions` | `string[]` | Permissions required to see/access this item |
+| `requiresObject` | `string` | Hide/disable unless the named object is registered |
+| `requiresService` | `string` | Hide/disable unless the named kernel service is registered |
+
+## Branding
+
+Customize the visual appearance of the app:
+
+```typescript
+branding: {
+  primaryColor: '#1a73e8',    // Hex color code
+  logo: '/assets/logo.svg',   // Logo URL
+  favicon: '/assets/icon.ico', // Favicon URL
+}
+```
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `primaryColor` | `string` | Primary brand color (hex) |
+| `logo` | `string` | Logo image URL |
+| `favicon` | `string` | Favicon URL |
+
+## Mobile Navigation
+
+Configure mobile-specific navigation behavior:
+
+```typescript
+mobileNavigation: {
+  mode: 'bottom_nav',
+  bottomNavItems: ['nav_home', 'nav_accounts', 'nav_contacts', 'nav_settings'],
+}
+```
+
+`mode` accepts `'drawer'` (default), `'bottom_nav'`, or `'hamburger'`. `bottomNavItems` lists the navigation item `id`s to surface in the bottom bar (max 5).
+
+## Complete Example
+
+```typescript
+const projectApp = {
+  name: 'project_management',
+  label: 'Project Management',
+  version: '2.0.0',
+  description: 'Track projects, tasks, and team workload',
+  icon: 'folder-kanban',
+  active: true,
+
+  branding: {
+    primaryColor: '#6366f1',
+    logo: '/assets/pm-logo.svg',
+  },
+
+  navigation: [
+    {
+      id: 'nav_home',
+      type: 'page',
+      label: 'Home',
+      pageName: 'pm_home',
+      icon: 'home',
+    },
+    {
+      id: 'grp_projects',
+      type: 'group',
+      label: 'Projects',
+      icon: 'folder',
+      expanded: true,
+      children: [
+        { id: 'nav_projects', type: 'object', label: 'Projects', objectName: 'project', icon: 'folder' },
+        { id: 'nav_tasks', type: 'object', label: 'Tasks', objectName: 'project_task', icon: 'check-square', viewName: 'task_board' },
+        { id: 'nav_milestones', type: 'object', label: 'Milestones', objectName: 'milestone', icon: 'flag' },
+      ],
+    },
+    {
+      id: 'grp_reports',
+      type: 'group',
+      label: 'Reports',
+      icon: 'bar-chart',
+      children: [
+        { id: 'nav_overview', type: 'dashboard', label: 'Overview', dashboardName: 'project_overview', icon: 'layout-dashboard' },
+        { id: 'nav_team_workload', type: 'dashboard', label: 'Team Workload', dashboardName: 'team_workload', icon: 'users' },
+      ],
+    },
+    {
+      id: 'nav_docs',
+      type: 'url',
+      label: 'Documentation',
+      url: 'https://docs.example.com/pm',
+      icon: 'book-open',
+      target: '_blank',
+    },
+  ],
+
+  requiredPermissions: ['pm_access'],
+  homePageId: 'nav_home',
+};
+```
+
+## Related
+
+- [Page Metadata](/docs/ui/pages) — Custom pages referenced from navigation
+- [Dashboard Metadata](/docs/ui/dashboards) — Dashboards referenced from navigation
+- [View Metadata](/docs/ui/views) — Views displayed within navigation items
+- [Permission Metadata](/docs/permissions/permission-metadata) — Access control for apps

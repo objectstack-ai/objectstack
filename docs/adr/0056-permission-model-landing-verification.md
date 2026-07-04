@@ -187,7 +187,7 @@ The one-time table above rots. Make it a **living ledger**: extend the ADR-0054 
 
 - ADR-0049 (no unenforced security properties), ADR-0054 (runtime proof), ADR-0055 (controlled-by-parent), ADR-0010 (metadata protection), ADR-0029 (kernel object ownership).
 - Audit evidence: `plugin-security/src/security-plugin.ts`, `rls-compiler.ts`; `plugin-sharing/src/sharing-service.ts`, `sharing-rule-service.ts`; `rest/src/rest-server.ts`; `runtime/src/security/resolve-execution-context.ts`; `spec/src/security/{permission,rls,sharing}.zod.ts`, `spec/src/data/object.zod.ts`.
-- Liveness ledger: `packages/spec/scripts/liveness/proof-registry.mts`. Implementation status: `content/docs/concepts/implementation-status.mdx`, `content/docs/guides/security.mdx`.
+- Liveness ledger: `packages/spec/scripts/liveness/proof-registry.mts`. Implementation status: `content/docs/releases/implementation-status.mdx`, `content/docs/permissions/index.mdx`.
 
 ---
 

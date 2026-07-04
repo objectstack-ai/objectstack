@@ -1,0 +1,372 @@
+---
+title: Troubleshooting & FAQ
+description: Solutions to common ObjectStack issues — validation failures, query problems, configuration mistakes, and more
+---
+
+# Troubleshooting & FAQ
+
+Solutions to the most common issues encountered when working with ObjectStack.
+
+---
+
+## Validation Errors
+
+### "Invalid enum value" for field type
+
+**Symptom:** Zod validation fails with `Invalid enum value. Expected 'text' | 'number' | ...`
+
+**Cause:** The `type` value has a typo or uses an unsupported type name.
+
+**Fix:** Use exact type names from the [Field Type Gallery](/docs/data-modeling/field-types). Common mistakes:
+
+| ❌ Wrong | ✅ Correct |
+|:---|:---|
+| `text_area` | `textarea` |
+| `multi_select` | `multiselect` |
+| `check_boxes` | `checkboxes` |
+| `master-detail` | `master_detail` |
+| `auto_number` | `autonumber` |
+| `rich_text` | `richtext` |
+| `qr_code` | `qrcode` |
+
+<Callout type="tip">
+The custom error map provides "Did you mean?" suggestions for common typos.
+</Callout>
+
+---
+
+### "Field name must be snake_case"
+
+**Symptom:** Validation fails with a regex error on the `name` field.
+
+**Cause:** Field and object names must match the pattern `^[a-z_][a-z0-9_]*$`.
+
+**Fix:**
+
+| ❌ Wrong | ✅ Correct |
+|:---|:---|
+| `firstName` | `first_name` |
+| `Order-Item` | `order_item` |
+| `2ndAddress` | `second_address` |
+| `STATUS` | `status` |
+
+---
+
+### "Required property missing: options"
+
+**Symptom:** A `select`, `multiselect`, `radio`, or `checkboxes` field fails validation.
+
+**Cause:** Selection-type fields require an `options` array.
+
+**Fix:**
+```typescript
+// ❌ Missing options
+{ name: 'status', type: 'select' }
+
+// ✅ With options
+{
+  name: 'status', type: 'select',
+  options: [
+    { label: 'Open', value: 'open' },
+    { label: 'Closed', value: 'closed' }
+  ]
+}
+```
+
+---
+
+### "Required property missing: reference"
+
+**Symptom:** A `lookup`, `master_detail`, or `tree` field fails validation.
+
+**Cause:** Relational fields require a `reference` property pointing to the target object.
+
+**Fix:**
+```typescript
+// ❌ Missing reference
+{ name: 'owner', type: 'lookup' }
+
+// ✅ With reference
+{ name: 'owner', type: 'lookup', reference: 'user' }
+```
+
+---
+
+## Query Issues
+
+### "My query returns empty results"
+
+**Possible causes:**
+1. **Wrong object name** — Object names are snake_case (`project_task`, not `ProjectTask`)
+2. **Filter typo** — Check operator spelling (`$contains`, not `$contain`)
+3. **Type mismatch** — Comparing string to number or vice versa
+4. **Null handling** — Use `$null: true` instead of `$eq: null`
+
+**Debug steps:**
+```typescript
+// 1. Start with the simplest query
+{ object: 'task', limit: 5 }
+
+// 2. Add fields
+{ object: 'task', fields: ['id', 'title', 'status'], limit: 5 }
+
+// 3. Add one filter at a time
+{ object: 'task', where: { status: { $eq: 'open' } }, limit: 5 }
+```
+
+---
+
+### "Invalid filter operator"
+
+**Symptom:** Query fails with `invalid_filter` error code.
+
+**Fix:** Check the operator name. Valid operators:
+
+```
+$eq, $ne, $gt, $gte, $lt, $lte,
+$in, $nin, $between,
+$contains, $startsWith, $endsWith,
+$null, $exists,
+$and, $or, $not
+```
+
+Common mistakes:
+| ❌ Wrong | ✅ Correct |
+|:---|:---|
+| `$equal` | `$eq` |
+| `$notEqual` | `$ne` |
+| `$like` | `$contains` |
+| `$greaterThan` | `$gt` |
+| `$isNull` | `$null` |
+| `$notIn` | `$nin` |
+
+---
+
+### "Sort field not found or not sortable"
+
+**Symptom:** Query fails with `invalid_sort` error.
+
+**Fix:** 
+1. Verify the field exists on the object
+2. Check that the field has `sortable: true` (or is not explicitly set to `sortable: false`)
+3. Computed fields (formula, summary) may not be sortable
+
+---
+
+## Configuration Issues
+
+### "Object not found" after defining it
+
+**Possible causes:**
+1. **Name mismatch** — The object name in your query does not match the `name` in the definition
+2. **Not registered** — The object is defined but not included in `defineStack({ objects: [...] })`
+3. **Case sensitivity** — Object names are exact-match snake_case
+
+**Fix:**
+```typescript
+// Ensure the object is included in the stack (array format)
+export default defineStack({
+  objects: [
+    { name: 'project_task', /* ... */ }
+  ]
+});
+
+// Or use map format (key becomes the name)
+export default defineStack({
+  objects: {
+    project_task: { /* ... */ }
+  }
+});
+
+// Use the exact same name when querying
+client.data.find('project_task', { /* query */ });
+```
+
+---
+
+### "Cannot delete record: delete restricted"
+
+**Cause:** The record has dependent child records via `lookup` or `master_detail` fields with `deleteBehavior: 'restrict'`.
+
+**Fix:**
+1. Delete the dependent records first
+2. Change `deleteBehavior` to `'cascade'` (deletes children) or `'set_null'` (clears reference)
+
+```typescript
+// Option A: Cascade delete (children are deleted with parent)
+{ name: 'project', type: 'master_detail', reference: 'project', deleteBehavior: 'cascade' }
+
+// Option B: Set null (children keep existing, reference cleared)
+{ name: 'project', type: 'lookup', reference: 'project', deleteBehavior: 'set_null' }
+```
+
+---
+
+### "defineStack() validation errors"
+
+**Symptom:** `defineStack()` in strict mode reports cross-reference errors.
+
+**Fix:** In strict mode, all references must be valid:
+```typescript
+// ❌ View references non-existent object
+defineStack({
+  objects: [{ name: 'task', /* ... */ }],
+  views: [{ name: 'contact_list', object: 'contact', /* ... */ }]  // 'contact' not defined!
+});
+
+// ✅ All references resolve
+defineStack({
+  objects: [
+    { name: 'task', /* ... */ },
+    { name: 'contact', /* ... */ }
+  ],
+  views: [{ name: 'contact_list', object: 'contact', /* ... */ }]
+});
+```
+
+---
+
+## TypeScript Issues
+
+### "Type is not assignable"
+
+**Cause:** Using a raw object literal where a parsed type is expected, or mixing up input vs. output types.
+
+**Fix:** Use the `define*` helpers which parse and return the correct types:
+
+```typescript
+// ❌ Raw object — no type checking
+const view = { list: { type: 'grid', columns: ['subject', 'status'] } };
+
+// ✅ Parsed with type checking
+import { defineView } from '@objectstack/spec';
+const view = defineView({
+  list: {
+    type: 'grid',
+    data: { provider: 'object', object: 'task' },
+    columns: ['subject', 'status', 'priority'],
+  },
+});
+```
+
+---
+
+### "Property does not exist on type"
+
+**Cause:** Accessing a property that exists on the Zod schema but not on the inferred TypeScript type (usually optional properties that were not provided).
+
+**Fix:** Use optional chaining or check for undefined:
+
+```typescript
+const field = FieldSchema.parse(data);
+
+// ❌ May be undefined
+console.log(field.maxLength.toString());
+
+// ✅ Safe access
+console.log(field.maxLength?.toString() ?? 'no limit');
+```
+
+---
+
+## Performance Issues
+
+### "Query is slow"
+
+**Checklist:**
+1. **Add indexes** — Set `index: true` on fields used in `where` clauses
+2. **Limit fields** — Only request fields you need (`fields: ['id', 'name']`)
+3. **Use pagination** — Always set `limit` to avoid returning all records
+4. **Avoid deep nesting** — Limit nested `$and`/`$or` depth
+5. **Use cursor pagination** — For large datasets, cursor-based is faster than offset
+
+```typescript
+// Optimized query
+{
+  object: 'activity',
+  fields: ['id', 'type', 'created_at'],  // Only needed fields
+  where: { type: { $eq: 'login' } },      // On indexed field
+  orderBy: [{ field: 'created_at', order: 'desc' }],
+  limit: 25,
+  cursor: { id: lastSeenId }  // Keyset/cursor pagination (field → last-seen value)
+}
+```
+
+---
+
+### "Bundle size is too large"
+
+**Fix:** Import from subpaths instead of the root:
+
+```typescript
+// ❌ Imports everything
+import { FieldSchema, QuerySchema } from '@objectstack/spec';
+
+// ✅ Tree-shakeable subpath imports
+import { FieldSchema } from '@objectstack/spec/data';
+import { ErrorResponseSchema } from '@objectstack/spec/api';
+```
+
+Available subpaths: `data`, `api`, `ui`, `system`, `kernel`, `ai`, `automation`, `contracts`, `integration`, `security`, `studio`.
+
+---
+
+## FAQ
+
+### What Node.js version is required?
+
+Node.js 18.0.0 or later. The `engines` field in `package.json` enforces this.
+
+### What TypeScript version is recommended?
+
+TypeScript 5.3.0 or later for full type inference support.
+
+### How do I validate data at runtime?
+
+Use Zod's `.parse()` or `.safeParse()` methods:
+
+```typescript
+import { FieldSchema } from '@objectstack/spec/data';
+
+// Throws on invalid data
+const field = FieldSchema.parse(input);
+
+// Returns result object (no throw)
+const result = FieldSchema.safeParse(input);
+if (result.success) {
+  console.log(result.data);
+} else {
+  console.error(result.error);
+}
+```
+
+### How do I get better error messages?
+
+Use the built-in `safeParsePretty()` helper:
+
+```typescript
+import { safeParsePretty } from '@objectstack/spec';
+
+const result = safeParsePretty(FieldSchema, input);
+// Pretty-printed errors with "Did you mean?" suggestions
+```
+
+### Can I use ObjectStack with JavaScript (not TypeScript)?
+
+Yes. All schemas work with plain JavaScript. You lose compile-time type checking but retain runtime validation via Zod's `.parse()`.
+
+### How do I extend a built-in schema?
+
+Use Zod's `.extend()` or `.merge()`:
+
+```typescript
+import { FieldSchema } from '@objectstack/spec/data';
+
+const CustomFieldSchema = FieldSchema.extend({
+  customProperty: z.string().optional()
+});
+```
+
+### Where are the JSON Schemas for IDE autocomplete?
+
+The bundled JSON Schema is at `packages/spec/json-schema/objectstack.json` (its `x-schema-count` field reports the total number of definitions). Per-domain schemas are in subfolders under `packages/spec/json-schema/` (e.g. `data/`, `ui/`, `api/`).

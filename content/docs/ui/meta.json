@@ -1,0 +1,19 @@
+{
+  "title": "UI Engine",
+  "icon": "Layout",
+  "pages": [
+    "index",
+    "apps",
+    "pages",
+    "views",
+    "dashboards",
+    "forms",
+    "doc-pages",
+    "setup-app",
+    "---Recipes---",
+    "create-vs-edit-form",
+    "field-grouping-and-order",
+    "role-based-interfaces",
+    "public-data-collection"
+  ]
+}

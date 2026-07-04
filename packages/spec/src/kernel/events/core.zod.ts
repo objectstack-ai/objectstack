@@ -62,7 +62,7 @@ export const EventMetadataSchema = lazySchema(() => z.object({
    * cross-node delivery, ordering, or persisted at-least-once semantics
    * MUST set the relevant fields.
    *
-   * @see content/docs/concepts/cluster-semantics.mdx §4
+   * @see content/docs/kernel/cluster.mdx §4
    */
   cluster: EventClusterOptionsSchema.optional()
     .describe('Per-emit cluster routing & delivery options. See cluster-semantics.mdx §4.'),

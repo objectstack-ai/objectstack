@@ -1,0 +1,397 @@
+---
+title: Forms (Public + Internal)
+description: Render any FormView either publicly (anonymous, /f/:slug) or internally (authed operators, /forms/:name). The same metadata drives both, with URL prefill, configurable post-submit behavior, and declarative open-form actions.
+---
+
+# Forms
+
+ObjectStack Forms are Airtable-style **metadata-driven** forms with two render modes that share **one** spec and **one** renderer:
+
+| Mode | Route | Auth | Spec source | Submit target |
+|---|---|---|---|---|
+| **Public** | `/console/f/:slug` | anonymous | `GET /api/v1/forms/:slug` (resolved by `sharing.publicLink`) | `POST /api/v1/forms/:slug/submit` (field whitelist + declaration-derived `publicFormGrant`) |
+| **Internal** | `/console/forms/:name` | authed | `GET /api/v1/meta/view/:name` (+ `meta/object/:object`) | `POST /api/v1/data/:object` (full RBAC) |
+
+Both modes:
+
+- Use the same `FormView` Zod schema (`@objectstack/spec/ui`)
+- Render through the same `FormPage` renderer shipped by the ObjectUI console (a separate package/repo)
+- Honor `?prefill_<field>=<value>` URL params
+- Honor `submitBehavior` (thank-you / redirect / continue / next-record)
+
+A **public form** is the Salesforce *Web-to-Lead* style embeddable form — declare a `FormView` with `sharing.allowAnonymous: true`, give it a `publicLink`, and the framework wires the anonymous REST endpoints automatically.
+
+## Architecture at a glance
+
+```
+Visitor                        Framework                       Driver
+───────                        ─────────                       ──────
+GET  /api/v1/forms/:slug   →   rest-server scans views     →
+                               match sharing.publicLink    →   (no DB read)
+                           ←   { form, objectSchema }
+
+POST /api/v1/forms/:slug/  →   field whitelist (form)
+     submit                →   derive publicFormGrant:
+                               { object: <form target> }   →
+                               protocol.createData()       →   INSERT
+                           ←   { object, id, record }
+```
+
+Only the spec'd whitelist of form fields is accepted; everything else (status, owner, internal_notes, …) is stripped server-side. Lifecycle hooks then stamp server-controlled defaults.
+
+> **Self-authorizing forms (ADR-0056 Option A).** The submit route does **not**
+> require a deployment-configured profile. It derives a narrow `publicFormGrant`
+> from the form's own declaration — `{ object: <the form's target object> }` —
+> and the SecurityPlugin authorizes **only** create + the immediate read-back on
+> exactly that object, never anything else and never the anonymous fall-open. So
+> public forms work under secure-by-default (`requireAuth: true`) with **no**
+> `guest_portal` profile. The `guest_portal` permission set + `anonymous` flag
+> are still attached for **back-compat** (object hooks that detect a guest via a
+> falsy `ctx.user?.id`), but they are no longer the authorization mechanism.
+
+## 1. Declare the form view
+
+```ts
+// hotcrm/src/views/lead.view.ts  (https://github.com/objectstack-ai/hotcrm)
+import { defineView } from '@objectstack/spec';
+
+export default defineView({
+  name: 'lead_views',
+  object: 'lead',
+  /* ... internal listViews etc. ... */
+  formViews: {
+    web_to_lead: {
+      type: 'simple',
+      data: { provider: 'object', object: 'lead' },
+      sections: [
+        {
+          label: 'Tell us about yourself',
+          columns: 2,
+          fields: [
+            { field: 'first_name', required: true },
+            { field: 'last_name',  required: true },
+            { field: 'email',      required: true },
+            { field: 'phone' },
+            { field: 'company',    required: true },
+            { field: 'title' },
+            { field: 'industry' },
+            { field: 'website' },
+            { field: 'annual_revenue' },
+            { field: 'no_of_employees' },
+            { field: 'description' },
+          ],
+        },
+      ],
+      sharing: {
+        enabled: true,
+        allowAnonymous: true,         // ← required
+        publicLink: '/forms/contact-us', // ← the slug ":contact-us" wires this view to the public route
+      },
+    },
+  },
+});
+```
+
+> Rules:
+> - The slug in `publicLink` (`contact-us`) becomes the `:slug` segment in the REST URL.
+> - Anything not in the `sections[].fields[]` whitelist is silently stripped at submit time. Treat the whitelist as the form's authoritative "what the public is allowed to set" list.
+> - Multiple form views per object are fine — only the one(s) with `sharing.allowAnonymous === true` are exposed.
+
+## 2. (Optional) Create the `guest_portal` profile
+
+Authorization no longer depends on this profile — the declaration-derived
+`publicFormGrant` (see the note above) is what permits the insert. You only need
+a `guest_portal` profile if you rely on the legacy back-compat path (e.g. an
+older runtime, or object hooks that branch on the `guest_portal` permission).
+When present it is still attached to the anonymous context, so keep it
+INSERT-only on the target object.
+
+```ts
+// hotcrm/src/profiles/guest-portal.profile.ts
+import { PermissionSetSchema } from '@objectstack/spec/security';
+
+export default PermissionSetSchema.parse({
+  name: 'guest_portal',
+  label: 'Public Form Submitters',
+  isProfile: true,
+  objects: {
+    lead: { allowCreate: true },  // no read/edit/delete
+    case: { allowCreate: true },
+  },
+});
+```
+
+## 3. Stamp server-controlled defaults in a hook
+
+Anonymous submitters cannot be trusted to set `lead_source`, `status`, `owner`, etc. A `beforeInsert` hook keyed off **the absence of `ctx.user.id`** is the canonical place to:
+
+- Apply safe defaults (`status='new'`, `lead_source='web'`, …)
+- Strip any internal fields that slipped past the whitelist
+
+```ts
+// hotcrm/src/objects/lead.hook.ts
+import type { Hook, HookContext } from '@objectstack/spec/data';
+
+const leadGuestDefaults: Hook = {
+  name: 'lead_guest_defaults',
+  object: 'lead',
+  events: ['beforeInsert'],
+  priority: 200,
+  handler: async (ctx: HookContext) => {
+    const isGuest = !ctx.previous && !ctx.user?.id;
+    if (!isGuest) return;
+    // For inserts the incoming record lives at ctx.input.data, not on ctx.input itself.
+    const rec = ctx.input.data as Record<string, unknown>;
+    if (!rec.lead_source) rec.lead_source = 'web';
+    if (!rec.status)      rec.status      = 'new';
+    delete rec.owner;
+    delete rec.is_converted;
+    delete rec.converted_account;
+    delete rec.converted_contact;
+    delete rec.converted_opportunity;
+    delete rec.converted_date;
+  },
+};
+
+export default leadGuestDefaults;
+```
+
+> **Why both `!ctx.previous` and `!ctx.user?.id`?**
+> `ctx.previous` is set on update/delete but undefined on insert, so the combined check protects the "new record by an anonymous caller" path specifically. Backend users (or automated jobs) bypass the guest branch.
+
+## 4. The REST contract
+
+Both routes are mounted under the active environment's API base. For a
+standalone environment that is `/api/v1`; for scoped deployments it is
+`/api/v1/environments/:environmentId`.
+
+### `GET /api/v1/forms/:slug`
+
+Returns the form spec + a restricted object schema for the whitelisted fields:
+
+```json
+{
+  "slug": "contact-us",
+  "object": "lead",
+  "label": null,
+  "form": { "type": "simple", "sections": [/* … */], "sharing": {/* … */} },
+  "objectSchema": {
+    "name": "lead",
+    "label": "Lead",
+    "fields": { "first_name": {/* … */}, "email": {/* … */}, "company": {/* … */} }
+  }
+}
+```
+
+The top-level `label` is `view.label ?? form.label` — it is **not** taken from a section label. The Section-1 example sets neither, so it comes back `null`; add a `label` to the form view if you want a value here.
+
+`objectSchema.fields` contains **only** the fields referenced by the form, so a public client can render labels, types, and select options without an auth-protected meta lookup.
+
+### `POST /api/v1/forms/:slug/submit`
+
+```bash
+curl -X POST http://localhost:3000/api/v1/forms/contact-us/submit \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "first_name": "Ada",
+    "last_name":  "Lovelace",
+    "company":    "Analytical Engines Ltd",
+    "email":      "ada@example.com",
+    "status":     "qualified",        // ← stripped (not in whitelist)
+    "owner":      "00000000-0000-0000-0000-000000000001"  // ← stripped
+  }'
+```
+
+Response on success (HTTP `201 Created`):
+
+```json
+{ "object": "lead", "id": "r7p8cUZoBJbFWudt", "record": {
+    "id": "r7p8cUZoBJbFWudt",
+    "first_name": "Ada", "last_name": "Lovelace",
+    "status": "new",         // ← hook default
+    "lead_source": "web",    // ← hook default
+    "owner": null            // ← whitelist stripped, hook deleted
+} }
+```
+
+Errors:
+
+| Status | Code | When |
+|---|---|---|
+| `400 INVALID_REQUEST` | missing / blank slug (an empty body is coerced to `{}` and surfaces as `VALIDATION_FAILED` below, not here) |
+| `400 VALIDATION_FAILED` | object schema validators fail (`required`, `format`, `length`, …) |
+| `403 PERMISSION_DENIED` | the resolved profile does not allow create on the target object |
+| `404 FORM_NOT_FOUND` | slug not registered on any `sharing.allowAnonymous: true` view |
+| `5xx` (generic) | driver / hook threw — submit errors are mapped by `mapDataError`; there is no dedicated `FORM_SUBMIT_FAILED` code |
+
+The companion `GET /api/v1/forms/:slug` route returns `500 FORM_RESOLVE_FAILED` if form resolution itself throws.
+
+### Auth model
+
+- Neither route calls `enforceAuth`, so they work even when the project is configured with `requireAuth: true`.
+- The execution context handed to ObjectQL is `{ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin honors `publicFormGrant` first — a create + read-back grant scoped to exactly the declared object — so authorization holds even without a `guest_portal` profile. `permissions: ['guest_portal']` is retained for back-compat.
+- No CSRF or auth header is needed; embed the form on any domain.
+
+## 5. Embedding from a front-end
+
+```tsx
+// minimal client — frontend frameworks/SDKs ship their own <PublicForm />
+async function loadForm(slug: string) {
+  const r = await fetch(`/api/v1/forms/${slug}`);
+  if (!r.ok) throw new Error(`form ${slug} not found`);
+  return r.json(); // { form, objectSchema }
+}
+
+async function submit(slug: string, payload: Record<string, unknown>) {
+  const r = await fetch(`/api/v1/forms/${slug}/submit`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(payload),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+```
+
+The ObjectUI console (a separate package/repo) ships a unified `FormPage` renderer at `/console/f/:slug` (public) and `/console/forms/:name` (internal) that does exactly this.
+
+## 6. Internal forms (`/console/forms/:name`)
+
+Sometimes you want the same FormView metadata to power an authed operator flow — "new lead", "new ticket", a queue triage screen. Set the FormView up normally (no `sharing.allowAnonymous`) and navigate to `/console/forms/<view_name>`:
+
+```ts
+// hotcrm/src/views/lead.view.ts (internal form variant)
+export default defineView({
+  name: 'lead_views',
+  object: 'lead',
+  formViews: {
+    quick_create: {
+      type: 'simple',
+      sections: [
+        {
+          label: 'Lead',
+          columns: 2,
+          fields: [
+            { field: 'first_name', required: true },
+            { field: 'last_name', required: true },
+            { field: 'email', required: true },
+            { field: 'company' },
+            { field: 'lead_source' },
+          ],
+        },
+      ],
+    },
+  },
+});
+```
+
+Operators hit `/console/forms/quick_create`. The renderer:
+
+- Loads metadata via `GET /api/v1/meta/view/quick_create`
+- Pulls the object schema via `GET /api/v1/meta/object/lead`
+- Submits to `POST /api/v1/data/lead` carrying the auth cookie
+
+Permissions are enforced server-side just like every other authed write — no `guest_portal` profile required.
+
+## 7. URL prefill
+
+Both modes accept `?prefill_<field_name>=<value>` query params. Use this to seed forms from email links, CRM segments, or campaign pages:
+
+```
+/console/f/contact-us?prefill_company=Acme&prefill_email=ada@example.com
+/console/forms/quick_create?prefill_lead_source=event_booth_2026
+```
+
+The renderer maps each `prefill_<name>` param to the corresponding form field. Values are still subject to validation and (for public mode) the server-side whitelist — prefill is a UX shortcut, not a permissions bypass.
+
+## 8. `submitBehavior` — what happens after submit
+
+Add a `submitBehavior` discriminated union to a FormView to control the post-submit experience:
+
+```ts
+formViews: {
+  web_to_lead: {
+    type: 'simple',
+    sections: [/* … */],
+    sharing: { enabled: true, allowAnonymous: true, publicLink: '/forms/contact-us' },
+
+    // Default: show a thank-you panel
+    submitBehavior: {
+      kind: 'thank-you',
+      title: 'Thanks!',
+      message: 'A specialist will reach out within 24 hours.',
+    },
+
+    // Or: redirect (great for marketing pages)
+    // submitBehavior: { kind: 'redirect', url: 'https://example.com/thanks', delayMs: 500 },
+
+    // Or: reset the form for another response (kiosks, batch entry)
+    // submitBehavior: { kind: 'continue' },
+
+    // Or: advance to the next record in a queue (internal mode only)
+    // submitBehavior: { kind: 'next-record' },
+  },
+},
+```
+
+| `kind` | Renderer behavior |
+|---|---|
+| `thank-you` *(default)* | Replace the form with a confirmation panel (`title`, `message`). |
+| `redirect` | `window.location.assign(url)` after `delayMs` (defaults to 0). |
+| `continue` | Re-read prefill values and reset state — user can submit another response without reload. |
+| `next-record` | Stub for queue contexts; falls back to thank-you when no queue is wired. |
+
+## 9. `type: 'form'` action — declarative form launchers
+
+App actions can declare `type: 'form'` to open a FormView without resorting to free-form URLs. The `target` is the FormView name; the runtime navigates to `/console/forms/:name`.
+
+```ts
+// hotcrm/src/actions/new-lead.action.ts
+import { Action } from '@objectstack/spec/ui';
+
+export default Action.create({
+  name: 'new_lead',
+  label: 'New Lead',
+  type: 'form',
+  target: 'quick_create', // FormView name
+});
+```
+
+Compared to `{ type: 'url', target: '/console/forms/quick_create' }`, the `'form'` variant is portable across runtimes — Studio/console/native shells can route it through their own form renderer instead of a raw navigation.
+
+## 10. Record detail is driven by semantic roles, not a form binding
+
+There is **no** object-level key that pins a FormView to the record-detail /
+edit screen (the once-documented `defaultDetailForm` was never implemented and
+has been removed from `ObjectSchema`). Record-detail rendering is derived from
+the object's **cross-surface semantic roles** (ADR-0085):
+
+- `nameField` — which field is the record's display name.
+- `highlightFields` — the most important fields (detail highlight strip,
+  default list columns, cards).
+- `stageField` — the linear-lifecycle field behind the detail progress
+  stepper (`false` suppresses detection).
+- `fieldGroups` + `Field.group` — semantic grouping, rendered identically on
+  forms, modals, and detail pages.
+
+When a record page needs a bespoke layout beyond what the roles derive, assign
+the object a **custom Page schema** — that is the supported per-page
+customization path. FormViews remain the metadata for the two form
+experiences this guide covers: public collection (`/f/:slug`) and internal
+entry (`/forms/:name`).
+
+## 11. Security checklist (public mode)
+
+- [x] **Whitelist enforced server-side** — clients cannot widen the field set by hand-crafting JSON.
+- [x] **Hook strips server-controlled fields** — `owner`, `status`, `internal_notes`, `is_*` flags, conversion fields are removed even if they survive the whitelist.
+- [x] **Grant is create + read-back only** — the declaration-derived `publicFormGrant` authorizes only insert (and the immediate read-back) on the form's target object; anonymous callers cannot read other records, edit, or delete via the form path.
+- [x] **No tenancy leakage** — submissions land on the project resolved from hostname/path, not from a client-supplied tenant id.
+- [ ] **Rate limiting / captcha** — not built in. Add a reverse-proxy rate limit (e.g. nginx, Cloudflare) or fronting plugin if the form sits on the public internet.
+- [ ] **Schema disclosure** — `GET /forms/:slug` returns labels and select options for whitelisted fields. If any of those are commercially sensitive, do not include them in the form.
+
+## See also
+
+- [`skills/objectstack-ui/SKILL.md`](https://github.com/objectstack-ai/framework/tree/main/skills/objectstack-ui) — full FormView schema reference.
+- [`skills/objectstack-data/SKILL.md`](https://github.com/objectstack-ai/framework/tree/main/skills/objectstack-data) — object, hook + permission-set authoring patterns.
+- [Hook & Action Bodies](/docs/automation/hook-bodies) — what runs in the sandbox vs. the host.
+- [Security](/docs/permissions) — RBAC, profiles, and the `anonymous` execution context.

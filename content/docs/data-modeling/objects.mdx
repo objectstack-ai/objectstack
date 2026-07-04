@@ -1,0 +1,288 @@
+---
+title: Object Metadata
+description: Define business entities with ObjectSchema — the core building block of every ObjectStack application
+---
+
+# Object Metadata
+
+An **Object** is the foundational metadata type in ObjectStack. It defines a business entity — its fields, capabilities, indexes, and behaviors. Each Object maps to a database table/collection and automatically gets CRUD APIs, UI forms, and query support.
+
+## Basic Structure
+
+```typescript
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+export const Account = ObjectSchema.create({
+  name: 'account',
+  label: 'Account',
+  pluralLabel: 'Accounts',
+  icon: 'building',
+  description: 'Companies and organizations',
+
+  fields: {
+    name: Field.text({ label: 'Account Name', required: true }),
+    industry: Field.select({
+      label: 'Industry',
+      options: [
+        { label: 'Technology', value: 'technology' },
+        { label: 'Finance', value: 'finance' },
+        { label: 'Healthcare', value: 'healthcare' },
+      ],
+    }),
+    annual_revenue: Field.currency({ label: 'Annual Revenue', scale: 2 }),
+    owner: Field.lookup('user', { label: 'Owner', required: true }),
+  },
+
+  enable: {
+    apiEnabled: true,
+    searchable: true,
+    trackHistory: true,
+  },
+});
+```
+
+## Properties
+
+### Identity
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | `string` | ✅ | Machine name (`snake_case`). Immutable after creation. |
+| `label` | `string` | optional | Human-readable singular label (e.g. `'Account'`) |
+| `pluralLabel` | `string` | optional | Plural label (e.g. `'Accounts'`) |
+| `description` | `string` | optional | Developer documentation |
+| `icon` | `string` | optional | Icon name (Lucide/Material) |
+| `tags` | `string[]` | optional | Categorization tags (e.g. `['sales', 'system']`) |
+
+### Data
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `fields` | `Record<string, Field>` | ✅ | Field definitions. Keys must be `snake_case`. |
+| `indexes` | `Index[]` | optional | Database performance indexes |
+| `datasource` | `string` | optional | Target datasource ID. Default: `'default'` |
+
+### Display
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `displayNameField` | `string` | optional | Field used as record display name (defaults to `'name'`) |
+| `titleFormat` | `string` | optional | Title expression (e.g. `'{name} - {code}'`) |
+| `highlightFields` | `string[]` | optional | Most-important fields in priority order — default list columns, cards, previews, detail highlight strip (ADR-0085; formerly `compactLayout` — the old spelling was retired and is now rejected) |
+| `stageField` | `string \| false` | optional | Linear lifecycle field; `false` declares the status field non-linear and suppresses stage heuristics (ADR-0085) |
+| `recordName` | `object` | optional | Record name auto-generation config |
+
+### Capabilities (`enable`)
+
+Control which platform features are active for this object:
+
+```typescript
+enable: {
+  trackHistory: true,      // Field history tracking for audit
+  searchable: true,        // Include in global search index
+  apiEnabled: true,        // Expose via REST/GraphQL APIs
+  apiMethods: ['get', 'list', 'create', 'update', 'delete'],
+  files: true,             // File attachments
+  feeds: true,             // Activity feed and comments
+  activities: true,        // Tasks and events tracking
+  trash: true,             // Soft delete with restore
+  mru: true,               // Most Recently Used tracking
+  clone: true,             // Deep record cloning
+}
+```
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `trackHistory` | `false` | Field history tracking for audit compliance |
+| `searchable` | `true` | Index records for global search |
+| `apiEnabled` | `true` | Expose object via automatic APIs |
+| `apiMethods` | all | Whitelist of allowed API operations |
+| `files` | `false` | Enable file attachments |
+| `feeds` | `false` | Enable social feed and comments |
+| `activities` | `false` | Enable tasks and events tracking |
+| `trash` | `true` | Enable soft delete with restore |
+| `mru` | `true` | Track Most Recently Used list |
+| `clone` | `true` | Allow record deep cloning |
+
+### Enterprise Features
+
+#### Multi-Tenancy
+
+```typescript
+tenancy: {
+  enabled: true,
+  strategy: 'shared',         // 'shared' | 'isolated' | 'hybrid'
+  tenantField: 'tenant_id',
+  crossTenantAccess: false,
+}
+```
+
+#### Soft Delete
+
+```typescript
+softDelete: {
+  enabled: true,
+  field: 'deleted_at',
+  cascadeDelete: false,
+}
+```
+
+#### Versioning
+
+```typescript
+versioning: {
+  enabled: true,
+  strategy: 'snapshot',       // 'snapshot' | 'delta' | 'event-sourcing'
+  retentionDays: 365,
+  versionField: 'version',
+}
+```
+
+#### Change Data Capture
+
+```typescript
+cdc: {
+  enabled: true,
+  events: ['insert', 'update', 'delete'],
+  destination: 'kafka://my-topic',
+}
+```
+
+#### Table Partitioning
+
+```typescript
+partitioning: {
+  enabled: true,
+  strategy: 'range',          // 'range' | 'hash' | 'list'
+  key: 'created_at',
+  interval: '1 month',        // Required for range strategy
+}
+```
+
+### Record Name
+
+Auto-generate unique record identifiers:
+
+```typescript
+recordName: {
+  type: 'autonumber',
+  displayFormat: 'ACC-{0000}',   // ACC-0001, ACC-0002, ...
+  startNumber: 1,
+}
+```
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `type` | `'text' \| 'autonumber'` | Generation mode |
+| `displayFormat` | `string` | Pattern (e.g. `'INV-{YYYY}-{0000}'`) |
+| `startNumber` | `number` | Starting number (default: 1) |
+
+### Indexes
+
+Optimize query performance:
+
+```typescript
+indexes: [
+  { fields: ['name'], type: 'btree', unique: false },
+  { fields: ['email'], type: 'btree', unique: true },
+  { fields: ['type', 'status'], type: 'btree', unique: false },
+]
+```
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `fields` | `string[]` | ✅ | Fields in the index |
+| `type` | `enum` | optional | `'btree'`, `'hash'`, `'gin'`, `'gist'`, `'fulltext'` (default: `'btree'`) |
+| `unique` | `boolean` | optional | Enforce uniqueness (default: `false`) |
+| `partial` | `string` | optional | Conditional index (SQL WHERE clause) |
+| `name` | `string` | optional | Index name (auto-generated if omitted) |
+
+### Additional Properties
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `active` | `boolean` | Is object active (default: `true`) |
+| `isSystem` | `boolean` | System object, protected from deletion (default: `false`) |
+| `abstract` | `boolean` | Abstract base, cannot be instantiated (default: `false`) |
+| `sharingModel` | `enum` | Org-Wide Default record visibility (ADR-0055/0056). Canonical: `'private'`, `'public_read'`, `'public_read_write'`, `'controlled_by_parent'` (detail visibility derived from its master). Legacy aliases: `'read'`=public_read, `'read_write'`/`'full'`=public_read_write |
+| `keyPrefix` | `string` | Short prefix for record IDs (e.g. `'001'`) |
+| `recordTypes` | `string[]` | Record type names for this object |
+| `validations` | `ValidationRule[]` | Object-level validation rules (see [Validation](/docs/data-modeling/validation)) |
+
+## Naming Conventions
+
+| Element | Convention | Example |
+| :--- | :--- | :--- |
+| Object `name` | `snake_case` | `project_task`, `user_profile` |
+| Export constant | `PascalCase` | `ProjectTask`, `UserProfile` |
+| Config keys | `camelCase` | `trackHistory`, `apiEnabled` |
+
+## Complete Example
+
+```typescript
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+export const ProjectTask = ObjectSchema.create({
+  name: 'project_task',
+  label: 'Project Task',
+  pluralLabel: 'Project Tasks',
+  icon: 'check-square',
+  description: 'Tasks within a project',
+
+  fields: {
+    title: Field.text({ label: 'Title', required: true, maxLength: 255 }),
+    description: Field.textarea({ label: 'Description' }),
+    status: Field.select({
+      label: 'Status',
+      options: [
+        { label: 'To Do', value: 'todo', default: true },
+        { label: 'In Progress', value: 'in_progress' },
+        { label: 'Done', value: 'done' },
+      ],
+    }),
+    priority: Field.select({
+      label: 'Priority',
+      options: [
+        { label: 'Low', value: 'low' },
+        { label: 'Medium', value: 'medium', default: true },
+        { label: 'High', value: 'high' },
+      ],
+    }),
+    due_date: Field.date({ label: 'Due Date' }),
+    assignee: Field.lookup('user', { label: 'Assignee' }),
+    project: Field.lookup('project', { label: 'Project', required: true }),
+    estimated_hours: Field.number({ label: 'Estimated Hours', min: 0 }),
+  },
+
+  indexes: [
+    { fields: ['status'], type: 'btree', unique: false },
+    { fields: ['project', 'status'], type: 'btree', unique: false },
+  ],
+
+  enable: {
+    apiEnabled: true,
+    searchable: true,
+    trackHistory: true,
+    feeds: true,
+    trash: true,
+  },
+
+  validations: [
+    {
+      name: 'due_date_future',
+      type: 'script',
+      severity: 'warning',
+      message: 'Due date should be in the future',
+      condition: 'due_date < today()',
+      events: ['insert'],
+    },
+  ],
+});
+```
+
+## Related
+
+- [Field Metadata](/docs/data-modeling/fields) — All field types and configuration options
+- [Validation Metadata](/docs/data-modeling/validation) — Data integrity rules
+- [View Metadata](/docs/ui/views) — Customize how objects are displayed
+- [Permission Metadata](/docs/permissions/permission-metadata) — Control access to objects

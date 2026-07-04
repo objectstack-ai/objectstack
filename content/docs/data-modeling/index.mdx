@@ -1,0 +1,39 @@
+---
+title: Data Modeling
+description: Define objects, fields, relationships, validation, formulas, and queries — the ObjectQL layer that every other module builds on.
+---
+
+# Data Modeling
+
+Data modeling is where every ObjectStack application starts: you declare **objects** (business entities), their **fields**, **relationships**, and **validation rules** as metadata, and the platform derives the database schema, APIs, permissions surface, and UI from that single definition. This module is the practical documentation for the **ObjectQL layer** — the Data Protocol described normatively in the [ObjectQL spec](/docs/protocol/objectql).
+
+## How it fits together
+
+- An **Object** is the unit of modeling (a table/collection with fields, actions, triggers, and permissions attached).
+- Queries are expressed as a JSON **AST** that the runtime validates and a **driver** compiles into SQL/NoSQL for the underlying store — the same model runs on Postgres, MySQL, SQLite, or MongoDB.
+- Validation and **formula (CEL) expressions** live in the metadata, so they are enforced identically in the API, UI, and automation layers.
+- Data that lives outside ObjectStack can join the model through **external datasources** (federation).
+
+## What's in this module
+
+<Cards>
+  <Card href="/docs/data-modeling/schema-design" title="Schema Design" description="End-to-end guide: designing objects, field groups, and real-world schemas" />
+  <Card href="/docs/data-modeling/objects" title="Objects" description="Object metadata: definition, options, and API operations" />
+  <Card href="/docs/data-modeling/fields" title="Fields" description="Field metadata and configuration" />
+  <Card href="/docs/data-modeling/field-types" title="Field Types" description="Gallery of every field type with examples" />
+  <Card href="/docs/data-modeling/relationships" title="Relationships & Lookups" description="Lookup, master-detail, and cross-object modeling" />
+  <Card href="/docs/data-modeling/validation" title="Validation" description="Validation metadata and rule authoring" />
+  <Card href="/docs/data-modeling/formulas" title="Expressions (CEL)" description="Formula fields and computed logic" />
+  <Card href="/docs/data-modeling/queries" title="Queries" description="Query syntax quick reference" />
+  <Card href="/docs/data-modeling/indexing" title="Database Indexing" description="Index configuration and performance" />
+  <Card href="/docs/data-modeling/seed-data" title="Seed Data & Fixtures" description="Ship demo and reference data with your app" />
+  <Card href="/docs/data-modeling/external-datasources" title="External Datasources" description="Federate external databases into the model" />
+  <Card href="/docs/data-modeling/drivers" title="Database Drivers" description="Configure SQL, MongoDB, and in-memory drivers" />
+  <Card href="/docs/data-modeling/analytics" title="Analytics Datasets" description="Model datasets for dashboards and reports" />
+</Cards>
+
+## Related
+
+- **Spec:** [ObjectQL — Schema](/docs/protocol/objectql/schema), [Query Syntax](/docs/protocol/objectql/query-syntax), [Type System](/docs/protocol/objectql/types)
+- **Schema reference:** [Data](/docs/references/data)
+- **Neighbors:** record access rules live in [Permissions & Identity](/docs/permissions); reacting to data changes lives in [Automation](/docs/automation); presenting records lives in [UI Engine](/docs/ui).

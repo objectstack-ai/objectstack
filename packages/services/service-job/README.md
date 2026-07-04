@@ -368,4 +368,4 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 - [Cron Expression Generator](https://crontab.guru/)
 - [@objectstack/spec/contracts](../../spec/src/contracts/)
-- [Job Scheduling Guide](/content/docs/guides/jobs/)
+- [Job Scheduling Guide](/content/docs/kernel/runtime-services/queue-service.mdx)

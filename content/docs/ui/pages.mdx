@@ -1,0 +1,245 @@
+---
+title: Page Metadata
+description: Build custom pages with component-based layouts, variables, and event handling
+---
+
+# Page Metadata
+
+A **Page** defines a custom UI layout using components, regions, and variables. Unlike Views which are bound to a single Object, Pages are flexible containers that can combine multiple components, embed views, and manage local state.
+
+## Basic Structure
+
+```typescript
+const homePage = {
+  name: 'sales_home',
+  label: 'Sales Home',
+  type: 'home',
+  regions: [
+    {
+      name: 'header',
+      width: 'full',
+      components: [
+        {
+          type: 'metric_card',
+          id: 'total_revenue',
+          label: 'Total Revenue',
+          properties: {
+            object: 'opportunity',
+            field: 'amount',
+            aggregate: 'sum',
+            format: 'currency',
+          },
+        },
+      ],
+    },
+    {
+      name: 'main',
+      width: 'large',
+      components: [
+        {
+          type: 'list_view',
+          id: 'recent_deals',
+          label: 'Recent Deals',
+          properties: {
+            object: 'opportunity',
+            view: 'recent_open',
+            limit: 10,
+          },
+        },
+      ],
+    },
+  ],
+};
+```
+
+## Page Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | `string` | ✅ | Machine name (`snake_case`) |
+| `label` | `string` | ✅ | Display label |
+| `description` | `string` | optional | Page description |
+| `type` | `enum` | optional | Page type (see below; default `'record'`) |
+| `object` | `string` | optional | Associated object (for `record` type) |
+| `template` | `string` | optional | Layout template name (default: `'default'`) |
+| `regions` | `PageRegion[]` | ✅ | Layout regions with components |
+| `variables` | `PageVariable[]` | optional | Local state variables |
+| `isDefault` | `boolean` | optional | Is default page for its type |
+| `assignedProfiles` | `string[]` | optional | Profiles that can access this page |
+
+### Page Types
+
+| Type | Description | Use Case |
+| :--- | :--- | :--- |
+| `record` | Tied to a specific object record | Custom detail pages |
+| `home` | Landing/home page | App entry points |
+| `app` | General application page | Custom layouts |
+| `utility` | Utility/helper panel | Tools, settings, wizards |
+| `list` | Record list/interface surface | Data-driven interface pages |
+
+The schema also declares roadmap types (`dashboard`, `form`, `record_detail`, `record_review`, `overview`, `blank`) that currently fall back to the list renderer; only the five types above have dedicated renderers today.
+
+## Regions
+
+Regions define layout zones on the page. Each region contains components.
+
+```typescript
+regions: [
+  {
+    name: 'sidebar',
+    width: 'small',
+    components: [/* ... */],
+  },
+  {
+    name: 'content',
+    width: 'large',
+    components: [/* ... */],
+  },
+]
+```
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | `string` | ✅ | Region identifier |
+| `width` | `enum` | optional | `'small'`, `'medium'`, `'large'`, `'full'` |
+| `components` | `PageComponent[]` | ✅ | Components in this region |
+
+## Components
+
+Components are the building blocks placed inside regions.
+
+```typescript
+{
+  type: 'chart',
+  id: 'revenue_chart',
+  label: 'Revenue Trend',
+  properties: {
+    chartType: 'line',
+    object: 'opportunity',
+    categoryField: 'close_date',
+    valueField: 'amount',
+  },
+  events: {
+    onClick: "navigate_to('opportunity_detail', { id: $event.id })",
+  },
+  visibility: "os.user.profile == 'sales_manager'",
+  style: { height: '400px' },
+}
+```
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `type` | `string` | ✅ | Component type (standard `PageComponentType` enum or custom string) |
+| `id` | `string` | optional | Unique component instance identifier |
+| `label` | `string` | optional | Display label |
+| `properties` | `Record<string, unknown>` | ✅ | Component-specific configuration |
+| `events` | `Record<string, string>` | optional | Event handlers (action expressions) |
+| `style` | `object` | optional | CSS styles |
+| `className` | `string` | optional | CSS class names |
+| `responsiveStyles` | `object` | optional | **Preferred** SDUI styling channel (ADR-0065): **desktop-first** per-breakpoint scoped style maps, compiled to id-scoped CSS at render. Keys are `large` (the unconditional base), then `medium` / `small` / `xsmall` as `max-width` overrides. Prefer design tokens, e.g. `{ large: { padding: 'var(--space-8)' }, small: { padding: 'var(--space-4)' } }`. Use over ad-hoc `style` / `className` for metadata-authored pages. |
+| `visibility` | `string` | optional | Visibility predicate (CEL expression) |
+
+The `type` field is a union of the standard `PageComponentType` enum and any custom string. The standard (namespaced) component types include:
+
+- **Structure:** `page:header`, `page:footer`, `page:sidebar`, `page:tabs`, `page:accordion`, `page:card`, `page:section`
+- **Record context:** `record:details`, `record:highlights`, `record:related_list`, `record:activity`, `record:chatter`, `record:path`, `record:alert`, `record:quick_actions`, `record:reference_rail`, `record:history`
+- **Navigation:** `app:launcher`, `nav:menu`, `nav:breadcrumb`
+- **Utility:** `global:search`, `global:notifications`, `user:profile`
+- **AI:** `ai:chat_window`, `ai:suggestion`
+- **Elements:** `element:text`, `element:number`, `element:image`, `element:divider`, `element:button`, `element:filter`, `element:form`, `element:record_picker`
+
+Components may also carry `dataSource` (per-element object binding for multi-object pages), `responsive`, and `aria` configuration. Custom string types are also accepted for project-specific widgets.
+
+## Variables
+
+Pages can define local variables for managing state across components.
+
+```typescript
+variables: [
+  {
+    name: 'selected_tab',
+    type: 'string',
+    defaultValue: 'overview',
+  },
+  {
+    name: 'date_range',
+    type: 'object',
+    defaultValue: { start: null, end: null },
+  },
+]
+```
+
+Variable `type` accepts `'string'` (default), `'number'`, `'boolean'`, `'object'`, `'array'`, or `'record_id'`.
+
+## Complete Example
+
+```typescript
+const accountRecordPage = {
+  name: 'account_detail',
+  label: 'Account Detail',
+  type: 'record',
+  object: 'account',
+  variables: [
+    { name: 'active_tab', type: 'string', defaultValue: 'details' },
+  ],
+  regions: [
+    {
+      name: 'header',
+      width: 'full',
+      components: [
+        {
+          type: 'record_header',
+          id: 'header',
+          properties: {
+            fields: ['name', 'type', 'industry', 'owner'],
+            actions: ['edit', 'delete', 'clone'],
+          },
+        },
+      ],
+    },
+    {
+      name: 'sidebar',
+      width: 'small',
+      components: [
+        {
+          type: 'record_detail',
+          id: 'key_fields',
+          label: 'Key Fields',
+          properties: {
+            fields: ['annual_revenue', 'employees', 'website', 'phone'],
+          },
+        },
+        {
+          type: 'activity_timeline',
+          id: 'activities',
+          label: 'Activity',
+        },
+      ],
+    },
+    {
+      name: 'main',
+      width: 'large',
+      components: [
+        {
+          type: 'related_list',
+          id: 'contacts',
+          label: 'Contacts',
+          properties: { object: 'contact', relationship: 'account' },
+        },
+        {
+          type: 'related_list',
+          id: 'opportunities',
+          label: 'Opportunities',
+          properties: { object: 'opportunity', relationship: 'account' },
+        },
+      ],
+    },
+  ],
+};
+```
+
+## Related
+
+- [View Metadata](/docs/ui/views) — List views and form views for record display
+- [Dashboard Metadata](/docs/ui/dashboards) — Analytics-focused page layout
+- [App Metadata](/docs/ui/apps) — Organize pages into applications

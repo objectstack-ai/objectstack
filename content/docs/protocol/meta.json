@@ -1,6 +1,13 @@
 {
-  "title": "Protocol",
+  "title": "Protocol Spec",
   "icon": "Network",
-  "root": true,
-  "pages": ["index", "objectql", "objectui", "objectos", "knowledge"]
+  "pages": [
+    "index",
+    "diagram",
+    "objectql",
+    "objectui",
+    "objectos",
+    "knowledge",
+    "backward-compatibility"
+  ]
 }

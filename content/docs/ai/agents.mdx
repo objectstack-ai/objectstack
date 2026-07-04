@@ -1,0 +1,239 @@
+---
+title: AI Agents
+description: The two platform agents (ask and build), how skills extend them, and the shape of an AgentSchema record
+---
+
+# AI Agents
+
+Part of the [AI module](/docs/ai) — see the overview for how the cloud / Enterprise in-UI AI runtime differs from the open edition's MCP-only (BYO-AI) approach.
+
+Per [ADR-0063](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0063-two-kernel-agents-skills-are-the-extension-primitive.md)
+the kernel ships **exactly two** platform agents, bound by the *surface* the user
+is in — the user never picks from a roster:
+
+| Agent | Surface | Does | Edition |
+|---|---|---|---|
+| **`ask`** | data console | Read / query / explore records + run the business **actions** the app exposes. RLS-bounded. | cloud · Enterprise |
+| **`build`** | Studio | Author *metadata* (objects, fields, views, flows) via plan → draft → verify → publish. | cloud · Enterprise |
+
+Both agents are part of the **cloud / Enterprise** in-UI AI runtime (cloud ADR-0025).
+The **open edition** ships neither — it uses `@objectstack/mcp` (BYO-AI) for data
+query and source-mode authoring instead (see the note above).
+
+Within the cloud / EE runtime there is no per-turn intent classifier and no agent
+dropdown: the surface binds the agent (data console → `ask`, Studio → `build`). A
+`build`-shaped request that reaches `ask` is declined and redirected to the
+Builder, never silently re-routed.
+
+## You extend the platform with **skills**, not agents
+
+`*.agent.ts` is **closed to third parties** — the `agent` metadata type is
+`allowRuntimeCreate:false, allowOrgOverride:false`, reserved for the two platform
+agents and platform-owned subagents (ADR-0063 §2). To give the `ask` agent a new
+capability you author a **skill** (`*.skill.ts`) whose `tools` reference your
+Actions / Flows / queries; it then attaches to `ask`. Every skill declares
+`surface: 'ask' | 'build' | 'both'`, and an agent's tool set is the **union of its
+surface-compatible skills' tools** — there is no global fall-through, so a skill
+reaches an agent only when their surfaces match
+([ADR-0064](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0064-tool-scoping-to-agent.md)).
+Both `surface:'ask'` and `surface:'build'` skills run only where the in-UI AI
+runtime exists — the **cloud / Enterprise** distribution. On the open framework
+there is no in-product agent to attach them to (cloud ADR-0025); author capability
+as Actions / Flows and reach it through `@objectstack/mcp` instead.
+
+## The shape of an agent
+
+An agent is metadata validated by `AgentSchema` (the platform's own `ask` / `build`
+records use exactly these fields):
+
+| Field | Meaning |
+|------|---------|
+| `surface` | `'ask'` \| `'build'` — the product surface this agent binds (ADR-0063 §1) |
+| `role` | Free-text **persona** string (e.g. `"Senior Support Engineer"`) — not an enum |
+| `instructions` | System prompt / prime directives |
+| `model` | Provider + model config (`provider`: `openai` \| `azure_openai` \| `anthropic` \| `local`) |
+| `skills` | Skill names to attach (the primary Agent → Skill → Tool capability model) |
+| `tools` | Direct tool **references** `{ type, name, description }` — `type` is `action` \| `flow` \| `query` \| `vector_search`; `name` points at an existing Action/Flow/query |
+| `knowledge` | RAG access: `{ topics: string[], indexes: string[] }` |
+
+There is no `type` field and no fixed agent "type" taxonomy — behaviour comes from
+persona, instructions, skills, and tools. There are no `triggers` / `schedule`
+fields on an agent; drive agents from [Flows/Workflows](/docs/automation) or invoke
+them via the chat endpoint.
+
+<Callout type="info">
+Agent tools are **references** to existing Actions, Flows, or queries — you do
+not define ad-hoc tool names with inline parameter schemas here. See
+[Actions as Tools](#actions-as-tools-explicit-opt-in) for how an Action becomes
+LLM-callable.
+</Callout>
+
+<Callout type="warning">
+The agent definitions below illustrate agent **anatomy** — they show how an
+`AgentSchema` record is shaped, *not* a tenant-authoring tutorial. On today's
+platform you do not ship your own agents (`*.agent.ts` is platform-internal); you
+add capability by authoring a **skill** that attaches to the built-in `ask` agent.
+Read the examples for structure, then express your own capability as a skill plus
+the Actions/Flows its tools reference.
+</Callout>
+
+## Sales Assistant Agent
+
+```typescript
+import { defineAgent } from '@objectstack/spec/ai';
+
+export const SalesAssistantAgent = defineAgent({
+  name: 'sales_assistant',
+  label: 'Sales Assistant',
+  role: 'Sales Development Assistant',
+
+  instructions: `You are a sales assistant AI.
+
+Your responsibilities:
+1. Qualify incoming leads (BANT criteria)
+2. Suggest next best actions
+3. Draft personalized emails
+4. Analyze win/loss patterns
+
+Always be professional and data-driven.`,
+
+  model: {
+    provider: 'openai',
+    model: 'gpt-4',
+    temperature: 0.7,
+    maxTokens: 2000,
+  },
+
+  // References to Actions/Flows exposed as tools (see "Actions as Tools").
+  tools: [
+    { type: 'flow', name: 'analyze_lead', description: 'Analyze a lead and provide a qualification score' },
+    { type: 'flow', name: 'suggest_next_action', description: 'Suggest the next best action for an opportunity' },
+    { type: 'action', name: 'generate_email', description: 'Generate a personalized email template' },
+  ],
+
+  // RAG access: topics to recruit knowledge from + vector store indexes.
+  knowledge: {
+    topics: ['sales-playbook', 'leads', 'opportunities'],
+    indexes: ['sales_docs'],
+  },
+});
+```
+
+## Customer Service Agent
+
+```typescript
+export const ServiceAgent = defineAgent({
+  name: 'service_agent',
+  label: 'Customer Service Agent',
+  role: 'Customer Service Specialist',
+
+  instructions: `You are a customer service AI agent.
+
+Your responsibilities:
+1. Triage incoming cases
+2. Suggest relevant knowledge articles
+3. Draft response templates
+4. Escalate critical issues
+
+Always be empathetic and solution-focused.`,
+
+  model: {
+    provider: 'openai',
+    model: 'gpt-4',
+    temperature: 0.5,
+    maxTokens: 1500,
+  },
+
+  // `search_knowledge` is provided by the Knowledge Protocol tool, not declared inline.
+  tools: [
+    { type: 'flow', name: 'triage_case', description: 'Analyze a case and assign priority' },
+    { type: 'action', name: 'generate_response', description: 'Generate a customer response' },
+  ],
+
+  knowledge: {
+    topics: ['support-kb', 'cases'],
+    indexes: ['support_docs'],
+  },
+});
+```
+
+## Lead Enrichment Agent
+
+```typescript
+export const LeadEnrichmentAgent = defineAgent({
+  name: 'lead_enrichment',
+  label: 'Lead Enrichment Agent',
+  role: 'Data Enrichment Worker',
+
+  instructions: `You enrich lead records with additional data.
+
+Tasks:
+1. Look up company information
+2. Enrich contact details
+3. Add firmographic data
+4. Research technology stack
+
+Use reputable data sources.`,
+
+  model: {
+    provider: 'openai',
+    model: 'gpt-3.5-turbo',
+    temperature: 0.3,
+    maxTokens: 1000,
+  },
+
+  tools: [
+    { type: 'flow', name: 'lookup_company', description: 'Look up company information' },
+    { type: 'flow', name: 'enrich_contact', description: 'Enrich contact information' },
+  ],
+});
+```
+
+To run enrichment when a lead is created or on a schedule, trigger this agent
+from a [Flow or Workflow](/docs/automation) — agents themselves carry no
+`triggers`/`schedule` fields.
+
+## Revenue Intelligence Agent
+
+```typescript
+export const RevenueIntelligenceAgent = defineAgent({
+  name: 'revenue_intelligence',
+  label: 'Revenue Intelligence Agent',
+  role: 'Revenue Operations Analyst',
+
+  instructions: `You analyze sales data and provide insights.
+
+Responsibilities:
+1. Analyze pipeline health
+2. Identify at-risk deals
+3. Summarize trends
+4. Generate executive summaries
+
+Use the data tools to query records and aggregate metrics.`,
+
+  model: {
+    provider: 'openai',
+    model: 'gpt-4',
+    temperature: 0.2,
+    maxTokens: 3000,
+  },
+
+  // Built-in data tools (query_records / get_record / aggregate_data) are
+  // available to agents automatically once registered — see "Actions as Tools".
+  tools: [
+    { type: 'flow', name: 'analyze_pipeline', description: 'Analyze sales pipeline health' },
+  ],
+
+  knowledge: {
+    topics: ['opportunities', 'pipeline'],
+    indexes: ['sales_docs'],
+  },
+});
+```
+
+---
+
+## See also
+
+- [AI Overview](/docs/ai)
+- [Actions as Tools](/docs/ai/actions-as-tools)

@@ -1,0 +1,43 @@
+---
+title: UI Engine
+description: Apps, pages, views, dashboards, and forms — server-driven UI declared as metadata and rendered by the ObjectUI runtime.
+---
+
+# UI Engine
+
+The UI engine turns metadata into user interfaces: you declare **apps**, **pages**, **views**, and **dashboards** as data, and any compliant renderer draws them. This module is the practical documentation for the **ObjectUI layer** — the UI Protocol described normatively in the [ObjectUI spec](/docs/protocol/objectui). Because the UI is data, it ships inside the same artifact as your schema, respects the same permissions, and can be generated or modified by AI agents through the same typed surface.
+
+## The building blocks
+
+- An **App** groups navigation, branding, and entry points for one audience.
+- **Views** present object records as list, form, kanban, or calendar; **Pages** compose free-form layouts from widgets.
+- **Dashboards** combine charts and datasets for analytics.
+- **Forms** capture data — both internal record forms and public, unauthenticated collection forms.
+- The **Setup App** is the platform's built-in administration UI, itself rendered from the same protocol.
+
+## What's in this module
+
+<Cards>
+  <Card href="/docs/ui/apps" title="Apps" description="App metadata: navigation, branding, entry points" />
+  <Card href="/docs/ui/pages" title="Pages" description="Page metadata and layout composition" />
+  <Card href="/docs/ui/views" title="Views" description="List, form, kanban, and calendar views" />
+  <Card href="/docs/ui/dashboards" title="Dashboards" description="Dashboard metadata and datasets" />
+  <Card href="/docs/ui/forms" title="Forms" description="Public and internal form patterns" />
+  <Card href="/docs/ui/doc-pages" title="Doc Pages" description="Ship package documentation rendered in the console" />
+  <Card href="/docs/ui/setup-app" title="Setup App" description="The built-in administration UI" />
+</Cards>
+
+### Recipes
+
+<Cards>
+  <Card href="/docs/ui/create-vs-edit-form" title="Create form ≠ edit form" description="Different layouts per form mode" />
+  <Card href="/docs/ui/field-grouping-and-order" title="Field grouping & order" description="Control form structure" />
+  <Card href="/docs/ui/role-based-interfaces" title="Role-based interfaces" description="Different UIs per audience" />
+  <Card href="/docs/ui/public-data-collection" title="Collect data from the public" description="Unauthenticated forms end to end" />
+</Cards>
+
+## Related
+
+- **Spec:** [UI as Data Concept](/docs/protocol/objectui/concept), [Layout DSL](/docs/protocol/objectui/layout-dsl), [Action Protocol](/docs/protocol/objectui/actions), [Widget Contract](/docs/protocol/objectui/widget-contract)
+- **Schema reference:** [UI](/docs/references/ui), [Studio](/docs/references/studio)
+- **Neighbors:** the records a view shows come from [Data Modeling](/docs/data-modeling); what a user is allowed to see is decided by [Permissions & Identity](/docs/permissions); buttons that run logic call into [Automation](/docs/automation).

@@ -1,0 +1,115 @@
+---
+title: Hooks
+description: Run custom code at interception points in the ObjectQL execution pipeline — before/after insert, update, delete, and find
+---
+
+# Hooks
+
+Hooks are the data-layer "logic layer": they run custom code at interception
+points in the ObjectQL execution pipeline (before/after insert, update, delete,
+find, etc.). The construct is `Hook`, imported from `@objectstack/spec/data`.
+
+A hook targets one or more `object`s and subscribes to one or more lifecycle
+`events`. Each event is a combined timing+action enum value, e.g.
+`beforeInsert`, `beforeUpdate`, `afterUpdate`, `afterDelete` (read-side events
+such as `beforeFind`/`afterFind` are also available).
+
+## Before Hook
+
+Mutate the incoming record before it is saved. The pending record lives on
+`ctx.input` (`ctx.input.doc` for insert/update):
+
+```typescript
+import { Hook } from '@objectstack/spec/data';
+
+export const AccountBeforeWrite: Hook = {
+  name: 'account_before_write',
+  object: 'account',
+  events: ['beforeInsert', 'beforeUpdate'],
+
+  handler: async (ctx) => {
+    const record = ctx.input.doc as Record<string, any>;
+
+    // Normalize phone numbers
+    if (record.phone) {
+      record.phone = normalizePhone(record.phone);
+    }
+
+    // Auto-populate from website
+    if (!record.industry && record.website) {
+      record.industry = await lookupIndustry(record.website);
+    }
+  },
+};
+```
+
+## After Hook
+
+React after a record is persisted. Use `ctx.previous` for the pre-change
+snapshot and `ctx.api.object('x')` for cross-object writes:
+
+```typescript
+export const OpportunityAfterUpdate: Hook = {
+  name: 'opportunity_after_update',
+  object: 'opportunity',
+  events: ['afterUpdate'],
+
+  handler: async (ctx) => {
+    const opp = ctx.result as Record<string, any>;
+    const wasWon = ctx.previous?.stage === 'closed_won';
+
+    if (opp.stage === 'closed_won' && !wasWon) {
+      // Create a contract via the scoped cross-object API
+      await ctx.api.object('contract').insert({
+        account: opp.account,
+        opportunity: opp.id,
+        contract_value: opp.amount,
+        start_date: new Date(),
+      });
+    }
+  },
+};
+```
+
+## Hook Context
+
+`handler` receives a `HookContext` with these fields:
+
+```typescript
+ctx = {
+  id,           // tracing id
+  object,       // target object name
+  event,        // e.g. 'beforeInsert' | 'afterUpdate'
+  input,        // mutable input (e.g. input.doc for insert/update)
+  result,       // mutable operation result (after* events)
+  previous,     // record state before the operation (update/delete)
+  session,      // { userId, tenantId, roles, accessToken, isSystem }
+  user,         // { id, name, email } convenience shortcut
+  transaction,  // active transaction handle, if any
+  ql,           // ObjectQL engine reference
+  api,          // scoped cross-object access: ctx.api.object('x')
+}
+```
+
+## Best Practices
+
+✅ **DO:**
+- Use before hooks to enrich/normalize the incoming record
+- Use after hooks for related-record side effects
+- Use `ctx.api.object('x')` for cross-object access so writes stay in scope
+- Handle errors gracefully
+
+❌ **DON'T:**
+- Query in loops
+- Trigger unbounded cascades of writes
+- Perform heavy/long-running work inline in a hook
+- Mutate `ctx.result` in before hooks (it is only populated for after hooks)
+
+## Related business logic
+
+Hooks are one of several business-logic layers. Topics formerly covered on this page now live on their own pages:
+
+- Validation rules → [/docs/data-modeling/validation](/docs/data-modeling/validation)
+- Formula logic → [/docs/data-modeling/formulas](/docs/data-modeling/formulas)
+- Flows → [/docs/automation/flows](/docs/automation/flows)
+- Approval nodes → [/docs/automation/approvals](/docs/automation/approvals)

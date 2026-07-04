@@ -1,0 +1,15 @@
+{
+  "title": "Deployment & Operations",
+  "icon": "Cloud",
+  "pages": [
+    "index",
+    "vercel",
+    "production-readiness",
+    "publish-and-preview",
+    "environment-variables",
+    "single-project-mode",
+    "cloud-artifact-api",
+    "migration-from-objectql",
+    "troubleshooting"
+  ]
+}

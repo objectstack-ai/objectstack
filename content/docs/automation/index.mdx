@@ -1,0 +1,35 @@
+---
+title: Automation
+description: Hooks, flows, workflows, approvals, and webhooks — the process engine that reacts to data changes and drives business processes.
+---
+
+# Automation
+
+Automation is ObjectStack's process engine: it lets you attach business logic to your data model **declaratively** — as metadata — instead of scattering it through application code. It is a cross-protocol capability: automations are declared in the Automation Protocol namespace and executed by the ObjectOS runtime against ObjectQL data.
+
+## The building blocks
+
+- **Hooks** run custom logic before/after record operations (create, update, delete) — the workhorse for validation-with-side-effects, denormalization, and integrations.
+- **Flows** are node-based visual logic (screen flows, autolaunched flows, scheduled flows).
+- **Workflows** model a record's lifecycle as a **finite state machine**: states, transitions, and guards.
+- **Approvals** add human sign-off steps to a process.
+- **Webhooks** deliver events to external systems over HTTP with retry semantics.
+
+Rule of thumb: model *state* with workflows, model *steps* with flows, use hooks for *code-level* reactions, and webhooks to *notify the outside world*.
+
+## What's in this module
+
+<Cards>
+  <Card href="/docs/automation/hooks" title="Hooks" description="Before/after hooks on record operations" />
+  <Card href="/docs/automation/hook-bodies" title="Hook & Action Bodies (L1/L2)" description="The two authoring levels for hook logic" />
+  <Card href="/docs/automation/flows" title="Flows" description="Flow metadata and node-based automation" />
+  <Card href="/docs/automation/workflows" title="Workflows" description="State-machine lifecycle modeling" />
+  <Card href="/docs/automation/approvals" title="Approvals" description="Approval process recipe" />
+  <Card href="/docs/automation/webhooks" title="Webhook Delivery" description="Outbound event delivery and retries" />
+</Cards>
+
+## Related
+
+- **Spec:** [State Machine (Lifecycle)](/docs/protocol/objectql/state-machine), [Runtime Capabilities](/docs/protocol/objectos/runtime-capabilities)
+- **Schema reference:** [Automation](/docs/references/automation)
+- **Neighbors:** validation rules that block bad data live in [Data Modeling](/docs/data-modeling/validation); who may trigger an automation is governed by [Permissions & Identity](/docs/permissions); the services hooks call (email, queue, storage…) are documented in [Kernel & Services](/docs/kernel/runtime-services).

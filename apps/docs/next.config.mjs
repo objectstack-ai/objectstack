@@ -1,4 +1,5 @@
 import { createMDX } from 'fumadocs-mdx/next';
+import { toNextRedirects } from './redirects.mjs';
 
 const withMDX = createMDX();
 
@@ -25,6 +26,9 @@ const config = {
         hostname: 'objectstack.ai',
       },
     ],
+  },
+  async redirects() {
+    return toNextRedirects();
   },
   async rewrites() {
     return [

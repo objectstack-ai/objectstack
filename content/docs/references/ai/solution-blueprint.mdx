@@ -3,7 +3,7 @@ title: Solution Blueprint
 description: Solution Blueprint protocol schemas
 ---
 
-{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 Solution Blueprint Schema (ADR-0033 §4 — plan-first authoring)
 
@@ -110,6 +110,7 @@ const result = BlueprintApp.parse(data);
 | **label** | `string` | optional | Human-readable singular label |
 | **description** | `string` | optional | What this object represents |
 | **fields** | `Object[]` | ✅ | Fields to create on the object |
+| **nameField** | `string` | optional | The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079). Set it to the object's text label field (e.g. "product_name"). For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "`{order_no}` · `{customer}`"). Omitting it lets the platform auto-pick a text field, but declaring it is strongly preferred. |
 
 
 ---
@@ -135,9 +136,9 @@ const result = BlueprintApp.parse(data);
 | **object** | `string` | ✅ | Object this view displays (snake_case) |
 | **name** | `string` | ✅ | View machine name (snake_case) |
 | **label** | `string` | optional | Human-readable view label |
-| **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar'>` | ✅ | View kind |
-| **columns** | `string[]` | optional | Field names shown as columns (in order) |
-| **groupBy** | `string` | optional | REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. |
+| **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>` | ✅ | View kind. Pick the surface that fits the data: "gallery" for a visual card/cover browse when the user asks for a 画廊/相册/卡片墙/封面/海报/图集 (a gallery / card wall / cover / poster grid) or the object has an image/avatar/file field worth showing as a card cover; "gantt" for a 甘特图/时间线/排期 (timeline / schedule) when the object has BOTH a start and an end date field; "kanban" for a board grouped by a status/select field; "calendar" for a single-date schedule; "form" for a record editor; else "list". |
+| **columns** | `string[]` | optional | Field names shown as columns (in order). For a gallery, INCLUDE the image/avatar/file field (it becomes the card cover); for a gantt, INCLUDE the start date column before the end date column. |
+| **groupBy** | `string` | optional | REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. Optional for gantt (groups leaf tasks into summary rows). |
 
 
 ---

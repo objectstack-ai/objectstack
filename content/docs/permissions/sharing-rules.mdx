@@ -1,0 +1,135 @@
+---
+title: "Sharing Rules"
+description: "Extend record access beyond the role hierarchy — organization-wide defaults, criteria- and owner-based sharing rules, recipient types, and RLS-safe analytics read scope."
+---
+
+# Sharing Rules
+
+Sharing rules extend access beyond the role hierarchy.
+
+## Organization-Wide Defaults (OWD)
+
+Set baseline access for all users:
+
+Each object's OWD is a single value from the `OWDModel` enum (`private`,
+`public_read`, `public_read_write`, `controlled_by_parent`):
+
+```typescript
+export const OrganizationDefaults = {
+  lead: 'private',                    // Users see only their own records
+  account: 'private',
+  contact: 'controlled_by_parent',   // Access controlled by parent (Account)
+  opportunity: 'private',
+  campaign: 'public_read',           // All users can read
+  product: 'public_read',
+};
+```
+
+## Access Levels
+
+| Level | Description |
+|-------|-------------|
+| `private` | Owner only (+ role hierarchy) |
+| `public_read` | All users can read |
+| `public_read_write` | All users can read and edit |
+| `controlled_by_parent` | Controlled by parent object |
+
+## Criteria-Based Sharing Rules
+
+Share records based on field criteria:
+
+```typescript
+import { defineSharingRule } from '@objectstack/spec/security';
+
+export const AccountTeamSharingRule = defineSharingRule({
+  name: 'account_team_sharing',
+  label: 'Share Active Customers with Sales Team',
+  type: 'criteria',
+  object: 'account',
+
+  // Predicate (CEL): which records to share
+  condition: P`record.type == "customer" && record.is_active == true`,
+
+  // Who to share with (a single recipient — see the recipient types below)
+  sharedWith: {
+    type: 'role',
+    value: 'sales_manager',
+  },
+
+  // Access level granted: read | edit | full
+  accessLevel: 'edit',
+});
+```
+
+### Recipient types
+
+`sharedWith` (and `ownedBy`) accept a `{ type, value }` recipient. The supported
+`type` values are:
+
+| `type` | Shares with |
+|:--|:--|
+| `user` | A single user |
+| `group` | All members of a public group |
+| `role` | Everyone assigned that role |
+| `role_and_subordinates` | Everyone in that role **and every role below it** in the hierarchy (ADR-0056 D6) — configurable per rule, so one rule can cascade down a branch of the org chart |
+
+```typescript
+// Share with a sales manager AND everyone reporting up to them.
+sharedWith: { type: 'role_and_subordinates', value: 'sales_manager' },
+```
+
+The recipient set is expanded by `@objectstack/plugin-sharing` when the rule is
+evaluated (`afterInsert` / `afterUpdate`); `role_and_subordinates` walks the
+`sys_role.parent` graph (cycle-safe).
+
+## Owner-Based Sharing Rules
+
+Share based on record owner characteristics:
+
+```typescript
+import { defineSharingRule } from '@objectstack/spec/security';
+
+export const OpportunityOwnerSharingRule = defineSharingRule({
+  name: 'opportunity_owner_sharing',
+  label: 'Share Sales Rep Opportunities with Managers',
+  type: 'owner',
+  object: 'opportunity',
+
+  // Share records owned by this group/role
+  ownedBy: {
+    type: 'role',
+    value: 'sales_rep',
+  },
+
+  // Share with this recipient
+  sharedWith: {
+    type: 'role',
+    value: 'sales_manager',
+  },
+
+  accessLevel: 'read',
+});
+```
+
+## Analytics and Dataset Read Scope
+
+Dataset-bound dashboards and reports often execute through the analytics
+service, including the NativeSQL strategy. That path still has to honor the
+same row-level security rules as ObjectQL. `@objectstack/plugin-security`
+therefore registers a public `security` service with
+`getReadFilter(object, context)`, and `@objectstack/service-analytics`
+auto-bridges to it unless an explicit `getReadScope` option is supplied.
+
+The bridge is context-aware and may be async because permission-set and RLS
+resolution can hit the database. The analytics service applies the returned
+filter to the base object and to joined objects declared by a dataset. If read
+scope resolution fails or an unsupported predicate would have to be translated
+into SQL, the analytics query fails closed instead of dropping the filter.
+
+---
+
+## See also
+
+- [Permissions & Identity overview](/docs/permissions)
+- [Role Hierarchy](/docs/permissions/roles)
+- [Field-Level Security](/docs/permissions/field-level-security)

@@ -1,0 +1,487 @@
+---
+title: Expressions (CEL)
+description: Canonical CEL-based expression language for formulas, predicates, conditions, and dynamic seed values
+---
+
+# Expressions
+
+ObjectStack uses a **single canonical expression language** for every place a
+piece of metadata needs to compute a value or evaluate a condition:
+
+- **Formula fields** (`type: 'formula'`)
+- **Predicates** — validation `condition`, sharing `condition`, field
+  conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`),
+  view section/column visibility (`visibleOn`), action `disabled`, view filter
+  `criteria`, hook `condition`, flow decisions
+- **Dynamic seed values** — fixtures whose value depends on the install-time
+  clock or identity context
+
+The language is **[CEL](https://github.com/google/cel-spec)** (Google's Common
+Expression Language, Apache-2.0), evaluated through `@objectstack/formula`
+(thin wrapper over [`@marcbachmann/cel-js`](https://github.com/marcbachmann/cel-js))
+plus the ObjectStack standard library.
+
+> **Why CEL?** Formal grammar, abundant public training corpus (so AI authors
+> emit it natively), AST-first persistence, and sandboxed execution with
+> bounded cost. ObjectStack does **not** ship a Salesforce-flavor DSL — the
+> previous custom 22-function engine was deleted in M9. See
+> [north-star §8](/docs/concepts/north-star) "No private expression DSL".
+
+---
+
+## The `Expression` envelope
+
+Every expression in metadata is persisted as the same envelope:
+
+```ts
+type Expression = {
+  dialect: 'cel' | 'js' | 'cron' | 'template';
+  source?: string;          // surface syntax
+  ast?: unknown;            // parsed AST (filled by `objectstack compile`)
+  meta?: { rationale?: string; generatedBy?: string };
+};
+```
+
+ObjectStack ships **four** registered dialects (M9.9):
+
+| Dialect    | Use for                                              | Helper        |
+|:-----------|:-----------------------------------------------------|:--------------|
+| `cel`      | computed values, predicates, defaults, formulas      | `` cel`...` `` / `` F`...` `` / `` P`...` `` |
+| `cron`     | recurring schedules (Job, ETL, sync, exports, jobs)  | `` cron`...` `` |
+| `template` | text interpolation (`{{path}}`) — notif/prompt/title | `` tmpl`...` `` |
+| `js`       | sandboxed L2 hook bodies (TypeScript source)         | n/a           |
+
+All dialects share the same variable scope (`record`, `previous`, `os.user`,
+`os.org`, `os.env`, `vars` for flow steps), so you author once and never have
+to relearn the syntax across surfaces.
+
+<Callout type="warn">
+**Predicates are bare CEL — never wrap field references in `{…}` braces.** The
+most common mistake (and the root cause of issue #1491) is a condition like
+`{record.rating} >= 4`: in CEL, `{…}` is a **map literal**, so it is a parse
+error. Write bare CEL: `record.rating >= 4`. Braces belong only in `{{ … }}`
+text templates. As of 7.6 a malformed expression no longer silently does
+nothing — it fails `objectstack build` and throws at runtime.
+</Callout>
+
+**Template formatting (7.6).** A `template` hole is a field path with an optional
+whitelisted formatter — `{{ path | formatter[:arg] }}` — with defined value→string
+semantics (no arbitrary logic; put logic in a CEL field):
+
+```ts
+tmpl`Deal {{record.name}} — {{record.amount | currency}} closes {{record.close_date | date:long}}`
+```
+
+Formatters: `currency[:CODE]`, `number[:decimals]`, `percent[:decimals]`,
+`date[:short|long|iso]`, `datetime[:…]`, `upper`, `lower`, `trim`, `truncate:N`,
+`default:'…'`, `json`. Single-brace `{x}` is **not** a valid template hole.
+
+At **input** time you may write a bare string for shorthand — the spec
+transforms it into the right envelope based on the field type. The compiled
+artifact always contains the full envelope (and, after M9.2, the AST).
+
+```ts
+import { F, P, cel, cron, tmpl } from '@objectstack/spec';
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+export const Invoice = ObjectSchema.create({
+  name: 'invoice',
+  titleFormat: tmpl`Invoice {{record.invoice_no}} – {{record.customer.name}}`,
+  fields: {
+    total: Field.formula({
+      returnType: 'number',
+      expression: F`record.subtotal + record.subtotal * record.tax_rate`,
+    }),
+    po_number: Field.text({
+      requiredWhen: P`record.amount > 10000`,
+    }),
+    // M9.9b — declarative default, evaluated at insert time
+    issued_date: Field.date({
+      defaultValue: cel`today()`,
+    }),
+  },
+});
+```
+
+<Callout type="warn">
+**A formula field's `type` is always `formula`** — that is the key the runtime
+evaluates (`objectql` computes a formula virtual field from its `expression`
+only). Do **not** pass `type: 'currency' | 'number' | …` to `Field.formula` — it
+is rejected by the typed `FieldInput` and, untyped, would override `type:'formula'`
+so the field silently never computes. To declare what the formula returns, set
+**`returnType`** (`'number' | 'text' | 'boolean' | 'date'`); it is inferred and
+stamped automatically by the AI build path, and consumers (dashboard measures,
+formatting) read it instead of re-parsing the expression. The CEL source is the
+**`expression`** key (the `formula` alias is normalized to it on save).
+</Callout>
+
+The three CEL tagged-template helpers — `cel`, `F` (formula alias), `P`
+(predicate alias) — are interchangeable; pick whichever reads best at the
+call site. `cron` and `tmpl` produce their respective envelopes.
+
+---
+
+## CEL primer
+
+CEL is documented at [cel-spec](https://github.com/google/cel-spec/blob/master/doc/langdef.md).
+Cheat-sheet of what you'll write daily:
+
+| Concept | Syntax |
+|:---|:---|
+| Field on current record | `record.first_name` |
+| Previous (in update hooks) | `previous.status` |
+| Input to a hook | `input.amount` |
+| Equality / inequality | `==` / `!=` |
+| Logical | `&&` / `\|\|` / `!` |
+| Ternary | `cond ? then : else` |
+| String literal | `'single quotes'` |
+| Membership | `record.region in ['us', 'eu']` |
+| Field present | `has(record.foo)` (returns true even when value is `null`) |
+
+> **`has()` gotcha:** `has(record.x)` is true whenever the key exists, even
+> when its value is `null`. To check for "not blank" use `isBlank(...)` or
+> `record.x != null` — see stdlib below.
+
+---
+
+## ObjectStack CEL standard library
+
+Registered automatically into every `Environment` by `@objectstack/formula`.
+All functions are pure given a pinned `now`, which is what makes
+`objectstack build` artifacts byte-stable across runs.
+
+| Function | Returns | Description |
+|:---|:---|:---|
+| `now()` | timestamp | Pinned wall-clock at evaluation start |
+| `today()` | timestamp | `now()` truncated to UTC start-of-day |
+| `daysFromNow(n)` | timestamp | `now() + n` days (preserves wall-clock time, not start-of-day) |
+| `daysAgo(n)` | timestamp | `now() - n` days |
+| `isBlank(v)` | bool | True for `null`, `undefined`, `''`, `[]` |
+| `coalesce(v, fallback)` | dyn | `v` when non-null, else `fallback` |
+| `trim(v)` | string | `v` with leading/trailing whitespace removed |
+| `joinNonEmpty(list, sep)` | string | `list` joined by `sep`, skipping blank entries |
+
+Add new helpers in
+[`packages/formula/src/stdlib.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/formula/src/stdlib.ts).
+Keep them pure, dependency-free, and AI-readable.
+
+### Variable scope
+
+`@objectstack/formula` builds the scope per evaluation:
+
+| Binding | Source | Available in |
+|:---|:---|:---|
+| `record` | the row being evaluated | formulas, validation, sharing, visibility |
+| `previous` | row before update | hooks, validation on update |
+| `input` | hook payload | hooks |
+| `os.user` | install / request user | seed, predicates with identity |
+| `os.org` | active organization | seed, predicates |
+| `os.env` | install env (`prod`, `dev`, `test`) | seed, predicates |
+
+---
+
+## Cookbook
+
+### Computed full name (handle nullable parts)
+
+```ts
+{
+  name: 'full_name',
+  type: 'formula',
+  expression: F`joinNonEmpty([record.salutation, record.first_name, record.last_name], ' ')`,
+}
+```
+
+`joinNonEmpty` skips blank parts, so you avoid the verbose triple-coalesce.
+Building the string by hand with `+` would also work, but CEL throws on
+`null + string`, so each nullable operand must be wrapped in `coalesce(..., '')`.
+
+### Conditional formula
+
+```ts
+{
+  name: 'roi',
+  type: 'formula',
+  expression: F`coalesce(record.actual_cost, 0) > 0
+             ? ((coalesce(record.actual_revenue, 0) - record.actual_cost) * 100.0) / record.actual_cost
+             : 0.0`,
+}
+```
+
+### Predicate (visibility, read-only, conditional required)
+
+```ts
+{
+  name: 'rating',
+  type: 'picklist',
+  visibleWhen: P`record.status == 'qualified'`,
+}
+
+Field.text({
+  visibleWhen: P`record.type == 'business'`,
+  readonlyWhen: P`record.status == 'approved'`,
+  requiredWhen: P`record.amount > 10000`,
+})
+```
+
+### Dynamic seed dates
+
+Use CEL **inside seed records** to defer evaluation to install time. The
+SeedLoader pins a single `now` per load run, so the same dataset produces
+identical SHA-1 across builds while still being "fresh" relative to whoever
+installs the package.
+
+```ts
+import { defineDataset, cel } from '@objectstack/spec';
+
+export const opportunityDataset = defineDataset({
+  object: 'opportunity',
+  records: [
+    {
+      id: 'opp_acme',
+      name: 'Acme Q3 Renewal',
+      close_date: cel`daysFromNow(45)`,
+      created_at: cel`now()`,
+    },
+  ],
+});
+```
+
+Without CEL, `new Date()` would be evaluated at **compile** time — your
+package would ship with the timestamp from your laptop and every customer
+would see "stale" demo data. With CEL, the date resolves on the customer's
+clock at install time.
+
+### Validation rule
+
+```ts
+{
+  name: 'amount_positive',
+  type: 'script',
+  condition: P`record.amount <= 0`,
+  message: 'Amount must be positive.',
+}
+```
+
+The generic CEL rule is `type: 'script'`. For `script` rules, the `condition`
+is the **failure** predicate — when it evaluates TRUE the validation fails, so
+invert the test (here `amount <= 0` rejects non-positive amounts).
+
+### Hook condition
+
+```ts
+{
+  name: 'notify_on_escalation',
+  object: 'case',
+  events: ['afterUpdate'],
+  condition: P`previous.status != 'escalated' && record.status == 'escalated'`,
+  body: { language: 'js', source: 'await ctx.notifyOpsTeam(record)' },
+}
+```
+
+---
+
+## Formula patterns
+
+Complex calculations and logic in formula fields.
+
+### Conditional Logic
+
+Formula fields are CEL. Use ternary `cond ? a : b` for conditionals and
+`&&`/`||`/`!` for boolean logic. Reference fields via `record.<field>`:
+
+```typescript
+// Tiered pricing
+Field.formula({
+  label: 'Discount Tier',
+  returnType: 'text',
+  expression: `
+    record.amount > 1000000 ? "Platinum" :
+    record.amount > 500000 ? "Gold" :
+    record.amount > 100000 ? "Silver" : "Bronze"
+  `,
+})
+
+// Status indicator
+Field.formula({
+  label: 'Health Score',
+  returnType: 'text',
+  expression: `
+    record.is_active && record.days_since_contact < 30 ? "Healthy" :
+    record.days_since_contact < 90 ? "At Risk" : "Critical"
+  `,
+})
+```
+
+### Date Calculations
+
+```typescript
+// Days until close
+Field.formula({
+  label: 'Days to Close',
+  returnType: 'number',
+  expression: 'daysBetween(record.close_date, today())',
+})
+
+// Contract end in 30 days
+Field.formula({
+  label: 'Expiring Soon',
+  returnType: 'boolean',
+  expression: 'record.status == "active" && daysBetween(record.end_date, today()) <= 30',
+})
+
+// Age in days
+Field.formula({
+  label: 'Age (Days)',
+  returnType: 'number',
+  expression: 'daysBetween(today(), record.created_date)',
+})
+```
+
+### Financial Calculations
+
+```typescript
+// Gross margin (computes a number; a formula's type is always 'formula' —
+// declare the value type with returnType, and decimal places with scale)
+Field.formula({
+  label: 'Gross Margin %',
+  returnType: 'number',
+  expression: 'record.revenue > 0 ? ((record.revenue - record.cost) / record.revenue) * 100 : 0',
+  scale: 2,
+})
+
+// Weighted pipeline
+Field.formula({
+  label: 'Weighted Amount',
+  returnType: 'number',
+  expression: 'record.amount * (record.probability / 100)',
+  scale: 2,
+})
+
+// Total with tax
+Field.formula({
+  label: 'Total with Tax',
+  returnType: 'number',
+  expression: 'record.subtotal * 1.0825', // 8.25% tax
+  scale: 2,
+})
+```
+
+### Text Manipulation
+
+```typescript
+// Uppercase
+Field.formula({
+  label: 'Code',
+  returnType: 'text',
+  expression: 'upper(record.sku)',
+})
+
+// Has a company email
+Field.formula({
+  label: 'Internal',
+  returnType: 'boolean',
+  expression: 'endsWith(lower(record.email), "@example.com")',
+})
+```
+
+### Lead scoring
+
+```typescript
+// Formula: Lead score
+Field.formula({
+  label: 'Lead Score',
+  returnType: 'number',
+  expression: `
+    (record.rating == "hot" ? 30 : record.rating == "warm" ? 20 : 10) +
+    (record.annual_revenue > 1000000 ? 25 : 0) +
+    (record.number_of_employees > 500 ? 20 : 0) +
+    (record.industry in ["technology", "finance"] ? 15 : 0)
+  `,
+})
+```
+
+### Best practices
+
+✅ **DO:**
+- Keep formulas simple and readable
+- Add comments for complex logic
+- Test edge cases (null, zero, empty)
+- Use appropriate data types
+
+❌ **DON'T:**
+- Create circular references
+- Use formulas for frequently changing data
+- Nest too many IF statements
+- Ignore null handling
+
+---
+
+## Determinism contract
+
+Two consecutive `objectstack build` runs with no source changes must produce
+**byte-identical** `dist/objectstack.json`. CEL plus pinned `now` is what
+makes this possible — there are zero compile-time-evaluated `Date.now()`
+calls in seed metadata. CI enforces this via SHA-1 comparison; if you add a
+new dialect or stdlib helper, ensure it preserves determinism.
+
+---
+
+## Migration from the legacy formula DSL
+
+The previous custom recursive-descent engine
+(`packages/objectql/src/formula.ts`, deleted in M9.5) had a Salesforce-style
+function set. Mechanical translation:
+
+| Legacy | CEL equivalent |
+|:---|:---|
+| `bare_field` | `record.bare_field` |
+| `=` / `<>` | `==` / `!=` |
+| `AND` / `OR` / `NOT` | `&&` / `\|\|` / `!` |
+| `"text"` | `'text'` (single quotes preferred) |
+| `IF(c, a, b)` | `c ? a : b` |
+| `ISBLANK(x)` | `isBlank(record.x)` |
+| `CONCAT(a, b, …)` | `a + b + …` (with `coalesce(...,'')`) |
+| `TODAY()` / `NOW()` | `today()` / `now()` |
+| `IN (a, b)` | `record.x in [a, b]` |
+| `ISCHANGED(x)` (in update hook) | `previous.x != record.x` |
+| `MONTH_DIFF(a, b)` | _not yet — add to stdlib_ |
+
+Salesforce compatibility is **not** a project goal. Authors targeting
+Salesforce semantics rewrite their formulas in CEL.
+
+---
+
+## Programmatic API
+
+```ts
+import { ExpressionEngine } from '@objectstack/formula';
+
+// Compile + cache
+const compiled = ExpressionEngine.compile({ dialect: 'cel', source: 'record.x * 2' });
+
+// Evaluate
+const result = ExpressionEngine.evaluate(
+  { dialect: 'cel', source: 'record.x * 2' },
+  { record: { x: 21 } },
+);
+// => { ok: true, value: 42 }
+```
+
+The low-level engine never throws — `evaluate()` returns `{ ok: false, error }`.
+But **call sites must not silently swallow that** (ADR-0032): `objectstack build`
+**fails** on an invalid expression (with a located, schema-aware message), and at
+runtime the flow/rule engines **throw** a loud, attributed error instead of
+treating a bad expression as `false`/`null`. The same `validateExpression`
+validator backs `objectstack build` and metadata registration (and a planned
+`validate_expression` agent tool), so an expression is checked before it ships.
+
+---
+
+## Related
+
+- [Field Metadata](/docs/data-modeling/fields) — declaring `type: 'formula'` fields
+- [Seed Data](/docs/data-modeling/seed-data) — using `cel\`...\`` for dynamic install-time values
+- [Hook Bodies](/docs/automation/hook-bodies) — when to use a JS hook vs a CEL `condition`
+- [`packages/formula/`](https://github.com/objectstack-ai/framework/tree/main/packages/formula) — engine + stdlib source
+- [north-star §8](/docs/concepts/north-star) — anti-pattern: private DSLs

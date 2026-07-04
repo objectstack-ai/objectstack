@@ -8,7 +8,8 @@
 // DO NOT place hand-written content in content/docs/references/ — it WILL be
 // overwritten or deleted on the next build.
 //
-// Hand-written documentation belongs in content/docs/guides/ instead.
+// Hand-written documentation lives in the module folders under content/docs/
+// (data-modeling/, automation/, permissions/, ui/, api/, ai/, plugins/, kernel/, ...).
 // See DX_ROADMAP.md and .cursorrules for details.
 
 import fs from 'fs';
@@ -268,7 +269,7 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
   md += `title: ${zodTitle}\n`;
   md += `description: ${zodTitle} protocol schemas\n`;
   md += `---\n\n`;
-  md += `{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs go in content/docs/guides/. */}\n\n`;
+  md += `{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}\n\n`;
   
   if (fileDesc) {
       md += `${fileDesc}\n\n`;
@@ -444,9 +445,8 @@ const pages = [
 const meta = {
   title: "Reference",
   icon: "FileCode",
-  // Render the (large, generated) reference as its own sidebar tab so it does not
-  // crowd the hand-written docs. Keep in sync with the other root sections' meta.json.
-  root: true,
+  // One collapsible group in the single-tree sidebar (module-based IA); it must
+  // NOT be a root tab — the whole docs tree renders as one sidebar.
   pages: pages
 };
 fs.writeFileSync(path.join(DOCS_ROOT, 'meta.json'), JSON.stringify(meta, null, 2));

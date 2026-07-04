@@ -5,33 +5,35 @@ description: Technical documentation for ObjectStack.
 
 # ObjectStack Documentation
 
-ObjectStack is an AI-native business backend protocol for structured, auditable business applications.
-These docs cover the protocol, runtime, metadata model, API surface, and implementation guides.
+ObjectStack is an AI-native business backend protocol for structured, auditable business applications. You declare your application — data model, logic, permissions, and UI — as metadata, and the platform derives the database, APIs, automation, and interface from that single artifact.
 
-## Start Here
+## Start here
 
-- [Quick Start](/docs/getting-started/quick-start): create an ObjectStack app and run the Console locally.
-- [What is ObjectStack?](/docs/getting-started): understand the protocol model and runtime layers.
-- [Core Concepts](/docs/getting-started/core-concepts): learn the key terms used across the docs.
-- [Architecture](/docs/getting-started/architecture): see how ObjectQL, ObjectOS, and ObjectUI fit together.
+- [What is ObjectStack?](/docs/getting-started) — the protocol model and runtime layers
+- [Quick Start](/docs/getting-started/quick-start) — create an app and run the Console locally
+- [Core Concepts](/docs/concepts) — the ideas behind metadata-driven development
+- [Architecture](/docs/concepts/architecture) — how ObjectQL, ObjectOS, and ObjectUI fit together
 
-## Build
+## Platform modules
 
-- [Data Modeling](/docs/guides/data-modeling): define objects, fields, relationships, and validation rules.
-- [Business Logic](/docs/guides/business-logic): model workflows, approvals, triggers, hooks, and formulas.
-- [Security](/docs/guides/security): configure permissions, sharing rules, RBAC, RLS, and field-level access.
-- [API Reference](/docs/guides/api-reference): work with generated REST, GraphQL, realtime, and SDK surfaces.
-- [Plugin Development](/docs/guides/plugin-development): build and register runtime plugins.
+Each module documents one capability in depth — overview first, then guides, with links to the matching protocol spec and schema reference.
 
-## Protocol
+<Cards>
+  <Card href="/docs/data-modeling" title="Data Modeling" description="Objects, fields, relationships, validation, formulas, and queries (ObjectQL)" />
+  <Card href="/docs/automation" title="Automation" description="Hooks, flows, workflows, approvals, and webhooks — the process engine" />
+  <Card href="/docs/permissions" title="Permissions & Identity" description="Authentication, roles, sharing rules, and field-level security" />
+  <Card href="/docs/ui" title="UI Engine" description="Apps, views, dashboards, and forms as server-driven UI (ObjectUI)" />
+  <Card href="/docs/api" title="API & SDK" description="Generated REST, realtime, and client SDK surfaces" />
+  <Card href="/docs/ai" title="AI" description="Agents, actions as tools, RAG, and natural-language queries" />
+  <Card href="/docs/plugins" title="Plugins & Packages" description="Extend the runtime and package your extensions" />
+  <Card href="/docs/kernel" title="Kernel & Services" description="The ObjectOS runtime, service registry, and services.* APIs" />
+  <Card href="/docs/deployment" title="Deployment & Operations" description="Deployment modes, environments, publishing, and troubleshooting" />
+</Cards>
 
-- [ObjectQL](/docs/protocol/objectql): data schemas, queries, filters, indexes, and object contracts.
-- [ObjectOS](/docs/protocol/objectos): kernel runtime, plugins, HTTP protocol, capabilities, and configuration.
-- [ObjectUI](/docs/protocol/objectui): UI metadata for apps, views, pages, dashboards, and actions.
+## Protocol & reference
 
-## Reference
-
-- [Schema Reference](/docs/references): generated Zod schema reference for ObjectStack metadata.
-- [Cheatsheets](/docs/guides/cheatsheets/quick-reference): quick lookup tables for common protocol decisions.
-- [CLI Reference](/docs/getting-started/cli): commands for creating, building, and validating projects.
-- [Glossary](/docs/getting-started/glossary): shared vocabulary across ObjectStack docs.
+- [Protocol Spec](/docs/protocol) — the normative ObjectQL / ObjectOS / ObjectUI specifications for implementers
+- [Schema Reference](/docs/references) — generated Zod schema reference for every metadata type
+- [Quick Reference](/docs/getting-started/quick-reference) — fast lookup tables across all protocols
+- [Glossary](/docs/getting-started/glossary) — the shared vocabulary used across these docs
+- [Releases](/docs/releases) — release notes and implementation status

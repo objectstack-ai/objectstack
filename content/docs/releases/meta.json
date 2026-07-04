@@ -1,6 +1,5 @@
 {
   "title": "Releases",
   "icon": "Tag",
-  "root": true,
-  "pages": ["index", "v9"]
+  "pages": ["index", "v9", "implementation-status"]
 }

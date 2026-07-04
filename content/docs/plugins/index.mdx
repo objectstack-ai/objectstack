@@ -1,0 +1,425 @@
+---
+title: Plugin System
+description: Overview of the ObjectStack plugin architecture — plugin types, configuration, management, and built-in plugins.
+---
+
+# Plugin System
+
+ObjectStack is built on a **microkernel architecture** where nearly everything beyond the core data engine is delivered as a **plugin**. This guide covers how to create, configure, and manage plugins using the CLI and configuration.
+
+<Callout type="info">
+**Key Principle**: In ObjectStack, the concept of "Project" and "Plugin" is fluid. A **Project** is simply a Stack that is currently being executed. A **Plugin** is a Stack loaded by another Stack. Any project can be imported as a plugin without code changes.
+</Callout>
+
+## What's in this module
+
+- **[Plugin Anatomy](/docs/plugins/anatomy)** — The `Plugin` contract: interface, `PluginContext`, and lifecycle phases
+- **[Plugin Development](/docs/plugins/development)** — Step-by-step tutorial: build, test, and register a plugin
+- **[Package Overview](/docs/plugins/packages)** — All ObjectStack packages, services, drivers, plugins, and adapters
+- **[Adding a Metadata Type](/docs/plugins/adding-a-metadata-type)** — Register a new metadata type in the Studio Metadata Admin
+- Schema reference: [Kernel](/docs/references/kernel)
+- Spec: [Plugin Package Specification](/docs/protocol/objectos/plugin-spec)
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    ObjectStack Kernel                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │ Plugin Loader │  │ Service      │  │ Event / Hook     │  │
+│  │ & Lifecycle   │  │ Registry     │  │ System           │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│                    Plugin Layer                              │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌─────────┐ │
+│  │ ObjectQL   │ │ Auth       │ │ Hono       │ │ Memory  │ │
+│  │ (data)     │ │ (security) │ │ (server)   │ │ (driver)│ │
+│  └────────────┘ └────────────┘ └────────────┘ └─────────┘ │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐             │
+│  │ REST API   │ │ MSW        │ │ Custom     │             │
+│  │ (api)      │ │ (testing)  │ │ (your own) │             │
+│  └────────────┘ └────────────┘ └────────────┘             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Plugin Types
+
+ObjectStack defines several specialized plugin types:
+
+| Type | Purpose | Example |
+|:-----|:--------|:--------|
+| `standard` | General-purpose backend logic | Custom services, hooks |
+| `ui` | Frontend assets / SPA serving | Studio, Console |
+| `driver` | Database or storage adapters | PostgreSQL, Memory |
+| `server` | HTTP/RPC server integration | Hono, Express |
+| `app` | Vertical solution bundles | CRM, Todo |
+| `theme` | UI appearance overrides | Dark theme, Brand theme |
+| `agent` | AI autonomous actors | Chat agent, RAG agent |
+| `objectql` | Core data provider | ObjectQL engine |
+
+---
+
+## Plugin Interface
+
+Every plugin implements the `Plugin` interface from `@objectstack/core` — see [Plugin Anatomy](/docs/plugins/anatomy) for the full contract and the `PluginContext` reference.
+
+---
+
+## Plugin Lifecycle
+
+Plugins follow a strict three-phase lifecycle (`init()` → `start()` → `destroy()`) managed by the kernel — see [Plugin Anatomy](/docs/plugins/anatomy#plugin-lifecycle) for the phase model.
+
+---
+
+## Creating a Plugin
+
+The fastest way to create a plugin is with the CLI scaffolding:
+
+```bash
+# Create a new plugin project
+os create plugin my-feature
+
+# This creates:
+# packages/plugins/plugin-my-feature/
+# ├── package.json
+# ├── tsconfig.json
+# ├── README.md
+# └── src/
+#     └── index.ts
+```
+
+For the full walkthrough — implementing the `Plugin` interface, registering services and hooks, testing, and registering with the kernel — see the [Plugin Development](/docs/plugins/development) tutorial.
+
+---
+
+## Configuring Plugins
+
+Plugins are configured in `objectstack.config.ts`:
+
+```typescript
+import { defineStack } from '@objectstack/spec';
+import { AuthPlugin } from '@objectstack/plugin-auth';
+import myPlugin from './src/plugins/my-plugin';
+
+export default defineStack({
+  manifest: {
+    id: 'com.example.my-app',
+    namespace: 'my_app',
+    version: '1.0.0',
+    type: 'app',
+    name: 'My App',
+  },
+
+  objects: [...],
+
+  // Production plugins
+  plugins: [
+    new AuthPlugin(),
+    myPlugin,
+  ],
+
+  // Development-only plugins (loaded only with `os dev`)
+  devPlugins: [
+  ],
+});
+```
+
+### Plugin Loading Strategies
+
+The `plugins` array accepts multiple formats:
+
+| Format | Example | Description |
+|:-------|:--------|:------------|
+| Plugin instance | `new AuthPlugin(config)` | Class-based plugin with configuration |
+| Plugin object | `{ name, init, start }` | Plain object implementing Plugin interface |
+| Package name | `'@objectstack/plugin-auth'` | String reference, imported at runtime |
+| Stack definition | `defineStack({...})` | Another project loaded as a plugin |
+
+---
+
+## Managing Plugins
+
+Runtime plugins are declared directly in `objectstack.config.ts` under the
+`plugins` (or `devPlugins`) array. Edit the file to add, remove, or reorder
+plugins — there is no dedicated CLI subcommand for this in v1.
+
+```typescript
+import { defineStack } from '@objectstack/spec';
+import { AuthPlugin } from '@objectstack/plugin-auth';
+
+export default defineStack({
+  manifest: { /* ... */ },
+  plugins: [
+    new AuthPlugin({
+      socialProviders: {
+        github: { clientId: '...', clientSecret: '...' },
+      },
+    }),
+    // add more plugins here
+  ],
+  devPlugins: [
+    // dev-only plugins (loaded by `os dev` / `os serve --dev`)
+  ],
+});
+```
+
+Install the npm package alongside the config edit:
+
+```bash
+pnpm add @objectstack/plugin-auth
+```
+
+When you run `os dev` or `os serve`, the kernel discovers and loads every
+plugin listed in the config — no separate registration step needed.
+
+---
+
+## Built-in Plugins
+
+ObjectStack ships with several official plugins:
+
+### `@objectstack/plugin-auth`
+Authentication and identity management powered by better-auth.
+- OAuth, 2FA, passkeys, magic links
+- Session management
+- Depends on: `com.objectstack.engine.objectql`
+
+### `@objectstack/plugin-hono-server`
+HTTP server integration using [Hono](https://hono.dev).
+- Lightweight and fast
+- Provides the `http.server` service
+
+### `@objectstack/plugin-security`
+Security features including field-level and row-level security.
+- Permission enforcement
+- Middleware-based security
+
+### `@objectstack/driver-memory`
+In-memory data driver for development and testing.
+- Auto-registered in dev mode if no driver is configured
+
+---
+
+## Auto-Detection
+
+The `os serve` and `os dev` commands automatically detect and load plugins:
+
+| Condition | Auto-loaded Plugin |
+|:----------|:-------------------|
+| `objects` defined, no ObjectQL | `@objectstack/objectql` |
+| Dev mode, no driver, has objects | `@objectstack/driver-memory` |
+| `objects`, `manifest`, or `apps` defined | `AppPlugin` (runtime) |
+| Server not disabled | `@objectstack/plugin-hono-server` |
+| Server enabled | `@objectstack/rest` (REST API) |
+
+This means a minimal config like this already works:
+
+```typescript
+export default defineStack({
+  manifest: { id: 'com.example.demo', type: 'app', name: 'demo', version: '1.0.0' },
+  objects: [myObject],
+});
+```
+
+Running `os dev` will auto-register ObjectQL, MemoryDriver, AppPlugin, HonoServer, and REST API.
+
+---
+
+## Advanced Topics
+
+### Service Replacement
+
+Optimization plugins can replace existing services:
+
+```typescript
+const optimizedCachePlugin: Plugin = {
+  name: 'com.example.redis-cache',
+  version: '1.0.0',
+
+  async init(ctx) {
+    // Replace the default in-memory cache with Redis
+    ctx.replaceService('cache', new RedisCacheService());
+  },
+};
+```
+
+### Health Checks
+
+Plugins with the `PluginMetadata` interface can provide health checks:
+
+```typescript
+const dbPlugin: PluginMetadata = {
+  name: 'com.example.database',
+  version: '1.0.0',
+
+  async healthCheck() {
+    const isConnected = await db.ping();
+    return {
+      healthy: isConnected,
+      message: isConnected ? 'Database connected' : 'Connection lost',
+    };
+  },
+
+  async init(ctx) { /* ... */ },
+};
+```
+
+### Plugin Security
+
+ObjectStack supports plugin security features:
+
+- **Configuration Validation**: Plugins can define a Zod `configSchema` for runtime validation
+- **Signature Verification**: Cryptographic signatures for plugin integrity
+- **Permission Enforcement**: Fine-grained access control for plugin operations
+
+```typescript
+import { z } from 'zod';
+
+const securePlugin: PluginMetadata = {
+  name: 'com.example.secure',
+  version: '1.0.0',
+  configSchema: z.object({
+    apiKey: z.string().min(1),
+    region: z.enum(['us', 'eu', 'ap']),
+  }),
+  signature: 'ed25519:key-1:<base64url-signature>',
+  
+  async init(ctx) { /* ... */ },
+};
+```
+
+### Startup Timeout
+
+Plugins can configure a custom startup timeout (default: 30 seconds):
+
+```typescript
+const slowPlugin: PluginMetadata = {
+  name: 'com.example.slow-init',
+  version: '1.0.0',
+  startupTimeout: 60000, // 60 seconds
+
+  async init(ctx) {
+    // Long initialization...
+  },
+};
+```
+
+### CLI Command Extensions
+
+Plugins can extend the ObjectStack CLI (`os`) with custom commands. This enables third-party packages — such as marketplace tools, deployment utilities, or domain-specific workflows — to register new top-level subcommands.
+
+The CLI is built on [oclif](https://oclif.io). Command extension is handled entirely by oclif's plugin system: a plugin ships oclif `Command` classes, declares oclif config in its `package.json`, and is installed into the CLI with `os plugins install <package>`. The host project's `objectstack.config.ts` does **not** determine CLI command availability.
+
+#### Step 1: Add oclif Config to `package.json`
+
+The plugin package declares its CLI commands location and oclif metadata:
+
+```json
+{
+  "name": "@acme/plugin-marketplace",
+  "version": "1.0.0",
+  "type": "module",
+  "files": ["dist"],
+  "oclif": {
+    "commands": {
+      "strategy": "pattern",
+      "target": "./dist/commands"
+    }
+  }
+}
+```
+
+#### Step 2: Implement oclif Command Classes
+
+Place command classes under `src/commands/` (compiled to `dist/commands/`). The file path determines the command name — `commands/marketplace/search.ts` becomes `os marketplace:search`.
+
+```typescript
+// src/commands/marketplace/search.ts
+import { Args, Command, Flags } from '@oclif/core';
+
+export default class MarketplaceSearch extends Command {
+  static description = 'Search marketplace apps';
+
+  static args = {
+    query: Args.string({ description: 'Search query', required: true }),
+  };
+
+  static flags = {
+    limit: Flags.integer({ char: 'l', description: 'Max results', default: 10 }),
+  };
+
+  async run(): Promise<void> {
+    const { args, flags } = await this.parse(MarketplaceSearch);
+    this.log(`Searching for "${args.query}" (limit ${flags.limit})...`);
+    // ... search logic
+  }
+}
+```
+
+#### Step 3: Install the Plugin into the CLI
+
+Users add the plugin to their `os` installation with oclif's plugin manager:
+
+```bash
+os plugins install @acme/plugin-marketplace
+```
+
+#### Using the Extended CLI
+
+Once installed, the new commands appear in `os --help` and can be invoked directly:
+
+```bash
+# List available commands (includes plugin commands)
+os --help
+
+# Use marketplace commands
+os marketplace:search "crm"
+```
+
+To remove a plugin command, uninstall it:
+
+```bash
+os plugins uninstall @acme/plugin-marketplace
+```
+
+---
+
+## Directory Structure Convention
+
+ObjectStack defines a Plugin Structure Standard (OPS) for consistent project layout:
+
+```
+plugin-my-feature/
+├── package.json
+├── tsconfig.json
+├── objectstack.config.ts      # Optional: if plugin is also a Stack
+├── README.md
+├── CHANGELOG.md
+└── src/
+    ├── index.ts               # Entry point (required)
+    ├── commands/               # oclif CLI commands (optional, for CLI extension)
+    ├── my_feature/             # Domain folder (snake_case)
+    │   ├── feature.object.ts   # Business object
+    │   ├── feature.view.ts     # View definition
+    │   └── index.ts            # Barrel export
+    └── services/
+        └── feature.service.ts  # Service implementation
+```
+
+**Naming Rules**:
+- Domain directories: `snake_case`
+- File suffixes: `.object.ts`, `.view.ts`, `.flow.ts`, `.service.ts`, etc.
+- Entry point: `index.ts` in every module
+
+---
+
+## Next Steps
+
+- **[Data Modeling](/docs/data-modeling)** — Define business objects and fields
+- **[Authentication](/docs/permissions/authentication)** — Set up auth with the auth plugin
+- **[Kernel Services](/docs/kernel/services-checklist)** — Understand the service registry
+- **[Security](/docs/permissions)** — Configure field and row-level security

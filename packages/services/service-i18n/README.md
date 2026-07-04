@@ -372,4 +372,4 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 - [i18next Documentation](https://www.i18next.com/)
 - [@objectstack/spec/system (Translation schema)](../../spec/src/system/)
-- [I18n Best Practices Guide](/content/docs/guides/i18n/)
+- [I18n Best Practices Guide](/content/docs/protocol/objectos/i18n-standard.mdx)

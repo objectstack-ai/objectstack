@@ -157,7 +157,7 @@ Password expiry and enforced MFA share a *session-validation gate*: a
 non-compliant session can authenticate but is blocked from data access (auth +
 health + a remediation allowlist still pass) until the user rotates the password
 or enrols MFA. See the
-[Authentication guide](../content/docs/guides/authentication.mdx#enterprise-authentication-hardening-adr-0069)
+[Authentication guide](../content/docs/permissions/authentication.mdx#enterprise-authentication-hardening-adr-0069)
 for the full per-setting reference.
 
 ## JWT / session lifecycle

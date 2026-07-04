@@ -32,7 +32,7 @@
 | 20 | 🟢 P3 | 企业 | 多步审批、委派、不在岗代理缺失 | 同上 |
 | 21 | 🟢 P3 | 企业 | 外部审计员 / 只读访客门户缺失 | 合规类应用刚需 |
 | 22 | 🟢 P3 | 移动 | 移动端响应式未验证 | 审批走手机是基本盘 |
-| 23 | 🟢 P3 | 文档 | ~~`services.data.{get,update}` 等 API 未文档化~~ | Fixed in Unreleased: 新增 `content/docs/guides/runtime-services/*` |
+| 23 | 🟢 P3 | 文档 | ~~`services.data.{get,update}` 等 API 未文档化~~ | Fixed in Unreleased: 新增 `content/docs/kernel/runtime-services/*` |
 | 24 | 🟢 P3 | 发布 | 模板包发布/版本升级流程不明 | 模板生态化卡点 |
 | 25 | 🟢 P3 | 审计 | 平台内置审计日志的可见性 / 配置入口不清 | 合规模板无法引用 |
 
@@ -290,7 +290,7 @@
 ### 23. ~~`services.data.{get,update}` 等 API 未文档化~~
 
 模板代码中调用 `services?.data?.get(object, id)` / `services?.data?.update(object, id, values)`，靠读源码发现，签名/错误语义无文档。建议补 SDK 参考。  
-**Fixed in Unreleased:** 已新增独立章节 `content/docs/guides/runtime-services/`，覆盖 `services.data/sharing/audit/queue/email/settings/storage` 方法签名、参数、返回、错误语义、示例与稳定性标记。
+**Fixed in Unreleased:** 已新增独立章节 `content/docs/kernel/runtime-services/`，覆盖 `services.data/sharing/audit/queue/email/settings/storage` 方法签名、参数、返回、错误语义、示例与稳定性标记。
 
 ### 24. 模板包发布 / 版本升级流程不明
 

@@ -1,0 +1,59 @@
+---
+title: "Role Hierarchy"
+description: "Roles control record-level access through a hierarchy derived from each role's parent link — access is granted upward to managers over their subordinates' records."
+---
+
+# Role Hierarchy
+
+Roles control record-level access through a hierarchy.
+
+The hierarchy is derived from the `parent` link on each role — there is no
+`RoleHierarchy` container schema. Author roles as individual `*.role.ts`
+entries (each matching `RoleSchema`), using `parent` to point at the role they
+report to:
+
+```typescript
+import type { Role } from '@objectstack/spec/identity';
+
+export const roles: Role[] = [
+  // Top level
+  { name: 'executive', label: 'Executive' },
+
+  // Sales hierarchy
+  { name: 'sales_director', label: 'Sales Director', parent: 'executive' },
+  { name: 'sales_manager', label: 'Sales Manager', parent: 'sales_director' },
+  { name: 'sales_rep', label: 'Sales Representative', parent: 'sales_manager' },
+
+  // Service hierarchy
+  { name: 'service_director', label: 'Service Director', parent: 'executive' },
+  { name: 'service_manager', label: 'Service Manager', parent: 'service_director' },
+  { name: 'service_agent', label: 'Service Agent', parent: 'service_manager' },
+];
+```
+
+## How Role Hierarchy Works
+
+```
+                   Executive
+                  /          \
+        Sales Director    Service Director
+             |                   |
+        Sales Manager      Service Manager
+             |                   |
+         Sales Rep          Service Agent
+```
+
+**Grant Access UP:** Users see records owned by:
+- Themselves
+- Their subordinates
+- Their subordinates' subordinates (all levels down)
+
+**Example:** Sales Director sees all records owned by Sales Managers and Sales Reps.
+
+---
+
+## See also
+
+- [Permissions & Identity overview](/docs/permissions)
+- [Sharing Rules](/docs/permissions/sharing-rules)
+- [Profiles](/docs/permissions/profiles)

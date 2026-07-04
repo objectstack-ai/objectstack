@@ -1,0 +1,34 @@
+---
+title: Natural Language Queries
+description: How agents query live data through the built-in data tools (query_records, get_record, aggregate_data) under RLS
+---
+
+# Natural Language Queries
+
+Part of the [AI module](/docs/ai) — how natural-language questions become ObjectQL queries at runtime.
+
+Agents query your data through the built-in **data tools** —
+`query_records`, `get_record`, and `aggregate_data` — which the LLM calls with
+structured arguments. These run as ordinary [ObjectQL](/docs/protocol/objectql) queries over
+your objects (ObjectStack uses ObjectQL, not SOQL), and they execute under the
+caller's `ExecutionContext`, so row-level security applies exactly as it does
+for the REST API.
+
+```typescript
+import { registerDataTools } from '@objectstack/service-ai';
+
+ctx.hook('ai:ready', async (ai) => {
+  registerDataTools(ai.toolRegistry, { dataEngine: ctx.getService('data') });
+});
+```
+
+There is no separate natural-language-to-query metadata type to author — the
+model is prompted with the available objects and translates the user's question
+into `query_records` / `aggregate_data` calls at runtime.
+
+---
+
+## See also
+
+- [AI Overview](/docs/ai)
+- [Knowledge & RAG](/docs/ai/knowledge-rag)
