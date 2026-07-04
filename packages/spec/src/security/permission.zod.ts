@@ -34,16 +34,19 @@ export const ObjectPermissionSchema = lazySchema(() => z.object({
   /**
    * Lifecycle Operations.
    *
-   * EXPERIMENTAL — not enforced (ADR-0049). The `transfer`/`restore`/`purge`
-   * operations these bits gate do not yet exist as ObjectQL operations, and no
-   * runtime consumer reads these bits. Authoring them is currently a no-op.
-   * The runtime fails CLOSED if such an operation is ever introduced without a
-   * matching permission mapping (see `permission-evaluator.ts`
-   * DESTRUCTIVE_OPERATIONS). Tracked by #1883.
+   * RBAC-gated, operations pending (#1883 / roadmap M2). The
+   * `transfer`/`restore`/`purge` ObjectQL operations do not exist yet, but the
+   * permission evaluator PRE-MAPS them to these bits
+   * (`permission-evaluator.ts` OPERATION_TO_PERMISSION): the moment such an
+   * operation is dispatched it is denied unless a resolved permission set
+   * grants the bit (or `modifyAllRecords`). Until the operations ship,
+   * authoring these bits grants nothing — there is no ungated window either
+   * way (unmapped destructive ops additionally fail CLOSED via
+   * DESTRUCTIVE_OPERATIONS, per ADR-0049).
    */
-  allowTransfer: z.boolean().default(false).describe('[EXPERIMENTAL — not enforced] Change record ownership'),
-  allowRestore: z.boolean().default(false).describe('[EXPERIMENTAL — not enforced] Restore from trash (Undelete)'),
-  allowPurge: z.boolean().default(false).describe('[EXPERIMENTAL — not enforced] Permanently delete (Hard Delete/GDPR)'),
+  allowTransfer: z.boolean().default(false).describe('[RBAC-gated; operation pending M2] Change record ownership'),
+  allowRestore: z.boolean().default(false).describe('[RBAC-gated; operation pending M2] Restore from trash (Undelete)'),
+  allowPurge: z.boolean().default(false).describe('[RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR)'),
 
   /** 
    * View All Records: Super-user read access. 

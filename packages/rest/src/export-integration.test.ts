@@ -185,7 +185,7 @@ async function boot() {
   await engine.insert('task', { id: '2', title: '写文档', done: false, priority: 'low', due: '2026-07-01T00:00:00.000Z', owner: 'u2' });
 
   const protocol = new ObjectStackProtocolImplementation(engine as any);
-  const rest = new RestServer(createMockServer() as any, protocol as any);
+  const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
   rest.registerRoutes();
   const route = rest.getRoutes().find(
     (r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export',

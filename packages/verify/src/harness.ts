@@ -172,7 +172,11 @@ export async function bootStack(
   await kernel.use(new SharingServicePlugin());
 
   // REST + dispatcher route surfaces (mount onto the http-server service).
-  await kernel.use(createRestApiPlugin({ api: { api: { requireAuth: true } } as never }));
+  // No `requireAuth` override: the harness deliberately boots on the platform
+  // DEFAULT (secure-by-default deny, ADR-0056 D2) so every dogfood proof —
+  // anonymous-deny, public-form survival, share-links — exercises the posture
+  // a fresh production deployment actually gets.
+  await kernel.use(createRestApiPlugin({}));
   await kernel.use(createDispatcherPlugin({}));
 
   // Fire the ready lifecycle: seed data, dev-admin bootstrap, route registration.

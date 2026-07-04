@@ -33,7 +33,7 @@ const selection = { dimensions: ['region'], measures: ['revenue'] };
 function buildServer(analyticsProvider?: any) {
   const server = mockServer();
   const rest = new RestServer(
-    server as any, mockProtocol() as any, {} as any,
+    server as any, mockProtocol() as any, { api: { requireAuth: false } } as any,
     undefined, undefined, undefined, undefined, undefined, undefined, undefined,
     undefined, undefined, undefined, undefined,
     analyticsProvider,

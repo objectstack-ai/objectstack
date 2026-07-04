@@ -118,13 +118,22 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
    * counterpart to the security plugin's RBAC enforcement and the
    * **only** defense for deployments where the security plugin is not
    * mounted (legacy bare-runtime hosts) or where it would otherwise fall
-   * through anonymous traffic. Cloud-connected per-project kernels set
-   * this to `true` automatically. Default `false` for backward compat with
-   * standalone single-environment setups that have always served data
-   * publicly (e.g. demo/playground deployments).
+   * through anonymous traffic.
+   *
+   * **Default `true` — secure by default (ADR-0056 D2).** Anonymous access
+   * to the data API must be an explicit deployment decision
+   * (`requireAuth: false`), not a silent fallthrough. Legitimate anonymous
+   * surfaces survive the deny posture without any opt-out: the control
+   * plane (`/auth`, `/health`, `/discovery`) is exempt, share-links read
+   * under a system context after token validation, and public-form
+   * submission is self-authorizing via the declaration-derived
+   * `publicFormGrant` (create + read-back on the declared target object
+   * only). Demo/playground deployments that intentionally serve data
+   * publicly must now set `requireAuth: false` explicitly — the REST
+   * plugin logs a boot warning when they do.
    */
-  requireAuth: z.boolean().default(false)
-    .describe('Reject anonymous requests on /data/* with HTTP 401'),
+  requireAuth: z.boolean().default(true)
+    .describe('Reject anonymous requests on /data/* with HTTP 401 (secure-by-default; set false to serve data publicly)'),
 
   /**
    * API documentation configuration

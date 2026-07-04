@@ -44,6 +44,9 @@ describe('Project-scoped REST routing (live Hono)', () => {
             createRestApiPlugin({
                 api: {
                     api: {
+                        // Routing test, no auth stack mounted — opt out of the
+                        // secure-by-default anonymous deny (ADR-0056 D2).
+                        requireAuth: false,
                         enableProjectScoping: true,
                         projectResolution: 'auto',
                     } as any,

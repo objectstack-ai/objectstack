@@ -129,7 +129,7 @@ async function boot() {
   engine.registry.registerObject(SYS_IMPORT_JOB as any);
 
   const protocol = new ObjectStackProtocolImplementation(engine as any);
-  const rest = new RestServer(createMockServer() as any, protocol as any);
+  const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
   rest.registerRoutes();
   const routes = rest.getRoutes();
   const find = (method: string, path: string) => routes.find((r: any) => r.method === method && r.path === path);

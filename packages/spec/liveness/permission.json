@@ -1,6 +1,6 @@
 {
   "type": "permission",
-  "_note": "PermissionSetSchema (also aliased as `profile`). Seeded from docs/audits/2026-06-security-identity-property-liveness.md. CRUD/FLS/RLS enforced via plugin-security; destructive ops + isProfile/contextVariables dead. allowTransfer/Restore/Purge are marker-driven experimental (spec `[EXPERIMENTAL — not enforced]`).",
+  "_note": "PermissionSetSchema (also aliased as `profile`). Seeded from docs/audits/2026-06-security-identity-property-liveness.md. CRUD/FLS/RLS enforced via plugin-security. allowTransfer/Restore/Purge are RBAC-mapped in the evaluator (#1883) — deny unless granted; the ObjectQL operations themselves are pending M2.",
   "props": {
     "name": {
       "status": "live",
@@ -38,6 +38,21 @@
         "allowDelete": {
           "status": "live",
           "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:8"
+        },
+        "allowTransfer": {
+          "status": "live",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (OPERATION_TO_PERMISSION transfer→allowTransfer + modifyAllRecords bypass)",
+          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `transfer` ObjectQL operation is pending M2, so granting delivers nothing until it ships."
+        },
+        "allowRestore": {
+          "status": "live",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (OPERATION_TO_PERMISSION restore→allowRestore + modifyAllRecords bypass)",
+          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `restore` ObjectQL operation is pending M2."
+        },
+        "allowPurge": {
+          "status": "live",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (OPERATION_TO_PERMISSION purge→allowPurge + modifyAllRecords bypass)",
+          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `purge` ObjectQL operation is pending M2."
         },
         "viewAllRecords": {
           "status": "live",

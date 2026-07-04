@@ -1708,7 +1708,10 @@ export class RestServer {
                 enableSearch: (api as any).enableSearch ?? true,
                 enableProjectScoping: api.enableProjectScoping ?? false,
                 projectResolution: api.projectResolution ?? 'auto',
-                requireAuth: (api as any).requireAuth ?? false,
+                // ADR-0056 D2 — secure-by-default: anonymous access to /data/*
+                // is denied unless the deployment explicitly opts out with
+                // `requireAuth: false` (mirrors the spec schema default).
+                requireAuth: (api as any).requireAuth ?? true,
                 documentation: api.documentation,
                 responseFormat: api.responseFormat,
             },

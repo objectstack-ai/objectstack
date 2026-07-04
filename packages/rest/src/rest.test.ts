@@ -75,6 +75,13 @@ function createMockPluginContext(services: Record<string, any> = {}) {
 /** Dummy handler */
 const noop = vi.fn();
 
+// The platform default is secure-by-default (`requireAuth` defaults to true,
+// ADR-0056 D2). These unit tests dispatch route handlers with NO auth context
+// on purpose — they exercise routing/CRUD mechanics, not the auth gate (that
+// is covered by rest-auth-gate.test.ts + the anonymous-deny dogfood proof) —
+// so they opt out explicitly, like an intentionally-public deployment would.
+const ANON_API = { api: { requireAuth: false } };
+
 // ---------------------------------------------------------------------------
 // RouteManager
 // ---------------------------------------------------------------------------
@@ -286,7 +293,7 @@ describe('RestServer', () => {
 
   describe('constructor', () => {
     it('should create a RestServer with default config', () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       expect(rest).toBeDefined();
       expect(rest.getRouteManager()).toBeInstanceOf(RouteManager);
     });
@@ -303,7 +310,7 @@ describe('RestServer', () => {
 
   describe('registerRoutes', () => {
     it('should register discovery, metadata, UI, CRUD, and batch routes by default', () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
 
       const routes = rest.getRoutes();
@@ -382,7 +389,7 @@ describe('RestServer', () => {
       protocol.updateManyData = vi.fn().mockResolvedValue([]);
       protocol.deleteManyData = vi.fn().mockResolvedValue([]);
 
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
 
       const batchRoutes = rest.getRoutes().filter((r) =>
@@ -392,7 +399,7 @@ describe('RestServer', () => {
     });
 
     it('should register UI view endpoint when enableUi is true', () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
 
       const uiRoutes = rest.getRoutes().filter((r) =>
@@ -402,7 +409,7 @@ describe('RestServer', () => {
     });
 
     it('should not register i18n endpoints (i18n routes are self-registered by service-i18n)', () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
 
       const i18nRoutes = rest.getRoutes().filter((r) =>
@@ -416,7 +423,7 @@ describe('RestServer', () => {
 
   describe('getRouteManager', () => {
     it('should return the internal RouteManager instance', () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       const rm = rest.getRouteManager();
       expect(rm).toBeInstanceOf(RouteManager);
     });
@@ -424,7 +431,7 @@ describe('RestServer', () => {
 
   describe('getRoutes', () => {
     it('should return an empty array before registerRoutes is called', () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       expect(rest.getRoutes()).toEqual([]);
     });
   });
@@ -438,7 +445,7 @@ describe('RestServer', () => {
     }
 
     it('should pass expand and select query params to protocol.getData', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
 
       const getByIdRoute = getRoute(rest, ':object/:id');
@@ -473,7 +480,7 @@ describe('RestServer', () => {
     });
 
     it('should omit expand/select when not present in query', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
 
       const getByIdRoute = getRoute(rest, ':object/:id');
@@ -510,13 +517,13 @@ describe('RestServer', () => {
     const mockRes = () => ({ json: vi.fn(), status: vi.fn().mockReturnThis() });
 
     it('registers the clone route alongside CRUD', () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       expect(cloneRoute(rest)).toBeDefined();
     });
 
     it('forwards object/id and nested overrides to protocol.cloneData and responds 201', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = cloneRoute(rest);
 
@@ -531,7 +538,7 @@ describe('RestServer', () => {
     });
 
     it('treats a bare body (no `overrides` key) as the override map', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = cloneRoute(rest);
 
@@ -545,7 +552,7 @@ describe('RestServer', () => {
     });
 
     it('maps a CLONE_DISABLED protocol error to 403', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = cloneRoute(rest);
 
@@ -562,7 +569,7 @@ describe('RestServer', () => {
 
     it('returns 501 when the protocol does not implement cloneData', async () => {
       const noClone = { ...protocol, cloneData: undefined };
-      const rest = new RestServer(server as any, noClone as any);
+      const rest = new RestServer(server as any, noClone as any, ANON_API as any);
       rest.registerRoutes();
       const route = cloneRoute(rest);
 
@@ -588,7 +595,7 @@ describe('RestServer', () => {
     });
 
     it('GET /meta/:type forwards previewDrafts to protocol.getMetaItems', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type');
       expect(route).toBeDefined();
@@ -603,7 +610,7 @@ describe('RestServer', () => {
     });
 
     it('GET /meta/:type omits previewDrafts without the flag', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type');
 
@@ -619,7 +626,7 @@ describe('RestServer', () => {
       // A cached protocol would normally win; preview must skip it (ETags are
       // keyed on the published checksum).
       protocol.getMetaItemCached = vi.fn();
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type/:name');
       expect(route).toBeDefined();
@@ -641,7 +648,7 @@ describe('RestServer', () => {
       // shipping the same type/name share one cache entry and the scope hint is
       // silently lost.
       protocol.getMetaItemCached = vi.fn();
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type/:name');
       expect(route).toBeDefined();
@@ -683,7 +690,7 @@ describe('RestServer', () => {
         cacheControl: { directives: ['private', 'no-cache'] },
         notModified: false,
       });
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getMetaItemRoute(rest);
       expect(route).toBeDefined();
@@ -710,7 +717,7 @@ describe('RestServer', () => {
         cacheControl: { directives: ['public', 'max-age'], maxAge: 3600 },
         notModified: false,
       });
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getMetaItemRoute(rest);
 
@@ -734,7 +741,7 @@ describe('RestServer', () => {
     }
 
     it('should pass query params including expand to protocol.findData', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
 
       const listRoute = getListRoute(rest);
@@ -764,7 +771,7 @@ describe('RestServer', () => {
     });
 
     it('should pass populate query param to protocol.findData', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
 
       const listRoute = getListRoute(rest);
@@ -819,7 +826,7 @@ describe('RestServer', () => {
     }
 
     it('streams CSV with header row and quotes risky cells', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getExportRoute(rest);
       expect(route).toBeDefined();
@@ -851,7 +858,7 @@ describe('RestServer', () => {
     });
 
     it('streams JSON array when format=json', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getExportRoute(rest);
 
@@ -872,7 +879,7 @@ describe('RestServer', () => {
     });
 
     it('rejects invalid JSON in filter query', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getExportRoute(rest);
 
@@ -885,7 +892,7 @@ describe('RestServer', () => {
     });
 
     it('honours the hard 50k row cap', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getExportRoute(rest);
 
@@ -955,7 +962,7 @@ describe('RestServer', () => {
 
     it('formats values readably in CSV using field metadata', async () => {
       const p = protocolWithSchema([RAW_TASK_ROW]);
-      const rest = new RestServer(server as any, p as any);
+      const rest = new RestServer(server as any, p as any, ANON_API as any);
       rest.registerRoutes();
       const route = getExportRoute(rest);
 
@@ -972,7 +979,7 @@ describe('RestServer', () => {
 
     it('omits the header row when header=false', async () => {
       const p = protocolWithSchema([RAW_TASK_ROW]);
-      const rest = new RestServer(server as any, p as any);
+      const rest = new RestServer(server as any, p as any, ANON_API as any);
       rest.registerRoutes();
       const route = getExportRoute(rest);
 
@@ -986,7 +993,7 @@ describe('RestServer', () => {
 
     it('injects $expand for reference fields into the findData query', async () => {
       const p = protocolWithSchema([RAW_TASK_ROW]);
-      const rest = new RestServer(server as any, p as any);
+      const rest = new RestServer(server as any, p as any, ANON_API as any);
       rest.registerRoutes();
       const route = getExportRoute(rest);
 
@@ -1000,7 +1007,7 @@ describe('RestServer', () => {
 
     it('formats values readably in JSON, leaving unknown keys untouched', async () => {
       const p = protocolWithSchema([{ ...RAW_TASK_ROW, extra: 'keep' }]);
-      const rest = new RestServer(server as any, p as any);
+      const rest = new RestServer(server as any, p as any, ANON_API as any);
       rest.registerRoutes();
       const route = getExportRoute(rest);
 
@@ -1016,7 +1023,7 @@ describe('RestServer', () => {
 
     it('streams a valid xlsx workbook with formatted cells', async () => {
       const p = protocolWithSchema([RAW_TASK_ROW]);
-      const rest = new RestServer(server as any, p as any);
+      const rest = new RestServer(server as any, p as any, ANON_API as any);
       rest.registerRoutes();
       const route = getExportRoute(rest);
 
@@ -1047,7 +1054,7 @@ describe('RestServer', () => {
     // `/data/<object>/export` is captured by `:id` ("export" treated as a record
     // id) and 404s with RECORD_NOT_FOUND instead of streaming the export.
     it('registers GET /export ahead of the greedy GET /:object/:id matcher', () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const routes = rest.getRoutes();
 
@@ -1099,7 +1106,7 @@ describe('RestServer', () => {
       // i18nServiceProvider is the 14th constructor arg (after server, protocol,
       // config, and the 10 service providers preceding it).
       const rest = new RestServer(
-        server as any, p as any, {},
+        server as any, p as any, ANON_API as any,
         undefined, undefined, undefined, undefined, undefined,
         undefined, undefined, undefined, undefined, undefined,
         async () => i18n as any,
@@ -1140,7 +1147,7 @@ describe('RestServer', () => {
     }
 
     it('returns 501 when no email service provider is wired', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const route = getEmailRoute(rest);
       expect(route).toBeDefined();
@@ -1154,7 +1161,7 @@ describe('RestServer', () => {
       const send = vi.fn(async () => ({ id: 'em-1', status: 'sent', messageId: '<m1@x>' }));
       const provider = async () => ({ send });
       const rest = new RestServer(
-        server as any, protocol as any, {},
+        server as any, protocol as any, ANON_API as any,
         undefined, undefined, undefined, undefined, undefined,
         provider as any,
       );
@@ -1174,7 +1181,7 @@ describe('RestServer', () => {
       const send = vi.fn(async () => { throw new Error('VALIDATION_FAILED: subject is required'); });
       const provider = async () => ({ send });
       const rest = new RestServer(
-        server as any, protocol as any, {},
+        server as any, protocol as any, ANON_API as any,
         undefined, undefined, undefined, undefined, undefined,
         provider as any,
       );
@@ -1204,7 +1211,7 @@ describe('RestServer', () => {
     }
 
     it('returns 501 when no sharing service provider is wired', async () => {
-      const rest = new RestServer(server as any, protocol as any);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       rest.registerRoutes();
       const { list, grant, revoke } = getShareRoutes(rest);
       expect(list && grant && revoke).toBeDefined();
@@ -1219,7 +1226,7 @@ describe('RestServer', () => {
       const listShares = vi.fn(async () => [{ id: 'shr_1', recipient_id: 'bob' }]);
       const provider = async () => ({ listShares, grant: vi.fn(), revoke: vi.fn() });
       const rest = new RestServer(
-        server as any, protocol as any, {},
+        server as any, protocol as any, ANON_API as any,
         undefined, undefined, undefined, undefined, undefined,
         undefined, provider as any,
       );
@@ -1235,7 +1242,7 @@ describe('RestServer', () => {
       const grant = vi.fn(async (input: any) => ({ id: 'shr_2', ...input }));
       const provider = async () => ({ listShares: vi.fn(), grant, revoke: vi.fn() });
       const rest = new RestServer(
-        server as any, protocol as any, {},
+        server as any, protocol as any, ANON_API as any,
         undefined, undefined, undefined, undefined, undefined,
         undefined, provider as any,
       );
@@ -1257,7 +1264,7 @@ describe('RestServer', () => {
       const grant = vi.fn(async () => { throw new Error('VALIDATION_FAILED: recipientId is required'); });
       const provider = async () => ({ listShares: vi.fn(), grant, revoke: vi.fn() });
       const rest = new RestServer(
-        server as any, protocol as any, {},
+        server as any, protocol as any, ANON_API as any,
         undefined, undefined, undefined, undefined, undefined,
         undefined, provider as any,
       );
@@ -1273,7 +1280,7 @@ describe('RestServer', () => {
       const revoke = vi.fn(async () => undefined);
       const provider = async () => ({ listShares: vi.fn(), grant: vi.fn(), revoke });
       const rest = new RestServer(
-        server as any, protocol as any, {},
+        server as any, protocol as any, ANON_API as any,
         undefined, undefined, undefined, undefined, undefined,
         undefined, provider as any,
       );
@@ -1306,7 +1313,7 @@ describe('RestServer', () => {
 
     function makeRest(provider?: any) {
       const rest = new RestServer(
-        server as any, protocol as any, {},
+        server as any, protocol as any, ANON_API as any,
         undefined, undefined, undefined, undefined, undefined,
         undefined, undefined, provider,
       );
@@ -1528,7 +1535,7 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const server = createMockServer();
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
-    const rest = new RestServer(server as any, protocol as any);
+    const rest = new RestServer(server as any, protocol as any, ANON_API as any);
     rest.registerRoutes();
 
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
@@ -1557,7 +1564,7 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const server = createMockServer();
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
-    const rest = new RestServer(server as any, protocol as any);
+    const rest = new RestServer(server as any, protocol as any, ANON_API as any);
     rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
@@ -1579,7 +1586,7 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const server = createMockServer();
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
-    const rest = new RestServer(server as any, protocol as any);
+    const rest = new RestServer(server as any, protocol as any, ANON_API as any);
     rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
@@ -1604,7 +1611,7 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     err.code = 'metadata_conflict';
     err.status = 409;
     protocol.saveMetaItem = vi.fn().mockRejectedValue(err);
-    const rest = new RestServer(server as any, protocol as any);
+    const rest = new RestServer(server as any, protocol as any, ANON_API as any);
     rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
@@ -1626,7 +1633,7 @@ describe('RestServer project-scoped routing', () => {
   it('only registers unscoped routes by default', () => {
     const server = createMockServer();
     const protocol = createMockProtocol();
-    const rest = new RestServer(server as any, protocol as any);
+    const rest = new RestServer(server as any, protocol as any, ANON_API as any);
     rest.registerRoutes();
 
     const paths = rest.getRoutes().map(r => r.path);
@@ -1642,7 +1649,7 @@ describe('RestServer project-scoped routing', () => {
     const server = createMockServer();
     const protocol = createMockProtocol();
     const rest = new RestServer(server as any, protocol as any, {
-      api: { enableProjectScoping: true, projectResolution: 'auto' } as any,
+      api: { requireAuth: false, enableProjectScoping: true, projectResolution: 'auto' } as any,
     } as any);
     rest.registerRoutes();
 
@@ -1657,7 +1664,7 @@ describe('RestServer project-scoped routing', () => {
     const server = createMockServer();
     const protocol = createMockProtocol();
     const rest = new RestServer(server as any, protocol as any, {
-      api: { enableProjectScoping: true, projectResolution: 'required' } as any,
+      api: { requireAuth: false, enableProjectScoping: true, projectResolution: 'required' } as any,
     } as any);
     rest.registerRoutes();
 
@@ -1670,7 +1677,7 @@ describe('RestServer project-scoped routing', () => {
     const server = createMockServer();
     const protocol = createMockProtocol();
     const rest = new RestServer(server as any, protocol as any, {
-      api: { enableProjectScoping: true, projectResolution: 'required' } as any,
+      api: { requireAuth: false, enableProjectScoping: true, projectResolution: 'required' } as any,
     } as any);
     rest.registerRoutes();
 
@@ -1694,7 +1701,7 @@ describe('RestServer project-scoped routing', () => {
     const server = createMockServer();
     const protocol = createMockProtocol();
     const rest = new RestServer(server as any, protocol as any, {
-      api: { enableProjectScoping: true, projectResolution: 'auto' } as any,
+      api: { requireAuth: false, enableProjectScoping: true, projectResolution: 'auto' } as any,
     } as any);
     rest.registerRoutes();
 
@@ -2015,7 +2022,7 @@ describe('discovery — routes.mcp (ADR-0036, #152)', () => {
     const protocol = createMockProtocol();
     // protocol discovery carries a `routes` object the server augments.
     (protocol.getDiscovery as any) = vi.fn().mockResolvedValue({ routes: { data: '', metadata: '' } });
-    const rest = new RestServer(server as any, protocol as any);
+    const rest = new RestServer(server as any, protocol as any, ANON_API as any);
     rest.registerRoutes();
     const entry = rest.getRouteManager().get('GET', '/api/v1/discovery');
     if (!entry) throw new Error('discovery route not registered');
@@ -2094,7 +2101,7 @@ describe('RestServer metadata translation — envelope unwrap', () => {
   });
 
   it('translates the inner document of a getMetaItem envelope', async () => {
-    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any);
+    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
     const envelope = { type: 'app', name: 'setup', item: makeDoc(), lock: null };
     const out = await (rest as any).translateMetaItem(zhReq, 'app', undefined, envelope, fakeI18n);
     // Envelope shape preserved …
@@ -2108,14 +2115,14 @@ describe('RestServer metadata translation — envelope unwrap', () => {
   });
 
   it('still translates a bare (already-unwrapped) document', async () => {
-    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any);
+    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
     const out = await (rest as any).translateMetaItem(zhReq, 'app', undefined, makeDoc(), fakeI18n);
     expect(out.label).toBe('系统设置');
     expect(out.navigation[0].children[0].label).toBe('文件存储');
   });
 
   it('translates list responses in the `{ items: [...] }` envelope shape', async () => {
-    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any);
+    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
     // translateMetaItems resolves the i18n service itself; stub the lookup.
     (rest as any).resolveI18nService = async () => fakeI18n;
     const listEnvelope = { items: [{ type: 'app', name: 'setup', item: makeDoc() }] };
@@ -2125,7 +2132,7 @@ describe('RestServer metadata translation — envelope unwrap', () => {
   });
 
   it('translates a bare array of unwrapped documents', async () => {
-    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any);
+    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
     (rest as any).resolveI18nService = async () => fakeI18n;
     const out = await (rest as any).translateMetaItems(zhReq, 'app', undefined, [makeDoc()]);
     expect(Array.isArray(out)).toBe(true);
@@ -2138,7 +2145,7 @@ describe('RestServer metadata translation — envelope unwrap', () => {
 // ---------------------------------------------------------------------------
 
 describe('filterAppForUser — ADR-0045 hidden-app gate', () => {
-  const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any);
+  const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
   const hiddenApp = { name: 'production_management', hidden: true, navigation: [] };
   const visibleApp = { name: 'crm', navigation: [] };
 
@@ -2174,7 +2181,7 @@ describe('filterAppForUser — ADR-0045 hidden-app gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('filterAppForUser — ADR-0057 D10 requiresService gate', () => {
-  const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any);
+  const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
   const app = () => ({
     name: 'setup',
     navigation: [
@@ -2240,7 +2247,7 @@ describe('filterAppForUser — ADR-0057 D10 requiresService gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', () => {
-  const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any);
+  const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
   const dash = () => ({
     name: 'system_overview',
     widgets: [

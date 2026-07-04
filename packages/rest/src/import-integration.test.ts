@@ -123,7 +123,7 @@ async function boot() {
   await engine.insert('user', { id: 'u2', name: '李四', email: 'li@x.com' });
 
   const protocol = new ObjectStackProtocolImplementation(engine as any);
-  const rest = new RestServer(createMockServer() as any, protocol as any);
+  const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
   rest.registerRoutes();
   const route = rest.getRoutes().find(
     (r: any) => r.method === 'POST' && r.path === '/api/v1/data/:object/import',

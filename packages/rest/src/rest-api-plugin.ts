@@ -214,17 +214,19 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
 
                 ctx.logger.info('REST API successfully registered');
 
-                // ADR-0056 D2 (warn → enforce): surface the fail-open posture.
-                // When `requireAuth` is off, anonymous requests reach the data API
-                // and read any object with no OWD/RLS — secure-by-default would deny
-                // them and route public access through share-links / `publicSharing`.
-                // We do NOT flip the default here (it would break deployments that
-                // rely on anonymous reads); we make the posture explicit instead.
-                if (!(config.api as any)?.requireAuth) {
+                // ADR-0056 D2 (warn → enforce, ENFORCED): the global default is
+                // now secure-by-default — anonymous requests to /data/* are
+                // denied unless the deployment explicitly opts out. The warning
+                // remains for that explicit opt-out so a fail-open posture is
+                // always visible in the boot log. (Reads the nested
+                // `api.api.requireAuth` — the flat read here previously warned
+                // even when requireAuth was on.)
+                const effectiveRequireAuth = (config.api as any)?.api?.requireAuth ?? true;
+                if (!effectiveRequireAuth) {
                     ctx.logger.warn(
-                        '[security] anonymous access to the data API is ALLOWED (api.requireAuth=false) — ' +
-                        'objects without OWD/RLS are world-readable. For secure-by-default set ' +
-                        'api.requireAuth=true and expose public records via share-links / publicSharing (ADR-0056 D2).',
+                        '[security] anonymous access to the data API is ALLOWED (api.requireAuth=false, explicit opt-out) — ' +
+                        'objects without OWD/RLS are world-readable. Remove the opt-out for secure-by-default and ' +
+                        'expose public records via share-links / publicSharing / public forms (ADR-0056 D2).',
                     );
                 }
             } catch (err: any) {

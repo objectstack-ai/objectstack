@@ -3,7 +3,13 @@
 import type { PermissionSet, ObjectPermission, FieldPermission } from '@objectstack/spec/security';
 
 /**
- * Operation type mapping to permission checks
+ * Operation type mapping to permission checks.
+ *
+ * `transfer`/`restore`/`purge` are pre-mapped to their RBAC bits (#1883) even
+ * though the ObjectQL operations do not exist yet (roadmap M2): the moment such
+ * an operation is dispatched through the security middleware it is gated by the
+ * corresponding `allow*` bit — deny unless a resolved permission set grants it.
+ * There is no window where the ops could ship ungated.
  */
 const OPERATION_TO_PERMISSION: Record<string, keyof ObjectPermission> = {
   find: 'allowRead',
@@ -13,16 +19,20 @@ const OPERATION_TO_PERMISSION: Record<string, keyof ObjectPermission> = {
   insert: 'allowCreate',
   update: 'allowEdit',
   delete: 'allowDelete',
+  transfer: 'allowTransfer',
+  restore: 'allowRestore',
+  purge: 'allowPurge',
 };
 
 /**
  * Destructive operation class — operations that must FAIL CLOSED when they are
  * not mapped to a concrete permission key. See ADR-0049: an unrecognised
- * destructive operation (e.g. a future `transfer`/`restore`/`purge` added
- * without a matching `OPERATION_TO_PERMISSION` entry, gated by the spec's
- * `allowTransfer`/`allowRestore`/`allowPurge` bits) must be DENIED rather than
- * silently allowed by the default-allow fallthrough. Non-destructive unknown
- * operations retain default-allow so custom read-side operations are not broken.
+ * destructive operation must be DENIED rather than silently allowed by the
+ * default-allow fallthrough. `transfer`/`restore`/`purge` are now mapped above
+ * (#1883), so this set acts as a backstop: it keeps them (and any future
+ * destructive op prefixed here before its mapping lands) fail-closed if the
+ * mapping is ever removed. Non-destructive unknown operations retain
+ * default-allow so custom read-side operations are not broken.
  */
 const DESTRUCTIVE_OPERATIONS = new Set<string>(['transfer', 'restore', 'purge']);
 
@@ -82,8 +92,13 @@ export class PermissionEvaluator {
       // but a `private` object is excluded from a non-super-user wildcard.
       const objPerm = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
       if (objPerm) {
-        // Check if modifyAllRecords is set (super-user bypass for write ops)
-        if (['allowEdit', 'allowDelete'].includes(permKey) && objPerm.modifyAllRecords) {
+        // Check if modifyAllRecords is set (super-user bypass for write ops,
+        // including the destructive lifecycle class — transfer/restore/purge —
+        // so a "Modify All Data" grant is not bricked by the #1883 gate)
+        if (
+          ['allowEdit', 'allowDelete', 'allowTransfer', 'allowRestore', 'allowPurge'].includes(permKey) &&
+          objPerm.modifyAllRecords
+        ) {
           return true;
         }
         // Check if viewAllRecords is set (super-user bypass for read ops)

@@ -4,7 +4,8 @@
 // PUBLIC FORM. `views/inquiry.view.ts` declares a FormView with
 // `sharing.allowAnonymous: true` + `publicLink: '/forms/contact-us'`, which
 // wires the anonymous REST endpoints. This exercises them end-to-end over the
-// real HTTP stack — the harness boots with `requireAuth: true`, so a passing
+// real HTTP stack — the harness boots on the platform DEFAULT, which is now
+// secure-by-default deny (ADR-0056 D2 flip), so a passing
 // anonymous submit proves the route works under SECURE-BY-DEFAULT auth, with
 // NO `guest_portal` profile, authorized solely by the declaration-derived
 // `publicFormGrant` (create + read-back on `showcase_inquiry` ONLY).

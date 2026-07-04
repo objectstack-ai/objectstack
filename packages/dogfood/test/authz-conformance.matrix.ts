@@ -78,10 +78,13 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'field-encryption', summary: 'at-rest field encryption', state: 'experimental', note: 'no crypto provider reads the config; marked [EXPERIMENTAL] (D8)' },
   { id: 'data-masking', summary: 'role-based data masking', state: 'experimental', note: 'FLS is the enforced field-visibility path; marked [EXPERIMENTAL] (D8)' },
   { id: 'rls-config-global', summary: 'global RLSConfig / RLSAuditEvent', state: 'experimental', note: 'not read by the RLS path; marked [EXPERIMENTAL] (D8)' },
-  { id: 'requireAuth-default-flip', summary: 'flip the global requireAuth default to secure-by-default', state: 'experimental',
-    note: 'D2 warn landed; the flip is release-gated. Pre-req: built-in guest_portal so public forms survive (share-links already read as SYSTEM after token validation, so they are safe).' },
+  { id: 'requireAuth-default-flip', summary: 'global requireAuth default is secure-by-default (deny anonymous)', state: 'enforced',
+    enforcement: 'spec/api/rest-server.zod.ts requireAuth default(true) + rest/rest-server.ts normalizeConfig ?? true; explicit requireAuth:false opt-out warns at boot (rest-api-plugin)',
+    proof: 'showcase-anonymous-deny.dogfood.test.ts',
+    note: 'ADR-0056 D2 flip LANDED. The verify harness boots on the platform default (no override), so anonymous-deny AND public-form survival (showcase-public-form.dogfood.test.ts — the publicFormGrant pre-req that unblocked the flip) are proven on the default posture. Share-links read as SYSTEM after token validation. CLI carve-out: auth-less stacks get an explicit fail-open (warned).' },
 
   // ── Removed — by ADR-0049 (roadmap M2) ─────────────────────────────────
-  { id: 'allow-transfer-restore-purge', summary: 'transfer/restore/purge ops', state: 'removed', note: 'ADR-0049 → roadmap M2' },
+  { id: 'allow-transfer-restore-purge', summary: 'transfer/restore/purge ops (RBAC gate pre-mapped)', state: 'removed',
+    note: 'ADR-0049 → roadmap M2. #1883: the ops still do not exist in ObjectQL, but the evaluator PRE-MAPS them (OPERATION_TO_PERMISSION transfer/restore/purge → allowTransfer/allowRestore/allowPurge, modifyAllRecords bypass, unmapped destructive ops fail closed) — there is no ungated window when the ops ship. Unit-proven in plugin-security/security-plugin.test.ts.' },
   { id: 'flow-run-as', summary: 'flow runAs', state: 'removed', note: 'ADR-0049 → roadmap M2' },
 ];

@@ -199,7 +199,7 @@ The decisions landed incrementally, each with a runtime proof:
 | :-- | :-- | :-- |
 | OWD scenarios (private + public-read) | ✅ landed | `showcase-private-owd`, `showcase-public-read-owd` dogfood |
 | D1 — canonical OWD vocabulary | ✅ landed | `plugin-sharing` units + OWD dogfood |
-| D2 — anonymous deny (warn) | ✅ landed (warn) | `showcase-anonymous-deny` dogfood; **flip release-gated** |
+| D2 — anonymous deny (default flip) | ✅ landed (**enforced**) | `showcase-anonymous-deny` dogfood on the platform default; spec `requireAuth` `default(true)` |
 | D4 — RLS compiler no-silent-drop | ✅ landed | `plugin-security` units |
 | D6 — configurable role hierarchy | ✅ landed | `RoleGraphService` units (`role_and_subordinates`) |
 | D7 — app-declared default profile | ✅ landed | `showcase-default-profile` dogfood |
@@ -223,4 +223,15 @@ pre-flip audit of the legitimate anonymous surfaces found:
 
 **Pre-requisite for the flip:** make public-form submission self-authorizing (grant INSERT
 on the form's declared target object) or ship a built-in `guest_portal`, then warn→enforce
-with a migration note. Until then, D2's boot WARN is the landed state.
+with a migration note.
+
+**Flip status (2026-07): LANDED.** The pre-requisite was satisfied by the
+declaration-derived `publicFormGrant` (Option A — self-authorizing public-form submission,
+proven by `showcase-public-form` / `form-self-auth` dogfood). The global default is now
+deny: spec `requireAuth` `default(true)` + `rest-server.ts` `?? true`. An explicit
+`requireAuth: false` opt-out remains available for deployments that intentionally serve
+data publicly and is surfaced with a boot warning (the previous warn-state behavior,
+now scoped to the explicit opt-out). The CLI keeps one carve-out: a stack with no `auth`
+tier cannot authenticate anyone, so `objectstack serve` passes an explicit `false` for it
+(warned). The verify harness boots on the platform default, so every dogfood proof runs
+under the flipped posture. Conformance row: `requireAuth-default-flip` → `enforced`.
