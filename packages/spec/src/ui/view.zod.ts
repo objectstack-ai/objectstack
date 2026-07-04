@@ -479,8 +479,23 @@ export const NavigationConfigSchema = lazySchema(() => z.object({
   preventNavigation: z.boolean().default(false).describe('Disable standard navigation entirely'),
   openNewTab: z.boolean().default(false).describe('Force open in new tab (applies to page mode)'),
   
-  /** Dimensions (for modal/drawer) */
-  width: z.union([z.string(), z.number()]).optional().describe('Width of the drawer/modal (e.g. "600px", "50%")'),
+  /**
+   * [#2578] Overlay size for a drawer/modal detail — coarse T-shirt buckets,
+   * aligned with `FormView.modalSize` (`page` mode ignores it). `'auto'`
+   * (default): the renderer derives the size from the object's field count and
+   * clamps it to the client viewport, so AI writes nothing — it cannot know the
+   * client width. Explicit buckets are a coarse, viewport-independent override.
+   */
+  size: z.enum(['auto', 'sm', 'md', 'lg', 'xl', 'full']).default('auto')
+    .describe("[#2578] Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
+
+  /**
+   * @deprecated [#2578 → `size`] A pixel/percent width cannot be authored blind:
+   * the author (often an AI) does not know the client viewport. Kept only as a
+   * renderer fallback for pre-#2578 metadata; new metadata sets `size` (or omits
+   * it for `auto`).
+   */
+  width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
 }));
 
 /**
@@ -828,7 +843,8 @@ export const FormViewSchema = lazySchema(() => z.object({
   splitResizable: z.boolean().optional().describe('Whether the split is resizable (split forms)'),
   /** Drawer (`type: 'drawer'`). */
   drawerSide: z.enum(['top', 'bottom', 'left', 'right']).optional().describe('Drawer side (drawer forms)'),
-  drawerWidth: z.string().optional().describe('Drawer width, e.g. "480px" (drawer forms)'),
+  /** @deprecated [#2578 → `modalSize` / size buckets] A pixel width can't be authored blind (unknown client viewport); the renderer derives width from content + viewport. */
+  drawerWidth: z.string().optional().describe('[DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it.'),
   /** Modal (`type: 'modal'`). */
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal size (modal forms)'),
 
