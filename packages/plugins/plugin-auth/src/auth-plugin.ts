@@ -165,7 +165,15 @@ export class AuthPlugin implements Plugin {
     // when no cache service is registered — with a warning, because a multi-node
     // deployment then silently rate-limits per-process (ADR-0069 D2 honesty).
     if (!authConfig.secondaryStorage) {
-      const cache = ctx.getService<any>('cache');
+      // The `cache` service is registered ASYNC — `getService` throws for it,
+      // so resolve via `getServiceAsync` and treat any failure (not registered,
+      // or not yet ready) as "no shared cache".
+      let cache: any;
+      try {
+        cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> }).getServiceAsync?.('cache');
+      } catch {
+        cache = undefined;
+      }
       if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') {
         const { cacheSecondaryStorage } = await import('./secondary-storage.js');
         authConfig.secondaryStorage = cacheSecondaryStorage(cache);
