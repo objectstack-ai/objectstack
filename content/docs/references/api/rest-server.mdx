@@ -192,7 +192,7 @@ const result = BatchEndpointsConfig.parse(data);
 | **enableOpenApi** | `boolean` | ✅ | Enable OpenAPI 3.1 spec & docs viewer endpoints |
 | **enableProjectScoping** | `boolean` | ✅ | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | ✅ | Project ID resolution strategy |
-| **requireAuth** | `boolean` | ✅ | Reject anonymous requests on /data/* with HTTP 401 |
+| **requireAuth** | `boolean` | ✅ | Reject anonymous requests on /data/* with HTTP 401 (secure-by-default; set false to serve data publicly) |
 | **documentation** | `Object` | optional | OpenAPI/Swagger documentation config |
 | **responseFormat** | `Object` | optional | Response format options |
 

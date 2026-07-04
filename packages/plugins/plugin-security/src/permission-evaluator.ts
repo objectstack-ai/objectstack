@@ -37,6 +37,22 @@ const OPERATION_TO_PERMISSION: Record<string, keyof ObjectPermission> = {
 const DESTRUCTIVE_OPERATIONS = new Set<string>(['transfer', 'restore', 'purge']);
 
 /**
+ * Permission keys covered by the `modifyAllRecords` super-user WRITE bypass:
+ * edit/delete plus the destructive lifecycle class, DERIVED from the two
+ * constants above so a future destructive op added to the map+set is covered
+ * automatically (hand-listing it inline is how bypass gaps happen — #1883).
+ * NOTE this means "Modify All Data" grants (incl. the wildcard on
+ * organization_admin / admin_full_access defaults) will cover
+ * transfer/restore/purge the moment the M2 ops ship — Salesforce semantics,
+ * confirmed in the #1883 disposition; revisit per-op when M2 lands.
+ */
+const MODIFY_ALL_WRITE_KEYS = new Set<keyof ObjectPermission>([
+  'allowEdit',
+  'allowDelete',
+  ...[...DESTRUCTIVE_OPERATIONS].map((op) => OPERATION_TO_PERMISSION[op]),
+]);
+
+/**
  * [ADR-0066 D2] Resolve the object permission a permission set contributes for
  * `objectName`, honouring the secure-by-default posture:
  *
@@ -92,13 +108,9 @@ export class PermissionEvaluator {
       // but a `private` object is excluded from a non-super-user wildcard.
       const objPerm = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
       if (objPerm) {
-        // Check if modifyAllRecords is set (super-user bypass for write ops,
-        // including the destructive lifecycle class — transfer/restore/purge —
-        // so a "Modify All Data" grant is not bricked by the #1883 gate)
-        if (
-          ['allowEdit', 'allowDelete', 'allowTransfer', 'allowRestore', 'allowPurge'].includes(permKey) &&
-          objPerm.modifyAllRecords
-        ) {
+        // Super-user WRITE bypass ("Modify All Data") — covers edit/delete and
+        // the destructive lifecycle class (see MODIFY_ALL_WRITE_KEYS).
+        if (MODIFY_ALL_WRITE_KEYS.has(permKey) && objPerm.modifyAllRecords) {
           return true;
         }
         // Check if viewAllRecords is set (super-user bypass for read ops)

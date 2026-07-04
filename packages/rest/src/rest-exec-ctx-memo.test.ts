@@ -17,7 +17,7 @@ const protocol: any = {};
 
 describe('RestServer.resolveExecCtx — request-scoped memoization (#2409)', () => {
   it('resolves once per request object and returns the cached instance', async () => {
-    const rest: any = new RestServer(httpServer, protocol, { requireAuth: false } as any);
+    const rest: any = new RestServer(httpServer, protocol, { api: { requireAuth: false } } as any);
     let calls = 0;
     rest.computeExecCtx = async () => { calls++; return { userId: 'u1' }; };
 
@@ -30,7 +30,7 @@ describe('RestServer.resolveExecCtx — request-scoped memoization (#2409)', () 
   });
 
   it('re-resolves for a different request object', async () => {
-    const rest: any = new RestServer(httpServer, protocol, { requireAuth: false } as any);
+    const rest: any = new RestServer(httpServer, protocol, { api: { requireAuth: false } } as any);
     let calls = 0;
     rest.computeExecCtx = async () => { calls++; return { userId: 'u1' }; };
 
@@ -41,7 +41,7 @@ describe('RestServer.resolveExecCtx — request-scoped memoization (#2409)', () 
   });
 
   it('keys the memo by environmentId within the same request', async () => {
-    const rest: any = new RestServer(httpServer, protocol, { requireAuth: false } as any);
+    const rest: any = new RestServer(httpServer, protocol, { api: { requireAuth: false } } as any);
     let calls = 0;
     rest.computeExecCtx = async (env: any) => { calls++; return { env }; };
 
@@ -54,7 +54,7 @@ describe('RestServer.resolveExecCtx — request-scoped memoization (#2409)', () 
   });
 
   it('caches an anonymous (undefined) resolution so repeat callers do not re-resolve', async () => {
-    const rest: any = new RestServer(httpServer, protocol, { requireAuth: false } as any);
+    const rest: any = new RestServer(httpServer, protocol, { api: { requireAuth: false } } as any);
     let calls = 0;
     rest.computeExecCtx = async () => { calls++; return undefined; };
 

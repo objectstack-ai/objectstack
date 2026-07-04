@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Security: anonymous access denied by default (BREAKING) + destructive-op RBAC gates
+
+- **`api.requireAuth` now defaults to `true`** (ADR-0056 D2 flip): anonymous
+  requests to `/data/*` CRUD + batch endpoints are rejected with HTTP 401
+  unless the deployment explicitly opts out with `api: { requireAuth: false }`
+  (the REST plugin logs a boot warning for the explicit opt-out). Share-links,
+  public forms (via the declaration-derived `publicFormGrant`), and the
+  control plane (`/auth`, `/health`, `/discovery`) keep working with no
+  action. `objectstack serve` passes an explicit `false` only for stacks with
+  no `auth` tier (nothing could authenticate against them). Conformance row
+  `requireAuth-default-flip` → `enforced`.
+- **`transfer` / `restore` / `purge` are RBAC-gated ahead of the ops** (#1883):
+  the permission evaluator maps them to `allowTransfer` / `allowRestore` /
+  `allowPurge` (with the `modifyAllRecords` super-user bypass), so when the
+  M2 operations ship there is no ungated window. Unmapped destructive
+  operations keep failing closed (ADR-0049).
+
 ### Added — ObjectUI one-month frontend scan + backend alignment summary
 
 Scanning `../objectui` from 2026-05-08 through 2026-06-08 shows a broad Studio

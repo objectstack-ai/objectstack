@@ -20,7 +20,7 @@ const makeRes = () => {
   return { res, state };
 };
 
-const rest = new RestServer(server, protocol, { requireAuth: false } as any);
+const rest = new RestServer(server, protocol, { api: { requireAuth: false } } as any);
 
 describe('RestServer.enforceAuth — ADR-0069 auth-policy gate', () => {
   const gate = (req: any, context: any) => {

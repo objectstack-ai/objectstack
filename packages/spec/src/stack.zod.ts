@@ -242,6 +242,30 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   webhooks: z.array(WebhookSchema).optional().describe('Outbound Webhooks'),
 
   /**
+   * Server-facing API configuration read by `objectstack serve` / `dev` when
+   * it mounts the REST + dispatcher plugins. Declared here (rather than only
+   * consumed ad-hoc) so it SURVIVES `defineStack` strict parsing — an
+   * undeclared key is silently stripped, which previously made these knobs a
+   * no-op through the primary authoring path. Forwarded to the REST plugin as
+   * `api.api.*`.
+   */
+  api: z.object({
+    /**
+     * Reject anonymous requests on `/data/*` with HTTP 401. Secure-by-default
+     * (ADR-0056 D2) at the REST layer; set `false` here to intentionally serve
+     * data publicly (the REST plugin logs a boot warning).
+     */
+    requireAuth: z.boolean().optional()
+      .describe('[ADR-0056 D2] Reject anonymous /data/* requests (secure-by-default; set false to serve publicly)'),
+    /** Enable environment-scoped routing for data/meta/AI APIs. */
+    enableProjectScoping: z.boolean().optional(),
+    /** Environment id resolution strategy when scoping is on. */
+    projectResolution: z.enum(['required', 'optional', 'auto']).optional(),
+    /** Per-environment membership 403 gate (dispatcher). Undefined → default. */
+    enforceProjectMembership: z.boolean().optional(),
+  }).optional().describe('Server-facing API config consumed by objectstack serve/dev'),
+
+  /**
    * ObjectAI: Artificial Intelligence Layer
    *
    * Three-tier composition (Agent → Skill → Tool) aligned with Salesforce

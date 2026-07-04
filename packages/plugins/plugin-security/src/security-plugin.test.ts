@@ -292,6 +292,36 @@ describe('SecurityPlugin', () => {
       expect(harness.findOne).toHaveBeenCalledTimes(1);
     });
 
+    it('DENIES a purge of a not-owned row via the pre-image check (#1883 — destructive ops inherit row-level gating)', async () => {
+      // The destructive lifecycle class (transfer/restore/purge) is pre-wired
+      // into OPERATION_TO_PERMISSION, so it clears the object-level RBAC gate.
+      // The record-level pre-image RLS check must therefore ALSO cover it —
+      // otherwise a grant-holder could destroy out-of-scope rows by id. purge
+      // maps onto the `delete` RLS class.
+      const purgerSet: PermissionSet = {
+        name: 'purger', label: 'Purger', isProfile: true,
+        objects: { '*': { allowRead: true, allowPurge: true } },
+        rowLevelSecurity: [
+          { name: 'owner_only_deletes', object: '*', operation: 'delete', using: 'created_by = current_user.id' },
+        ],
+      } as any;
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'purger' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [purgerSet],
+        objectFields: ownerFields,
+        findOneImpl: () => null, // row exists but not owned → filtered out → deny
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = {
+        object: 'task', operation: 'purge',
+        options: { where: { id: 'r1' } },
+        context: memberCtx,
+      };
+      await expect(harness.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+      expect(harness.findOne).toHaveBeenCalledTimes(1);
+    });
+
     it('SKIPS the check when no RLS policy applies (e.g. modifyAllRecords / admin) — no extra read', async () => {
       const adminSet: PermissionSet = {
         name: 'admin_full_access', label: 'Admin', isProfile: true,

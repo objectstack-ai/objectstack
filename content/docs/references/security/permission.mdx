@@ -68,9 +68,9 @@ const result = FieldPermission.parse(data);
 | **allowRead** | `boolean` | ✅ | Read permission |
 | **allowEdit** | `boolean` | ✅ | Edit permission |
 | **allowDelete** | `boolean` | ✅ | Delete permission |
-| **allowTransfer** | `boolean` | ✅ | [EXPERIMENTAL — not enforced] Change record ownership |
-| **allowRestore** | `boolean` | ✅ | [EXPERIMENTAL — not enforced] Restore from trash (Undelete) |
-| **allowPurge** | `boolean` | ✅ | [EXPERIMENTAL — not enforced] Permanently delete (Hard Delete/GDPR) |
+| **allowTransfer** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Change record ownership |
+| **allowRestore** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
+| **allowPurge** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
 | **viewAllRecords** | `boolean` | ✅ | View All Data (Bypass Sharing) |
 | **modifyAllRecords** | `boolean` | ✅ | Modify All Data (Bypass Sharing) |
 | **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own|unit|unit_and_below|org |

@@ -1388,7 +1388,13 @@ export default class Serve extends Command {
         // entirely; such auth-less playgrounds get an EXPLICIT `false`
         // (fail-open), which the REST plugin surfaces with a boot warning.
         // Apps can always override via stack `api.requireAuth`.
-        const requireAuth = apiConfig.requireAuth ?? (tierEnabled('auth') ? true : false);
+        // Auth availability = tier auto-registers it OR the stack mounts
+        // AuthPlugin explicitly (hasAuthPlugin, computed above). Keying only on
+        // the tier would hand an explicit fail-open to a stack that ships auth
+        // via `plugins:` under a minimal tier set — re-opening the very hole
+        // the flip closes. Only a stack with NO auth at all gets the carve-out.
+        const requireAuth = apiConfig.requireAuth
+          ?? ((tierEnabled('auth') || hasAuthPlugin) ? true : false);
 
         try {
           const { createRestApiPlugin } = await import('@objectstack/rest');

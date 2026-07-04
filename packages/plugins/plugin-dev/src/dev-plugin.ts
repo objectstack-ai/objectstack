@@ -528,6 +528,7 @@ export class DevPlugin implements Plugin {
     //     as part of its manifest), so no separate child plugin is needed.
 
     // 4. Auth Plugin
+    let authMounted = false;
     if (enabled('auth')) {
       try {
         const { AuthPlugin } = await import('@objectstack/plugin-auth') as any;
@@ -536,6 +537,7 @@ export class DevPlugin implements Plugin {
           baseUrl: this.options.authBaseUrl,
         });
         this.childPlugins.push(authPlugin);
+        authMounted = true;
         ctx.logger.info('  ✔ Auth plugin enabled (dev credentials)');
       } catch {
         ctx.logger.warn('  ✘ @objectstack/plugin-auth not installed — skipping auth');
@@ -601,9 +603,21 @@ export class DevPlugin implements Plugin {
     if (enabled('rest')) {
       try {
         const { createRestApiPlugin } = await import('@objectstack/rest') as any;
-        const restPlugin = createRestApiPlugin();
+        // Secure-by-default carve-out (mirrors `objectstack serve`, ADR-0056
+        // D2): when NO auth mounted in this dev stack (service disabled or
+        // plugin-auth not installed), nobody could ever authenticate — the
+        // deny default would brick the local playground's data API. Pass an
+        // EXPLICIT fail-open for that case; the REST plugin's boot warning
+        // keeps the posture visible.
+        const restPlugin = authMounted
+          ? createRestApiPlugin()
+          : createRestApiPlugin({ api: { api: { requireAuth: false } } as any });
         this.childPlugins.push(restPlugin);
-        ctx.logger.info('  ✔ REST API endpoints enabled (CRUD + metadata)');
+        ctx.logger.info(
+          authMounted
+            ? '  ✔ REST API endpoints enabled (CRUD + metadata)'
+            : '  ✔ REST API endpoints enabled (CRUD + metadata; anonymous ALLOWED — no auth mounted)',
+        );
       } catch {
         ctx.logger.debug('  ℹ @objectstack/rest not installed — skipping REST endpoints');
       }

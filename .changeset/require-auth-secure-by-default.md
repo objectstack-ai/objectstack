@@ -10,18 +10,28 @@ feat(security)!: `api.requireAuth` now defaults to `true` — anonymous access t
 **BREAKING.** The global `requireAuth` default flipped FROM `false` TO `true`
 (`RestApiConfigSchema.requireAuth` in `@objectstack/spec`, mirrored by
 `RestServer.normalizeConfig` in `@objectstack/rest`). Anonymous requests to
-`/data/*` CRUD + batch endpoints are now rejected with HTTP 401 unless the
-deployment explicitly opts out.
+the `/data/*` CRUD + batch endpoints are now rejected with HTTP 401 unless the
+deployment explicitly opts out. (Scope note: this gate covers the REST
+`/data/*` surface — the metadata read/write endpoints and the dispatcher
+GraphQL route have their own pre-existing anonymous posture, tracked
+separately; this flip does not change them.)
 
 **Migration (one line):** a deployment that intentionally serves data publicly
-(demo / playground / kiosk) must set the flag explicitly:
+(demo / playground / kiosk) sets the flag on the stack config — now a declared
+`ObjectStackDefinitionSchema.api` field, so it survives `defineStack` strict
+parsing (previously an undeclared top-level `api` key was silently stripped):
 
 ```ts
-api: { requireAuth: false }
+export default defineStack({
+  // …
+  api: { requireAuth: false },
+});
 ```
 
 The REST plugin logs a boot warning for the explicit opt-out so a fail-open
-posture is always visible.
+posture is always visible. A misplaced `api.requireAuth` at the plugin level
+(one nesting short) is now also called out with a boot warning instead of
+being silently ignored.
 
 **What keeps working with no action:**
 

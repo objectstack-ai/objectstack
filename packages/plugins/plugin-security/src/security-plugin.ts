@@ -433,7 +433,7 @@ export class SecurityPlugin implements Plugin {
         const sc: any = opCtx.context;
         if (['find', 'findOne', 'count', 'aggregate'].includes(opCtx.operation)) {
           sc.__readScope = this.permissionEvaluator.getEffectiveScope('read', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
-        } else if (opCtx.operation === 'update' || opCtx.operation === 'delete') {
+        } else if (['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation)) {
           sc.__writeScope = this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
         }
       }
@@ -457,17 +457,28 @@ export class SecurityPlugin implements Plugin {
       // applies — e.g. an admin set with no RLS, or `modifyAllRecords`) the
       // check is skipped and behaviour is unchanged.
       if (
-        (opCtx.operation === 'update' || opCtx.operation === 'delete') &&
+        // update/delete today; transfer/restore/purge are pre-wired (#1883) so
+        // the M2 ops inherit the pre-image check the moment they dispatch —
+        // the CRUD bit alone must never be the only row-level defense.
+        ['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
         permissionSets.length > 0 &&
         !!opCtx.context?.userId &&
         this.ql
       ) {
         const targetId = this.extractSingleId(opCtx);
         if (targetId != null) {
+          // RLS policies declare select/insert/update/delete — map the
+          // destructive lifecycle class onto its nearest write class so
+          // authored policies apply (purge destroys like delete;
+          // transfer/restore mutate like update).
+          const rlsOperation =
+            opCtx.operation === 'purge' ? 'delete'
+            : opCtx.operation === 'transfer' || opCtx.operation === 'restore' ? 'update'
+            : opCtx.operation;
           const writeFilter = await this.computeRlsFilter(
             permissionSets,
             opCtx.object,
-            opCtx.operation,
+            rlsOperation,
             opCtx.context,
           );
           if (writeFilter) {
@@ -504,7 +515,7 @@ export class SecurityPlugin implements Plugin {
       // authored RLS, so the #1994 pre-image check above is a no-op for it; this
       // closes the by-id write path by checking the master instead.
       if (
-        (opCtx.operation === 'insert' || opCtx.operation === 'update' || opCtx.operation === 'delete') &&
+        ['insert', 'update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
         permissionSets.length > 0 &&
         !!opCtx.context?.userId &&
         this.ql
