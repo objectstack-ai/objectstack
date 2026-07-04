@@ -59,3 +59,47 @@ describe('normalizeViewMetadata', () => {
     expect(out.list).toBeDefined();
   });
 });
+
+/**
+ * #2555 — a console personalization PUT (column sort, inline edit, …) sends
+ * only the raw view config, no `viewKind`/`object`. Persisted verbatim, the
+ * overlay replaces the flattened package entry minus its identity and the view
+ * vanishes from every consumer that filters on `viewKind && object` (the
+ * switcher endpoint). The write path now inherits the missing identity fields
+ * from the registry entry the overlay shadows (passed as `baseline`).
+ */
+describe('normalizeViewMetadata — identity inheritance from baseline (#2555)', () => {
+  const baseline = { name: 'task.default', object: 'task', viewKind: 'list', label: 'All Tasks', config: { type: 'grid' } };
+
+  it('inherits viewKind/object/label onto a raw-config personalization body', () => {
+    const body = { type: 'grid', data: { provider: 'object', object: 'task' }, columns: ['title'], sort: [{ field: 'estimate_hours', order: 'desc' }] };
+    const out = normalizeViewMetadata('view', body, 'task.default', baseline) as any;
+    expect(out.name).toBe('task.default');
+    expect(out.viewKind).toBe('list');
+    expect(out.object).toBe('task');
+    expect(out.label).toBe('All Tasks');
+    expect(out.sort).toEqual(body.sort);      // personalization survives
+  });
+
+  it("the overlay's own identity fields win over the baseline", () => {
+    const body = { name: 'task.default', object: 'task', viewKind: 'form', label: 'Renamed', config: {} };
+    const out = normalizeViewMetadata('view', body, 'task.default', baseline) as any;
+    expect(out.viewKind).toBe('form');
+    expect(out.label).toBe('Renamed');
+    expect(out).toBe(body);                   // nothing to inherit → untouched
+  });
+
+  it('does not touch defineView container bodies', () => {
+    const body = { name: 'task.default', list: { type: 'grid', data: {} } };
+    const out = normalizeViewMetadata('view', body, 'task.default', baseline) as any;
+    expect(out).toBe(body);
+    expect('viewKind' in out).toBe(false);
+  });
+
+  it('is a no-op without a baseline (pre-#2555 behaviour)', () => {
+    const body = { type: 'grid', data: {}, sort: [] };
+    const out = normalizeViewMetadata('view', body, 'task.default') as any;
+    expect(out.name).toBe('task.default');
+    expect('viewKind' in out).toBe(false);
+  });
+});

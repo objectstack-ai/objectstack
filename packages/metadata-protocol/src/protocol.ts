@@ -313,13 +313,42 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
  * name). Structural validity is enforced separately by the view metadata schema
  * during the spec-validation step. No-op for non-view types and bodies that
  * already carry a `name`.
+ *
+ * When `baseline` is provided (the registry entry this overlay will shadow),
+ * missing identity fields — `viewKind`, `object`, `label` — are inherited onto
+ * non-container bodies. A runtime personalization PUT (console column sort,
+ * inline edit, …) sends only the raw view config; persisting it verbatim makes
+ * the overlay replace the flattened package entry minus its identity, and the
+ * view silently drops out of every consumer that filters on
+ * `viewKind`/`object` (e.g. the switcher endpoint). See #2555. Container
+ * bodies are left untouched — `expandViewContainer` derives identity itself.
  */
-export function normalizeViewMetadata(type: string, item: unknown, saveName: string): unknown {
+export function normalizeViewMetadata(type: string, item: unknown, saveName: string, baseline?: unknown): unknown {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (singular !== 'view') return item;
     if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
     const it = item as Record<string, unknown>;
-    return it.name ? it : { ...it, name: saveName };
+    const patch = viewIdentityPatch(it, baseline);
+    if (it.name && !patch) return it;
+    return { ...it, ...(it.name ? undefined : { name: saveName }), ...patch };
+}
+
+/**
+ * #2555 — compute the identity fields (`viewKind`, `object`, `label`) a view
+ * overlay is missing but the registry entry it shadows carries. The overlay's
+ * own fields always win. Returns `null` (nothing to inherit) for `defineView`
+ * container bodies — their identity is derived at expansion — and for
+ * absent/invalid baselines.
+ */
+function viewIdentityPatch(overlay: Record<string, unknown>, baseline: unknown): Record<string, unknown> | null {
+    if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) return null;
+    if ('list' in overlay || 'listViews' in overlay || 'formViews' in overlay) return null;
+    const b = baseline as Record<string, unknown>;
+    const patch: Record<string, unknown> = {};
+    for (const key of ['viewKind', 'object', 'label'] as const) {
+        if (overlay[key] === undefined && b[key] !== undefined) patch[key] = b[key];
+    }
+    return Object.keys(patch).length > 0 ? patch : null;
 }
 
 /**
@@ -1239,6 +1268,17 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                         const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
                         if (recPkg && (data as any)._packageId === undefined) {
                             (data as any)._packageId = recPkg;
+                        }
+                        // #2555 — heal identity-less view overlays already in the
+                        // DB (persisted by pre-fix saves): a raw-config row would
+                        // replace the flattened package entry wholesale, dropping
+                        // viewKind/object and vanishing the view from every
+                        // consumer that filters on them (switcher endpoint).
+                        // Inherit the identity fields from the shadowed entry;
+                        // the overlay's own fields still win.
+                        if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view') {
+                            const patch = viewIdentityPatch(data as Record<string, unknown>, byName.get(data.name));
+                            if (patch) Object.assign(data, patch);
                         }
                         byName.set(data.name, data);
                     }
@@ -3630,9 +3670,20 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         // Normalize loose `view` bodies to the canonical record shape BEFORE
         // validation + persistence, so no producer (AI tools, hand-authoring,
         // Studio) can persist a view that validates but the console can't bind
-        // or render (missing top-level name/object/viewKind). See
-        // {@link normalizeViewMetadata}.
-        request.item = normalizeViewMetadata(request.type, request.item, request.name);
+        // or render (missing top-level name/object/viewKind). The registry
+        // entry this overlay will shadow supplies the missing identity fields
+        // (#2555 — a console personalization PUT sends only the raw config).
+        // See {@link normalizeViewMetadata}.
+        {
+            let baseline: unknown;
+            if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view'
+                && typeof this.engine.registry?.getItem === 'function') {
+                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
+                baseline = this.engine.registry.getItem(request.type, request.name)
+                    ?? (alt ? this.engine.registry.getItem(alt, request.name) : undefined);
+            }
+            request.item = normalizeViewMetadata(request.type, request.item, request.name, baseline);
+        }
 
         // Spec-conformance check: if a Zod schema is registered for this
         // overlay type (see OVERLAY_VALIDATION_SCHEMAS), validate the payload
