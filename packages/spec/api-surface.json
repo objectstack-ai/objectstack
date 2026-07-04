@@ -3232,6 +3232,7 @@
     "NotificationTypeSchema (const)",
     "NumberFormat (type)",
     "NumberFormatSchema (const)",
+    "ObjectListViewSchema (const)",
     "ObjectNavItem (type)",
     "ObjectNavItemSchema (const)",
     "OfflineCacheConfig (type)",

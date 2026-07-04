@@ -26,6 +26,9 @@ export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-wid
 export { validateStackExpressions } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
 
+export { validateListViewMode, LIST_VIEW_FILTERS_IN_VIEWS_MODE } from './validate-list-view-mode.js';
+export type { ListViewModeFinding, ListViewModeSeverity } from './validate-list-view-mode.js';
+
 export {
   validateResponsiveStyles,
   STYLE_NODE_MISSING_ID,

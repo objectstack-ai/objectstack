@@ -9,6 +9,7 @@ import { ZodError } from 'zod';
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { validateStackExpressions } from '@objectstack/lint';
+import { validateListViewMode } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
@@ -104,6 +105,35 @@ export default class Validate extends Command {
         for (const i of exprErrors.slice(0, 50)) {
           console.log(`  • ${i.where}: ${i.message}`);
           console.log(chalk.dim(`      source: \`${i.source}\``));
+        }
+        this.exit(1);
+      }
+
+      // 2c. ADR-0053 list-view navigation modes — `userFilters`/`quickFilters`
+      //     on an object list view ("views" mode) are silently dropped: the
+      //     object-list schema (ObjectListViewSchema) OMITS them, so this is
+      //     checked on `normalized` (PRE-parse) — `result.data` has already had
+      //     the field stripped. They belong to a page list ("filters" mode).
+      //     See objectui #2219 and ADR-0053 phase 4.
+      if (!flags.json) printStep('Checking list-view navigation modes (ADR-0053)...');
+      const listViewFindings = validateListViewMode(normalized as Record<string, unknown>);
+      const listViewErrors = listViewFindings.filter((f) => f.severity === 'error');
+
+      if (listViewErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({
+            valid: false,
+            errors: listViewErrors,
+            duration: timer.elapsed(),
+          }, null, 2));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`List-view mode check failed (${listViewErrors.length} issue${listViewErrors.length > 1 ? 's' : ''})`);
+        for (const f of listViewErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
         }
         this.exit(1);
       }

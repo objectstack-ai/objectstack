@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { FieldSchema } from './field.zod';
 import { ValidationRuleSchema } from './validation.zod';
 import { ActionSchema } from '../ui/action.zod';
-import { ListViewSchema } from '../ui/view.zod';
+import { ObjectListViewSchema } from '../ui/view.zod';
 
 /**
  * API Operations Enum
@@ -629,8 +629,10 @@ const ObjectSchemaBase = z.object({
    * business context — e.g. an approval-request list should ship with
    * "My pending", "I submitted", "Completed" tabs out of the box.
    *
-   * Each value is a `ListViewSchema` (see `@objectstack/spec/ui`) so authors
-   * get the full tab/filter/sort/grouping vocabulary.
+   * Each value is an `ObjectListViewSchema` (a `ListViewSchema` minus the
+   * page-only `userFilters` — ADR-0053 "views" mode, where the `ViewTabBar` is
+   * the only nav control) so authors get the full tab/filter/sort/grouping
+   * vocabulary without the wrong-context filter bar.
    *
    * @example
    * ```ts
@@ -644,7 +646,7 @@ const ObjectSchemaBase = z.object({
    * }
    * ```
    */
-  listViews: z.record(z.string(), ListViewSchema).optional().describe('Built-in named list views (segmented tabs) shipped with the object schema'),
+  listViews: z.record(z.string(), ObjectListViewSchema).optional().describe('Built-in named list views (segmented tabs) shipped with the object schema — "views" mode, no page-only userFilters (ADR-0053)'),
 
   /**
    * Search Engine Config 

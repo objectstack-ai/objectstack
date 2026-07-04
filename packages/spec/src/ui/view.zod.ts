@@ -891,6 +891,19 @@ export const FormViewSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * ADR-0053 "views" mode — an object's default list + named list views.
+ *
+ * Structurally a {@link ListViewSchema} MINUS the page-only control `userFilters`:
+ * that field belongs to a page list (`InterfaceListPage`, "filters" mode), never an
+ * object list view, whose only nav control is the `ViewTabBar`. Omitting the field
+ * makes the wrong-context state untypable at author time (tsc). Runtime parse still
+ * STRIPS an authored `userFilters` silently (default strip, no throw) for back-compat,
+ * and the CLI `validate` list-view-mode rule reports it pre-parse. See objectui #2219
+ * and ADR-0053 phase 4.
+ */
+export const ObjectListViewSchema = lazySchema(() => ListViewSchema.omit({ userFilters: true }));
+
+/**
  * Master View Schema
  * Can define multiple named views.
  */
@@ -909,9 +922,9 @@ export const FormViewSchema = lazySchema(() => z.object({
  * }
  */
 export const ViewSchema = lazySchema(() => z.object({
-    list: ListViewSchema.optional(), // Default list view
+    list: ObjectListViewSchema.optional(), // Default list view (views mode — no userFilters, ADR-0053)
     form: FormViewSchema.optional(), // Default form view
-    listViews: z.record(z.string(), ListViewSchema).optional().describe('Additional named list views'),
+    listViews: z.record(z.string(), ObjectListViewSchema).optional().describe('Additional named list views (views mode — no userFilters, ADR-0053)'),
     formViews: z.record(z.string(), FormViewSchema).optional().describe('Additional named form views'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
