@@ -3899,15 +3899,17 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                 request.packageId != null &&
                 !this.isWritablePackage(request.packageId)
             ) {
+                // Surfaced verbatim as a console toast — keep the sentence
+                // user-actionable; the ADR pointer lives in `docs` below.
                 const err = new Error(
-                    `[writable_package_required] Cannot author ${singularTypeForRepo}/${request.name} into `
-                    + `'${request.packageId}': it is a read-only code/installed package, not a writable base. `
-                    + `Create or select a writable base (package) first, then retry. `
-                    + `See docs/adr/0070-package-first-authoring.md.`,
+                    `[writable_package_required] Cannot save ${singularTypeForRepo}/${request.name}: `
+                    + `the package '${request.packageId}' is read-only (provided by code or an installed app). `
+                    + `Switch to a writable package in the package selector, or create a new one, and retry.`,
                 );
                 (err as any).code = 'writable_package_required';
                 (err as any).status = 422;
                 (err as any).packageId = request.packageId;
+                (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
                 throw err;
             }
             const orgId = request.organizationId ?? null;
