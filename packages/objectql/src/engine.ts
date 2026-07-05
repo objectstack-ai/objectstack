@@ -694,6 +694,23 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
+   * Build the acting-user object (ADR-0068 EvalUser shape) surfaced to
+   * validation-time predicates as `current_user` — notably per-option
+   * `visibleWhen` authorization gating (objectui#2284). Returns undefined for
+   * system / unauthenticated writes, where role predicates then fail-open.
+   */
+  private buildEvalUser(
+    execCtx?: ExecutionContext,
+  ): { id: string; roles: string[]; organizationId: string | null } | undefined {
+    if (!execCtx || execCtx.userId == null) return undefined;
+    return {
+      id: String(execCtx.userId),
+      roles: execCtx.roles ?? [],
+      organizationId: execCtx.tenantId != null ? String(execCtx.tenantId) : null,
+    };
+  }
+
+  /**
    * Build the DriverOptions blob passed to every IDataDriver call.
    *
    * Always carries `tenantId` from the active ExecutionContext so the
@@ -2148,7 +2165,7 @@ export class ObjectQL implements IDataEngine {
           for (const r of rows) {
             normalizeMultiValueFields(schemaForValidation, r);
             validateRecord(schemaForValidation, r, 'insert');
-            evaluateValidationRules(schemaForValidation as any, r, 'insert', { logger: this.logger });
+            evaluateValidationRules(schemaForValidation as any, r, 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context) });
           }
           if (driver.bulkCreate) {
                result = await driver.bulkCreate(object, rows, hookContext.input.options as any);
@@ -2167,7 +2184,7 @@ export class ObjectQL implements IDataEngine {
           await this.encryptSecretFields(object, row, opCtx.context, hookContext.input.options);
           normalizeMultiValueFields(schemaForValidation, row);
           validateRecord(schemaForValidation, row, 'insert');
-          evaluateValidationRules(schemaForValidation as any, row, 'insert', { logger: this.logger });
+          evaluateValidationRules(schemaForValidation as any, row, 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context) });
           result = await driver.create(object, row, hookContext.input.options as any);
         }
 
@@ -2292,7 +2309,7 @@ export class ObjectQL implements IDataEngine {
                // field is read-only for this record's state, so the incoming
                // change is ignored (the persisted value is kept).
                hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, hookContext.input.data as Record<string, unknown>, priorRecord, this.logger) as any;
-               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger });
+               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context) });
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);

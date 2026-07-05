@@ -141,6 +141,14 @@ export interface EvaluateRulesOptions {
   previous?: Record<string, unknown> | null;
   /** Optional logger for non-blocking diagnostics (broken rules, warnings). */
   logger?: { warn?: (msg: string, meta?: any) => void };
+  /**
+   * The acting user (ADR-0068 EvalUser shape), surfaced to per-option
+   * `visibleWhen` predicates as `current_user` so role/context-gated options can
+   * be enforced server-side (objectui#2284). Absent on system/unauthenticated
+   * writes — role predicates then reference an unbound `current_user`, fault,
+   * and fail-open (see {@link evaluateOptionVisibility}).
+   */
+  currentUser?: { id?: string; roles?: string[]; organizationId?: string | null; [k: string]: unknown } | null;
 }
 
 /**
@@ -215,10 +223,29 @@ function ruleNeedsPrior(r: unknown): boolean {
 
 /** Field-level conditional rules (B2): a field is required / read-only when its
  *  CEL predicate is TRUE over the record. */
+interface ConditionalFieldOption {
+  value?: unknown;
+  /** Per-option visibility predicate (CEL) — objectui#2284. */
+  visibleWhen?: string | Expression;
+}
+
 interface ConditionalFieldDef {
   requiredWhen?: string | Expression;
   conditionalRequired?: string | Expression; // back-compat alias of requiredWhen
   readonlyWhen?: string | Expression;
+  /** Field type — scopes per-option `visibleWhen` enforcement to choice fields. */
+  type?: string;
+  /** Select/multiselect/radio options; an option may gate itself with `visibleWhen`. */
+  options?: Array<ConditionalFieldOption | null | undefined>;
+}
+
+/** Choice fields whose picked value(s) are drawn from `options`. */
+const CHOICE_FIELD_TYPES = new Set(['select', 'multiselect', 'radio']);
+
+/** True when a choice field carries at least one option gated by `visibleWhen`. */
+function fieldHasOptionVisibility(def: ConditionalFieldDef | undefined | null): boolean {
+  if (!def || !CHOICE_FIELD_TYPES.has(String(def.type))) return false;
+  return Array.isArray(def.options) && def.options.some((o) => o != null && o.visibleWhen != null);
 }
 
 function isMissing(v: unknown): boolean {
@@ -226,17 +253,81 @@ function isMissing(v: unknown): boolean {
 }
 
 /** True when any field declares a conditional rule that needs the merged/prior
- *  record to evaluate (so the engine fetches `previous` on update). */
+ *  record to evaluate (so the engine fetches `previous` on update). Per-option
+ *  `visibleWhen` counts too — a cascade predicate can reference an unchanged
+ *  sibling that only `previous` supplies (objectui#2284). */
 function fieldsNeedPrior(fields: Record<string, ConditionalFieldDef> | undefined): boolean {
   if (!fields) return false;
   return Object.values(fields).some(
-    (f) => f && (f.requiredWhen || f.conditionalRequired || f.readonlyWhen),
+    (f) => f && (f.requiredWhen || f.conditionalRequired || f.readonlyWhen || fieldHasOptionVisibility(f)),
   );
 }
 
 /** Normalize an author-time ExpressionInput into the canonical envelope. */
 function toExpression(cond: string | Expression): Expression {
   return typeof cond === 'string' ? { dialect: 'cel', source: cond } : cond;
+}
+
+/**
+ * Per-option authorization / cascade enforcement (objectui#2284).
+ *
+ * A `select` / `multiselect` / `radio` option may gate itself with a
+ * `visibleWhen` CEL predicate, evaluated against the live record + `current_user`
+ * (the same predicate the client uses to hide the option). Client-side hiding is
+ * UX, not a security boundary — a caller can still submit a hidden value — so on
+ * write we re-evaluate the predicate for the *picked* value(s) and reject any
+ * that resolve cleanly to FALSE. This enforces both role/context gating
+ * (`'admin' in current_user.roles`) and cascade integrity (`record.country ==
+ * 'cn'`), server-side.
+ *
+ * Only WRITTEN fields are checked — an unchanged persisted value is left alone.
+ * A predicate that can't be evaluated (missing referenced field, unbound
+ * `current_user` on a system write) is **fail-open** (logged, allowed), matching
+ * every other field rule here: a broken cascade predicate must never brick a
+ * write. Authorization gating therefore depends on the engine binding
+ * `current_user` on authenticated writes.
+ */
+function evaluateOptionVisibility(
+  fields: Record<string, ConditionalFieldDef> | undefined,
+  data: Record<string, unknown>,
+  merged: Record<string, unknown>,
+  previous: Record<string, unknown> | undefined,
+  currentUser: EvaluateRulesOptions['currentUser'],
+  errors: FieldValidationError[],
+  logger: EvaluateRulesOptions['logger'],
+): void {
+  if (!fields) return;
+  const user = (currentUser ?? undefined) as any;
+  for (const [name, def] of Object.entries(fields)) {
+    if (!fieldHasOptionVisibility(def) || !(name in data)) continue;
+    const raw = data[name];
+    if (raw === undefined || raw === null || raw === '') continue;
+    const picked = Array.isArray(raw) ? raw : [raw];
+    for (const value of picked) {
+      const opt = def.options!.find((o) => o != null && o.value === value);
+      // Unknown value (not in options) or an ungated option → nothing to enforce
+      // here; an out-of-set value is the enum validator's concern, not ours.
+      if (!opt || opt.visibleWhen == null) continue;
+      const res = ExpressionEngine.evaluate<boolean>(toExpression(opt.visibleWhen), {
+        record: merged,
+        previous,
+        user,
+      });
+      if (!res.ok) {
+        logger?.warn?.(
+          `option visibleWhen for '${name}=${String(value)}' failed to evaluate — allowed through`,
+        );
+        continue; // fail-open
+      }
+      if (res.value === false) {
+        errors.push({
+          field: name,
+          code: 'invalid_option',
+          message: `${name}: option '${String(value)}' is not available`,
+        });
+      }
+    }
+  }
 }
 
 /**
@@ -296,6 +387,12 @@ export function evaluateValidationRules(
       }
     }
   }
+
+  // Per-option authorization / cascade gating (objectui#2284): reject a written
+  // choice value whose option `visibleWhen` resolves cleanly to FALSE against the
+  // merged record + `current_user`. Complements the client-side hiding, which is
+  // not a security boundary.
+  evaluateOptionVisibility(fields, data, merged, previous, opts.currentUser, errors, opts.logger);
 
   const ordered = (hasRules ? rules! : [])
     .filter((r): r is BaseRule => r != null && typeof r === 'object')
