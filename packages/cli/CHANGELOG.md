@@ -1,5 +1,59 @@
 # @objectstack/cli
 
+## 12.1.0
+
+### Patch Changes
+
+- Updated dependencies [8bcd994]
+- Updated dependencies [497bda8]
+- Updated dependencies [93e6d02]
+  - @objectstack/service-automation@12.1.0
+  - @objectstack/runtime@12.1.0
+  - @objectstack/spec@12.1.0
+  - @objectstack/plugin-approvals@12.1.0
+  - @objectstack/trigger-record-change@12.1.0
+  - @objectstack/trigger-schedule@12.1.0
+  - @objectstack/verify@12.1.0
+  - @objectstack/client@12.1.0
+  - @objectstack/cloud-connection@12.1.0
+  - @objectstack/account@12.1.0
+  - @objectstack/setup@12.1.0
+  - @objectstack/studio@12.1.0
+  - @objectstack/core@12.1.0
+  - @objectstack/formula@12.1.0
+  - @objectstack/lint@12.1.0
+  - @objectstack/mcp@12.1.0
+  - @objectstack/objectql@12.1.0
+  - @objectstack/observability@12.1.0
+  - @objectstack/platform-objects@12.1.0
+  - @objectstack/driver-memory@12.1.0
+  - @objectstack/driver-mongodb@12.1.0
+  - @objectstack/driver-sql@12.1.0
+  - @objectstack/driver-sqlite-wasm@12.1.0
+  - @objectstack/plugin-audit@12.1.0
+  - @objectstack/plugin-auth@12.1.0
+  - @objectstack/plugin-email@12.1.0
+  - @objectstack/plugin-hono-server@12.1.0
+  - @objectstack/plugin-org-scoping@12.1.0
+  - @objectstack/plugin-reports@12.1.0
+  - @objectstack/plugin-security@12.1.0
+  - @objectstack/plugin-sharing@12.1.0
+  - @objectstack/plugin-webhooks@12.1.0
+  - @objectstack/rest@12.1.0
+  - @objectstack/service-analytics@12.1.0
+  - @objectstack/service-cache@12.1.0
+  - @objectstack/service-datasource@12.1.0
+  - @objectstack/service-job@12.1.0
+  - @objectstack/service-messaging@12.1.0
+  - @objectstack/service-package@12.1.0
+  - @objectstack/service-queue@12.1.0
+  - @objectstack/service-realtime@12.1.0
+  - @objectstack/service-settings@12.1.0
+  - @objectstack/service-storage@12.1.0
+  - @objectstack/trigger-api@12.1.0
+  - @objectstack/types@12.1.0
+  - @objectstack/console@12.1.0
+
 ## 12.0.0
 
 ### Minor Changes

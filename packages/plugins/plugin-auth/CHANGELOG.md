@@ -1,5 +1,15 @@
 # Changelog
 
+## 12.1.0
+
+### Patch Changes
+
+- Updated dependencies [93e6d02]
+  - @objectstack/spec@12.1.0
+  - @objectstack/core@12.1.0
+  - @objectstack/platform-objects@12.1.0
+  - @objectstack/types@12.1.0
+
 ## 12.0.0
 
 ### Minor Changes
