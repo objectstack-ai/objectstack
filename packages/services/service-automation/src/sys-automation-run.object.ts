@@ -13,10 +13,15 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * the engine writes a row on suspend and deletes it on terminal completion, so a
  * cold-booted kernel can rehydrate and continue.
  *
- * Lifecycle: one row per *currently* suspended run. The row is removed when the
- * run resumes to completion or fails — only live pauses are stored. `id` is the
- * `runId`; `correlation` ties back to the pausing node's external state (e.g.
- * `sys_approval_request.id`, mirrored by `sys_approval_request.flow_run_id`).
+ * Lifecycle: one row per *currently* suspended run (`status: 'paused'`, id =
+ * raw `runId`, removed on terminal completion) plus bounded terminal history
+ * (`status: 'completed' | 'failed'`, id = `run_`-prefixed). History rows are
+ * subject to retention (#2585, ADR-0057 posture): a write-time per-flow cap
+ * (default 100) plus a periodic age sweep (default 30 days) — see
+ * `ObjectStoreSuspendedRunStore` / `AutomationServicePluginOptions`. Paused
+ * rows are live resumable state and are never pruned. `correlation` ties back
+ * to the pausing node's external state (e.g. `sys_approval_request.id`,
+ * mirrored by `sys_approval_request.flow_run_id`).
  *
  * The resumable state (`variables` / `steps` / `context` / `screen`) is stored
  * JSON-serialized — the engine works with a `Map`, which round-trips through
@@ -106,7 +111,7 @@ export const SysAutomationRun = ObjectSchema.create({
     steps_json: Field.textarea({
       label: 'Steps',
       required: false,
-      description: 'JSON snapshot of the executed step logs so far.',
+      description: 'JSON step log: for a paused run, the steps executed so far (resume state); for a terminal history row, the bounded per-node step log (durable run detail, #2585).',
       group: 'State',
     }),
 
@@ -171,6 +176,8 @@ export const SysAutomationRun = ObjectSchema.create({
     { fields: ['status', 'updated_at'] },
     // Run-history reads for the Studio "Runs" tab: newest terminal runs per flow.
     { fields: ['flow_name', 'started_at'] },
+    // Retention age sweep: delete terminal rows older than the window (#2585).
+    { fields: ['status', 'created_at'] },
     // Look up a suspended run by the pausing node's correlation key.
     { fields: ['correlation'] },
   ],

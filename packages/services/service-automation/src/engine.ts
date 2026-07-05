@@ -242,6 +242,14 @@ export interface ConnectorDescriptor {
  */
 export const DEFAULT_MAX_EXECUTION_LOG_SIZE = 1000;
 
+/**
+ * Max steps persisted per terminal run-history row (#2585). The tail of the
+ * step log is kept — the last steps carry the failure — so durable single-run
+ * detail stays meaningful without letting a pathological loop-heavy run write
+ * an unbounded `steps_json` column.
+ */
+export const MAX_PERSISTED_HISTORY_STEPS = 200;
+
 /** Construction options for {@link AutomationEngine}. */
 export interface AutomationEngineOptions {
     /**
@@ -364,12 +372,20 @@ export interface RunRecord {
     status: 'completed' | 'failed';
     startedAt: string;
     startTime?: number;
+    /** When the run reached its terminal state. */
+    finishedAt?: string;
     durationMs?: number;
     /** Failure reason for a `failed` run — what a designer needs to fix it. */
     error?: string;
     nodeId?: string;
     organizationId?: string | null;
     userId?: string | null;
+    /**
+     * Bounded per-node step log (see {@link AutomationEngine.compactStepsForHistory}),
+     * so "which node blew up?" survives a restart. Optional — history rows
+     * written before this field existed have none.
+     */
+    steps?: StepLogEntry[];
 }
 
 export interface SuspendedRunStore {
@@ -391,6 +407,12 @@ export interface SuspendedRunStore {
     recordTerminal?(record: RunRecord): Promise<void>;
     /** Newest terminal run-history records for a flow (for the Runs tab). */
     listHistory?(flowName: string, limit: number): Promise<RunRecord[]>;
+    /**
+     * Load one terminal run-history record by its raw `runId`, or `null` when
+     * none is stored. Backs {@link AutomationEngine.getRun}'s durable fallback
+     * so "open a past failed run" works after a restart.
+     */
+    loadTerminal?(runId: string): Promise<RunRecord | null>;
 }
 
 export class AutomationEngine implements IAutomationService {
@@ -997,7 +1019,8 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /** Rehydrate a durable {@link RunRecord} into an {@link ExecutionLogEntry}
-     *  for the Runs list. Step-level detail isn't persisted in the summary. */
+     *  for the Runs surfaces. Steps carry the bounded persisted step log (rows
+     *  written before step persistence have none). */
     private runRecordToLogEntry(r: RunRecord): ExecutionLogEntry {
         return {
             id: r.runId,
@@ -1005,15 +1028,31 @@ export class AutomationEngine implements IAutomationService {
             flowVersion: r.flowVersion,
             status: r.status, // 'completed' | 'failed' — both valid ExecutionLog statuses
             startedAt: r.startedAt,
+            completedAt: r.finishedAt,
             durationMs: r.durationMs,
             trigger: { type: '', userId: r.userId ?? undefined },
-            steps: [],
+            steps: r.steps ?? [],
             error: r.error,
         };
     }
 
     async getRun(runId: string): Promise<ExecutionLogEntry | null> {
-        return this.executionLogs.find(l => l.id === runId) ?? null;
+        const inMem = this.executionLogs.find(l => l.id === runId);
+        if (inMem) return inMem;
+        // Durable fallback: after a restart (or ring-buffer eviction) the run's
+        // terminal history row still answers "what happened, at which node?".
+        // Best-effort — a store failure degrades to "not found", never throws.
+        if (this.store?.loadTerminal) {
+            try {
+                const rec = await this.store.loadTerminal(runId);
+                if (rec) return this.runRecordToLogEntry(rec);
+            } catch (err) {
+                this.logger.warn(
+                    `[Automation] durable run lookup failed for '${runId}': ${(err as Error)?.message}`,
+                );
+            }
+        }
+        return null;
     }
 
     /**
@@ -1691,15 +1730,19 @@ export class AutomationEngine implements IAutomationService {
             entry.status === 'cancelled' ||
             entry.status === 'timed_out';
         if (terminal && this.store?.recordTerminal) {
+            const lastStep = entry.steps[entry.steps.length - 1];
             const record: RunRecord = {
                 runId: entry.id,
                 flowName: entry.flowName,
                 flowVersion: entry.flowVersion,
                 status: entry.status === 'completed' ? 'completed' : 'failed',
                 startedAt: entry.startedAt,
+                finishedAt: entry.completedAt,
                 durationMs: entry.durationMs,
                 error: entry.error,
                 userId: entry.trigger?.userId,
+                nodeId: lastStep?.nodeId,
+                steps: this.compactStepsForHistory(entry.steps),
             };
             void this.store.recordTerminal(record).catch((err) => {
                 this.logger.warn(
@@ -1707,6 +1750,19 @@ export class AutomationEngine implements IAutomationService {
                 );
             });
         }
+    }
+
+    /**
+     * Compact a run's step log for durable history: keep the newest
+     * {@link MAX_PERSISTED_HISTORY_STEPS} steps (the tail carries the failure)
+     * and drop `error.stack` (the code/message pair is the designer-facing
+     * "why"; stacks bloat rows without aiding the Runs surface). Bounds the
+     * `steps_json` column so history rows stay cheap under retention (#2585).
+     */
+    private compactStepsForHistory(steps: StepLogEntry[]): StepLogEntry[] {
+        return steps.slice(-MAX_PERSISTED_HISTORY_STEPS).map((s) =>
+            s.error?.stack ? { ...s, error: { code: s.error.code, message: s.error.message } } : s,
+        );
     }
 
     /**

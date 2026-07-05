@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 // Core engine
-export { AutomationEngine, DEFAULT_MAX_EXECUTION_LOG_SIZE } from './engine.js';
+export { AutomationEngine, DEFAULT_MAX_EXECUTION_LOG_SIZE, MAX_PERSISTED_HISTORY_STEPS } from './engine.js';
 export type {
     AutomationEngineOptions,
     NodeExecutor,
@@ -15,6 +15,7 @@ export type {
     ConnectorActionDescriptor,
     SuspendedRun,
     SuspendedRunStore,
+    RunRecord,
     StepLogEntry,
 } from './engine.js';
 
@@ -23,8 +24,10 @@ export type {
 export {
     InMemorySuspendedRunStore,
     ObjectStoreSuspendedRunStore,
+    DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW,
+    DEFAULT_RUN_HISTORY_RETENTION_DAYS,
 } from './suspended-run-store.js';
-export type { SuspendedRunStoreEngine } from './suspended-run-store.js';
+export type { SuspendedRunStoreEngine, ObjectStoreSuspendedRunStoreOptions } from './suspended-run-store.js';
 
 // The sys_automation_run object backing the durable store — registered by
 // AutomationServicePlugin and exported for hosts wiring a custom store.
