@@ -23,11 +23,13 @@ describe('app-crm minimal metadata bundle', () => {
     ]);
   });
 
-  it('registers exactly one app, one dashboard, one hook, and at least 4 flows', () => {
+  it('registers exactly one app, one dashboard, one hook, and one flow', () => {
     expect(stack.apps).toHaveLength(1);
     expect(stack.dashboards).toHaveLength(1);
     expect(stack.hooks).toHaveLength(1);
-    expect((stack.flows ?? []).length).toBeGreaterThanOrEqual(4);
+    // One flow only — the convert-lead screen wizard. Automation breadth
+    // is the showcase's job.
+    expect(stack.flows).toHaveLength(1);
   });
 
   it('includes a screen flow with input/output variables, screen nodes, and guard decision', () => {
@@ -66,7 +68,9 @@ describe('app-crm minimal metadata bundle', () => {
     expect((stack.data ?? []).length).toBeGreaterThanOrEqual(3);
   });
 
-  // Phase 2: full metadata coverage
+  // Infrastructure & security of the slim core (feature breadth lives in
+  // the showcase — its coverage manifest enforces it; see #2611/#2612 for
+  // the inert mappings/connectors this example used to demo):
   it('has datasources', () => {
     expect((stack.datasources ?? []).length).toBeGreaterThanOrEqual(1);
   });
@@ -84,24 +88,6 @@ describe('app-crm minimal metadata bundle', () => {
     expect(stack.i18n!.supportedLocales).toContain('zh-CN');
   });
 
-  it('has object extensions', () => {
-    expect((stack.objectExtensions ?? []).length).toBeGreaterThanOrEqual(1);
-    expect(stack.objectExtensions![0].extend).toBe('crm_contact');
-  });
-
-  it('has a portal', () => {
-    expect((stack.portals ?? []).length).toBeGreaterThanOrEqual(1);
-    expect(stack.portals![0].routePrefix).toBe('/portal/customer');
-  });
-
-  it('has themes (light + dark)', () => {
-    expect((stack.themes ?? []).length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('has jobs', () => {
-    expect((stack.jobs ?? []).length).toBeGreaterThanOrEqual(2);
-  });
-
   it('has sharing rules (criteria + owner types)', () => {
     const rules = stack.sharingRules ?? [];
     expect(rules.length).toBeGreaterThanOrEqual(2);
@@ -109,26 +95,6 @@ describe('app-crm minimal metadata bundle', () => {
     expect(rules.some((r) => r.type === 'owner')).toBe(true);
   });
 
-
-  it('has API endpoints', () => {
-    expect((stack.apis ?? []).length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('has webhooks', () => {
-    expect((stack.webhooks ?? []).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('has import/export mappings', () => {
-    expect((stack.mappings ?? []).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('has analytics cubes', () => {
-    expect((stack.analyticsCubes ?? []).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('has connectors', () => {
-    expect((stack.connectors ?? []).length).toBeGreaterThanOrEqual(1);
-  });
 });
 
 describe('Pipeline dashboard', () => {
