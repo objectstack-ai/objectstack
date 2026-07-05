@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { wireAuthoredTranslationSync } from '@objectstack/core';
 import type { IHttpServer, IHttpRequest, IHttpResponse } from '@objectstack/spec/contracts';
 import type { II18nService } from '@objectstack/spec/contracts';
 import { FileI18nAdapter } from './file-i18n-adapter.js';
@@ -110,6 +111,19 @@ export class I18nServicePlugin implements Plugin {
         }
       });
     }
+
+    // ── Runtime-authored translations (#2591) ──────────────────────────
+    // Translations authored in the Studio persist as `translation` metadata
+    // (`allowRuntimeCreate: true`) but only static bundles were ever loaded
+    // — a published translation was a dead-end on publish AND after restart.
+    // The shared core sync (`wireAuthoredTranslationSync`) loads the authored
+    // layer at `kernel:ready`, on `metadata:reloaded`, and on `translation`
+    // protocol mutations, replacing it wholesale via the adapter's
+    // `replaceAuthoredTranslations` (clear-then-reload — deleted keys stop
+    // resolving). The runtime's AppPlugin wires the same sync for kernels
+    // running the in-memory fallback adapter; the ownership marker inside
+    // makes double-wiring a no-op.
+    wireAuthoredTranslationSync(ctx as any);
   }
 
   /**

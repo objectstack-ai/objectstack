@@ -5,8 +5,9 @@
  * rather than replaced, so multiple plugins can each contribute their own
  * slice of a locale's translations (e.g. `{objects: {account: ...}}` and
  * `{objects: {task: ...}}`) without clobbering one another.
+ * Exported for the authored-translation sync (#2591).
  */
-function deepMerge(
+export function deepMerge(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -77,6 +78,11 @@ export function resolveLocale(requestedLocale: string, availableLocales: string[
  */
 export function createMemoryI18n() {
   const translations = new Map<string, Record<string, unknown>>();
+  // Runtime-AUTHORED overlay (#2591): translations published as `translation`
+  // metadata. Kept separate from the static map so a re-sync can REPLACE the
+  // whole authored layer (clear-then-reload — deleted keys must not linger),
+  // while authored values win over static bundle values on read.
+  const authored = new Map<string, Record<string, unknown>>();
   let defaultLocale = 'en';
 
   /**
@@ -92,16 +98,26 @@ export function createMemoryI18n() {
     return typeof current === 'string' ? current : undefined;
   }
 
+  /** Merged (static ⊕ authored) view of a single, exact locale key. */
+  function mergedLocale(locale: string): Record<string, unknown> | undefined {
+    const stat = translations.get(locale);
+    const auth = authored.get(locale);
+    if (stat && auth) return deepMerge(stat, auth);
+    return auth ?? stat;
+  }
+
   /**
    * Find translation data for a locale, with fallback resolution.
    */
   function resolveTranslations(locale: string): Record<string, unknown> | undefined {
     // Exact match
-    if (translations.has(locale)) return translations.get(locale);
+    const exact = mergedLocale(locale);
+    if (exact) return exact;
 
     // Locale fallback (zh → zh-CN, en-us → en-US, etc.)
-    const resolved = resolveLocale(locale, [...translations.keys()]);
-    if (resolved) return translations.get(resolved);
+    const allLocales = [...new Set([...translations.keys(), ...authored.keys()])];
+    const resolved = resolveLocale(locale, allLocales);
+    if (resolved) return mergedLocale(resolved);
 
     return undefined;
   }
@@ -110,7 +126,7 @@ export function createMemoryI18n() {
     _fallback: true, _serviceName: 'i18n',
 
     t(key: string, locale: string, params?: Record<string, unknown>): string {
-      const data = resolveTranslations(locale) ?? translations.get(defaultLocale);
+      const data = resolveTranslations(locale) ?? mergedLocale(defaultLocale);
       const value = data ? resolveKey(data, key) : undefined;
       if (value == null) return key;
       if (!params) return value;
@@ -131,8 +147,22 @@ export function createMemoryI18n() {
       }
     },
 
+    /**
+     * Replace the ENTIRE runtime-authored translation layer (#2591). Called
+     * by the authored-translation sync with the full current set of active
+     * `translation` metadata items keyed by locale. Wholesale replacement —
+     * not a merge — so deleted items/keys stop resolving on the next sync.
+     */
+    replaceAuthoredTranslations(byLocale: Record<string, Record<string, unknown>>): void {
+      authored.clear();
+      for (const [locale, data] of Object.entries(byLocale ?? {})) {
+        if (!data || typeof data !== 'object') continue;
+        authored.set(locale, { ...data });
+      }
+    },
+
     getLocales(): string[] {
-      return [...translations.keys()];
+      return [...new Set([...translations.keys(), ...authored.keys()])];
     },
 
     getDefaultLocale(): string {

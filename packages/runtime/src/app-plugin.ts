@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext } from '@objectstack/core';
+import { Plugin, PluginContext, wireAuthoredTranslationSync } from '@objectstack/core';
 import { resolveMultiOrgEnabled } from '@objectstack/types';
 import { SeedLoaderService } from './seed-loader.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
@@ -118,6 +118,15 @@ export class AppPlugin implements Plugin {
         // first Studio hook). Runs in init (Phase 1) so it is in place before
         // ObjectQLPlugin.start binds metadata-service hooks in Phase 2 (#2588).
         this.installDefaultHookBodyRunner(ctx);
+        // Same for the action runner — authored actions register in Phase 2's
+        // authored-action re-sync and need the sandbox bridge in place (#2605).
+        this.installDefaultActionBodyRunner(ctx);
+        // Wire the authored-translation sync (#2591) — also BEFORE the empty-env
+        // return: an empty env is exactly where a user authors their first
+        // Studio translation. Covers whatever `i18n` service this kernel ends
+        // up with (the core in-memory fallback included); idempotent across
+        // multiple wirers via the ownership marker in core.
+        wireAuthoredTranslationSync(ctx as any);
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping init', {
                 pluginName: this.name,
@@ -209,6 +218,44 @@ export class AppPlugin implements Plugin {
             appId: 'runtime-authored',
         }));
         ctx.logger.info('[AppPlugin] Installed default hook body runner (runtime-authored hooks can execute)');
+    }
+
+    /**
+     * Install the engine's DEFAULT action body runner (`engine.setDefaultActionRunner`).
+     *
+     * The exact action-path parallel of {@link installDefaultHookBodyRunner}
+     * (#2605 item 1): actions authored at runtime (Studio → `action` metadata →
+     * publish) are registered by ObjectQLPlugin's authored-action re-sync,
+     * which lives in `objectql` and therefore has no sandbox of its own. This
+     * boot point hands it the same QuickJS-sandboxed runner that
+     * `defineStack({ actions })` bundles already execute through, so an
+     * authored `body` becomes a real `executeAction` handler instead of a
+     * silent "Action not found".
+     *
+     * `OS_DISABLE_AUTHORED_ACTIONS=1` opts out for deployments that want
+     * runtime-authored (DB-stored, non-code-reviewed) action bodies to stay
+     * inert; code-shipped actions are unaffected (AppPlugin registers those
+     * itself with its own runner).
+     */
+    private installDefaultActionBodyRunner(ctx: PluginContext): void {
+        if (process.env.OS_DISABLE_AUTHORED_ACTIONS === '1') {
+            ctx.logger.info('[AppPlugin] OS_DISABLE_AUTHORED_ACTIONS=1 — runtime-authored action bodies will not execute');
+            return;
+        }
+        let ql: any;
+        try {
+            ql = ctx.getService('objectql');
+        } catch {
+            return; // no engine on this kernel — nothing to wire
+        }
+        if (!ql || typeof ql.setDefaultActionRunner !== 'function') return;
+        if (ql._defaultActionRunner) return; // another AppPlugin already installed one
+        ql.setDefaultActionRunner(actionBodyRunnerFactory(new QuickJSScriptRunner(), {
+            ql,
+            logger: ctx.logger,
+            appId: 'runtime-authored',
+        }));
+        ctx.logger.info('[AppPlugin] Installed default action body runner (runtime-authored actions can execute)');
     }
 
     start = async (ctx: PluginContext) => {

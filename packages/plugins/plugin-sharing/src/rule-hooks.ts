@@ -7,6 +7,14 @@ const SYSTEM_CTX = { isSystem: true, roles: [], permissions: [] } as const;
 
 export const SHARING_RULE_HOOK_PACKAGE = 'plugin-sharing:rules';
 
+/**
+ * Package id for the `sys_sharing_rule` DATA-change triggers that re-run the
+ * bind (#2592). Deliberately distinct from {@link SHARING_RULE_HOOK_PACKAGE}
+ * so {@link unbindAllRuleHooks} — which the rebind itself calls — can never
+ * tear down the triggers that drive it.
+ */
+export const RULE_REBIND_TRIGGER_PACKAGE = 'plugin-sharing:rule-rebind';
+
 interface MinimalEngine {
   registerHook(event: string, handler: (ctx: any) => any | Promise<any>, options?: {
     object?: string | string[];

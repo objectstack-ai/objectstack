@@ -9,8 +9,12 @@ import { createMemoryMetadata } from './memory-metadata.js';
 export { createMemoryCache } from './memory-cache.js';
 export { createMemoryQueue } from './memory-queue.js';
 export { createMemoryJob } from './memory-job.js';
-export { createMemoryI18n, resolveLocale } from './memory-i18n.js';
+export { createMemoryI18n, resolveLocale, deepMerge } from './memory-i18n.js';
 export { createMemoryMetadata } from './memory-metadata.js';
+export {
+  wireAuthoredTranslationSync,
+  readAuthoredTranslationLayer,
+} from './authored-translation-sync.js';
 
 /**
  * Map of core-criticality service names to their in-memory fallback factories.

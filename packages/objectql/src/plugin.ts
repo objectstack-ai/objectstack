@@ -215,23 +215,35 @@ export class ObjectQLPlugin implements Plugin {
     ctx.registerService('protocol', protocolShim);
     ctx.logger.info('Protocol service registered');
 
-    // ── Runtime-authored hook rebind on authoring (#2588) ────────────────
+    // ── Runtime-authored hook/action rebind on authoring (#2588, #2605) ──
     // The protocol is the ONE choke point every metadata-authoring surface
     // funnels through (rest-server PUT /meta, dispatcher, publish-drafts, AI
-    // builders). When a `hook` row lands (direct-active save, publish) or is
-    // deleted, re-bind the authored-hook set so the change is live without a
-    // restart. Draft saves are skipped — drafts are not live by design.
-    // Fire-and-forget: a rebind failure is logged, never fails the write.
+    // builders). When a `hook` or `action` row lands (direct-active save,
+    // publish) or is deleted, re-sync the authored set so the change is live
+    // without a restart. Draft saves are skipped — drafts are not live by
+    // design. Fire-and-forget: a resync failure is logged, never fails the
+    // write.
     if (typeof (protocolShim as any).onMetadataMutation === 'function') {
       const unsubscribe = (protocolShim as any).onMetadataMutation(
         (evt: { type: string; name: string; state: string }) => {
-          if (evt?.type !== 'hook' || evt.state === 'draft') return;
-          void this.resyncAuthoredHooks(ctx).catch((e: any) => {
-            ctx.logger.warn('[ObjectQLPlugin] authored-hook rebind after mutation failed', {
-              hook: evt.name,
-              error: e?.message,
+          if (evt?.state === 'draft') return;
+          if (evt?.type === 'hook') {
+            void this.resyncAuthoredHooks(ctx).catch((e: any) => {
+              ctx.logger.warn('[ObjectQLPlugin] authored-hook rebind after mutation failed', {
+                hook: evt.name,
+                error: e?.message,
+              });
             });
-          });
+          } else if (evt?.type === 'action' || evt?.type === 'object') {
+            // `object` rows carry embedded `actions[]`, so an object edit can
+            // add/remove an authored action too — re-sync on both.
+            void this.resyncAuthoredActions(ctx).catch((e: any) => {
+              ctx.logger.warn('[ObjectQLPlugin] authored-action rebind after mutation failed', {
+                item: evt.name,
+                error: e?.message,
+              });
+            });
+          }
         },
       );
       this.metadataUnsubscribes.push(unsubscribe);
@@ -322,9 +334,11 @@ export class ObjectQLPlugin implements Plugin {
     // set, so edited hooks re-bind and deleted hooks tear down.
     ctx.hook('kernel:ready', async () => {
         await this.resyncAuthoredHooks(ctx);
+        await this.resyncAuthoredActions(ctx);
     });
     ctx.hook('metadata:reloaded', async () => {
         await this.resyncAuthoredHooks(ctx);
+        await this.resyncAuthoredActions(ctx);
     });
 
     // Discover features from Kernel Services
@@ -1113,6 +1127,236 @@ export class ObjectQLPlugin implements Plugin {
       bound: bindable.length,
       authoredRows: authoredHooks?.length ?? 0,
       artifactSkipped: byName.size - bindable.length,
+    });
+  }
+
+  /**
+   * Resolve the engine object key an action registers under. Standalone
+   * `action` metadata declares `objectName` (spec `ActionSchema`); bundle
+   * collectors attach `object`; object-less actions register under the
+   * `'global'` wildcard key, matching AppPlugin's bundle registration.
+   */
+  private actionObjectKey(action: any): string {
+    if (typeof action?.objectName === 'string' && action.objectName.length > 0) return action.objectName;
+    if (typeof action?.object === 'string' && action.object.length > 0) return action.object;
+    return 'global';
+  }
+
+  /**
+   * True when an action of this name is shipped by an installed CODE
+   * package — either as a standalone `action` artifact, or embedded in a
+   * packaged object's `actions[]` array (the common `defineStack` shape).
+   * Those handlers are registered by AppPlugin under `app:<appId>` with its
+   * own runner, and `engine.registerAction` REPLACES by `<object>:<name>`
+   * key — so re-registering here would clobber the packaged handler with a
+   * metadata copy. Artifact-wins, same rule as {@link isArtifactShippedHook}.
+   */
+  private isArtifactShippedAction(action: any): boolean {
+    const name = action?.name;
+    if (typeof name !== 'string' || name.length === 0) return false;
+    const registry: any = this.ql?.registry;
+    if (!registry || typeof registry.getArtifactItem !== 'function') return false;
+    if (registry.getArtifactItem('action', name) !== undefined) return true;
+    const objectKey = this.actionObjectKey(action);
+    if (objectKey !== 'global') {
+      const artifactObject: any = registry.getArtifactItem('object', objectKey);
+      if (Array.isArray(artifactObject?.actions)
+          && artifactObject.actions.some((a: any) => a?.name === name)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Read the ACTIVE runtime-authored action definitions from `sys_metadata`.
+   *
+   * Two authoring shapes both land here (and both are dead without this
+   * re-sync — #2605 item 1):
+   *   1. standalone `action` rows (the Studio's Action editor / PUT
+   *      `/meta/action/:name`), plus legacy plural `actions` rows;
+   *   2. actions EMBEDDED in authored `object` rows' `actions[]` — the
+   *      object-editor path. The object schema itself is read live, but the
+   *      handler still needs registering.
+   *
+   * Same read discipline as {@link readAuthoredHookRows}: direct table read
+   * (env-scoped kernels surface authored rows nowhere else), all
+   * organizations (engine actions are process-wide), `null` on a failed
+   * read so callers never tear down live registrations on an error.
+   */
+  private async readAuthoredActionRows(ctx: PluginContext): Promise<any[] | null> {
+    if (!this.ql) return null;
+    const parseRow = (row: any): any | undefined => {
+      try {
+        const data = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+        if (!data || typeof data !== 'object') return undefined;
+        const recPkg = row.package_id ?? undefined;
+        if (recPkg && data._packageId === undefined) data._packageId = recPkg;
+        return data;
+      } catch {
+        return undefined; // malformed row — skip it, keep the rest
+      }
+    };
+    try {
+      let rows: any[] = (await this.ql.find('sys_metadata', {
+        where: { type: 'action', state: 'active' },
+      })) ?? [];
+      if (rows.length === 0) {
+        rows = (await this.ql.find('sys_metadata', {
+          where: { type: 'actions', state: 'active' },
+        })) ?? [];
+      }
+      const actions: any[] = [];
+      for (const row of rows) {
+        const data = parseRow(row);
+        if (data && typeof data.name === 'string') actions.push(data);
+      }
+
+      // Embedded shape: authored object rows may carry their own actions.
+      const objectRows: any[] = (await this.ql.find('sys_metadata', {
+        where: { type: 'object', state: 'active' },
+      })) ?? [];
+      for (const row of objectRows) {
+        const obj = parseRow(row);
+        if (!obj || typeof obj.name !== 'string' || !Array.isArray(obj.actions)) continue;
+        for (const action of obj.actions) {
+          if (!action || typeof action !== 'object' || typeof action.name !== 'string') continue;
+          const copy = { ...action };
+          if (typeof copy.object !== 'string' && typeof copy.objectName !== 'string') {
+            copy.object = obj.name;
+          }
+          if (obj._packageId && copy._packageId === undefined) copy._packageId = obj._packageId;
+          actions.push(copy);
+        }
+      }
+      return actions;
+    } catch (e: any) {
+      ctx.logger.debug('[ObjectQLPlugin] authored-action read from sys_metadata failed', {
+        error: e?.message,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Serializes {@link resyncAuthoredActions} runs — same rationale as
+   * {@link authoredHookResyncChain}: overlapping read→register sequences
+   * must not finish out of order and leave the older snapshot registered.
+   */
+  private authoredActionResyncChain: Promise<void> = Promise.resolve();
+
+  /**
+   * (Re-)register runtime-authored actions on the engine (#2605 item 1 —
+   * the action-path parallel of {@link resyncAuthoredHooks}).
+   *
+   * Both action dispatch surfaces (`POST /api/v1/actions/:object/:action`
+   * and the MCP `run_action` bridge) resolve handlers through
+   * `engine.executeAction`, whose map was only ever populated from the app
+   * bundle at boot — a published `action` row was stored + listed but never
+   * executable, before OR after a restart.
+   *
+   * Sources, unioned by `<object>:<name>` (fresher DB row wins):
+   *   1. `metadataService.loadMany('action')` — FS-scanned action items;
+   *   2. authored `sys_metadata` rows (standalone AND object-embedded) via
+   *      {@link readAuthoredActionRows}.
+   *
+   * Package-artifact actions are filtered out (AppPlugin registers those
+   * under `app:<appId>`; registerAction replaces by key, so re-registering
+   * would clobber them). Handlers are built through the engine's default
+   * action runner installed at boot by the runtime's AppPlugin; when that
+   * runner is absent (e.g. `OS_DISABLE_AUTHORED_ACTIONS=1`, or a bare
+   * engine without the runtime) bodies are skipped with a warning. Bodyless
+   * actions (target-bound script / flow / url) register nothing here —
+   * their dispatch is either code (registered by the app) or the flow
+   * runner, not a metadata body.
+   *
+   * Idempotent: the whole `'metadata-service'` action set is torn down and
+   * re-registered, so edits re-register and deleted rows unregister.
+   * Best-effort: when BOTH sources are unreadable the resync is a no-op.
+   */
+  private resyncAuthoredActions(ctx: PluginContext): Promise<void> {
+    const run = this.authoredActionResyncChain.then(() => this.resyncAuthoredActionsNow(ctx));
+    // The chain must never hold a rejection (it would poison every later
+    // resync); callers still see the failure through `run`.
+    this.authoredActionResyncChain = run.catch(() => undefined);
+    return run;
+  }
+
+  private async resyncAuthoredActionsNow(ctx: PluginContext): Promise<void> {
+    const ql: any = this.ql;
+    if (!ql
+        || typeof ql.registerAction !== 'function'
+        || typeof ql.removeActionsByPackage !== 'function') {
+      return;
+    }
+
+    let serviceActions: any[] | null = null;
+    try {
+      const metadataService = ctx.getService('metadata') as any;
+      if (metadataService && typeof metadataService.loadMany === 'function') {
+        serviceActions = (await metadataService.loadMany('action')) ?? [];
+      }
+    } catch {
+      serviceActions = null; // no metadata service on this kernel
+    }
+
+    const authoredActions = await this.readAuthoredActionRows(ctx);
+    if (serviceActions === null && authoredActions === null) return; // nothing readable — keep current registrations
+
+    const byKey = new Map<string, any>();
+    for (const a of serviceActions ?? []) {
+      if (a && typeof a.name === 'string') byKey.set(`${this.actionObjectKey(a)}:${a.name}`, a);
+    }
+    for (const a of authoredActions ?? []) {
+      if (a && typeof a.name === 'string') byKey.set(`${this.actionObjectKey(a)}:${a.name}`, a);
+    }
+
+    const bindable = Array.from(byKey.values()).filter(
+      (a) => !this.isArtifactShippedAction(a),
+    );
+
+    // Full replace: tear down the package set, then re-register survivors —
+    // deleting the last authored action must unregister it.
+    ql.removeActionsByPackage('metadata-service');
+
+    const runner: any = ql._defaultActionRunner;
+    let registered = 0;
+    let skippedNoHandler = 0;
+    for (const action of bindable) {
+      if (typeof runner !== 'function') {
+        skippedNoHandler++;
+        continue;
+      }
+      let handler: any;
+      try {
+        handler = runner(action);
+      } catch (e: any) {
+        ctx.logger.warn('[ObjectQLPlugin] default action runner rejected an authored action', {
+          action: action.name,
+          error: e?.message,
+        });
+        continue;
+      }
+      if (typeof handler !== 'function') {
+        skippedNoHandler++; // no body (target/flow/url action) or invalid body shape
+        continue;
+      }
+      ql.registerAction(this.actionObjectKey(action), action.name, handler, 'metadata-service');
+      registered++;
+    }
+    if (typeof runner !== 'function' && bindable.length > 0) {
+      ctx.logger.warn(
+        '[ObjectQLPlugin] authored actions present but no default action runner is installed '
+        + '— their bodies will not execute (is the runtime AppPlugin booted, '
+        + 'or is OS_DISABLE_AUTHORED_ACTIONS=1 set?)',
+        { actions: bindable.slice(0, 5).map((a: any) => a.name) },
+      );
+    }
+    ctx.logger.info('[ObjectQLPlugin] re-synced runtime-authored actions', {
+      registered,
+      authoredRows: authoredActions?.length ?? 0,
+      artifactSkipped: byKey.size - bindable.length,
+      skippedNoHandler,
     });
   }
 

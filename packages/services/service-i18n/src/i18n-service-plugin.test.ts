@@ -150,7 +150,10 @@ describe('I18nServicePlugin', () => {
       await plugin.init!(ctx as any);
       await plugin.start!(ctx as any);
 
-      expect(ctx.hook).not.toHaveBeenCalled();
+      // kernel:ready / metadata:reloaded hooks are still registered for the
+      // authored-translation sync (#2591) — but no HTTP route may land.
+      await ctx.trigger('kernel:ready');
+      expect(httpServer.get).not.toHaveBeenCalled();
     });
 
     it('should gracefully skip routes when http-server is not available', async () => {

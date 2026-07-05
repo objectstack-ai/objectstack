@@ -9,7 +9,7 @@ import { SharingService, type SharingEngine } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
-import { bindRuleHooks, unbindAllRuleHooks } from './rule-hooks.js';
+import { bindRuleHooks, unbindAllRuleHooks, RULE_REBIND_TRIGGER_PACKAGE } from './rule-hooks.js';
 import { bindPrimaryBuHooks, backfillPrimaryBu } from './primary-bu-projection.js';
 import { bootstrapDeclaredSharingRules } from './bootstrap-declared-sharing-rules.js';
 
@@ -78,6 +78,64 @@ export class SharingServicePlugin implements Plugin {
 
   constructor(options: SharingPluginOptions = {}) {
     this.options = options;
+  }
+
+  /**
+   * Serializes rule-hook rebinds triggered by `sys_sharing_rule` data
+   * changes, so two rapid writes can't interleave their unbind→bind
+   * sequences and leave the older rule snapshot bound.
+   */
+  private ruleRebindChain: Promise<void> = Promise.resolve();
+
+  /**
+   * [#2592] Rebind rule hooks whenever `sys_sharing_rule` DATA changes.
+   *
+   * `bindRuleHooks` above runs once at `kernel:ready` and registers
+   * lifecycle hooks only for the objects that had ≥1 rule at that moment.
+   * Rule *evaluation* reads `sys_sharing_rule` live, but a rule created at
+   * runtime for an object with no boot-time rule never got a hook — so it
+   * silently no-oped until the next restart. And because authoring a rule
+   * is a data INSERT (not a metadata publish), the `metadata:reloaded`
+   * rebind pattern (#2576) never fires here — the trigger must be a
+   * data-change hook on the rule table itself.
+   *
+   * The rebind mirrors boot exactly: unbind the whole rule-hook package,
+   * re-bind from a fresh `listRules()`. Runs AFTER the write inside the
+   * same lifecycle pipeline (awaited, so the rule is enforceable the moment
+   * the authoring call returns), but never fails the write — a rebind
+   * failure logs and leaves the previous bindings in place.
+   */
+  private bindRuleRebindTriggers(engine: any, ctx: PluginContext): void {
+    const scheduleRebind = (): Promise<void> => {
+      const run = this.ruleRebindChain.then(async () => {
+        const ruleService = this.ruleService;
+        if (!ruleService) return;
+        const rules = await ruleService.listRules({ activeOnly: true }, { isSystem: true } as any);
+        unbindAllRuleHooks(engine);
+        bindRuleHooks(engine, ruleService, rules, ctx.logger as any);
+      });
+      // The chain must never hold a rejection (it would poison later
+      // rebinds); callers observe failures through `run`.
+      this.ruleRebindChain = run.catch(() => undefined);
+      return run;
+    };
+    const handler = async () => {
+      try {
+        await scheduleRebind();
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: sharing-rule hook rebind failed — previous bindings kept', {
+          error: err?.message,
+        });
+      }
+    };
+    for (const event of ['afterInsert', 'afterUpdate', 'afterDelete']) {
+      engine.registerHook(event, handler, {
+        object: 'sys_sharing_rule',
+        packageId: RULE_REBIND_TRIGGER_PACKAGE,
+        priority: 200,
+      });
+    }
+    ctx.logger.info('SharingServicePlugin: sharing-rule data-change rebind triggers bound');
   }
 
   async init(ctx: PluginContext): Promise<void> {
@@ -202,6 +260,7 @@ export class SharingServicePlugin implements Plugin {
             const rules = await this.ruleService.listRules({ activeOnly: true }, { isSystem: true } as any);
             unbindAllRuleHooks(engine);
             bindRuleHooks(engine, this.ruleService, rules, ctx.logger as any);
+            this.bindRuleRebindTriggers(engine, ctx);
           } else {
             ctx.logger.warn('SharingServicePlugin: engine has no hook API — sharing rule auto-evaluation disabled');
           }

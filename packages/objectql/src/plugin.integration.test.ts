@@ -980,8 +980,11 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
     it('does NOT hydrate a project kernel (environmentId set) without the opt-in', async () => {
       // Default behavior: a project kernel sources metadata from the artifact /
       // control-plane proxy, so boot must not hydrate OBJECTS from a local
-      // sys_metadata. The only permitted boot read is the runtime-authored
-      // hook re-sync (#2588), which is narrowly scoped to type='hook'.
+      // sys_metadata. The only permitted boot reads are the runtime-authored
+      // re-syncs: hooks (#2588, type='hook') and actions (#2605 —
+      // type='action' plus type='object' rows scanned ONLY to extract their
+      // embedded `actions[]`). Neither registers objects — the registry
+      // assertion below pins that.
       const findCalls: Array<{ object: string; query?: any }> = [];
       await kernel.use({
         name: 'mock-noopt-driver',
@@ -996,7 +999,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
 
       const metaReads = findCalls.filter((c) => c.object === 'sys_metadata');
       for (const read of metaReads) {
-        expect(read.query?.where?.type).toMatch(/^hooks?$/);
+        expect(read.query?.where?.type).toMatch(/^(hooks?|actions?|object)$/);
       }
       const registry = (kernel.getService('objectql') as any).registry;
       expect(registry.getObject('product')).toBeUndefined();

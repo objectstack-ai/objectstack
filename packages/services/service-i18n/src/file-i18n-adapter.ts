@@ -36,8 +36,11 @@ function resolveKey(data: Record<string, unknown>, key: string): string | undefi
 /**
  * Deep-merge two plain objects recursively.
  * Arrays and non-plain-object values from `source` overwrite those in `target`.
+ * Exported for the plugin's authored-translation re-sync (#2591), which must
+ * merge multiple authored items targeting the same locale with the exact
+ * semantics the adapter itself uses.
  */
-function deepMerge(
+export function deepMerge(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -104,6 +107,16 @@ function interpolate(template: string, params: Record<string, unknown>): string 
  */
 export class FileI18nAdapter implements II18nService {
   private readonly translations = new Map<string, Record<string, unknown>>();
+  /**
+   * Runtime-AUTHORED overlay (#2591): translations published as `translation`
+   * metadata in the Studio. Kept separate from the static `translations` map
+   * so a re-sync can REPLACE the whole authored layer (clear-then-reload) —
+   * deep-merging authored items into the static map would make deleted keys
+   * linger forever. Authored values win over static bundle values on read.
+   */
+  private readonly authoredTranslations = new Map<string, Record<string, unknown>>();
+  /** Per-locale merged view (static ⊕ authored), invalidated on any write. */
+  private readonly mergedCache = new Map<string, Record<string, unknown>>();
   private defaultLocale: string;
   private readonly fallbackLocale: string | undefined;
 
@@ -137,7 +150,13 @@ export class FileI18nAdapter implements II18nService {
   }
 
   getTranslations(locale: string): Record<string, unknown> {
-    return this.translations.get(locale) ?? {};
+    const authored = this.authoredTranslations.get(locale);
+    if (!authored) return this.translations.get(locale) ?? {};
+    const cached = this.mergedCache.get(locale);
+    if (cached) return cached;
+    const merged = deepMerge(this.translations.get(locale) ?? {}, authored);
+    this.mergedCache.set(locale, merged);
+    return merged;
   }
 
   loadTranslations(locale: string, translations: Record<string, unknown>): void {
@@ -149,10 +168,31 @@ export class FileI18nAdapter implements II18nService {
     } else {
       this.translations.set(locale, { ...translations });
     }
+    this.mergedCache.delete(locale);
+  }
+
+  /**
+   * Replace the ENTIRE runtime-authored translation layer (#2591).
+   *
+   * Called by the I18nServicePlugin's authored-translation re-sync with the
+   * full current set of active `translation` metadata items, keyed by
+   * locale. Wholesale replacement — not a merge — so keys removed from (or
+   * deleted with) an authored item stop resolving on the next sync, while
+   * the static bundle layer underneath is untouched.
+   */
+  replaceAuthoredTranslations(byLocale: Record<string, Record<string, unknown>>): void {
+    this.authoredTranslations.clear();
+    for (const [locale, data] of Object.entries(byLocale)) {
+      if (!data || typeof data !== 'object') continue;
+      this.authoredTranslations.set(locale, { ...data });
+    }
+    this.mergedCache.clear();
   }
 
   getLocales(): string[] {
-    return Array.from(this.translations.keys());
+    const locales = new Set(this.translations.keys());
+    for (const locale of this.authoredTranslations.keys()) locales.add(locale);
+    return Array.from(locales);
   }
 
   getDefaultLocale(): string {
@@ -186,6 +226,13 @@ export class FileI18nAdapter implements II18nService {
   }
 
   private resolveFromLocale(key: string, locale: string): string | undefined {
+    // Authored layer wins over the static bundle (same precedence as
+    // getTranslations' merged view) — cheap two-map probe instead of a merge.
+    const authored = this.authoredTranslations.get(locale);
+    if (authored) {
+      const value = resolveKey(authored, key);
+      if (value !== undefined) return value;
+    }
     const data = this.translations.get(locale);
     if (!data) return undefined;
     return resolveKey(data, key);

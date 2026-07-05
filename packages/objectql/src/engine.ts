@@ -539,6 +539,20 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
+   * Install a default ACTION body-runner factory: `(actionDef) => handler |
+   * undefined`. The runtime layer sets this once per engine (same boot point
+   * as {@link setDefaultBodyRunner}) so runtime-authored `action` metadata —
+   * which registers through paths that have no sandbox access of their own,
+   * notably ObjectQLPlugin's metadata-service re-sync — can turn a declarative
+   * `body` into an executable `registerAction` handler. The factory returns
+   * `undefined` for actions it cannot run (no `body`, invalid shape), which
+   * callers must treat as "skip", not an error.
+   */
+  setDefaultActionRunner(runner: (actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined): void {
+    (this as any)._defaultActionRunner = runner;
+  }
+
+  /**
    * Toggle strict hook-binding mode for this engine. When enabled, every
    * subsequent `bindHooks` call rejects on the first unresolved hook
    * instead of silently warning. Production runtimes should enable this.
