@@ -1,5 +1,29 @@
 # @objectstack/runtime
 
+## 12.3.0
+
+### Patch Changes
+
+- Updated dependencies [5a0da03]
+- Updated dependencies [e7eceec]
+  - @objectstack/objectql@12.3.0
+  - @objectstack/spec@12.3.0
+  - @objectstack/rest@12.3.0
+  - @objectstack/core@12.3.0
+  - @objectstack/formula@12.3.0
+  - @objectstack/metadata@12.3.0
+  - @objectstack/observability@12.3.0
+  - @objectstack/driver-memory@12.3.0
+  - @objectstack/driver-sql@12.3.0
+  - @objectstack/driver-sqlite-wasm@12.3.0
+  - @objectstack/plugin-auth@12.3.0
+  - @objectstack/plugin-org-scoping@12.3.0
+  - @objectstack/plugin-security@12.3.0
+  - @objectstack/service-cluster@12.3.0
+  - @objectstack/service-datasource@12.3.0
+  - @objectstack/service-i18n@12.3.0
+  - @objectstack/types@12.3.0
+
 ## 12.2.0
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # Changelog — @objectstack/service-analytics
 
+## 12.3.0
+
+### Patch Changes
+
+- Updated dependencies [e7eceec]
+  - @objectstack/spec@12.3.0
+  - @objectstack/core@12.3.0
+
 ## 12.2.0
 
 ### Patch Changes

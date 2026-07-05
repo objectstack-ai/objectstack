@@ -1,5 +1,14 @@
 # @objectstack/lint
 
+## 12.3.0
+
+### Patch Changes
+
+- Updated dependencies [e7eceec]
+  - @objectstack/spec@12.3.0
+  - @objectstack/formula@12.3.0
+  - @objectstack/sdui-parser@12.3.0
+
 ## 12.2.0
 
 ### Patch Changes
