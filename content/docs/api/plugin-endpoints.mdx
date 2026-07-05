@@ -13,12 +13,12 @@ These REST endpoints are only available when the corresponding plugin is install
 These endpoints are only available when an auth plugin is installed. Check `discovery.services.auth.enabled` first.
 </Callout>
 
-### `POST /auth/login`
+### `POST /auth/sign-in/email`
 
-Authenticate and receive a session token.
+Authenticate with email and password (better-auth's email sign-in route, mounted under the auth plugin's `/auth` prefix) and receive a session token. There is no `/auth/login` route.
 
-**Body**: `{ username: "admin", password: "secret" }`  
-**Response**: `{ token: "jwt...", expiresAt: "...", user: { ... } }`
+**Body**: `{ email: "admin@example.com", password: "secret" }`  
+**Response**: `{ token: "jwt...", user: { ... } }`
 
 ---
 
@@ -48,11 +48,15 @@ The automation dispatcher also exposes flow CRUD (`GET`/`POST /automation`, `GET
 
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
-| GET | `/ui/views?object=:object` | List views for an object |
-| GET | `/ui/views/:viewId` | Get a view definition |
-| POST | `/ui/views` | Create a new view |
-| PATCH | `/ui/views/:viewId` | Update a view |
-| DELETE | `/ui/views/:viewId` | Delete a view |
+| GET | `/ui/views/:object` | List views for an object |
+| GET | `/ui/views/:object/:viewId` | Get a view definition |
+| POST | `/ui/views/:object` | Create a new view |
+| PATCH | `/ui/views/:object/:viewId` | Update a view |
+| DELETE | `/ui/views/:object/:viewId` | Delete a view |
+
+<Callout type="info">
+The auto-generated (non-CRUD) view resolver `GET /ui/view/:object/:type` is always available and provided by the kernel — see [Metadata API](/docs/api/metadata-api). It is a separate route from the `/ui/views` CRUD above.
+</Callout>
 
 ### Realtime (`/realtime`) — Plugin Required
 
@@ -82,9 +86,12 @@ The core dispatcher implements only the list / read / read-all routes above. Dev
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
 | POST | `/ai/nlq` | Natural language → query |
-| POST | `/ai/chat` | AI chat conversation |
 | POST | `/ai/suggest` | Get value suggestions |
 | POST | `/ai/insights` | Get data insights |
+
+<Callout type="info">
+There is no `/ai/chat` route — the AI chat route was removed so the wire protocol aligns with the Vercel AI SDK. Use `useChat()` (`@ai-sdk/react`) directly against the streaming chat endpoint rather than the client SDK's `ai` namespace, which intentionally does not expose a `chat` method.
+</Callout>
 
 ### i18n (`/i18n`) — Plugin Required
 

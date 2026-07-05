@@ -35,11 +35,11 @@ const client = new ObjectStackClient({
 });
 
 async function main() {
-  // 1. Connect — fetches discovery manifest
-  await client.connect();
+  // 1. Connect — resolves with the discovery manifest
+  const discovery = await client.connect();
 
   // 2. Check available services
-  console.log('Services:', client.discovery?.services);
+  console.log('Services:', discovery.services);
   // → { metadata: { enabled: true, status: 'degraded' }, data: { enabled: true, status: 'available' }, auth: { enabled: false, ... } }
 
   // 3. Query data
@@ -80,17 +80,16 @@ When you call `client.connect()`, the client:
 3. Configures all API route paths dynamically
 
 ```typescript
-await client.connect();
+// connect() resolves with the discovery manifest — capture the return value
+const discovery = await client.connect();
 
-// Discovery result is available
-const discovery = client.discovery;
 console.log(discovery.version);      // "1.0.0"
 console.log(discovery.environment);  // "development"
 
 // Check if a service is available before using it
 if (discovery.services?.auth?.enabled) {
   // Auth plugin is installed — login is available
-  await client.auth.login({ username: 'admin', password: 'secret' });
+  await client.auth.login({ email: 'admin@example.com', password: 'secret' });
 } else {
   console.log(discovery.services?.auth?.message);
   // → "Install an auth plugin to enable"
@@ -105,7 +104,7 @@ if (discovery.services?.auth?.enabled) {
 
 ## Protocol Coverage
 
-The `@objectstack/client` SDK aims to implement the ObjectStack API protocol specification. The core namespaces are listed below; the client also exposes additional namespaces (`approvals`, `feed`, `organizations`, `projects`/environments) — see [`index.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/client/src/index.ts) for the full surface:
+The `@objectstack/client` SDK aims to implement the ObjectStack API protocol specification. The core namespaces are listed below; the client also exposes additional namespaces (`approvals`, `feed`, `organizations`, `oauth`, `projects`/environments) — see [`index.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/client/src/index.ts) for the full surface:
 
 | Namespace | Status | Methods | Purpose |
 |:----------|:------:|:--------|:--------|
@@ -116,7 +115,7 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | **permissions** | ✅ | 3 | Access control checks |
 | **packages** | ✅ | 6 | Plugin/package lifecycle management |
 | **views** | ✅ | 5 | UI view definitions |
-| **workflow** | ✅ | 5 | Workflow state transitions |
+| **workflow** | ✅ | 3 | Workflow state transitions |
 | **analytics** | ✅ | 3 | Analytics queries |
 | **automation** | ✅ | 1 | Automation triggers |
 | **storage** | ✅ | 2 | File upload & download |
@@ -217,7 +216,7 @@ const result = await client.analytics.query({
   cube: 'account',
   measures: ['revenue.sum', 'count'],
   dimensions: ['industry'],
-  filters: [{ member: 'status', operator: 'equals', values: ['active'] }],
+  where: { status: 'active' },
   limit: 100,
 });
 
@@ -235,10 +234,10 @@ const explained = await client.analytics.explain({
 
 ```typescript
 const packages = await client.packages.list();
-await client.packages.install({ name: 'plugin-auth', version: '1.0.0' });
-await client.packages.enable('plugin-auth');
-await client.packages.disable('plugin-auth');
-await client.packages.uninstall('plugin-auth');
+await client.packages.install({ id: 'com.objectstack.plugin-auth', version: '1.0.0' });
+await client.packages.enable('com.objectstack.plugin-auth');
+await client.packages.disable('com.objectstack.plugin-auth');
+await client.packages.uninstall('com.objectstack.plugin-auth');
 ```
 
 ### Additional Namespaces
@@ -248,7 +247,7 @@ The client also provides full implementations for:
 ```typescript
 // Auth — User authentication and session management
 await client.auth.login({ email: 'user@example.com', password: 'pass' });
-await client.auth.register({ email: 'new@example.com', password: 'pass' });
+await client.auth.register({ email: 'new@example.com', password: 'pass', name: 'New User' });
 await client.auth.me();
 await client.auth.logout();
 await client.auth.refreshToken('refresh-token-string');
@@ -272,10 +271,10 @@ await client.approvals.reject(requestId, { comment: 'Incomplete' });
 await client.approvals.listActions(requestId); // audit trail
 
 // Realtime — WebSocket subscriptions
-await client.realtime.connect({ protocol: 'websocket' });
-await client.realtime.subscribe({ channel: 'account', event: 'update' });
+await client.realtime.connect({ transport: 'websocket' });
+await client.realtime.subscribe({ channel: 'account', events: ['record.updated'] });
 await client.realtime.unsubscribe('subscription-id');
-await client.realtime.setPresence('account', { status: 'online' });
+await client.realtime.setPresence('account', { userId: 'user-123', status: 'online', lastSeen: new Date().toISOString() });
 await client.realtime.getPresence('account');
 await client.realtime.disconnect();
 
@@ -320,7 +319,7 @@ await client.views.delete('account', viewId);
 ```
 
 <Callout type="info">
-**Service availability**: Optional services (workflow, ai, etc.) are only available when the corresponding plugin is installed on the server. Always check `client.discovery?.services` to verify service availability before calling these methods.
+**Service availability**: Optional services (workflow, ai, etc.) are only available when the corresponding plugin is installed on the server. Always check the `services` map on the discovery result returned by `client.connect()` (cache it yourself — the client has no `discovery` getter) to verify service availability before calling these methods.
 </Callout>
 
 ---
@@ -381,8 +380,8 @@ The `find` method accepts an options object with **canonical** (recommended) fie
 | `offset` | `number` | Records to skip (OFFSET) | `0` |
 | `expand` | `Record<string, any>` or `string[]` | Relation loading (JOIN) | `{ owner: {} }` |
 
-<Callout type="warn">
-**Removed in 11:** the legacy query-field aliases were removed — use the canonical names: `fields` (was `select`), `where` (was `filter`/`filters`), `orderBy` (was `sort`), `limit` (was `top`), `offset` (was `skip`).
+<Callout type="info">
+**Canonical names recommended:** `find()` accepts the canonical names above; the legacy aliases (`select`, `filter`/`filters`, `sort`, `top`, `skip`) still work for backward compatibility, but new code should use the canonical names. (`@objectstack/client-react`'s `useQuery`/`useInfiniteQuery` hooks are stricter — the legacy aliases were removed there in v11; see `docs/upgrading-to-11.md`.)
 </Callout>
 
 ### Batch Options
@@ -418,9 +417,9 @@ try {
 |:-----|:-----|:---------|:----------|:------------|
 | `validation_error` | 400 | validation | No | Input validation failed |
 | `invalid_query` | 400 | validation | No | Malformed query expression |
-| `unauthenticated` | 401 | auth | No | Authentication required |
-| `permission_denied` | 403 | auth | No | Insufficient permissions |
-| `resource_not_found` | 404 | request | No | Resource does not exist |
+| `unauthenticated` | 401 | authentication | No | Authentication required |
+| `permission_denied` | 403 | authorization | No | Insufficient permissions |
+| `resource_not_found` | 404 | not_found | No | Resource does not exist |
 | `rate_limit_exceeded` | 429 | rate_limit | Yes | Too many requests |
 | `internal_error` | 500 | server | Yes | Unexpected server error |
 | `service_unavailable` | 503 | server | Yes | Service temporarily unavailable |
@@ -543,7 +542,7 @@ Integration tests verify end-to-end communication with a live ObjectStack server
 
 For detailed information about the client's protocol implementation:
 
-- **[Protocol Compliance Matrix](https://github.com/objectstack-ai/framework/blob/main/packages/client/CLIENT_SPEC_COMPLIANCE.md)** — Method-by-method verification of all API methods across 15 namespaces
+- **[Protocol Compliance Matrix](https://github.com/objectstack-ai/framework/blob/main/packages/client/CLIENT_SPEC_COMPLIANCE.md)** — Method-by-method verification of all API methods across 13 namespaces
 - **[Integration Test Specifications](https://github.com/objectstack-ai/framework/blob/main/packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md)** — Comprehensive test cases for client-server communication
 - **[Package README](https://github.com/objectstack-ai/framework/blob/main/packages/client/README.md)** — Developer navigation and API reference
 

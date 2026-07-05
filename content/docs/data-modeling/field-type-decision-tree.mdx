@@ -253,5 +253,5 @@ Can't find your use case above? Check this table:
 | "Is it for AI/ML?" | `vector` |
 
 <Callout type="info">
-**Still unsure?** Start with `text` for strings or `number` for numerics. You can change the field type later, but ObjectStack does not auto-convert existing data: compatible changes pass cleanly, while narrowing or incompatible changes surface a build-time warning that existing values may not convert cleanly.
+**Still unsure?** Start with `text` for strings or `number` for numerics. You can change the field type later, but ObjectStack does not auto-convert existing data: a small set of compatible narrowings (e.g. `text` → `textarea`/`markdown`/`html`/`code`, `date` ↔ `datetime`) pass cleanly, while other type changes are rejected with a `destructive_change` error when you save the updated object — existing values may not convert cleanly. Re-submit the save with `?force=true` to proceed anyway.
 </Callout>

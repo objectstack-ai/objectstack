@@ -109,7 +109,7 @@ Approvals are Flow nodes:
   type: 'approval',
   label: 'Manager Approval',
   config: {
-    approvers: [{ type: 'user', value: '${record.owner_manager_id}' }],
+    approvers: [{ type: 'field', value: 'owner_manager_id' }],
     behavior: 'unanimous',
     approvalStatusField: 'approval_status',
     lockRecord: true,

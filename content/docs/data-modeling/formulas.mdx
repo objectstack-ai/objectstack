@@ -11,8 +11,8 @@ piece of metadata needs to compute a value or evaluate a condition:
 - **Formula fields** (`type: 'formula'`)
 - **Predicates** — validation `condition`, sharing `condition`, field
   conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`),
-  view section/column visibility (`visibleOn`), action `disabled`, view filter
-  `criteria`, hook `condition`, flow decisions
+  view section/column visibility (`visibleOn`), action `disabled`,
+  hook `condition`, flow decisions
 - **Dynamic seed values** — fixtures whose value depends on the install-time
   clock or identity context
 
@@ -24,8 +24,9 @@ plus the ObjectStack standard library.
 > **Why CEL?** Formal grammar, abundant public training corpus (so AI authors
 > emit it natively), AST-first persistence, and sandboxed execution with
 > bounded cost. ObjectStack does **not** ship a Salesforce-flavor DSL — the
-> previous custom 22-function engine was deleted in M9. See
-> [north-star §8](/docs/concepts/north-star) "No private expression DSL".
+> previous custom 22-function engine was deleted in M9. See the
+> [north-star](/docs/concepts/north-star) principles on typed metadata over
+> custom DSLs.
 
 ---
 
@@ -86,8 +87,13 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Invoice = ObjectSchema.create({
   name: 'invoice',
-  titleFormat: tmpl`Invoice {{record.invoice_no}} – {{record.customer.name}}`,
+  nameField: 'display_title', // ADR-0079 — the record title is a designated field; composite titles migrate off the deprecated `titleFormat` to a text formula
   fields: {
+    // Composite record title as a text formula, surfaced via `nameField` above.
+    display_title: Field.formula({
+      returnType: 'text',
+      expression: F`"Invoice " + string(record.invoice_no) + " – " + record.customer.name`,
+    }),
     total: Field.formula({
       returnType: 'number',
       expression: F`record.subtotal + record.subtotal * record.tax_rate`,
@@ -112,7 +118,8 @@ so the field silently never computes. To declare what the formula returns, set
 **`returnType`** (`'number' | 'text' | 'boolean' | 'date'`); it is inferred and
 stamped automatically by the AI build path, and consumers (dashboard measures,
 formatting) read it instead of re-parsing the expression. The CEL source is the
-**`expression`** key (the `formula` alias is normalized to it on save).
+**`expression`** key — it is the only key the schema and runtime read for a
+formula's source; there is no separate `formula` source key.
 </Callout>
 
 The three CEL tagged-template helpers — `cel`, `F` (formula alias), `P`
@@ -493,4 +500,4 @@ validator backs `objectstack build` and metadata registration (and a planned
 - [Seed Data](/docs/data-modeling/seed-data) — using `cel\`...\`` for dynamic install-time values
 - [Hook Bodies](/docs/automation/hook-bodies) — when to use a JS hook vs a CEL `condition`
 - [`packages/formula/`](https://github.com/objectstack-ai/framework/tree/main/packages/formula) — engine + stdlib source
-- [north-star §8](/docs/concepts/north-star) — anti-pattern: private DSLs
+- [North Star](/docs/concepts/north-star) — architecture principles (typed metadata over custom DSLs)

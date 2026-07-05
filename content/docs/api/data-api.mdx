@@ -21,12 +21,12 @@ Query records with filtering, sorting, selection, and pagination.
 | `select` | query | Comma-separated field names |
 | `filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. |
 | `sort` | query | Sort expression (e.g. `name asc` or `-created_at`) |
-| `top` | query | Limit (default: 20) |
+| `top` | query | Max records to return. No default — omitting it returns all matching records. |
 | `skip` | query | Offset |
 | `expand` | query | Comma-separated list of relations to eager-load |
 | `search` | query | Full-text search query |
 
-> **Note:** OData-style `$`-prefixed parameters (`$filter`, `$select`, `$orderby`, `$top`, `$skip`) are supported via the [OData endpoint](/docs/references/api/odata). The standard REST API uses unprefixed parameter names.
+> **Note:** OData-style `$`-prefixed parameters (`$filter`, `$select`, `$orderby`, `$top`, `$skip`, `$expand`, `$count`, `$search`) are also accepted directly on this same endpoint as aliases — they're normalized internally to the parameter names above. There is no separate standalone OData endpoint.
 
 **Response**:
 ```json
@@ -192,13 +192,21 @@ Filtering uses the canonical Query DSL `where` object (the same MongoDB-style `F
 
 ### `GET /analytics/meta`
 
-Get auto-generated cube metadata for all objects.
+Get metadata for all registered cubes. Cubes are explicitly defined (via `defineCube`
+or the analytics service's `cubes` config) — a cube referenced by a query that isn't
+yet registered is lazily auto-inferred from that query's shape, but metadata isn't
+proactively generated for every object.
 
-**Response**: Array of cube definitions with measures, dimensions, and time dimensions.
+**Response**: Array of cube definitions with measures and dimensions (time-based
+dimensions are `dimensions` entries with `type: "time"`).
 
 ### `POST /analytics/sql`
 
-Execute a raw SQL analytics query (if supported by driver).
+Generate the SQL for a given analytics query **without executing it** (dry-run/debug).
+Accepts the same body shape as `/analytics/query`; support depends on the underlying
+driver/strategy.
+
+**Response**: `{ success: true, data: { sql: string, params: unknown[] } }`
 
 ---
 

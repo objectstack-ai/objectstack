@@ -30,7 +30,7 @@ contract.
 
 On a cloud / EE dev host (where `@objectstack/service-ai` is available —
 see the callout above), the `default` and `full` plugin tier presets both
-include the `ai` capability, so `objectstack dev` boots the AI services
+include the `ai` capability, so `os dev` boots the AI services
 unless you opt out with `--preset minimal`. Provide a Vercel AI Gateway
 model and key via env vars:
 
@@ -106,7 +106,7 @@ const chat = useObjectChat({
 ## 4. HITL (Human-in-the-Loop) flow
 
 When the agent picks a dangerous action (e.g. `delete_task`) the tool
-handler enqueues an `ai_pending_action` row and the chat returns a
+handler enqueues an `ai_pending_actions` row and the chat returns a
 `pending_approval` tool result. Your Console UI then:
 
 1. Polls `GET /api/v1/ai/pending-actions?status=pending`.

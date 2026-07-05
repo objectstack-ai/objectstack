@@ -5,7 +5,7 @@ description: How hook handlers and script-action bodies travel through ObjectSta
 
 # Hook & Action Bodies
 
-ObjectStack treats every hook handler and every `type: 'script'` action as **pure metadata**. There is no separate `.mjs` file shipped alongside the project artifact, no dynamic `import()` at runtime, and no filesystem dependency on the cloud. A body is either:
+ObjectStack treats every hook handler and every `type: 'script'` action as **pure metadata**. In the self-contained (body-only) form there is no separate `.mjs` file shipped alongside the project artifact, no dynamic `import()` at runtime, and no filesystem dependency on the cloud — though today a legacy `objectstack-runtime.{hash}.mjs` back-compat bundle can still ship, and does get dynamically imported at boot, for any handler that hasn't been lowered to a metadata `body` yet (see [Migration](#migration) below). A body is either:
 
 - **L1 — Expression** &nbsp;&nbsp; a formula-engine string, side-effect-free.
 - **L2 — Sandboxed JS** &nbsp;&nbsp; a JavaScript source string executed inside an isolated VM with declared capabilities.
@@ -33,7 +33,7 @@ export default defineStack({
 ```
 
 ```jsonc
-// Build artifact (account.hook.json — what objectos actually loads)
+// Build artifact (excerpt from dist/objectstack.json's "hooks" array — what objectos actually loads)
 {
   "name": "normalize_account",
   "object": "account",
@@ -61,9 +61,8 @@ This is the same trade-off ServiceNow made (Business Rules), Salesforce made (Fo
 
 ## L1 — Expression bodies
 
-Pure formula. No IO, no mutation. Used for:
+Pure formula. No IO, no mutation. This is the `body.language: 'expression'` shape, used for:
 
-- Hook `condition` (run-this-hook? predicate)
 - Action `body` for trivial computed values
 - Validation rules
 
@@ -71,7 +70,9 @@ Pure formula. No IO, no mutation. Used for:
 { "language": "expression", "source": "input.amount > 1000 && input.status == 'open'" }
 ```
 
-Evaluated by the same formula engine that powers field formulas — see [Formula Reference](/docs/data-modeling/formulas).
+Hook `condition` is a **separate field with a different envelope** — a bare CEL string, or `{ dialect: 'cel', source }` (`ExpressionInputSchema` in `packages/spec/src/shared/expression.zod.ts`), not a `{ language, source }` body. e.g. `condition: 'record.status == "open" && record.amount > 1000'`.
+
+Both forms are evaluated by the same formula engine that powers field formulas — see [Formula Reference](/docs/data-modeling/formulas).
 
 ## L2 — Sandboxed JS bodies
 
@@ -99,7 +100,7 @@ The script sees only what the surrounding `ctx` object exposes:
 | `ctx.api.object(name).find\|count\|aggregate` | Cross-object reads, scoped to current tenant. | `api.read` |
 | `ctx.api.object(name).insert\|update\|delete` | Cross-object writes. | `api.write` |
 | `ctx.crypto.randomUUID()` | UUID generation. | `crypto.uuid` |
-| `ctx.crypto.hash(algo, data)` | Sha-256/512 etc. | `crypto.hash` |
+| `ctx.crypto.hash(algo, data)` _(not yet wired)_ | Sha-256/512 etc. The `crypto.hash` capability exists in the schema and is inferred by the build-time extractor, but the QuickJS sandbox currently only installs `ctx.crypto.randomUUID` — calling `ctx.crypto.hash(...)` throws inside the VM today. | `crypto.hash` |
 | `ctx.log.{info,warn,error}` | Structured logging. | `log` |
 | `ctx.connector(name).<method>(...)` _(planned)_ | Outbound HTTP / SaaS calls. **Not yet wired into the sandbox** — ships with the separate Connector spec. | (separate Connector spec) |
 
@@ -108,9 +109,9 @@ The script sees only what the surrounding `ctx` object exposes:
 The CLI builder **rejects** any source that uses:
 
 - `import` / `require` / dynamic `import()`
-- `fetch`, `XMLHttpRequest`, `WebSocket`
-- `process`, `globalThis`, `Buffer`, `setImmediate`
-- `eval`, `new Function`, `Function` constructor
+- `fetch`
+- `process`, `globalThis`
+- `eval`, `new Function`
 - references to identifiers from value-only top-level imports
 
 Need outbound HTTP? Define a **Connector recipe** as metadata and call it via `ctx.connector(...)`. (Connector spec is tracked separately and ships after L1+L2 stabilises.)
@@ -148,7 +149,7 @@ If you have a body that genuinely cannot be expressed in L1+L2 (typically: it ne
 2. For each inline handler, take its source via `String(fn)` (the callable is already loaded by tsx/esbuild).
 3. Run a regex allow-list over the stringified body (see "What the sandbox forbids" above).
 4. **Pass:** emit `body: { language: 'js', source: <body>, capabilities: <inferred> }`.
-5. **Forbidden token (default):** extraction fails, a `bodyExtractionWarning` is recorded, and the callable still ships via the back-compat handler-ref bundle — the build does **not** abort. Pass `objectstack compile --strict-body` to turn extraction warnings into a hard build failure (exit 1) with a per-callable diagnostic, e.g. `hook 'normalize_account': fetch() is not allowed in hook bodies — declare a Connector recipe instead.`
+5. **Forbidden token (default):** extraction fails, a `bodyExtractionWarning` is recorded, and the callable still ships via the back-compat handler-ref bundle — the build does **not** abort. Pass `objectstack compile --strict-body` to turn extraction warnings into a hard build failure (exit 1) with a per-callable diagnostic, e.g. `hook 'normalize_account': fetch() is not allowed in hook/action bodies — declare a Connector recipe instead.`
 
 Capabilities are inferred by matching known patterns in the body source (e.g. `ctx.api.object(...).insert(...)` ⇒ `api.write`). A fuller AST-based analysis is planned for a later version. You can override with a directive comment when the inference is wrong.
 

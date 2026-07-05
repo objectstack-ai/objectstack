@@ -324,7 +324,6 @@ Parent-child relationship (cascading delete by default).
 |:---|:---|:---|:---|
 | `reference` | `string` | **required** | Target (master) object name |
 | `referenceFilters` | `string[]` | — | Filters applied to lookup dialogs (e.g. `"active = true"`) |
-| `writeRequiresMasterRead` | `boolean` | — | Require read access on master to write detail |
 | `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'cascade'` | Behavior when parent is deleted (master-detail cascades unless set to `restrict`) |
 | `inlineEdit` | `boolean \| 'grid' \| 'form'` | — | Edit child records inline on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`) |
 | `inlineColumns` | `array` | — | Optional explicit inline grid columns |

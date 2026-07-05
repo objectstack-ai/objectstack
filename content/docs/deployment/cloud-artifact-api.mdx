@@ -112,7 +112,7 @@ calls, not data-plane calls.
 |:---|:---|
 | `packages/cli/src/commands/package/publish.ts` | CLI `os package publish` command and endpoint construction (the legacy `publish.ts` / `rollback.ts` commands were removed — #2237). |
 | `packages/runtime/src/http-dispatcher.ts` | Kernel-resolution seam for per-request environment resolution. The concrete id/hostname registry ships in the host distribution `@objectstack/objectos-runtime` (not part of this open-source repo). |
-| `packages/cloud-connection/src/runtime-config-plugin.ts` | Console runtime-config for active/default environment state. |
+| `packages/cloud-connection/src/runtime-config-plugin.ts` | Console runtime-config for default (hostname-resolved) environment state. |
 | `packages/spec/src/system/environment-artifact.zod.ts` | Normative artifact envelope schema. |
 
 ---

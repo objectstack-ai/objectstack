@@ -595,9 +595,9 @@ export const hotLeadFollowUp: Flow = {
       label: 'Create Follow-up Task',
       config: {
         object: 'task',
-        data: {
+        fields: {
           subject: 'Follow up on hot lead',
-          related_to: '${record.id}',
+          related_to: '{record.id}',
           priority: 'high',
         },
       },
@@ -607,8 +607,10 @@ export const hotLeadFollowUp: Flow = {
       type: 'notify',
       label: 'Notify Owner',
       config: {
-        channel: 'in_app',
-        template: 'hot_lead_created',
+        recipients: '{record.owner}',
+        title: 'New hot lead',
+        message: 'Hot lead created: {record.name}',
+        channels: ['inbox'],
       },
     },
     { id: 'end', type: 'end', label: 'End' },

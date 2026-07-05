@@ -67,7 +67,7 @@ Each skill ships `SKILL.md` plus a generated `references/` index, and richer ski
 | **Overview** | `SKILL.md` | Yes | High-level guide with decision trees and quick-start examples |
 | **References** | `references/_index.md` | Generated | Pointers into the published `@objectstack/spec` Zod sources (present in every skill except Formula) |
 | **Rules** | `rules/*.md` | Optional | Detailed implementation rules with ✅ correct / ❌ incorrect code examples (today: Data, Platform, Query) |
-| **Evaluations** | `evals/*.md` | Optional | Test cases to validate AI assistant understanding |
+| **Evaluations** | `evals/*.md` | Optional | Test cases to validate AI assistant understanding (mostly planned — `objectstack-automation` ships the first worked example; other skills' `evals/` directories are still placeholders) |
 
 ### SKILL.md — The Entry Point
 
@@ -144,11 +144,11 @@ Each skill has **clear boundaries** — it knows what it's responsible for and e
             ▼             ▼             ▼
         ┌───────┐     ┌──────┐    ┌────────────┐
         │ Query │     │  UI  │    │ Automation │
-        └───────┘     └──────┘    └─────┬──────┘
-                          │             │
-                     ┌────▼────┐   ┌────▼────┐
-                     │   API   │   │   AI    │
-                     └─────────┘   └─────────┘
+        └───┬───┘     └──────┘    └─────┬──────┘
+            │                           │
+       ┌────▼────┐                 ┌────▼────┐
+       │   API   │                 │   AI    │
+       └─────────┘                 └─────────┘
 
   Formula and i18n are cross-cutting — load them alongside any host skill.
 ```
@@ -215,7 +215,7 @@ Each skill maps directly to an ObjectStack protocol domain. The schema skill tea
 
 ### 4. Testable
 
-The `evals/` directory in each skill allows teams to validate that their AI assistant correctly understands the protocol. This is analogous to test suites for runtime code — but for AI comprehension.
+The `evals/` directory in each skill is reserved for test cases that validate an AI assistant correctly understands the protocol — analogous to test suites for runtime code, but for AI comprehension. Most skills' `evals/` directories are still placeholders; `objectstack-automation` ships the first worked example (`evals/approvals/test-revise-loop.md`).
 
 ---
 

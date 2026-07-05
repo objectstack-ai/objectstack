@@ -46,7 +46,7 @@ ObjectStack ships **9 domain-specific skills**. Each is self-contained — an AI
 | # | Skill | Domain | Path | What it covers |
 | :--- | :--- | :--- | :--- | :--- |
 | 1 | [Platform](#platform) | `platform` | `skills/objectstack-platform/` | Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, adapters, scaffolding), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready` and `data:*`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel). |
-| 2 | [Data](#data) | `data` | `skills/objectstack-data/` | Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security — and the seed datasets (`defineDataset()`) that load fixtures and reference data alongside them. |
+| 2 | [Data](#data) | `data` | `skills/objectstack-data/` | Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security — and the seed definitions (`defineSeed()`) that load fixtures and reference data alongside them. |
 | 3 | [Query](#query) | `query` | `skills/objectstack-query/` | Construct ObjectQL queries — filters, sorting, pagination, aggregation, joins/expansion, window functions, and full-text search. |
 | 4 | [UI](#ui) | `ui` | `skills/objectstack-ui/` | Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`). |
 | 5 | [Automation](#automation) | `automation` | `skills/objectstack-automation/` | Design ObjectStack automation — Flows (visual logic), Workflows (declarative rules), Triggers, Approvals, scheduled jobs, and webhooks. |
@@ -75,7 +75,7 @@ Do not use for data schema design (see objectstack-data) or query patterns (see 
 
 **Domain** `data` · **Path** `skills/objectstack-data/`
 
-Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security — and the seed datasets (`defineDataset()`) that load fixtures and reference data alongside them.
+Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security — and the seed definitions (`defineSeed()`) that load fixtures and reference data alongside them.
 
 Use when the user is creating or modifying `*.object.ts` / `*.seed.ts` files, picking field types, modelling relationships, writing `beforeInsert`/`afterUpdate` hooks, configuring per-object access control, or authoring bootstrap / demo data. Use for `visibleWhen` / `readonlyWhen` / `requiredWhen` rules that belong on fields.
 
@@ -147,7 +147,7 @@ Do not use for general LLM prompting questions unrelated to ObjectStack metadata
 
 Design the server-side API surface that an ObjectStack runtime exposes — REST/GraphQL endpoints, auth providers, realtime channels, error envelopes, batch/versioning contracts.
 
-Use when the user is adding `*.endpoint.ts`, configuring auth providers, defining custom routes, or extending the REST/GraphQL generator.
+Use when the user is adding `ApiEndpoint` entries to the `apis:` array in `defineStack()`, configuring auth providers, defining custom routes, or extending the REST/GraphQL generator.
 
 Do not use for: consuming an ObjectStack API from a client (that is just standard HTTP — no skill needed); the auto-generated CRUD endpoints (those follow from objectstack-data); request-side query syntax (see objectstack-query). CEL expressions in route guards or auth predicates: load objectstack-formula alongside.
 

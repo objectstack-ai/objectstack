@@ -13,7 +13,7 @@ Solutions to the most common issues encountered when working with ObjectStack.
 
 ### "Invalid enum value" for field type
 
-**Symptom:** Zod validation fails with `Invalid enum value. Expected 'text' | 'number' | ...`
+**Symptom:** Zod validation fails with `Invalid option: expected one of "text"|"number"|...`
 
 **Cause:** The `type` value has a typo or uses an unsupported type name.
 
@@ -296,10 +296,12 @@ console.log(field.maxLength?.toString() ?? 'no limit');
 
 ### "Bundle size is too large"
 
+**Cause:** `@objectstack/spec` does not re-export domain schemas (like `FieldSchema` or `QuerySchema`) from its root — only `define*` factory functions and a handful of top-level schemas are available there. Each domain (~400 Zod schema closures total) is only reachable through its subpath, so an import that assumes it's on the root will not resolve.
+
 **Fix:** Import from subpaths instead of the root:
 
 ```typescript
-// ❌ Imports everything
+// ❌ Not exported from the root at all
 import { FieldSchema, QuerySchema } from '@objectstack/spec';
 
 // ✅ Tree-shakeable subpath imports
@@ -307,7 +309,7 @@ import { FieldSchema } from '@objectstack/spec/data';
 import { ErrorResponseSchema } from '@objectstack/spec/api';
 ```
 
-Available subpaths: `data`, `api`, `ui`, `system`, `kernel`, `ai`, `automation`, `contracts`, `integration`, `security`, `studio`.
+Available subpaths: `data`, `api`, `ui`, `system`, `kernel`, `ai`, `automation`, `contracts`, `integration`, `security`, `studio`, `cloud`, `qa`, `identity`, `shared`.
 
 ---
 

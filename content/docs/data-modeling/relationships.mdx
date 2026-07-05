@@ -22,14 +22,24 @@ fields: {
 
 ### Filtered Lookups
 
-Reference records that meet criteria:
+Reference records that meet criteria, using `lookupFilters` for static conditions and
+`dependsOn` to scope candidates by another field on the same record:
 
 ```typescript
 contact: Field.lookup('contact', {
   label: 'Contact',
-  referenceFilters: ['account = {account}', 'is_active = true'],
+  dependsOn: ['account'],
+  lookupFilters: [
+    { field: 'is_active', operator: 'eq', value: true },
+  ],
 })
 ```
+
+<Callout type="warn">
+  The legacy `referenceFilters: string[]` property (e.g. `['is_active = true']`) is accepted
+  by the schema but is **not** read by the record-picker UI — it filters nothing. Use the
+  structured `lookupFilters` (`{ field, operator, value }`) and `dependsOn` shown above instead.
+</Callout>
 
 ### Self-Referencing Lookups
 

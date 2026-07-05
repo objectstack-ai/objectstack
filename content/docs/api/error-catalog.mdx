@@ -12,6 +12,10 @@ ObjectStack uses a structured error system with **9 error categories** and **51 
 **Import:** `import { StandardErrorCode, ErrorCategory, ErrorResponseSchema } from '@objectstack/spec/api'`
 </Callout>
 
+<Callout type="warn">
+**Spec vs. wire format:** The codes below are `StandardErrorCode` — the standardized, lowercase snake_case contract that plugin/hook authors should throw with (see [Server-Side Error Handling](/docs/api/error-handling-server)). The kernel REST server (`@objectstack/rest`) that serves `/api/v1/data/*` today emits a flatter envelope with SCREAMING_SNAKE_CASE codes instead — e.g. `VALIDATION_FAILED`, `PERMISSION_DENIED`, `RECORD_NOT_FOUND`, `CONCURRENT_UPDATE` — not the codes in this catalog. See the [API Overview](/docs/api#error-handling) for both wire formats in use and [Wire Format](/docs/api/wire-format#7-error-response-format) for JSON examples.
+</Callout>
+
 ---
 
 ## Error Categories
@@ -383,6 +387,15 @@ interface FieldError {
 ---
 
 ## Client-Side Error Handling
+
+<Callout type="warn">
+The `@objectstack/client` SDK's built-in fetch error handling attaches only
+`code`, `category`, `httpStatus`, `retryable`, and `details` to the thrown
+error — not `fieldErrors`, `retryAfter`, or `requestId` directly. If your
+server populates those on the response body, read them from
+`apiError.details` (e.g. `apiError.details?.fieldErrors`) until the client
+surfaces them at the top level.
+</Callout>
 
 ### TypeScript Example
 

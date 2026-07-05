@@ -128,7 +128,10 @@ requests and do not run through a target environment kernel.
 | `OS_PORT` | HTTP listen port. |
 
 Third-party provider variables such as `OPENAI_API_KEY`, `TURSO_*`,
-`SMTP_*`, `RESEND_API_KEY`, and OAuth client secrets keep their provider names.
+`RESEND_API_KEY`, and OAuth client secrets keep their provider names. Mail
+settings are the exception — they route through the settings env-override
+convention as `OS_MAIL_<KEY>` (e.g. `OS_MAIL_SMTP_HOST`, `OS_MAIL_SMTP_PORT`),
+not a raw `SMTP_*` name.
 
 <Callout type="warn">
 **Set `OS_SECRET_KEY` for any containerized or multi-node deployment.** The

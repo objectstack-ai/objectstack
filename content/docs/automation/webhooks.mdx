@@ -44,27 +44,33 @@ rely on a stable contract.
 ## 2. Design principles
 
 **P1 — At-least-once, never at-most-once.** Receivers MUST be prepared
-for duplicates. We never silently drop a delivery, but we also never
-guarantee uniqueness — that requires receiver-side idempotency keys, which
-we provide but cannot enforce.
+for duplicates. Once a delivery is enqueued as a `sys_http_delivery` row we
+never silently drop it, but we also never guarantee uniqueness — that
+requires receiver-side idempotency keys, which we provide but cannot enforce.
+(The enqueue step itself is not yet this durable across nodes — see §4.1.)
 
 **P2 — Durable before fast.** Every delivery is persisted before it is
 attempted. A node crash mid-flight loses at most the in-flight HTTP
 attempt; the next node picks the row up from the queue.
 
-**P3 — Signed by default.** Every outbound request carries a signature
-the receiver can verify with a shared secret. Customers can detect
-spoofing without writing custom auth.
+**P3 — Signed when configured.** Whenever a webhook's `definition_json`
+carries a `secret`, every outbound request for it carries a signature the
+receiver can verify with that shared secret (see §6). The `secret` field is
+optional, not auto-generated — a webhook created without one is delivered
+unsigned. Customers can detect spoofing without writing custom auth, once
+they set a secret.
 
-**P4 — Safe egress.** The dispatcher refuses to send to localhost,
-private IP ranges, or the metadata endpoints of common cloud providers
-unless the operator explicitly allowlists them. Webhooks are a textbook
-SSRF vector; the runtime defends against it.
+**P4 — Safe egress.** Webhooks are a textbook SSRF vector, and the design
+goal is to refuse localhost, private IP ranges, and cloud-provider metadata
+endpoints by default. **This is not shipped yet** — see §7: the dispatcher
+today POSTs to whatever URL is configured, with no blocklisting. Treat
+webhook URL configuration as privileged until this lands.
 
 **P5 — Observable.** Every delivery attempt is visible to the owner of
-the webhook: status, response code, latency, retry schedule, manual
-redelivery. The Studio surfaces this without custom UI code by reusing
-the standard object/view machinery.
+the webhook: status, response code, retry schedule, manual redelivery.
+(Per-attempt latency is computed in memory during the HTTP call but is not
+persisted to `sys_http_delivery` or surfaced today.) The Studio surfaces this
+without custom UI code by reusing the standard object/view machinery.
 
 ## 3. Data model
 
@@ -80,7 +86,7 @@ CRUD, permissions, audit, and Studio UI without bespoke code.
 The subscription record. One row per "I want webhook X to fire for object Y".
 The full transport configuration (headers, secret, timeout, method) is carried
 in `definition_json`, a serialised `Webhook` JSON (canonical schema:
-`WebhookSchema` in `@objectstack/spec/automation/webhook`).
+`WebhookSchema`, exported from `@objectstack/spec/automation`).
 
 | Field             | Type      | Notes                                                                              |
 |-------------------|-----------|------------------------------------------------------------------------------------|
@@ -93,7 +99,7 @@ in `definition_json`, a serialised `Webhook` JSON (canonical schema:
 | `method`          | text      | HTTP method. Default `POST`.                                                        |
 | `description`     | textarea  | Free-text description.                                                              |
 | `active`          | boolean   | Inactive webhooks are skipped by the dispatcher. Default `true`.                    |
-| `definition_json` | textarea  | Serialised `Webhook` JSON (`@objectstack/spec/automation/webhook`) — carries the full headers / auth / retry / payload config, including the signing `secret`, custom `headers`, and `timeoutMs`. |
+| `definition_json` | textarea  | Serialised `Webhook` JSON (`WebhookSchema` from `@objectstack/spec/automation`) — carries the full headers / auth / retry / payload config, including the signing `secret`, custom `headers`, and `timeoutMs`. |
 | `created_at`      | datetime  | Standard audit columns.                                                            |
 | `updated_at`      | datetime  |                                                                                    |
 
@@ -142,8 +148,8 @@ writable.
 | `response_code`   | number   | Last HTTP status code received.                                              |
 | `response_body`   | textarea | Truncated to the first 16 KB.                                                |
 | `error`           | textarea | Last transport-level error (DNS, connect, timeout).                         |
-| `created_at`      | number   | Epoch ms.                                                                   |
-| `updated_at`      | number   | Epoch ms.                                                                   |
+| `created_at`      | datetime | Native TIMESTAMP column — written as a `Date`, not an epoch-ms number.       |
+| `updated_at`      | datetime | Native TIMESTAMP column — written as a `Date`, not an epoch-ms number.       |
 
 > **Why store full payload?** Receivers may be down for hours; we must
 > retry the *exact* bytes we promised to send. Recomputing payload from
@@ -155,9 +161,9 @@ Five stages, each implemented as a thin layer over an existing primitive.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ 1. Event   eventBus.emit('data:account:updated', payload,       │
-│            { scope: 'cluster', deliverySemantics: 'at-least-    │
-│              once', partitionKey: payload.id })                 │
+│ 1. Event   realtimeService.publish({ type, object, payload,     │
+│            timestamp }) — plain in-process pub/sub; no          │
+│            cluster / retry options are attached (see §4.1)      │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -184,21 +190,42 @@ Five stages, each implemented as a thin layer over an existing primitive.
 
 ### 4.1 Stage 1 — Event emission
 
-Producers (CRUD handlers, flow nodes, manual API triggers) emit a
-**cluster-scoped, at-least-once** event with the record id as
-`partitionKey`. These three settings together guarantee:
+Producers (the ObjectQL engine's insert/update/delete handlers) call
+`IRealtimeService.publish(event)` after the write commits, where `event` is a
+plain `{ type, object, payload, timestamp }` record — e.g.
+`{ type: 'data.record.updated', object: 'account', payload: { recordId,
+changes, after }, timestamp: <ISO 8601 string> }`.
 
-- Every node sees the event (subscribers may live anywhere).
-- Even on producer crash mid-emit, the event survives.
-- Two rapid updates to the same record arrive at the subscriber
-  in order, so no "stale → fresh → stale" replay reaches the receiver.
+> **Not yet cluster-aware.** The only shipped `IRealtimeService` implementation
+> is `InMemoryRealtimeAdapter`, an in-process, single-node pub/sub with no
+> persistence — its own documentation calls this out as the "v1 deployment
+> contract: single-instance only" (`packages/services/service-realtime/src/realtime-service-plugin.ts`).
+> Concretely, today:
+> - There is no `eventBus.emit()` API and no `scope` / `deliverySemantics` /
+>   `partitionKey` options on the call — `publish()` takes only the event.
+> - Events published on one node are **not** delivered to subscribers
+>   (including the webhook auto-enqueuer) on another node; cross-node fan-out
+>   is future work.
+> - Delivery is synchronous and unpersisted before Stage 3 — if the process
+>   crashes between the write and `publish()` returning, the event does not
+>   survive.
+> - There is no explicit `partitionKey` ordering primitive; two updates to the
+>   same record only stay in order because a single node runs JavaScript
+>   single-threaded.
+>
+> Everything from Stage 3 onward (the `sys_http_delivery` outbox and
+> `HttpDispatcher`) is durable and cluster-aware as described below — the gap
+> is upstream, between the CRUD write and the enqueue in Stage 2.
 
 ### 4.2 Stage 2 — Matching
 
-The subscriber is a single cluster-wide service
-(`clusterScope: 'cluster', leaderStrategy: 'idempotent-broadcast'` —
-running on every node is fine because the INSERT in stage 3 is keyed by
-`(event_id, webhook_id)` UNIQUE, so duplicates collapse).
+The subscriber (`AutoEnqueuer`) is a plain service registered per-node via
+`ctx.registerService('webhook.autoEnqueuer', ...)` — it runs independently on
+every node with no `clusterScope` / `leaderStrategy` annotation, subscribing to
+its own node-local realtime events only (see §4.1). Duplicate enqueues (e.g.
+from a periodic cache refresh re-matching the same event) still collapse
+safely because the Stage 3 INSERT is keyed by the `(source, dedup_key)`
+UNIQUE constraint.
 
 For each incoming event the subscriber:
 
@@ -285,7 +312,7 @@ on top:
   "object": "account",
   "recordId": "acc_123",
   "action": "updated",
-  "timestamp": 1730000000000
+  "timestamp": "2024-10-27T00:00:00.000Z"
   // ...remaining fields from the originating event payload
 }
 ```
@@ -295,7 +322,9 @@ Notes:
 - **`object`** — short object name the event came from.
 - **`recordId`** — id of the affected record.
 - **`action`** — `created` / `updated` / `deleted` / `undeleted`.
-- **`timestamp`** — event timestamp (epoch ms).
+- **`timestamp`** — event timestamp, an ISO 8601 string (passed through
+  unchanged from the originating realtime event's `timestamp` field — not
+  an epoch-ms number).
 - Any additional fields the event carried (e.g. record snapshot data) are
   spread in after these four.
 
@@ -419,30 +448,29 @@ A precise table of what the runtime promises and what it does not.
 
 | Failure                                  | Guarantee                                                   |
 |------------------------------------------|-------------------------------------------------------------|
-| Producer node crashes mid-emit           | Event durably in transport bus (at-least-once), redelivered on producer restart. |
+| Producer node crashes mid-emit           | **Not durable today.** The realtime bus (`InMemoryRealtimeAdapter`) is an unpersisted, in-process pub/sub — an event lost before Stage 3's INSERT is gone, not redelivered (see §4.1). |
 | Subscriber node crashes after persist    | Row exists in `sys_http_delivery`, another node picks it up. |
 | Dispatcher node crashes mid-HTTP         | Row stays `in_flight` with `claimed_by`; it reverts to `pending` after the claim TTL and is re-posted. The TTL derives from the dispatcher tick (`intervalMs`, default 500ms): `lockTtlMs = 5 × intervalMs`, `claimTtlMs = 2 × lockTtlMs` (so ~5s at defaults), all configurable via `HttpDispatcherOptions`. |
-| Receiver returns 5xx                     | Retry per backoff schedule until `maxAttempts`.             |
+| Receiver returns 5xx                     | Retry per backoff schedule until the fixed 8-attempt budget is exhausted (§4.5). |
 | Receiver returns 4xx                     | Treated as terminal — no retry, status `dead` immediately. Exception: 408 / 429 are retried. |
 | Receiver returns 2xx                     | `status = success`, no more attempts.                       |
 | DNS / connect / TLS error                | Treated as 5xx — retry per backoff.                         |
 | Timeout (per-attempt)                    | Treated as 5xx — retry per backoff.                         |
 | Network partition between dispatcher and DB | Worker pauses; row stays `pending`. On reconnect, normal claim resumes. |
-| Two events for the same record arrive out of order | `partitionKey` ordering at the event bus prevents this. Receiver still sees deliveries in emit order. |
+| Two events for the same record arrive out of order | No explicit ordering primitive; holds today only because a single node runs the emit → match → enqueue path synchronously (see §4.1). Not guaranteed across nodes. |
 | Duplicate delivery (at-least-once)       | Receiver gets the same `X-Objectstack-Delivery` id twice. Must dedupe on that header — we provide the key, can't enforce. |
 
 ## 13. Plugin location & layering
 
 ```
 packages/plugins/plugin-webhooks/
-├── src/
-│   ├── webhook-outbox-plugin.ts  # plugin: registers sys_webhook + nav,
-│   │                             #   starts the auto-enqueuer, mounts redeliver
-│   ├── sys-webhook.object.ts     # ObjectSchema.create() — sys_webhook config
-│   ├── auto-enqueuer.ts          # realtime data.record.* → enqueue onto outbox
-│   └── schema.ts                 # shared types
-└── test/
-    └── …
+└── src/
+    ├── webhook-outbox-plugin.ts  # plugin: registers sys_webhook + nav,
+    │                             #   starts the auto-enqueuer, mounts redeliver
+    ├── sys-webhook.object.ts     # ObjectSchema.create() — sys_webhook config
+    ├── auto-enqueuer.ts          # realtime data.record.* → enqueue onto outbox
+    ├── auto-enqueuer.test.ts     # tests are colocated in src/, not a separate test/ dir
+    └── schema.ts                 # shared types
 ```
 
 The delivery runtime — `sys_http_delivery`, `HttpDispatcher`, the HTTP sender,
@@ -475,7 +503,8 @@ Every design choice matches one or more established systems:
 - **AWS EventBridge / SQS** — at-least-once durability, dead-letter
   queue model (our `status = dead`).
 - **Kubernetes admission webhooks** — egress validation and TLS-only
-  enforcement.
+  enforcement (design inspiration only — per §7 this is not yet enforced
+  by our dispatcher).
 
 ## 15. Migration plan
 

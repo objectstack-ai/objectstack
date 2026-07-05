@@ -15,7 +15,7 @@ ObjectStack exposes a fully typed REST API. All endpoints use JSON request/respo
 | :--- | :--- |
 | **REST** | ✅ Auto-generated from the protocol (`@objectstack/rest`) — CRUD, query, batch, metadata, packages |
 | **Realtime** | ⚠️ In-process pub/sub service (`@objectstack/service-realtime`, single-instance); the `/realtime/*` REST routes and WebSocket/SSE transport are plugin-provided — none ships in the open framework |
-| **MCP** | ✅ Objects and opted-in actions exposed as Model Context Protocol tools ([AI module](/docs/ai)) |
+| **MCP** | ✅ Non-system objects and their actions exposed as Model Context Protocol tools, gated by the caller's permissions/RLS rather than a per-action opt-in flag ([AI module](/docs/ai)) |
 | **GraphQL** | ⚠️ Route is wired but **bring-your-own service**: `/graphql` returns 501 unless an implementation of the `IGraphQLService` contract is registered — none ships in the open framework |
 | **OData** | ⚠️ Vocabulary only: REST list endpoints accept OData-style operators (e.g. `$top`), but there is no standalone OData endpoint |
 
@@ -53,50 +53,37 @@ Returns the full discovery manifest.
 **Response**:
 ```json
 {
-  "name": "ObjectOS",
   "version": "1.0.0",
-  "environment": "development",
+  "apiName": "ObjectStack API",
   "routes": {
     "data": "/api/v1/data",
     "metadata": "/api/v1/meta",
-    "analytics": "/api/v1/analytics",
-    "auth": null,
-    "workflow": null
-  },
-  "features": {
-    "graphql": false,
-    "search": false,
-    "websockets": false,
-    "files": false,
-    "analytics": true,
-    "ai": false,
-    "workflow": false,
-    "notifications": false,
-    "i18n": false
+    "analytics": "/api/v1/analytics"
   },
   "services": {
     "metadata": {
       "enabled": true,
-      "status": "degraded",
+      "status": "available",
       "route": "/api/v1/meta",
-      "provider": "kernel",
-      "message": "In-memory registry; DB persistence pending"
+      "provider": "objectql"
     },
-    "data": { "enabled": true, "status": "available", "route": "/api/v1/data", "provider": "kernel" },
-    "analytics": { "enabled": true, "status": "available", "route": "/api/v1/analytics" },
-    "auth": { "enabled": false, "status": "unavailable", "message": "Install an auth plugin to enable" }
+    "data": { "enabled": true, "status": "available", "route": "/api/v1/data", "provider": "objectql" },
+    "analytics": { "enabled": true, "status": "available", "route": "/api/v1/analytics", "provider": "objectql" },
+    "auth": { "enabled": false, "status": "unavailable", "message": "Install plugin-auth to enable" }
   },
-  "locale": {
-    "default": "en",
-    "supported": ["en", "zh-CN"],
-    "timezone": "UTC"
+  "capabilities": {
+    "feed": { "enabled": false },
+    "automation": { "enabled": false },
+    "search": { "enabled": false }
   }
 }
 ```
 
+Disabled/uninstalled route keys (e.g. `auth`, `workflow`) are omitted from `routes` entirely rather than set to `null`; check `services` to tell "not installed" apart from "installed but not yet mounted here."
+
 ### `GET /.well-known/objectstack`
 
-Alias for the discovery endpoint used by auto-discovery in the client SDK.
+Served by the runtime dispatcher (`@objectstack/runtime`), not `@objectstack/rest` — its body is wrapped as `{ "data": { ... } }` and includes fields (`name`, `environment`, `features`, `locale`) that the `@objectstack/rest`-served `/api/v1` response above does not. The client SDK's `connect()` tries `/api/v1/discovery` first and falls back to this endpoint, unwrapping either `body.data` or the bare `body`.
 
 <Callout type="info">
 **Service Status Values**: `available` (fully operational), `registered` (route declared but handler unverified — may return 501), `degraded` (partial functionality), `unavailable` (not installed), `stub` (placeholder that throws errors)
@@ -117,11 +104,11 @@ Error responses depend on which HTTP server is in front of the kernel. There are
 }
 ```
 
-Validation failures additionally include an `issues` array. Common codes emitted by the kernel REST server:
+Validation failures additionally include a `fields` array (one entry per invalid field). Common codes emitted by the kernel REST server:
 
 | Code | HTTP | Description |
 |:-----|:-----|:------------|
-| `VALIDATION_FAILED` | 400 | Input validation failed (includes `issues`) |
+| `VALIDATION_FAILED` | 400 | Input validation failed (includes `fields`) |
 | `PERMISSION_DENIED` | 403 | Insufficient permissions |
 | `RECORD_NOT_FOUND` | 404 | Resource does not exist |
 | `CONCURRENT_UPDATE` | 409 | Record was modified by another user |

@@ -136,7 +136,7 @@ DELETE /api/v1/data/task/:id
 Your entire business logic lives in:
 - Object definitions (`.object.ts`)
 - View configurations (`.view.ts`)
-- Workflow rules (`.workflow.ts`)
+- Automation flows (`.flow.ts`) and lifecycle hooks (`.hook.ts`)
 
 The Kernel simply **interprets** these definitions.
 
@@ -181,7 +181,7 @@ const FieldSchema = z.object({
 type Field = z.infer<typeof FieldSchema>;
 
 // Derived: JSON Schema (for IDE autocomplete)
-const jsonSchema = zodToJsonSchema(FieldSchema);
+const jsonSchema = z.toJSONSchema(FieldSchema);
 ```
 
 ### 3. Technology Agnostic

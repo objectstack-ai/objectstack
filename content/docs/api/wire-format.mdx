@@ -61,7 +61,7 @@ The response is the `CreateDataResponse` envelope: `{ object, id, record }`.
     "created_at": "2025-01-20T10:30:00.000Z",
     "updated_at": "2025-01-20T10:30:00.000Z",
     "created_by": "usr_01HQ3V5K8N2M4P6R7T9W",
-    "owner": "usr_01HQ3V5K8N2M4P6R7T9W"
+    "owner_id": "usr_01HQ3V5K8N2M4P6R7T9W"
   }
 }
 ```
@@ -131,7 +131,7 @@ Filtering uses the MongoDB-style `where` clause: `{ field: value }` for equality
   },
   "fields": ["id", "title", "status", "priority", "assigned_to", "due_date"],
   "expand": {
-    "assigned_to": { "object": "user", "fields": ["id", "name"] }
+    "assigned_to": { "object": "sys_user", "fields": ["id", "name"] }
   },
   "orderBy": [
     { "field": "due_date", "order": "asc" }
@@ -225,7 +225,7 @@ The response is the `UpdateDataResponse` envelope: `{ object, id, record }`.
     "created_at": "2025-01-20T10:30:00.000Z",
     "updated_at": "2025-01-20T14:15:00.000Z",
     "created_by": "usr_01HQ3V5K8N2M4P6R7T9W",
-    "owner": "usr_01HQ3V5K8N2M4P6R7T9W"
+    "owner_id": "usr_01HQ3V5K8N2M4P6R7T9W"
   }
 }
 ```
@@ -302,7 +302,7 @@ Metadata is addressed by type name. `object` is the metadata type, so this route
           "name": "assigned_to",
           "label": "Assigned To",
           "type": "lookup",
-          "reference": "user"
+          "reference": "sys_user"
         },
         {
           "name": "due_date",
@@ -365,7 +365,7 @@ Field-level failures carry a `fields` array.
 
 ```json
 {
-  "error": "Insufficient permissions to update task records",
+  "error": "[Security] Access denied: operation 'update' on object 'task' is not permitted for roles [standard_user]",
   "code": "PERMISSION_DENIED",
   "object": "task"
 }
@@ -394,7 +394,7 @@ Returned when an `If-Match` / `expectedVersion` token no longer matches the stor
 
 **`POST /api/v1/data/task/batch`**
 
-Process many records of a **single** operation type in one request. The body carries one `operation` (`create`, `update`, `upsert`, or `delete`) plus a `records` array. By default the batch is atomic (rolled back on any failure); set `options.atomic: false` to allow partial success.
+Process many records of a **single** operation type in one request. The body carries one `operation` (`create`, `update`, `upsert`, or `delete`) plus a `records` array. By default (`options.atomic: true`) processing stops at the first failing record — records already written earlier in the same batch are **not** rolled back, since there is no wrapping database transaction. Set `options.atomic: false` (with `options.continueOnError: true`) to keep processing every record and collect a full partial-success report.
 
 ### Request
 
@@ -415,7 +415,7 @@ Process many records of a **single** operation type in one request. The body car
 
 ### Response — `200 OK`
 
-The response is the `BatchUpdateResponse` envelope: a top-level `success` flag plus `total` / `succeeded` / `failed` counts and a per-record `results` array.
+The response is the `BatchUpdateResponse` envelope: a top-level `success` flag plus `total` / `succeeded` / `failed` counts and a per-record `results` array. Each successful entry echoes the written `record`; pass `options.returnRecords: false` to get back just `{ id, success }` per result.
 
 ```json
 {
@@ -425,15 +425,15 @@ The response is the `BatchUpdateResponse` envelope: a top-level `success` flag p
   "succeeded": 2,
   "failed": 0,
   "results": [
-    { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "success": true, "index": 0 },
-    { "id": "tsk_01HQ4B8C0E4G6H9K3L5M", "success": true, "index": 1 }
+    { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "success": true, "record": { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "status": "done" } },
+    { "id": "tsk_01HQ4B8C0E4G6H9K3L5M", "success": true, "record": { "id": "tsk_01HQ4B8C0E4G6H9K3L5M", "status": "done" } }
   ]
 }
 ```
 
 ### Partial Failure Response
 
-When `options.atomic: false` and some records fail, the failing entries carry an `errors` array:
+When `options.atomic: false` and some records fail, the failing entries carry a single `error` message string (not an array):
 
 ```json
 {
@@ -443,14 +443,8 @@ When `options.atomic: false` and some records fail, the failing entries carry an
   "succeeded": 1,
   "failed": 1,
   "results": [
-    { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "success": true, "index": 0 },
-    {
-      "success": false,
-      "index": 1,
-      "errors": [
-        { "code": "record_not_found", "message": "Record not found: task/tsk_invalid_id" }
-      ]
-    }
+    { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "success": true, "record": { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "status": "done" } },
+    { "id": "tsk_invalid_id", "success": false, "error": "Record tsk_invalid_id not found in task" }
   ]
 }
 ```
@@ -479,7 +473,8 @@ When `options.atomic: false` and some records fail, the failing entries carry an
 | Header | Description |
 |:---|:---|
 | `X-Request-Id` | Server-assigned (or echoed) request ID |
-| `X-RateLimit-Limit` | Maximum requests per window |
-| `X-RateLimit-Remaining` | Remaining requests in current window |
-| `X-RateLimit-Reset` | UTC timestamp when the window resets |
 | `ETag` | Entity tag for conditional requests |
+
+<Callout type="info">
+**Rate limiting is opt-in:** ObjectStack ships a token-bucket `RateLimiter` primitive (`@objectstack/runtime`), but it is **not** wired into the default REST response path — a deployment must add it at the adapter layer. Only when a deployment does so will responses carry `X-RateLimit-Limit` / `X-RateLimit-Remaining` / `X-RateLimit-Reset` (and a `429` with `Retry-After` once the limit is hit).
+</Callout>

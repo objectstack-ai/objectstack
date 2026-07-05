@@ -88,12 +88,12 @@ needed, the `X-Environment-Id` request header.
 ```typescript
 import { createDefaultHostConfig, createStandaloneStack } from '@objectstack/runtime';
 
-const stack = createStandaloneStack({
+const stack = await createStandaloneStack({
   environmentId: 'env_local',
   artifactPath: './dist/objectstack.json',
 });
 
-const host = createDefaultHostConfig({
+const host = await createDefaultHostConfig({
   environmentId: 'env_local',
   artifactPath: './dist/objectstack.json',
 });

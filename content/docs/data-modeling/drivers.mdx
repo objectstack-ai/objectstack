@@ -223,7 +223,7 @@ export default defineStack({
   datasources: {
     analytics: {
       driver: 'postgres',
-      config: { connection: process.env.ANALYTICS_URL },
+      config: { url: process.env.ANALYTICS_URL },
     },
     cache: {
       driver: 'mongodb',

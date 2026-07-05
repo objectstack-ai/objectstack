@@ -195,7 +195,7 @@ export const HighValueCustomerFlow = defineFlow({
 });
 ```
 
-See the [Automation Protocol](/docs/protocol/objectos) for the full Flow node and edge reference.
+See the [Flow Metadata reference](/docs/automation/flows) for the full Flow node and edge reference.
 
 ObjectOS **orchestrates** these rules at runtime, independent of the data structure or UI.
 
@@ -456,9 +456,11 @@ export const OpportunityKanbanView = defineView({
       { field: 'customer' },
     ],
     // Kanban-specific config: group columns by the stage field.
+    // `columns` here lists the fields shown on each card (required).
     kanban: {
       groupByField: 'stage',
       summarizeField: 'amount',
+      columns: ['title', 'amount', 'customer'],
     },
   },
 });

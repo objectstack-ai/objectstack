@@ -27,7 +27,7 @@ export const MyObject = ObjectSchema.create({
   description: 'Description...',   // Help text
   
   // Display configuration
-  titleFormat: '{{record.field1}} - {{record.field2}}',
+  nameField: 'field1',            // Canonical title field (ADR-0079)
   highlightFields: ['field1', 'field2', 'field3'],
   
   // Fields definition
@@ -55,7 +55,8 @@ export const MyObject = ObjectSchema.create({
 | `pluralLabel` | string | Plural display name | `'Accounts'` |
 | `icon` | string | Icon identifier | `'building'` |
 | `description` | string | Help text | `'Companies...'` |
-| `titleFormat` | string | Record title template (`{{record.field}}` interpolation) | `'{{record.name}} - {{record.id}}'` |
+| `nameField` | string | Canonical primary title field — the stored field used as the record display name (ADR-0079); the deprecated alias `displayNameField` is still accepted | `'name'` |
+| `titleFormat` | string | Deprecated (ADR-0079 → `nameField`). Render-only title template (`{{record.field}}` interpolation); an explicit `nameField` now takes precedence | `'{{record.name}} - {{record.id}}'` |
 | `highlightFields` | string[] | Most-important fields, in priority order (default columns, cards, previews, detail highlight strip; ADR-0085 — formerly `compactLayout`; the old spelling was retired and is now rejected) | `['name', 'status']` |
 
 ### Enable Features
@@ -284,7 +285,7 @@ here (ADR-0085).
 ❌ **DON'T:**
 - Create too many indexes (slows writes)
 - Put indexes on low-cardinality fields
-- Use SOQL in loops
+- Run ObjectQL queries inside loops (N+1 queries)
 
 ### 5. Validation
 
@@ -347,6 +348,11 @@ export const Account = ObjectSchema.create({
     owner: Field.user({
       label: 'Account Owner',
       required: true,
+    }),
+    
+    is_active: Field.boolean({
+      label: 'Active',
+      defaultValue: true,
     }),
   },
   

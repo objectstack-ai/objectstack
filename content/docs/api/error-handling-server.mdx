@@ -8,7 +8,7 @@ description: Best practices for handling and throwing errors in ObjectStack plug
 This guide covers best practices for handling and throwing errors within ObjectStack plugins and server-side code — from creating custom errors with proper codes to transaction rollback and integration with `safeParsePretty()`.
 
 <Callout type="info">
-**Error Contract:** ObjectStack defines a standardized error envelope, `ErrorResponseSchema` (exported from `@objectstack/spec/api`). It wraps an `EnhancedApiError` with a machine-readable `code`, `httpStatus`, optional `category`, and `fieldErrors`. Errors you throw on the server should carry these fields so the API layer can serialize them into that envelope.
+**Error Contract:** ObjectStack defines a standardized error envelope, `ErrorResponseSchema` (exported from `@objectstack/spec/api`). It wraps an `EnhancedApiError` with a machine-readable `code`, `httpStatus`, optional `category`, and `fieldErrors`. This is the spec's target contract for plugin/hook authors to throw against — but the kernel REST server (`@objectstack/rest`) that serves `/api/v1/data/*` does not auto-translate an arbitrary thrown error into this envelope today. It emits a flatter `{ error, code }` shape and only recognizes a small, fixed set of SCREAMING_SNAKE_CASE codes (`VALIDATION_FAILED`, `PERMISSION_DENIED`, `RECORD_NOT_FOUND`, `CONCURRENT_UPDATE`, `DELETE_RESTRICTED`, …). See the [API Overview](/docs/api#error-handling) and [Wire Format](/docs/api/wire-format#7-error-response-format) for both wire formats in use, and the [Error Catalog](/docs/api/error-catalog) for the full `StandardErrorCode` list.
 </Callout>
 
 ---

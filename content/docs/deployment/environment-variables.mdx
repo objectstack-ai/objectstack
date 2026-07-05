@@ -47,9 +47,9 @@ read at startup unless noted otherwise. Boolean variables accept `true` / `false
 
 | Variable | Type | Default | Description |
 |:---|:---|:---|:---|
-| `OS_DATABASE_URL` | url | — | Database connection string (e.g. `file:./data.sqlite`, `postgres://…`, `libsql://…`). |
-| `OS_DATABASE_DRIVER` | enum | inferred | Force a specific driver when the URL is ambiguous. `sqlite` \| `postgres` \| `libsql`. |
-| `OS_STORAGE_ROOT` | path | `<OS_HOME>/storage` | Root directory for the local file storage adapter. |
+| `OS_DATABASE_URL` | url | — | Database connection string (e.g. `file:./data.sqlite`, `postgres://…`, `mongodb://…`, `memory://`). `libsql://` (Turso) is not dispatched by the open-core runtime — that driver ships separately in the ObjectStack Cloud distribution. |
+| `OS_DATABASE_DRIVER` | enum | inferred | Force a specific driver when the URL is ambiguous. `memory` \| `sqlite` \| `sqlite-wasm` \| `postgres` \| `mongodb`. |
+| `OS_STORAGE_ROOT` | path | `./.objectstack/data/uploads` | Root directory for the local file storage adapter, relative to the process cwd (used by `os serve`'s default `storage` capability wiring). |
 | `OS_ARTIFACT_PATH` | path | — | Path or `http(s)://` URL to a compiled `objectstack.json` artifact to boot the kernel from. |
 
 ---
@@ -229,7 +229,7 @@ Provider credentials keep their upstream names. ObjectStack does not rename
 |:---|:---|:---|:---|
 | `OS_MARKETPLACE_CACHE` | enum | `on` | `off` disables the in-memory marketplace listing cache. |
 | `OS_MARKETPLACE_PUBLIC_BASE_URL` | url | — | Public base URL of the marketplace registry (proxied from this runtime when set). |
-| `OS_METADATA_WRITABLE` | boolean | `true` (dev) / `false` (prod) | Allow PATCH / PUT on `/api/v1/metadata/*` at runtime. |
+| `OS_METADATA_WRITABLE` | csv | — (none) | Comma-separated metadata type names (e.g. `hook,validation`) granted a runtime escape hatch that treats them as `allowOrgOverride: true`, letting artifact-backed items of those protected types be overridden per-org outside their static registry declaration. See [ADR-0005](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0005-metadata-customization-overlay.md). |
 
 ---
 
@@ -277,10 +277,9 @@ the hosted ObjectStack Cloud control plane.
 | `OS_KERNEL_TTL_MS` | number | `900000` | Idle TTL for cached kernels in ms. |
 | `OS_ENV_CACHE_TTL_MS` | number | `300000` | Env-record cache TTL in ms. |
 | `OS_ARTIFACT_CACHE_TTL_MS` | number | `300000` | Artifact-record cache TTL in ms. |
-| `OS_ARTIFACT_FETCH_TIMEOUT_MS` | number | `30000` | Timeout for remote artifact fetches. `0` disables the timeout. |
+| `OS_ARTIFACT_FETCH_TIMEOUT_MS` | number | `60000` | Timeout for remote artifact fetches. Only a positive value is honored — an unset, non-numeric, or `0` value falls back to the 60s default (pass `fetchTimeoutMs: 0` in `artifactSource` config to actually disable the timeout). |
 | `OS_INLINE_SEED_BUDGET_MS` | number | `8000` | Time budget for synchronous seed execution at boot before deferring to a worker. |
 | `OS_TENANT_AUDIT` | flag | `1` | Set to `0` to silence the tenant-isolation audit warnings emitted by the SQL driver. |
-| `OS_NODE_ID` | string | hostname | Stable node id used by the webhook outbox for distributed locking. |
 
 ---
 
@@ -288,7 +287,7 @@ the hosted ObjectStack Cloud control plane.
 
 Some env vars accept a legacy alias for compatibility. **Ecosystem-standard names** (e.g. `DATABASE_URL`, `AUTH_SECRET`, `BETTER_AUTH_*`, `PORT`, `CORS_*`, `MCP_SERVER_*`) are permanently accepted and no longer warn. ObjectStack's own former names are deprecated — prefer the canonical `OS_*`.
 
-> **Removed in 11** (rename required): `OS_MULTI_TENANT` → `OS_MULTI_ORG_ENABLED`, `OBJECTSTACK_METADATA_WRITABLE` → `OS_METADATA_WRITABLE`, `AUTH_BASE_URL`/`OS_AUTH_BASE_URL` → `OS_AUTH_URL`.
+> **Removed in 11** (rename required): `OS_MULTI_TENANT` → `OS_MULTI_ORG_ENABLED`, `AUTH_BASE_URL`/`OS_AUTH_BASE_URL` → `OS_AUTH_URL`.
 
 | Canonical | Legacy |
 |:---|:---|
@@ -305,6 +304,6 @@ Some env vars accept a legacy alias for compatibility. **Ecosystem-standard name
 | `OS_MCP_SERVER_ENABLED` | `MCP_SERVER_ENABLED` |
 | `OS_MCP_SERVER_NAME` | `MCP_SERVER_NAME` |
 | `OS_MCP_SERVER_TRANSPORT` | `MCP_SERVER_TRANSPORT` |
-| `OS_NODE_ID` | `OBJECTSTACK_NODE_ID` |
+| `OS_METADATA_WRITABLE` | `OBJECTSTACK_METADATA_WRITABLE` |
 | `OS_HOME` | `OBJECTSTACK_HOME` |
 | `OS_DEV_CRYPTO_KEY` | `OBJECTSTACK_DEV_CRYPTO_KEY` |

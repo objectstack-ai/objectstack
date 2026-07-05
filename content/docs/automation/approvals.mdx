@@ -34,11 +34,20 @@ The node declares **who approves** (a named user, a role, the submitter's manage
 // Illustrative — see the Approval reference for the exact node schema.
 defineFlow({
   name: 'invoice_approval',
+  type: 'record_change',
   runAs: 'user',                       // submitter's RLS unless a step needs more
-  trigger: { object: 'invoice', on: 'create' },
   nodes: [
-    { type: 'approval', approver: { type: 'role', role: 'finance_manager' },
-      onApprove: 'mark_approved', onReject: 'mark_rejected' },
+    { id: 'start', type: 'start', label: 'Start',
+      config: { objectName: 'invoice', triggerType: 'record-after-create' } },
+    { id: 'approval', type: 'approval', label: 'Approval',
+      config: { approvers: [{ type: 'role', value: 'finance_manager' }] } },
+    { id: 'mark_approved', type: 'update_record', label: 'Mark Approved' },
+    { id: 'mark_rejected', type: 'update_record', label: 'Mark Rejected' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'approval' },
+    { id: 'e2', source: 'approval', target: 'mark_approved', label: 'approve' },
+    { id: 'e3', source: 'approval', target: 'mark_rejected', label: 'reject' },
   ],
 });
 ```
@@ -74,7 +83,7 @@ export const opportunityApproval: Flow = {
       type: 'approval',
       label: 'Manager Approval',
       config: {
-        approvers: [{ type: 'user', value: '${record.owner_manager_id}' }],
+        approvers: [{ type: 'field', value: 'owner_manager_id' }],
         behavior: 'unanimous',
         approvalStatusField: 'approval_status',
         lockRecord: true,
@@ -118,7 +127,7 @@ Separating *who configures* from *who approves* from *as whom it runs* is the sa
 
 ## Runnable example
 
-- Flows: [`examples/app-showcase/src/flows`](https://github.com/objectstack-ai/framework/tree/main/examples/app-showcase/src/flows).
+- Flows: [`examples/app-showcase/src/automation/flows`](https://github.com/objectstack-ai/framework/tree/main/examples/app-showcase/src/automation/flows).
 - Approval schema: [`packages/spec/src/automation/approval.zod.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/spec/src/automation/approval.zod.ts).
 
 ## Anti-patterns

@@ -64,9 +64,9 @@ These properties apply to **all** field types and are validated by the base `Fie
 
 | Property | Type | Default | Validation Behavior |
 |:---|:---|:---|:---|
-| `format` | `string` | `email` | Validates RFC 5322 email format |
+| `format` | `string` | `email` | Validates a basic `local@domain` shape |
 
-**Default constraints:** Must conform to valid email format.
+**Default constraints:** Must contain an `@` and a domain with a dot — a lightweight pattern check, not full RFC 5322 validation.
 
 ### `url`
 
@@ -80,9 +80,9 @@ These properties apply to **all** field types and are validated by the base `Fie
 
 | Property | Type | Default | Validation Behavior |
 |:---|:---|:---|:---|
-| `format` | `string` | `phone` | Validates phone number format |
+| `format` | `string` | `phone` | Validates a permissive phone-number character set |
 
-**Default constraints:** Accepts E.164 and common national formats.
+**Default constraints:** Accepts digits, `+ ( ) - .` and spaces (minimum 5 characters) — a lenient character-set check, not strict E.164 structural validation.
 
 ### `password`
 
@@ -91,7 +91,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 | `maxLength` | `number` | — | Maximum password length |
 | `minLength` | `number` | — | Minimum password length |
 
-**Default constraints:** Value is never returned in read operations. Stored as a one-way hash owned by the auth subsystem — for reversible encrypted-at-rest secrets, use the `secret` type instead.
+**Default constraints:** Validated the same as `text` (`maxLength`/`minLength` only) — the engine does not automatically hash or mask a `password`-typed field's value on read; even the platform's own credential column (`sys_account.password`) is declared as `Field.text()`, with hashing and verification owned entirely by the auth subsystem (better-auth), not driven by this field type. For a reversible encrypted-at-rest value on your own objects, use the `secret` type instead.
 
 ---
 
@@ -209,7 +209,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 | `options` | `SelectOption[]` | — | **Required.** Static option list |
 | `defaultValue` | `string` | — | Must match an option `value` |
 
-**Option validation:** Each option `value` must be lowercase (`^[a-z_][a-z0-9_]*$`).
+**Option validation:** Each option `value` must be a lowercase system identifier — starts with a letter, then letters/digits/underscores/dots (`^[a-z][a-z0-9_.]*$`), minimum 2 characters.
 
 ### `multiselect`
 
@@ -256,7 +256,6 @@ These properties apply to **all** field types and are validated by the base `Fie
 |:---|:---|:---|:---|
 | `reference` | `string` | — | **Required.** Parent object name |
 | `deleteBehavior` | `enum` | `cascade` | Master-detail cascades at runtime unless set to `restrict` |
-| `writeRequiresMasterRead` | `boolean` | — | Require read access to master record |
 
 **Default constraints:** Enforces parent-child ownership. Child records cascade-delete with the parent by default.
 
@@ -266,7 +265,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 |:---|:---|:---|:---|
 | `reference` | `string` | — | **Required.** Self-referencing object name |
 
-**Default constraints:** Self-referencing lookup for hierarchical structures. Prevents circular references.
+**Default constraints:** Self-referencing lookup for hierarchical structures. Stored and expanded like a `lookup`; the engine does not run a cycle check on write, so a self-reference chain that loops back on itself is not automatically rejected.
 
 ---
 
@@ -432,7 +431,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 
 ### `tags`
 
-**Default constraints:** Stored as array of strings. Each tag is trimmed and deduplicated.
+**Default constraints:** Stored as array of strings. A lone scalar value is coerced into a single-element array; the engine does not trim or deduplicate entries.
 
 ---
 
@@ -467,7 +466,9 @@ For sensitive data, use the properties and types the platform actually enforces:
 | `trackHistory` | `boolean` | — | Render the field's value changes as entries on the record activity timeline |
 
 For reversible encrypted-at-rest values (API keys, tokens, DB passwords), use the
-`secret` field type; for credentials, use `password` (one-way hash). See the
+`secret` field type — it is the type with an enforced masking/encryption code path.
+`password` is validated like plain text and has no built-in hashing or read-masking
+(see the `password` section above). See the
 [Field Type Gallery](/docs/data-modeling/field-types).
 
 ---
@@ -478,10 +479,10 @@ For reversible encrypted-at-rest values (API keys, tokens, DB passwords), use th
 |:---|:---|:---|
 | `text` | — | `maxLength`, `minLength`, `format` |
 | `textarea` | — | `maxLength`, `minLength` |
-| `email` | — | RFC 5322 email format |
+| `email` | — | Basic `local@domain` shape (not full RFC 5322) |
 | `url` | — | Valid URL with protocol |
-| `phone` | — | E.164 / national format |
-| `password` | — | One-way hash, never returned |
+| `phone` | — | Permissive character set, not strict E.164 |
+| `password` | — | Validated like `text`; no built-in hashing/masking |
 | `markdown` | — | `maxLength` |
 | `html` | — | Sanitized, `maxLength` |
 | `richtext` | — | Sanitized, `maxLength` |
@@ -493,13 +494,13 @@ For reversible encrypted-at-rest values (API keys, tokens, DB passwords), use th
 | `time` | — | ISO 8601 time, 24h |
 | `boolean` | — | `true` / `false` only |
 | `toggle` | — | `true` / `false` only |
-| `select` | `options` | Option values must be lowercase snake_case |
+| `select` | `options` | Option values must be lowercase system identifiers |
 | `multiselect` | `options` | Array of valid option values |
 | `radio` | `options` | Single value from options |
 | `checkboxes` | `options` | Array of valid option values |
 | `lookup` | `reference` | Foreign key integrity |
 | `master_detail` | `reference` | Cascade delete, ownership |
-| `tree` | `reference` | Self-referencing, no circular refs |
+| `tree` | `reference` | Self-referencing; no automatic cycle check |
 | `image` | — | `fileAttachmentConfig` for dimensions |
 | `file` | — | `fileAttachmentConfig` for restrictions |
 | `avatar` | — | Single image, typically square |
@@ -518,5 +519,5 @@ For reversible encrypted-at-rest values (API keys, tokens, DB passwords), use th
 | `signature` | — | Base64 image, typically immutable |
 | `qrcode` | — | Format-specific validation |
 | `progress` | — | Numeric, typically 0–100 |
-| `tags` | — | String array, trimmed, deduplicated |
+| `tags` | — | String array; no automatic trim/dedup |
 | `vector` | `dimensions` | Numeric array of exact `dimensions` length |

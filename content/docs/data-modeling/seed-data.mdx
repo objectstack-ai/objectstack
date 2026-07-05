@@ -68,7 +68,7 @@ record (matched by `externalId`).
 | `insert` | Create only, throw on duplicate | Append-only tables, audit logs |
 | `update` | Update only, skip if not found | Migration patches on existing rows |
 | `ignore` | Create if new, silently skip duplicates | Bootstrap data that must not overwrite user edits |
-| `replace` | Delete ALL records then insert | Cache / lookup tables rebuilt on each run |
+| `replace` | Insert without checking for an existing match — the seed loader does **not** delete anything itself; the target table must already be empty (or cleared by the caller) | Cache / lookup tables rebuilt from an already-truncated table |
 
 ### `upsert` — Recommended Default
 
@@ -97,10 +97,12 @@ defineSeed(SystemRole, {
 });
 ```
 
-### `replace` — Full Table Rebuild
+### `replace` — Insert Into an Already-Cleared Table
 
 ```typescript
-// ⚠️ Deletes ALL records in the object before inserting.
+// ⚠️ The seed loader does NOT delete existing records for you — `replace`
+// always inserts. Truncate/clear the table yourself before this seed runs,
+// or every load will attempt to insert duplicate rows.
 // Only use for cache or lookup tables with no user-generated data.
 defineSeed(ExchangeRateCache, {
   externalId: 'key',
@@ -238,54 +240,69 @@ Available in the seed CEL context:
   `isBlank(v)`, `coalesce(v, fallback)`
 - **Scope:** `os.user`, `os.org`, `os.env`
 
-### Binding records to a user (`os.user`)
+### Owner-style fields (`owner_id`, `created_by`, `assigned_to`)
 
-Many objects have a **required** owner lookup — `owner_id`, `created_by`,
-`assigned_to`. To seed such a record, bind it to a user with `cel\`os.user.id\``.
-This is the single canonical convention; there is no `currentUser()`, `@admin`,
-or similar special syntax.
+Many objects have an owner lookup — `owner_id`, `created_by`, `assigned_to`.
+On a fresh boot there are no human users yet — seed data loads *before* the
+first sign-up — so the platform does **not** mint a placeholder system user to
+own these fields. The recommended pattern is to **leave owner-style fields
+unset** in the record:
 
 ```typescript
 defineSeed(Project, {
   externalId: 'code',
   records: [{
-    code:     'bootstrap',
-    name:     'Bootstrap Project',
-    owner_id: cel`os.user.id`,   // ← bound to the seed identity
+    code: 'bootstrap',
+    name: 'Bootstrap Project',
+    // owner_id intentionally omitted — filled in by the first-admin handoff below
   }],
 });
 ```
 
-**Where does `os.user` come from?** On a fresh boot there are no human users yet
-— seeding runs *before* the first sign-up. So the runtime provisions a
-deterministic, non-loginable **system user** (`usr_system`, role `system`)
-*before* any seed runs and binds it to `os.user`. It owns seeded data the way
-Salesforce's "Automated Process" user does — it has no credential and **cannot
-sign in**.
+**What actually happens to `os.user`?** The seed loader binds `os.user` to
+whatever identity the load run carries (`config.identity`). During the normal
+boot sequence no identity is supplied, so `os.user` resolves to a null
+identity and `cel\`os.user.id\`` evaluates to `null` — the record still seeds
+successfully, with the field left `null` rather than the load failing. Once
+the first human user is promoted to platform admin, a one-time ownership
+handoff re-owns every orphaned row (`owner_id` `null`, or the legacy
+`usr_system` value from older databases) to that admin.
 
-- The **human login admin** is created separately (CLI sign-up / first-signup
-  promotion) through better-auth and need **not** be the seed owner.
+- Because `cel\`os.user.id\`` resolves to `null` before an admin exists, a
+  **required** (non-nullable) owner-style field must not depend on it —
+  either leave the field optional/unset (recommended) or supply a literal
+  value.
+- `cel\`os.user.id\`` still resolves to a real user id when the loader is
+  invoked with an explicit identity (e.g. a re-seed run through tooling that
+  passes `config.identity`).
 - `os.org.id` resolves to the current organization; during a per-tenant replay
   it is that tenant's id, falling back to the load's `organizationId`.
 
-This ordering guarantee means `cel\`os.user.id\`` / `cel\`os.org.id\`` always
-resolve at boot — you never have to sequence seeds around user creation.
-
 ### Failure is loud, not silent
 
-If a record uses a CEL value that cannot be resolved — e.g. `cel\`os.user.id\``
-when the system identity could not be provisioned — the record is **not silently
-dropped**. The loader counts it as an error, marks the load unsuccessful, and
-logs an actionable message:
+If a record's CEL expression cannot be evaluated at all (a malformed
+expression, or a reference the CEL engine cannot compile), the record is
+**not silently dropped**. The loader counts it as an error, marks the load
+unsuccessful, and logs an actionable message:
 
 ```
-[SeedLoader] Cannot resolve dynamic seed values for project record #0:
-  ... Records using cel`os.user.id` / cel`os.org.id` require a seed identity —
-  ensure a system/admin user exists before seeding.
+[SeedLoader] Cannot resolve dynamic seed values for project record #0: <expression error>.
+  `os.user.id` resolves to null at seed time (the owning admin does not exist yet) and
+  owner-style fields are assigned by the first-admin handoff — so a required, non-owner
+  field must not depend on it. Provide a literal value or make the field optional.
 ```
 
-Write failures (e.g. a required field still missing after resolution) are
-surfaced the same way. Tooling should check `result.success` / `result.errors`.
+Separately, if the write itself fails after resolution (e.g. a `NOT NULL`
+column rejects a `null` value produced by an unresolved owner field), that
+surfaces as its own error:
+
+```
+[SeedLoader] Failed to write project record #0 (code=bootstrap): <driver error>
+```
+
+Both cases increment `result.summary.totalErrored`, add an entry to
+`result.errors`, and flip `result.success` to `false`. Tooling should check
+`result.success` / `result.errors` rather than assuming a clean run.
 
 ---
 

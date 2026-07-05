@@ -155,9 +155,10 @@ storage for artifacts.
 | `OS_S3_SECRET_ACCESS_KEY` | optional | Falls back to AWS SDK credential chain |
 | `OS_S3_FORCE_PATH_STYLE` | optional | `1` for MinIO / self-hosted |
 
-> See [Publish, Versioning & Preview](/docs/deployment/publish-and-preview) for the full
-> storage matrix (native S3, Cloudflare R2, MinIO, etc.) and what the cloud
-> control plane stores in each bucket.
+> The Cloud control plane's storage backend (S3, Cloudflare R2, MinIO, etc.) is
+> configured and documented in that separate distribution, not in this framework
+> repo. See [Publish, Versioning & Preview](/docs/deployment/publish-and-preview)
+> for the package publish/install workflow the control plane exposes to the CLI.
 
 <Callout type="warn">
 **Never commit secrets.** Use Vercel's environment variable UI or the Vercel CLI (`vercel env add`) to configure tokens and S3 credentials.

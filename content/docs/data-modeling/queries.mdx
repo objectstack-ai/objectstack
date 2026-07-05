@@ -199,6 +199,14 @@ position from the previous page. There is no `keyset`/`after` query property.
 }
 ```
 
+<Callout type="warn">
+This object form of a field node isn't wired up for top-level `fields` projection. When the
+object's schema is registered, the engine's unknown-field filter compares each entry against
+the schema's field names via `String(f)`, so an object entry never matches and is silently
+dropped from the projection — the aliased field is simply missing from results, no error. Use
+`expand` to pull in a relationship's fields instead.
+</Callout>
+
 ---
 
 ## Expand (Related Records)
@@ -243,6 +251,13 @@ applied on this path.
 | `array_agg` | Collect into array | `{ function: 'array_agg', field: 'tag', alias: 'all_tags' }` |
 | `string_agg` | Concatenate strings | `{ function: 'string_agg', field: 'name', alias: 'names' }` |
 
+<Callout type="warn">
+`count_distinct` / `array_agg` / `string_agg` are only fully supported on the MongoDB driver.
+The SQL driver's aggregate function mapper throws `Unsupported aggregate function` for all
+three (only `count`/`sum`/`avg`/`min`/`max` are mapped), and the in-memory driver's aggregator
+silently returns `null` for them. Avoid these three on SQL- or memory-backed objects.
+</Callout>
+
 ### Aggregation Example
 
 ```typescript
@@ -258,9 +273,25 @@ applied on this path.
 }
 ```
 
+<Callout type="warn">
+`having` is accepted by `QuerySchema` but is not enforced by the query engine today.
+`EngineAggregateOptions` (the type `ObjectQL.aggregate()` actually takes) has no `having`
+field, and both the REST `findData()` dispatcher and `ObjectQL.aggregate()` build their
+driver-facing query from only `where` / `groupBy` / `aggregations` — a `having` clause is
+silently dropped before it reaches any driver. No driver (SQL, in-memory, MongoDB) filters
+on it either. Post-filter grouped results on the client until this is wired up.
+</Callout>
+
 ---
 
 ## Joins
+
+<Callout type="warn">
+`joins` is defined in `QuerySchema` (`JoinNodeSchema`) and the SQL driver advertises
+`supports.joins: true`, but no driver's `find()` actually executes a join today — the SQL,
+in-memory, and MongoDB drivers all ignore the `joins` array (there is no `.join()`/`.leftJoin()`
+call in the SQL driver's query builder). Use `expand` for relationship traversal instead.
+</Callout>
 
 ### Join Types
 
@@ -328,9 +359,24 @@ applied on this path.
 | `language` | `string` | Language for stemming/stopwords |
 | `highlight` | `boolean` | Return highlighted matches |
 
+<Callout type="warn">
+Only `query` and `fields` are implemented. The engine expands `search` into a driver-agnostic
+`$and`-of-`$or`-of-`$contains` filter (ADR-0061) — `fuzzy`, `operator`, `boost`, `minScore`,
+`language`, and `highlight` are accepted by `QuerySchema` but read nowhere in
+`expandSearchToFilter()` / `normalizeSearch()`, so they have no effect. Multiple search terms
+are always AND-ed regardless of `operator`.
+</Callout>
+
 ---
 
 ## Window Functions
+
+<Callout type="warn">
+`windowFunctions` is only reachable by calling the SQL driver's `findWithWindowFunctions()`
+method directly. `ObjectQL.find()` / `.aggregate()` and the `POST /api/v1/data/:object/query`
+route never call it, so sending `windowFunctions` through the standard client/REST query path
+has no effect.
+</Callout>
 
 | Function | Description |
 |:---|:---|
@@ -377,6 +423,13 @@ applied on this path.
 }
 ```
 
+<Callout type="warn">
+The top-level `distinct: true` flag is defined in `QuerySchema` but isn't applied by any
+driver's `find()` (SQL, in-memory, and MongoDB all ignore it). A separate
+`driver.distinct(object, field)` method exists on the SQL and in-memory drivers, but it isn't
+called by `ObjectQL.find()`/`.aggregate()`, so it isn't reachable through a normal query.
+</Callout>
+
 ### Group By with Having
 
 ```typescript
@@ -390,6 +443,11 @@ applied on this path.
   having: { total_spent: { $gt: 1000 } }
 }
 ```
+
+<Callout type="warn">
+As noted under [Aggregations](#aggregations) above, `having` is not currently enforced —
+it's dropped before reaching the aggregation engine or any driver.
+</Callout>
 
 ---
 

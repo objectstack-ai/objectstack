@@ -27,25 +27,22 @@ Enable scoped route registration in `objectstack.config.ts`:
 ```typescript
 import { defineStack } from '@objectstack/spec';
 
-const stack = defineStack({
+export default defineStack({
   // ...your manifest, objects, apis, etc.
-});
-
-export default {
-  ...stack,
   api: {
     enableProjectScoping: true,
     projectResolution: 'auto',
   },
-};
+});
 ```
 
-<Callout type="warn">
-`defineStack` validates against a schema that has no top-level `api` field, so
-unknown keys are stripped — passing `api` *inside* `defineStack({ ... })` is
-silently dropped and scoping stays disabled. Attach the `api` block to the
-exported config object instead, as shown above. The CLI reads it from the
-exported config (`config.api`) when registering the REST and dispatcher plugins.
+<Callout type="info">
+`api` is a declared top-level field on `ObjectStackDefinitionSchema`, so it
+survives `defineStack`'s strict parsing — you can pass it directly inside the
+`defineStack({ ... })` call as shown above. (Older stacks that instead spread
+it onto the exported config object, e.g. `export default { ...stack, api: {...} }`,
+still work the same way.) The CLI reads the resolved value from the exported
+config (`config.api`) when registering the REST and dispatcher plugins.
 </Callout>
 
 The option names are historical for compatibility with existing config files;
@@ -73,7 +70,7 @@ const client = new ObjectStackClient({
 
 const env = client.project('env_prod');
 
-await env.data.find('customer', { limit: 20 });
+await env.data.find('customer', { top: 20 });
 await env.meta.getItems('object');
 await env.packages.list();
 ```

@@ -86,7 +86,8 @@ ctx = {
   result,       // mutable operation result (after* events)
   previous,     // record state before the operation (update/delete)
   session,      // { userId, tenantId, roles, accessToken, isSystem }
-  user,         // { id, name, email } convenience shortcut
+  user,         // { id, name, email } convenience shortcut — reserved for future use;
+                // not currently set by the engine, use session.userId instead
   transaction,  // active transaction handle, if any
   ql,           // ObjectQL engine reference
   api,          // scoped cross-object access: ctx.api.object('x')

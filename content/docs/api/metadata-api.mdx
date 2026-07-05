@@ -70,9 +70,10 @@ List installed packages.
 
 ### `POST /packages`
 
-Install a package from manifest.
+Publish a package (manifest + metadata) to the package registry.
 
-**Body**: `{ manifest: { name: "plugin-auth", version: "1.0.0", ... } }`
+**Body**: `{ manifest: { id: "plugin-auth", name: "Plugin Auth", version: "1.0.0", ... }, metadata: { objects: [...], views: [...], ... } }`  
+**Response**: `{ success: true, message: "...", package: { id: "plugin-auth", version: "1.0.0" } }`
 
 ### `GET /packages/:id`
 

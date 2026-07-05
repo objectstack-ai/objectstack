@@ -41,7 +41,7 @@ Three action types are supported:
 | `action.type` | Dispatch path | Wiring needed |
 |:---|:---|:---|
 | `script` | `IDataEngine.executeAction(object, target, ctx)` — the same call Studio makes | none beyond the metadata service |
-| `api` | HTTP call to `action.target` via `ApiActionClient` (default: `fetch`) | `apiBaseUrl` (or a custom `apiClient`) |
+| `api` | HTTP call to `action.target` via the configured `apiClient` (default: `fetch`) | `apiActionBaseUrl` (or a custom `apiClient`) |
 | `flow` | `IAutomationService.execute(target, { triggerData })` | `automation` service registered |
 
 Console-only types (`url`, `modal`, `form`) are always skipped. Dangerous
@@ -158,7 +158,7 @@ automatically scope what an agent can see and do. There is no separate
 **How it works:**
 
 1. The REST routes for `/api/v1/ai/assistant/chat` and
-   `/api/v1/ai/agents/:id/chat` pull the authenticated principal out of
+   `/api/v1/ai/agents/:agentName/chat` pull the authenticated principal out of
    `req.user` and forward it to `aiService.chatWithTools(...)` as
    `toolExecutionContext: { actor, conversationId, environmentId }`.
    Both **cookie session** (`better-auth.session_token`) and **Bearer
@@ -197,8 +197,10 @@ Omit `toolExecutionContext` to keep the previous system-level behaviour
 
 ## LLM-generated conversation titles
 
-Auto-titling is **opt-in** (disabled by default; enable it via the `ai`
-settings namespace from Console → Settings → AI). Once enabled, after a
+Auto-titling is **on by default** for any configured LLM provider (the
+memory/echo provider never triggers it, since no real LLM call is made);
+toggle `title_generation_enabled` off via the `ai` settings namespace from
+Console → Settings → AI if you'd rather leave conversations unnamed. Once a
 conversation has at least one user + assistant exchange (≥ 2 messages) and
 still has no title, the AI service fires a short, out-of-band LLM call
 (default cap **16 characters**, single-line, no quotes) to summarise what the
