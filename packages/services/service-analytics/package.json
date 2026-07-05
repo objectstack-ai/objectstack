@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-analytics",
-  "version": "12.1.0",
+  "version": "12.2.0",
   "license": "Apache-2.0",
   "description": "Analytics Service for ObjectStack — implements IAnalyticsService with multi-driver strategy pattern (NativeSQL, ObjectQL, InMemory)",
   "type": "module",

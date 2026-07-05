@@ -1,5 +1,30 @@
 # @objectstack/spec
 
+## 12.2.0
+
+### Minor Changes
+
+- fce8ff4: feat(rest,spec): named import mappings (#2611) — `POST /data/:object/import` accepts `mappingName`, resolving a registered `defineMapping` artifact (stack `mappings:`) and applying its fieldMapping pipeline (rename + constant/map/split/join; lookup delegates to the built-in reference resolution) as a strict projection before coercion. The artifact's `mode`/`upsertKey` serve as writeMode/matchFields defaults; explicit request values win. Errors are loud and specific: `MAPPING_NOT_FOUND`, `MAPPING_TARGET_MISMATCH`, `MAPPING_FORMAT_MISMATCH`, `CONFLICTING_MAPPING` (mutually exclusive with the inline rename), and `UNSUPPORTED_TRANSFORM` for `javascript` (no server-side sandbox — never silently skipped). `defineStack` cross-reference validation now rejects mappings targeting undefined objects and `javascript` transforms at build time.
+- 3962023: feat(spec,security): make ambiguous nav landings unrepresentable + close the field-permission filter oracle (objectui#2251, objectui ADR-0055).
+
+  **spec — `ObjectNavItem` target exclusivity.** `NavigationItemSchema` now rejects an object nav item that combines `filters` with `recordId` or `viewName` (custom issue on `filters` with the fix in the message). Runtime precedence would silently ignore the extras — a stale `recordId` hijacking a configured `filters` slice — so the ambiguous combination is now unwritable (ADR-0053 correct-by-construction). FROM `{ filters, viewName }` / `{ filters, recordId }` TO exactly one landing field; the legacy `recordId` + `viewName` combination stays tolerated (documented: `viewName` is ignored). `filters` shipped in the same unreleased minor, so no released metadata is affected.
+
+  **plugin-security — field-level predicate guard.** `FieldMasker` strips non-readable fields from RESULTS, but predicates still leaked their values: filtering / sorting / grouping / aggregating by a hidden field changes row presence (a filter oracle — probe `salary >= X` even though the column is masked). The security middleware now rejects (403 `PermissionDeniedError`, `reason: 'field_predicate_denied'`) any caller query whose `where` / `orderBy` / `groupBy` / `having` / `aggregations` / `windowFunctions` reference a field the caller cannot read — evaluated against the caller's AST **before** RLS injection, so RLS policies may keep referencing hidden fields (e.g. `owner_id`). Rejection over silent predicate dropping: removing an `$and` branch widens results and re-opens the oracle. New exports: `assertReadableQueryFields`, `collectQueryFields`, `collectConditionFields`.
+
+- 2bb193d: feat(spec): `ObjectNavItem.filters` — declarative URL filter conditions targeting the parameterized bare data surface (objectui ADR-0055, objectui#2251).
+
+  An object nav item can now carry `filters: Record<string, string>` (equality semantics). The shell resolves such an entry to `/:objectName/data?filter[<field>]=<value>` — an unanchored data surface with removable filter chips — instead of a saved list view. Use it for one-off / parameterized slices (dashboard drill-throughs, "assigned to me" links); slices worth curating stay on `viewName`. Values support the same `{current_user_id}` / `{current_org_id}` template variables as `recordId`. Target precedence within `type: 'object'`: `recordId` → `filters` → `viewName`. Purely additive — items without `filters` are unaffected.
+
+- 0426d27: feat(spec): `deriveRecordFlowSurface(def, flow, opts)` — flow-aware record-surface derivation (#2604, extends #2578's `deriveRecordSurface`, ADR-0085 §5 one-shared-derivation).
+
+  Decides the default surface per record FLOW: `view` keeps the shipped behavior verbatim (field-heavy → `route`/page, light → drawer overlay); the task flows (`create` / `edit` / `child-create` / `child-edit`) are ALWAYS overlays — never routes — with the derived `'page'` mapped to a full-screen modal (`size: 'full'`) and light objects staying a drawer. `child-*` flows take the CHILD object's def (the overlay sizes to the record being edited; the return target is always the parent detail). Mobile task flows are full-screen modals.
+
+  Rationale: viewing a record is shareable state (deep-link belongs there); making/changing one is a transient task whose URL is a false promise (refresh loses the draft) and whose invariant is lossless return to the origin. Renderers treat the result as the DEFAULT only — explicit `navigation.mode`/`size`, `FormView.type`/`modalSize`, or an assigned page still win. No new authorable key (ADR-0085 §2). Additive, no breaking changes.
+
+- da807f7: feat(spec)!: retire the placeholder metadata kinds `trigger`, `router`, `function`, `service` (ADR-0088).
+
+  The registry is the contract authors — human and AI — read to learn what can be authored, and these four kinds had no authoring surface, no loader, no schema, and no (or a dead) consumer. `MetadataTypeSchema` + `DEFAULT_METADATA_TYPE_REGISTRY` shrink 30 → 26; `OPS_FILE_SUFFIX_REGEX` drops the four suffixes; the dormant objectql load path that registered QL functions from `type: 'function'` metadata items is removed (`defineStack({ functions })` / plugin `contributes.functions` remain the delivered forms); the metadata-core lockstep enum follows. `external_catalog` stays and is now annotated RUNTIME-CREATED (ADR-0062): its lack of an authoring surface is correct design. The delivered replacements: `hook` / `record_change` flows (trigger), plugin `contributes.routes` + declarative `apis:` (router), `defineStack({ functions })` (function), the plugin/service registry (service). Persisted `sys_metadata` rows are unaffected — no production read path re-parses stored `type` values through the enum.
+
 ## 12.1.0
 
 ### Patch Changes

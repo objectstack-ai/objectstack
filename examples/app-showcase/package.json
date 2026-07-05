@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/example-showcase",
-  "version": "0.2.17",
+  "version": "0.2.18",
   "description": "Kitchen-sink showcase workspace — exercises every metadata type, every view type, every chart type, and the major end-to-end capability chains (security, automation, analytics). Built for demonstration, debugging, and coverage-driven verification.",
   "license": "Apache-2.0",
   "private": true,

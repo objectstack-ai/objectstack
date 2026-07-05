@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/account",
-  "version": "12.1.0",
+  "version": "12.2.0",
   "license": "Apache-2.0",
   "description": "ObjectStack Account — the end-user account/self-service console app, packaged as its own ObjectStack app package (ADR-0048: one app per package).",
   "main": "dist/index.js",

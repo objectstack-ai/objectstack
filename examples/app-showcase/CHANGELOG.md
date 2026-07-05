@@ -1,5 +1,22 @@
 # @objectstack/example-showcase
 
+## 0.2.18
+
+### Patch Changes
+
+- Updated dependencies [fce8ff4]
+- Updated dependencies [3962023]
+- Updated dependencies [2bb193d]
+- Updated dependencies [0426d27]
+- Updated dependencies [da807f7]
+- Updated dependencies [4f5b791]
+  - @objectstack/spec@12.2.0
+  - @objectstack/runtime@12.2.0
+  - @objectstack/cloud-connection@12.2.0
+  - @objectstack/connector-rest@12.2.0
+  - @objectstack/connector-slack@12.2.0
+  - @objectstack/driver-sql@12.2.0
+
 ## 0.2.17
 
 ### Patch Changes

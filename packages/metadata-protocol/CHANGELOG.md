@@ -1,5 +1,22 @@
 # @objectstack/metadata-protocol
 
+## 12.2.0
+
+### Patch Changes
+
+- 75c310f: Rewrite the `writable_package_required` rejection message as user-facing remediation ("switch to a writable package in the package selector, or create a new one") instead of developer-facing copy that cited an internal ADR path — the message is surfaced verbatim as a Studio toast. The ADR pointer moves to a `docs` property on the error; `code`, `status`, and `packageId` are unchanged.
+- Updated dependencies [fce8ff4]
+- Updated dependencies [3962023]
+- Updated dependencies [2bb193d]
+- Updated dependencies [0426d27]
+- Updated dependencies [da807f7]
+- Updated dependencies [4f5b791]
+  - @objectstack/spec@12.2.0
+  - @objectstack/metadata-core@12.2.0
+  - @objectstack/core@12.2.0
+  - @objectstack/formula@12.2.0
+  - @objectstack/types@12.2.0
+
 ## 12.1.0
 
 ### Patch Changes

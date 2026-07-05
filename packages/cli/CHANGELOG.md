@@ -1,5 +1,62 @@
 # @objectstack/cli
 
+## 12.2.0
+
+### Patch Changes
+
+- Updated dependencies [fce8ff4]
+- Updated dependencies [3962023]
+- Updated dependencies [2bb193d]
+- Updated dependencies [0426d27]
+- Updated dependencies [da807f7]
+- Updated dependencies [4f5b791]
+  - @objectstack/rest@12.2.0
+  - @objectstack/spec@12.2.0
+  - @objectstack/plugin-security@12.2.0
+  - @objectstack/objectql@12.2.0
+  - @objectstack/runtime@12.2.0
+  - @objectstack/core@12.2.0
+  - @objectstack/plugin-sharing@12.2.0
+  - @objectstack/verify@12.2.0
+  - @objectstack/account@12.2.0
+  - @objectstack/setup@12.2.0
+  - @objectstack/studio@12.2.0
+  - @objectstack/client@12.2.0
+  - @objectstack/cloud-connection@12.2.0
+  - @objectstack/formula@12.2.0
+  - @objectstack/lint@12.2.0
+  - @objectstack/mcp@12.2.0
+  - @objectstack/observability@12.2.0
+  - @objectstack/platform-objects@12.2.0
+  - @objectstack/driver-memory@12.2.0
+  - @objectstack/driver-mongodb@12.2.0
+  - @objectstack/driver-sql@12.2.0
+  - @objectstack/driver-sqlite-wasm@12.2.0
+  - @objectstack/plugin-approvals@12.2.0
+  - @objectstack/plugin-audit@12.2.0
+  - @objectstack/plugin-auth@12.2.0
+  - @objectstack/plugin-email@12.2.0
+  - @objectstack/plugin-hono-server@12.2.0
+  - @objectstack/plugin-org-scoping@12.2.0
+  - @objectstack/plugin-reports@12.2.0
+  - @objectstack/plugin-webhooks@12.2.0
+  - @objectstack/service-analytics@12.2.0
+  - @objectstack/service-automation@12.2.0
+  - @objectstack/service-cache@12.2.0
+  - @objectstack/service-datasource@12.2.0
+  - @objectstack/service-job@12.2.0
+  - @objectstack/service-messaging@12.2.0
+  - @objectstack/service-package@12.2.0
+  - @objectstack/service-queue@12.2.0
+  - @objectstack/service-realtime@12.2.0
+  - @objectstack/service-settings@12.2.0
+  - @objectstack/service-storage@12.2.0
+  - @objectstack/trigger-api@12.2.0
+  - @objectstack/trigger-record-change@12.2.0
+  - @objectstack/trigger-schedule@12.2.0
+  - @objectstack/types@12.2.0
+  - @objectstack/console@12.2.0
+
 ## 12.1.0
 
 ### Patch Changes

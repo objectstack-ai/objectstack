@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/mcp",
-  "version": "12.1.0",
+  "version": "12.2.0",
   "license": "Apache-2.0",
   "description": "ObjectStack as an MCP server — exposes your app's objects (and AI tools) over the Model Context Protocol (stdio + Streamable HTTP)",
   "type": "module",

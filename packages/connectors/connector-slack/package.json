@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/connector-slack",
-  "version": "12.1.0",
+  "version": "12.2.0",
   "license": "Apache-2.0",
   "description": "Slack Web API connector for ObjectStack — registers `chat.postMessage` / `chat.update` / `call` actions on the automation engine's connector registry (ADR-0018 §Addendum, ADR-0022).",
   "main": "dist/index.js",
