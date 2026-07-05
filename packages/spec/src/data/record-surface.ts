@@ -91,3 +91,62 @@ export function deriveRecordSurface(def: unknown, opts: RecordSurfaceOptions = {
   if (countAuthorableFields(def) >= threshold) return 'page';
   return 'drawer';
 }
+
+/**
+ * The record flow being opened. `view` shows state; the other four perform a
+ * task (create/change a record). For `child-*` flows — a subtable / related-
+ * list child created or edited from its PARENT's detail — pass the CHILD
+ * object's def: the overlay sizes to the record being edited, while the
+ * return target is always the parent (#2604 D3).
+ */
+export type RecordFlow = 'view' | 'create' | 'edit' | 'child-create' | 'child-edit';
+
+/** How the surface is mounted: a navigated route, or an overlay over the origin. */
+export type RecordFlowContainer = 'route' | 'overlay';
+
+export interface RecordFlowSurface {
+  /**
+   * `'route'` only ever for flow `'view'` (a record is shareable state —
+   * deep-linkable, refresh-safe). Every task flow is an `'overlay'`: close
+   * returns to the origin with its context (scroll / filters / tab) intact,
+   * which is the #2604 return-flow invariant — and a create/edit URL would be
+   * a false promise anyway (refresh loses the draft).
+   */
+  container: RecordFlowContainer;
+  surface: RecordSurface;
+  /** Maps onto `navigation.size` / `FormView.modalSize`; routes ignore it. */
+  size: 'auto' | 'full';
+}
+
+/**
+ * Derive the DEFAULT surface for a record FLOW (#2604; extends
+ * {@link deriveRecordSurface}, ADR-0085 §5 "one shared derivation").
+ *
+ * Rule — the two axes are independent:
+ *   - how BIG (field count, via {@link deriveRecordSurface}) is unchanged;
+ *   - whether it ROUTES is decided by what the flow *is*: viewing a record is
+ *     state → route-capable; making/changing one is a task → always overlay.
+ *
+ * So `view` keeps the #2578 behavior verbatim (`'page'` → route), while the
+ * task flows map the derived `'page'` to a FULL-SCREEN MODAL — same big
+ * canvas, overlay return semantics. This mapping is why `'modal'` exists in
+ * {@link RecordSurface} without the base heuristic ever emitting it.
+ *
+ * Like the base derivation this is a DEFAULT only: explicit `navigation.mode`
+ * / `navigation.size`, `FormView.type` / `modalSize`, or an assigned page win
+ * (the sanctioned per-object overrides — no new authorable key, ADR-0085 §2).
+ */
+export function deriveRecordFlowSurface(
+  def: unknown,
+  flow: RecordFlow,
+  opts: RecordSurfaceOptions = {},
+): RecordFlowSurface {
+  const surface = deriveRecordSurface(def, opts);
+  if (flow === 'view') {
+    return { container: surface === 'page' ? 'route' : 'overlay', surface, size: 'auto' };
+  }
+  // Task flows (create / edit / child-*): never a route. Field-heavy (or
+  // mobile, where the base derivation says 'page') → full-screen modal.
+  if (surface === 'page') return { container: 'overlay', surface: 'modal', size: 'full' };
+  return { container: 'overlay', surface, size: 'auto' };
+}

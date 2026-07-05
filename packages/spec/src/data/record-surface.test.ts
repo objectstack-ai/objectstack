@@ -3,8 +3,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveRecordSurface,
+  deriveRecordFlowSurface,
   countAuthorableFields,
   RECORD_SURFACE_PAGE_THRESHOLD,
+  type RecordFlow,
 } from './record-surface';
 
 /** Build an object def with `n` plain text fields named f0..f(n-1). */
@@ -51,6 +53,65 @@ describe('deriveRecordSurface (ADR-0085 §5)', () => {
     expect(deriveRecordSurface(undefined)).toBe('drawer');
     expect(deriveRecordSurface({})).toBe('drawer');
     expect(deriveRecordSurface({ fields: 'nope' } as unknown)).toBe('drawer');
+  });
+});
+
+describe('deriveRecordFlowSurface (#2604)', () => {
+  const TASK_FLOWS: RecordFlow[] = ['create', 'edit', 'child-create', 'child-edit'];
+  const heavy = objWithFields(RECORD_SURFACE_PAGE_THRESHOLD);
+  const light = objWithFields(RECORD_SURFACE_PAGE_THRESHOLD - 1);
+
+  it("view keeps the #2578 behavior verbatim: heavy → route('page'), light → overlay('drawer')", () => {
+    expect(deriveRecordFlowSurface(heavy, 'view')).toEqual({
+      container: 'route', surface: 'page', size: 'auto',
+    });
+    expect(deriveRecordFlowSurface(light, 'view')).toEqual({
+      container: 'overlay', surface: 'drawer', size: 'auto',
+    });
+  });
+
+  it('task flows never route: heavy → full-screen modal overlay', () => {
+    for (const flow of TASK_FLOWS) {
+      expect(deriveRecordFlowSurface(heavy, flow)).toEqual({
+        container: 'overlay', surface: 'modal', size: 'full',
+      });
+    }
+  });
+
+  it('task flows on a light object stay a drawer overlay', () => {
+    for (const flow of TASK_FLOWS) {
+      expect(deriveRecordFlowSurface(light, flow)).toEqual({
+        container: 'overlay', surface: 'drawer', size: 'auto',
+      });
+    }
+  });
+
+  it('mobile: view routes to a page; task flows become a full-screen modal', () => {
+    expect(deriveRecordFlowSurface(light, 'view', { viewport: 'mobile' })).toEqual({
+      container: 'route', surface: 'page', size: 'auto',
+    });
+    for (const flow of TASK_FLOWS) {
+      expect(deriveRecordFlowSurface(light, flow, { viewport: 'mobile' })).toEqual({
+        container: 'overlay', surface: 'modal', size: 'full',
+      });
+    }
+  });
+
+  it('child-* flows size to the def they are given (the child), independent of any parent', () => {
+    // A thin child stays a drawer even though its parent (not passed) is heavy.
+    expect(deriveRecordFlowSurface(objWithFields(3), 'child-create').surface).toBe('drawer');
+    // A fat child gets the full-screen modal.
+    expect(deriveRecordFlowSurface(objWithFields(40), 'child-edit')).toEqual({
+      container: 'overlay', surface: 'modal', size: 'full',
+    });
+  });
+
+  it('honours pageThreshold and tolerates bare/malformed input', () => {
+    expect(deriveRecordFlowSurface(objWithFields(5), 'create', { pageThreshold: 4 }).size).toBe('full');
+    expect(deriveRecordFlowSurface(null, 'create')).toEqual({
+      container: 'overlay', surface: 'drawer', size: 'auto',
+    });
+    expect(deriveRecordFlowSurface({ fields: 'nope' } as unknown, 'view').surface).toBe('drawer');
   });
 });
 
