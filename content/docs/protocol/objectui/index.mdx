@@ -354,12 +354,16 @@ ListView.create({
 
 UI changes should **never** require rebuilding:
 
-```
-Traditional:  Change Code → Build → Test → Deploy → (iOS) App Store Wait
-              ────────────────────── 2-14 days ──────────────────────────
-
-ObjectUI:     Change Config → Refresh Page
-              ───────── 5 seconds ─────────
+```mermaid
+flowchart LR
+    subgraph T["Traditional — 2–14 days"]
+      direction LR
+      C1["Change Code"] --> B1["Build"] --> Te1["Test"] --> D1["Deploy"] --> A1["(iOS) App Store wait"]
+    end
+    subgraph O["ObjectUI — 5 seconds"]
+      direction LR
+      C2["Change Config"] --> R2["Refresh Page"]
+    end
 ```
 
 **Why:** Business requirements change daily. Code deployment cycles are weekly at best.

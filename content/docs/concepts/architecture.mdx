@@ -622,30 +622,34 @@ Datasource Protocol (Connection Config)
 
 UI auto-generated from data definitions:
 
-```
-Object → Field → View → Page → App
+```mermaid
+flowchart LR
+    Object --> Field --> View --> Page --> App
 ```
 
 ### Pattern 2: Custom UI with Data Binding
 
 Custom UI connected to data:
 
-```
-Page → Component → View (Custom) → Query → Object
+```mermaid
+flowchart LR
+    Page --> Component --> View["View (Custom)"] --> Query --> Object
 ```
 
 ### Pattern 3: Automation & Integration
 
 Business logic automation:
 
-```
-Object → Hook → Flow → Automation → API/Webhook
+```mermaid
+flowchart LR
+    Object --> Hook --> Flow --> Automation --> API["API / Webhook"]
 ```
 
 ### Pattern 4: AI-Enhanced Applications
 
 AI capabilities on top of data:
 
-```
-Object → RAG Pipeline → Agent → Conversation → UI
+```mermaid
+flowchart LR
+    Object --> RAG["RAG Pipeline"] --> Agent --> Conversation --> UI
 ```

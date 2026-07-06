@@ -25,20 +25,13 @@ and rollback capabilities.
 
 ## Upgrade Flow
 
-```
-
-1. PreCheck    → Validate compatibility, check dependencies
-
-2. Plan        → Generate upgrade plan with metadata diff
-
-3. Snapshot    → Backup current state (metadata + customizations)
-
-4. Execute     → Apply new package metadata with 3-way merge
-
-5. Validate    → Run post-upgrade health checks
-
-6. Commit      → Finalize upgrade (or Rollback on failure)
-
+```mermaid
+flowchart LR
+    A["1 · PreCheck<br/>validate compatibility, deps"] --> B["2 · Plan<br/>upgrade plan + metadata diff"]
+    B --> C["3 · Snapshot<br/>backup metadata + customizations"]
+    C --> D["4 · Execute<br/>apply new metadata (3-way merge)"]
+    D --> E["5 · Validate<br/>post-upgrade health checks"]
+    E --> F["6 · Commit<br/>finalize (or Rollback on failure)"]
 ```
 
 <Callout type="info">

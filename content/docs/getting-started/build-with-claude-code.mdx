@@ -315,12 +315,12 @@ a client.
 
 ## Recap — where each guardrail sat
 
-```
-   describe ─▶ Claude authors ─▶ os validate ─▶ you verify in UI ─▶ iterate ─▶ MCP
-                    │                 │                 │
-              skills+AGENTS.md   the gate rejects   Console is the
-              taught the rules   silent-runtime     human review
-              up front           mistakes loudly    surface
+```mermaid
+flowchart LR
+    D["Describe"] --> A["Claude Code authors<br/>skills + AGENTS.md taught the rules"]
+    A --> V["os validate<br/>the gate rejects silent mistakes"]
+    V --> C["You verify in the UI<br/>Console = the human review surface"]
+    C --> I["Iterate"] --> M["MCP<br/>app is AI-operable"]
 ```
 
 - **Skills + `AGENTS.md`** meant the agent authored to the protocol, not from

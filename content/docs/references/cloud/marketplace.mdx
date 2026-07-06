@@ -47,18 +47,12 @@ platform, and customers who install plugins.
 
 ## Platform Management Flow
 
-```
-
-1. Receive   → Accept submissions from verified publishers
-
-2. Scan      → Automated security scan and compatibility check
-
-3. Review    → Human review for quality and policy compliance
-
-4. Catalog   → Index in marketplace search catalog
-
-5. Monitor   → Track installs, ratings, issues, and enforce SLAs
-
+```mermaid
+flowchart LR
+    A["1 · Receive<br/>accept submissions from verified publishers"] --> B["2 · Scan<br/>automated security + compatibility check"]
+    B --> C["3 · Review<br/>human review for quality + policy"]
+    C --> D["4 · Catalog<br/>index in marketplace search"]
+    D --> E["5 · Monitor<br/>track installs, ratings, issues, SLAs"]
 ```
 
 <Callout type="info">

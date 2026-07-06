@@ -67,11 +67,11 @@ When a feature, schema property, or API is deprecated, ObjectStack follows a str
 
 ### Timeline Summary
 
-```
-v3.2.0  →  Feature deprecated (warning emitted)
-v3.3.0  →  Migration period continues
-v3.4.0  →  Migration period continues (minimum 2 minor releases)
-v4.0.0  →  Feature removed (earliest possible removal)
+```mermaid
+flowchart TD
+    A["v3.2.0 — feature deprecated (warning emitted)"] --> B["v3.3.0 — migration period continues"]
+    B --> C["v3.4.0 — migration continues (minimum 2 minor releases)"]
+    C --> D["v4.0.0 — feature removed (earliest possible removal)"]
 ```
 
 <Callout type="warn">

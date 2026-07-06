@@ -641,11 +641,10 @@ Each connection consumes server resources.
 
 WebSocket connections are sticky sessions:
 
-```
-Client → Load Balancer → Server A
-         (remembers)
-         
-Client reconnects → Server A (same server)
+```mermaid
+flowchart LR
+    C["Client"] --> LB["Load Balancer<br/>(remembers via session-ID cookie)"] --> S["Server A"]
+    C2["Client reconnects"] -.->|routed to same server| S
 ```
 
 **Why sticky sessions:**
@@ -657,13 +656,12 @@ Client reconnects → Server A (same server)
 
 For multi-server deployments, ObjectStack uses Redis pub/sub:
 
-```
-Server A ←→ Redis Pub/Sub ←→ Server B
-   ↓                            ↓
-Client 1                    Client 2
-
-# Data changes on Server A
-Server A publishes to Redis → Server B receives → Client 2 gets update
+```mermaid
+flowchart LR
+    C1["Client 1"] --> SA["Server A"]
+    SA <-->|pub/sub| R["Redis Pub/Sub"]
+    R <-->|pub/sub| SB["Server B"]
+    SB --> C2["Client 2"]
 ```
 
 **How it works:**

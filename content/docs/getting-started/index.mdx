@@ -12,10 +12,14 @@ import { Database, Layout, Cog } from 'lucide-react';
 ObjectStack is designed around one workflow: **an AI agent authors the app; you
 verify it in a visual UI; guardrails keep the agent from shipping mistakes.**
 
-```
-   describe ─▶ Claude Code authors ─▶ os validate ─▶ you verify in ─▶ iterate ─▶ MCP
-   in plain    the typed metadata     (the gate)      the Console                (app is
-   language                                                                       AI-operable)
+```mermaid
+flowchart LR
+    A["Describe<br/>in plain language"] --> B["Claude Code authors<br/>the typed metadata"]
+    B --> G{"os validate<br/>the gate"}
+    G -->|fails| B
+    G -->|passes| V["You verify in<br/>the Console"]
+    V -->|iterate| A
+    V -->|ship| M["MCP — your app<br/>is AI-operable"]
 ```
 
 You say what you want; Claude Code (or Cursor, Copilot, …) writes the typed

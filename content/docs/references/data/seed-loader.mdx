@@ -21,20 +21,13 @@ relationship resolution, dependency ordering, and multi-pass insertion.
 
 ## Loading Flow
 
-```
-
-1. Build object dependency graph from field metadata (lookup/master_detail)
-
-2. Topological sort → determine insert order (parents before children)
-
-3. Pass 1: Insert/upsert records, resolve references via externalId
-
-4. Pass 2: Fill deferred references (circular/delayed dependencies)
-
-5. Validate & report unresolved references
-
-6. Return structured result with per-object stats
-
+```mermaid
+flowchart TD
+    A["1 · Build object dependency graph<br/>from field metadata (lookup / master_detail)"] --> B["2 · Topological sort<br/>→ insert order (parents before children)"]
+    B --> C["3 · Pass 1 — insert/upsert records,<br/>resolve references via externalId"]
+    C --> D["4 · Pass 2 — fill deferred references<br/>(circular / delayed dependencies)"]
+    D --> E["5 · Validate & report unresolved references"]
+    E --> F["6 · Return structured result<br/>with per-object stats"]
 ```
 
 <Callout type="info">

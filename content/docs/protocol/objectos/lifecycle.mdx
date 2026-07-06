@@ -219,12 +219,17 @@ async function installPlugin(packageName: string, version: string) {
 
 A plugin progresses through these states:
 
-```
-NOT_INSTALLED → DOWNLOADING → VALIDATING → INSTALLING → INSTALLED → ENABLED
-                      ↓              ↓            ↓
-                   [ERROR]       [ERROR]      [ERROR]
-                      ↓              ↓            ↓
-                 FAILED_DOWNLOAD  FAILED_VALIDATION  FAILED_INSTALL
+```mermaid
+stateDiagram-v2
+    [*] --> NOT_INSTALLED
+    NOT_INSTALLED --> DOWNLOADING
+    DOWNLOADING --> VALIDATING
+    VALIDATING --> INSTALLING
+    INSTALLING --> INSTALLED
+    INSTALLED --> ENABLED
+    DOWNLOADING --> FAILED_DOWNLOAD: error
+    VALIDATING --> FAILED_VALIDATION: error
+    INSTALLING --> FAILED_INSTALL: error
 ```
 
 ### Dependency Resolution
