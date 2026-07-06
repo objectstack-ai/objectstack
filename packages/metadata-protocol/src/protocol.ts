@@ -5,7 +5,7 @@ import { IDataEngine } from '@objectstack/core';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type { MetadataHostEngine } from './host-engine.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
-import { ConflictError } from '@objectstack/metadata-core';
+import { ConflictError, assertProtocolCompat } from '@objectstack/metadata-core';
 import type {
     BatchUpdateRequest,
     BatchUpdateResponse,
@@ -5923,6 +5923,15 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         if (typeof manifest.version !== 'string' || !manifest.version) {
             manifest.version = '0.1.0';
         }
+
+        // ADR-0087 D1 — protocol handshake. Refuse a package whose declared
+        // `engines.protocol` range excludes this runtime's major BEFORE writing
+        // it to the registry, with a structured diagnostic naming the migrate
+        // command — instead of letting the mismatch surface later as a deep
+        // schema/renderer crash. Packages with no range are grandfathered (warn
+        // only); an unparsed range never causes a false rejection.
+        assertProtocolCompat(manifest);
+
         const pkg = this.engine.registry.installPackage(manifest as any, request.settings);
 
         // Best-effort durable persistence to `sys_packages` (non-fatal by

@@ -1498,6 +1498,8 @@
     "OpsFilePathSchema (const)",
     "OpsPluginStructure (type)",
     "OpsPluginStructureSchema (const)",
+    "PROTOCOL_MAJOR (const)",
+    "PROTOCOL_VERSION (const)",
     "PackageArtifact (type)",
     "PackageArtifactInput (type)",
     "PackageArtifactSchema (const)",

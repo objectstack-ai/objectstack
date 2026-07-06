@@ -25,6 +25,7 @@ export * from './plugin-security-advanced.zod';
 export * from './plugin-structure.zod';
 export * from './plugin-validator.zod';
 export * from './plugin-versioning.zod';
+export * from './protocol-version';
 export * from './plugin.zod';
 export * from './service-registry.zod';
 export * from './startup-orchestrator.zod';
