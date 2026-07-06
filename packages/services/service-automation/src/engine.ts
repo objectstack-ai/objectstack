@@ -426,6 +426,26 @@ export class AutomationEngine implements IAutomationService {
 
     private flows = new Map<string, FlowParsed>();
     private flowEnabled = new Map<string, boolean>();
+    /**
+     * Re-entrancy guard for record-triggered flows (complements the intra-run
+     * {@link MAX_NODE_REENTRIES} back-edge guard, which cannot see a self-trigger
+     * loop because each re-fire is a NEW run with a new id).
+     *
+     * A `record-after-update` flow whose action writes back to its OWN trigger
+     * record re-fires itself (update → afterUpdate → dispatch → execute → update
+     * → …). Normally the flow's start `condition` suppresses the second fire, but
+     * a broken guard makes it INFINITE — e.g. HotCRM's `case_escalation` guards on
+     * `record.is_escalated != true`, but a `boolean` field persists as integer `1`
+     * on SQLite/libsql and CEL `1 != true` is `true`, so it never trips. During
+     * first-boot seed (which awaits automation to settle) that infinite cascade
+     * wedges the whole per-env kernel build → the env is unopenable (2026-07-06).
+     *
+     * Keyed by `flowName::recordId`: the SAME flow re-entering for the SAME record
+     * while an execution is still on the stack is broken. Different flows or
+     * different records are unaffected, so legitimate cross-record fan-out and
+     * distinct-flow chains still run.
+     */
+    private readonly activeRecordFlows = new Set<string>();
     /** Flows the persisted deployment `status` currently marks disabled
      *  (`obsolete`/`invalid`), tracked so a status flip back to active/draft
      *  re-enables on the next (re)register even if the flow had been turned off. */
@@ -1098,6 +1118,21 @@ export class AutomationEngine implements IAutomationService {
             return { success: false, error: `Flow '${flowName}' is disabled` };
         }
 
+        // Re-entrancy loop guard (see `activeRecordFlows`). Break the SAME flow
+        // re-firing for the SAME record while a prior execution is still active —
+        // a self-trigger cascade whose start condition fails to suppress it would
+        // otherwise loop forever and wedge the caller (fatally, mid seed).
+        const guardRecordId = (context?.record as { id?: unknown } | undefined)?.id;
+        const reentryKey = guardRecordId != null ? `${flowName}::${String(guardRecordId)}` : undefined;
+        if (reentryKey && this.activeRecordFlows.has(reentryKey)) {
+            this.logger.warn(
+                `[automation] flow '${flowName}' re-entered for the same record '${String(guardRecordId)}' while still running — breaking self-trigger loop. ` +
+                `Its start condition did not suppress the re-fire; if it guards on a boolean field (e.g. \`is_escalated != true\`), note booleans persist as 0/1 on SQLite/libsql and CEL \`1 != true\` is true.`,
+            );
+            return { success: true, output: { skipped: true, reason: 'reentrancy_loop_guard' } };
+        }
+        if (reentryKey) this.activeRecordFlows.add(reentryKey);
+
         // Initialize variable context
         const variables = new Map<string, unknown>();
         if (flow.variables) {
@@ -1281,6 +1316,11 @@ export class AutomationEngine implements IAutomationService {
                 error: errorMessage,
                 durationMs,
             };
+        } finally {
+            // Release the re-entrancy guard for this (flow, record). Runs before
+            // the returned promise settles, so an error-retry re-run (whose inner
+            // execute happens after its own await) is not falsely blocked.
+            if (reentryKey) this.activeRecordFlows.delete(reentryKey);
         }
     }
 
