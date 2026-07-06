@@ -39,7 +39,7 @@ describe('AutomationEngine — record-flow re-entrancy loop guard', () => {
         // synchronous cascade.
         engine.registerNodeExecutor({
             type: 'self_retrigger',
-            async execute(_node, _vars, ctx?: any) {
+            async execute(_node, _vars, _ctx?: any) {
                 executeCalls += 1;
                 if (executeCalls > 50) throw new Error('INFINITE LOOP — guard failed to break re-entry');
                 // Re-fire the SAME flow for the SAME record (the loop shape).
