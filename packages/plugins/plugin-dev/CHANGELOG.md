@@ -1,5 +1,33 @@
 # @objectstack/plugin-dev
 
+## 12.4.1
+
+### Patch Changes
+
+- 3b9fd94: `os dev` / `os start` / `os serve` no longer default-load the `@objectstack/studio` app package.
+
+  The console ships a dedicated Studio surface at `/_console/studio/<package-id>/<pillar>`,
+  so Studio no longer needs to exist as a navigable app tile in the home "Your apps" list.
+  The `@objectstack/studio` package is unchanged and can still be registered explicitly;
+  Setup and Account remain default-loaded (ADR-0048 one-app-per-package mechanism).
+
+- Updated dependencies [8b3d363]
+  - @objectstack/spec@12.4.1
+  - @objectstack/objectql@12.4.1
+  - @objectstack/account@12.4.1
+  - @objectstack/setup@12.4.1
+  - @objectstack/studio@12.4.1
+  - @objectstack/core@12.4.1
+  - @objectstack/driver-memory@12.4.1
+  - @objectstack/plugin-auth@12.4.1
+  - @objectstack/plugin-hono-server@12.4.1
+  - @objectstack/plugin-org-scoping@12.4.1
+  - @objectstack/plugin-security@12.4.1
+  - @objectstack/rest@12.4.1
+  - @objectstack/runtime@12.4.1
+  - @objectstack/service-i18n@12.4.1
+  - @objectstack/types@12.4.1
+
 ## 12.4.0
 
 ### Patch Changes

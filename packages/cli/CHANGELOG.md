@@ -1,5 +1,64 @@
 # @objectstack/cli
 
+## 12.4.1
+
+### Patch Changes
+
+- 3b9fd94: `os dev` / `os start` / `os serve` no longer default-load the `@objectstack/studio` app package.
+
+  The console ships a dedicated Studio surface at `/_console/studio/<package-id>/<pillar>`,
+  so Studio no longer needs to exist as a navigable app tile in the home "Your apps" list.
+  The `@objectstack/studio` package is unchanged and can still be registered explicitly;
+  Setup and Account remain default-loaded (ADR-0048 one-app-per-package mechanism).
+
+- Updated dependencies [8b3d363]
+  - @objectstack/spec@12.4.1
+  - @objectstack/objectql@12.4.1
+  - @objectstack/trigger-record-change@12.4.1
+  - @objectstack/service-automation@12.4.1
+  - @objectstack/account@12.4.1
+  - @objectstack/setup@12.4.1
+  - @objectstack/studio@12.4.1
+  - @objectstack/client@12.4.1
+  - @objectstack/cloud-connection@12.4.1
+  - @objectstack/core@12.4.1
+  - @objectstack/formula@12.4.1
+  - @objectstack/lint@12.4.1
+  - @objectstack/mcp@12.4.1
+  - @objectstack/observability@12.4.1
+  - @objectstack/platform-objects@12.4.1
+  - @objectstack/driver-memory@12.4.1
+  - @objectstack/driver-mongodb@12.4.1
+  - @objectstack/driver-sql@12.4.1
+  - @objectstack/driver-sqlite-wasm@12.4.1
+  - @objectstack/plugin-approvals@12.4.1
+  - @objectstack/plugin-audit@12.4.1
+  - @objectstack/plugin-auth@12.4.1
+  - @objectstack/plugin-email@12.4.1
+  - @objectstack/plugin-hono-server@12.4.1
+  - @objectstack/plugin-org-scoping@12.4.1
+  - @objectstack/plugin-reports@12.4.1
+  - @objectstack/plugin-security@12.4.1
+  - @objectstack/plugin-sharing@12.4.1
+  - @objectstack/plugin-webhooks@12.4.1
+  - @objectstack/rest@12.4.1
+  - @objectstack/runtime@12.4.1
+  - @objectstack/service-analytics@12.4.1
+  - @objectstack/service-cache@12.4.1
+  - @objectstack/service-datasource@12.4.1
+  - @objectstack/service-job@12.4.1
+  - @objectstack/service-messaging@12.4.1
+  - @objectstack/service-package@12.4.1
+  - @objectstack/service-queue@12.4.1
+  - @objectstack/service-realtime@12.4.1
+  - @objectstack/service-settings@12.4.1
+  - @objectstack/service-storage@12.4.1
+  - @objectstack/trigger-api@12.4.1
+  - @objectstack/trigger-schedule@12.4.1
+  - @objectstack/types@12.4.1
+  - @objectstack/verify@12.4.1
+  - @objectstack/console@12.4.1
+
 ## 12.4.0
 
 ### Patch Changes

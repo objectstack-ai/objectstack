@@ -1,5 +1,13 @@
 # @objectstack/account
 
+## 12.4.1
+
+### Patch Changes
+
+- Updated dependencies [8b3d363]
+  - @objectstack/spec@12.4.1
+  - @objectstack/platform-objects@12.4.1
+
 ## 12.4.0
 
 ### Patch Changes

@@ -1,5 +1,28 @@
 # @objectstack/runtime
 
+## 12.4.1
+
+### Patch Changes
+
+- Updated dependencies [8b3d363]
+  - @objectstack/spec@12.4.1
+  - @objectstack/objectql@12.4.1
+  - @objectstack/core@12.4.1
+  - @objectstack/formula@12.4.1
+  - @objectstack/metadata@12.4.1
+  - @objectstack/observability@12.4.1
+  - @objectstack/driver-memory@12.4.1
+  - @objectstack/driver-sql@12.4.1
+  - @objectstack/driver-sqlite-wasm@12.4.1
+  - @objectstack/plugin-auth@12.4.1
+  - @objectstack/plugin-org-scoping@12.4.1
+  - @objectstack/plugin-security@12.4.1
+  - @objectstack/rest@12.4.1
+  - @objectstack/service-cluster@12.4.1
+  - @objectstack/service-datasource@12.4.1
+  - @objectstack/service-i18n@12.4.1
+  - @objectstack/types@12.4.1
+
 ## 12.4.0
 
 ### Minor Changes

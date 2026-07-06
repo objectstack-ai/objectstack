@@ -1,5 +1,16 @@
 # @objectstack/plugin-approvals
 
+## 12.4.1
+
+### Patch Changes
+
+- Updated dependencies [8b3d363]
+  - @objectstack/spec@12.4.1
+  - @objectstack/core@12.4.1
+  - @objectstack/formula@12.4.1
+  - @objectstack/metadata-core@12.4.1
+  - @objectstack/platform-objects@12.4.1
+
 ## 12.4.0
 
 ### Patch Changes

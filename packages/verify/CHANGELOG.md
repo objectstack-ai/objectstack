@@ -1,5 +1,26 @@
 # @objectstack/verify
 
+## 12.4.1
+
+### Patch Changes
+
+- Updated dependencies [8b3d363]
+  - @objectstack/spec@12.4.1
+  - @objectstack/objectql@12.4.1
+  - @objectstack/service-automation@12.4.1
+  - @objectstack/core@12.4.1
+  - @objectstack/driver-sqlite-wasm@12.4.1
+  - @objectstack/plugin-auth@12.4.1
+  - @objectstack/plugin-hono-server@12.4.1
+  - @objectstack/plugin-org-scoping@12.4.1
+  - @objectstack/plugin-security@12.4.1
+  - @objectstack/plugin-sharing@12.4.1
+  - @objectstack/rest@12.4.1
+  - @objectstack/runtime@12.4.1
+  - @objectstack/service-analytics@12.4.1
+  - @objectstack/service-datasource@12.4.1
+  - @objectstack/service-settings@12.4.1
+
 ## 12.4.0
 
 ### Patch Changes
