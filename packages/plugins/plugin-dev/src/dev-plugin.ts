@@ -543,12 +543,14 @@ export class DevPlugin implements Plugin {
         ctx.logger.warn('  ✘ @objectstack/plugin-auth not installed — skipping auth');
       }
 
-      // ADR-0048 — the platform apps (Setup/Studio/Account) moved out of
+      // ADR-0048 — the platform apps (Setup/Account) moved out of
       // plugin-auth's manifest into their own one-app packages. Register each
       // after AuthPlugin so they load alongside the auth objects they navigate.
+      // NOTE: @objectstack/studio is intentionally NOT default-loaded — the
+      // console ships a dedicated Studio surface at /_console/studio/<pkg>/<pillar>,
+      // so Studio no longer needs to exist as a navigable app tile.
       for (const spec of [
         ['@objectstack/setup', 'createSetupAppPlugin'],
-        ['@objectstack/studio', 'createStudioAppPlugin'],
         ['@objectstack/account', 'createAccountAppPlugin'],
       ] as const) {
         try {

@@ -1261,12 +1261,14 @@ export default class Serve extends Command {
             }));
             trackPlugin('Auth');
 
-            // ADR-0048 — the platform apps (Setup/Studio/Account) moved out of
+            // ADR-0048 — the platform apps (Setup/Account) moved out of
             // plugin-auth's manifest into their own one-app packages. Register
             // each after AuthPlugin (best-effort; skipped if not installed).
+            // NOTE: @objectstack/studio is intentionally NOT default-loaded — the
+            // console ships a dedicated Studio surface at /_console/studio/<pkg>/<pillar>,
+            // so Studio no longer needs to exist as a navigable app tile.
             for (const [appPkg, factory] of [
               ['@objectstack/setup', 'createSetupAppPlugin'],
-              ['@objectstack/studio', 'createStudioAppPlugin'],
               ['@objectstack/account', 'createAccountAppPlugin'],
             ] as const) {
               try {
