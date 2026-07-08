@@ -29,6 +29,7 @@ import {
     type MetadataLock,
     type MetadataProvenance,
 } from '@objectstack/spec/kernel';
+import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { z } from 'zod';
 import {
     computeMetadataDiagnostics,
@@ -4446,6 +4447,37 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         const repo = this.getOverlayRepo(orgId);
         const drafts = await repo.listDrafts({ packageId: request.packageId });
 
+        // Runtime enforcement of the package namespace-prefix rule (ADR-0028
+        // current-state contract). `defineStack` enforces this at compile time,
+        // but Studio-authored packages never take that path — so a bare,
+        // collision-prone object name (`ticket` instead of `leave_ticket`)
+        // could publish unchecked. Read the package's DECLARED namespace and
+        // reject any object draft missing the `<ns>_` prefix BEFORE promoting
+        // anything — the publish is atomic, so one bad name fails the whole
+        // batch with an actionable message. Like `defineStack`, we do NOT
+        // invent a prefix here when the package declares no namespace (legacy
+        // packages are grandfathered); the default is derived+persisted once at
+        // install time (`installPackage`), so real Studio packages always have
+        // one by the time they publish.
+        const pkgNamespace = this.engine?.registry?.getPackage?.(request.packageId)?.manifest?.namespace;
+        if (pkgNamespace) {
+            const nsViolations: Array<{ type: string; name: string; error: string; code: string }> = [];
+            for (const d of drafts) {
+                if (d.type !== 'object') continue;
+                const err = validateObjectNamespacePrefix(d.name, pkgNamespace);
+                if (err) nsViolations.push({ type: d.type, name: d.name, error: err, code: 'NAMESPACE_PREFIX' });
+            }
+            if (nsViolations.length > 0) {
+                return {
+                    success: false,
+                    publishedCount: 0,
+                    failedCount: nsViolations.length,
+                    published: [],
+                    failed: nsViolations,
+                };
+            }
+        }
+
         const published: Array<{ type: string; name: string; version: string }> = [];
         const failed: Array<{ type: string; name: string; error: string; code?: string; issues?: Array<{ path: string; message: string; code?: string }> }> = [];
 
@@ -5926,6 +5958,20 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         const manifest: any = { ...(request.manifest as any) };
         if (typeof manifest.version !== 'string' || !manifest.version) {
             manifest.version = '0.1.0';
+        }
+
+        // Studio-authored writable packages arrive WITHOUT a namespace. The
+        // protocol mandates a package namespace whose prefix every object name
+        // must carry (manifest.zod `namespace`); `defineStack` enforces it at
+        // compile time, but runtime-created packages never take that path — so
+        // the rule was silently inert for them. Derive a default namespace from
+        // the package id (`com.example.leave` → `leave`) so the prefix can be
+        // enforced at publish. An explicitly declared namespace always wins.
+        // Set it on the single `manifest` object shared by the in-memory
+        // registry and the durable `sys_packages` row below, so both agree.
+        if (typeof manifest.namespace !== 'string' || !manifest.namespace) {
+            const derived = deriveNamespaceFromPackageId(manifest.id);
+            if (derived) manifest.namespace = derived;
         }
 
         // ADR-0087 D1 — protocol handshake. Refuse a package whose declared

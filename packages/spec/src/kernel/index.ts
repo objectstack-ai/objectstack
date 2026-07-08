@@ -9,6 +9,7 @@ export * from './events.zod';
 export * from './feature.zod';
 export * from './manifest.zod';
 export * from './metadata-customization.zod';
+export * from './namespace-prefix';
 export * from './metadata-loader.zod';
 export * from './metadata-plugin.zod';
 export * from './metadata-protection.zod';

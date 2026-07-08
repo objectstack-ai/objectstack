@@ -37,6 +37,50 @@ describe('protocol.publishPackageDrafts (ADR-0033)', () => {
     expect(res.published.map((p) => p.name)).toEqual(['course', 'student', 'course_list']);
   });
 
+  it('rejects an object draft missing the package namespace prefix — atomic, before promoting', async () => {
+    const { protocol, publishMetaItem } = makeProtocol([
+      { type: 'object', name: 'edu_course' },
+      { type: 'object', name: 'ticket' }, // missing the 'edu_' prefix
+    ]);
+    // Package declares namespace 'edu' (derived+persisted at install time).
+    (protocol as any).engine = { registry: { getPackage: () => ({ manifest: { namespace: 'edu' } }) } };
+
+    const res = await protocol.publishPackageDrafts({ packageId: 'app.edu' });
+
+    expect(publishMetaItem).not.toHaveBeenCalled(); // aborted BEFORE any promote
+    expect(res.success).toBe(false);
+    expect(res.publishedCount).toBe(0);
+    expect(res.failedCount).toBe(1);
+    expect(res.failed[0]).toMatchObject({ type: 'object', name: 'ticket', code: 'NAMESPACE_PREFIX' });
+    expect(res.failed[0].error).toMatch(/Rename it to 'edu_ticket'/);
+  });
+
+  it('publishes compliant prefixed object drafts under a declared namespace', async () => {
+    const { protocol, publishMetaItem } = makeProtocol([
+      { type: 'object', name: 'edu_course' },
+      { type: 'object', name: 'edu_student' },
+    ]);
+    (protocol as any).engine = { registry: { getPackage: () => ({ manifest: { namespace: 'edu' } }) } };
+    publishMetaItem.mockResolvedValue({ success: true, version: 'h', seq: 1 } as never);
+
+    const res = await protocol.publishPackageDrafts({ packageId: 'app.edu' });
+
+    expect(res).toMatchObject({ success: true, publishedCount: 2, failedCount: 0 });
+  });
+
+  it('skips the namespace check when the package declares no namespace (legacy grandfathered)', async () => {
+    // No registry / no declared namespace → bare names still publish, exactly
+    // as before this rule existed (mirrors defineStack's absent-namespace skip).
+    const { protocol, publishMetaItem } = makeProtocol([
+      { type: 'object', name: 'course' }, // bare name, no prefix
+    ]);
+    publishMetaItem.mockResolvedValue({ success: true, version: 'h', seq: 1 } as never);
+
+    const res = await protocol.publishPackageDrafts({ packageId: 'app.edu' });
+
+    expect(res).toMatchObject({ success: true, publishedCount: 1 });
+  });
+
   it('collects per-item failures without aborting the rest', async () => {
     const { protocol, publishMetaItem } = makeProtocol([
       { type: 'object', name: 'course' },

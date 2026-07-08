@@ -38,11 +38,34 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
       message: string;
     };
 
-    expect(registry.installPackage).toHaveBeenCalledWith(manifest, undefined);
+    // The registry + durable row receive the manifest with a namespace derived
+    // from the id (`app.demo` → `demo`) since none was declared (see below).
+    expect(registry.installPackage).toHaveBeenCalledWith(
+      { ...manifest, namespace: 'demo' },
+      undefined,
+    );
     expect(publish).toHaveBeenCalledTimes(1);
-    expect((publish.mock.calls[0] as unknown[])[0]).toMatchObject({ manifest });
+    expect((publish.mock.calls[0] as unknown[])[0]).toMatchObject({
+      manifest: { ...manifest, namespace: 'demo' },
+    });
     expect(res.package.manifest.id).toBe('app.demo');
     expect(res.message).toContain('app.demo');
+  });
+
+  it('derives + persists a namespace from the id when the manifest declares none', async () => {
+    const { protocol, registry } = makeProtocol();
+    const manifest = { id: 'com.example.leave', name: 'Leave', version: '1.0.0', type: 'application' };
+    await protocol.installPackage({ manifest } as never);
+    // `com.example.leave` → namespace `leave` (last dot-segment).
+    expect((registry.installPackage.mock.calls[0][0] as any).namespace).toBe('leave');
+  });
+
+  it('does NOT override an explicitly declared namespace', async () => {
+    const { protocol, registry } = makeProtocol();
+    // HotCRM ships namespace `crm`, which differs from the id last segment.
+    const manifest = { id: 'app.objectstack.hotcrm', name: 'HotCRM', version: '1.0.0', type: 'application', namespace: 'crm' };
+    await protocol.installPackage({ manifest } as never);
+    expect((registry.installPackage.mock.calls[0][0] as any).namespace).toBe('crm');
   });
 
   it('forwards install-time settings to the registry', async () => {
