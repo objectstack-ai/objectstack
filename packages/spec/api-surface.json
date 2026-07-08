@@ -3251,6 +3251,7 @@
     "ObjectListViewSchema (const)",
     "ObjectNavItem (type)",
     "ObjectNavItemSchema (const)",
+    "ObjectUserFiltersSchema (const)",
     "OfflineCacheConfig (type)",
     "OfflineCacheConfigSchema (const)",
     "OfflineConfig (type)",
