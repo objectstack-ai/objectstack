@@ -56,6 +56,11 @@
       "status": "live",
       "note": "objectui button styling."
     },
+    "order": {
+      "status": "live",
+      "evidence": "packages/spec/src/stack.zod.ts (mergeActionsIntoObjects stable-sorts each action group by order)",
+      "note": "Deterministic action ordering (#2670). Framework stable-sorts every action group by `order` at defineStack/composeStacks time; objectui record_header picks the first as the primary button. Lower = higher; unset = 0."
+    },
     "confirmText": {
       "status": "live",
       "note": "objectui confirm dialog."
