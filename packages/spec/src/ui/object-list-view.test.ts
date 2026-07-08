@@ -1,24 +1,46 @@
 import { describe, it, expect } from 'vitest';
-import { ObjectListViewSchema, ListViewSchema } from './view.zod';
+import { ObjectListViewSchema, ObjectUserFiltersSchema, ListViewSchema } from './view.zod';
 
 /**
- * ADR-0053 phase 4 — the object list view ("views" mode) must not carry the
- * page-only `userFilters` control. The guardrail is layered: the field is
- * OMITTED from ObjectListViewSchema (untypable at author time), STRIPPED at
- * parse (no throw — runtime back-compat), while the full ListViewSchema used by
- * page lists ("filters" mode) still accepts it. See objectui #2219 / #2220.
+ * ADR-0047 amendment (framework #2679 / objectui #2338) — an object list view
+ * ("views" mode) MAY carry a `dropdown` (value-chip) `userFilters`, but NOT the
+ * page-only `tabs` preset bar (it would collide with the ViewTabBar). The
+ * guardrail is layered: `ObjectUserFiltersSchema` narrows `element` to
+ * dropdown/toggle (a `tabs` element is untypable at author time and rejected at
+ * parse), while the full `ListViewSchema` used by page lists ("filters" mode)
+ * still accepts the tabs style.
  */
-describe('ObjectListViewSchema (ADR-0053 "views" mode)', () => {
+describe('ObjectListViewSchema (ADR-0047 "views" mode)', () => {
   const base = { columns: ['name'] };
 
-  it('omits userFilters from its shape (untypable at author time)', () => {
-    expect('userFilters' in (ObjectListViewSchema as unknown as { shape: Record<string, unknown> }).shape).toBe(false);
+  it('exposes userFilters on its shape (dropdown chips are allowed)', () => {
+    expect('userFilters' in (ObjectListViewSchema as unknown as { shape: Record<string, unknown> }).shape).toBe(true);
   });
 
-  it('strips an authored userFilters at parse instead of throwing (runtime back-compat)', () => {
-    const parsed = ObjectListViewSchema.parse({ ...base, userFilters: { element: 'dropdown' } } as never);
-    expect(parsed).not.toHaveProperty('userFilters');
-    expect((parsed as { columns: string[] }).columns).toEqual(['name']); // sibling survives
+  it('preserves a dropdown userFilters at parse', () => {
+    const uf = { element: 'dropdown', fields: [{ field: 'status' }] };
+    const parsed = ObjectListViewSchema.parse({ ...base, userFilters: uf } as never);
+    expect((parsed as { userFilters?: unknown }).userFilters).toMatchObject(uf);
+  });
+
+  it('drops the page-only tabs/showAllRecords keys from a dropdown userFilters', () => {
+    const parsed = ObjectListViewSchema.parse({
+      ...base,
+      userFilters: { element: 'dropdown', tabs: [{ name: 'mine', label: 'Mine', filter: [] }], showAllRecords: true },
+    } as never);
+    const parsedUf = (parsed as { userFilters?: Record<string, unknown> }).userFilters!;
+    expect(parsedUf).not.toHaveProperty('tabs');
+    expect(parsedUf).not.toHaveProperty('showAllRecords');
+    expect(parsedUf.element).toBe('dropdown');
+  });
+
+  it('rejects a tabs-element userFilters (page-only, would collide with ViewTabBar)', () => {
+    expect(() =>
+      ObjectUserFiltersSchema.parse({ element: 'tabs' } as never),
+    ).toThrow();
+    expect(() =>
+      ObjectListViewSchema.parse({ ...base, userFilters: { element: 'tabs' } } as never),
+    ).toThrow();
   });
 
   it('accepts a clean object list view unchanged', () => {
@@ -26,8 +48,11 @@ describe('ObjectListViewSchema (ADR-0053 "views" mode)', () => {
     expect((parsed as { label?: string }).label).toBe('All');
   });
 
-  it('ListViewSchema (page "filters" mode) still accepts userFilters', () => {
-    const parsed = ListViewSchema.parse({ ...base, userFilters: { element: 'dropdown' } } as never);
-    expect((parsed as { userFilters?: unknown }).userFilters).toEqual({ element: 'dropdown' });
+  it('ListViewSchema (page "filters" mode) still accepts the tabs style', () => {
+    const parsed = ListViewSchema.parse({
+      ...base,
+      userFilters: { element: 'tabs', tabs: [{ name: 'mine', label: 'Mine', filter: [] }] },
+    } as never);
+    expect((parsed as { userFilters?: { element?: string } }).userFilters?.element).toBe('tabs');
   });
 });

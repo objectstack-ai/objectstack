@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { validateListViewMode, LIST_VIEW_FILTERS_IN_VIEWS_MODE } from './validate-list-view-mode.js';
 
-describe('validateListViewMode (ADR-0053 views-mode guardrail)', () => {
+describe('validateListViewMode (ADR-0047 views-mode guardrail)', () => {
   it('passes a clean stack — object listViews without page-only filters', () => {
     const findings = validateListViewMode({
       objects: [
@@ -11,10 +11,19 @@ describe('validateListViewMode (ADR-0053 views-mode guardrail)', () => {
     expect(findings).toHaveLength(0);
   });
 
-  it('flags userFilters on an object built-in list view, with location + hint', () => {
+  it('allows a dropdown userFilters on an object built-in list view', () => {
     const findings = validateListViewMode({
       objects: [
-        { name: 'task', listViews: { tabular: { label: 'Tabular', userFilters: { element: 'dropdown' } } } },
+        { name: 'task', listViews: { tabular: { label: 'Tabular', userFilters: { element: 'dropdown', fields: [{ field: 'status' }] } } } },
+      ],
+    });
+    expect(findings).toHaveLength(0);
+  });
+
+  it('flags a tabs userFilters on an object built-in list view, with location + hint', () => {
+    const findings = validateListViewMode({
+      objects: [
+        { name: 'task', listViews: { tabular: { label: 'Tabular', userFilters: { element: 'tabs' } } } },
       ],
     });
     expect(findings).toHaveLength(1);
@@ -25,7 +34,17 @@ describe('validateListViewMode (ADR-0053 views-mode guardrail)', () => {
     });
     expect(findings[0].where).toContain('task');
     expect(findings[0].message).toContain('views');
-    expect(findings[0].hint).toContain('filters');
+    expect(findings[0].hint).toContain('listViews');
+  });
+
+  it('flags a userFilters that carries a tabs array even without element: "tabs"', () => {
+    const findings = validateListViewMode({
+      objects: [
+        { name: 'task', listViews: { t: { userFilters: { tabs: [{ label: 'Mine', filter: [] }] } } } },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('objects[0].listViews.t.userFilters');
   });
 
   it('flags quickFilters too', () => {
@@ -38,7 +57,7 @@ describe('validateListViewMode (ADR-0053 views-mode guardrail)', () => {
     expect(findings[0].path).toBe('objects[0].listViews.all.quickFilters');
   });
 
-  it('flags userFilters on a defineView default list AND named listViews', () => {
+  it('flags a tabs userFilters on a defineView default list but allows a dropdown named listView', () => {
     const findings = validateListViewMode({
       views: [
         {
@@ -48,15 +67,14 @@ describe('validateListViewMode (ADR-0053 views-mode guardrail)', () => {
         },
       ],
     });
-    expect(findings).toHaveLength(2);
-    const paths = findings.map((f) => f.path).sort();
-    expect(paths).toEqual(['views[0].list.userFilters', 'views[0].listViews.mine.userFilters']);
-    expect(findings.every((f) => f.where.includes('task'))).toBe(true);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('views[0].list.userFilters');
+    expect(findings[0].where).toContain('task');
   });
 
   it('handles the name-keyed map form of objects', () => {
     const findings = validateListViewMode({
-      objects: { task: { listViews: { t: { userFilters: { element: 'dropdown' } } } } },
+      objects: { task: { listViews: { t: { userFilters: { element: 'tabs' } } } } },
     });
     expect(findings).toHaveLength(1);
     expect(findings[0].where).toContain('task');

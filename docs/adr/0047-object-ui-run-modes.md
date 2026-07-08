@@ -10,6 +10,20 @@
 > and the page editor edits them in place. `sourceView` is deprecated and kept
 > only as a runtime back-compat fallback. TL;DR #2 below no longer holds; the
 > rest of the ADR (two run modes, userFilters, visualization whitelist) stands.
+>
+> **Amendment (2026-07-07) — `dropdown` user filters are allowed on object list
+> views again (framework #2679 / objectui #2338).** The phase-4 rollout had
+> blanket-suppressed *all* `userFilters` on object list views ("views" mode):
+> `ObjectListViewSchema` omitted the field, the `validate` list-view-mode rule
+> errored on it, and objectui's `ObjectView` forced `userFilters: undefined` at
+> render. That over-corrected against TL;DR #5 (data mode is *supposed* to expose
+> quick filters). The narrowed rule: an object list view MAY carry a `dropdown`
+> (per-field value-chip) `userFilters`; only the `tabs` preset style stays
+> page-only, because an object view's saved-view `ViewTabBar` already owns the
+> tab-bar role and a `tabs` user-filter would render a second, conflicting bar
+> (need named presets on an object → use `listViews`). Enforced by a new
+> `ObjectUserFiltersSchema` (element narrowed to `dropdown`/`toggle`, `tabs`/
+> `showAllRecords` omitted), which `ObjectListViewSchema` now `.extend`s back in.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source per type, org overlay), [ADR-0017](./0017-object-has-many-view.md) (independent view entities, `viewKind`), [ADR-0019](./0019-app-as-consumer-unit.md) (App is the consumer-facing unit — navigation decides what users see), [ADR-0027](./0027-metadata-authoring-lifecycle.md) (draft · publish lifecycle), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (**AI is the long-term author of metadata — the design center this ADR inherits**)
 **Consumers**: `@objectstack/spec` (view + page Zod schemas), `@objectstack/objectql` (registry validation/diagnostics), `../objectui` (console `ObjectView` / `PageView`, `plugin-list`), framework templates (`hotcrm`, `app-showcase`), the `objectstack-ui` authoring skill

@@ -1,21 +1,24 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// Build-time guardrail for ADR-0053 list-view navigation modes.
+// Build-time guardrail for ADR-0047 list-view navigation modes.
 //
 // A pure `(stack) => Finding[]` rule (ADR-0019), run from `os validate` and
 // reusable by AI authoring. It catches the "wrong context" authoring mistake
-// the type system alone cannot surface at author time: `userFilters` /
-// `quickFilters` placed on an object list view ("views" mode — where the
-// ViewTabBar is the only nav control), where they are silently dropped. Those
-// controls belong to a page list (InterfaceListPage, "filters" mode) only.
+// the type system alone cannot surface at author time on an object list view
+// ("views" mode — where the ViewTabBar owns the tab-bar role):
+//   - `quickFilters` — never valid on an object list view;
+//   - `userFilters` with `element: 'tabs'` (or carrying `tabs`) — the tab-bar
+//     preset style is page-only; it would collide with the ViewTabBar.
+// A `dropdown` (value-chip) `userFilters` IS allowed on object views since the
+// ADR-0047 amendment (framework #2679 / objectui #2338) and is NOT flagged.
 //
 // Runs PRE-parse (on the normalizeStackInput output, before the
 // ObjectStackDefinition parse): the object-list schema (ObjectListViewSchema)
-// OMITS `userFilters`, so a post-parse stack has already had the field
-// stripped and this rule would never see it. The layering is deliberate —
-// tsc rejects it at author time, the schema strips it at runtime (no throw,
-// back-compat), and this rule reports it at `os validate` with a fix hint.
-// See objectui #2219 / #2220 and ADR-0053 phase 4.
+// narrows `userFilters` to ObjectUserFiltersSchema (dropdown/toggle only), so a
+// post-parse stack has already had a `tabs` user-filter stripped and this rule
+// would never see it. The layering is deliberate — tsc rejects it at author
+// time, the schema strips it at runtime (no throw, back-compat), and this rule
+// reports it at `os validate` with a fix hint. See objectui #2338 and ADR-0047.
 
 export type ListViewModeSeverity = 'error' | 'warning';
 
@@ -35,9 +38,6 @@ export const LIST_VIEW_FILTERS_IN_VIEWS_MODE = 'list-view-filters-in-views-mode'
 
 type AnyRec = Record<string, unknown>;
 
-/** Page filters-mode controls that must not appear on an object list view. */
-const FORBIDDEN_FIELDS = ['userFilters', 'quickFilters'] as const;
-
 /** Coerce an array-or-name-keyed-map collection to an array (name injected). */
 function asArray(v: unknown): AnyRec[] {
   if (Array.isArray(v)) return v as AnyRec[];
@@ -50,7 +50,7 @@ function asArray(v: unknown): AnyRec[] {
   return [];
 }
 
-/** Emit a finding for each forbidden field present on a single list-view def. */
+/** Emit a finding for each wrong-context filter control on a single list-view def. */
 function scanView(
   view: unknown,
   where: string,
@@ -59,20 +59,44 @@ function scanView(
 ): void {
   if (!view || typeof view !== 'object') return;
   const rec = view as AnyRec;
-  for (const field of FORBIDDEN_FIELDS) {
-    if (rec[field] == null) continue;
+
+  // `quickFilters` is never valid on an object list view.
+  if (rec.quickFilters != null) {
     out.push({
       severity: 'error',
       rule: LIST_VIEW_FILTERS_IN_VIEWS_MODE,
       where,
-      path: `${path}.${field}`,
+      path: `${path}.quickFilters`,
       message:
-        `\`${field}\` is a page filters-mode control and is ignored on an object ` +
-        `list view ("views" mode) — the ViewTabBar is the only nav control here.`,
+        '`quickFilters` is a page filters-mode control and is ignored on an object ' +
+        'list view ("views" mode) — the ViewTabBar owns nav here.',
       hint:
-        `Move \`${field}\` to a page list (InterfaceListPage, "filters" mode), or ` +
-        `remove it. See ADR-0053.`,
+        'Move `quickFilters` to a page list (InterfaceListPage, "filters" mode), or ' +
+        'remove it. See ADR-0047.',
     });
+  }
+
+  // `userFilters` is allowed on object views ONLY as `dropdown` (value chips).
+  // The `tabs` preset style — or any `userFilters` carrying `tabs` — collides
+  // with the ViewTabBar and stays page-only.
+  const uf = rec.userFilters;
+  if (uf && typeof uf === 'object') {
+    const ufRec = uf as AnyRec;
+    if (ufRec.element === 'tabs' || ufRec.tabs != null) {
+      out.push({
+        severity: 'error',
+        rule: LIST_VIEW_FILTERS_IN_VIEWS_MODE,
+        where,
+        path: `${path}.userFilters`,
+        message:
+          '`userFilters` with `element: "tabs"` is page-only and is ignored on an ' +
+          'object list view ("views" mode) — it would collide with the ViewTabBar.',
+        hint:
+          'Use `listViews` for named presets on an object (each becomes a segmented ' +
+          'tab), switch to `element: "dropdown"` for value chips, or move the `tabs` ' +
+          'filter to a page list (InterfaceListPage, "filters" mode). See ADR-0047.',
+      });
+    }
   }
 }
 
@@ -95,10 +119,11 @@ function scanListViews(
 }
 
 /**
- * Flag ADR-0053 "views" mode violations: `userFilters` / `quickFilters` on an
- * object's built-in named views or a `defineView` default `list` / named
- * `listViews`. Returns the list of findings (empty = clean). Caller decides how
- * to surface / whether to fail the build.
+ * Flag ADR-0047 "views" mode violations on an object's built-in named views or a
+ * `defineView` default `list` / named `listViews`: `quickFilters`, or a `tabs`
+ * `userFilters`. A `dropdown` `userFilters` is allowed and not flagged. Returns
+ * the list of findings (empty = clean). Caller decides how to surface / whether
+ * to fail the build.
  *
  * Feed the PRE-parse stack (normalizeStackInput output) — see file header.
  */

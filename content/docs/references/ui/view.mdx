@@ -16,8 +16,8 @@ Migrated to shared/http.zod.ts. Re-exported here for backward compatibility.
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnSummary, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, ViewData, ViewFilterRule, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnSummary, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, ViewData, ViewFilterRule, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnSummary, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, NavigationConfig, NavigationMode, ObjectUserFilters, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, ViewData, ViewFilterRule, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnSummary, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, NavigationConfig, NavigationMode, ObjectUserFilters, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, ViewData, ViewFilterRule, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfig.parse(data);
@@ -253,6 +253,18 @@ List chart view configuration
 * `popover`
 * `new_window`
 * `none`
+
+
+---
+
+## ObjectUserFilters
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **element** | `Enum<'dropdown' \| 'toggle'>` | ✅ | Filter control style on object views: "dropdown" (per-field value chips). "toggle" is deprecated. "tabs" is page-only — use `listViews` for named presets. |
+| **fields** | `Object[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
 
 
 ---

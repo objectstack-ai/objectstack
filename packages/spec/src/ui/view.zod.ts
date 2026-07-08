@@ -912,17 +912,34 @@ export const FormViewSchema = lazySchema(() => z.object({
 }));
 
 /**
- * ADR-0053 "views" mode — an object's default list + named list views.
+ * Object-scoped user filters (ADR-0047 amendment, framework #2679 / objectui #2338).
  *
- * Structurally a {@link ListViewSchema} MINUS the page-only control `userFilters`:
- * that field belongs to a page list (`InterfaceListPage`, "filters" mode), never an
- * object list view, whose only nav control is the `ViewTabBar`. Omitting the field
- * makes the wrong-context state untypable at author time (tsc). Runtime parse still
- * STRIPS an authored `userFilters` silently (default strip, no throw) for back-compat,
- * and the CLI `validate` list-view-mode rule reports it pre-parse. See objectui #2219
- * and ADR-0053 phase 4.
+ * A {@link UserFiltersSchema} restricted to the styles that make sense on an object
+ * list view: `dropdown` (per-field value chips — the Airtable "quick filter" pills)
+ * and the deprecated `toggle`. The `tabs` element and its `showAllRecords` companion
+ * are OMITTED because an object view's saved-view switcher (`ViewTabBar`) already owns
+ * the tab-bar role — a `tabs` user-filter would render a second, conflicting tab bar.
+ * Need named presets on an object? Use `listViews` (each becomes a segmented tab).
  */
-export const ObjectListViewSchema = lazySchema(() => ListViewSchema.omit({ userFilters: true }));
+export const ObjectUserFiltersSchema = lazySchema(() =>
+  UserFiltersSchema.omit({ tabs: true, showAllRecords: true }).extend({
+    element: z.enum(['dropdown', 'toggle']).default('dropdown')
+      .describe('Filter control style on object views: "dropdown" (per-field value chips). "toggle" is deprecated. "tabs" is page-only — use `listViews` for named presets.'),
+  }));
+
+/**
+ * ADR-0047 "views" mode — an object's default list + named list views.
+ *
+ * Structurally a {@link ListViewSchema} whose `userFilters` is narrowed to
+ * {@link ObjectUserFiltersSchema}: `dropdown` value chips are allowed (ADR-0047
+ * amendment, framework #2679), but the page-only `tabs` preset bar is not — that
+ * belongs to a page list (`InterfaceListPage`, "filters" mode), because an object
+ * view's only tab-bar nav is the `ViewTabBar`. The narrowed schema makes a `tabs`
+ * user-filter untypable at author time (tsc); the CLI `validate` list-view-mode rule
+ * reports it pre-parse. See objectui #2338.
+ */
+export const ObjectListViewSchema = lazySchema(() =>
+  ListViewSchema.omit({ userFilters: true }).extend({ userFilters: ObjectUserFiltersSchema.optional() }));
 
 /**
  * Master View Schema
@@ -943,9 +960,9 @@ export const ObjectListViewSchema = lazySchema(() => ListViewSchema.omit({ userF
  * }
  */
 export const ViewSchema = lazySchema(() => z.object({
-    list: ObjectListViewSchema.optional(), // Default list view (views mode — no userFilters, ADR-0053)
+    list: ObjectListViewSchema.optional(), // Default list view (views mode — dropdown userFilters allowed, no tabs; ADR-0047)
     form: FormViewSchema.optional(), // Default form view
-    listViews: z.record(z.string(), ObjectListViewSchema).optional().describe('Additional named list views (views mode — no userFilters, ADR-0053)'),
+    listViews: z.record(z.string(), ObjectListViewSchema).optional().describe('Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047)'),
     formViews: z.record(z.string(), FormViewSchema).optional().describe('Additional named form views'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package

@@ -629,10 +629,10 @@ const ObjectSchemaBase = z.object({
    * business context — e.g. an approval-request list should ship with
    * "My pending", "I submitted", "Completed" tabs out of the box.
    *
-   * Each value is an `ObjectListViewSchema` (a `ListViewSchema` minus the
-   * page-only `userFilters` — ADR-0053 "views" mode, where the `ViewTabBar` is
-   * the only nav control) so authors get the full tab/filter/sort/grouping
-   * vocabulary without the wrong-context filter bar.
+   * Each value is an `ObjectListViewSchema` (a `ListViewSchema` whose `userFilters`
+   * is narrowed to dropdown value chips — ADR-0047 "views" mode, where the
+   * `ViewTabBar` owns the tab-bar role so `tabs` presets stay page-only) so authors
+   * get the full filter/sort/grouping vocabulary plus quick-filter dropdowns.
    *
    * @example
    * ```ts
@@ -646,7 +646,7 @@ const ObjectSchemaBase = z.object({
    * }
    * ```
    */
-  listViews: z.record(z.string(), ObjectListViewSchema).optional().describe('Built-in named list views (segmented tabs) shipped with the object schema — "views" mode, no page-only userFilters (ADR-0053)'),
+  listViews: z.record(z.string(), ObjectListViewSchema).optional().describe('Built-in named list views (segmented tabs) shipped with the object schema — "views" mode, dropdown userFilters allowed, no page-only tabs (ADR-0047)'),
 
   /**
    * Search Engine Config 

@@ -289,6 +289,16 @@ Rules:
   filter element style (Airtable's Elements choice). If a view configures
   both `tabs` and `userFilters`, tabs win and the dropdowns never render.
   Want both demos? Put them on different views.
+- **On an object list view (`*.view.ts` `list` / `listViews`), only
+  `element: 'dropdown'` (value chips) is allowed — `tabs` is page-only**
+  (ADR-0047 amendment, framework #2679 / objectui #2338). An object view's
+  saved-view `ViewTabBar` already owns the tab-bar role, so a `tabs`
+  user-filter would render a second, colliding tab bar. The spec narrows it
+  (`ObjectUserFiltersSchema` — a `tabs` element is untypable at author time
+  and dropped at parse) and the `validate` list-view-mode lint reports it.
+  Need named presets on an object? Add a `listViews` entry instead. The full
+  `dropdown | tabs | toggle` range applies only to **page lists** /
+  `interfaceConfig.userFilters` (the block above).
 - **Omit `userFilters` when unsure — omission means a clean toolbar.** Filter
   elements render only when explicitly configured; nothing is auto-derived.
   In data mode the saved-views switcher already covers the preset use case,
@@ -585,7 +595,7 @@ Object list UI has **three run modes**, selected by the navigation item shape:
 | What renders | ALL list views as switcher tabs | The URL-defined slice, no saved-view tabs | One curated page referencing ONE view |
 | Anchored to | Saved views | **The URL itself** (`/:objectName/data?filter[...]`) | Page config |
 | User-created views | Allowed | "Save as view" exit only | Never |
-| Quick filters | Auto-derived (or view `userFilters`) | Auto-derived + removable URL chips | Only what the author enabled |
+| Quick filters | Auto-derived (or view `userFilters` — `dropdown` only) | Auto-derived + removable URL chips | Only what the author enabled |
 | Visualization | Switchable (whitelist) | Switchable (URL filter state survives) | Locked unless whitelisted |
 
 **Decision rule — default to data mode.** Generate ONLY objects + list views +

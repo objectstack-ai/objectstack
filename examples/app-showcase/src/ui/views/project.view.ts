@@ -10,6 +10,17 @@ export const ProjectViews = defineView({
     label: 'All Projects',
     type: 'grid',
     data,
+    // Airtable-style quick-filter chips on the DEFAULT object list view
+    // (ADR-0047 amendment, framework #2679 / objectui #2338). `dropdown` value
+    // chips are allowed on object views; `tabs` presets stay page-only (they'd
+    // collide with the saved-view ViewTabBar — use `listViews` for those).
+    userFilters: {
+      element: 'dropdown',
+      fields: [
+        { field: 'status' },
+        { field: 'health', showCount: true },
+      ],
+    },
     columns: [
       { field: 'name' },
       { field: 'account' },
