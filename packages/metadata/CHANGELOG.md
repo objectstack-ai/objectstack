@@ -1,5 +1,18 @@
 # @objectstack/metadata
 
+## 12.6.0
+
+### Patch Changes
+
+- Updated dependencies [6cebf22]
+- Updated dependencies [21420d9]
+  - @objectstack/spec@12.6.0
+  - @objectstack/core@12.6.0
+  - @objectstack/metadata-core@12.6.0
+  - @objectstack/platform-objects@12.6.0
+  - @objectstack/types@12.6.0
+  - @objectstack/metadata-fs@12.6.0
+
 ## 12.5.0
 
 ### Patch Changes

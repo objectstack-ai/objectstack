@@ -1,5 +1,33 @@
 # @objectstack/runtime
 
+## 12.6.0
+
+### Patch Changes
+
+- b5a87eb: Sandbox: stop `QuickJSScriptRunner` from crashing when a hook context holds a non-serialisable host object.
+
+  `installCtx` marshalled `ctx` into the QuickJS sandbox with a bare `JSON.stringify`. If the context (or anything reachable from it) held a live `setTimeout`/`setInterval` handle, `JSON.stringify` threw `TypeError: Converting circular structure to JSON` (`Timeout._idlePrev -> TimersList._idleNext -> …`) and took the whole hook down (#2674). Marshalling now goes through a shared `safeJsonStringify` that drops circular back-edges via a path `WeakSet` and coerces `BigInt` to a string, so only JSON-safe leaves cross the boundary and the body still runs.
+
+- Updated dependencies [6cebf22]
+- Updated dependencies [21420d9]
+  - @objectstack/spec@12.6.0
+  - @objectstack/core@12.6.0
+  - @objectstack/rest@12.6.0
+  - @objectstack/driver-sql@12.6.0
+  - @objectstack/formula@12.6.0
+  - @objectstack/metadata@12.6.0
+  - @objectstack/objectql@12.6.0
+  - @objectstack/observability@12.6.0
+  - @objectstack/driver-memory@12.6.0
+  - @objectstack/driver-sqlite-wasm@12.6.0
+  - @objectstack/plugin-auth@12.6.0
+  - @objectstack/plugin-org-scoping@12.6.0
+  - @objectstack/plugin-security@12.6.0
+  - @objectstack/service-cluster@12.6.0
+  - @objectstack/service-datasource@12.6.0
+  - @objectstack/service-i18n@12.6.0
+  - @objectstack/types@12.6.0
+
 ## 12.5.0
 
 ### Patch Changes

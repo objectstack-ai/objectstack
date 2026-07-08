@@ -1,5 +1,40 @@
 # @objectstack/verify
 
+## 12.6.0
+
+### Minor Changes
+
+- 3fd3576: Add `checkReadCoercion` — a reusable, driver-agnostic read-coercion conformance
+  helper (a stored value must read back as its declared type: boolean as boolean,
+  json as object, integer as number). Mirrors `checkLedger`: returns a list of
+  problems (empty = conformant) with no test-runner dependency, so any driver —
+  including out-of-tree ones like cloud's driver-turso — can run the identical
+  contract against itself. This is the invariant behind the case_escalation
+  `1 != true` incident.
+
+### Patch Changes
+
+- Updated dependencies [6cebf22]
+- Updated dependencies [c4fd39f]
+- Updated dependencies [0adcc1c]
+- Updated dependencies [b5a87eb]
+- Updated dependencies [21420d9]
+  - @objectstack/spec@12.6.0
+  - @objectstack/service-settings@12.6.0
+  - @objectstack/service-automation@12.6.0
+  - @objectstack/runtime@12.6.0
+  - @objectstack/core@12.6.0
+  - @objectstack/rest@12.6.0
+  - @objectstack/objectql@12.6.0
+  - @objectstack/driver-sqlite-wasm@12.6.0
+  - @objectstack/plugin-auth@12.6.0
+  - @objectstack/plugin-hono-server@12.6.0
+  - @objectstack/plugin-org-scoping@12.6.0
+  - @objectstack/plugin-security@12.6.0
+  - @objectstack/plugin-sharing@12.6.0
+  - @objectstack/service-analytics@12.6.0
+  - @objectstack/service-datasource@12.6.0
+
 ## 12.5.0
 
 ### Patch Changes
