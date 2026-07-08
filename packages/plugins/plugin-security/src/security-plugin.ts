@@ -797,8 +797,13 @@ export class SecurityPlugin implements Plugin {
 
       await next();
 
-      // 4. Field-level security: mask restricted fields in read results
-      if (opCtx.result && ['find', 'findOne'].includes(opCtx.operation)) {
+      // 4. Field-level security: mask restricted fields in returned records.
+      // Covers reads AND the record echoed back by a write — otherwise a caller
+      // with edit-but-not-field-read could PATCH a record and read a
+      // read-protected field back out of the mutation response (FLS bypass).
+      // Field WRITES are already blocked upstream (detectForbiddenWrites); this
+      // closes the read leak on the response image.
+      if (opCtx.result && ['find', 'findOne', 'insert', 'update'].includes(opCtx.operation)) {
         let fieldPerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
         // [ADR-0066 D3] AND-gate field-level requiredPermissions into the mask.
         fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);

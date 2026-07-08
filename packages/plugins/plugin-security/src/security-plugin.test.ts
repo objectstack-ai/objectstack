@@ -796,6 +796,52 @@ describe('SecurityPlugin', () => {
     });
   });
 
+  it('FLS write — the record echoed back by an update is masked (no read-leak of hidden fields)', async () => {
+    // Regression: a caller with edit-but-not-field-read must not be able to
+    // read a read-protected field back out of the mutation response. The write
+    // itself only touches an editable field; the engine echoes the full row.
+    const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+    const harness = makeMiddlewareCtx({
+      permissionSets: [flsPolicySet],
+      objectFields: ['id', 'owner_id', 'name', 'salary', 'ssn'],
+    });
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    const opCtx: any = {
+      object: 'task',
+      operation: 'update',
+      data: { name: 'edited' }, // only editable field written → passes write gate
+      // Engine's echoed post-image (pre-set; harness `next` is a no-op).
+      result: { id: 't1', name: 'edited', salary: 9999, ssn: 'secret-leak' },
+      context: { userId: 'u1', tenantId: 'org-1', roles: [], permissions: ['member_default'] },
+    };
+    await harness.run(opCtx);
+    // ssn (readable:false) stripped; salary (readable:true) retained.
+    expect(opCtx.result.ssn).toBeUndefined();
+    expect(opCtx.result.salary).toBe(9999);
+    expect(opCtx.result.name).toBe('edited');
+  });
+
+  it('FLS write — the record echoed back by an insert is masked', async () => {
+    const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+    const harness = makeMiddlewareCtx({
+      permissionSets: [flsPolicySet],
+      objectFields: ['id', 'owner_id', 'name', 'salary', 'ssn'],
+    });
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    const opCtx: any = {
+      object: 'task',
+      operation: 'insert',
+      data: { name: 'A' },
+      result: { id: 't2', name: 'A', salary: 100, ssn: 'server-generated' },
+      context: { userId: 'u1', tenantId: 'org-1', roles: [], permissions: ['member_default'] },
+    };
+    await harness.run(opCtx);
+    expect(opCtx.result.ssn).toBeUndefined();
+    expect(opCtx.result.salary).toBe(100);
+  });
+
   it('fails CLOSED when permission resolution throws — denies, never bypasses (P0-2)', async () => {
     const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
     const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
