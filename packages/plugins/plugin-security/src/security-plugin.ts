@@ -369,14 +369,13 @@ export class SecurityPlugin implements Plugin {
 
     // [ADR-0090 D12] Delegated-admin gate shares the SAME permission-set
     // resolution as the CRUD middleware, so a delegate's authority and their
-    // ordinary grants can never drift.
-    this.delegatedAdminGate = ql
-      ? new DelegatedAdminGate({
-          ql,
-          resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
-          logger: ctx.logger,
-        })
-      : null;
+    // ordinary grants can never drift. (`ql` is guaranteed non-null here —
+    // start() bailed out above without a middleware-capable engine.)
+    this.delegatedAdminGate = new DelegatedAdminGate({
+      ql,
+      resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
+      logger: ctx.logger,
+    });
 
     // ADR-0021 D-C — expose the per-request READ scope as a reusable service.
     // The analytics raw-SQL path (which bypasses this engine middleware)

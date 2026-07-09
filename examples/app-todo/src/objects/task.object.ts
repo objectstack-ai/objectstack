@@ -5,6 +5,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Task = ObjectSchema.create({
   name: 'todo_task',
+  // [ADR-0090 D1] Explicit grandfather stamp: this demo object is
+  // intentionally org-shared; without it the secure default (unset OWD =>
+  // private) owner-filters it and the D7 publish linter fails the build.
+  sharingModel: 'public_read_write',
   label: 'Task',
   pluralLabel: 'Tasks',
   icon: 'check-square',
