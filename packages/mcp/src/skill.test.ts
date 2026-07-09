@@ -51,7 +51,7 @@ describe('renderSkillMarkdown', () => {
     expect(md).toContain('Authorization: ApiKey');
   });
 
-  it('lists the object-CRUD tools and a discover-first instruction', () => {
+  it('lists the full native tool surface (CRUD + business actions) and a discover-first instruction', () => {
     const md = renderSkillMarkdown();
     for (const tool of [
       'list_objects',
@@ -61,10 +61,18 @@ describe('renderSkillMarkdown', () => {
       'create_record',
       'update_record',
       'delete_record',
+      'list_actions',
+      'run_action',
     ]) {
       expect(md).toContain(tool);
     }
     expect(md.toLowerCase()).toContain('discover');
+  });
+
+  it('teaches action preference — run a matching business action instead of hand-editing records', () => {
+    const md = renderSkillMarkdown();
+    expect(md).toContain('Prefer actions over hand-edits');
+    expect(md).toContain('run_action({ actionName, objectName?, recordId?, params? })');
   });
 
   it('is generic — it does not enumerate any concrete schema', () => {

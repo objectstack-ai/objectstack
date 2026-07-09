@@ -58,8 +58,9 @@ description: ${OBJECTSTACK_SKILL_DESCRIPTION}
 
 # ObjectStack
 
-${intro} An ObjectStack environment exposes its data **objects** (tables) as
-tools over the Model Context Protocol (MCP). Every operation runs **as you** —
+${intro} An ObjectStack environment exposes its data **objects** (tables) and
+its business **actions** (registered app logic: approvals, conversions, flow
+triggers) as tools over the Model Context Protocol (MCP). Every operation runs **as you** —
 under your account's permissions and row-level security — so you may see a
 subset of rows, or get a permission error on a write. That is expected
 governance, not a failure.
@@ -67,9 +68,11 @@ governance, not a failure.
 ## When to use
 
 Use these tools whenever the user wants to **inspect or change data** in their
-ObjectStack app: look up records, filter/report, create or update entries, or
-clean up data. Prefer these tools over guessing — the environment is the source
-of truth.
+ObjectStack app — look up records, filter/report, create or update entries,
+clean up data — or **run a business action** the app defines (approve a
+request, convert a lead, kick off a flow). Prefer these tools over guessing —
+the environment is the source of truth, and an action is always better than
+hand-editing the records it would have touched.
 
 ## Connect
 
@@ -112,6 +115,8 @@ always current even as the app evolves:
 1. \`list_objects\` — see what objects exist.
 2. \`describe_object({ objectName })\` — get an object's fields (name, type,
    required) before querying or writing it.
+3. \`list_actions\` — see what business actions you may run (each entry
+   includes its parameters and whether it needs a \`recordId\`).
 
 Always discover the relevant object's shape before constructing a filter or a
 create/update payload.
@@ -128,6 +133,14 @@ create/update payload.
 - **update_record({ objectName, recordId, data })** — change fields on a record.
 - **delete_record({ objectName, recordId })** — delete a record (destructive —
   confirm with the user first).
+- **list_actions()** — list the business actions you are permitted to run, with
+  each action's declared parameters, whether it operates on a record, and
+  whether it is flagged destructive.
+- **run_action({ actionName, objectName?, recordId?, params? })** — invoke a
+  business action by name. This executes the app's registered logic (can
+  mutate data or trigger flows) under your permissions and RLS. Pass
+  \`recordId\` for record-scoped actions and \`params\` for declared inputs;
+  \`objectName\` only disambiguates a name shared by multiple objects.
 
 ## Conventions & gotchas
 
@@ -139,13 +152,20 @@ create/update payload.
 - **Writes are real and immediate.** There is no implicit dry-run. Confirm
   destructive actions (\`delete_record\`, bulk updates) with the user.
 - **Page large reads.** Use \`limit\`/\`offset\` rather than asking for everything.
+- **Prefer actions over hand-edits.** When \`list_actions\` offers an action for
+  the task (approve, convert, close, …), call it instead of updating the
+  records yourself — actions carry the app's validation and side effects.
+  Confirm first when an action is record-destructive or flagged for
+  confirmation.
 
 ## Recommended workflow
 
-1. \`list_objects\` to orient.
+1. \`list_objects\` (and \`list_actions\` when the task sounds like a business
+   operation) to orient.
 2. \`describe_object\` on the target object.
 3. \`query_records\` to read / verify current state.
-4. \`create_record\` / \`update_record\` / \`delete_record\` to make changes,
-   confirming destructive steps with the user.
+4. \`run_action\` when a matching business action exists; otherwise
+   \`create_record\` / \`update_record\` / \`delete_record\` — confirming
+   destructive steps with the user.
 `;
 }
