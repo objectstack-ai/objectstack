@@ -5,6 +5,8 @@ import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/se
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits } from '@objectstack/spec/security';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
+import { explainAccess, buildContextForUser } from './explain-engine.js';
+import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 import { bootstrapDeclaredPermissions, upsertPackagePermissionSet } from './bootstrap-declared-permissions.js';
 import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
@@ -386,8 +388,13 @@ export class SecurityPlugin implements Plugin {
     try {
       ctx.registerService('security', {
         getReadFilter: (object: string, context?: any) => this.getReadFilter(object, context),
+        // [ADR-0090 D6] First-class access explanation. Same code paths as
+        // the middleware (resolution/evaluator/RLS compiler) — explained by
+        // construction. Explaining ANOTHER user requires `manage_users`.
+        explain: (request: { object: string; operation: string; userId?: string }, callerContext?: any) =>
+          this.explainAccessForCaller(request, callerContext),
       });
-      ctx.logger.info('[security] registered "security" service (getReadFilter) for raw-SQL RLS bridging');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, explain) — ADR-0021 D-C / ADR-0090 D6');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -1110,6 +1117,55 @@ export class SecurityPlugin implements Plugin {
    * service pre-resolves these per request (base + every joined object) before
    * the synchronous SQL builder runs.
    */
+  /**
+   * [ADR-0090 D6] Explain access for a caller. `request.userId` (explaining
+   * someone else) requires the caller to hold `manage_users` or be system —
+   * an access report is itself sensitive data. The evaluation delegates to
+   * {@link explainAccess} with the SAME internals the middleware uses.
+   */
+  async explainAccessForCaller(
+    request: { object: string; operation: string; userId?: string },
+    callerContext?: any,
+  ): Promise<ExplainDecision> {
+    const operation = String(request?.operation ?? 'read') as ExplainOperation;
+    const object = String(request?.object ?? '');
+    if (!object) throw new Error('[Security] explain: request.object is required');
+
+    let targetContext = callerContext ?? {};
+    if (request.userId && request.userId !== callerContext?.userId) {
+      const callerIsSystem = callerContext?.isSystem === true;
+      if (!callerIsSystem) {
+        const callerSets = await this.resolvePermissionSetsForContext(callerContext).catch(() => []);
+        const held = this.permissionEvaluator.getSystemPermissions(callerSets);
+        if (!held.has('manage_users')) {
+          throw new PermissionDeniedError(
+            `[Security] Access denied: explaining another user's access requires the 'manage_users' capability (ADR-0090 D6).`,
+            { object, operation, targetUserId: request.userId },
+          );
+        }
+      }
+      targetContext = await buildContextForUser(this.ql, request.userId);
+    }
+
+    return explainAccess(
+      {
+        ql: this.ql,
+        resolveSets: (c: any) => this.resolvePermissionSetsForContext(c),
+        evaluator: this.permissionEvaluator,
+        getObjectSecurityMeta: (o: string) => this.getObjectSecurityMeta(o),
+        requiredCaps: (meta: any, engineOp: string) => requiredCapsForOperation(meta, engineOp),
+        computeRlsFilter: (sets, o, engineOp, c) => this.computeRlsFilter(sets as any, o, engineOp, c),
+        getFieldMask: (sets, o, fieldRequired) => {
+          let fp = this.permissionEvaluator.getFieldPermissions(o, sets as any);
+          fp = this.foldFieldRequiredPermissions(fp, fieldRequired, sets as any);
+          return fp as any;
+        },
+        fallbackPermissionSet: this.fallbackPermissionSet,
+      },
+      { object, operation, context: targetContext },
+    );
+  }
+
   async getReadFilter(
     object: string,
     context?: any,

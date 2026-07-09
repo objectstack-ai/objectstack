@@ -11,7 +11,7 @@ import { lowerCallables } from '../utils/lower-callables.js';
 import { validateStackExpressions } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
-import { validateSecurityPosture } from '@objectstack/lint';
+import { validateSecurityPosture, buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
 import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
 import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
@@ -57,6 +57,10 @@ export default class Compile extends Command {
       description: '[deprecated] Auto-skip is now the default. Pass --no-runtime-bundle to fail loudly if any callable still requires the legacy bundle.',
       default: false,
       hidden: true,
+    }),
+    'update-access-matrix': Flags.boolean({
+      description: '[ADR-0090 D6] Rewrite access-matrix.json from the current stack instead of failing on drift. Review the resulting diff — it IS the capability change.',
+      default: false,
     }),
   };
 
@@ -354,6 +358,46 @@ export default class Compile extends Command {
           printWarning(`${f.where}: ${f.message}`);
           console.log(chalk.dim(`    ${f.hint}`));
           console.log(chalk.dim(`    rule: ${f.rule}`));
+        }
+      }
+
+      // 3f. [ADR-0090 D6] Access-matrix snapshot gate. Opt-in per app: when
+      //     `access-matrix.json` sits next to the config, the (permission set
+      //     × object) capability matrix derived from THIS build must match it
+      //     — a drift fails the build with a SEMANTIC diff ("'crm_admin'
+      //     gains delete on 'crm_lead'") until the snapshot is updated via
+      //     --update-access-matrix. An unchanged matrix auto-passes, so the
+      //     gate costs nothing until someone changes who-can-do-what.
+      {
+        const matrixPath = path.join(path.dirname(absolutePath), 'access-matrix.json');
+        const currentMatrix = buildAccessMatrix(result.data as Record<string, unknown>);
+        if (flags['update-access-matrix']) {
+          // Unconditional write — creates or refreshes the snapshot.
+          fs.writeFileSync(matrixPath, JSON.stringify(currentMatrix, null, 2) + '\n');
+          if (!flags.json) printStep(`Access matrix snapshot written to ${path.relative(process.cwd(), matrixPath)} (ADR-0090 D6) — review the diff.`);
+        } else {
+          // Single read attempt (no exists-then-read TOCTOU): a missing file
+          // means the app has not opted into the gate; an unreadable/corrupt
+          // one is treated as empty so the drift report shows every entry.
+          let committedRaw: string | null = null;
+          try { committedRaw = fs.readFileSync(matrixPath, 'utf8'); } catch { committedRaw = null; }
+          if (committedRaw !== null) {
+            if (!flags.json) printStep('Checking access-matrix snapshot (ADR-0090 D6)...');
+            let committed: any = { version: 1, entries: [] };
+            try { committed = JSON.parse(committedRaw); } catch { /* corrupt = empty */ }
+            const drift = diffAccessMatrix(committed, currentMatrix);
+            if (drift.length > 0) {
+              if (flags.json) {
+                console.log(JSON.stringify({ success: false, error: 'access matrix drift', changes: drift }));
+                this.exit(1);
+              }
+              console.log('');
+              printError(`Access matrix drift (${drift.length} change${drift.length > 1 ? 's' : ''}) — capability changes must be reviewed`);
+              for (const line of drift.slice(0, 50)) console.log(`  • ${line}`);
+              console.log(chalk.dim('  If intended, re-run with --update-access-matrix and commit the snapshot — its diff IS the review artifact.'));
+              this.exit(1);
+            }
+          }
         }
       }
 

@@ -212,10 +212,15 @@ being **structured data**:
    `@objectstack/lint`, gating `os compile`): unset OWD, retired OWD aliases, external dial wider
    than internal, non-admin superuser wildcards, high-privilege everyone-suggested sets, forbidden
    vocabulary — each rule traceable to an observed failure class and mirrored by a runtime gate.
-3. **Access-matrix snapshot**: publishes evaluate representative positions × objects and diff
-   against the committed matrix; an unchanged matrix auto-passes, a changed one raises a human gate
-   showing the *semantic* impact ("grants `sales_rep` (~1,200 users) org-wide read on
-   `crm_opportunity`").
+3. **Access-matrix snapshot** (landed in P4 as `buildAccessMatrix`/`diffAccessMatrix` in
+   `@objectstack/lint`, gating `os compile` when `access-matrix.json` is committed): the
+   (permission set × object) matrix is derived purely from metadata and diffed on every build; an
+   unchanged matrix auto-passes, a changed one FAILS the build with the *semantic* impact
+   ("`crm_admin` gains delete on `crm_lead`", depth changes, OWD swings) until the snapshot is
+   re-generated with `--update-access-matrix` — the snapshot's git diff is the review artifact.
+   The runtime side is the **explain engine** (P4, `security` service `explain(request)`): the
+   nine-layer pipeline reported per-layer with contributor attribution, walking the same code the
+   middleware enforces with — explained by construction.
 4. **Tiered human gates**: AI drafts anything; publishing security-domain metadata requires human
    approval of that semantic diff. Non-security metadata auto-publishes.
 5. **Fail-closed runtime** (ADR-0049/#2565 posture) + post-publish telemetry as the last parachute.

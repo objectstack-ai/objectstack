@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "permissionSet": "crm_sales_user",
+      "object": "crm_account",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "crm_sales_user",
+      "object": "crm_activity",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "crm_sales_user",
+      "object": "crm_contact",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "crm_sales_user",
+      "object": "crm_lead",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "crm_sales_user",
+      "object": "crm_opportunity",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "guest_portal",
+      "object": "crm_lead",
+      "create": true,
+      "read": false,
+      "edit": false,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    }
+  ]
+}
