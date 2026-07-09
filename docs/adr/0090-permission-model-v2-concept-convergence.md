@@ -1,6 +1,6 @@
 # ADR-0090: Permission Model v2 — Concept Convergence, Final Naming, and AI-Authoring Safety
 
-**Status**: Proposed (2026-07-08)
+**Status**: Accepted (2026-07-09)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove),
 [ADR-0056](./0056-permission-model-landing-verification.md) (permission-model landing verification),
