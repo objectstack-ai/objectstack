@@ -13,15 +13,15 @@ RLS, client UI gates) under the canonical variable name `current_user`
 
 (aliases `user`, `ctx.user`) with an **identical shape**. A predicate such as
 
-`current_user.roles.exists(r, r == 'org_admin')` (or
+`current_user.positions.exists(p, p == 'org_admin')` (or
 
-`'org_admin' in current_user.roles`) therefore evaluates identically wherever
+`'org_admin' in current_user.positions`) therefore evaluates identically wherever
 
 it is written.
 
-`roles: string[]` is the **only canonical** role field. Singular `role` is NOT
+`positions: string[]` is the **only canonical** membership field (renamed from
 
-part of this contract — its legacy "overwritten to 'admin' on promotion"
+`roles`, ADR-0090 D3). A singular field is NOT part of this contract — its legacy "overwritten to 'admin' on promotion"
 
 behavior is the footgun this eliminates.
 
@@ -52,8 +52,8 @@ const result = EvalUser.parse(data);
 | **id** | `string` | ✅ | User ID |
 | **name** | `string` | optional | Display name |
 | **email** | `string` | optional | Email address |
-| **roles** | `string[]` | ✅ | Canonical role names assigned to the user (scope-resolved) |
-| **isPlatformAdmin** | `boolean` | optional | DERIVED alias of 'platform_admin' in roles. Deprecated. |
+| **positions** | `string[]` | ✅ | Canonical position/identity names assigned to the user (scope-resolved) |
+| **isPlatformAdmin** | `boolean` | optional | DERIVED alias of 'platform_admin' in positions. Deprecated. |
 | **organizationId** | `string \| null` | optional | Active organization ID (null = platform/unscoped) |
 
 

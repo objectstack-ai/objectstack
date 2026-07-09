@@ -217,7 +217,7 @@ const result = RLSEvaluationResult.parse(data);
 | **operation** | `Enum<'select' \| 'insert' \| 'update' \| 'delete' \| 'all'>` | ✅ | Database operation this policy applies to |
 | **using** | `string` | optional | Filter condition for SELECT/UPDATE/DELETE. One of the four compiler-supported forms: `field = current_user.<prop>`, `field = 'literal'`, `field IN (current_user.<array>)`, or `1 = 1`. Optional for INSERT-only policies. |
 | **check** | `string` | optional | Validation condition for INSERT/UPDATE (defaults to USING clause if not specified - enforced at application level) |
-| **roles** | `string[]` | optional | Roles this policy applies to (omit for all roles) |
+| **positions** | `string[]` | optional | Positions this policy applies to (omit for all) |
 | **enabled** | `boolean` | ✅ | Whether this policy is active |
 | **priority** | `integer` | ✅ | Policy evaluation priority (higher = evaluated first) |
 | **tags** | `string[]` | optional | Policy categorization tags |

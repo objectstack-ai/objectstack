@@ -89,8 +89,7 @@ const result = FieldPermission.parse(data);
 | **label** | `string` | optional | Display label |
 | **packageId** | `string` | optional | [ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored) |
 | **managedBy** | `Enum<'package' \| 'platform' \| 'user'>` | optional | [ADR-0086 D3] Record provenance: package (upgrade-owned metadata) vs platform/user (env config) |
-| **isProfile** | `boolean` | ✅ | Whether this is a user profile |
-| **isDefault** | `boolean` | ✅ | [ADR-0056 D7] When true, this profile is the FALLBACK assigned to authenticated users who have no explicit grants — an app declares its default access posture here instead of relying on the built-in member_default. Foundation for SSO/JIT provisioning. |
+| **isDefault** | `boolean` | ✅ | [ADR-0090 D5] Install-time suggestion to bind this set to the everyone position (admin confirms; never auto-bound) |
 | **objects** | `Record<string, Object>` | ✅ | Entity permissions |
 | **fields** | `Record<string, Object>` | optional | Field level security |
 | **systemPermissions** | `string[]` | optional | System level capabilities |

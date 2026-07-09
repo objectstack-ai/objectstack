@@ -314,7 +314,7 @@ Metadata query with filtering, sorting, and pagination
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `Enum<'object' \| 'field' \| 'validation' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'profile' \| 'role' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
+| **types** | `Enum<'object' \| 'field' \| 'validation' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
 | **namespaces** | `string[]` | optional | Filter by namespaces |
 | **packageId** | `string` | optional | Filter by owning package |
 | **search** | `string` | optional | Full-text search query |
@@ -349,7 +349,7 @@ Metadata query with filtering, sorting, and pagination
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'field' \| 'validation' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'profile' \| 'role' \| 'agent' \| 'tool' \| 'skill'>` | ✅ | Metadata type |
+| **type** | `Enum<'object' \| 'field' \| 'validation' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>` | ✅ | Metadata type |
 | **name** | `string` | ✅ | Item name (snake_case) |
 | **data** | `Record<string, any>` | ✅ | Metadata payload |
 | **namespace** | `string` | optional | Optional namespace |
