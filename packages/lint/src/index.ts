@@ -86,3 +86,5 @@ export {
   SECURITY_PRIVATE_NO_READSCOPE,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
+
+export { buildAccessMatrix, diffAccessMatrix } from './build-access-matrix.js';

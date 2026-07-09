@@ -29,4 +29,6 @@ export { bootstrapDeclaredPermissions } from './bootstrap-declared-permissions.j
 export { claimSeedOwnership } from './claim-seed-ownership.js';
 export { appDefaultPermissionSetName } from './app-default-permission-set.js';
 export { DelegatedAdminGate } from './delegated-admin-gate.js';
+export { explainAccess, buildContextForUser } from './explain-engine.js';
+export type { ExplainEngineDeps, ExplainInput } from './explain-engine.js';
 export type { DelegatedAdminGateDeps } from './delegated-admin-gate.js';
