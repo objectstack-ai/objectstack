@@ -62,6 +62,18 @@ jobs:
         run: bash scripts/build-console.sh
 
       - name: Downstream backward-compat smoke (live hotcrm)
+        # TEMPORARY (ADR-0090 v2 launch window) — advisory, not blocking.
+        # ADR-0090 P1 (#2697) removed the sharing recipients `role` /
+        # `role_and_subordinates` from @objectstack/spec with NO compatibility
+        # aliases (docs/adr/0090 D3 — a deliberate, launch-window break). The
+        # latest published hotcrm tag (v1.2.2) still authors those values, so
+        # this gate necessarily goes red on a break the spec took on purpose,
+        # and no adopting hotcrm release exists yet to bump HOTCRM_REF to. Keep
+        # the step running for signal, but don't let it block the v2 publish.
+        # RESTORE (make blocking again): once hotcrm ships a release adopting
+        # the v2 recipient vocabulary, bump HOTCRM_REF below to that tag and
+        # delete this `continue-on-error` line so a red here blocks publish.
+        continue-on-error: true
         # Pre-publish gate (#2035): the about-to-publish @objectstack/spec must
         # not break a real third-party consumer pinned to a published release.
         # Clones objectstack-ai/hotcrm@${HOTCRM_REF}, installs it (published
