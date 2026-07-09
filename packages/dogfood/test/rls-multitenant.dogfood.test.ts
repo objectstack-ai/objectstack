@@ -30,7 +30,19 @@ import crmStack from '@objectstack/example-crm';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { runRlsProofs, formatRlsReport, type RlsReport } from '@objectstack/verify';
 
-describe('objectstack verify RLS: CRM multi-tenant (#1994 org-scoped)', () => {
+// The multi-org runtime moved to the ENTERPRISE `@objectstack/organizations`
+// package (ADR-0081 D2) — not part of this open workspace. Skip (loudly) when
+// it isn't linked in; enterprise/cloud CI, which ships the package, runs this.
+const organizationsPkg = '@objectstack/organizations';
+const organizationsAvailable = await import(/* webpackIgnore: true */ organizationsPkg)
+  .then(() => true)
+  .catch(() => false);
+if (!organizationsAvailable) {
+  // eslint-disable-next-line no-console
+  console.warn('[dogfood] @objectstack/organizations (enterprise) not installed — skipping the multi-org RLS gate');
+}
+
+describe.skipIf(!organizationsAvailable)('objectstack verify RLS: CRM multi-tenant (#1994 org-scoped)', () => {
   let stack: VerifyStack;
   let report: RlsReport;
 

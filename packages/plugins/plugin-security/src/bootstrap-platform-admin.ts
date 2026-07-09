@@ -14,7 +14,7 @@
  *     If a platform admin already exists, this is a no-op forever.
  *
  * The "create a Default Organization for the freshly-promoted admin"
- * behavior moved to `@objectstack/plugin-org-scoping` (see
+ * behavior moved to `@objectstack/organizations` (see
  * `ensureDefaultOrganization`). Install that plugin to get
  * multi-tenant bootstrap.
  */

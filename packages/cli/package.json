@@ -59,7 +59,6 @@
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-email": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
-    "@objectstack/plugin-org-scoping": "workspace:*",
     "@objectstack/plugin-reports": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",

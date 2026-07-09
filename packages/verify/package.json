@@ -24,7 +24,6 @@
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
-    "@objectstack/plugin-org-scoping": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/rest": "workspace:*",

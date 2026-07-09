@@ -41,7 +41,7 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'controlled-by-parent', summary: 'master-detail controlled_by_parent', state: 'enforced',
     enforcement: 'plugin-security/security-plugin.ts computeControlledByParentFilter + assertControlledByParentWrite', proof: 'controlled-by-parent.dogfood.test.ts' },
   { id: 'multi-tenant', summary: 'organization isolation', state: 'enforced',
-    enforcement: 'plugin-org-scoping + wildcard tenant RLS', proof: 'rls-multitenant.dogfood.test.ts' },
+    enforcement: '@objectstack/organizations (enterprise) + wildcard tenant RLS', proof: 'rls-multitenant.dogfood.test.ts' },
   { id: 'anonymous-deny', summary: 'secure-by-default anonymous posture (capability)', state: 'enforced',
     enforcement: 'rest/rest-server.ts enforceAuth (requireAuth)', proof: 'showcase-anonymous-deny.dogfood.test.ts' },
   { id: 'default-profile', summary: 'app-declared default profile (isDefault)', state: 'enforced',

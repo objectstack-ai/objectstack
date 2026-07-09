@@ -23,7 +23,6 @@
     "@objectstack/objectql": "workspace:^",
     "@objectstack/plugin-auth": "workspace:^",
     "@objectstack/plugin-hono-server": "workspace:^",
-    "@objectstack/plugin-org-scoping": "workspace:^",
     "@objectstack/plugin-security": "workspace:^",
     "@objectstack/rest": "workspace:^",
     "@objectstack/runtime": "workspace:^",

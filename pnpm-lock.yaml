@@ -384,9 +384,6 @@ importers:
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
-      '@objectstack/plugin-org-scoping':
-        specifier: workspace:*
-        version: link:../plugins/plugin-org-scoping
       '@objectstack/plugin-reports':
         specifier: workspace:*
         version: link:../plugins/plugin-reports
@@ -1349,9 +1346,6 @@ importers:
       '@objectstack/plugin-hono-server':
         specifier: workspace:^
         version: link:../plugin-hono-server
-      '@objectstack/plugin-org-scoping':
-        specifier: workspace:^
-        version: link:../plugin-org-scoping
       '@objectstack/plugin-security':
         specifier: workspace:^
         version: link:../plugin-security
@@ -1429,31 +1423,6 @@ importers:
       hono:
         specifier: ^4.12.28
         version: 4.12.28
-    devDependencies:
-      '@types/node':
-        specifier: ^26.1.0
-        version: 26.1.0
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.0)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(msw@2.14.6(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
-
-  packages/plugins/plugin-org-scoping:
-    dependencies:
-      '@objectstack/core':
-        specifier: workspace:*
-        version: link:../../core
-      '@objectstack/platform-objects':
-        specifier: workspace:*
-        version: link:../../platform-objects
-      '@objectstack/plugin-auth':
-        specifier: workspace:*
-        version: link:../plugin-auth
-      '@objectstack/spec':
-        specifier: workspace:*
-        version: link:../../spec
     devDependencies:
       '@types/node':
         specifier: ^26.1.0
@@ -1631,9 +1600,6 @@ importers:
       '@objectstack/plugin-auth':
         specifier: workspace:*
         version: link:../plugins/plugin-auth
-      '@objectstack/plugin-org-scoping':
-        specifier: workspace:*
-        version: link:../plugins/plugin-org-scoping
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugins/plugin-security
@@ -2154,9 +2120,6 @@ importers:
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
-      '@objectstack/plugin-org-scoping':
-        specifier: workspace:*
-        version: link:../plugins/plugin-org-scoping
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugins/plugin-security

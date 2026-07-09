@@ -1280,21 +1280,28 @@ export default class Serve extends Command {
               }
             }
 
-            // Pair: OrgScopingPlugin (multi-tenant) — optional, must register BEFORE SecurityPlugin
-            // OrgScopingPlugin provides `organization_id` auto-stamp, per-org
-            // seed-replay, and default-org bootstrap. SecurityPlugin probes
-            // the `org-scoping` service at start() time and conditionally
-            // strips the wildcard `tenant_isolation` RLS when this plugin
-            // is absent — so registration order matters.
+            // Pair: OrganizationsPlugin (multi-org, ENTERPRISE) — must register
+            // BEFORE SecurityPlugin. The multi-org runtime (`organization_id`
+            // auto-stamp, per-org seed replay, multi-org default-org bootstrap)
+            // lives in the closed-source `@objectstack/organizations` package
+            // (ADR-0081 D2; it registers the historical `org-scoping` service
+            // SecurityPlugin probes at start() to keep vs strip the wildcard
+            // `tenant_isolation` RLS — so registration order matters). Without
+            // it, deployments are single-org: the open member-management
+            // basics (plugin-auth's default-org bootstrap + better-auth
+            // invitations) still work.
             const multiTenant = resolveMultiOrgEnabled();
             if (multiTenant) {
               try {
-                const orgScopingPkg = '@objectstack/plugin-org-scoping';
-                const { OrgScopingPlugin } = await import(/* webpackIgnore: true */ orgScopingPkg);
-                await kernel.use(new OrgScopingPlugin());
-                trackPlugin('OrgScoping');
+                const organizationsPkg = '@objectstack/organizations';
+                const mod: any = await import(/* webpackIgnore: true */ organizationsPkg);
+                await kernel.use(new mod.OrganizationsPlugin());
+                trackPlugin('Organizations');
               } catch {
-                // optional — multi-tenant mode requested but plugin not installed
+                // Requested multi-org without the enterprise package — loud,
+                // not silent: RLS tenant policies will be STRIPPED and every
+                // org boundary is inert until the package is installed.
+                console.warn(chalk.yellow('  ⚠ OS_MULTI_ORG_ENABLED=true but @objectstack/organizations (enterprise) is not installed — running single-org.'));
               }
             }
 

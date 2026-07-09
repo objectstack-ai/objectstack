@@ -564,18 +564,21 @@ export class DevPlugin implements Plugin {
     }
 
     // 5. Security Plugin (RBAC, RLS, field-level masking)
-    // OrgScopingPlugin (when multi-tenant) MUST register BEFORE SecurityPlugin
-    // because SecurityPlugin.start() probes the `org-scoping` service and
-    // caches the result for the lifetime of the plugin.
+    // OrganizationsPlugin (when multi-org; ENTERPRISE `@objectstack/organizations`,
+    // ADR-0081 D2) MUST register BEFORE SecurityPlugin because
+    // SecurityPlugin.start() probes the `org-scoping` service (the historical
+    // name the enterprise plugin keeps registering) and caches the result for
+    // the lifetime of the plugin.
     if (enabled('security')) {
       const multiTenant = resolveMultiOrgEnabled();
       if (multiTenant) {
         try {
-          const { OrgScopingPlugin } = await import('@objectstack/plugin-org-scoping') as any;
-          this.childPlugins.push(new OrgScopingPlugin());
-          ctx.logger.info('  ✔ Org-scoping plugin enabled (multi-tenant: organization_id auto-stamp, per-org seed)');
+          const organizationsPkg = '@objectstack/organizations';
+          const mod: any = await import(/* webpackIgnore: true */ organizationsPkg);
+          this.childPlugins.push(new mod.OrganizationsPlugin());
+          ctx.logger.info('  ✔ Organizations plugin enabled (multi-org: organization_id auto-stamp, per-org seed)');
         } catch {
-          ctx.logger.warn('  ✘ OS_MULTI_ORG_ENABLED=true but @objectstack/plugin-org-scoping not installed');
+          ctx.logger.warn('  ✘ OS_MULTI_ORG_ENABLED=true but @objectstack/organizations (enterprise) not installed — running single-org');
         }
       }
       try {

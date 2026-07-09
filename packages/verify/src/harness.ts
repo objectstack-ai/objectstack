@@ -74,7 +74,7 @@ export interface BootOptions {
    */
   security?: SecurityPlugin;
   /**
-   * Boot multi-tenant: register `@objectstack/plugin-org-scoping` BEFORE the
+   * Boot multi-tenant: register enterprise `@objectstack/organizations` plugin BEFORE the
    * SecurityPlugin so the wildcard `organization_id` RLS policies that ship in
    * the default permission sets actually apply (SecurityPlugin probes the
    * `org-scoping` service once at start and otherwise STRIPS them — see
@@ -147,13 +147,26 @@ export async function bootStack(
     }
   }
 
-  // Multi-tenant: org-scoping MUST register BEFORE SecurityPlugin — the latter
-  // probes the `org-scoping` service exactly once at start and caches it, then
-  // keeps (vs strips) the wildcard `organization_id` RLS policies accordingly.
-  // Mirrors the CLI's ordering for `OS_MULTI_ORG_ENABLED`.
+  // Multi-org: the enterprise OrganizationsPlugin (`@objectstack/organizations`,
+  // ADR-0081 D2) MUST register BEFORE SecurityPlugin — the latter probes the
+  // `org-scoping` service (the historical name the enterprise plugin keeps
+  // registering) exactly once at start and caches it, then keeps (vs strips)
+  // the wildcard `organization_id` RLS policies accordingly. Mirrors the CLI's
+  // ordering for `OS_MULTI_ORG_ENABLED`. `multiTenant` is an explicit opt-in,
+  // so a missing package is a hard, actionable error — not a silent
+  // single-org downgrade that would flip the fixture's RLS posture.
   if (opts.multiTenant) {
-    const { OrgScopingPlugin } = await import('@objectstack/plugin-org-scoping');
-    await kernel.use(new OrgScopingPlugin());
+    const organizationsPkg = '@objectstack/organizations';
+    let mod: any;
+    try {
+      mod = await import(/* webpackIgnore: true */ organizationsPkg);
+    } catch (e) {
+      throw new Error(
+        'verify: multiTenant=true requires the enterprise @objectstack/organizations package (migrated from plugin-org-scoping, ADR-0081 D2). ' +
+          `Install/link it in this workspace to run multi-org fixtures. (${(e as Error).message})`,
+      );
+    }
+    await kernel.use(new mod.OrganizationsPlugin());
   }
 
   // Automation service — opt-in. Registered before bootstrap so its start()

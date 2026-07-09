@@ -42,7 +42,7 @@ export default class Verify extends Command {
       default: false,
     }),
     'multi-tenant': Flags.boolean({
-      description: 'Boot org-scoped (register plugin-org-scoping) so tenant-isolation RLS policies apply (also honors $OS_MULTI_ORG_ENABLED)',
+      description: 'Boot org-scoped (register the enterprise @objectstack/organizations plugin) so tenant-isolation RLS policies apply (also honors $OS_MULTI_ORG_ENABLED)',
       default: false,
     }),
     json: Flags.boolean({ description: 'Emit the structured report as JSON', default: false }),
