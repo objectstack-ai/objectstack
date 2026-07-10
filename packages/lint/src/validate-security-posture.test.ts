@@ -16,6 +16,7 @@ import {
   SECURITY_ANCHOR_HIGH_PRIVILEGE,
   SECURITY_ROLE_WORD,
   SECURITY_PRIVATE_NO_READSCOPE,
+  SECURITY_MASTER_DETAIL_UNGRANTED,
 } from './validate-security-posture.js';
 
 const rulesOf = (stack: Record<string, unknown>) =>
@@ -203,5 +204,114 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
         ],
       }).filter((r) => r === SECURITY_PRIVATE_NO_READSCOPE),
     ).toEqual([]);
+  });
+});
+
+// ── Rule: security-master-detail-ungranted (framework#2700) ───────────
+describe('validateSecurityPosture · master-detail detail ungranted (framework#2700)', () => {
+  const mdOnly = (stack: Record<string, unknown>) =>
+    validateSecurityPosture(stack).filter((f) => f.rule === SECURITY_MASTER_DETAIL_UNGRANTED);
+
+  /**
+   * A work_order (master, granted) + work_order_item (detail). `childGrant`
+   * grants the child in the same set; `extraPermission` appends another set
+   * (e.g. an admin wildcard). Omit both → the incident shape: parent granted,
+   * child forgotten. The master grant carries readScope so it never trips the
+   * separate private-no-readscope info rule.
+   */
+  const detailStack = (
+    childGrant?: Record<string, unknown>,
+    opts?: { extraPermission?: Record<string, unknown> },
+  ): Record<string, unknown> => ({
+    objects: [
+      { name: 'work_order', label: 'Work Order', sharingModel: 'private', fields: { name: { name: 'name', label: 'Name' } } },
+      {
+        name: 'work_order_item',
+        label: 'Work Order Item',
+        sharingModel: 'controlled_by_parent',
+        fields: { order: { name: 'order', type: 'master_detail', reference: 'work_order', required: true } },
+      },
+    ],
+    permissions: [
+      {
+        name: 'field_tech',
+        label: 'Field Tech',
+        objects: {
+          work_order: { allowRead: true, allowCreate: true, allowEdit: true, readScope: 'unit' },
+          ...(childGrant ? { work_order_item: childGrant } : {}),
+        },
+      },
+      ...(opts?.extraPermission ? [opts.extraPermission] : []),
+    ],
+  });
+
+  it('warns when the child is granted by no permission set — the incident shape', () => {
+    const md = mdOnly(detailStack());
+    expect(md).toHaveLength(1);
+    expect(md[0]).toMatchObject({ severity: 'warning', where: 'object "work_order_item"' });
+    expect(md[0].path).toBe('objects[1].fields.order');
+    expect(md[0].message).toContain('controlled_by_parent');
+    expect(md[0].message).toContain('403');
+    expect(md[0].message).toContain('work_order'); // names the master
+    expect(md[0].hint).toContain('permissions[i].objects.work_order_item');
+  });
+
+  it.each([
+    ['allowRead', { allowRead: true }],
+    ['allowCreate', { allowCreate: true }],
+    ['allowEdit', { allowEdit: true }],
+    ['allowDelete', { allowDelete: true }],
+    ['viewAllRecords (VAMA)', { viewAllRecords: true }],
+    ['modifyAllRecords (VAMA)', { modifyAllRecords: true }],
+  ])('stays silent when the child is granted %s in a set', (_label, grant) => {
+    expect(mdOnly(detailStack(grant))).toEqual([]);
+  });
+
+  it("stays silent when a package-declared '*' wildcard grant covers every object", () => {
+    expect(
+      mdOnly(detailStack(undefined, { extraPermission: { name: 'app_admin', objects: { '*': { allowRead: true } } } })),
+    ).toEqual([]);
+  });
+
+  it('does not fire when the package authors no permission sets (nothing to compare)', () => {
+    const { permissions: _drop, ...noPerms } = detailStack();
+    expect(mdOnly(noPerms)).toEqual([]);
+  });
+
+  it('ignores a non-detail object that is merely ungranted (lookup, not master_detail)', () => {
+    expect(
+      mdOnly({
+        objects: [
+          { name: 'work_order', label: 'Work Order', sharingModel: 'private', fields: { name: { name: 'name', label: 'Name' } } },
+          { name: 'lonely', label: 'Lonely', sharingModel: 'private', fields: { ref: { name: 'ref', type: 'lookup', reference: 'work_order' } } },
+        ],
+        permissions: [{ name: 'u', objects: { work_order: { allowRead: true, readScope: 'unit' } } }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('exempts system detail objects (sys_ prefix or isSystem:true)', () => {
+    expect(
+      mdOnly({
+        objects: [
+          { name: 'thing', label: 'Thing', sharingModel: 'private', fields: { name: { name: 'name', label: 'Name' } } },
+          { name: 'sys_thing_audit', sharingModel: 'controlled_by_parent', fields: { thing: { name: 'thing', type: 'master_detail', reference: 'thing' } } },
+          { name: 'thing_internal', isSystem: true, sharingModel: 'controlled_by_parent', fields: { thing: { name: 'thing', type: 'master_detail', reference: 'thing' } } },
+        ],
+        permissions: [{ name: 'u', objects: { thing: { allowRead: true, readScope: 'unit' } } }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('detects detail objects declared with the array field form', () => {
+    const md = mdOnly({
+      objects: [
+        { name: 'work_order', label: 'Work Order', sharingModel: 'private', fields: [{ name: 'name', label: 'Name' }] },
+        { name: 'work_order_item', sharingModel: 'controlled_by_parent', fields: [{ name: 'order', type: 'master_detail', reference: 'work_order', required: true }] },
+      ],
+      permissions: [{ name: 'u', objects: { work_order: { allowRead: true, readScope: 'unit' } } }],
+    });
+    expect(md).toHaveLength(1);
+    expect(md[0].where).toBe('object "work_order_item"');
   });
 });

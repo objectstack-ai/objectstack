@@ -15,11 +15,15 @@
  * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors          |
  * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze   |
  * | security-private-no-readscope (info)    | admin-intent mismatch class     |
+ * | security-master-detail-ungranted(warn)  | framework#2700 os-tianshun-mtc#43|
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4 zod
  * enum + fail-closed evaluator, D5/D9 anchor binding gate, D3 rename wave) —
- * the lint moves the failure from runtime-deny to author-time fix-it.
+ * the lint moves the failure from runtime-deny to author-time fix-it. The lone
+ * `warning` (master-detail-ungranted) likewise mirrors a runtime gate — the
+ * object-level CRUD check (ADR-0055) — but stays advisory: it flags a *likely*
+ * misconfiguration whose per-permission-set nuance it cannot fully adjudicate.
  *
  * Pure `(stack) => Finding[]`; accepts the NORMALIZED stack input (works both
  * pre- and post-zod-parse, so `os lint` catches what the zod gate would
@@ -35,6 +39,7 @@ export const SECURITY_WILDCARD_VAMA = 'security-wildcard-vama';
 export const SECURITY_ANCHOR_HIGH_PRIVILEGE = 'security-anchor-high-privilege';
 export const SECURITY_ROLE_WORD = 'security-role-word';
 export const SECURITY_PRIVATE_NO_READSCOPE = 'security-private-no-readscope';
+export const SECURITY_MASTER_DETAIL_UNGRANTED = 'security-master-detail-ungranted';
 
 export type SecuritySeverity = 'error' | 'warning' | 'info';
 
@@ -99,6 +104,44 @@ function identifierHasRoleToken(name: unknown): boolean {
 function labelHasRoleWord(label: unknown): boolean {
   if (typeof label !== 'string') return false;
   return /\brole(s)?\b/i.test(label);
+}
+
+/** The `reference`/`reference_to` target a relationship field points at. */
+function refOf(def: AnyRec): string | undefined {
+  const r = (def.reference ?? def.reference_to) as unknown;
+  return typeof r === 'string' && r ? r : undefined;
+}
+
+/**
+ * The first `master_detail` field on an object, if any — its presence is what
+ * makes the object a DETAIL (the child side of a master-detail; ADR-0055).
+ * Works for both the array and name-keyed-map field forms (`asArray` folds the
+ * map key into `name`).
+ */
+function firstMasterDetailField(obj: AnyRec): { name: string; parent?: string } | undefined {
+  for (const f of asArray(obj.fields)) {
+    if (f.type === 'master_detail') {
+      return { name: String(f.name ?? '?'), parent: refOf(f) };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Does a per-object permission entry open the object-level CRUD gate at all?
+ * Any of the four CRUD bits, or a super-user bypass (View/Modify All Data),
+ * counts — this mirrors the runtime `checkObjectPermission` gate (ADR-0066 D2):
+ * that gate returns true if ANY set contributes one of these for the object.
+ */
+function grantsObjectAccess(p: AnyRec): boolean {
+  return (
+    p.allowRead === true ||
+    p.allowCreate === true ||
+    p.allowEdit === true ||
+    p.allowDelete === true ||
+    p.viewAllRecords === true ||
+    p.modifyAllRecords === true
+  );
 }
 
 /**
@@ -331,6 +374,66 @@ export function validateSecurityPosture(stack: AnyRec): SecurityFinding[] {
               `'own_and_reports' | 'unit' | 'unit_and_below' | 'org', or widen the object's sharingModel.`,
           });
         }
+      }
+    }
+  }
+
+  // ── ADR-0055: master-detail DETAIL object with no object-level CRUD ───
+  // A master-detail CHILD derives its RECORD-level scope from the master
+  // (`controlled_by_parent`) — but that is gate ②. Object-level CRUD is a
+  // SEPARATE gate ① (`checkObjectPermission`) that is NEVER derived: a set that
+  // lists the parent but forgets the child denies role-bound non-admin users a
+  // 403 *before* the parent-derived access is ever consulted, surfacing as the
+  // silent "can't fill in / can't submit the subtable" trap (framework#2700,
+  // downstream os-tianshun-mtc#43). Statically detectable: a detail (has a
+  // master_detail field) that NO authored permission set grants.
+  //
+  // Advisory `warning` — it does not gate the build. Two deliberate silences
+  // keep the false-positive rate near zero: (a) if the package authors no
+  // permission sets there is nothing to compare against, and (b) a package-
+  // declared `'*'` wildcard grant is treated as covering every object (a broad
+  // grant is an explicit choice — suppress rather than cry wolf). The residual
+  // per-set gap (one role grants it, another forgets it) is intentionally out
+  // of scope (issue #2700); the platform's own default admin set lives outside
+  // the linted stack, so it never masks a package that forgot the child here.
+  if (permissionSets.length > 0) {
+    const wildcardGrantsAll = permissionSets.some((ps) =>
+      grantsObjectAccess(((ps.objects as AnyRec | undefined)?.['*'] ?? {}) as AnyRec),
+    );
+    if (!wildcardGrantsAll) {
+      const grantedObjects = new Set<string>();
+      for (const ps of permissionSets) {
+        const objectsMap = (ps.objects && typeof ps.objects === 'object' ? ps.objects : {}) as AnyRec;
+        for (const [objName, rawPerm] of Object.entries(objectsMap)) {
+          if (objName === '*') continue;
+          if (grantsObjectAccess((rawPerm ?? {}) as AnyRec)) grantedObjects.add(objName);
+        }
+      }
+      for (let i = 0; i < objects.length; i++) {
+        const obj = objects[i];
+        if (!obj || typeof obj !== 'object' || isSystemObject(obj)) continue;
+        const objName = typeof obj.name === 'string' ? obj.name : '';
+        if (!objName || grantedObjects.has(objName)) continue;
+        const md = firstMasterDetailField(obj);
+        if (!md) continue;
+        const parentText = md.parent ? ` → "${md.parent}"` : '';
+        findings.push({
+          severity: 'warning',
+          rule: SECURITY_MASTER_DETAIL_UNGRANTED,
+          where: `object "${objName}"`,
+          path: `objects[${i}].fields.${md.name}`,
+          message:
+            `detail object "${objName}" (master_detail "${md.name}"${parentText}) has no object-level ` +
+            `CRUD grant in any permission set. A master-detail child derives its RECORD-level access ` +
+            `from the master (ADR-0055 controlled_by_parent), but object-level CRUD is a SEPARATE gate ` +
+            `that is never derived — role-bound non-admin users are denied (403) before the ` +
+            `parent-derived access is ever consulted (the silent "can't submit the subtable" trap).`,
+          hint:
+            `Grant "${objName}" in at least one permission set that already grants its master` +
+            `${md.parent ? ` "${md.parent}"` : ''} — e.g. permissions[i].objects.${objName} = ` +
+            `{ allowRead: true, allowCreate: true, allowEdit: true }. If no role should ever touch ` +
+            `it (a pure system/internal table), name it sys_* or set isSystem: true.`,
+        });
       }
     }
   }
