@@ -1,5 +1,14 @@
 # @objectstack/core
 
+## 14.3.0
+
+### Patch Changes
+
+- Updated dependencies [2a71f48]
+- Updated dependencies [02f6af4]
+- Updated dependencies [c1064f1]
+  - @objectstack/spec@14.3.0
+
 ## 14.2.0
 
 ### Patch Changes

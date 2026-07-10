@@ -1,5 +1,87 @@
 # @objectstack/plugin-security
 
+## 14.3.0
+
+### Minor Changes
+
+- 02f6af4: ADR-0090 follow-through wave: enforce book audience at the read layer; finish the D2/D3 cleanup the P1 rename missed.
+
+  - **rest**: `/meta/book`, `/meta/doc`, and `/meta/book/:name/tree` now ENFORCE
+    the ADR-0046 §6.7 audience model (ADR-0049 — no unenforced security
+    properties): anonymous callers see only `public` books/docs;
+    `{ permissionSet }`-gated books require the caller to hold the named set;
+    a doc's effective audience is the union over the books that CLAIM it
+    (unclaimed docs default to `org`; orphan rendering never inherits `public`).
+    Gated evaluation fails CLOSED when holdings cannot be resolved. `doc`/`book`
+    single-item reads bypass the shared meta cache (per-caller gate vs shared ETag).
+  - **spec**: new pure helpers powering that gate — `audienceAllows`,
+    `resolveDocAudiences`, `docAudienceAllows`, `resolveBookClaimedDocs`
+    (+ `AudienceCaller`/`AudienceBook` types). BREAKING but ships as a `minor`
+    per the launch-window convention (pre-1.0 semantics — breaking changes do
+    not burn a major version number while the whole stack is in lockstep):
+    `METADATA_FORM_REGISTRY` keys `role`/`profile` are gone — `position` is the
+    registered form (the `position` type had LOST its form layout in the P1
+    rename); `EnvironmentArtifactMetadataSchema` declares `positions` instead of
+    retired `roles`/`profiles`.
+  - **plugin-security**: the `security` service exposes
+    `resolvePermissionSetNames(ctx)` — the same resolution as data-plane
+    enforcement, for the docs gate.
+  - **metadata**: artifact ingestion maps `positions → 'position'` (the stale
+    `roles → 'role'` mapping matched nothing since the P1 rename, silently
+    dropping compiled positions from metadata registration).
+  - **lint**: books join the D3 role-word scan (their `audience` is a
+    permission-model reference now), and a new advisory rule
+    `security-book-audience-unknown-set` flags a `{ permissionSet }` audience
+    naming a set the stack does not declare (runtime fails closed — the typo
+    cost is "nobody can read the book", so say it at author time).
+  - **platform-objects**: metadata-form translations regain `position` (all four
+    locales) and drop the retired `role`/`profile` groups, with a vocabulary
+    regression test.
+
+- 8f0b9df: fix(cli,plugin-security): `os meta resync` to re-materialize default permission sets from dist (#2705)
+
+  The default permission sets (`admin_full_access` / `member_default` /
+  `viewer_readonly` …) were seeded **insert-once** at boot: `bootstrapPlatformAdmin`
+  skipped any row that already existed and never wrote the shipped declaration
+  back. So editing a default set's source, recompiling, and restarting `os dev`
+  **without** `--fresh` left the runtime serving the OLD value — silently, because
+  the runtime authz resolver hydrates permission sets from the `sys_permission_set`
+  row (`resolve-authz-context.ts`), not from the in-memory dist. A permission-gated
+  surface (e.g. `setup.access`) would keep its stale behavior with no error, which
+  repeatedly misled debugging. Every _other_ metadata seed (declared permission
+  sets, positions, built-in roles, capabilities) already upserts on boot, leaving
+  the platform-default path the lone insert-once holdout — a gap ADR-0090 widened
+  by persisting more facets (`system_permissions`, delegated-admin `admin_scope`)
+  onto the same row.
+
+  The insert-once posture is deliberate for prod (it protects an admin's Setup
+  edits and keeps the defaults env-authored — the exact posture
+  `bootstrapDeclaredPermissions` relies on), so this is **not** switched to a blind
+  upsert. Instead:
+
+  - `bootstrapPlatformAdmin` gains a `resync` option. Default boot behavior is
+    unchanged (insert-once). Under `resync`, an existing row is reconciled to the
+    shipped dist **only** when the platform still owns it (`managed_by` absent or
+    `'platform'`); a row an admin took over (`managed_by:'user'`) or a package owns
+    (`'package'`) is an intentional override and is left untouched.
+  - New `os meta resync` command boots the runtime, reconciles the default
+    permission-set rows to the compiled dist, and reports what was reconciled /
+    preserved / newly seeded — **without touching business data** and without a
+    `--fresh` wipe. Gated behind a confirmation prompt (`--yes` to skip; `--json`
+    for scripting).
+
+  Prod boot is unaffected; the fix is entirely opt-in via the new command.
+
+### Patch Changes
+
+- Updated dependencies [2a71f48]
+- Updated dependencies [02f6af4]
+- Updated dependencies [c1064f1]
+  - @objectstack/platform-objects@14.3.0
+  - @objectstack/spec@14.3.0
+  - @objectstack/core@14.3.0
+  - @objectstack/formula@14.3.0
+
 ## 14.2.0
 
 ### Minor Changes

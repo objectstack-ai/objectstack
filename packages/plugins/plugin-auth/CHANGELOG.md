@@ -1,5 +1,82 @@
 # Changelog
 
+## 14.3.0
+
+### Minor Changes
+
+- 2a71f48: feat(auth): admin direct user management, phone sign-in, and identity bulk import (#2766, re-scoped #2758)
+
+  `sys_user` is managed by better-auth and its generic CRUD is suppressed, so
+  until now the only way to add a teammate was the email-dependent invite flow.
+  This ships three staged capabilities:
+
+  - **Admin direct user management** — `POST /api/v1/auth/admin/create-user`
+    and a wrapped `POST /api/v1/auth/admin/set-user-password` (ADR-0068
+    platform-admin gate; better-auth pipeline so credentials are real). Optional
+    generated temporary password (returned once, never persisted or logged) and
+    a new `sys_user.must_change_password` flag enforced through the ADR-0069
+    authGate (`403 PASSWORD_EXPIRED` until the user changes it). New
+    `create_user` action and upgraded `set_user_password` action on the Users
+    list — pure schema, no frontend changes.
+  - **Phone sign-in (opt-in `auth.plugins.phoneNumber`)** — better-auth
+    phoneNumber plugin, phone+password only (`POST /sign-in/phone-number`);
+    OTP flows stay off until SMS infrastructure exists. Adds
+    `sys_user.phone_number` (unique) / `phone_number_verified`. Phone-only
+    accounts get an undeliverable placeholder email
+    (`u-<random>@placeholder.invalid`, never derived from the phone number);
+    all auth mail callbacks refuse placeholder recipients.
+  - **Identity bulk import** — `POST /api/v1/auth/admin/import-users` accepts
+    the same payloads as the generic import routes (rows/csv/xlsx, dryRun,
+    upsert by email or phone) but writes every row through better-auth.
+    Password policies: `invite` (reset-link email per created user; requires an
+    EmailService) and `temporary` (per-row one-time passwords + forced change).
+    Sync only, ≤500 rows per request; no undo; upsert updates touch profile
+    fields only and can never reset an existing user's password.
+    `prepareImportRequest` and the CSV/xlsx parsers moved from rest-server.ts
+    to an exported `import-prepare.ts` module (behavior unchanged).
+
+- c1064f1: feat(messaging/auth): SMS infrastructure + phone-number OTP first-login/reset (#2780)
+
+  #2766 shipped phone+password sign-in but no OTP — the platform had no SMS
+  delivery capability. This adds the missing infrastructure end to end:
+
+  - **New `@objectstack/plugin-sms`** — `ISmsService`/`ISmsTransport` contracts
+    (spec) with Aliyun SMS (ACS3-HMAC-SHA256, template-based) and Twilio
+    transports plus a dev log fallback. Configured through the new `sms`
+    settings namespace (live provider rebind, encrypted secrets, send-test
+    action; `OS_SMS_*` env keys win at the resolver). Deliberately NO message
+    persistence and NO body logging — SMS bodies carry OTP codes.
+  - **Messaging `sms` channel** — registered at kernel:ready when an `sms`
+    service is present; `notify(channels:['sms'])` resolves
+    `sys_user.phone_number`, renders `(topic,'sms',locale)` templates, and
+    inherits outbox retry/dead-letter.
+  - **Phone OTP flows open** — the phoneNumber plugin's `sendOTP` /
+    `sendPasswordResetOTP` now deliver via SMS, enabling
+    `/phone-number/send-otp` + `/verify` (OTP sign-in/verification) and
+    `/phone-number/request-password-reset` + `/reset-password` (self-service
+    reset). Without a deliverable SMS service they keep failing loudly
+    (NOT_SUPPORTED); `features.phoneNumberOtp` advertises real availability.
+    Shipped with the abuse hardening: explicit `allowedAttempts: 3`, always-on
+    per-number cooldown (60s) + rolling-hour cap (5, secondaryStorage-shared
+    across nodes), `/phone-number/*` in the settings-bound per-IP rate-limit
+    rules, and OTP codes never reach logs or error messages.
+  - **Import SMS invites** — `/admin/import-users`'s `invite` policy now
+    supports phone-only rows: a credential-free invitation SMS points the
+    employee at phone-OTP first sign-in followed by self-set password; mixed
+    files validate the reachable channel per row.
+
+### Patch Changes
+
+- Updated dependencies [2a71f48]
+- Updated dependencies [02f6af4]
+- Updated dependencies [c1064f1]
+- Updated dependencies [bea4b92]
+  - @objectstack/platform-objects@14.3.0
+  - @objectstack/rest@14.3.0
+  - @objectstack/spec@14.3.0
+  - @objectstack/core@14.3.0
+  - @objectstack/types@14.3.0
+
 ## 14.2.0
 
 ### Patch Changes
