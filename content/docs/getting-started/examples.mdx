@@ -230,10 +230,10 @@ hotcrm/
 │   ├── dashboards/       # Executive, Sales, Service dashboards
 │   ├── data/             # Seed data for all objects
 │   ├── flows/            # 5 automation flows: case escalation, approval, ...
-│   ├── profiles/         # 5 security profiles: admin, sales rep, manager, ...
+│   ├── security/         # 5 permission sets: admin, sales rep, manager, ...
 │   ├── rag/              # 4 RAG pipelines: product info, competitive intel, ...
 │   ├── reports/          # 7 reports with tabular, summary, matrix formats
-│   └── sharing/          # Sharing rules, role hierarchy, org defaults
+│   └── sharing/          # Sharing rules, business-unit hierarchy, org defaults
 ```
 
 ### Features Showcased
@@ -244,7 +244,7 @@ hotcrm/
 | **State Machine** | Lead lifecycle: `new → contacted → qualified → converted` with `Lead.state.ts` |
 | **AI Agents** | Sales Assistant, Service Agent, Revenue Intelligence, Email Campaign, Lead Enrichment |
 | **RAG Pipelines** | Product info, competitive intel, sales knowledge, support knowledge |
-| **Security Model** | 5 profiles (Admin, Manager, Rep, Agent, Marketing), sharing rules, role hierarchy |
+| **Security Model** | 5 permission sets (Admin, Manager, Rep, Agent, Marketing), sharing rules, business-unit hierarchy |
 | **Automation** | Lead conversion, case escalation, opportunity approval, campaign enrollment, quote generation |
 | **Custom APIs** | `POST /lead-convert`, `GET /pipeline-stats` |
 | **Seed Data** | 50+ realistic records across all objects |

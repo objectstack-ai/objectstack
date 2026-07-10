@@ -66,7 +66,7 @@ const BaseSharingRuleSchema = z.object({
   // Recipient (Whom to share with)
   sharedWith: z.object({
     type: ShareRecipientType,
-    value: z.string().describe('ID or Code of the User/Group/Role'),
+    value: z.string().describe('ID or Code of the recipient (user / group / position / business unit)'),
   }).describe('The recipient of the shared access'),
 });
 
@@ -88,7 +88,7 @@ export const OwnerSharingRuleSchema = lazySchema(() => BaseSharingRuleSchema.ext
   ownedBy: z.object({
     type: ShareRecipientType,
     value: z.string(),
-  }).describe('Source group/role whose records are being shared'),
+  }).describe('Source group/position whose records are being shared'),
 }));
 
 /**

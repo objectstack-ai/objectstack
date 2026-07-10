@@ -167,7 +167,7 @@ end-user's `ExecutionContext` so tool calls respect row-level security:
 ```typescript
 const reply = await aiService.chatWithTools(messages, tools, {
   toolExecutionContext: {
-    actor: { id: currentUser.id, name: currentUser.displayName, roles: currentUser.roles, permissions: currentUser.permissions },
+    actor: { id: currentUser.id, name: currentUser.displayName, positions: currentUser.positions, permissions: currentUser.permissions },
     conversationId,
     environmentId,
   },

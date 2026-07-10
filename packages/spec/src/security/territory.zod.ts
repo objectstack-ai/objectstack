@@ -5,18 +5,19 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 
 /**
  * Territory Management Protocol
- * Defines a matrix reporting structure that exists parallel to the Role Hierarchy.
- * 
+ * Defines a matrix reporting structure that exists parallel to the
+ * business-unit hierarchy (ADR-0090 D3 — the org tree is `sys_business_unit`).
+ *
  * USE CASE:
  * - Enterprise Sales Teams (Geo-based: "EMEA", "APAC")
  * - Industry Verticals (Industry-based: "Healthcare", "Financial")
  * - Strategic Accounts (Account-based: "Strategic Accounts")
- * 
- * DIFFERENCE FROM ROLE:
- * - Role: Hierarchy of PEOPLE (Who reports to whom). Stable. HR-driven.
+ *
+ * DIFFERENCE FROM THE BUSINESS-UNIT TREE:
+ * - Business unit: Hierarchy of PEOPLE (org structure). Stable. HR-driven.
  * - Territory: Hierarchy of ACCOUNTS/REVENUE (Who owns which market). Flexible. Sales-driven.
  * - One User can be assigned to MANY Territories (Matrix).
- * - One User has only ONE Role (Tree).
+ * - One User belongs to one primary business unit (Tree).
  */
 
 import { lazySchema } from '../shared/lazy-schema';

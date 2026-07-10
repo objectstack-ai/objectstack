@@ -531,6 +531,19 @@ function validateSingleApp(config: ObjectStackDefinition): string[] {
 }
 
 /**
+ * Platform-provided object names (`sys_` / `cloud_` / `ai_` prefixes — the
+ * same classification the seed loader applies). These objects are contributed
+ * by the runtime, never by the stack, so cross-reference checks must not
+ * demand they appear in `config.objects`: an app legitimately seeds the
+ * ADR-0090 business-unit tree (`sys_business_unit`) or grants a delegated
+ * administrator CRUD on the RBAC link tables (`sys_user_position`, ADR-0090
+ * D12). The typo net stays intact for the stack's OWN objects.
+ */
+function isPlatformObjectName(name: string): boolean {
+  return /^(sys_|cloud_|ai_)/.test(name);
+}
+
+/**
  * Collect all object names defined in a stack definition.
  */
 function collectObjectNames(config: ObjectStackDefinition): Set<string> {
@@ -592,10 +605,15 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
     }
   }
 
-  // Validate seed data → object references
+  // Validate seed data → object references (platform objects are runtime-
+  // provided seed targets — see isPlatformObjectName).
   if (config.data) {
     for (const dataset of config.data) {
-      if (dataset.object && !objectNames.has(dataset.object)) {
+      if (
+        dataset.object &&
+        !objectNames.has(dataset.object) &&
+        !isPlatformObjectName(dataset.object)
+      ) {
         errors.push(
           `Seed data references object '${dataset.object}' which is not defined in objects.`,
         );
@@ -634,12 +652,14 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
   // explicit-permission-set path does not — so the grant is simply lost (e.g. a
   // public Web-to-Lead INSERT is denied for "roles []"). Fail loudly at build
   // time. (`validateNamespacePrefix`'s doc already assumes this check lives here.)
+  // Platform objects are legitimate grant targets (e.g. a delegated-admin set
+  // carrying CRUD on the RBAC link tables, ADR-0090 D12) — skip them here.
   if (config.permissions) {
     for (const perm of config.permissions) {
       const grants = (perm as { objects?: Record<string, unknown> }).objects;
       if (grants && typeof grants === 'object') {
         for (const objName of Object.keys(grants)) {
-          if (!objectNames.has(objName)) {
+          if (!objectNames.has(objName) && !isPlatformObjectName(objName)) {
             errors.push(
               `Permission '${(perm as { name?: string }).name ?? '(unnamed)'}' grants on object ` +
                 `'${objName}' which is not defined in objects.`,

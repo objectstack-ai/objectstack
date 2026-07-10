@@ -95,8 +95,8 @@ export const ToolSchema = lazySchema(() => z.object({
   /** Whether the tool requires human confirmation before execution */
   requiresConfirmation: z.boolean().default(false).describe('Require user confirmation before execution'),
 
-  /** Permission profiles/roles required to use this tool */
-  permissions: z.array(z.string()).optional().describe('Required permissions or roles'),
+  /** Permission-set capabilities required to use this tool */
+  permissions: z.array(z.string()).optional().describe('Required permission-set capabilities'),
 
   /** Whether the tool is enabled */
   active: z.boolean().default(true).describe('Whether the tool is enabled'),

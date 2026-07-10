@@ -152,11 +152,12 @@ That's the job of the other layers.
 // src/permissions/sales_rep.permission.ts
 import { definePermissionSet } from '@objectstack/spec';
 
-// A permission set (here used as a profile) keyed by object and field.
+// A permission set keyed by object and field — the only capability
+// container (ADR-0090: capability is the union of held sets; the old
+// profile concept was removed).
 export const SalesRepPermission = definePermissionSet({
   name: 'sales_rep',
   label: 'Sales Rep',
-  isProfile: true,
   objects: {
     customer: {
       allowCreate: true,

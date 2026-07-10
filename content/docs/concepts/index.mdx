@@ -133,11 +133,11 @@ This ensures ObjectStack apps can run on Node.js + PostgreSQL today, Python + SQ
 | Layer | Responsibility | Example |
 | :--- | :--- | :--- |
 | **Protocol** | Defines capabilities | A row-level-security policy slot (`operation` + `using` clause) |
-| **App** | Defines business logic | `{ operation: 'select', using: "role == 'admin'" }` |
+| **App** | Defines business logic | `{ operation: 'select', using: "owner_id == current_user.id" }` |
 | **Engine** | Enforces the logic | Compiles the `using` condition into a query filter |
 
 <Callout type="info">
-CRUD permissions (`allowRead`, `allowEdit`, …) are simple booleans — they grant or deny an operation. Record-level *conditional* access is a separate mechanism: [Row-Level Security](/docs/concepts/architecture) policies, whose `using` clause is a CEL predicate over context variables such as `current_user.roles` and `current_user.id`.
+CRUD permissions (`allowRead`, `allowEdit`, …) are simple booleans — they grant or deny an operation. Record-level *conditional* access is a separate mechanism: [Row-Level Security](/docs/concepts/architecture) policies, whose `using` clause is a CEL predicate over context variables such as `current_user.positions` and `current_user.id`.
 </Callout>
 
 ### Single Source of Truth

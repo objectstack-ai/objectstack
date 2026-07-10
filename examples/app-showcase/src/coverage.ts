@@ -121,10 +121,15 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
   // ── security ──
   permission: {
     status: 'demonstrated',
-    files: ['src/security/index.ts'],
-    notes: 'Includes MemberDefault — the isDefault permission set (ADR-0090 D5 suggestion flag).',
+    files: ['src/security/permission-sets.ts'],
+    notes:
+      'Full ADR-0090 authoring surface: CRUD+FLS+RLS, scope depth (own/org read-write asymmetry; hierarchy depths are enterprise hierarchy-security), VAMA, system permissions, the isDefault everyone-suggestion (D5), guest-safe capability (D9), and adminScope delegated administration (D12). Snapshot-gated by access-matrix.json (D6). tabPermissions is not demoable in a single-app package (ADR-0019 D3).',
   },
-  position: { status: 'demonstrated', files: ['src/security/index.ts'] },
+  position: {
+    status: 'demonstrated',
+    files: ['src/security/positions.ts'],
+    notes: 'Flat positions only (no hierarchy — ADR-0090 D3); everyone/guest are built-in anchors, never declared.',
+  },
 
   // ── ai ──
   agent: {
@@ -235,7 +240,8 @@ export const COVERAGE = {
       'automation/flows/index.ts — CRUD quartet (create: InboundTaskWebhookFlow, update: ReassignWizardFlow, get+delete: InquiryPurgeFlow), screen/approval/wait/subflow/map/connector_action across the chain; BPMN gateway/boundary forms waived (FLOW_NODE_WAIVERS) in favor of the ADR-0031 structured containers.',
   },
   capabilityChains: {
-    security: 'security/index.ts — roles + permission set (CRUD + FLS + RLS) + sharing + policy',
+    security:
+      'security/* — positions + permission sets (CRUD + FLS + RLS + depth + VAMA + system/tab permissions + adminScope) + sharing rules (position & BU-subtree recipients) + per-object OWD/externalSharingModel + seeded sys_business_unit tree + access-matrix.json gate (ADR-0090)',
     automation: 'automation/flows/index.ts (incl. approval nodes) + automation/webhooks/index.ts + automation/jobs/index.ts + system/emails/index.ts',
   },
   i18nThemingPortals: {

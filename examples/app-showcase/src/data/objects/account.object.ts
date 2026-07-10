@@ -18,6 +18,10 @@ export const Account = ObjectSchema.create({
   // object is RLS-owned / intentionally public; without this the new secure
   // default (unset OWD => private) would owner-filter it.
   sharingModel: 'public_read_write',
+  // [ADR-0090 D11] External principals may READ accounts (portal users see
+  // the customer directory) but never write them — a non-default external
+  // dial that is still strictly ≤ the internal `public_read_write`.
+  externalSharingModel: 'public_read',
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'building',

@@ -4,7 +4,8 @@ import { definePosition } from '@objectstack/spec/identity';
 import { definePermissionSet } from '@objectstack/spec/security';
 
 /**
- * Example roles — a small sales hierarchy.
+ * Example positions — flat distribution groups for a small sales team
+ * (positions carry no hierarchy — ADR-0090 D3).
  */
 export const SalesRepPosition = definePosition({
   name: 'sales_rep',

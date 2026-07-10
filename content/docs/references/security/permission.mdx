@@ -24,12 +24,28 @@ Refined with enterprise data lifecycle controls:
 ## TypeScript Usage
 
 ```typescript
-import { FieldPermission, ObjectAccessScope, ObjectPermission, PermissionSet } from '@objectstack/spec/security';
-import type { FieldPermission, ObjectAccessScope, ObjectPermission, PermissionSet } from '@objectstack/spec/security';
+import { AdminScope, FieldPermission, ObjectAccessScope, ObjectPermission, PermissionSet } from '@objectstack/spec/security';
+import type { AdminScope, FieldPermission, ObjectAccessScope, ObjectPermission, PermissionSet } from '@objectstack/spec/security';
 
 // Validate data
-const result = FieldPermission.parse(data);
+const result = AdminScope.parse(data);
 ```
+
+---
+
+## AdminScope
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **businessUnit** | `string` | ✅ | [ADR-0090 D12] Delegation boundary: sys_business_unit.name of the subtree root |
+| **includeSubtree** | `boolean` | ✅ | Cover descendant business units too (default true) |
+| **manageAssignments** | `boolean` | ✅ | Manage user↔position assignments within the subtree |
+| **manageBindings** | `boolean` | ✅ | Manage position↔permission-set bindings within the subtree |
+| **authorEnvironmentSets** | `boolean` | ✅ | Author environment-owned permission sets |
+| **assignablePermissionSets** | `string[]` | ✅ | Allowlist of permission-set names the delegate may hand out |
+
 
 ---
 
@@ -96,6 +112,7 @@ const result = FieldPermission.parse(data);
 | **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional | App/tab visibility: visible, hidden, default_on (shown by default), default_off (available but hidden initially) |
 | **rowLevelSecurity** | `Object[]` | optional | Row-level security policies (see rls.zod.ts for full spec) |
 | **contextVariables** | `Record<string, any>` | optional | Context variables for RLS evaluation |
+| **adminScope** | `Object` | optional | [ADR-0090 D12] Scoped delegated-administration grant (BU subtree + assignable-set allowlist) |
 
 
 ---

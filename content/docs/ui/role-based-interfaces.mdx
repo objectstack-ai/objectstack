@@ -1,9 +1,9 @@
 ---
-title: Role-based interfaces
+title: Audience-based interfaces
 description: The same data serves different audiences. Give end users a curated app/page and keep builder surfaces — Studio, raw object tables, automation config — out of their view. Separate consumer and builder paths by default.
 ---
 
-# Role-based interfaces
+# Audience-based interfaces
 
 ## Scenario
 
@@ -18,7 +18,7 @@ description: The same data serves different audiences. Give end users a curated 
 | **End user (consumer)** | a curated **App** → `page` / `view` (interface mode) | `App.requiredPermissions`, permission-set `tabPermissions`, nav-item gating |
 | **Builder / admin** | **Setup / Studio**, raw object tables (data mode) | capabilities: `setup.access`, `studio.access`, `manage_metadata` |
 
-The built-in profiles already encode this split: `member_default` and `viewer_readonly` do **not** carry `studio.access` / `manage_metadata`, so Studio and schema-design surfaces are invisible to them; `admin_full_access` and `organization_admin` do (see [`default-permission-sets.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/plugins/plugin-security/src/objects/default-permission-sets.ts)).
+The built-in permission sets already encode this split: `member_default` and `viewer_readonly` do **not** carry `studio.access` / `manage_metadata`, so Studio and schema-design surfaces are invisible to them; `admin_full_access` and `organization_admin` do (see [`default-permission-sets.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/plugins/plugin-security/src/objects/default-permission-sets.ts)).
 
 ### 1. Gate the app and its navigation
 
@@ -40,7 +40,7 @@ defineApp({
 Each nav item supports three independent gates ([`app.zod`](/docs/references/ui/app)):
 
 - `requiredPermissions` — RBAC capability (e.g. `manage_metadata`).
-- `visible` — a CEL predicate (e.g. `P\`'org_admin' in current_user.roles\``).
+- `visible` — a CEL predicate (e.g. `P\`'org_admin' in current_user.positions\``).
 - `requiresObject` / `requiresService` — hide unless a runtime object/service is installed.
 
 **Hide, don't disable.** A disabled-but-visible builder entry is still noise and still confuses end users. Gated nav items are *not rendered* for users who lack the capability.
@@ -55,11 +55,11 @@ Use a [curated view](/docs/ui/field-grouping-and-order) (selected fields, progre
 
 ## Why
 
-This is the lesson from Airtable's surfaces: the **Automations tab is visible to every base collaborator, even read-only** — so end users see builder chrome they can't use and don't understand. ObjectStack avoids that by making "consumer vs builder" a capability boundary that the built-in profiles already draw, plus per-nav gating that *omits* (not merely disables) what a user can't use. Action gates are **dual-surface** (ADR-0066 D4): the ActionRunner hides/disables an action in the UI **and** the server rejects the call — no "UI-gated but server-open" footgun.
+This is the lesson from Airtable's surfaces: the **Automations tab is visible to every base collaborator, even read-only** — so end users see builder chrome they can't use and don't understand. ObjectStack avoids that by making "consumer vs builder" a capability boundary that the built-in permission sets already draw, plus per-nav gating that *omits* (not merely disables) what a user can't use. Action gates are **dual-surface** (ADR-0066 D4): the ActionRunner hides/disables an action in the UI **and** the server rejects the call — no "UI-gated but server-open" footgun.
 
 ## Runnable example
 
-- Profiles: [`default-permission-sets.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/plugins/plugin-security/src/objects/default-permission-sets.ts) — `member_default` / `viewer_readonly` vs `organization_admin` / `admin_full_access`.
+- Permission sets: [`default-permission-sets.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/plugins/plugin-security/src/objects/default-permission-sets.ts) — `member_default` / `viewer_readonly` vs `organization_admin` / `admin_full_access`.
 - Apps: [`examples/app-showcase/src/apps`](https://github.com/objectstack-ai/framework/tree/main/examples/app-showcase/src/apps).
 
 ## Anti-patterns

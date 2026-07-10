@@ -15,9 +15,9 @@ and Salesforce Criteria-Based Sharing Rules.
 
 Row-Level Security (RLS) allows you to control which rows users can access
 
-in database tables based on their identity and role. Unlike object-level
+in database tables based on their identity and positions. Unlike
 
-permissions (CRUD), RLS provides record-level filtering.
+object-level permissions (CRUD), RLS provides record-level filtering.
 
 ## Use Cases
 
@@ -97,15 +97,17 @@ using: 'organization_id == current_user.organization_id'
 
 ## Salesforce Sharing Rules Comparison
 
-Salesforce uses "Sharing Rules" and "Role Hierarchy" for record-level access.
+Salesforce uses "Sharing Rules" and a visibility hierarchy for record-level
+
+access (our equivalent hierarchy is the business-unit tree, ADR-0090 D3).
 
 ObjectStack RLS provides similar functionality with more flexibility.
 
 Salesforce:
 
-- Criteria-Based Sharing: Share records matching criteria with users/roles
+- Criteria-Based Sharing: Share records matching criteria with users/groups
 
-- Owner-Based Sharing: Share records based on owner's role
+- Owner-Based Sharing: Share records based on who owns them
 
 - Manual Sharing: Individual record sharing
 
@@ -123,7 +125,7 @@ ObjectStack RLS:
 
 2. **Define INSERT/UPDATE CHECK Policies**: Prevent data leakage
 
-3. **Use Role-Based Policies**: Apply different rules to different roles
+3. **Use Position-Scoped Policies**: Apply different rules to different positions
 
 4. **Test Thoroughly**: RLS can have complex interactions
 

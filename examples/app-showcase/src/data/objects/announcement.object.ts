@@ -20,9 +20,16 @@ export const Announcement = ObjectSchema.create({
   icon: 'megaphone',
   description: 'A team announcement everyone can read but only its owner can edit — `read` OWD (ADR-0056).',
 
-  // Everyone reads; owner writes. Canonical OWD name (ADR-0056 D1); `read` is
-  // the legacy alias. No RLS authored.
+  // Everyone reads; owner writes. Canonical OWD vocabulary only — the legacy
+  // aliases were removed from the enum (ADR-0090 D4). No RLS authored.
   sharingModel: 'public_read',
+  // [ADR-0090 D11] The EXTERNAL dial: portal/partner principals
+  // (`audience: 'external'`) get their own, stricter baseline. Internal
+  // announcements are public_read for employees but PRIVATE to external
+  // users — an external portal user sees only announcements they own or were
+  // explicitly shared. Must never be wider than the internal model
+  // (validated: external ≤ internal).
+  externalSharingModel: 'private',
 
   fields: {
     title: Field.text({ label: 'Title', required: true, searchable: true, maxLength: 160 }),

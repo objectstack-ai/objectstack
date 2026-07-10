@@ -25,7 +25,10 @@ describe('showcase stack', () => {
     // leaving 3 dataset-bound analytics reports.
     expect((stack.reports ?? []).length).toBe(3);
     expect((stack.flows ?? []).length).toBeGreaterThan(0);
-    expect((stack.positions ?? []).length).toBe(3);
+    // Six flat positions (contributor/manager/exec/auditor/ops/
+    // field_ops_delegate) — the ADR-0090 distribution layer; `everyone` and
+    // `guest` are built-in anchors and never declared by the app.
+    expect((stack.positions ?? []).length).toBe(6);
     expect((stack.agents ?? []).length).toBe(0); // AI agents are an enterprise (service-ai) feature; the open showcase ships none
   });
 });

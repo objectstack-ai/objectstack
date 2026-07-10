@@ -108,7 +108,7 @@ Resolves the authenticated user from a request. Returns `undefined` when the req
 ```typescript
 const user = await authService.getCurrentUser?.(request);
 if (user) {
-  console.log(`Request from ${user.name} (${user.roles?.join(', ')})`);
+  console.log(`Request from ${user.name} (${user.positions?.join(', ')})`);
 }
 ```
 

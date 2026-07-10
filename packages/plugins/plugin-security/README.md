@@ -9,7 +9,7 @@
 
 `plugin-security` hooks into the ObjectQL pipeline and applies authorization on every read and write:
 
-1. **Resolve permission sets** — match user roles against `SysPermissionSet` metadata.
+1. **Resolve permission sets** — expand the user's positions and direct grants against `SysPermissionSet` metadata.
 2. **Check object CRUD** — `allowRead`, `allowCreate`, `allowEdit`, `allowDelete`.
 3. **Inject RLS** — compile row-level policy expressions into query filters.
 4. **Mask fields** — remove non-readable fields from results; flag non-editable fields on writes.
@@ -60,10 +60,10 @@ In CLI / dev-server mode the `OS_MULTI_ORG_ENABLED` environment variable (defaul
 | Export | Kind | Description |
 |:---|:---|:---|
 | `SecurityPlugin` | class | Kernel plugin that installs the four-step security chain. |
-| `PermissionEvaluator` | class | Evaluates object-level CRUD permissions across roles (most-permissive merge). |
+| `PermissionEvaluator` | class | Evaluates object-level CRUD permissions across the held permission sets (most-permissive merge). |
 | `RLSCompiler` | class | Compiles RLS expressions into ObjectQL filter AST. |
 | `FieldMasker` | class | Strips non-readable fields and identifies non-editable ones. |
-| `SysRole`, `SysPermissionSet` | objects | Metadata objects registered by the plugin. |
+| `SysPosition`, `SysPermissionSet` | objects | Metadata objects registered by the plugin. |
 
 ## System objects
 
@@ -71,10 +71,10 @@ The plugin contributes these system objects to the kernel:
 
 | Object | Purpose |
 |:---|:---|
-| `sys_position` | User role definitions. |
-| `sys_permission_set` | Bundles object and field permissions; can include RLS expressions. |
+| `sys_position` | Position (岗位) definitions — the flat permission-set distribution layer (ADR-0090 D3). |
+| `sys_permission_set` | Bundles object and field permissions; can include RLS expressions and a delegated-admin `admin_scope` (ADR-0090 D12). |
 
-Assignment tables (role ↔ user, role ↔ permission_set) are provided by [`@objectstack/plugin-auth`](../plugin-auth) when used together.
+Assignment tables (position ↔ user, position ↔ permission_set, user ↔ permission_set) are registered alongside and governed by the delegated-admin and audience-anchor gates.
 
 ## RLS expression language
 

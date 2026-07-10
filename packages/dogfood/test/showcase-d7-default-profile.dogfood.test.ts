@@ -52,10 +52,12 @@ describe('showcase: app-declared default profile, CLI-wired (ADR-0056 D7)', () =
     expect(r.status, 'declared default grants announcement read').toBe(200);
   });
 
-  it('and NOT by the built-in member_default wildcard (private_note is denied)', async () => {
-    const r = await stack.apiAs(memberToken, 'GET', '/data/showcase_private_note');
+  it('and NOT by the built-in member_default wildcard (contact is denied)', async () => {
+    const r = await stack.apiAs(memberToken, 'GET', '/data/showcase_contact');
     // member_default has a wildcard grant → would be 200. The app default grants
-    // no private_note access → denied, proving the declared default is in force.
-    expect(r.status, 'declared default does NOT grant private_note').not.toBe(200);
+    // no contact access → denied, proving the declared default is in force.
+    // (private_note is no longer a valid canary: the ADR-0090 zoo deliberately
+    // grants it in the baseline as the personal-data-on-private-OWD demo.)
+    expect(r.status, 'declared default does NOT grant showcase_contact').not.toBe(200);
   });
 });

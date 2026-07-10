@@ -1,0 +1,136 @@
+---
+title: Explain
+description: Explain protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+[ADR-0090 D6] Access-explanation contract — `explain(principal, object,
+
+operation)` as a first-class API.
+
+The explain engine (`@objectstack/plugin-security`) walks the SAME code
+
+paths as the enforcement middleware — the same permission-set resolution,
+
+the same evaluator, the same RLS compiler — and reports what each layer of
+
+the evaluation pipeline contributed to the final decision. "Explained by
+
+construction": the report can never drift from enforcement because it IS
+
+enforcement, minus the throw.
+
+Layer order mirrors the runtime pipeline:
+
+principal → required_permissions → object_crud → fls → owd_baseline →
+
+depth → sharing → vama_bypass → rls.
+
+<Callout type="info">
+**Source:** `packages/spec/src/security/explain.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { AccessMatrix, AccessMatrixEntry, ExplainDecision, ExplainLayer, ExplainOperation, ExplainRequest } from '@objectstack/spec/security';
+import type { AccessMatrix, AccessMatrixEntry, ExplainDecision, ExplainLayer, ExplainOperation, ExplainRequest } from '@objectstack/spec/security';
+
+// Validate data
+const result = AccessMatrix.parse(data);
+```
+
+---
+
+## AccessMatrix
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **version** | `number` | ✅ |  |
+| **entries** | `Object[]` | ✅ |  |
+
+
+---
+
+## AccessMatrixEntry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **permissionSet** | `string` | ✅ |  |
+| **object** | `string` | ✅ |  |
+| **create** | `boolean` | ✅ |  |
+| **read** | `boolean` | ✅ |  |
+| **edit** | `boolean` | ✅ |  |
+| **delete** | `boolean` | ✅ |  |
+| **viewAllRecords** | `boolean` | ✅ |  |
+| **modifyAllRecords** | `boolean` | ✅ |  |
+| **readScope** | `string` | optional |  |
+| **writeScope** | `string` | optional |  |
+| **sharingModel** | `string` | optional |  |
+
+
+---
+
+## ExplainDecision
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowed** | `boolean` | ✅ |  |
+| **object** | `string` | ✅ |  |
+| **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge'>` | ✅ |  |
+| **principal** | `Object` | ✅ |  |
+| **layers** | `Object[]` | ✅ |  |
+| **readFilter** | `any` | optional |  |
+
+
+---
+
+## ExplainLayer
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **layer** | `Enum<'principal' \| 'required_permissions' \| 'object_crud' \| 'fls' \| 'owd_baseline' \| 'depth' \| 'sharing' \| 'vama_bypass' \| 'rls'>` | ✅ |  |
+| **verdict** | `Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>` | ✅ |  |
+| **detail** | `string` | ✅ |  |
+| **contributors** | `Object[]` | ✅ |  |
+
+
+---
+
+## ExplainOperation
+
+### Allowed Values
+
+* `read`
+* `create`
+* `update`
+* `delete`
+* `transfer`
+* `restore`
+* `purge`
+
+
+---
+
+## ExplainRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ |  |
+| **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge'>` | ✅ |  |
+| **userId** | `string` | optional |  |
+
+
+---
+

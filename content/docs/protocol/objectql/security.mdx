@@ -36,10 +36,10 @@ const accounts = await dataEngine.find('account');
 // owner_id == current_user.id (CEL) → compiled to a row filter by the RLS compiler
 ```
 
-The model is composed of three distinct metadata types (see `packages/spec/src/security` and `packages/spec/src/identity`):
+The model is composed of three distinct metadata types (see `packages/spec/src/security` and `packages/spec/src/identity`), per the [Permission Model v2 vocabulary](/docs/permissions) (ADR-0090):
 
-- **Permission Set** (`permission` / `profile` metadata) — the CRUD/FLS grant. A *profile* is a permission set with `isProfile: true`.
-- **Role** (`role` metadata) — the reporting hierarchy used for ownership-based visibility roll-up.
+- **Permission Set** (`permission` metadata) — the only capability container: CRUD, FLS, RLS, scope depth, View/Modify-All, system permissions. There is no profile concept — a user's capability is the *union* of every set they hold.
+- **Position** (`position` metadata) — the flat distribution layer: who holds which permission sets. Hierarchy lives in the **business-unit tree** (`sys_business_unit`), never on positions.
 - **Sharing Rule** + **Organization-Wide Defaults (OWD)** — broaden the baseline visibility set for an object.
 
 ---
@@ -81,7 +81,6 @@ Object permissions live inside a **permission set**. Each entry in the `objects`
 # sales_rep.permission.yml
 name: sales_rep            # lowercase snake_case, required
 label: Sales Representative
-isProfile: false           # set true to make this a base profile
 objects:
   account:
     allowCreate: true
@@ -106,7 +105,7 @@ Beyond the four CRUD flags, the schema also exposes lifecycle and super-user gra
 | `viewAllRecords` | Read every record, bypassing sharing & ownership |
 | `modifyAllRecords` | Write every record, bypassing sharing & ownership |
 
-> Permission sets are layered: a user has exactly one **profile** (`isProfile: true`) plus zero or more add-on permission sets. Grants are additive (a `true` anywhere wins).
+> Permission sets are **additive-only**: a user's effective capability is the union of every set they hold — directly, via positions, or via the built-in `everyone` baseline (ADR-0090 D5). A `true` anywhere wins; there are no subtraction sets — to withhold, don't grant.
 
 ### Permission Check Flow
 
@@ -129,7 +128,7 @@ Return filtered result
 
 ## 2. Row-Level Security
 
-Row-level filtering is expressed as **RLS policies** (`RowLevelSecurityPolicySchema` in `packages/spec/src/security/rls.zod.ts`). Policies carry a **CEL** `using` clause (for SELECT/UPDATE/DELETE) and/or a `check` clause (for INSERT/UPDATE) — canonical CEL since ADR-0058; a legacy SQL-style `=`/`IN (...)` predicate still compiles via a **deprecated bridge** (warns). Multiple policies for one object are combined with OR (most-permissive wins). Available context variables are the **unique identifiers and membership sets** the runtime pre-resolves: equality predicates may use `current_user.id`, `current_user.email` (the unique, seedable owner anchor), or `current_user.organization_id`; set-membership predicates may use `id in current_user.org_user_ids`, `id in current_user.roles`, or any §7.3.1 set staged in `ExecutionContext.rlsMembership`. Display `name` and arbitrary user fields are **intentionally not** resolvable — only unique identifiers, so an ownership predicate can never leak access through a name collision.
+Row-level filtering is expressed as **RLS policies** (`RowLevelSecurityPolicySchema` in `packages/spec/src/security/rls.zod.ts`). Policies carry a **CEL** `using` clause (for SELECT/UPDATE/DELETE) and/or a `check` clause (for INSERT/UPDATE) — canonical CEL since ADR-0058; a legacy SQL-style `=`/`IN (...)` predicate still compiles via a **deprecated bridge** (warns). Multiple policies for one object are combined with OR (most-permissive wins). Available context variables are the **unique identifiers and membership sets** the runtime pre-resolves: equality predicates may use `current_user.id`, `current_user.email` (the unique, seedable owner anchor), or `current_user.organization_id`; set-membership predicates may use `id in current_user.org_user_ids`, `'manager' in current_user.positions`, or any §7.3.1 set staged in `ExecutionContext.rlsMembership`. Display `name` and arbitrary user fields are **intentionally not** resolvable — only unique identifiers, so an ownership predicate can never leak access through a name collision.
 
 Policies can be attached to a permission set via its `rowLevelSecurity` array, or registered as standalone metadata.
 
@@ -162,11 +161,11 @@ rowLevelSecurity:
     check: 'organization_id == current_user.organization_id'
 ```
 
-The `RLS` helper factory exports `RLS.tenantPolicy(object)` / `RLS.ownerPolicy(object)` / `RLS.rolePolicy(...)` to generate these.
+The `RLS` helper factory exports `RLS.tenantPolicy(object)` / `RLS.ownerPolicy(object)` / `RLS.positionPolicy(...)` to generate these.
 
-### Role-Scoped Access
+### Position-Scoped Access
 
-`roles` restricts a policy to specific roles; omit it to apply to everyone (except `bypassRoles`):
+`positions` restricts a policy to users holding one of the named positions (ADR-0090 D3; formerly `roles`); omit it to apply to everyone:
 
 ```yaml
 rowLevelSecurity:
@@ -174,7 +173,7 @@ rowLevelSecurity:
     object: task
     operation: select
     using: 'assigned_to_id in current_user.team_member_ids'  # pre-resolved §7.3.1 set — NOT a subquery (ADR-0055)
-    roles: [manager, director]
+    positions: [manager, director]
 ```
 
 ### Regional / Territory Access
@@ -185,7 +184,7 @@ rowLevelSecurity:
     object: account
     operation: select
     using: 'territory_id in current_user.territory_ids'  # pre-resolved set (current_user.region is not exposed)
-    roles: [sales_rep]
+    positions: [sales_rep]
 ```
 
 ### Time-Based Access
@@ -264,12 +263,12 @@ fields:
 
 ## 5. Sharing Rules & Organization-Wide Defaults
 
-The baseline visibility of an object is set by its **Organization-Wide Default (OWD)** — the `sharingModel` field on the object (`packages/spec/src/data/object.zod.ts`), one of `private`, `read`, `read_write`, `full`. **Sharing rules** then grant *additional* access on top of that baseline.
+The baseline visibility of an object is set by its **Organization-Wide Default (OWD)** — the `sharingModel` field on the object (`packages/spec/src/data/object.zod.ts`), one of the four canonical values `private`, `public_read`, `public_read_write`, `controlled_by_parent` (ADR-0090 D4 — the legacy aliases `read`/`read_write`/`full` were **removed from the enum**; authoring rejects them). A custom object with no declared `sharingModel` resolves to **`private`** (ADR-0090 D1 — the unset state no longer means public). An optional `externalSharingModel` (same enum, default `private`, never wider than the internal value) is the stricter dial for external portal/partner principals (ADR-0090 D11). **Sharing rules** then grant *additional* access on top of that baseline — sharing only ever widens, RLS only ever narrows.
 
 ```yaml
 # account.object.yml
 name: account
-sharingModel: private   # owner-only by default
+sharingModel: private   # owner-only baseline (also the D1 default)
 ```
 
 ### Criteria-Based Sharing
@@ -284,13 +283,15 @@ object: account
 accessLevel: read           # read | edit | full
 condition: 'record.account_type == "Enterprise"'
 sharedWith:
-  type: role                # user | group | role | role_and_subordinates | guest
+  type: position            # user | group | position | unit_and_subordinates | guest
   value: sales_rep
 ```
 
+`unit_and_subordinates` expands a **business-unit subtree**: the unit named by `value` plus every descendant unit's members (ADR-0057 D5 / ADR-0090 D3 — the former position-tree walk was re-homed onto the `sys_business_unit` tree).
+
 ### Owner-Based Sharing
 
-Share records owned by one group/role with another (`OwnerSharingRuleSchema`):
+Share records owned by one group with another (`OwnerSharingRuleSchema`):
 
 ```yaml
 name: share_west_region
@@ -298,12 +299,14 @@ type: owner
 object: account
 accessLevel: edit
 ownedBy:
-  type: role
+  type: position
   value: west_region_reps
 sharedWith:
-  type: role
+  type: position
   value: west_region_managers
 ```
+
+> **Enforcement status.** Criteria rules with `user` / `position` / `unit_and_subordinates` recipients compile and enforce (the CEL condition lowers to a runtime filter that materializes `sys_record_share` grants, ADR-0058 D3). Owner-type rules and `group`/`guest` recipients are `[experimental — not enforced]`: the seed bootstrap skips them (logged) rather than seeding a permissive match-all (ADR-0049).
 
 > `accessLevel` is one of `read`, `edit`, or `full`. `full` additionally grants transfer/share/delete.
 
@@ -384,9 +387,8 @@ fields:
 ### Principle of Least Privilege
 
 ```yaml
-# Restrictive profile: read only what you own
+# Restrictive permission set: read only what you own
 name: account_owner
-isProfile: true
 objects:
   account:
     allowRead: true

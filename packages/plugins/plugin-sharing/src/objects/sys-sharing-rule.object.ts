@@ -137,7 +137,7 @@ export const SysSharingRule = ObjectSchema.create({
         label: 'Recipient Type',
         required: true,
         defaultValue: 'business_unit',
-        description: 'Kind of principal that receives access — expanded to user grants at evaluation time. `department` walks the parent_business_unit_id tree; `team` is flat (better-auth); `role` is the role\'s direct members; `unit_and_subordinates` walks the sys_position.parent hierarchy to also include every subordinate role (ADR-0056 D6).',
+        description: 'Kind of principal that receives access — expanded to user grants at evaluation time. `business_unit` walks the parent_business_unit_id tree; `team` is flat (better-auth); `position` expands the position\'s holders (positions are flat, ADR-0090 D3); `unit_and_subordinates` expands the named business unit PLUS every descendant unit\'s members via the sys_business_unit tree (ADR-0057 D5).',
         group: 'Recipient',
       },
     ),

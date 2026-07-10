@@ -520,6 +520,61 @@ describe('defineStack', () => {
     expect(() => defineStack(config, { strict: true })).not.toThrow();
   });
 
+  it('should allow permission grants on platform (sys_) objects the runtime provides', () => {
+    // ADR-0090 D12: a delegated-admin set carries CRUD on the RBAC link
+    // tables — platform objects contributed by the runtime, not the stack.
+    const config = {
+      manifest: baseManifest,
+      objects: [
+        { name: 'crm_lead', fields: { email: { type: 'email' } } },
+      ],
+      permissions: [
+        {
+          name: 'delegate_admin',
+          objects: {
+            sys_user_position: { allowRead: true, allowCreate: true },
+            sys_business_unit: { allowRead: true },
+          },
+          adminScope: { businessUnit: 'Field Operations', manageAssignments: true },
+        },
+      ],
+    };
+    expect(() => defineStack(config, { strict: true })).not.toThrow();
+  });
+
+  it('should allow seed data targeting platform (sys_) objects', () => {
+    // The seed loader officially supports sys_* targets (isSystem context);
+    // e.g. an app seeding the ADR-0090 business-unit tree.
+    const config = {
+      manifest: baseManifest,
+      objects: [
+        { name: 'crm_lead', fields: { email: { type: 'email' } } },
+      ],
+      data: [
+        {
+          object: 'sys_business_unit',
+          mode: 'upsert',
+          externalId: 'id',
+          records: [{ id: 'bu_root', name: 'HQ', kind: 'company' }],
+        },
+      ],
+    };
+    expect(() => defineStack(config, { strict: true })).not.toThrow();
+  });
+
+  it('should still reject seed data targeting an undefined non-platform object', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [
+        { name: 'crm_lead', fields: { email: { type: 'email' } } },
+      ],
+      data: [
+        { object: 'lead', records: [{ name: 'typo — crm_lead was meant' }] },
+      ],
+    };
+    expect(() => defineStack(config, { strict: true })).toThrow("object 'lead'");
+  });
+
   it('should skip cross-reference validation when no objects are defined', () => {
     const config = {
       manifest: baseManifest,

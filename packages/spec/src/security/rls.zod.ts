@@ -11,8 +11,8 @@ import { z } from 'zod';
  * ## Overview
  * 
  * Row-Level Security (RLS) allows you to control which rows users can access
- * in database tables based on their identity and role. Unlike object-level
- * permissions (CRUD), RLS provides record-level filtering.
+ * in database tables based on their identity and positions. Unlike
+ * object-level permissions (CRUD), RLS provides record-level filtering.
  * 
  * ## Use Cases
  * 
@@ -64,12 +64,13 @@ import { z } from 'zod';
  * 
  * ## Salesforce Sharing Rules Comparison
  * 
- * Salesforce uses "Sharing Rules" and "Role Hierarchy" for record-level access.
+ * Salesforce uses "Sharing Rules" and a visibility hierarchy for record-level
+ * access (our equivalent hierarchy is the business-unit tree, ADR-0090 D3).
  * ObjectStack RLS provides similar functionality with more flexibility.
- * 
+ *
  * Salesforce:
- * - Criteria-Based Sharing: Share records matching criteria with users/roles
- * - Owner-Based Sharing: Share records based on owner's role
+ * - Criteria-Based Sharing: Share records matching criteria with users/groups
+ * - Owner-Based Sharing: Share records based on who owns them
  * - Manual Sharing: Individual record sharing
  * 
  * ObjectStack RLS:
@@ -81,7 +82,7 @@ import { z } from 'zod';
  * 
  * 1. **Always Define SELECT Policy**: Control what users can view
  * 2. **Define INSERT/UPDATE CHECK Policies**: Prevent data leakage
- * 3. **Use Role-Based Policies**: Apply different rules to different roles
+ * 3. **Use Position-Scoped Policies**: Apply different rules to different positions
  * 4. **Test Thoroughly**: RLS can have complex interactions
  * 5. **Monitor Performance**: Complex RLS policies can impact query performance
  * 
@@ -291,7 +292,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
    * 2. `field = 'literal'` — equality against a single-quoted string literal
    * 3. `field IN (current_user.<array_prop>)` — set membership against a
    *    pre-resolved id array (see "Dynamic membership" below)
-   * 4. `1 = 1` — always true / no restriction (privileged-role allow-all)
+   * 4. `1 = 1` — always true / no restriction (privileged-position allow-all)
    *
    * There is intentionally **no** support for `AND`/`OR`/`NOT`, comparison
    * operators other than `=`, `IS NULL`/`IS NOT NULL`, `NOT IN`, `LIKE`/
@@ -324,7 +325,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
    * @example "owner_id = current_user.id"
    * @example "status = 'published'"
    * @example "assigned_to_id IN (current_user.team_member_ids)" // §7.3.1 pre-resolved
-   * @example "1 = 1" // privileged-role allow-all
+   * @example "1 = 1" // privileged-position allow-all
    */
   using: z.string()
     .optional()
@@ -571,7 +572,7 @@ export const RLS = {
   }),
 
   /**
-   * Create a role-based policy
+   * Create a position-scoped policy
    */
   positionPolicy: (object: string, positions: string[], condition: string): RowLevelSecurityPolicy => ({
     name: `${object}_${positions.join('_')}_access`,

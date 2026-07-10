@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineSeed } from '@objectstack/spec/data';
+import { defineSeed, SeedSchema } from '@objectstack/spec/data';
 import { cel } from '@objectstack/spec';
 import { Account } from '../objects/account.object.js';
 import { Preference } from '../objects/preference.object.js';
@@ -130,6 +130,37 @@ const businessUnits = defineSeed(BusinessUnit, {
   ],
 });
 
+/**
+ * The REAL org tree — `sys_business_unit` rows (platform identity object),
+ * distinct from the `showcase_business_unit` DEMO object above (which only
+ * feeds the `tree` view). This tree is what the ADR-0090 permission model
+ * actually evaluates against:
+ *   • depth grants (`readScope: 'unit' / 'unit_and_below'`) resolve membership
+ *     through it (Setup → Access Control → Business Units, org-chart view);
+ *   • the `share_new_inquiries_with_field_ops` sharing rule expands the
+ *     `bu_field_ops` SUBTREE (Field Operations + West/East Coast);
+ *   • the `showcase_field_ops_delegate` adminScope is bounded by it.
+ *
+ * Seeded with EXPLICIT ids so metadata can reference units statically (the
+ * sharing-rule recipient wants the row id; the adminScope wants the `name`).
+ * The tree is normally environment-owned admin data — seeding it here plays
+ * the admin's part so the permission demos work on a fresh boot. Users can't
+ * be seeded (they sign up), so user↔unit membership (`sys_business_unit_member`)
+ * and position assignments stay runtime admin actions.
+ */
+const orgUnits = SeedSchema.parse({
+  object: 'sys_business_unit',
+  mode: 'upsert',
+  externalId: 'id',
+  records: [
+    { id: 'bu_acme', name: 'Acme Corporation', code: 'ACME', kind: 'company', active: true },
+    { id: 'bu_field_ops', name: 'Field Operations', code: 'FOPS', kind: 'division', parent_business_unit_id: 'bu_acme', active: true },
+    { id: 'bu_west_coast', name: 'West Coast', code: 'FOPS-W', kind: 'office', parent_business_unit_id: 'bu_field_ops', active: true },
+    { id: 'bu_east_coast', name: 'East Coast', code: 'FOPS-E', kind: 'office', parent_business_unit_id: 'bu_field_ops', active: true },
+    { id: 'bu_hq_finance', name: 'HQ Finance', code: 'FIN', kind: 'department', parent_business_unit_id: 'bu_acme', active: true },
+  ],
+});
+
 const teams = defineSeed(Team, {
   mode: 'upsert',
   externalId: 'name',
@@ -255,4 +286,4 @@ const preferences = defineSeed(Preference, {
   ],
 });
 
-export const ShowcaseSeedData = [accounts, contacts, inquiries, products, projects, tasks, categories, businessUnits, teams, memberships, fieldZoo, invoices, invoiceLines, preferences];
+export const ShowcaseSeedData = [accounts, contacts, inquiries, products, projects, tasks, categories, businessUnits, orgUnits, teams, memberships, fieldZoo, invoices, invoiceLines, preferences];

@@ -164,8 +164,8 @@ export const AgentSchema = lazySchema(() => z.object({
   active: z.boolean().default(true),
   access: z.array(z.string()).optional().describe('Who can chat with this agent'),
 
-  /** Permission profiles/roles required to use this agent */
-  permissions: z.array(z.string()).optional().describe('Required permissions or roles'),
+  /** Permission-set capabilities required to use this agent */
+  permissions: z.array(z.string()).optional().describe('Required permission-set capabilities'),
 
   /** Multi-tenancy & Visibility */
   tenantId: z.string().optional().describe('Tenant/Organization ID'),

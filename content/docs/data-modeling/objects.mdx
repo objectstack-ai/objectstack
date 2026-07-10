@@ -183,7 +183,7 @@ indexes: [
 | `active` | `boolean` | Is object active (default: `true`) |
 | `isSystem` | `boolean` | System object, protected from deletion (default: `false`) |
 | `abstract` | `boolean` | Abstract base, cannot be instantiated (default: `false`) |
-| `sharingModel` | `enum` | Org-Wide Default record visibility (ADR-0055/0056). Canonical: `'private'`, `'public_read'`, `'public_read_write'`, `'controlled_by_parent'` (detail visibility derived from its master). Legacy aliases: `'read'`=public_read, `'read_write'`/`'full'`=public_read_write |
+| `sharingModel` | `enum` | Org-Wide Default record visibility (ADR-0055/0056/0090). Canonical four only: `'private'`, `'public_read'`, `'public_read_write'`, `'controlled_by_parent'` (detail visibility derived from its master). The legacy aliases (`'read'`, `'read_write'`, `'full'`) were removed from the enum (ADR-0090 D4) — authoring rejects them. Unset on a custom object resolves to `'private'` (ADR-0090 D1) |
 | `keyPrefix` | `string` | Short prefix for record IDs (e.g. `'001'`) |
 | `validations` | `ValidationRule[]` | Object-level validation rules (see [Validation](/docs/data-modeling/validation)) |
 

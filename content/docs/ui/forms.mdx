@@ -45,7 +45,7 @@ Only the spec'd whitelist of form fields is accepted; everything else (status, o
 > and the SecurityPlugin authorizes **only** create + the immediate read-back on
 > exactly that object, never anything else and never the anonymous fall-open. So
 > public forms work under secure-by-default (`requireAuth: true`) with **no**
-> `guest_portal` profile. The `guest_portal` permission set + `anonymous` flag
+> `guest_portal` permission set. The `guest_portal` permission set + `anonymous` flag
 > are still attached for **back-compat** (object hooks that detect a guest via a
 > falsy `ctx.user?.id`), but they are no longer the authorization mechanism.
 
@@ -97,23 +97,24 @@ export default defineView({
 > - Anything not in the `sections[].fields[]` whitelist is silently stripped at submit time. Treat the whitelist as the form's authoritative "what the public is allowed to set" list.
 > - Multiple form views per object are fine — only the one(s) with `sharing.allowAnonymous === true` are exposed.
 
-## 2. (Optional) Create the `guest_portal` profile
+## 2. (Optional) Create the `guest_portal` permission set
 
-Authorization no longer depends on this profile — the declaration-derived
+Authorization no longer depends on this set — the declaration-derived
 `publicFormGrant` (see the note above) is what permits the insert. You only need
-a `guest_portal` profile if you rely on the legacy back-compat path (e.g. an
-older runtime, or object hooks that branch on the `guest_portal` permission).
+a `guest_portal` permission set if you rely on the legacy back-compat path (e.g.
+an older runtime, or object hooks that branch on the `guest_portal` permission).
 When present it is still attached to the anonymous context, so keep it
-INSERT-only on the target object.
+INSERT-only on the target object — the guest-safe shape (ADR-0090 D9).
 
 ```ts
-// hotcrm/src/profiles/guest-portal.profile.ts
-import { PermissionSetSchema } from '@objectstack/spec/security';
+// hotcrm/src/security/guest-portal.permission.ts
+import { definePermissionSet } from '@objectstack/spec/security';
 
-export default PermissionSetSchema.parse({
+// Guest-safe capability: INSERT-only on the intake objects. (`isProfile` no
+// longer exists — the Profile concept was removed by ADR-0090 D2.)
+export default definePermissionSet({
   name: 'guest_portal',
   label: 'Public Form Submitters',
-  isProfile: true,
   objects: {
     lead: { allowCreate: true },  // no read/edit/delete
     case: { allowCreate: true },
