@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/lint",
-  "version": "14.1.0",
+  "version": "14.2.0",
   "license": "Apache-2.0",
   "description": "Static, build-time validation for an ObjectStack metadata graph — dashboard widget bindings, CEL/predicate expressions, and more. Pure (stack) => Issue[] functions shared by the CLI's `os validate` and any other consumer (e.g. AI authoring). Depends on @objectstack/spec; never on a runtime.",
   "type": "module",

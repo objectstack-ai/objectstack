@@ -1,5 +1,14 @@
 # @objectstack/setup
 
+## 14.2.0
+
+### Patch Changes
+
+- Updated dependencies [ac8f029]
+- Updated dependencies [4ab9958]
+  - @objectstack/spec@14.2.0
+  - @objectstack/platform-objects@14.2.0
+
 ## 14.1.0
 
 ### Patch Changes

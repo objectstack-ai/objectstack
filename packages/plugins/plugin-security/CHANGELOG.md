@@ -1,5 +1,59 @@
 # @objectstack/plugin-security
 
+## 14.2.0
+
+### Minor Changes
+
+- ac8f029: Two ADR-0090 D5 closures (#2752, #2753):
+
+  **`GET /me/apps` sources the engine registry.** Stack apps are registered
+  into the engine registry (runtime AppPlugin), not the metadata service —
+  `metadata.list('app')` returned `[]` for every principal, leaving
+  `tabPermissions` and `AppSchema.requiredPermissions` with no enforced
+  consumer. The endpoint now reads `registry.getAllApps()` (same authority as
+  the meta routes, nav contributions merged) with the metadata service as an
+  additive fallback; the capability and tab filters are unchanged and now
+  actually run.
+
+  **The default baseline binds to the `everyone` anchor.** `member_default`
+  carried `allowDelete` on its `'*'` grant — an anchor-forbidden bit — so
+  bootstrap refused the `everyone` binding on every boot and the baseline
+  flowed only through the separate fallback channel D5 explicitly rejected.
+  Two aligned changes:
+
+  - `describeHighPrivilegeBits` (spec) is calibrated to the exact ADR-0090 D5
+    bit list (VAMA, delete/purge/transfer, systemPermissions). A plain `'*'`
+    wildcard is no longer high-privilege by itself; the wildcard ban moves to
+    the GUEST tier where D9 specifies it (`describeAnchorForbiddenBits`).
+  - `member_default` drops `allowDelete` from the wildcard. **Behavior
+    change:** deleting records is no longer a baseline right — members keep
+    create/read/edit-own; domains that want member deletes grant them per
+    object via an ordinary position-distributed set. The owner-scoped delete
+    RLS stays as a narrowing defense for members who receive a delete bit
+    elsewhere.
+
+  With the baseline anchor-safe, bootstrap's existing binding path succeeds:
+  "what new users get" is now literally "what is bound to `everyone`" — same
+  table, same audit, same explain path (proven by the new
+  `me-apps-and-everyone-baseline` dogfood).
+
+- 4ab9958: Position assignment panels as pure SDUI (ADR-0090 follow-through).
+
+  - `RecordRelatedListProps` gains `relationshipValueField` (default `'id'`): which parent-record field the junction's `relationshipField` stores — the generic affordance for name-keyed junctions (`sys_user_position.position` stores `sys_position.name`). Used for both the list filter and the Add-picker's parent-side value.
+  - `sys_user` detail page gains a **Positions** tab (assign positions to a user; Add picker stores the position machine name via `valueField: 'name'`; the D12 delegated-admin gate's denials surface in the dialog).
+  - New `sys_position` detail page (shipped by plugin-security): **Holders** (name-keyed via `relationshipValueField: 'name'`) and **Permission Sets** (bindings) tabs — zero bespoke UI; ADR-0091 validity columns slot in later as plain column additions.
+
+  Renderer note: the generic `record:related_list` Add-picker and `relationshipValueField` support land in objectui alongside the ^14 alignment; with older renderers these tabs degrade to read-only lists.
+
+### Patch Changes
+
+- Updated dependencies [ac8f029]
+- Updated dependencies [4ab9958]
+  - @objectstack/spec@14.2.0
+  - @objectstack/platform-objects@14.2.0
+  - @objectstack/core@14.2.0
+  - @objectstack/formula@14.2.0
+
 ## 14.1.0
 
 ### Patch Changes

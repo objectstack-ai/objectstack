@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/driver-mongodb",
-  "version": "14.1.0",
+  "version": "14.2.0",
   "license": "Apache-2.0",
   "description": "MongoDB Driver for ObjectStack - Native document database driver via official mongodb client",
   "main": "dist/index.js",

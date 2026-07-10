@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/console",
-  "version": "14.1.0",
+  "version": "14.2.0",
   "description": "Prebuilt Console SPA pinned to this @objectstack/framework release. Source of truth: @object-ui/console (https://github.com/objectstack-ai/objectui).",
   "license": "Apache-2.0",
   "homepage": "https://github.com/objectstack-ai/framework/tree/main/packages/console",

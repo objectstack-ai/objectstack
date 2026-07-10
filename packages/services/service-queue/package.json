@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-queue",
-  "version": "14.1.0",
+  "version": "14.2.0",
   "license": "Apache-2.0",
   "description": "Queue Service for ObjectStack — implements IQueueService with in-memory and durable DB-backed (sys_job_queue) adapters",
   "type": "module",

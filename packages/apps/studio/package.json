@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/studio",
-  "version": "14.1.0",
+  "version": "14.2.0",
   "license": "Apache-2.0",
   "description": "ObjectStack Studio — the metadata builder app, packaged as its own ObjectStack app package (ADR-0048: one app per package).",
   "main": "dist/index.js",
