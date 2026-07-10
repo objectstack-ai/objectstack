@@ -1,5 +1,32 @@
 # @objectstack/runtime
 
+## 14.3.0
+
+### Patch Changes
+
+- Updated dependencies [2a71f48]
+- Updated dependencies [02f6af4]
+- Updated dependencies [8f0b9df]
+- Updated dependencies [ff648ad]
+- Updated dependencies [c1064f1]
+- Updated dependencies [bea4b92]
+  - @objectstack/plugin-auth@14.3.0
+  - @objectstack/rest@14.3.0
+  - @objectstack/spec@14.3.0
+  - @objectstack/plugin-security@14.3.0
+  - @objectstack/metadata@14.3.0
+  - @objectstack/objectql@14.3.0
+  - @objectstack/core@14.3.0
+  - @objectstack/formula@14.3.0
+  - @objectstack/observability@14.3.0
+  - @objectstack/driver-memory@14.3.0
+  - @objectstack/driver-sql@14.3.0
+  - @objectstack/driver-sqlite-wasm@14.3.0
+  - @objectstack/service-cluster@14.3.0
+  - @objectstack/service-datasource@14.3.0
+  - @objectstack/service-i18n@14.3.0
+  - @objectstack/types@14.3.0
+
 ## 14.2.0
 
 ### Patch Changes

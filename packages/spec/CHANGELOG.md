@@ -1,5 +1,104 @@
 # @objectstack/spec
 
+## 14.3.0
+
+### Minor Changes
+
+- 2a71f48: feat(auth): admin direct user management, phone sign-in, and identity bulk import (#2766, re-scoped #2758)
+
+  `sys_user` is managed by better-auth and its generic CRUD is suppressed, so
+  until now the only way to add a teammate was the email-dependent invite flow.
+  This ships three staged capabilities:
+
+  - **Admin direct user management** — `POST /api/v1/auth/admin/create-user`
+    and a wrapped `POST /api/v1/auth/admin/set-user-password` (ADR-0068
+    platform-admin gate; better-auth pipeline so credentials are real). Optional
+    generated temporary password (returned once, never persisted or logged) and
+    a new `sys_user.must_change_password` flag enforced through the ADR-0069
+    authGate (`403 PASSWORD_EXPIRED` until the user changes it). New
+    `create_user` action and upgraded `set_user_password` action on the Users
+    list — pure schema, no frontend changes.
+  - **Phone sign-in (opt-in `auth.plugins.phoneNumber`)** — better-auth
+    phoneNumber plugin, phone+password only (`POST /sign-in/phone-number`);
+    OTP flows stay off until SMS infrastructure exists. Adds
+    `sys_user.phone_number` (unique) / `phone_number_verified`. Phone-only
+    accounts get an undeliverable placeholder email
+    (`u-<random>@placeholder.invalid`, never derived from the phone number);
+    all auth mail callbacks refuse placeholder recipients.
+  - **Identity bulk import** — `POST /api/v1/auth/admin/import-users` accepts
+    the same payloads as the generic import routes (rows/csv/xlsx, dryRun,
+    upsert by email or phone) but writes every row through better-auth.
+    Password policies: `invite` (reset-link email per created user; requires an
+    EmailService) and `temporary` (per-row one-time passwords + forced change).
+    Sync only, ≤500 rows per request; no undo; upsert updates touch profile
+    fields only and can never reset an existing user's password.
+    `prepareImportRequest` and the CSV/xlsx parsers moved from rest-server.ts
+    to an exported `import-prepare.ts` module (behavior unchanged).
+
+- 02f6af4: ADR-0090 follow-through wave: enforce book audience at the read layer; finish the D2/D3 cleanup the P1 rename missed.
+
+  - **rest**: `/meta/book`, `/meta/doc`, and `/meta/book/:name/tree` now ENFORCE
+    the ADR-0046 §6.7 audience model (ADR-0049 — no unenforced security
+    properties): anonymous callers see only `public` books/docs;
+    `{ permissionSet }`-gated books require the caller to hold the named set;
+    a doc's effective audience is the union over the books that CLAIM it
+    (unclaimed docs default to `org`; orphan rendering never inherits `public`).
+    Gated evaluation fails CLOSED when holdings cannot be resolved. `doc`/`book`
+    single-item reads bypass the shared meta cache (per-caller gate vs shared ETag).
+  - **spec**: new pure helpers powering that gate — `audienceAllows`,
+    `resolveDocAudiences`, `docAudienceAllows`, `resolveBookClaimedDocs`
+    (+ `AudienceCaller`/`AudienceBook` types). BREAKING but ships as a `minor`
+    per the launch-window convention (pre-1.0 semantics — breaking changes do
+    not burn a major version number while the whole stack is in lockstep):
+    `METADATA_FORM_REGISTRY` keys `role`/`profile` are gone — `position` is the
+    registered form (the `position` type had LOST its form layout in the P1
+    rename); `EnvironmentArtifactMetadataSchema` declares `positions` instead of
+    retired `roles`/`profiles`.
+  - **plugin-security**: the `security` service exposes
+    `resolvePermissionSetNames(ctx)` — the same resolution as data-plane
+    enforcement, for the docs gate.
+  - **metadata**: artifact ingestion maps `positions → 'position'` (the stale
+    `roles → 'role'` mapping matched nothing since the P1 rename, silently
+    dropping compiled positions from metadata registration).
+  - **lint**: books join the D3 role-word scan (their `audience` is a
+    permission-model reference now), and a new advisory rule
+    `security-book-audience-unknown-set` flags a `{ permissionSet }` audience
+    naming a set the stack does not declare (runtime fails closed — the typo
+    cost is "nobody can read the book", so say it at author time).
+  - **platform-objects**: metadata-form translations regain `position` (all four
+    locales) and drop the retired `role`/`profile` groups, with a vocabulary
+    regression test.
+
+- c1064f1: feat(messaging/auth): SMS infrastructure + phone-number OTP first-login/reset (#2780)
+
+  #2766 shipped phone+password sign-in but no OTP — the platform had no SMS
+  delivery capability. This adds the missing infrastructure end to end:
+
+  - **New `@objectstack/plugin-sms`** — `ISmsService`/`ISmsTransport` contracts
+    (spec) with Aliyun SMS (ACS3-HMAC-SHA256, template-based) and Twilio
+    transports plus a dev log fallback. Configured through the new `sms`
+    settings namespace (live provider rebind, encrypted secrets, send-test
+    action; `OS_SMS_*` env keys win at the resolver). Deliberately NO message
+    persistence and NO body logging — SMS bodies carry OTP codes.
+  - **Messaging `sms` channel** — registered at kernel:ready when an `sms`
+    service is present; `notify(channels:['sms'])` resolves
+    `sys_user.phone_number`, renders `(topic,'sms',locale)` templates, and
+    inherits outbox retry/dead-letter.
+  - **Phone OTP flows open** — the phoneNumber plugin's `sendOTP` /
+    `sendPasswordResetOTP` now deliver via SMS, enabling
+    `/phone-number/send-otp` + `/verify` (OTP sign-in/verification) and
+    `/phone-number/request-password-reset` + `/reset-password` (self-service
+    reset). Without a deliverable SMS service they keep failing loudly
+    (NOT_SUPPORTED); `features.phoneNumberOtp` advertises real availability.
+    Shipped with the abuse hardening: explicit `allowedAttempts: 3`, always-on
+    per-number cooldown (60s) + rolling-hour cap (5, secondaryStorage-shared
+    across nodes), `/phone-number/*` in the settings-bound per-IP rate-limit
+    rules, and OTP codes never reach logs or error messages.
+  - **Import SMS invites** — `/admin/import-users`'s `invite` policy now
+    supports phone-only rows: a credential-free invitation SMS points the
+    employee at phone-OTP first sign-in followed by self-set password; mixed
+    files validate the reachable channel per row.
+
 ## 14.2.0
 
 ### Minor Changes
