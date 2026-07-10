@@ -9,7 +9,7 @@ import {
 /**
  * These run against the REAL ledgers shipped by `@objectstack/spec` (the same
  * files the gate enforces), so they double as a contract test: if an
- * `authorWarn` annotation is removed from `enable.files` / `columnName` / etc.,
+ * `authorWarn` annotation is removed from `versioning` / `columnName` / etc.,
  * the matching assertion fails.
  */
 
@@ -18,14 +18,13 @@ const rules = (findings: { rule: string }[]) => findings.map((f) => f.rule);
 const paths = (findings: { message: string }[]) => findings.map((f) => f.message);
 
 describe('lintLivenessProperties', () => {
-  it('warns on an authored dead capability flag (enable.files: true)', () => {
-    const findings = lintLivenessProperties(objStack({ enable: { files: true } }));
-    expect(findings.length).toBeGreaterThan(0);
-    const files = findings.find((f) => f.message.includes('enable.files'));
-    expect(files).toBeDefined();
-    expect(files!.rule).toBe(LIVENESS_DEAD_PROPERTY);
-    expect(files!.where).toBe("object 'widget'");
-    expect(files!.hint.length).toBeGreaterThan(0);
+  it('warns on a present dead object block (versioning)', () => {
+    const findings = lintLivenessProperties(objStack({ versioning: { enabled: true } }));
+    const v = findings.find((f) => f.message.includes('versioning'));
+    expect(v).toBeDefined();
+    expect(v!.rule).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(v!.where).toBe("object 'widget'");
+    expect(v!.hint.length).toBeGreaterThan(0);
   });
 
   it('does NOT warn on a default-on flag the author left alone (enable.trash: true)', () => {
@@ -33,25 +32,14 @@ describe('lintLivenessProperties', () => {
     expect(paths(findings).some((m) => m.includes('enable.trash'))).toBe(false);
   });
 
-  // #2707: feeds/activities/trackHistory went LIVE (opt-out writer/UI gates +
-  // History-tab master switch) — authoring them must no longer warn.
-  it('does NOT warn on the now-live capability flags (feeds/activities/trackHistory)', () => {
+  // #2707/#2727: every ObjectCapabilities flag is now LIVE (opt-out
+  // writer/UI gates, the History-tab master switch, the opt-in Attachments
+  // gate) — authoring them must no longer warn.
+  it('does NOT warn on the now-live capability flags (feeds/activities/trackHistory/files)', () => {
     const findings = lintLivenessProperties(
-      objStack({ enable: { feeds: true, activities: true, trackHistory: true } }),
+      objStack({ enable: { feeds: true, activities: true, trackHistory: true, files: true } }),
     );
-    expect(paths(findings).some((m) => m.includes('enable.feeds'))).toBe(false);
-    expect(paths(findings).some((m) => m.includes('enable.activities'))).toBe(false);
-    expect(paths(findings).some((m) => m.includes('enable.trackHistory'))).toBe(false);
-  });
-
-  it('does NOT warn when a dead boolean flag is explicitly false (enable.files: false)', () => {
-    const findings = lintLivenessProperties(objStack({ enable: { files: false } }));
-    expect(paths(findings).some((m) => m.includes('enable.files'))).toBe(false);
-  });
-
-  it('warns on a present dead object block (versioning)', () => {
-    const findings = lintLivenessProperties(objStack({ versioning: { enabled: true } }));
-    expect(paths(findings).some((m) => m.includes('versioning'))).toBe(true);
+    expect(paths(findings).some((m) => m.includes('enable.'))).toBe(false);
   });
 
   it('warns on a misleading dead field prop (columnName)', () => {
@@ -83,7 +71,7 @@ describe('lintLivenessProperties', () => {
 
   it('handles objects as a keyed record (not just arrays)', () => {
     const findings = lintLivenessProperties({
-      objects: { widget: { name: 'widget', enable: { files: true } } },
+      objects: { widget: { name: 'widget', versioning: { enabled: true } } },
     });
     expect(rules(findings)).toContain(LIVENESS_DEAD_PROPERTY);
   });

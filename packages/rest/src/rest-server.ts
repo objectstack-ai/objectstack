@@ -104,18 +104,19 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             },
         };
     }
-    // Capability gate (#2707): the target object opted out of comments
-    // (`enable.feeds: false`) — plugin-audit's engine hook rejects the
-    // sys_comment insert fail-closed. 403 like CLONE_DISABLED; surfaced by
-    // `code` because the generic data routes map through here (they never
-    // reach sendError's `.status` passthrough). `error.object` names the
-    // gated TARGET object (not sys_comment), so prefer it.
-    if (error?.code === 'FEEDS_DISABLED') {
+    // Capability gates (#2707 feeds / #2727 files): plugin-audit's engine
+    // hooks reject sys_comment / sys_attachment inserts fail-closed when the
+    // TARGET object's capability flag disallows them. 403 like
+    // CLONE_DISABLED; surfaced by `code` because the generic data routes map
+    // through here (they never reach sendError's `.status` passthrough).
+    // `error.object` names the gated TARGET object (not the join table), so
+    // prefer it.
+    if (error?.code === 'FEEDS_DISABLED' || error?.code === 'FILES_DISABLED') {
         return {
             status: 403,
             body: {
-                error: error?.message ?? 'Comments are disabled for this object',
-                code: 'FEEDS_DISABLED',
+                error: error?.message ?? 'This capability is disabled for the target object',
+                code: error.code,
                 ...(error?.object || object ? { object: error?.object ?? object } : {}),
             },
         };

@@ -81,7 +81,7 @@ const result = ApiMethod.parse(data);
 | **searchable** | `boolean` | ✅ | Index records for global search |
 | **apiEnabled** | `boolean` | ✅ | Expose object via automatic APIs |
 | **apiMethods** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| 'aggregate' \| 'history' \| 'search' \| 'restore' \| 'purge' \| 'import' \| 'export'>[]` | optional | Whitelist of allowed API operations |
-| **files** | `boolean` | ✅ | RESERVED (no runtime effect yet) — use Field.file/Field.image for attachments; this flag will gate the future generic Attachments panel |
+| **files** | `boolean` | ✅ | Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments targeting this object; otherwise creation is rejected. Field.file/Field.image are independent |
 | **feeds** | `boolean` | ✅ | Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects new comments for this object |
 | **activities** | `boolean` | ✅ | Record activity timeline (sys_activity mirror of CRUD). Default on; explicit false stops mirroring and hides the timeline |
 | **trash** | `boolean` | ✅ | Enable soft-delete with restore capability |

@@ -385,3 +385,57 @@ describe('audit writers — enable.feeds server-side enforcement (#2707)', () =>
     await expect(fire('beforeInsert', commentInsert('ghost_object:rec-9'))).resolves.toBeUndefined();
   });
 });
+
+describe('audit writers — enable.files server-side enforcement (#2727)', () => {
+  const SCHEMA = {
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: SINGLE_TENANT.sys_activity,
+    crm_lead: ['id', 'name'],
+  };
+
+  const attachmentInsert = (parentObject?: unknown) => ({
+    object: 'sys_attachment',
+    input: { data: { parent_object: parentObject, parent_id: 'rec-1', file_id: 'file-1' } },
+    session: {},
+  });
+
+  it('allows sys_attachment creation when the parent object declares files: true', async () => {
+    const { engine, fire } = makeEngine(SCHEMA, {
+      crm_lead: { enable: { files: true } },
+    });
+    installAuditWriters(engine as any, 'test.audit');
+
+    await expect(fire('beforeInsert', attachmentInsert('crm_lead'))).resolves.toBeUndefined();
+  });
+
+  it('rejects when the flag is absent — opt-in means explicit (403 FILES_DISABLED)', async () => {
+    const noBlock = makeEngine(SCHEMA);
+    installAuditWriters(noBlock.engine as any, 'test.audit');
+    await expect(noBlock.fire('beforeInsert', attachmentInsert('crm_lead'))).rejects.toMatchObject({
+      code: 'FILES_DISABLED',
+      status: 403,
+      object: 'crm_lead',
+    });
+
+    const explicitFalse = makeEngine(SCHEMA, { crm_lead: { enable: { files: false } } });
+    installAuditWriters(explicitFalse.engine as any, 'test.audit');
+    await expect(explicitFalse.fire('beforeInsert', attachmentInsert('crm_lead'))).rejects.toMatchObject({
+      code: 'FILES_DISABLED',
+    });
+  });
+
+  it('rejects an unknown parent object (fail-closed, unlike the opt-out feeds gate)', async () => {
+    const { engine, fire } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await expect(fire('beforeInsert', attachmentInsert('ghost_object'))).rejects.toMatchObject({
+      code: 'FILES_DISABLED',
+      object: 'ghost_object',
+    });
+  });
+
+  it('leaves a missing parent_object to schema validation (no gate error)', async () => {
+    const { engine, fire } = makeEngine(SCHEMA, { crm_lead: { enable: { files: false } } });
+    installAuditWriters(engine as any, 'test.audit');
+    await expect(fire('beforeInsert', attachmentInsert(undefined))).resolves.toBeUndefined();
+  });
+});

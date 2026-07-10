@@ -74,15 +74,18 @@ export const ObjectCapabilities = z.object({
   apiMethods: z.array(ApiMethod).optional().describe('Whitelist of allowed API operations'),
 
   /**
-   * Standard attachments/files engine — opt-in, NOT YET CONSUMED at runtime.
+   * Generic Attachments panel (Salesforce "Notes & Attachments" parity) —
+   * opt-in.
    *
-   * Reserved for the generic Attachments related-list (Salesforce
-   * "Notes & Attachments" parity). Until that ships, model attachments with
-   * `Field.file` / `Field.image` (or relate to `sys_attachment`) — setting
-   * this flag alone enables nothing, and the compile-time liveness lint
-   * warns on it.
+   * Contract (#2727): `true` surfaces the record Attachments panel in the
+   * console (upload/list/download/delete over `sys_attachment` join rows)
+   * and permits `sys_attachment` rows to target this object; anything else
+   * rejects new attachments server-side (403 FILES_DISABLED, enforced at
+   * the engine hook seam by plugin-audit — opt-in means explicit).
+   * `Field.file` / `Field.image` column attachments are independent of
+   * this flag.
    */
-  files: z.boolean().default(false).describe('RESERVED (no runtime effect yet) — use Field.file/Field.image for attachments; this flag will gate the future generic Attachments panel'),
+  files: z.boolean().default(false).describe('Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments targeting this object; otherwise creation is rejected. Field.file/Field.image are independent'),
 
   /**
    * Social collaboration (Comments, Mentions, Feeds) — opt-out.

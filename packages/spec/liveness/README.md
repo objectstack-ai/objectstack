@@ -105,7 +105,7 @@ Signal over noise is the whole point, so warnings are **opt-in per entry**:
 Two rules keep it false-positive-free, **both of which the marker author must respect**:
 
 1. **Only mark genuinely *misleading* dead props** — ones that imply a capability/behavior
-   that doesn't exist (`enable.files`, `field.columnName`, `versioning`). Benign display/doc
+   that doesn't exist (`versioning`, `field.columnName`, `softDelete`). Benign display/doc
    metadata that's "dead" (no runtime reader) — `description`, `tags`, `icon` — must NOT be
    marked; an author isn't misled by them.
 2. **Booleans: only mark `default(false)` flags.** The lint warns on a boolean only when set
@@ -163,7 +163,7 @@ The governed set is `GOVERNED` at the top of `check-liveness.mts`. To add a type
 
 | Type | live | exp | dead | Notes |
 |---|---|---|---|---|
-| object | 34 | – | 14 | versioning/partitioning/cdc tier dead; ObjectCapabilities mostly live post-#2707 (`apiEnabled`/`apiMethods` enforced #1937; `feeds`/`activities` opt-out gates + `trackHistory` UI master switch); `enable.files` reserved/dead |
+| object | 35 | – | 13 | versioning/partitioning/cdc tier dead; ObjectCapabilities fully live post-#2707/#2727 (`apiEnabled`/`apiMethods` enforced #1937; `feeds`/`activities` opt-out gates; `trackHistory` UI master switch; `files` opt-in Attachments gate) |
 | field | 34 | – | 39 | ~half dead — aspirational enhanced-type + governance config; naming-drift props server-live/client-snake |
 | flow | 29 | 1 | 7 | `runAs` experimental (unenforced identity switch); status/active gate nothing; FlowNodeAction enum out of sync |
 | action | 26 | – | 5 | `disabled` CEL ignored (renderers read non-spec `enabled`); type:'form'/shortcut/bulkEnabled dead |

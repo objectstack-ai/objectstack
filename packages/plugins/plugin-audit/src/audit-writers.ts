@@ -563,6 +563,36 @@ export function installAuditWriters(
   engine.registerHook('beforeInsert', enforceFeedsCapability, { object: 'sys_comment', packageId });
 
   /**
+   * `enable.files` server-side enforcement (#2727). The generic Attachments
+   * panel persists `sys_attachment` join rows through the generic data path,
+   * so — like the feeds gate above — the engine hook seam is the one gate
+   * every caller crosses. Unlike feeds, `files` is opt-IN (spec default
+   * `false`): the panel is a new surface, not an existing behavior, so a
+   * parent object must declare `enable: { files: true }` before attachments
+   * may target it. Fail-closed: an absent enable block, an absent flag, and
+   * an unknown parent object all reject — opt-in means *explicit*.
+   *
+   * Deliberately NOT gated: `Field.file` / `Field.image` uploads. Those
+   * store the file URL in the record's own column via service-storage and
+   * never create a sys_attachment row, so field-level attachments keep
+   * working regardless of this flag.
+   */
+  const enforceFilesCapability = async (ctx: HookContext) => {
+    const data: any = (ctx.input as any)?.data;
+    const parentObject = data?.parent_object;
+    if (typeof parentObject !== 'string' || parentObject.length === 0) return; // schema requires it; let validation report the miss
+    const def = getObjectDef(parentObject);
+    if (def?.enable?.files !== true) {
+      const err: any = new Error(`File attachments are not enabled for object '${parentObject}' (requires enable.files: true)`);
+      err.code = 'FILES_DISABLED';
+      err.status = 403;
+      err.object = parentObject;
+      throw err;
+    }
+  };
+  engine.registerHook('beforeInsert', enforceFilesCapability, { object: 'sys_attachment', packageId });
+
+  /**
    * M10.8: Dedicated hook on `sys_comment` afterInsert that parses the
    * `mentions` JSON field and writes one sys_notification per mentioned
    * user. Lives outside `writeAudit` because sys_comment is in

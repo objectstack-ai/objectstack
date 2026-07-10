@@ -165,10 +165,8 @@
           "_authorWarnSkipped": "defaults to true in the schema — the lint can't distinguish author-set-true from the default, so warning here would fire on every object with an enable block. Only default-FALSE booleans are safe to authorWarn."
         },
         "files": {
-          "status": "dead",
-          "evidence": "no behavior-changing reader in framework or objectui — reserved for the generic Attachments related-list (Salesforce Notes & Attachments parity), tracked in #2727",
-          "authorWarn": true,
-          "authorHint": "File attachments are modeled with a `Field.file`/`Field.image` (or the sys_attachment object), not this object flag — it enables nothing on its own yet (reserved for the future generic Attachments panel)."
+          "status": "live",
+          "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts (enforceFilesCapability beforeInsert hook: sys_attachment rows may only target objects declaring enable.files true — 403 FILES_DISABLED otherwise); objectui RecordAttachmentsPanel renders the record Attachments surface (upload/list/download/delete) when the flag is true. Opt-in — spec default false (#2727)."
         },
         "feeds": {
           "status": "live",

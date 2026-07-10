@@ -1947,6 +1947,21 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.object).toBe('gate_probe');
   });
 
+  // #2727: same shape for the opt-in attachments gate on sys_attachment.
+  it('maps FILES_DISABLED → 403 with the gated target object', () => {
+    const r = mapDataError(
+      Object.assign(new Error("File attachments are not enabled for object 'crm_lead' (requires enable.files: true)"), {
+        code: 'FILES_DISABLED',
+        status: 403,
+        object: 'crm_lead',
+      }),
+      'sys_attachment',
+    );
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('FILES_DISABLED');
+    expect(r.body.object).toBe('crm_lead');
+  });
+
   it('maps SQLite "has no column named" → 400 INVALID_FIELD with the field', () => {
     const r = mapDataError(
       sqliteError(
