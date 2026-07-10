@@ -129,9 +129,9 @@
         "strategy": {
           "status": "dead",
           "evidence": "inert — only tenancy.enabled is read",
-          "note": "part of the live tenancy block (sql-driver reads enabled+tenantField); verify before touching.",
+          "note": "REMOVAL DECIDED (#2763, owner 2026-07-10): the platform has exactly two tenancy modes — per-tenant database (environment-level, zero object config) and shared-DB org row isolation (enabled+tenantField). Object-level isolation strategy has no requirement; remove at the next spec major.",
           "authorWarn": true,
-          "authorHint": "Only tenancy.enabled + tenantField are read (sql-driver row scoping) — 'shared'/'isolated'/'hybrid' changes nothing. Do not expect per-tenant databases from this knob."
+          "authorHint": "No requirement — removal decided (#2763). Library-level isolation is an environment/deployment choice; row-level isolation is tenancy.enabled + tenantField. This knob changes nothing."
         },
         "tenantField": {
           "status": "live",
@@ -141,9 +141,9 @@
         "crossTenantAccess": {
           "status": "dead",
           "evidence": "inert",
-          "note": "part of the live tenancy block; verify before touching.",
+          "note": "REMOVAL DECIDED (#2763, owner 2026-07-10): cross-visibility governance lives in sharing/OWD (ADR-0056), externalSharingModel (ADR-0090 D11) and access posture; a blanket boolean has no requirement. Remove at the next spec major.",
           "authorWarn": true,
-          "authorHint": "Inert — setting it true does NOT grant (or gate) cross-tenant access. Tenant isolation is enforced solely via tenancy.enabled row scoping."
+          "authorHint": "No requirement — removal decided (#2763). Setting it true grants nothing; use sharing rules / externalSharingModel for cross-visibility."
         }
       }
     },
