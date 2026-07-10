@@ -52,7 +52,7 @@ export const zhCN: TranslationData = {
         nav_organizations: { label: '组织' },
         nav_invitations: { label: '邀请' },
 
-        nav_roles: { label: '角色' },
+        nav_positions: { label: '岗位' },
         nav_capabilities: { label: '能力' },
         nav_permission_sets: { label: '权限集' },
         nav_sharing_rules: { label: '共享规则' },

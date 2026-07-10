@@ -268,10 +268,10 @@ describe('NavigationItemSchema (Recursive)', () => {
               objectName: 'user',
             },
             {
-              id: 'nav_roles',
-              label: 'Roles',
+              id: 'nav_positions',
+              label: 'Positions',
               type: 'object' as const,
-              objectName: 'role',
+              objectName: 'position',
             },
           ],
         },

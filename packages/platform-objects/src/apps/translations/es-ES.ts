@@ -51,7 +51,7 @@ export const esES: TranslationData = {
         nav_organizations: { label: 'Organizaciones' },
         nav_invitations: { label: 'Invitaciones' },
 
-        nav_roles: { label: 'Roles' },
+        nav_positions: { label: 'Posiciones' },
         nav_permission_sets: { label: 'Conjuntos de Permisos' },
         nav_sharing_rules: { label: 'Reglas de Compartición' },
         nav_record_shares: { label: 'Registros Compartidos' },

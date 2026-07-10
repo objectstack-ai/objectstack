@@ -51,7 +51,7 @@ export const jaJP: TranslationData = {
         nav_organizations: { label: '組織' },
         nav_invitations: { label: '招待' },
 
-        nav_roles: { label: 'ロール' },
+        nav_positions: { label: 'ポジション' },
         nav_permission_sets: { label: '権限セット' },
         nav_sharing_rules: { label: '共有ルール' },
         nav_record_shares: { label: 'レコード共有' },

@@ -13,7 +13,7 @@
  * that owns the underlying objects rather than living here (ADR-0029 K2):
  *   - `group_integrations` → `@objectstack/plugin-webhooks` (K2.a)
  *   - `group_approvals`     → `@objectstack/plugin-approvals` (K2.b)
- *   - `group_access_control` Roles / Permission Sets → `@objectstack/plugin-security`
+ *   - `group_access_control` Positions / Permission Sets → `@objectstack/plugin-security`
  *   - `group_access_control` Sharing Rules / Record Shares → `@objectstack/plugin-sharing`
  * As each remaining domain moves to its capability plugin, its entries move out
  * of this file into that plugin the same way.
@@ -78,12 +78,12 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
   {
     app: 'setup',
     group: 'group_access_control',
-    // Priority 300 keeps API Keys after plugin-security's Roles / Permission
+    // Priority 300 keeps API Keys after plugin-security's Positions / Permission
     // Sets (100) and plugin-sharing's Sharing Rules / Record Shares (200),
     // preserving the original menu order.
     priority: 300,
     items: [
-      // Roles / Permission Sets are contributed by @objectstack/plugin-security
+      // Positions / Permission Sets are contributed by @objectstack/plugin-security
       // and Sharing Rules / Record Shares by @objectstack/plugin-sharing
       // (ADR-0029 K2). Only API Keys (sys_api_key, an identity object owned by
       // plugin-auth) remains a platform-objects base entry here.

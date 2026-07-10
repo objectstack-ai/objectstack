@@ -70,7 +70,7 @@ export const en: TranslationData = {
         nav_invitations: { label: 'Invitations' },
 
         // Access Control
-        nav_roles: { label: 'Roles' },
+        nav_positions: { label: 'Positions' },
         nav_permission_sets: { label: 'Permission Sets' },
         nav_sharing_rules: { label: 'Sharing Rules' },
         nav_record_shares: { label: 'Record Shares' },

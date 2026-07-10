@@ -252,7 +252,7 @@ export class SecurityPlugin implements Plugin {
           group: 'group_access_control',
           priority: 100,
           items: [
-            { id: 'nav_roles', type: 'object', label: 'Roles', objectName: 'sys_position', icon: 'shield-check' },
+            { id: 'nav_positions', type: 'object', label: 'Positions', objectName: 'sys_position', icon: 'shield-check' },
             { id: 'nav_capabilities', type: 'object', label: 'Capabilities', objectName: 'sys_capability', icon: 'badge-check' },
             { id: 'nav_permission_sets', type: 'object', label: 'Permission Sets', objectName: 'sys_permission_set', icon: 'lock' },
           ],
