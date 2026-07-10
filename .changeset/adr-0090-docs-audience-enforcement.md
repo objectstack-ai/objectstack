@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': major
+'@objectstack/spec': minor
 '@objectstack/rest': minor
 '@objectstack/plugin-security': minor
 '@objectstack/lint': minor
@@ -19,7 +19,9 @@ ADR-0090 follow-through wave: enforce book audience at the read layer; finish th
   single-item reads bypass the shared meta cache (per-caller gate vs shared ETag).
 - **spec**: new pure helpers powering that gate — `audienceAllows`,
   `resolveDocAudiences`, `docAudienceAllows`, `resolveBookClaimedDocs`
-  (+ `AudienceCaller`/`AudienceBook` types). BREAKING (launch window):
+  (+ `AudienceCaller`/`AudienceBook` types). BREAKING but ships as a `minor`
+  per the launch-window convention (pre-1.0 semantics — breaking changes do
+  not burn a major version number while the whole stack is in lockstep):
   `METADATA_FORM_REGISTRY` keys `role`/`profile` are gone — `position` is the
   registered form (the `position` type had LOST its form layout in the P1
   rename); `EnvironmentArtifactMetadataSchema` declares `positions` instead of

@@ -84,3 +84,11 @@ jobs:
           else
             echo "Found $CHANGESET_COUNT changeset(s)"
           fi
+
+      - name: Guard against accidental major bumps (launch window)
+        # Every publishable package is in one Changesets "fixed" (lockstep) group,
+        # so a single `major` bump promotes the ENTIRE monorepo to a new major
+        # version. During the launch window we ship breaking changes as `minor`.
+        # Add the `allow-major` PR label when a whole-stack major is intended.
+        if: "!contains(github.event.pull_request.labels.*.name, 'allow-major')"
+        run: node scripts/check-changeset-no-major.mjs
