@@ -1,5 +1,63 @@
 # @objectstack/lint
 
+## 14.0.0
+
+### Minor Changes
+
+- 216fa9a: Add a `position` approver type so approvals can route to org positions (ADR-0090 D3 fallout).
+
+  Post ADR-0090 D3 the `role` approver type resolves against the better-auth org-membership
+  tier (`sys_member.role`: `owner`/`admin`/`member`) — it was never a position. Downstream
+  apps that authored `{ type: 'role', value: 'sales_manager' }` silently routed approvals to
+  nobody. Now:
+
+  - **spec**: `ApproverType` gains `'position'` — `value` is the position machine name; the
+    approver expands to its holders via `sys_user_position`. Authoring guidance: keep
+    `type: 'role'` ONLY for membership tiers; for org positions use
+    `{ type: 'position', value: '<position_name>' }` (one-line fix for the mismatch above).
+  - **plugin-approvals**: the engine resolves `position` approvers via `sys_user_position` ∪
+    the `sys_member.role` transition source (same semantics as `PositionGraphService` in
+    plugin-sharing). The `department` approver type is now honored by its spec spelling
+    (previously only the off-spec `business_unit`/`bu` dialect matched).
+  - **lint**: new `validateApprovalApprovers` rule — `approval-role-not-membership-tier`
+    warns when a `role` approver's value is not a membership tier and prescribes the
+    `position` rewrite; `approval-approver-type-unknown` flags off-spec approver types
+    (with a `business_unit` → `department` fix-it). Wired into `os lint`.
+
+### Patch Changes
+
+- 2f3581f: feat(lint): warn when a master-detail child has no object-level CRUD grant (ADR-0090 D7)
+
+  New security-posture rule `security-master-detail-ungranted` (advisory
+  `warning`; it does not gate the build). A master-detail DETAIL object derives
+  its RECORD-level access from the master (ADR-0055 `controlled_by_parent`,
+  gate ②), but object-level CRUD is a SEPARATE gate ① (`checkObjectPermission`)
+  that is never derived — a permission set that grants the parent but forgets the
+  child denies role-bound non-admin users a 403 before the parent-derived access
+  is ever consulted, surfacing as the silent "can't fill in / can't submit the
+  subtable" trap (framework#2700, downstream os-tianshun-mtc#43).
+
+  The rule flags a non-system detail (has a `master_detail` field) that NO
+  authored permission set grants (explicit entry or `'*'` wildcard). It stays
+  silent when the package authors no permission sets, when a package-declared
+  `'*'` wildcard grant covers every object, or for `sys_*` / `isSystem` objects —
+  keeping the false-positive rate near zero. The residual per-set gap (one role
+  grants it, another forgets it) is intentionally out of scope, and CRUD
+  auto-inheritance is deliberately NOT adopted (secure-by-default, Salesforce
+  parity).
+
+- Updated dependencies [0a8e685]
+- Updated dependencies [afa8115]
+- Updated dependencies [80f12ca]
+- Updated dependencies [e2fa074]
+- Updated dependencies [23c8668]
+- Updated dependencies [29f017d]
+- Updated dependencies [216fa9a]
+- Updated dependencies [6c22b12]
+  - @objectstack/spec@14.0.0
+  - @objectstack/formula@14.0.0
+  - @objectstack/sdui-parser@14.0.0
+
 ## 13.0.0
 
 ### Minor Changes

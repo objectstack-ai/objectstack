@@ -1,5 +1,171 @@
 # @objectstack/rest
 
+## 14.0.0
+
+### Minor Changes
+
+- ac08698: ADR-0090 D6 — the explain engine gets its REST face (#2696).
+
+  **`@objectstack/rest`**: new `GET/POST /api/v1/security/explain`
+  (`object`/`operation`/`userId`, validated against the spec's
+  `ExplainRequestSchema`) delegating to the `security` service's
+  `explain(request, callerContext)` — the same code paths the enforcement
+  middleware runs, so the returned `ExplainDecision` is explained by
+  construction. The route is authenticated-only (401 even on
+  `requireAuth=false` deployments), returns 501 when no security service
+  exposes `explain`, and maps the service's `PermissionDeniedError` to 403.
+  Registered on scoped (`/environments/:environmentId`) and unscoped base
+  paths; the env kernel's own `security` service is preferred, with a new
+  host-kernel `securityServiceProvider` fallback wired by the REST plugin.
+
+  **`@objectstack/plugin-security`**: `explainAccessForCaller` now honors
+  delegated administration (D12) — explaining ANOTHER user is authorized by
+  `manage_users` **or** a delegated `adminScope` whose business-unit subtree
+  covers the target user (new `DelegatedAdminGate.scopesCoverUser`, fail-closed
+  on unresolvable scopes/memberships). Self-explain still needs neither.
+
+- bd39dc5: ADR-0090 D5/D9 — suggested audience bindings become a queryable, confirmable surface.
+
+  A package permission set declaring `isDefault: true` is an install-time
+  SUGGESTION to bind the set to the built-in `everyone` position — never
+  auto-bound. Until now the flag was only read at bootstrap as the fallback-set
+  name; after an install there was no way to see or act on the suggestion.
+
+  **`@objectstack/plugin-security`**: new `sys_audience_binding_suggestion`
+  system object (read-only over the data API; unique per
+  package × set × anchor) plus a convergent reconciler
+  (`syncAudienceBindingSuggestions`) that reads every declared `isDefault` set —
+  boot-declared stack metadata AND installed package manifests, so a runtime
+  `POST /api/v1/packages` install is visible immediately — and keeps the table
+  honest: undeclared → pending row pruned, bound out-of-band → marked
+  `confirmed` (observed). The `security` service gains
+  `listAudienceBindingSuggestions` / `confirmAudienceBindingSuggestion` /
+  `dismissAudienceBindingSuggestion`, all pre-gated on tenant-level admin
+  (ADR-0066 superuser wildcard — anchors stay tenant-level only per D12).
+  Confirm writes the `sys_position_permission_set` row **with the caller's
+  execution context**, so the D5/D9 audience-anchor gate (no high-privilege
+  set on `everyone`/`guest`) and the D12 delegated-admin gate enforce the
+  binding; a set not yet materialized (installed this session) is first
+  seeded through the same provenance-checked upsert as the boot seeder
+  (ADR-0086 D4).
+
+  **`@objectstack/rest`** and **`@objectstack/runtime`**: the HTTP surface,
+  registered on both API layers (the RestServer that `objectstack dev`/hono
+  serves, and the runtime HttpDispatcher used by the adapters) —
+  `GET /api/v1/security/suggested-bindings?status=&packageId=`,
+  `POST /api/v1/security/suggested-bindings/:id/confirm`,
+  `POST /api/v1/security/suggested-bindings/:id/dismiss` (401 unauthenticated,
+  403/404/409 mapped from the service's typed errors, 501/503 without
+  plugin-security).
+
+### Patch Changes
+
+- e2fa074: feat(data): make object `enable.feeds`/`enable.activities` real opt-out gates; define the `enable.trackHistory` contract (#2707)
+
+  `ObjectSchema.enable.{files,trackHistory,activities,feeds}` were parsed but
+  (mostly) unconsumed — an author setting them got nothing, silently. Per the
+  enforce-or-remove doctrine, each flag now has a defined enforcement contract:
+
+  - `enable.activities` — opt-OUT writer gate. Spec default flips
+    `false → true`; plugin-audit keeps mirroring CRUD into the `sys_activity`
+    timeline unless the object declares an explicit `activities: false`
+    (behavior-preserving for every existing stack; the off-switch is the
+    per-object lever for activity-row growth, ADR-0057). The compliance
+    `sys_audit_log` row is NOT gated.
+  - `enable.feeds` — opt-OUT with server-side enforcement. Spec default flips
+    `false → true`; an explicit `feeds: false` now rejects `sys_comment`
+    creation targeting that object at the engine hook seam
+    (403 `FEEDS_DISABLED`, fail-closed like `CLONE_DISABLED`).
+  - `enable.trackHistory` — was misclassified `dead` in the liveness ledger:
+    the console has gated the record History tab on it since 2026-05.
+    Reclassified live with the two-grain contract documented (object flag =
+    History-tab master switch; per-field `trackHistory` = diff selector; audit
+    _capture_ stays unconditional as a compliance ledger).
+  - `enable.files` — stays dead + authorWarn (reserved for the future generic
+    Attachments panel; use `Field.file`/`Field.image` meanwhile). Its
+    `describe()` now says so instead of advertising a capability that
+    doesn't exist.
+
+  The default flips can't be avoided: with `default(false)`, compiled output
+  materializes `false` for every object with an `enable` block, making
+  "author explicitly opted out" indistinguishable from "schema default" — so
+  opt-out semantics require the default to be `true` (same posture as
+  `trash`/`mru`/`clone`). Liveness ledger + reference docs regenerated;
+  compile-time authorWarn now fires only for `enable.files`.
+
+- 23c8668: feat(data): `enable.files` goes live — opt-in gate for the generic Attachments surface (#2727)
+
+  The last dead ObjectCapabilities flag gets its enforcement contract.
+  `enable.files` is opt-IN (spec default stays `false`): the generic record
+  Attachments panel is a new surface, not an existing behavior.
+
+  - plugin-audit registers a `sys_attachment` beforeInsert hook: attachment
+    join rows may only target objects that explicitly declare
+    `enable: { files: true }` — anything else (absent block, absent flag,
+    explicit false, unknown object) rejects fail-closed with
+    403 `FILES_DISABLED` (CLONE_DISABLED / FEEDS_DISABLED pattern).
+  - `mapDataError` maps `FILES_DISABLED` → 403 with the gated target object
+    (generic data routes bypass `sendError`'s `.status` passthrough — the
+    #2707 lesson, applied at introduction time).
+  - `Field.file` / `Field.image` are deliberately independent: they store
+    the file URL in the record's own column and never create
+    `sys_attachment` rows, so field-level attachments work regardless of
+    this flag.
+  - Liveness ledger: `enable.files` dead→live, authorWarn dropped —
+    ObjectCapabilities is now 100% live. The compile-time
+    liveness-dead-property warning no longer fires for it; `describe()` and
+    the reference docs state the real contract.
+
+  Companion objectui PR ships `RecordAttachmentsPanel` (upload/list/
+  download/delete over the presigned three-step storage flow), rendered on
+  record pages when the flag is true.
+
+- 1056c5f: Package uninstall now revokes the package's data-plane permission rows (#2747, ADR-0086 D3 / ADR-0090 D5 "no ghost grants").
+
+  **`@objectstack/metadata-protocol`**: `deletePackage` gains an
+  uninstall-cleanup seam — the exact mirror of the publish materializer:
+  domain plugins register named cleanups via `registerUninstallCleanup(name,
+fn)` and every cleanup runs with the uninstalled package id, its outcome
+  reported on the new `cleanups` array of the response (a failed revocation is
+  visible, never silent). `deletePackage` also unregisters the package from
+  the in-memory SchemaRegistry (best-effort), so the running kernel stops
+  serving it without waiting for a restart.
+
+  **`@objectstack/plugin-security`**: registers the
+  `security.package-permissions` cleanup — deletes the package's own
+  `sys_permission_set` rows (`managed_by: 'package'` + matching `package_id`
+  only; env-authored and foreign-package rows are never touched, ADR-0086 D4),
+  their `sys_position_permission_set` / `sys_user_permission_set` bindings
+  (bindings first, so no dangling grants), and the package's
+  `sys_audience_binding_suggestion` rows (a reinstall re-prompts fresh).
+  Also fixes the engine-call signature in the suggestion module: `find`/`delete`
+  read `context` from their second argument — the previous trailing
+  `{ context }` argument was ignored, so deletes ran principal-less.
+
+  **`@objectstack/rest`**: `DELETE /api/v1/packages/:id` (no version pin) now
+  goes through `protocol.deletePackage` — one uninstall semantic instead of a
+  bare `sys_packages` row delete — removing the package's metadata, durable
+  record, registry entry, and running the cleanups; the response carries
+  `deletedCount` + `cleanups`. A version-scoped delete keeps the narrow
+  durable-registry semantics.
+
+- Updated dependencies [0a8e685]
+- Updated dependencies [afa8115]
+- Updated dependencies [80f12ca]
+- Updated dependencies [332b711]
+- Updated dependencies [e2fa074]
+- Updated dependencies [23c8668]
+- Updated dependencies [29f017d]
+- Updated dependencies [216fa9a]
+- Updated dependencies [6c22b12]
+- Updated dependencies [d0531c4]
+- Updated dependencies [cff5aac]
+  - @objectstack/spec@14.0.0
+  - @objectstack/platform-objects@14.0.0
+  - @objectstack/core@14.0.0
+  - @objectstack/service-package@14.0.0
+  - @objectstack/types@14.0.0
+
 ## 13.0.0
 
 ### Major Changes

@@ -1,5 +1,155 @@
 # @objectstack/plugin-security
 
+## 14.0.0
+
+### Minor Changes
+
+- ac08698: ADR-0090 D6 — the explain engine gets its REST face (#2696).
+
+  **`@objectstack/rest`**: new `GET/POST /api/v1/security/explain`
+  (`object`/`operation`/`userId`, validated against the spec's
+  `ExplainRequestSchema`) delegating to the `security` service's
+  `explain(request, callerContext)` — the same code paths the enforcement
+  middleware runs, so the returned `ExplainDecision` is explained by
+  construction. The route is authenticated-only (401 even on
+  `requireAuth=false` deployments), returns 501 when no security service
+  exposes `explain`, and maps the service's `PermissionDeniedError` to 403.
+  Registered on scoped (`/environments/:environmentId`) and unscoped base
+  paths; the env kernel's own `security` service is preferred, with a new
+  host-kernel `securityServiceProvider` fallback wired by the REST plugin.
+
+  **`@objectstack/plugin-security`**: `explainAccessForCaller` now honors
+  delegated administration (D12) — explaining ANOTHER user is authorized by
+  `manage_users` **or** a delegated `adminScope` whose business-unit subtree
+  covers the target user (new `DelegatedAdminGate.scopesCoverUser`, fail-closed
+  on unresolvable scopes/memberships). Self-explain still needs neither.
+
+- bd39dc5: ADR-0090 D5/D9 — suggested audience bindings become a queryable, confirmable surface.
+
+  A package permission set declaring `isDefault: true` is an install-time
+  SUGGESTION to bind the set to the built-in `everyone` position — never
+  auto-bound. Until now the flag was only read at bootstrap as the fallback-set
+  name; after an install there was no way to see or act on the suggestion.
+
+  **`@objectstack/plugin-security`**: new `sys_audience_binding_suggestion`
+  system object (read-only over the data API; unique per
+  package × set × anchor) plus a convergent reconciler
+  (`syncAudienceBindingSuggestions`) that reads every declared `isDefault` set —
+  boot-declared stack metadata AND installed package manifests, so a runtime
+  `POST /api/v1/packages` install is visible immediately — and keeps the table
+  honest: undeclared → pending row pruned, bound out-of-band → marked
+  `confirmed` (observed). The `security` service gains
+  `listAudienceBindingSuggestions` / `confirmAudienceBindingSuggestion` /
+  `dismissAudienceBindingSuggestion`, all pre-gated on tenant-level admin
+  (ADR-0066 superuser wildcard — anchors stay tenant-level only per D12).
+  Confirm writes the `sys_position_permission_set` row **with the caller's
+  execution context**, so the D5/D9 audience-anchor gate (no high-privilege
+  set on `everyone`/`guest`) and the D12 delegated-admin gate enforce the
+  binding; a set not yet materialized (installed this session) is first
+  seeded through the same provenance-checked upsert as the boot seeder
+  (ADR-0086 D4).
+
+  **`@objectstack/rest`** and **`@objectstack/runtime`**: the HTTP surface,
+  registered on both API layers (the RestServer that `objectstack dev`/hono
+  serves, and the runtime HttpDispatcher used by the adapters) —
+  `GET /api/v1/security/suggested-bindings?status=&packageId=`,
+  `POST /api/v1/security/suggested-bindings/:id/confirm`,
+  `POST /api/v1/security/suggested-bindings/:id/dismiss` (401 unauthenticated,
+  403/404/409 mapped from the service's typed errors, 501/503 without
+  plugin-security).
+
+- 1056c5f: Package uninstall now revokes the package's data-plane permission rows (#2747, ADR-0086 D3 / ADR-0090 D5 "no ghost grants").
+
+  **`@objectstack/metadata-protocol`**: `deletePackage` gains an
+  uninstall-cleanup seam — the exact mirror of the publish materializer:
+  domain plugins register named cleanups via `registerUninstallCleanup(name,
+fn)` and every cleanup runs with the uninstalled package id, its outcome
+  reported on the new `cleanups` array of the response (a failed revocation is
+  visible, never silent). `deletePackage` also unregisters the package from
+  the in-memory SchemaRegistry (best-effort), so the running kernel stops
+  serving it without waiting for a restart.
+
+  **`@objectstack/plugin-security`**: registers the
+  `security.package-permissions` cleanup — deletes the package's own
+  `sys_permission_set` rows (`managed_by: 'package'` + matching `package_id`
+  only; env-authored and foreign-package rows are never touched, ADR-0086 D4),
+  their `sys_position_permission_set` / `sys_user_permission_set` bindings
+  (bindings first, so no dangling grants), and the package's
+  `sys_audience_binding_suggestion` rows (a reinstall re-prompts fresh).
+  Also fixes the engine-call signature in the suggestion module: `find`/`delete`
+  read `context` from their second argument — the previous trailing
+  `{ context }` argument was ignored, so deletes ran principal-less.
+
+  **`@objectstack/rest`**: `DELETE /api/v1/packages/:id` (no version pin) now
+  goes through `protocol.deletePackage` — one uninstall semantic instead of a
+  bare `sys_packages` row delete — removing the package's metadata, durable
+  record, registry entry, and running the cleanups; the response carries
+  `deletedCount` + `cleanups`. A version-scoped delete keeps the narrow
+  durable-registry semantics.
+
+### Patch Changes
+
+- 0a8e685: ADR-0090 permission-model zoo + docs alignment.
+
+  **Showcase (`@objectstack/example-showcase`)** now exercises the full Permission
+  Model v2 authoring surface and is guarded by a new runtime dogfood test
+  (`showcase-permission-zoo.dogfood.test.ts`): typed `definePosition`/
+  `definePermissionSet`/`defineSharingRule` factories; six flat positions (the
+  stale pre-D3 `parent` fields are gone); permission sets covering CRUD+FLS+RLS,
+  org-depth read/write asymmetry (`readScope: 'org'` / `writeScope: 'own'`),
+  View-All (auditor) and Modify-All (ops) bypasses, `systemPermissions`
+  (`setup.access`), the `isDefault` everyone-suggestion (incl. personal-data
+  grants on the `private`-OWD note object), a guest-safe set for the `guest`
+  anchor (D9), and a delegated-administration `adminScope` bounded to a seeded
+  `sys_business_unit` subtree (D12). Objects gain `externalSharingModel` dials
+  (D11). A committed `access-matrix.json` opts the showcase into the D6 snapshot
+  gate. Hierarchy depths (`own_and_reports`/`unit`/`unit_and_below`) are
+  deliberately NOT authored — they are enterprise (`hierarchy-security`) and the
+  open runtime fails closed; BU-shaped visibility is demonstrated via the
+  enforced `unit_and_subordinates` sharing-rule recipient instead.
+
+  **`@objectstack/spec`**: `defineStack` strict cross-reference validation no
+  longer rejects permission grants or seed datasets that target platform-provided
+  objects (`sys_`/`cloud_`/`ai_` prefixes) — a delegated-admin set carrying CRUD
+  on the RBAC link tables (ADR-0090 D12) and an app seeding the business-unit
+  tree are legitimate shapes; the typo net stays intact for the stack's own
+  objects. Stale pre-ADR-0090 vocabulary in zod docstrings (rls/territory/
+  sharing/tool/agent) is rewritten; the auto-generated references (including the
+  previously missing `security/explain.mdx`) are regenerated.
+
+  **Docs**: `protocol/objectql/security.mdx` rewritten to the v2 model (no
+  profiles, positions, canonical OWD four + D1 private default +
+  `externalSharingModel`, position-scoped RLS, enforced sharing recipients);
+  `isProfile` scrubbed from every authoring example; the dead
+  `/docs/references/identity/role` link fixed; implementation-status and
+  plugin READMEs aligned. Remaining rename misses are tracked in #2722
+  (RLSUserContext.role), #2723 (portal `profiles`), #2724 (sys_record_share
+  `role` enum).
+
+- d0531c4: Setup → Access Control nav: the `sys_position` entry is renamed
+  `nav_roles`/"Roles" → `nav_positions`/"Positions" (岗位 / ポジション /
+  Posiciones) — the last "role" leftover in platform UI copy (ADR-0090 D3;
+  the Studio-side relabel already landed in objectui). The framework's
+  `.objectui-sha` pin is bumped to pick up the Studio Access-pillar explain
+  panel ("why can this user access?", ADR-0090 D6) and the suggested
+  audience-binding install prompt (D5/D9).
+- cff5aac: Setup navigation: the Access Control menu entry for `sys_position` is now labeled "Positions" (was still "Roles" after the ADR-0090 D3 rename) — `nav_roles` → `nav_positions`, with zh-CN 岗位 / ja-JP ポジション / es-ES Posiciones translations updated to match the position vocabulary.
+- Updated dependencies [0a8e685]
+- Updated dependencies [afa8115]
+- Updated dependencies [80f12ca]
+- Updated dependencies [332b711]
+- Updated dependencies [e2fa074]
+- Updated dependencies [23c8668]
+- Updated dependencies [29f017d]
+- Updated dependencies [216fa9a]
+- Updated dependencies [6c22b12]
+- Updated dependencies [d0531c4]
+- Updated dependencies [cff5aac]
+  - @objectstack/spec@14.0.0
+  - @objectstack/platform-objects@14.0.0
+  - @objectstack/core@14.0.0
+  - @objectstack/formula@14.0.0
+
 ## 13.0.0
 
 ### Major Changes

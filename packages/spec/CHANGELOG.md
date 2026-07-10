@@ -1,5 +1,198 @@
 # @objectstack/spec
 
+## 14.0.0
+
+### Major Changes
+
+- 80f12ca: `BookAudience` gated arm renamed: `{ profile: string }` → `{ permissionSet: string }`.
+
+  ADR-0090 D2 removed the Profile concept, but `book.audience` (ADR-0046 §6.7)
+  still modelled its gated arm as a profile reference. Books ship in packages,
+  and packages own permission sets but never positions (ADR-0090 D9), so the
+  gate is a capability reference — a permission-set name the reader must hold,
+  e.g. `{ permissionSet: 'crm_admin' }`. Pre-launch one-step rename, no alias:
+  the zod union now rejects `{ profile }` at parse time. `'org'` and `'public'`
+  literals are unchanged (`'public'` ≡ the built-in `guest` position, D9).
+
+### Minor Changes
+
+- 0a8e685: ADR-0090 permission-model zoo + docs alignment.
+
+  **Showcase (`@objectstack/example-showcase`)** now exercises the full Permission
+  Model v2 authoring surface and is guarded by a new runtime dogfood test
+  (`showcase-permission-zoo.dogfood.test.ts`): typed `definePosition`/
+  `definePermissionSet`/`defineSharingRule` factories; six flat positions (the
+  stale pre-D3 `parent` fields are gone); permission sets covering CRUD+FLS+RLS,
+  org-depth read/write asymmetry (`readScope: 'org'` / `writeScope: 'own'`),
+  View-All (auditor) and Modify-All (ops) bypasses, `systemPermissions`
+  (`setup.access`), the `isDefault` everyone-suggestion (incl. personal-data
+  grants on the `private`-OWD note object), a guest-safe set for the `guest`
+  anchor (D9), and a delegated-administration `adminScope` bounded to a seeded
+  `sys_business_unit` subtree (D12). Objects gain `externalSharingModel` dials
+  (D11). A committed `access-matrix.json` opts the showcase into the D6 snapshot
+  gate. Hierarchy depths (`own_and_reports`/`unit`/`unit_and_below`) are
+  deliberately NOT authored — they are enterprise (`hierarchy-security`) and the
+  open runtime fails closed; BU-shaped visibility is demonstrated via the
+  enforced `unit_and_subordinates` sharing-rule recipient instead.
+
+  **`@objectstack/spec`**: `defineStack` strict cross-reference validation no
+  longer rejects permission grants or seed datasets that target platform-provided
+  objects (`sys_`/`cloud_`/`ai_` prefixes) — a delegated-admin set carrying CRUD
+  on the RBAC link tables (ADR-0090 D12) and an app seeding the business-unit
+  tree are legitimate shapes; the typo net stays intact for the stack's own
+  objects. Stale pre-ADR-0090 vocabulary in zod docstrings (rls/territory/
+  sharing/tool/agent) is rewritten; the auto-generated references (including the
+  previously missing `security/explain.mdx`) are regenerated.
+
+  **Docs**: `protocol/objectql/security.mdx` rewritten to the v2 model (no
+  profiles, positions, canonical OWD four + D1 private default +
+  `externalSharingModel`, position-scoped RLS, enforced sharing recipients);
+  `isProfile` scrubbed from every authoring example; the dead
+  `/docs/references/identity/role` link fixed; implementation-status and
+  plugin READMEs aligned. Remaining rename misses are tracked in #2722
+  (RLSUserContext.role), #2723 (portal `profiles`), #2724 (sys_record_share
+  `role` enum).
+
+- afa8115: ADR-0090 vocabulary leftovers (#2722, #2723, #2724) — the last "role"/"profile"
+  surfaces are renamed one-step, no aliases (launch-window discipline).
+
+  **`PortalSchema.profiles` → `positions`** (#2723, D2 removal miss). FROM → TO:
+  `profiles: ['client_portal_user']` → `positions: ['client_portal_user']` —
+  portal admission is now position-scoped; use the built-in `guest` position
+  for anonymous-only portals. The removed `profiles` key is a loud tombstone:
+  authoring it fails with the prescription instead of silently stripping. The
+  showcase Client Portal is migrated and now admits a real declared position
+  (`client_portal_user`).
+
+  **`RLSUserContextSchema.role` → `positions`** (#2722, D3 rename miss). FROM →
+  TO: `role: string | string[]` → `positions: string[]` — matches the runtime
+  shape the RLS compiler resolves as `current_user.positions`. No runtime
+  consumer read the old field (the compiler has its own context type); public
+  export names are unchanged.
+
+  **`sys_record_share.recipient_type` `'role'` → `'position'`** (#2724, D3).
+  The record-share enum and the `ShareRecipientType` contract type now match
+  the already-migrated spec zod enum. No stored-data migration is required:
+  no reader expands non-`user` record-share rows (rules materialize per-user
+  grants), so legacy `'role'` rows were inert. The plugin-sharing translation
+  bundles are regenerated — fixing the pre-stale `sys_sharing_rule` options
+  block too — with zh-CN/ja-JP labels patched per the generated-file contract
+  (业务单元及下级 / ビジネスユニットと下位階層).
+
+- e2fa074: feat(data): make object `enable.feeds`/`enable.activities` real opt-out gates; define the `enable.trackHistory` contract (#2707)
+
+  `ObjectSchema.enable.{files,trackHistory,activities,feeds}` were parsed but
+  (mostly) unconsumed — an author setting them got nothing, silently. Per the
+  enforce-or-remove doctrine, each flag now has a defined enforcement contract:
+
+  - `enable.activities` — opt-OUT writer gate. Spec default flips
+    `false → true`; plugin-audit keeps mirroring CRUD into the `sys_activity`
+    timeline unless the object declares an explicit `activities: false`
+    (behavior-preserving for every existing stack; the off-switch is the
+    per-object lever for activity-row growth, ADR-0057). The compliance
+    `sys_audit_log` row is NOT gated.
+  - `enable.feeds` — opt-OUT with server-side enforcement. Spec default flips
+    `false → true`; an explicit `feeds: false` now rejects `sys_comment`
+    creation targeting that object at the engine hook seam
+    (403 `FEEDS_DISABLED`, fail-closed like `CLONE_DISABLED`).
+  - `enable.trackHistory` — was misclassified `dead` in the liveness ledger:
+    the console has gated the record History tab on it since 2026-05.
+    Reclassified live with the two-grain contract documented (object flag =
+    History-tab master switch; per-field `trackHistory` = diff selector; audit
+    _capture_ stays unconditional as a compliance ledger).
+  - `enable.files` — stays dead + authorWarn (reserved for the future generic
+    Attachments panel; use `Field.file`/`Field.image` meanwhile). Its
+    `describe()` now says so instead of advertising a capability that
+    doesn't exist.
+
+  The default flips can't be avoided: with `default(false)`, compiled output
+  materializes `false` for every object with an `enable` block, making
+  "author explicitly opted out" indistinguishable from "schema default" — so
+  opt-out semantics require the default to be `true` (same posture as
+  `trash`/`mru`/`clone`). Liveness ledger + reference docs regenerated;
+  compile-time authorWarn now fires only for `enable.files`.
+
+- 23c8668: feat(data): `enable.files` goes live — opt-in gate for the generic Attachments surface (#2727)
+
+  The last dead ObjectCapabilities flag gets its enforcement contract.
+  `enable.files` is opt-IN (spec default stays `false`): the generic record
+  Attachments panel is a new surface, not an existing behavior.
+
+  - plugin-audit registers a `sys_attachment` beforeInsert hook: attachment
+    join rows may only target objects that explicitly declare
+    `enable: { files: true }` — anything else (absent block, absent flag,
+    explicit false, unknown object) rejects fail-closed with
+    403 `FILES_DISABLED` (CLONE_DISABLED / FEEDS_DISABLED pattern).
+  - `mapDataError` maps `FILES_DISABLED` → 403 with the gated target object
+    (generic data routes bypass `sendError`'s `.status` passthrough — the
+    #2707 lesson, applied at introduction time).
+  - `Field.file` / `Field.image` are deliberately independent: they store
+    the file URL in the record's own column and never create
+    `sys_attachment` rows, so field-level attachments work regardless of
+    this flag.
+  - Liveness ledger: `enable.files` dead→live, authorWarn dropped —
+    ObjectCapabilities is now 100% live. The compile-time
+    liveness-dead-property warning no longer fires for it; `describe()` and
+    the reference docs state the real contract.
+
+  Companion objectui PR ships `RecordAttachmentsPanel` (upload/list/
+  download/delete over the presigned three-step storage flow), rendered on
+  record pages when the flag is true.
+
+- 216fa9a: Add a `position` approver type so approvals can route to org positions (ADR-0090 D3 fallout).
+
+  Post ADR-0090 D3 the `role` approver type resolves against the better-auth org-membership
+  tier (`sys_member.role`: `owner`/`admin`/`member`) — it was never a position. Downstream
+  apps that authored `{ type: 'role', value: 'sales_manager' }` silently routed approvals to
+  nobody. Now:
+
+  - **spec**: `ApproverType` gains `'position'` — `value` is the position machine name; the
+    approver expands to its holders via `sys_user_position`. Authoring guidance: keep
+    `type: 'role'` ONLY for membership tiers; for org positions use
+    `{ type: 'position', value: '<position_name>' }` (one-line fix for the mismatch above).
+  - **plugin-approvals**: the engine resolves `position` approvers via `sys_user_position` ∪
+    the `sys_member.role` transition source (same semantics as `PositionGraphService` in
+    plugin-sharing). The `department` approver type is now honored by its spec spelling
+    (previously only the off-spec `business_unit`/`bu` dialect matched).
+  - **lint**: new `validateApprovalApprovers` rule — `approval-role-not-membership-tier`
+    warns when a `role` approver's value is not a membership tier and prescribes the
+    `position` rewrite; `approval-approver-type-unknown` flags off-spec approver types
+    (with a `business_unit` → `department` fix-it). Wired into `os lint`.
+
+### Patch Changes
+
+- 29f017d: chore(liveness): authorWarn sweep across all governed types + lint coverage to match
+
+  Every remaining _misleading_ dead property now warns at compile time (12 new
+  markings): `flow.errorHandling.fallbackNodeId` (engine uses fault edges),
+  `flow.nodes[].outputSchema` (never validated), `flow.template`,
+  `action.timeout` (no runtime enforcement), `object.tenancy.strategy` /
+  `crossTenantAccess` (only enabled+tenantField are read), `object.abstract`,
+  `field.dependencies`, `agent.tenantId`, `tool.permissions` (invocation not
+  permission-gated), `permission.contextVariables` (RLS reads current_user.\*
+  only), `dataset.measures[].certified` (governance flag unenforced).
+
+  The compile-time lint previously only checked objects+fields, so markings on
+  other types were silent — it now covers every governed type (flat stack
+  collections) and fans container checks out over arrays (one finding per
+  item+path). Benign display metadata (label/description/tags) stays unmarked
+  per the README's signal rules.
+
+  Also re-anchors the README: the counts table had drifted badly (field listed
+  as 34 live/39 dead vs the ledger's actual 54/6; `action.disabled` was still
+  described as ignored though it went live via metadata-admin) — replaced with
+  regenerable numbers plus the script to regenerate them, and added the
+  cross-repo evidence rule (grep ../objectui before classifying dead — the
+  enable.trackHistory lesson, #2707).
+
+- 6c22b12: fix(spec): bump PROTOCOL_VERSION 12.0.0 → 13.0.0 to match the spec major
+
+  The version-packages roll (#2720) took `@objectstack/spec` to major `13.0.0`
+  but left `PROTOCOL_VERSION` at `12.0.0`, so `protocol-version.test.ts` (the
+  lockstep guard that asserts the protocol major equals the package major) failed
+  on `main` — reddening Test Core for every PR. Restore the lockstep so the
+  loader/installer handshake advertises the major the package actually ships.
+
 ## 13.0.0
 
 ### Major Changes

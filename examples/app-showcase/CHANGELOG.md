@@ -1,5 +1,93 @@
 # @objectstack/example-showcase
 
+## 0.3.0
+
+### Minor Changes
+
+- 0a8e685: ADR-0090 permission-model zoo + docs alignment.
+
+  **Showcase (`@objectstack/example-showcase`)** now exercises the full Permission
+  Model v2 authoring surface and is guarded by a new runtime dogfood test
+  (`showcase-permission-zoo.dogfood.test.ts`): typed `definePosition`/
+  `definePermissionSet`/`defineSharingRule` factories; six flat positions (the
+  stale pre-D3 `parent` fields are gone); permission sets covering CRUD+FLS+RLS,
+  org-depth read/write asymmetry (`readScope: 'org'` / `writeScope: 'own'`),
+  View-All (auditor) and Modify-All (ops) bypasses, `systemPermissions`
+  (`setup.access`), the `isDefault` everyone-suggestion (incl. personal-data
+  grants on the `private`-OWD note object), a guest-safe set for the `guest`
+  anchor (D9), and a delegated-administration `adminScope` bounded to a seeded
+  `sys_business_unit` subtree (D12). Objects gain `externalSharingModel` dials
+  (D11). A committed `access-matrix.json` opts the showcase into the D6 snapshot
+  gate. Hierarchy depths (`own_and_reports`/`unit`/`unit_and_below`) are
+  deliberately NOT authored — they are enterprise (`hierarchy-security`) and the
+  open runtime fails closed; BU-shaped visibility is demonstrated via the
+  enforced `unit_and_subordinates` sharing-rule recipient instead.
+
+  **`@objectstack/spec`**: `defineStack` strict cross-reference validation no
+  longer rejects permission grants or seed datasets that target platform-provided
+  objects (`sys_`/`cloud_`/`ai_` prefixes) — a delegated-admin set carrying CRUD
+  on the RBAC link tables (ADR-0090 D12) and an app seeding the business-unit
+  tree are legitimate shapes; the typo net stays intact for the stack's own
+  objects. Stale pre-ADR-0090 vocabulary in zod docstrings (rls/territory/
+  sharing/tool/agent) is rewritten; the auto-generated references (including the
+  previously missing `security/explain.mdx`) are regenerated.
+
+  **Docs**: `protocol/objectql/security.mdx` rewritten to the v2 model (no
+  profiles, positions, canonical OWD four + D1 private default +
+  `externalSharingModel`, position-scoped RLS, enforced sharing recipients);
+  `isProfile` scrubbed from every authoring example; the dead
+  `/docs/references/identity/role` link fixed; implementation-status and
+  plugin READMEs aligned. Remaining rename misses are tracked in #2722
+  (RLSUserContext.role), #2723 (portal `profiles`), #2724 (sys_record_share
+  `role` enum).
+
+- afa8115: ADR-0090 vocabulary leftovers (#2722, #2723, #2724) — the last "role"/"profile"
+  surfaces are renamed one-step, no aliases (launch-window discipline).
+
+  **`PortalSchema.profiles` → `positions`** (#2723, D2 removal miss). FROM → TO:
+  `profiles: ['client_portal_user']` → `positions: ['client_portal_user']` —
+  portal admission is now position-scoped; use the built-in `guest` position
+  for anonymous-only portals. The removed `profiles` key is a loud tombstone:
+  authoring it fails with the prescription instead of silently stripping. The
+  showcase Client Portal is migrated and now admits a real declared position
+  (`client_portal_user`).
+
+  **`RLSUserContextSchema.role` → `positions`** (#2722, D3 rename miss). FROM →
+  TO: `role: string | string[]` → `positions: string[]` — matches the runtime
+  shape the RLS compiler resolves as `current_user.positions`. No runtime
+  consumer read the old field (the compiler has its own context type); public
+  export names are unchanged.
+
+  **`sys_record_share.recipient_type` `'role'` → `'position'`** (#2724, D3).
+  The record-share enum and the `ShareRecipientType` contract type now match
+  the already-migrated spec zod enum. No stored-data migration is required:
+  no reader expands non-`user` record-share rows (rules materialize per-user
+  grants), so legacy `'role'` rows were inert. The plugin-sharing translation
+  bundles are regenerated — fixing the pre-stale `sys_sharing_rule` options
+  block too — with zh-CN/ja-JP labels patched per the generated-file contract
+  (业务单元及下级 / ビジネスユニットと下位階層).
+
+### Patch Changes
+
+- Updated dependencies [57b8fe0]
+- Updated dependencies [0a8e685]
+- Updated dependencies [afa8115]
+- Updated dependencies [80f12ca]
+- Updated dependencies [e2fa074]
+- Updated dependencies [23c8668]
+- Updated dependencies [29f017d]
+- Updated dependencies [bc26360]
+- Updated dependencies [afa8115]
+- Updated dependencies [216fa9a]
+- Updated dependencies [6c22b12]
+- Updated dependencies [bd39dc5]
+  - @objectstack/runtime@14.0.0
+  - @objectstack/spec@14.0.0
+  - @objectstack/driver-sql@14.0.0
+  - @objectstack/cloud-connection@14.0.0
+  - @objectstack/connector-rest@14.0.0
+  - @objectstack/connector-slack@14.0.0
+
 ## 0.2.23
 
 ### Patch Changes

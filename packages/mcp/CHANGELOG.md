@@ -1,5 +1,47 @@
 # @objectstack/plugin-mcp-server
 
+## 14.0.0
+
+### Minor Changes
+
+- 332b711: feat(mcp): plugin-carried "Connect an agent" Setup page (#2714 Phase 1)
+
+  The MCP plugin now registers a Setup page (`connect_agent`) plus its
+  navigation entry under Integrations — the nav lives and dies with the
+  capability (cloud ADR-0009 principle) and follows the surface's default-on
+  switch: an opted-out deployment (`OS_MCP_SERVER_ENABLED=false`) gets no page
+  and no entry. The page body is the `mcp:connect-agent` SDUI widget provided
+  by objectui (objectui#2372): env MCP URL, per-client connect cards, SKILL.md
+  download, API-key minting. zh-CN nav label included.
+
+- bc26360: feat(mcp): `GET /api/v1/mcp/skill` — download the environment-customized Agent Skill
+
+  `renderSkillMarkdown()` was export-only; nothing served it over HTTP, so the
+  "one generic skill" distributable (ADR-0036 Amendment C) had no self-serve
+  outlet. The runtime dispatcher now serves it at `GET /api/v1/mcp/skill` as
+  `text/markdown` — public like `/discovery` (generic agent instructions plus a
+  URL the caller already knows; no schema, no tenant data), gated on the same
+  default-on MCP switch (404 when opted out), 501 when the MCP plugin isn't
+  loaded. The environment URL comes from the auth service's canonical
+  `getMcpResourceUrl()` with a request-host fallback. `MCPServerRuntime` gains
+  `renderSkill()` so hosts reach the renderer via the registered `'mcp'`
+  service without a package dependency. Feeds the Setup "Connect an agent"
+  page (objectui#2363) and the distribution shells (#2714).
+
+### Patch Changes
+
+- Updated dependencies [0a8e685]
+- Updated dependencies [afa8115]
+- Updated dependencies [80f12ca]
+- Updated dependencies [e2fa074]
+- Updated dependencies [23c8668]
+- Updated dependencies [29f017d]
+- Updated dependencies [216fa9a]
+- Updated dependencies [6c22b12]
+  - @objectstack/spec@14.0.0
+  - @objectstack/core@14.0.0
+  - @objectstack/types@14.0.0
+
 ## 13.0.0
 
 ### Minor Changes

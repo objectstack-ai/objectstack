@@ -1,5 +1,38 @@
 # @objectstack/platform-objects
 
+## 14.0.0
+
+### Patch Changes
+
+- 332b711: feat(mcp): plugin-carried "Connect an agent" Setup page (#2714 Phase 1)
+
+  The MCP plugin now registers a Setup page (`connect_agent`) plus its
+  navigation entry under Integrations — the nav lives and dies with the
+  capability (cloud ADR-0009 principle) and follows the surface's default-on
+  switch: an opted-out deployment (`OS_MCP_SERVER_ENABLED=false`) gets no page
+  and no entry. The page body is the `mcp:connect-agent` SDUI widget provided
+  by objectui (objectui#2372): env MCP URL, per-client connect cards, SKILL.md
+  download, API-key minting. zh-CN nav label included.
+
+- d0531c4: Setup → Access Control nav: the `sys_position` entry is renamed
+  `nav_roles`/"Roles" → `nav_positions`/"Positions" (岗位 / ポジション /
+  Posiciones) — the last "role" leftover in platform UI copy (ADR-0090 D3;
+  the Studio-side relabel already landed in objectui). The framework's
+  `.objectui-sha` pin is bumped to pick up the Studio Access-pillar explain
+  panel ("why can this user access?", ADR-0090 D6) and the suggested
+  audience-binding install prompt (D5/D9).
+- cff5aac: Setup navigation: the Access Control menu entry for `sys_position` is now labeled "Positions" (was still "Roles" after the ADR-0090 D3 rename) — `nav_roles` → `nav_positions`, with zh-CN 岗位 / ja-JP ポジション / es-ES Posiciones translations updated to match the position vocabulary.
+- Updated dependencies [0a8e685]
+- Updated dependencies [afa8115]
+- Updated dependencies [80f12ca]
+- Updated dependencies [e2fa074]
+- Updated dependencies [23c8668]
+- Updated dependencies [29f017d]
+- Updated dependencies [216fa9a]
+- Updated dependencies [6c22b12]
+  - @objectstack/spec@14.0.0
+  - @objectstack/metadata-core@14.0.0
+
 ## 13.0.0
 
 ### Major Changes

@@ -1,5 +1,110 @@
 # @objectstack/runtime
 
+## 14.0.0
+
+### Minor Changes
+
+- bc26360: feat(mcp): `GET /api/v1/mcp/skill` — download the environment-customized Agent Skill
+
+  `renderSkillMarkdown()` was export-only; nothing served it over HTTP, so the
+  "one generic skill" distributable (ADR-0036 Amendment C) had no self-serve
+  outlet. The runtime dispatcher now serves it at `GET /api/v1/mcp/skill` as
+  `text/markdown` — public like `/discovery` (generic agent instructions plus a
+  URL the caller already knows; no schema, no tenant data), gated on the same
+  default-on MCP switch (404 when opted out), 501 when the MCP plugin isn't
+  loaded. The environment URL comes from the auth service's canonical
+  `getMcpResourceUrl()` with a request-host fallback. `MCPServerRuntime` gains
+  `renderSkill()` so hosts reach the renderer via the registered `'mcp'`
+  service without a package dependency. Feeds the Setup "Connect an agent"
+  page (objectui#2363) and the distribution shells (#2714).
+
+- bd39dc5: ADR-0090 D5/D9 — suggested audience bindings become a queryable, confirmable surface.
+
+  A package permission set declaring `isDefault: true` is an install-time
+  SUGGESTION to bind the set to the built-in `everyone` position — never
+  auto-bound. Until now the flag was only read at bootstrap as the fallback-set
+  name; after an install there was no way to see or act on the suggestion.
+
+  **`@objectstack/plugin-security`**: new `sys_audience_binding_suggestion`
+  system object (read-only over the data API; unique per
+  package × set × anchor) plus a convergent reconciler
+  (`syncAudienceBindingSuggestions`) that reads every declared `isDefault` set —
+  boot-declared stack metadata AND installed package manifests, so a runtime
+  `POST /api/v1/packages` install is visible immediately — and keeps the table
+  honest: undeclared → pending row pruned, bound out-of-band → marked
+  `confirmed` (observed). The `security` service gains
+  `listAudienceBindingSuggestions` / `confirmAudienceBindingSuggestion` /
+  `dismissAudienceBindingSuggestion`, all pre-gated on tenant-level admin
+  (ADR-0066 superuser wildcard — anchors stay tenant-level only per D12).
+  Confirm writes the `sys_position_permission_set` row **with the caller's
+  execution context**, so the D5/D9 audience-anchor gate (no high-privilege
+  set on `everyone`/`guest`) and the D12 delegated-admin gate enforce the
+  binding; a set not yet materialized (installed this session) is first
+  seeded through the same provenance-checked upsert as the boot seeder
+  (ADR-0086 D4).
+
+  **`@objectstack/rest`** and **`@objectstack/runtime`**: the HTTP surface,
+  registered on both API layers (the RestServer that `objectstack dev`/hono
+  serves, and the runtime HttpDispatcher used by the adapters) —
+  `GET /api/v1/security/suggested-bindings?status=&packageId=`,
+  `POST /api/v1/security/suggested-bindings/:id/confirm`,
+  `POST /api/v1/security/suggested-bindings/:id/dismiss` (401 unauthenticated,
+  403/404/409 mapped from the service's typed errors, 501/503 without
+  plugin-security).
+
+### Patch Changes
+
+- 57b8fe0: fix(runtime): action body `ctx.user` now reflects the session operator, not `system`
+
+  The `POST /actions/:object/:action` route called `handleActions` directly,
+  bypassing `dispatcher.dispatch()` — so `resolveExecutionContext` never ran and
+  the action handler's `ctx.user` was hard-coded to `{ id: 'system' }`. Handlers
+  could not branch on the operator's identity or business roles, nor enforce
+  server-side ownership. (#2701)
+
+  - The action routes now dispatch through `dispatch()` like the automation/AI
+    routes, so the per-request pipeline resolves the session identity (and swaps
+    to the per-project kernel) before the action body runs.
+  - `handleActions` builds `ctx.user` from the resolved `ExecutionContext`,
+    exposing `id`, `email`, `roles`/`positions` (ADR-0090 business roles),
+    `permissions`, and `tenantId` — matching the MCP `runAction` and
+    record-change trigger paths. It falls back to a `system` principal only for a
+    genuinely anonymous / self-invoked call.
+
+  No authoring change is required: action handlers that previously always saw
+  `ctx.user.id === 'system'` will now see the real caller.
+
+- Updated dependencies [0a8e685]
+- Updated dependencies [afa8115]
+- Updated dependencies [80f12ca]
+- Updated dependencies [e2fa074]
+- Updated dependencies [ac08698]
+- Updated dependencies [23c8668]
+- Updated dependencies [29f017d]
+- Updated dependencies [afa8115]
+- Updated dependencies [216fa9a]
+- Updated dependencies [6c22b12]
+- Updated dependencies [d0531c4]
+- Updated dependencies [cff5aac]
+- Updated dependencies [bd39dc5]
+- Updated dependencies [1056c5f]
+  - @objectstack/spec@14.0.0
+  - @objectstack/plugin-security@14.0.0
+  - @objectstack/rest@14.0.0
+  - @objectstack/driver-sql@14.0.0
+  - @objectstack/objectql@14.0.0
+  - @objectstack/core@14.0.0
+  - @objectstack/formula@14.0.0
+  - @objectstack/metadata@14.0.0
+  - @objectstack/observability@14.0.0
+  - @objectstack/driver-memory@14.0.0
+  - @objectstack/driver-sqlite-wasm@14.0.0
+  - @objectstack/plugin-auth@14.0.0
+  - @objectstack/service-cluster@14.0.0
+  - @objectstack/service-datasource@14.0.0
+  - @objectstack/service-i18n@14.0.0
+  - @objectstack/types@14.0.0
+
 ## 13.0.0
 
 ### Major Changes

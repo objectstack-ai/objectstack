@@ -1,5 +1,86 @@
 # @objectstack/plugin-audit
 
+## 14.0.0
+
+### Minor Changes
+
+- e2fa074: feat(data): make object `enable.feeds`/`enable.activities` real opt-out gates; define the `enable.trackHistory` contract (#2707)
+
+  `ObjectSchema.enable.{files,trackHistory,activities,feeds}` were parsed but
+  (mostly) unconsumed — an author setting them got nothing, silently. Per the
+  enforce-or-remove doctrine, each flag now has a defined enforcement contract:
+
+  - `enable.activities` — opt-OUT writer gate. Spec default flips
+    `false → true`; plugin-audit keeps mirroring CRUD into the `sys_activity`
+    timeline unless the object declares an explicit `activities: false`
+    (behavior-preserving for every existing stack; the off-switch is the
+    per-object lever for activity-row growth, ADR-0057). The compliance
+    `sys_audit_log` row is NOT gated.
+  - `enable.feeds` — opt-OUT with server-side enforcement. Spec default flips
+    `false → true`; an explicit `feeds: false` now rejects `sys_comment`
+    creation targeting that object at the engine hook seam
+    (403 `FEEDS_DISABLED`, fail-closed like `CLONE_DISABLED`).
+  - `enable.trackHistory` — was misclassified `dead` in the liveness ledger:
+    the console has gated the record History tab on it since 2026-05.
+    Reclassified live with the two-grain contract documented (object flag =
+    History-tab master switch; per-field `trackHistory` = diff selector; audit
+    _capture_ stays unconditional as a compliance ledger).
+  - `enable.files` — stays dead + authorWarn (reserved for the future generic
+    Attachments panel; use `Field.file`/`Field.image` meanwhile). Its
+    `describe()` now says so instead of advertising a capability that
+    doesn't exist.
+
+  The default flips can't be avoided: with `default(false)`, compiled output
+  materializes `false` for every object with an `enable` block, making
+  "author explicitly opted out" indistinguishable from "schema default" — so
+  opt-out semantics require the default to be `true` (same posture as
+  `trash`/`mru`/`clone`). Liveness ledger + reference docs regenerated;
+  compile-time authorWarn now fires only for `enable.files`.
+
+- 23c8668: feat(data): `enable.files` goes live — opt-in gate for the generic Attachments surface (#2727)
+
+  The last dead ObjectCapabilities flag gets its enforcement contract.
+  `enable.files` is opt-IN (spec default stays `false`): the generic record
+  Attachments panel is a new surface, not an existing behavior.
+
+  - plugin-audit registers a `sys_attachment` beforeInsert hook: attachment
+    join rows may only target objects that explicitly declare
+    `enable: { files: true }` — anything else (absent block, absent flag,
+    explicit false, unknown object) rejects fail-closed with
+    403 `FILES_DISABLED` (CLONE_DISABLED / FEEDS_DISABLED pattern).
+  - `mapDataError` maps `FILES_DISABLED` → 403 with the gated target object
+    (generic data routes bypass `sendError`'s `.status` passthrough — the
+    #2707 lesson, applied at introduction time).
+  - `Field.file` / `Field.image` are deliberately independent: they store
+    the file URL in the record's own column and never create
+    `sys_attachment` rows, so field-level attachments work regardless of
+    this flag.
+  - Liveness ledger: `enable.files` dead→live, authorWarn dropped —
+    ObjectCapabilities is now 100% live. The compile-time
+    liveness-dead-property warning no longer fires for it; `describe()` and
+    the reference docs state the real contract.
+
+  Companion objectui PR ships `RecordAttachmentsPanel` (upload/list/
+  download/delete over the presigned three-step storage flow), rendered on
+  record pages when the flag is true.
+
+### Patch Changes
+
+- Updated dependencies [0a8e685]
+- Updated dependencies [afa8115]
+- Updated dependencies [80f12ca]
+- Updated dependencies [332b711]
+- Updated dependencies [e2fa074]
+- Updated dependencies [23c8668]
+- Updated dependencies [29f017d]
+- Updated dependencies [216fa9a]
+- Updated dependencies [6c22b12]
+- Updated dependencies [d0531c4]
+- Updated dependencies [cff5aac]
+  - @objectstack/spec@14.0.0
+  - @objectstack/platform-objects@14.0.0
+  - @objectstack/core@14.0.0
+
 ## 13.0.0
 
 ### Patch Changes

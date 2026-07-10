@@ -1,5 +1,25 @@
 # @objectstack/plugin-email
 
+## 14.0.0
+
+### Patch Changes
+
+- Updated dependencies [0a8e685]
+- Updated dependencies [afa8115]
+- Updated dependencies [80f12ca]
+- Updated dependencies [332b711]
+- Updated dependencies [e2fa074]
+- Updated dependencies [23c8668]
+- Updated dependencies [29f017d]
+- Updated dependencies [216fa9a]
+- Updated dependencies [6c22b12]
+- Updated dependencies [d0531c4]
+- Updated dependencies [cff5aac]
+  - @objectstack/spec@14.0.0
+  - @objectstack/platform-objects@14.0.0
+  - @objectstack/core@14.0.0
+  - @objectstack/formula@14.0.0
+
 ## 13.0.0
 
 ### Patch Changes

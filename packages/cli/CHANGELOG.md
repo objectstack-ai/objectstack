@@ -1,5 +1,176 @@
 # @objectstack/cli
 
+## 14.0.0
+
+### Patch Changes
+
+- e2fa074: feat(data): make object `enable.feeds`/`enable.activities` real opt-out gates; define the `enable.trackHistory` contract (#2707)
+
+  `ObjectSchema.enable.{files,trackHistory,activities,feeds}` were parsed but
+  (mostly) unconsumed — an author setting them got nothing, silently. Per the
+  enforce-or-remove doctrine, each flag now has a defined enforcement contract:
+
+  - `enable.activities` — opt-OUT writer gate. Spec default flips
+    `false → true`; plugin-audit keeps mirroring CRUD into the `sys_activity`
+    timeline unless the object declares an explicit `activities: false`
+    (behavior-preserving for every existing stack; the off-switch is the
+    per-object lever for activity-row growth, ADR-0057). The compliance
+    `sys_audit_log` row is NOT gated.
+  - `enable.feeds` — opt-OUT with server-side enforcement. Spec default flips
+    `false → true`; an explicit `feeds: false` now rejects `sys_comment`
+    creation targeting that object at the engine hook seam
+    (403 `FEEDS_DISABLED`, fail-closed like `CLONE_DISABLED`).
+  - `enable.trackHistory` — was misclassified `dead` in the liveness ledger:
+    the console has gated the record History tab on it since 2026-05.
+    Reclassified live with the two-grain contract documented (object flag =
+    History-tab master switch; per-field `trackHistory` = diff selector; audit
+    _capture_ stays unconditional as a compliance ledger).
+  - `enable.files` — stays dead + authorWarn (reserved for the future generic
+    Attachments panel; use `Field.file`/`Field.image` meanwhile). Its
+    `describe()` now says so instead of advertising a capability that
+    doesn't exist.
+
+  The default flips can't be avoided: with `default(false)`, compiled output
+  materializes `false` for every object with an `enable` block, making
+  "author explicitly opted out" indistinguishable from "schema default" — so
+  opt-out semantics require the default to be `true` (same posture as
+  `trash`/`mru`/`clone`). Liveness ledger + reference docs regenerated;
+  compile-time authorWarn now fires only for `enable.files`.
+
+- 23c8668: feat(data): `enable.files` goes live — opt-in gate for the generic Attachments surface (#2727)
+
+  The last dead ObjectCapabilities flag gets its enforcement contract.
+  `enable.files` is opt-IN (spec default stays `false`): the generic record
+  Attachments panel is a new surface, not an existing behavior.
+
+  - plugin-audit registers a `sys_attachment` beforeInsert hook: attachment
+    join rows may only target objects that explicitly declare
+    `enable: { files: true }` — anything else (absent block, absent flag,
+    explicit false, unknown object) rejects fail-closed with
+    403 `FILES_DISABLED` (CLONE_DISABLED / FEEDS_DISABLED pattern).
+  - `mapDataError` maps `FILES_DISABLED` → 403 with the gated target object
+    (generic data routes bypass `sendError`'s `.status` passthrough — the
+    #2707 lesson, applied at introduction time).
+  - `Field.file` / `Field.image` are deliberately independent: they store
+    the file URL in the record's own column and never create
+    `sys_attachment` rows, so field-level attachments work regardless of
+    this flag.
+  - Liveness ledger: `enable.files` dead→live, authorWarn dropped —
+    ObjectCapabilities is now 100% live. The compile-time
+    liveness-dead-property warning no longer fires for it; `describe()` and
+    the reference docs state the real contract.
+
+  Companion objectui PR ships `RecordAttachmentsPanel` (upload/list/
+  download/delete over the presigned three-step storage flow), rendered on
+  record pages when the flag is true.
+
+- 29f017d: chore(liveness): authorWarn sweep across all governed types + lint coverage to match
+
+  Every remaining _misleading_ dead property now warns at compile time (12 new
+  markings): `flow.errorHandling.fallbackNodeId` (engine uses fault edges),
+  `flow.nodes[].outputSchema` (never validated), `flow.template`,
+  `action.timeout` (no runtime enforcement), `object.tenancy.strategy` /
+  `crossTenantAccess` (only enabled+tenantField are read), `object.abstract`,
+  `field.dependencies`, `agent.tenantId`, `tool.permissions` (invocation not
+  permission-gated), `permission.contextVariables` (RLS reads current_user.\*
+  only), `dataset.measures[].certified` (governance flag unenforced).
+
+  The compile-time lint previously only checked objects+fields, so markings on
+  other types were silent — it now covers every governed type (flat stack
+  collections) and fans container checks out over arrays (one finding per
+  item+path). Benign display metadata (label/description/tags) stays unmarked
+  per the README's signal rules.
+
+  Also re-anchors the README: the counts table had drifted badly (field listed
+  as 34 live/39 dead vs the ledger's actual 54/6; `action.disabled` was still
+  described as ignored though it went live via metadata-admin) — replaced with
+  regenerable numbers plus the script to regenerate them, and added the
+  cross-repo evidence rule (grep ../objectui before classifying dead — the
+  enable.trackHistory lesson, #2707).
+
+- 216fa9a: Add a `position` approver type so approvals can route to org positions (ADR-0090 D3 fallout).
+
+  Post ADR-0090 D3 the `role` approver type resolves against the better-auth org-membership
+  tier (`sys_member.role`: `owner`/`admin`/`member`) — it was never a position. Downstream
+  apps that authored `{ type: 'role', value: 'sales_manager' }` silently routed approvals to
+  nobody. Now:
+
+  - **spec**: `ApproverType` gains `'position'` — `value` is the position machine name; the
+    approver expands to its holders via `sys_user_position`. Authoring guidance: keep
+    `type: 'role'` ONLY for membership tiers; for org positions use
+    `{ type: 'position', value: '<position_name>' }` (one-line fix for the mismatch above).
+  - **plugin-approvals**: the engine resolves `position` approvers via `sys_user_position` ∪
+    the `sys_member.role` transition source (same semantics as `PositionGraphService` in
+    plugin-sharing). The `department` approver type is now honored by its spec spelling
+    (previously only the off-spec `business_unit`/`bu` dialect matched).
+  - **lint**: new `validateApprovalApprovers` rule — `approval-role-not-membership-tier`
+    warns when a `role` approver's value is not a membership tier and prescribes the
+    `position` rewrite; `approval-approver-type-unknown` flags off-spec approver types
+    (with a `business_unit` → `department` fix-it). Wired into `os lint`.
+
+- Updated dependencies [57b8fe0]
+- Updated dependencies [0a8e685]
+- Updated dependencies [afa8115]
+- Updated dependencies [80f12ca]
+- Updated dependencies [332b711]
+- Updated dependencies [e2fa074]
+- Updated dependencies [ac08698]
+- Updated dependencies [23c8668]
+- Updated dependencies [2f3581f]
+- Updated dependencies [29f017d]
+- Updated dependencies [bc26360]
+- Updated dependencies [afa8115]
+- Updated dependencies [216fa9a]
+- Updated dependencies [6c22b12]
+- Updated dependencies [d0531c4]
+- Updated dependencies [cff5aac]
+- Updated dependencies [bd39dc5]
+- Updated dependencies [1056c5f]
+  - @objectstack/runtime@14.0.0
+  - @objectstack/spec@14.0.0
+  - @objectstack/plugin-sharing@14.0.0
+  - @objectstack/plugin-security@14.0.0
+  - @objectstack/mcp@14.0.0
+  - @objectstack/platform-objects@14.0.0
+  - @objectstack/plugin-audit@14.0.0
+  - @objectstack/rest@14.0.0
+  - @objectstack/lint@14.0.0
+  - @objectstack/driver-sql@14.0.0
+  - @objectstack/objectql@14.0.0
+  - @objectstack/plugin-approvals@14.0.0
+  - @objectstack/client@14.0.0
+  - @objectstack/cloud-connection@14.0.0
+  - @objectstack/verify@14.0.0
+  - @objectstack/account@14.0.0
+  - @objectstack/setup@14.0.0
+  - @objectstack/core@14.0.0
+  - @objectstack/formula@14.0.0
+  - @objectstack/observability@14.0.0
+  - @objectstack/driver-memory@14.0.0
+  - @objectstack/driver-mongodb@14.0.0
+  - @objectstack/driver-sqlite-wasm@14.0.0
+  - @objectstack/plugin-auth@14.0.0
+  - @objectstack/plugin-email@14.0.0
+  - @objectstack/plugin-hono-server@14.0.0
+  - @objectstack/plugin-reports@14.0.0
+  - @objectstack/plugin-webhooks@14.0.0
+  - @objectstack/service-analytics@14.0.0
+  - @objectstack/service-automation@14.0.0
+  - @objectstack/service-cache@14.0.0
+  - @objectstack/service-datasource@14.0.0
+  - @objectstack/service-job@14.0.0
+  - @objectstack/service-messaging@14.0.0
+  - @objectstack/service-package@14.0.0
+  - @objectstack/service-queue@14.0.0
+  - @objectstack/service-realtime@14.0.0
+  - @objectstack/service-settings@14.0.0
+  - @objectstack/service-storage@14.0.0
+  - @objectstack/trigger-api@14.0.0
+  - @objectstack/trigger-record-change@14.0.0
+  - @objectstack/trigger-schedule@14.0.0
+  - @objectstack/types@14.0.0
+  - @objectstack/console@14.0.0
+
 ## 13.0.0
 
 ### Major Changes
