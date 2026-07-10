@@ -25,6 +25,7 @@ import {
   resolveConsolePath,
   hasConsoleDist,
   createConsoleStaticPlugin,
+  createRuntimeAssetsPlugin,
 } from '../utils/console.js';
 import dotenvFlow from 'dotenv-flow';
 
@@ -813,6 +814,18 @@ export default class Serve extends Command {
           console.warn(chalk.yellow(`  ⚠ HTTP server plugin not available: ${e.message}`));
         }
       }
+
+      // Serve /runtime/assets/* unconditionally — branding logos, favicons,
+      // and other static runtime assets must resolve even when the Console
+      // dist hasn't been built yet.  The directory is resolved as:
+      //   1. OS_RUNTIME_ASSETS_DIR env var (explicit override)
+      //   2. process.cwd() + '/assets' (when CLI cwd is a runtime/ package)
+      // Silently skips if no assets directory exists.
+      const runtimeAssetsDir = (
+        process.env.OS_RUNTIME_ASSETS_DIR?.trim() ||
+        path.resolve(process.cwd(), 'assets')
+      );
+      await kernel.use(createRuntimeAssetsPlugin(runtimeAssetsDir));
 
       // Unknown-environment hostname guard.
       //

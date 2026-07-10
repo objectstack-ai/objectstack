@@ -15,7 +15,7 @@
  *     singleEnvironment: boolean,
  *     defaultOrgId?, defaultEnvironmentId?,   // multi-tenant, per-hostname
  *     features: { installLocal, marketplace, aiStudio, autoPublishAiBuilds, ... },
- *     branding: { productName, productShortName }
+ *     branding: { productName, productShortName, logoUrl, faviconUrl, brandColor, pwaDescription, pwaThemeColor }
  *   }
  *
  * ## Feature seam (open-core boundary — cloud ADR-0012)
@@ -95,6 +95,16 @@ export interface RuntimeConfigPluginConfig {
     productName?: string;
     /** Short product name (PWA shortName, compact spots). Defaults to productName. */
     productShortName?: string;
+    /** Absolute or relative URL for the product logo. Falls back to OS_LOGO_URL env var. */
+    logoUrl?: string;
+    /** Absolute or relative URL for the favicon. Falls back to OS_FAVICON_URL env var. */
+    faviconUrl?: string;
+    /** Primary brand hex color (e.g. '#4F46E5'). Falls back to OS_BRAND_COLOR env var. */
+    brandColor?: string;
+    /** PWA manifest description. Falls back to OS_PWA_DESCRIPTION env var. Default: "<productName> — runtime console". */
+    pwaDescription?: string;
+    /** PWA theme color hex. Falls back to OS_PWA_THEME_COLOR env var. Default: brandColor or '#4f46e5'. */
+    pwaThemeColor?: string;
     /**
      * Distribution feature-policy hook (open-core seam — cloud ADR-0012).
      * Called with `undefined` for the static default (no environment resolved
@@ -123,6 +133,11 @@ export class RuntimeConfigPlugin implements Plugin {
     private readonly singleEnvironment: boolean;
     private readonly productName: string;
     private readonly productShortName: string;
+    private readonly logoUrl: string | undefined;
+    private readonly faviconUrl: string | undefined;
+    private readonly brandColor: string | undefined;
+    private readonly pwaDescription: string;
+    private readonly pwaThemeColor: string;
     private readonly resolveFeatures?: (token: string | undefined) => RuntimeFeatureOverrides;
 
     constructor(config: RuntimeConfigPluginConfig = {}) {
@@ -140,6 +155,16 @@ export class RuntimeConfigPlugin implements Plugin {
         const envShort = (typeof process !== 'undefined' ? process.env?.OS_PRODUCT_SHORT_NAME : undefined)?.trim();
         this.productName = (config.productName ?? envName ?? 'ObjectOS').trim() || 'ObjectOS';
         this.productShortName = (config.productShortName ?? envShort ?? this.productName).trim() || this.productName;
+        const envLogoUrl = (typeof process !== 'undefined' ? process.env?.OS_LOGO_URL : undefined)?.trim();
+        const envFaviconUrl = (typeof process !== 'undefined' ? process.env?.OS_FAVICON_URL : undefined)?.trim();
+        const envBrandColor = (typeof process !== 'undefined' ? process.env?.OS_BRAND_COLOR : undefined)?.trim();
+        const envPwaDescription = (typeof process !== 'undefined' ? process.env?.OS_PWA_DESCRIPTION : undefined)?.trim();
+        const envPwaThemeColor = (typeof process !== 'undefined' ? process.env?.OS_PWA_THEME_COLOR : undefined)?.trim();
+        this.logoUrl = config.logoUrl ?? envLogoUrl;
+        this.faviconUrl = config.faviconUrl ?? envFaviconUrl;
+        this.brandColor = config.brandColor ?? envBrandColor;
+        this.pwaDescription = config.pwaDescription ?? envPwaDescription ?? `${this.productName} — runtime console`;
+        this.pwaThemeColor = config.pwaThemeColor ?? envPwaThemeColor ?? this.brandColor ?? '#4f46e5';
     }
 
     init = async (_ctx: PluginContext): Promise<void> => {};
@@ -244,6 +269,11 @@ export class RuntimeConfigPlugin implements Plugin {
                     branding: {
                         productName: this.productName,
                         productShortName: this.productShortName,
+                        logoUrl: this.logoUrl,
+                        faviconUrl: this.faviconUrl,
+                        brandColor: this.brandColor,
+                        pwaDescription: this.pwaDescription,
+                        pwaThemeColor: this.pwaThemeColor,
                     },
                 });
             };

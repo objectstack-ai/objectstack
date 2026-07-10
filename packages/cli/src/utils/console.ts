@@ -450,6 +450,54 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
   };
 }
 
+// ─── Runtime Assets Plugin ──────────────────────────────────────────
+
+/**
+ * Create a plugin that serves static runtime assets at /runtime/assets/*.
+ * Decoupled from the console plugin so branding assets (logos, favicons) are
+ * served even when the console dist hasn't been built yet.
+ *
+ * The `distPath` should point at the host project's `runtime/assets` directory
+ * (i.e. `path.resolve(process.cwd(), 'assets')` when the CLI cwd is the
+ * `runtime/` package).
+ */
+export function createRuntimeAssetsPlugin(distPath: string) {
+  return {
+    name: 'com.objectstack.runtime-assets',
+
+    init: async () => {},
+
+    start: async (ctx: any) => {
+      const httpServer = ctx.getService?.('http.server');
+      if (!httpServer?.getRawApp) return;
+
+      const app = httpServer.getRawApp();
+      const assetsDir = path.resolve(distPath);
+      if (!fs.existsSync(assetsDir)) return;
+
+      app.get('/runtime/assets/:filename', async (c: any) => {
+        const filename = String(c.req.param?.('filename') ?? '').replace(/[/\\]+/g, '');
+        const filePath = path.join(assetsDir, filename);
+        // Path-traversal guard: reject any path that escapes assetsDir.
+        if (!path.resolve(filePath).startsWith(path.resolve(assetsDir))) {
+          return c.text('Forbidden', 403);
+        }
+        try {
+          const content = fs.readFileSync(filePath);
+          return new Response(content, {
+            headers: {
+              'content-type': mimeType(filePath),
+              'cache-control': 'public, max-age=3600',
+            },
+          });
+        } catch {
+          return c.text('Not Found', 404);
+        }
+      });
+    },
+  };
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────
 
 const MIME_TYPES: Record<string, string> = {
