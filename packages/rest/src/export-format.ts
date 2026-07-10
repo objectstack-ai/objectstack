@@ -17,7 +17,7 @@ export interface ExportFieldMeta {
   name: string;
   type?: string;
   label?: string;
-  options?: Array<{ label?: string; value?: unknown }>;
+  options?: Array<{ label?: string; value?: unknown; color?: string }>;
   /** Target object for lookup / master_detail / user fields. */
   reference?: string;
   /** Field on the referenced record to show as its label. */
@@ -126,6 +126,36 @@ function optionLabel(value: unknown, options?: Array<{ label?: string; value?: u
   if (!options) return value;
   const hit = options.find((o) => o && o.value === value);
   return hit?.label ?? value;
+}
+
+/**
+ * Normalize a CSS-ish hex color to exceljs' 8-digit ARGB (`FFRRGGBB`, opaque).
+ * Accepts `#RGB` / `#RRGGBB` with or without the leading `#`, any case.
+ * Returns `undefined` for anything else (empty, named colors, rgb(), garbage)
+ * so callers simply skip styling rather than emit an invalid workbook.
+ */
+export function toArgb(color: unknown): string | undefined {
+  if (typeof color !== 'string') return undefined;
+  const hex = color.trim().replace(/^#/, '');
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    const [r, g, b] = hex;
+    return `FF${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) return `FF${hex}`.toUpperCase();
+  return undefined;
+}
+
+/**
+ * Font color (exceljs ARGB) for one cell, driven by the matched select/radio
+ * option's `color`. Returns `undefined` when the field is not option-typed, no
+ * option matches, the option has no color, or the color is not a valid hex —
+ * i.e. whenever the cell should stay unstyled.
+ */
+export function cellFontColor(value: unknown, meta?: ExportFieldMeta): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (!meta || !meta.type || !OPTION_TYPES.has(meta.type) || !meta.options) return undefined;
+  const hit = meta.options.find((o) => o && o.value === value);
+  return toArgb(hit?.color);
 }
 
 function displayFromRecord(rec: Record<string, unknown>, displayField?: string): string {
