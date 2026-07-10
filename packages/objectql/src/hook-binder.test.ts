@@ -219,9 +219,13 @@ describe('wrapDeclarativeHook', () => {
       },
     };
     const wrapped = wrapDeclarativeHook(meta, meta.handler as any);
-    const t0 = Date.now();
     await wrapped(makeCtx({ event: 'afterInsert' }));
-    expect(Date.now() - t0).toBeLessThan(20); // returned before handler finished
+    // Ordering, not wall clock (#2744): if the wrapper had awaited the
+    // handler, `calls` would already hold 'done' here — the 30ms timer is a
+    // macrotask and cannot fire between the wrapper's resolution and this
+    // synchronous check, no matter how slow the runner is. The old
+    // `< 20ms` wall-clock assertion was flaky on shared CI machines.
+    expect(calls).toEqual([]); // returned before handler finished
     await new Promise((r) => setTimeout(r, 60));
     expect(calls).toEqual(['done']);
   });
