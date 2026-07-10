@@ -15,7 +15,7 @@
  * Kept in lockstep with the package's own major; `protocol-version.test.ts`
  * asserts it against `package.json` so the two cannot drift.
  */
-export const PROTOCOL_VERSION = '12.0.0';
+export const PROTOCOL_VERSION = '13.0.0';
 
 /** The protocol major as an integer — the value the handshake compares. */
 export const PROTOCOL_MAJOR: number = Number.parseInt(PROTOCOL_VERSION.split('.')[0]!, 10);
