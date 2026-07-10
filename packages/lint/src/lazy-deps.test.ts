@@ -129,5 +129,8 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
     });
     expect(depLoaded(req.cache, 'typescript')).toBe(true);
     expect(props.some((f) => f.rule === 'react-prop-missing-required' && /objectName/.test(f.message))).toBe(true);
-  });
+    // Cold-loading sucrase + typescript in-process takes >5s on a loaded CI
+    // runner (dozens of parallel turbo tasks) — the default 5s timeout flakes
+    // there while the assertion set is pure contract, not latency.
+  }, 30_000);
 });
