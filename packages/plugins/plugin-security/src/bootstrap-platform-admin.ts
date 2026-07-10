@@ -29,6 +29,25 @@ interface BootstrapOptions {
     info: (message: string, meta?: Record<string, any>) => void;
     warn: (message: string, meta?: Record<string, any>) => void;
   };
+  /**
+   * [#2705] Force re-materialization of the default permission-set rows from
+   * the compiled declaration.
+   *
+   * Default (`false`) keeps the insert-once shape: an existing row is left
+   * untouched so an admin's Setup customizations survive every restart, and so
+   * the platform defaults stay env-authored (never clobbered — the exact
+   * posture `bootstrapDeclaredPermissions` relies on). This is correct for
+   * prod boot.
+   *
+   * `os meta resync` sets it to `true` to reconcile the DB rows to the shipped
+   * `dist` after a source edit — the dev loop that insert-once otherwise makes
+   * silently stale (a changed default set is served with its OLD value until a
+   * `--fresh` wipe). Only platform-owned rows (`managed_by` absent or
+   * `'platform'`) are overwritten; a row an admin explicitly took over
+   * (`managed_by:'user'`) or a package owns (`'package'`) is left alone so the
+   * resync never destroys an intentional override.
+   */
+  resync?: boolean;
 }
 
 const SYSTEM_CTX = { isSystem: true };
@@ -50,10 +69,46 @@ async function tryInsert(ql: any, object: string, data: any): Promise<any | null
   }
 }
 
+async function tryUpdate(ql: any, object: string, data: any): Promise<boolean> {
+  try {
+    await ql.update(object, data, { context: SYSTEM_CTX });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function genId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
   const ts = Date.now().toString(36);
   return `${prefix}_${ts}${rand}`;
+}
+
+/**
+ * The platform-owned definition facets of a default permission set — the
+ * fields the runtime resolver hydrates back into ExecutionContext
+ * (`resolve-authz-context.ts` → systemPermissions / tabPermissions / object &
+ * field masks). Single source for both the first-boot insert and the `#2705`
+ * resync update so the two paths can never drift. Identity/provenance columns
+ * (`id`, `name`, `active`, `managed_by`, `package_id`) are deliberately NOT
+ * here — resync reconciles the declaration, never the ownership.
+ *
+ * `description` / `adminScope` are read defensively: neither is on the typed
+ * PermissionSet shape (name/label/objects/fields/...), but both persist when a
+ * runtime declaration provides them without tripping the dts typecheck.
+ */
+function platformOwnedFields(ps: PermissionSet): Record<string, any> {
+  return {
+    label: ps.label ?? ps.name,
+    description: (ps as any).description ?? null,
+    object_permissions: JSON.stringify(ps.objects ?? {}),
+    field_permissions: JSON.stringify(ps.fields ?? {}),
+    system_permissions: JSON.stringify(ps.systemPermissions ?? []),
+    row_level_security: JSON.stringify(ps.rowLevelSecurity ?? []),
+    tab_permissions: JSON.stringify(ps.tabPermissions ?? {}),
+    // [ADR-0090 D12] Delegated-admin scope travels with the set row.
+    admin_scope: (ps as any).adminScope ? JSON.stringify((ps as any).adminScope) : null,
+  };
 }
 
 /**
@@ -70,6 +125,10 @@ export async function bootstrapPlatformAdmin(
   reason?: string;
   /** Count of seeded rows re-owned to the freshly-promoted admin. */
   ownershipClaimed?: number;
+  /** [#2705] Existing platform-owned rows reconciled to dist under `resync`. */
+  resynced?: number;
+  /** [#2705] Existing rows left untouched by `resync` (admin/package-owned). */
+  resyncSkipped?: number;
 }> {
   const logger = options.logger;
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
@@ -78,36 +137,42 @@ export async function bootstrapPlatformAdmin(
 
   // 1. Seed permission set rows.
   const seeded: Record<string, string> = {};
+  let resynced = 0;
+  let resyncSkipped = 0;
   for (const ps of bootstrapPermissionSets) {
     if (!ps.name) continue;
     const existing = await tryFind(ql, 'sys_permission_set', { name: ps.name }, 1);
     if (existing.length > 0 && existing[0].id) {
-      seeded[ps.name] = existing[0].id;
+      const row = existing[0];
+      seeded[ps.name] = row.id;
+      // Insert-once by default: an existing row is env-authored config and is
+      // never clobbered on restart (protects admin Setup edits, and keeps the
+      // platform defaults env-authored — the posture bootstrapDeclaredPermissions
+      // relies on). Under `resync` (`os meta resync`, #2705) reconcile the row to
+      // the shipped dist so a dev source edit takes effect without `--fresh` —
+      // but only for rows the platform still owns. A row an admin explicitly took
+      // over (`managed_by:'user'`) or a package owns (`'package'`) is an
+      // intentional override and is left alone.
+      if (options.resync) {
+        if (!row.managed_by || row.managed_by === 'platform') {
+          if (await tryUpdate(ql, 'sys_permission_set', { id: row.id, ...platformOwnedFields(ps) })) {
+            resynced += 1;
+          }
+        } else {
+          resyncSkipped += 1;
+          logger?.warn?.(
+            `[security] resync left ${ps.name} untouched — row is ${row.managed_by}-owned (intentional override)`,
+            { name: ps.name, managedBy: row.managed_by },
+          );
+        }
+      }
       continue;
     }
     const id = genId('ps');
     const created = await tryInsert(ql, 'sys_permission_set', {
       id,
       name: ps.name,
-      label: ps.label ?? ps.name,
-      // `description` is not part of the typed PermissionSet shape (name/label
-      // only); read it defensively so a runtime-provided description still
-      // persists without tripping the dts typecheck.
-      description: (ps as any).description ?? null,
-      object_permissions: JSON.stringify(ps.objects ?? {}),
-      field_permissions: JSON.stringify(ps.fields ?? {}),
-      // Persist the remaining permset facets so the runtime resolver
-      // (rest-server.ts / resolve-execution-context.ts) can hydrate
-      // them back into ExecutionContext.systemPermissions etc. Without
-      // these the platform-admin promotion grants the right LINK row
-      // but the permission set itself carries no capabilities, so
-      // `setup.access` / `studio.access` never reach the app filter
-      // and the Setup app is invisible even to admin_full_access.
-      system_permissions: JSON.stringify(ps.systemPermissions ?? []),
-      row_level_security: JSON.stringify(ps.rowLevelSecurity ?? []),
-      tab_permissions: JSON.stringify(ps.tabPermissions ?? {}),
-      // [ADR-0090 D12] Delegated-admin scope travels with the set row.
-      admin_scope: (ps as any).adminScope ? JSON.stringify((ps as any).adminScope) : null,
+      ...platformOwnedFields(ps),
       active: true,
     });
     if (created?.id) seeded[ps.name] = created.id;
@@ -115,11 +180,15 @@ export async function bootstrapPlatformAdmin(
   }
 
   const seededCount = Object.keys(seeded).length;
+  // Attached to every return below so `os meta resync` can report the reconcile
+  // outcome even when admin promotion short-circuits (the common dev case: a DB
+  // that already has an admin returns `already_have_admin`).
+  const resyncCounts = { resynced, resyncSkipped };
 
   // 2. First-user platform admin promotion.
   const adminPsId = seeded['admin_full_access'];
   if (!adminPsId) {
-    return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_missing' };
+    return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_missing', ...resyncCounts };
   }
 
   const existingAdminLinks = await tryFind(
@@ -135,7 +204,7 @@ export async function bootstrapPlatformAdmin(
   // every real admin forever. Ignoring it here makes the bootstrap
   // self-healing on restart.
   if (existingAdminLinks.some((r) => !r.organization_id && r.user_id !== SystemUserId.SYSTEM)) {
-    return { seeded: seededCount, adminPromoted: false, reason: 'already_have_admin' };
+    return { seeded: seededCount, adminPromoted: false, reason: 'already_have_admin', ...resyncCounts };
   }
 
   const allUsers = await tryFind(ql, 'sys_user', {}, 50);
@@ -149,7 +218,7 @@ export async function bootstrapPlatformAdmin(
   );
   if (humanUsers.length === 0) {
     logger?.info?.('[security] no human users yet — first sign-up will be promoted to platform admin');
-    return { seeded: seededCount, adminPromoted: false, reason: 'no_users' };
+    return { seeded: seededCount, adminPromoted: false, reason: 'no_users', ...resyncCounts };
   }
   const sorted = [...humanUsers].sort((a, b) => {
     const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -167,7 +236,7 @@ export async function bootstrapPlatformAdmin(
   });
   if (!inserted) {
     logger?.warn?.(`[security] failed to grant admin_full_access to first user ${target.email ?? target.id}`);
-    return { seeded: seededCount, adminPromoted: false, reason: 'insert_failed' };
+    return { seeded: seededCount, adminPromoted: false, reason: 'insert_failed', ...resyncCounts };
   }
   logger?.info?.(`[security] first user promoted to platform admin: ${target.email ?? target.id}`);
 
@@ -182,5 +251,5 @@ export async function bootstrapPlatformAdmin(
     logger?.warn?.('[security] seed ownership handoff failed', { error: (e as Error).message });
   }
 
-  return { seeded: seededCount, adminPromoted: true, ownershipClaimed };
+  return { seeded: seededCount, adminPromoted: true, ownershipClaimed, ...resyncCounts };
 }

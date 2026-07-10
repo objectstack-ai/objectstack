@@ -29,6 +29,9 @@ export interface SchemaStack {
   driver: SqlDriverLike | null;
   dbLabel: string;
   managedTableCount: number;
+  /** The booted kernel — `getService('objectql')` etc. for one-shot commands
+   *  beyond schema migration (e.g. `os meta resync`, #2705). */
+  kernel: any;
   shutdown: () => Promise<void>;
 }
 
@@ -95,6 +98,7 @@ export async function bootSchemaStack(opts: { databaseUrl?: string } = {}): Prom
     driver,
     dbLabel: describeDb(driver),
     managedTableCount,
+    kernel,
     shutdown: async () => {
       try { await (runtime as any).stop?.(); } catch { /* ignore */ }
       try { await driver?.disconnect?.(); } catch { /* ignore */ }
