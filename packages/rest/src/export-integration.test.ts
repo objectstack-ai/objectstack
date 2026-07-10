@@ -132,7 +132,8 @@ const TASK = {
     done: { name: 'done', type: 'boolean' as const, label: '完成' },
     priority: {
       name: 'priority', type: 'select' as const, label: '优先级',
-      options: [{ label: '高', value: 'high' }, { label: '低', value: 'low' }],
+      // `color` drives the xlsx font colour; '#3ab' exercises the 3-digit path.
+      options: [{ label: '高', value: 'high', color: '#e11d48' }, { label: '低', value: 'low', color: '#3ab' }],
     },
     due: { name: 'due', type: 'date' as const, label: '截止' },
     owner: { name: 'owner', type: 'lookup' as const, label: '负责人', reference: 'user', displayField: 'name' },
@@ -253,6 +254,43 @@ describe('export route — real engine + protocol integration', () => {
     expect(header).toEqual(['ID', '标题', '完成', '优先级', '截止', '负责人']);
     const r1 = (ws.getRow(2).values as any[]).slice(1).map((v) => String(v));
     expect(r1).toEqual(['1', '写代码', '是', '高', '2026-06-30', '张三']);
+  });
+
+  it('XLSX: select cells get the option colour as font colour; header signals applied', async () => {
+    const { res, getBuffer, headers } = makeBinRes();
+    await route.handler({ params: { object: 'task' }, query: { format: 'xlsx' } } as any, res);
+
+    // Default limit (10000) is within the style cap, so colours are applied.
+    expect(headers['X-Export-Styles']).toBe('applied');
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(getBuffer() as any);
+    const ws = wb.worksheets[0];
+    // priority is column 4 (ID, 标题, 完成, 优先级, ...).
+    const highCell = ws.getRow(2).getCell(4); // '高' → #e11d48
+    const lowCell = ws.getRow(3).getCell(4);  // '低' → #3ab (shorthand)
+    expect((highCell.font?.color as any)?.argb).toBe('FFE11D48');
+    expect((lowCell.font?.color as any)?.argb).toBe('FF33AABB');
+    // A non-option cell (title) stays unstyled.
+    expect(ws.getRow(2).getCell(2).font?.color).toBeUndefined();
+  });
+
+  it('XLSX: exceeding the style cap drops styling but keeps all rows', async () => {
+    const { res, getBuffer, headers } = makeBinRes();
+    await route.handler(
+      { params: { object: 'task' }, query: { format: 'xlsx', limit: '20000' } } as any,
+      res,
+    );
+
+    expect(headers['X-Export-Styles']).toBe('dropped');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(getBuffer() as any);
+    const ws = wb.worksheets[0];
+    // Data is intact...
+    const r1 = (ws.getRow(2).values as any[]).slice(1).map((v) => String(v));
+    expect(r1).toEqual(['1', '写代码', '是', '高', '2026-06-30', '张三']);
+    // ...but the select cell carries no font colour.
+    expect(ws.getRow(2).getCell(4).font?.color).toBeUndefined();
   });
 
   it('JSON: readable values, all rows present', async () => {

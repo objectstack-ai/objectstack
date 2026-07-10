@@ -11,6 +11,7 @@ import {
     headerLabel,
     formatRowCells,
     formatRowForJson,
+    cellFontColor,
     type ExportFieldMeta,
 } from './export-format.js';
 import { runImport } from './import-runner.js';
@@ -783,7 +784,7 @@ function rowsToCsv(
  * ended. Dynamically imported so `node:stream` / `exceljs` stay out of the
  * module's static graph.
  */
-async function createXlsxStream(res: any): Promise<{
+async function createXlsxStream(res: any, useStyles = false): Promise<{
     ws: any;
     finalize: () => Promise<void>;
 }> {
@@ -797,7 +798,7 @@ async function createXlsxStream(res: any): Promise<{
         passthrough.on('error', reject);
     });
 
-    const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: passthrough, useStyles: false });
+    const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: passthrough, useStyles });
     const ws = wb.addWorksheet('Export');
 
     return {
@@ -4154,6 +4155,11 @@ export class RestServer {
         // Streams the response so 50k-row exports do not buffer in memory; the
         // xlsx path pipes exceljs' streaming writer straight onto the response.
         // Filename suggests `${object}-${YYYY-MM-DD}.${ext}` for browsers.
+        //
+        // xlsx only: select / radio cells are coloured with their option's
+        // `color` as the font colour (white cell background) when the effective
+        // limit is <= 10000. Larger exports drop styling for performance and set
+        // `X-Export-Styles: dropped` (else `applied`); csv / json are unaffected.
         this.routeManager.register({
             method: 'GET',
             path: `${dataPath}/:object/export`,
@@ -4177,9 +4183,17 @@ export class RestServer {
                     const includeHeader = String(q.header ?? 'true').toLowerCase() !== 'false';
                     const HARD_CAP = 50_000;
                     const MAX_CHUNK = 5_000;
+                    // Styled xlsx (per-cell font colour from select options) is far
+                    // heavier than a bare value dump, so cap it well below HARD_CAP;
+                    // above this the export still succeeds, just without colours.
+                    const STYLE_ROW_CAP = 10_000;
                     const requestedLimit = q.limit != null ? Math.max(1, Number(q.limit) || 0) : 10_000;
                     const limit = Math.min(requestedLimit, HARD_CAP);
                     const chunkSize = Math.min(MAX_CHUNK, Math.max(50, q.page != null ? Number(q.page) || 500 : 500));
+                    // Colour cells only for xlsx within the style cap; decided up
+                    // front (before streaming) since we can't know the true row
+                    // count until the stream drains.
+                    const styled = format === 'xlsx' && limit <= STYLE_ROW_CAP;
 
                     let filter: any = undefined;
                     if (typeof q.filter === 'string' && q.filter.length > 0) {
@@ -4267,13 +4281,17 @@ export class RestServer {
                     }
                     res.header('X-Export-Format', format);
                     res.header('X-Export-Limit', String(limit));
+                    // Signal whether select-option colours were applied. Only
+                    // meaningful for xlsx; 'dropped' means the limit exceeded the
+                    // style cap so the workbook is colourless but complete.
+                    if (format === 'xlsx') res.header('X-Export-Styles', styled ? 'applied' : 'dropped');
                     res.header('Cache-Control', 'no-store');
 
                     let exported = 0;
                     let firstChunk = true;
                     let skip = 0;
                     if (format === 'json') res.write('[');
-                    const xlsx = format === 'xlsx' ? await createXlsxStream(res) : null;
+                    const xlsx = format === 'xlsx' ? await createXlsxStream(res, styled) : null;
 
                     while (exported < limit) {
                         const take = Math.min(chunkSize, limit - exported);
@@ -4312,8 +4330,16 @@ export class RestServer {
                             if (firstChunk && includeHeader) {
                                 xlsx!.ws.addRow((fields ?? []).map((f) => headerLabel(f, metaMap))).commit();
                             }
+                            const cols = fields ?? [];
                             for (const row of rows) {
-                                xlsx!.ws.addRow(formatRowCells(row, fields ?? [], metaMap)).commit();
+                                const r = xlsx!.ws.addRow(formatRowCells(row, cols, metaMap));
+                                if (styled) {
+                                    cols.forEach((f, i) => {
+                                        const argb = cellFontColor(row?.[f], metaMap.get(f));
+                                        if (argb) r.getCell(i + 1).font = { color: { argb } };
+                                    });
+                                }
+                                r.commit();
                             }
                         } else {
                             for (let i = 0; i < rows.length; i++) {
