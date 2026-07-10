@@ -185,7 +185,9 @@ export default class Serve extends Command {
    * mirror this list on their per-project kernels.
    */
   static readonly ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze([
-    'queue', 'job', 'cache', 'settings', 'email', 'sms', 'storage', 'sharing', 'messaging',
+    // The first six form the pinned foundational prefix (see
+    // serve-defaults.test.ts) — grow the slate AFTER them.
+    'queue', 'job', 'cache', 'settings', 'email', 'storage', 'sms', 'sharing', 'messaging',
     // `analytics` is foundational post-ADR-0021: the AnalyticsService backs the
     // dataset/cube query endpoints (`/api/v1/analytics/*`). It must exist even
     // when an app declares no `analyticsCubes`, because a `dataset` can be
