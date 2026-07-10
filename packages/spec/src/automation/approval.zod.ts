@@ -8,7 +8,11 @@ import { lazySchema } from '../shared/lazy-schema';
  */
 export const ApproverType = z.enum([
   'user',           // Specific user(s)
-  'role',           // Users with specific role (sys_member.role)
+  // `role` is the better-auth ORG-MEMBERSHIP TIER (sys_member.role: owner /
+  // admin / member) — NOT an org position. Post ADR-0090 D3 a value like
+  // 'sales_manager' here silently matches nobody; author `position` instead.
+  'role',
+  'position',       // Holders of a position (sys_user_position, ADR-0090 D3)
   'team',           // Members of a flat collaboration team (sys_team)
   'department',     // Members of a department + all descendant departments (sys_business_unit)
   'manager',        // Submitter's manager (sys_user.manager_id)
@@ -74,25 +78,28 @@ export const APPROVAL_BRANCH_LABELS = {
 export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
   type: ApproverType,
   /**
-   * The approver reference, interpreted per `type`: a user id (`user`), role
-   * name (`role`), team/department id (`team`/`department`), field name
+   * The approver reference, interpreted per `type`: a user id (`user`), a
+   * membership tier — owner/admin/member (`role`), a position machine name
+   * (`position`), team/department id (`team`/`department`), field name
    * holding a user id (`field`), or queue id (`queue`). Omitted for `manager`
    * (resolved from the submitter's `manager_id`).
    */
   // `xRef` marks this string as a *polymorphic* typed reference (ADR-0018
   // §configSchema): the concrete picker follows the sibling `type` column, so
-  // the Studio designer shows a user/role/team/department/queue picker — or an
-  // object-field picker (resolved from the flow's `$trigger` object) when
-  // `type` is `field`. `manager` and any unmapped value carry no `value` and
-  // stay free text. A single `.meta()` carries both description and annotation.
+  // the Studio designer shows a user/role/position/team/department/queue
+  // picker — or an object-field picker (resolved from the flow's `$trigger`
+  // object) when `type` is `field`. `manager` and any unmapped value carry no
+  // `value` and stay free text. A single `.meta()` carries both description
+  // and annotation.
   value: z.string().optional().meta({
-    description: 'User id / role / team / department / field / queue — per `type`',
+    description: 'User id / membership tier / position / team / department / field / queue — per `type`',
     xRef: {
       kindFrom: 'type',
       objectSource: '$trigger',
       map: {
         user: 'user',
         role: 'role',
+        position: 'position',
         team: 'team',
         department: 'department',
         field: 'object-field',

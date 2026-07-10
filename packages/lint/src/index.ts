@@ -76,6 +76,13 @@ export {
 export type { CapabilityRefFinding, CapabilityRefSeverity } from './validate-capability-references.js';
 
 export {
+  validateApprovalApprovers,
+  APPROVAL_ROLE_NOT_MEMBERSHIP_TIER,
+  APPROVAL_APPROVER_TYPE_UNKNOWN,
+} from './validate-approval-approvers.js';
+export type { ApprovalApproverFinding, ApprovalApproverSeverity } from './validate-approval-approvers.js';
+
+export {
   validateSecurityPosture,
   SECURITY_OWD_UNSET,
   SECURITY_OWD_ALIAS,

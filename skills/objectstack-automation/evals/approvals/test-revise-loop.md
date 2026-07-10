@@ -29,7 +29,7 @@ revision window, and a **declared back-edge** closing the loop:
       config: { objectName: 'project', triggerType: 'record-after-update',
                 condition: 'budget > 100000 && budget != previous.budget' } },
     { id: 'manager_review', type: 'approval',
-      config: { approvers: [{ type: 'role', value: 'manager' }], lockRecord: true,
+      config: { approvers: [{ type: 'position', value: 'manager' }], lockRecord: true,
                 maxRevisions: 2 } },                         // send-back budget
     { id: 'wait_revision', type: 'wait', label: 'Awaiting Revision',
       config: { eventType: 'signal', signalName: 'budget_revision' } },

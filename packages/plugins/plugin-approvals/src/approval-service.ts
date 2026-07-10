@@ -31,8 +31,8 @@ import type {
  * `approve` / `reject` edge.
  *
  * This service owns the durable approval *state* — `sys_approval_request` /
- * `sys_approval_action`, approver resolution (team / department / role /
- * manager graph), and the optional status-field mirror — plus the decision
+ * `sys_approval_action`, approver resolution (team / department / position /
+ * role / manager graph), and the optional status-field mirror — plus the decision
  * API. It does not author processes, submit, or walk multi-step machinery
  * anymore; that orchestration lives on the one automation engine.
  */
@@ -274,16 +274,20 @@ export class ApprovalService implements IApprovalService {
 
   /**
    * Expand the approvers on an Approval node into user IDs by querying the
-   * graph tables for `team:` / `department:` / `role:` / `manager:` approver
-   * types. Falls back to a prefixed literal (`type:value`) when graph lookups
-   * produce nothing — so existing fixtures and flows that rely on substring
-   * matching keep working.
+   * graph tables for `team:` / `department:` / `position:` / `role:` /
+   * `manager:` approver types. Falls back to a prefixed literal
+   * (`type:value`) when graph lookups produce nothing — so existing fixtures
+   * and flows that rely on substring matching keep working.
    *
    * **Graph semantics:**
    *   - `team`       → flat members of `sys_team` (better-auth; no BFS)
    *   - `department` → recursive BFS of `sys_business_unit.parent_business_unit_id`
    *                    → members of every descendant via `sys_business_unit_member`
-   *   - `role`       → users with `sys_member.role = value` in tenant
+   *   - `position`   → holders via `sys_user_position` ∪ `sys_member.role`
+   *                    transition source (ADR-0090 D3 / ADR-0057 D4)
+   *   - `role`       → users with `sys_member.role = value` in tenant — the
+   *                    better-auth MEMBERSHIP TIER (owner/admin/member), not a
+   *                    position; author `position` for org positions
    *   - `manager`    → `sys_user.manager_id` of `record[value] ?? record.owner_id`
    *   - `field`      → literal user id stored in `record[value]`
    *   - `user`       → literal value
@@ -299,8 +303,11 @@ export class ApprovalService implements IApprovalService {
         if (a.type === 'team') {
           const users = await this.expandTeamUsers(String(a.value));
           if (users.length) { for (const u of users) out.push(u); continue; }
-        } else if (a.type === 'business_unit' || a.type === 'bu') {
+        } else if (a.type === 'department' || a.type === 'business_unit' || a.type === 'bu') {
           const users = await this.expandBusinessUnitUsers(String(a.value), organizationId);
+          if (users.length) { for (const u of users) out.push(u); continue; }
+        } else if (a.type === 'position') {
+          const users = await this.expandPositionUsers(String(a.value), organizationId);
           if (users.length) { for (const u of users) out.push(u); continue; }
         } else if (a.type === 'role') {
           const users = await this.expandRoleUsers(String(a.value), organizationId);
@@ -377,6 +384,33 @@ export class ApprovalService implements IApprovalService {
     return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
   }
 
+  /**
+   * Position holders (ADR-0090 D3): `sys_user_position` is the platform-owned
+   * assignment table, keyed by the position's machine name (ADR-0057 D4),
+   * unioned with the better-auth membership string (`sys_member.role`) as a
+   * transition source — the same semantics as `PositionGraphService` in
+   * `plugin-sharing`, so an approval routes to exactly the users the sharing
+   * engine would expand for the same position.
+   */
+  private async expandPositionUsers(positionName: string, organizationId?: string | null): Promise<string[]> {
+    if (!positionName) return [];
+    const users = new Set<string>();
+    const filter: any = { position: positionName };
+    if (organizationId) filter.organization_id = organizationId;
+    try {
+      const rows = await this.engine.find('sys_user_position', {
+        filter, fields: ['user_id'], limit: 10000, context: SYSTEM_CTX,
+      } as any);
+      for (const r of (rows ?? []) as any[]) {
+        const uid = String(r.user_id ?? '');
+        if (uid) users.add(uid);
+      }
+    } catch { /* table may not exist on minimal stacks — union source below still applies */ }
+    for (const uid of await this.expandRoleUsers(positionName, organizationId)) users.add(uid);
+    return Array.from(users);
+  }
+
+  /** better-auth org-membership tier (`sys_member.role`) — NOT positions. */
   private async expandRoleUsers(roleName: string, organizationId?: string | null): Promise<string[]> {
     if (!roleName) return [];
     const filter: any = { role: roleName };

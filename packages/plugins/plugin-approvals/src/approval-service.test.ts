@@ -187,6 +187,65 @@ describe('ApprovalService (node era)', () => {
     expect(engine._tables['opportunity'][0].approval_status).toBe('pending');
   });
 
+  // ── approver expansion: position (ADR-0090 D3) ──────────────────
+
+  const positionInput = (extra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    config: {
+      approvers: [{ type: 'position' as const, value: 'sales_manager' }],
+      behavior: 'first_response' as const,
+      lockRecord: true,
+    },
+    ...extra,
+  });
+
+  it('position approver: expands via sys_user_position, org-scoped', async () => {
+    engine._tables['sys_user_position'] = [
+      { id: 'up1', user_id: 'u5', position: 'sales_manager', organization_id: 't1' },
+      { id: 'up2', user_id: 'u6', position: 'sales_manager', organization_id: 't1' },
+      { id: 'up3', user_id: 'u7', position: 'sales_manager', organization_id: 't2' }, // other tenant
+      { id: 'up4', user_id: 'u8', position: 'cfo', organization_id: 't1' },           // other position
+    ];
+    const req = await svc.openNodeRequest(positionInput(), CTX);
+    expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
+  });
+
+  it('position approver: unions the sys_member.role transition source (ADR-0057 D4)', async () => {
+    engine._tables['sys_user_position'] = [
+      { id: 'up1', user_id: 'u5', position: 'sales_manager', organization_id: 't1' },
+    ];
+    engine._tables['sys_member'] = [
+      { id: 'm1', user_id: 'u6', role: 'sales_manager', organization_id: 't1' },
+      { id: 'm2', user_id: 'u5', role: 'sales_manager', organization_id: 't1' }, // deduped
+    ];
+    const req = await svc.openNodeRequest(positionInput(), CTX);
+    expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
+  });
+
+  it('position approver: falls back to a position: literal when nobody holds it', async () => {
+    const req = await svc.openNodeRequest(positionInput(), CTX);
+    expect(req.pending_approvers).toEqual(['position:sales_manager']);
+  });
+
+  it("department approver: honors the spec enum value 'department' (not just the business_unit dialect)", async () => {
+    engine._tables['sys_business_unit'] = [
+      { id: 'bu1', organization_id: 't1', active: true },
+      { id: 'bu2', parent_business_unit_id: 'bu1', organization_id: 't1', active: true },
+    ];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'bm1', business_unit_id: 'bu1', user_id: 'u5' },
+      { id: 'bm2', business_unit_id: 'bu2', user_id: 'u6' },
+    ];
+    const req = await svc.openNodeRequest(positionInput({
+      config: {
+        approvers: [{ type: 'department' as const, value: 'bu1' }],
+        behavior: 'first_response' as const,
+        lockRecord: true,
+      },
+    }), CTX);
+    expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
+  });
+
   // ── decideNode ──────────────────────────────────────────────────
 
   it('decideNode: first_response approve finalizes immediately', async () => {

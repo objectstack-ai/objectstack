@@ -8,7 +8,7 @@ import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { computeI18nCoverage } from '../utils/i18n-coverage.js';
 import { lintDataModel } from '../lint/data-model-rules.js';
 import { validateWidgetBindings } from '@objectstack/lint';
-import { validateRecordTitle, validateSemanticRoles, validateCapabilityReferences, validateSecurityPosture } from '@objectstack/lint';
+import { validateRecordTitle, validateSemanticRoles, validateCapabilityReferences, validateSecurityPosture, validateApprovalApprovers } from '@objectstack/lint';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
@@ -360,6 +360,21 @@ export function lintConfig(config: any): LintIssue[] {
   // gate would reject in `os compile` get a located fix-it instead of a Zod
   // enum error. `error` findings gate `os compile`; `info` maps to suggestion.
   for (const t of validateSecurityPosture(config)) {
+    issues.push({
+      severity: t.severity === 'info' ? 'suggestion' : t.severity,
+      rule: t.rule,
+      message: `${t.where}: ${t.message}`,
+      path: t.path,
+      fix: t.hint,
+    });
+  }
+
+  // ── Approval-node approvers (ADR-0090 D3 fallout) ──
+  // `{ type: 'role' }` resolves against the better-auth org-membership tier
+  // (owner/admin/member), NOT positions — a position name authored there
+  // silently routes the approval to nobody. Advisory: the fix-it points at
+  // `{ type: 'position' }` (sys_user_position).
+  for (const t of validateApprovalApprovers(config)) {
     issues.push({
       severity: t.severity === 'info' ? 'suggestion' : t.severity,
       rule: t.rule,

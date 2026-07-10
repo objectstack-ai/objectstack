@@ -47,7 +47,7 @@ const approvalFlow = {
       id: 'request_approval',
       type: 'approval',
       label: 'Manager Approval',
-      config: { approvers: [{ type: 'role', value: 'manager' }] },
+      config: { approvers: [{ type: 'position', value: 'manager' }] },
     },
     { id: 'end', type: 'end', label: 'End' },
   ],
@@ -366,8 +366,8 @@ resumes down `approve`. Any one rejection finalizes immediately down `reject`.
   label: 'Finance + Legal Sign-off',
   config: {
     approvers: [
-      { type: 'role', value: 'finance' },
-      { type: 'role', value: 'legal' },
+      { type: 'position', value: 'finance' },
+      { type: 'position', value: 'legal' },
     ],
     behavior: 'unanimous',   // 'first_response' = any one decides
     lockRecord: false,

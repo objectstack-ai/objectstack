@@ -54,8 +54,8 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'user' \| 'role' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue'>` | ✅ |  |
-| **value** | `string` | optional | User id / role / team / department / field / queue — per `type` |
+| **type** | `Enum<'user' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue'>` | ✅ |  |
+| **value** | `string` | optional | User id / membership tier / position / team / department / field / queue — per `type` |
 
 
 ---
@@ -82,6 +82,7 @@ const result = ApprovalDecision.parse(data);
 
 * `user`
 * `role`
+* `position`
 * `team`
 * `department`
 * `manager`

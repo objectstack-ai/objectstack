@@ -28,7 +28,7 @@ A schedule-triggered escalation has no triggering user — so it must be `system
 
 ### 3. The approval node
 
-The node declares **who approves** (a named user, a role, the submitter's manager, …) and what happens on approve / reject / escalate. The authoritative shape is [`ApprovalNodeConfig` / `ApproverType`](/docs/references/automation/approval); a flow strings the trigger, the approval node, and the post-decision branches together.
+The node declares **who approves** (a named user, a position, the submitter's manager, …) and what happens on approve / reject / escalate. The authoritative shape is [`ApprovalNodeConfig` / `ApproverType`](/docs/references/automation/approval); a flow strings the trigger, the approval node, and the post-decision branches together.
 
 ```ts
 // Illustrative — see the Approval reference for the exact node schema.
@@ -40,7 +40,7 @@ defineFlow({
     { id: 'start', type: 'start', label: 'Start',
       config: { objectName: 'invoice', triggerType: 'record-after-create' } },
     { id: 'approval', type: 'approval', label: 'Approval',
-      config: { approvers: [{ type: 'role', value: 'finance_manager' }] } },
+      config: { approvers: [{ type: 'position', value: 'finance_manager' }] } },
     { id: 'mark_approved', type: 'update_record', label: 'Mark Approved' },
     { id: 'mark_rejected', type: 'update_record', label: 'Mark Rejected' },
   ],
@@ -52,7 +52,15 @@ defineFlow({
 });
 ```
 
-Approving is itself a gated action — model "may approve" as a capability (`approve_invoice`) the approver role holds, and gate the approve action's `requiredPermissions` on it so the gate is enforced on **both** the UI and the server (ADR-0066 D4).
+<Callout type="warn">
+**`position` vs `role`.** `{ type: 'position', value: 'finance_manager' }` routes to the
+holders of a position (`sys_user_position`, ADR-0090 D3). The `role` approver type is the
+better-auth **org-membership tier** (`sys_member.role`: `owner`/`admin`/`member`) — a position
+name authored as `type: 'role'` matches nobody and the request stalls; `os lint` flags this
+(`approval-role-not-membership-tier`).
+</Callout>
+
+Approving is itself a gated action — model "may approve" as a capability (`approve_invoice`) the approver's permission set grants, and gate the approve action's `requiredPermissions` on it so the gate is enforced on **both** the UI and the server (ADR-0066 D4).
 
 ## Approval nodes in practice
 

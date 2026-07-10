@@ -180,7 +180,7 @@ export const BudgetApprovalFlow = defineFlow({
       type: 'approval',
       label: 'Manager Review',
       config: {
-        approvers: [{ type: 'role', value: 'manager' }],
+        approvers: [{ type: 'position', value: 'manager' }],
         behavior: 'first_response',
         lockRecord: true,
         // ADR-0044: at most two send-backs; the third auto-rejects.
@@ -206,7 +206,7 @@ export const BudgetApprovalFlow = defineFlow({
       type: 'approval',
       label: 'Executive Review',
       config: {
-        approvers: [{ type: 'role', value: 'exec' }],
+        approvers: [{ type: 'position', value: 'exec' }],
         behavior: 'unanimous',
         lockRecord: true,
       },
@@ -562,7 +562,7 @@ export const ClosureSignoffSubflow = defineFlow({
       type: 'approval',
       label: 'Manager Sign-off',
       config: {
-        approvers: [{ type: 'role', value: 'manager' }],
+        approvers: [{ type: 'position', value: 'manager' }],
         behavior: 'first_response',
         // The parent project just hit a terminal status — no point locking it.
         lockRecord: false,
@@ -875,8 +875,8 @@ export const ResilientSyncFlow = defineFlow({
  *
  * Decide via the approvals API (never a raw engine `resume`):
  *   POST /api/v1/automation/showcase_invoice_signoff/runs/{runId}/...  ← no
- *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'role:finance' }
- *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'role:legal' }   ← now it continues
+ *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'position:finance' }
+ *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'position:legal' }   ← now it continues
  */
 export const InvoiceDualSignoffFlow = defineFlow({
   name: 'showcase_invoice_signoff',
@@ -905,8 +905,8 @@ export const InvoiceDualSignoffFlow = defineFlow({
       config: {
         // Two approver groups, notified in parallel; `unanimous` waits for both.
         approvers: [
-          { type: 'role', value: 'finance' },
-          { type: 'role', value: 'legal' },
+          { type: 'position', value: 'finance' },
+          { type: 'position', value: 'legal' },
         ],
         behavior: 'unanimous',
         // The invoice keeps flowing through other automations while it waits.
@@ -1063,7 +1063,7 @@ export const OneTaskSignoffSubflow = defineFlow({
       type: 'approval',
       label: 'Task Sign-off',
       config: {
-        approvers: [{ type: 'role', value: 'manager' }],
+        approvers: [{ type: 'position', value: 'manager' }],
         behavior: 'first_response',
         lockRecord: false,
       },

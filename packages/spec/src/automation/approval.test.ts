@@ -11,7 +11,7 @@ import {
 
 describe('ApproverType', () => {
   it('should accept all valid approver types', () => {
-    ['user', 'role', 'team', 'department', 'manager', 'field', 'queue'].forEach(t => {
+    ['user', 'role', 'position', 'team', 'department', 'manager', 'field', 'queue'].forEach(t => {
       expect(() => ApproverType.parse(t)).not.toThrow();
     });
   });
@@ -39,6 +39,8 @@ describe('Approval node constants (ADR-0019)', () => {
 describe('ApprovalNodeApproverSchema', () => {
   it('accepts a typed approver with an optional value', () => {
     expect(() => ApprovalNodeApproverSchema.parse({ type: 'user', value: 'u1' })).not.toThrow();
+    // ADR-0090 D3: positions route by machine name (sys_user_position)
+    expect(() => ApprovalNodeApproverSchema.parse({ type: 'position', value: 'sales_manager' })).not.toThrow();
     // manager resolves from the submitter, so value is optional
     expect(() => ApprovalNodeApproverSchema.parse({ type: 'manager' })).not.toThrow();
   });
