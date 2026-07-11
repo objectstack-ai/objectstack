@@ -1,7 +1,8 @@
 # ADR-0092: Identity-table write guard — engine-enforced `managedBy: 'better-auth'`, with sys_user profile fields as the first whitelist
 
-- **Status:** Proposed
-- **Date:** 2026-07-10 (proposed) · 2026-07-11 (revised: D2 generalized from a sys_user-only hook to a registry-driven guard over every better-auth-managed object, per review)
+- **Status:** Accepted
+- **Date:** 2026-07-10 (proposed) · 2026-07-11 (revised: D2 generalized from a sys_user-only hook to a registry-driven guard over every better-auth-managed object, per review) · 2026-07-11 (accepted)
+- **Implementation:** #2816 (generic identity write guard — D2/D3/D6) → #2817 (sys_user edit affordance + form field gating — D4, gated on #2816)
 - **Deciders:** ObjectStack Protocol Architects
 - **Relates to:** [ADR-0010](./0010-metadata-protection-model.md) (identity tables managed by better-auth), [ADR-0049](./0049-no-unenforced-security-properties.md) (no unenforced security properties), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (platform-admin gate), [ADR-0069](./0069-enterprise-authentication-hardening.md) (system-managed auth stamps), #2766 / PR #2771 (admin user management + identity import), #2784 (originating RFC)
 
