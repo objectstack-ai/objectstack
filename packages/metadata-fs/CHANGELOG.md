@@ -1,5 +1,12 @@
 # @objectstack/metadata-fs
 
+## 14.4.0
+
+### Patch Changes
+
+- Updated dependencies [7953832]
+  - @objectstack/metadata-core@14.4.0
+
 ## 14.3.0
 
 ### Patch Changes
