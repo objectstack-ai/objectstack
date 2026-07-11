@@ -3451,17 +3451,32 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    if (!this.isSqlite) return copy;
-
-    const fields = this.jsonFields[object];
-    if (fields && fields.length > 0) {
-      if (!copied) { copy = { ...copy }; copied = true; }
-      for (const field of fields) {
-        if (copy[field] !== undefined && typeof copy[field] === 'object' && copy[field] !== null) {
+    // JSON field serialisation: PostgreSQL native jsonb columns require
+    // valid JSON for ALL values (strings, numbers, booleans, objects).
+    // SQLite stores JSON as plain TEXT so only objects/arrays need
+    // stringification (better-sqlite3 can only bind primitives).
+    const jsonFields = this.jsonFields[object];
+    if (jsonFields && jsonFields.length > 0) {
+      for (const field of jsonFields) {
+        if (copy[field] === undefined || copy[field] === null) continue;
+        if (this.isSqlite) {
+          // SQLite: only objects/arrays need JSON.stringify; primitives
+          // are stored as-is and re-parsed on read by formatOutput.
+          if (typeof copy[field] === 'object') {
+            if (!copied) { copy = { ...copy }; copied = true; }
+            copy[field] = JSON.stringify(copy[field]);
+          }
+        } else {
+          // PostgreSQL: every value must be valid JSON so the native
+          // jsonb column accepts it. JSON.stringify wraps strings in
+          // quotes, leaves numbers/booleans unchanged as literals.
+          if (!copied) { copy = { ...copy }; copied = true; }
           copy[field] = JSON.stringify(copy[field]);
         }
       }
     }
+
+    if (!this.isSqlite) return copy;
 
     // Safety net: better-sqlite3 can only bind numbers/strings/bigints/buffers/
     // null. Any value still an array or plain object here (a field type not
