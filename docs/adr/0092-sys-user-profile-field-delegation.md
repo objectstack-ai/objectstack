@@ -1,33 +1,35 @@
-# ADR-0092: sys_user profile-field editing — guarded edit affordance via engine hook
+# ADR-0092: Identity-table write guard — engine-enforced `managedBy: 'better-auth'`, with sys_user profile fields as the first whitelist
 
 - **Status:** Proposed
-- **Date:** 2026-07-10
+- **Date:** 2026-07-10 (proposed) · 2026-07-11 (revised: D2 generalized from a sys_user-only hook to a registry-driven guard over every better-auth-managed object, per review)
 - **Deciders:** ObjectStack Protocol Architects
-- **Relates to:** [ADR-0010](./0010-metadata-protection-model.md) (identity tables managed by better-auth), [ADR-0049](./0049-no-unenforced-security-properties.md) (no unenforced security properties), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (platform-admin gate), [ADR-0069](./0069-enterprise-authentication-hardening.md) (system-managed auth stamps), #2766 / PR #2771 (admin user management + identity import), #2784 (this RFC)
+- **Relates to:** [ADR-0010](./0010-metadata-protection-model.md) (identity tables managed by better-auth), [ADR-0049](./0049-no-unenforced-security-properties.md) (no unenforced security properties), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (platform-admin gate), [ADR-0069](./0069-enterprise-authentication-hardening.md) (system-managed auth stamps), #2766 / PR #2771 (admin user management + identity import), #2784 (originating RFC)
 
 ## TL;DR
 
-`sys_user` is `managedBy: 'better-auth'`: every generic CRUD affordance is off and the
-default permission sets deny direct writes, because a raw ObjectQL write bypasses the
-better-auth pipeline (scrypt hashing, `sys_account` creation, verification flows,
-session-cache coherence). After #2766, every *credential* mutation has a purpose-built
-endpoint — but editing a **pure profile field** (a user's display name) still cannot go
-through the standard edit form / data API, which leaves the Users surface inconsistent
-with every other object.
+`managedBy: 'better-auth'` promises that identity tables are only written through the
+better-auth pipeline — but today that promise is enforced by nothing but UI
+affordances and default permission sets. `admin_full_access` (wildcard, no RLS) can
+raw-write **any column of any identity table** through the generic data API: a user's
+`email`, a `sys_member.role`, a `sys_session` row. That is exactly the "declared but
+unenforced security property" ADR-0049 prohibits.
 
-Decision — open a **narrow, server-enforced** profile write path:
+At the same time, the one legitimate gap the RFC (#2784) surfaced — an admin cannot
+edit a teammate's display name through the standard form — needs a *narrow opening*,
+not a bigger lock.
 
-- **D1** — classify `sys_user` columns into three tiers: *profile-editable*
-  (`name`, `image`), *admin-surface-only* (written only by dedicated endpoints /
-  import: `role`, `phone_number`, `manager_id`, `ai_access`, ban columns), and
-  *never-direct* (login identity, credentials, every system-managed stamp).
-- **D2** — enforcement lives in a **`beforeUpdate` engine hook** in `plugin-auth`
-  that fail-closed strips any non-whitelisted field from a *user-context* update to
-  `sys_user`. UI `readonly` flags alone are explicitly rejected as the mechanism
-  (ADR-0049: a boundary the runtime does not enforce is worse than absent).
-- **D3** — one shared whitelist module in `plugin-auth`; the import upsert's
-  `UPDATE_ALLOWED_FIELDS` (PR #2771) becomes a superset re-exported from it, so the
-  two surfaces cannot drift.
+Decision — one mechanism serves both:
+
+- **D1** — classify `sys_user` columns into three tiers; only `name` and `image` are
+  profile-editable through the generic path.
+- **D2** — plugin-auth installs a **generic identity write guard**: engine
+  `before{Insert,Update,Delete}` hooks that fail-closed reject **user-context**
+  writes to *every* object whose schema declares `managedBy: 'better-auth'`
+  (registry-driven, no hardcoded table list). A per-object **update whitelist**
+  is the only opening; `sys_user → {name, image}` is its first entry. Internal
+  writes (better-auth adapter, `isSystem` plugin/system contexts) bypass untouched.
+- **D3** — one whitelist module; the import upsert's `UPDATE_ALLOWED_FIELDS`
+  (PR #2771) becomes a superset-by-construction of the sys_user entry.
 - **D4** — only after D2 lands, flip the UI affordance: `userActions: { edit: true }`
   on `sys_user` (create / import / delete stay off). Non-whitelisted fields must
   render non-editable in the standard edit form.
@@ -39,10 +41,10 @@ Decision — open a **narrow, server-enforced** profile write path:
   session snapshots (secondary storage), keeping better-auth session reads coherent
   without delegating the write itself to `internalAdapter.updateUser`.
 
-Side effect worth naming: D2 also **closes an existing hole** — today
-`admin_full_access` (wildcard, no RLS) can already write *any* `sys_user` column —
-including `email`, `banned`, `must_change_password` — through the generic data API;
-only UI affordances hide it. After D2 that path is whitelist-filtered too.
+Scope note: the *decision* about which fields open up is sys_user-specific (D1);
+the *mechanism* (D2) is family-wide by construction. A future "org admins may edit
+`sys_organization.name`" is a one-line whitelist registration citing this ADR,
+not a new ADR.
 
 ## Context
 
@@ -63,7 +65,7 @@ object in the platform offers inline/form editing gated by permissions.
 
 ### What the engine actually enforces today
 
-Three findings from the current code shape this decision:
+Four findings from the current code shape this decision:
 
 1. **Field-level `readonly` is a UI hint, not a server boundary.**
    `validateRecord` *skips* system/readonly columns rather than rejecting writes to
@@ -74,11 +76,20 @@ Three findings from the current code shape this decision:
    buttons; the REST data API for `sys_user` is fully on
    (`apiMethods: ['get','list','create','update','delete']`). The real gate is the
    permission-set layer — and `admin_full_access` passes it with a wildcard.
-3. **better-auth's own writes flow through the ObjectQL engine.** The better-auth
+3. **The hole is family-wide, not sys_user-wide.** Every table in
+   `BETTER_AUTH_MANAGED_OBJECTS` (`default-permission-sets.ts` — `sys_user`,
+   `sys_account`, `sys_session`, `sys_organization`, `sys_member`, `sys_invitation`,
+   `sys_team`, `sys_team_member`, `sys_api_key`, `sys_two_factor`,
+   `sys_verification`, …) relies on the same deny-by-permission-set +
+   hide-by-affordance combination. A platform admin can raw-insert a `sys_member`
+   row (grant themselves org membership), raw-update a `sys_api_key`, or raw-delete
+   a `sys_session` — none of which fires the better-auth side effects those tables
+   assume. Guarding only `sys_user` would patch one table and leave ten.
+4. **better-auth's own writes flow through the ObjectQL engine.** The better-auth
    adapter (`objectql-adapter.ts`) calls `engine.update(...)` with no caller context,
    which means (a) engine hooks *do* fire for better-auth writes — audit already
-   captures them — and (b) a guard hook must distinguish user-context writes from
-   internal/system writes, not just "writes".
+   captures them — and (b) the guard must distinguish user-context writes from
+   internal/system writes, not just "writes to a table".
 
 ### Session-cache consistency
 
@@ -90,7 +101,7 @@ whitelist" is how drift ships — coherence is handled explicitly (D6).
 
 ## Decisions
 
-### D1 — Field tiers
+### D1 — sys_user field tiers
 
 **Tier 1: profile-editable** (standard form / data API, guarded by D2):
 
@@ -126,59 +137,71 @@ door:
   `locked_until`, `failed_login_count`, `mfa_required_at`, `last_login_at`,
   `last_login_ip`, `source`, `id`, `created_at`, `updated_at`.
 
-### D2 — A fail-closed `beforeUpdate` guard hook in plugin-auth
+### D2 — A generic, registry-driven identity write guard
 
 `plugin-auth` registers (at `kernel:ready`, same pattern as the existing SCIM
-provenance hook):
-
-```
-engine.registerHook('beforeUpdate', guardSysUserProfileWrite,
-                    { object: 'sys_user', packageId: 'com.objectstack.plugin-auth' });
-```
+provenance hook) `beforeInsert` / `beforeUpdate` / `beforeDelete` hooks that apply to
+**every object whose registered schema declares `managedBy: 'better-auth'`** — the
+guard reads the flag from the schema registry at evaluation time; there is no
+hardcoded table list to drift from the schemas (the `BETTER_AUTH_MANAGED_OBJECTS`
+array in `default-permission-sets.ts` remains what it is today: the permission-set
+seed, mirroring the same flag).
 
 Behaviour:
 
-- **Applies to user-context writes only**: when `hookContext.session` carries a real
-  user and the operation context is not `isSystem`. Internal writes — the better-auth
-  adapter (no context), plugin system writes (`SYSTEM_CTX`), import's engine calls —
-  bypass the guard unchanged. This is what keeps sign-in stamps, ban endpoints and
-  the import path working.
-- **Whitelist-filters, fail-closed**: every key in the update payload that is not in
-  Tier 1 is stripped; if the payload becomes empty the hook throws a
-  `FORBIDDEN`-class error (so a form that only tried to set `email` gets a loud
-  failure, not a silent no-op). Unknown/new columns are non-whitelisted by
-  construction — adding a field to `sys_user` never silently opens it.
+- **Applies to user-context writes only**: when the operation context carries a real
+  user and is not `isSystem`. Internal writes — the better-auth adapter (no
+  context), plugin system writes (`SYSTEM_CTX`), import's engine calls — bypass the
+  guard unchanged. This is what keeps sign-in stamps, ban endpoints, org lifecycle
+  and the import path working.
+- **Default-deny**: a user-context insert or delete on a managed table, or an update
+  to a managed table with no registered whitelist, is rejected with a
+  `FORBIDDEN`-class error naming the dedicated surface (the error message should
+  point at "use the Invite / Create User / better-auth API", not just say no).
+- **Per-object update whitelist is the only opening**: plugin-auth exposes a small
+  registry — `registerManagedUpdateWhitelist(object, fields)` — consulted by the
+  `beforeUpdate` guard. Non-whitelisted keys are stripped; if the payload becomes
+  empty the hook throws (loud failure, not a silent no-op). First and only entry
+  shipped by this ADR: `sys_user → SYS_USER_PROFILE_EDIT_FIELDS` (D1 Tier 1).
+  Unknown/new columns are non-whitelisted by construction — adding a field to any
+  identity table never silently opens it.
 - **Covers both update shapes**: single-id updates and `options.multi` bulk updates
   run through the same `beforeUpdate` event; the filter applies to the payload in
   both cases.
 - Self-vs-other is *not* distinguished here: permission sets already decide who may
-  update at all (D5); the hook decides *which columns* any permitted actor may touch.
+  update at all (D5); the guard decides *which columns* any permitted actor may
+  touch.
 
-Why a hook and not the alternatives:
+Why a guard hook and not the alternatives:
 
-- **Not UI `readonly` only** — finding #1 above; ADR-0049 prohibits it.
+- **Not UI `readonly` / affordances only** — findings #1–#2; ADR-0049 prohibits it.
+- **Not per-table bespoke hooks** — finding #3: the hole is the family, and eleven
+  copies of one guard is how the twelfth table ships unguarded. The flag already
+  exists on every schema; enforcement should key off the same single source
+  (Prime Directive: one contract, not N dialects).
 - **Not full delegation to `internalAdapter.updateUser`** — the adapter itself writes
-  through `engine.update`, so a hook that re-enters better-auth would recurse through
-  the very pipeline it guards; it also couples the data path to better-auth API
-  stability for zero gain, since the columns in Tier 1 have no auth-side effects.
-  Delegation remains the right answer for anything credential-shaped — which is why
-  those stay on dedicated endpoints (Tier 2/3), not in the whitelist.
+  through `engine.update`, so a guard that re-enters better-auth would recurse
+  through the very pipeline it guards; it also couples the data path to better-auth
+  API stability for zero gain, since the whitelisted columns have no auth-side
+  effects. Delegation remains the right answer for anything credential-shaped —
+  which is why those stay on dedicated endpoints (Tier 2/3), not in the whitelist.
 - **Not a new `/admin/update-profile` endpoint** — it would fix the one missing cell
-  but keep `sys_user` off the standard UI path (the very inconsistency this RFC is
-  about), add a bespoke audit surface, and leave the `admin_full_access` raw-write
-  hole open.
+  but keep `sys_user` off the standard UI path (the very inconsistency the RFC is
+  about), add a bespoke audit surface, and leave the family-wide raw-write hole
+  open.
 
 Trade-off accepted: `admin_full_access`'s "rescue data directly" capability on
-`sys_user` narrows to Tier 1 via the HTTP data API. Rescue of other columns now
-requires system context (server-side script / CLI), which is deliberate hardening —
-the columns in question are exactly the ones raw rescue is most dangerous for.
+identity tables goes away at the HTTP data API. Rescue now requires system context
+(server-side script / CLI), which is deliberate hardening — the rows in question are
+exactly the ones raw rescue is most dangerous for, and every legitimate admin
+operation has (or should get) a dedicated endpoint that runs the real pipeline.
 
 ### D3 — One whitelist module, import re-uses it
 
 New module in `plugin-auth` (e.g. `sys-user-writable-fields.ts`):
 
 ```ts
-/** Tier 1 — standard form / data-API editable (guard hook, D2). */
+/** Tier 1 — standard form / data-API editable (D2 guard whitelist). */
 export const SYS_USER_PROFILE_EDIT_FIELDS = new Set(['name', 'image']);
 
 /** Import-upsert may additionally touch these (admin bulk-identity surface). */
@@ -192,7 +215,9 @@ export const SYS_USER_IMPORT_UPDATE_FIELDS = new Set([
 (a spread, not two hand-maintained lists), which is the actual anti-drift property
 the RFC asked for — the two surfaces intentionally differ (import may set `role` /
 `phone_number`; the form may not), so "the same set" would be wrong; "one file, one
-derivation" is right.
+derivation" is right. (Import runs under `SYSTEM_CTX`, so it passes the D2 guard by
+context, not by whitelist — its field discipline stays its own responsibility,
+enforced by this shared constant.)
 
 ### D4 — Affordance flip, after enforcement exists
 
@@ -202,9 +227,9 @@ Once D2 is merged and tested, `sys_user` gains:
 userActions: { edit: true },   // create / import / delete stay bucket-default (off)
 ```
 
-`managedBy: 'better-auth'` stays — it remains true (drives permission-set defaults,
-system-field injection skip, docs) — the per-flag override is exactly what
-`userActions` exists for.
+`managedBy: 'better-auth'` stays — it remains true (drives the D2 guard, permission-
+set defaults, system-field injection skip, docs) — the per-flag override is exactly
+what `userActions` exists for.
 
 Form rendering: every non-Tier-1 field must render non-editable in the standard edit
 form. Most Tier 2/3 columns already carry `readonly: true`; the remainder (`email`,
@@ -214,12 +239,13 @@ implementer: `email` / `role` are referenced as action `params` (`create_user`,
 `invite_user`, `set_user_role`) — verify that flipping `readonly` on the field does
 not disable those param inputs before choosing between `readonly: true` and a
 form-level exclusion. Sequencing is a hard rule either way: **affordance ships in the
-same or a later release as the guard, never earlier** (ADR-0049).
+same or a later release as the guard, never earlier** (ADR-0049). No other identity
+table changes its affordances in this ADR.
 
 ### D5 — Who can edit whom: unchanged permission topology
 
 - `member_default` / `viewer_readonly` / `organization_admin`: `allowEdit: false` on
-  `sys_user` stays. Nothing about this ADR widens *who* may write.
+  identity tables stays. Nothing about this ADR widens *who* may write.
 - Platform admins (`admin_full_access`) become the only principals whose standard-form
   edits reach the guard — and they were already past the permission layer today.
 - Self-service stays on better-auth `/update-user` (`update_my_profile` action):
@@ -240,25 +266,32 @@ changed a Tier-1 field. Implementation detail delegated to the auth manager (it 
 the storage keys); the hook only reports "user X changed". No-op when secondary
 storage isn't wired (single-node memory cache TTLs it out).
 
-### Audit (evaluation item 4 — no decision needed)
+### Audit (RFC evaluation item 4 — no decision needed)
 
 Nothing to build: plugin-audit already registers engine-wide `beforeUpdate` (previous
 snapshot) + `afterUpdate` (audit_log write) hooks, so guarded profile edits are
 captured with field-level before/after — *better* than the dedicated endpoints, whose
-audit trail is bespoke. This asymmetry is an argument for the hook mechanism, not
-against it.
+audit trail is bespoke. Guard rejections surface as errors on an audited path. This
+asymmetry is an argument for the hook mechanism, not against it.
 
 ## Alternatives considered
 
 | Alternative | Verdict |
 |:---|:---|
-| Status quo + dedicated `/admin/update-profile` endpoint | Fixes the gap, keeps the UI inconsistency, adds bespoke audit, leaves the wildcard raw-write hole. Rejected. |
+| Status quo + dedicated `/admin/update-profile` endpoint | Fixes the gap, keeps the UI inconsistency, adds bespoke audit, leaves the family-wide raw-write hole. Rejected. |
 | `userActions.edit: true` + field `readonly` flags only | UI-only boundary; server accepts any column from any permitted actor. Prohibited by ADR-0049. Rejected. |
+| sys_user-only guard hook (first draft of this ADR) | Sound for the RFC's cell, but patches one of eleven tables and invites per-table copies. Superseded by the registry-driven guard. |
 | Delegate profile writes to `internalAdapter.updateUser` inside the hook | Re-entrancy (adapter writes back through the engine), better-auth API coupling, no benefit for columns with no auth side effects. Rejected; D6 covers the one real coherence concern. |
 | Widen whitelist to `phone_number` / `manager_id` now | Login-identifier re-keying without verification; silent RLS-scope changes. Deferred behind dedicated flows. |
 
 ## Risks
 
+- **Default-deny breaks an unknown legitimate user-context write path.** The
+  permission layer already denies non-admins, so the exposed surface is
+  platform-admin flows only; implementation must grep call sites and run the full
+  suite + dogfood pass before merge. Any legitimate path found is either switched to
+  system context (if it's really an internal write) or given a dedicated endpoint —
+  not whitelisted reflexively.
 - **Whitelist too narrow** → admins fall back to import/SQL for excluded fields.
   Acceptable: widening is a one-line, reviewed change against a named tier list.
 - **Guard bypass via system context** — any code path that stamps `isSystem` writes
@@ -271,9 +304,10 @@ against it.
 
 ## Rollout
 
-1. Implementation issue (on acceptance): guard hook + shared whitelist module +
-   import refactor + tests (user-context strip/throw, system-context bypass,
-   multi-update, better-auth adapter path untouched).
+1. Implementation issue (on acceptance): generic guard (insert/update/delete,
+   registry-driven off `managedBy`) + whitelist registry + shared field module +
+   import refactor + tests (user-context strip/throw per table, system-context
+   bypass, multi-update, better-auth adapter path untouched, whitelist registration).
 2. Session-cache invalidation hook (D6) — same PR or immediate follow-up.
 3. Affordance flip + field-level form gating + objectui verification — separate PR,
    gated on 1.
