@@ -1,9 +1,9 @@
 {
   "name": "@objectstack/dogfood",
-  "version": "0.0.29",
+  "version": "0.0.30",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Dogfood regression gate \u2014 hand-written golden tests that boot real example apps through @objectstack/verify's in-process HTTP stack, pinning historical runtime regressions (#2018 timezone bucketing, #1994 cross-owner RLS, #2004 field fidelity) that static checks miss.",
+  "description": "Dogfood regression gate — hand-written golden tests that boot real example apps through @objectstack/verify's in-process HTTP stack, pinning historical runtime regressions (#2018 timezone bucketing, #1994 cross-owner RLS, #2004 field fidelity) that static checks miss.",
   "type": "module",
   "scripts": {
     "test": "vitest run"

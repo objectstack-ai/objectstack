@@ -1,5 +1,84 @@
 # @objectstack/spec
 
+## 14.4.0
+
+### Minor Changes
+
+- 7953832: ADR-0057 data lifecycle P1–P4 (#2786): platform-generated data is now bounded by construction.
+
+  - **P1 — contract**: new `lifecycle` object property (`class: record | audit | telemetry | transient | event` + `retention` / `ttl` / `storage(rotation)` / `archive` / `reclaim`), enforced by the platform-owned **LifecycleService** registered by `ObjectQLPlugin` (default-on; disable via `OS_LIFECYCLE_DISABLED=1` or plugin `lifecycle.enabled=false`). The Reaper batch-deletes rows past `retention.maxAge` / `ttl` under a system context and reclaims space (`SqlDriver.reclaimSpace()` → SQLite `PRAGMA incremental_vacuum`). Non-`record` classes must declare a bounding policy (parse-time invariant + spec-liveness gate + dogfood storage-growth gate).
+  - **P2 — rotation**: `storage: { strategy: 'rotation', shards, unit }` physically time-shards the table on SQLite — writes land in the current shard, reads go through a UNION-ALL view under the base name, expiry is an O(1) `DROP` of shards past the window. A legacy table is adopted as the first shard on upgrade. Other dialects fall back to an equivalent age-based reap.
+  - **P3 — separation + Archiver**: registering a datasource named `telemetry` routes telemetry/event/audit objects to it (opt-in by existence; `transient` deliberately stays on the primary). Audit objects with `archive` declared get retain → archive → delete once the archive datasource exists; without it rows are retained, never dropped unarchived.
+  - **P4 — governance**: new `lifecycle` settings namespace — runtime enable switch, per-object retention overrides (tenant-scoped: regulated tenants set years, dev sets days), per-object/per-class row quotas and growth alerts (observe-and-alert only).
+
+  **Behavior change**: 11 platform objects now carry lifecycle declarations and their telemetry is bounded by default — `sys_activity` 14d (rotated), `sys_audit_log` 90d hot → archive (retained forever until an `archive` datasource is registered), `sys_metadata_audit` 365d → archive, `sys_job_run` / `sys_automation_run` / `sys_http_delivery` 30d, notification pipeline (`sys_notification`, delivery, receipt, inbox) 90d, `sys_device_code` expires_at + 1d. Extend windows per environment/tenant via the `lifecycle.retention_overrides` setting.
+
+- 82e745e: ADR-0091 L1 — grant validity windows: effective-dated assignments, resolution-time filtering, explain expired state, authoring lint.
+
+  - **plugin-security (objects)**: `sys_user_position` and `sys_user_permission_set` gain the D1 lifecycle columns — `valid_from`, `valid_until` (half-open `[from, until)`, UTC; null = unbounded, existing rows unchanged), `reason`, `delegated_from`, `last_certified_at`, `certified_by`.
+  - **core**: new shared predicate `isGrantActive` / `isGrantExpired` (`@objectstack/core`), and `resolveAuthzContext` now filters BOTH grant tables through it (D2, fail-closed — an expired unscoped `admin_full_access` grant no longer derives `platform_admin`). Present-but-unparseable bounds fail closed.
+  - **plugin-security (explain)**: `buildContextForUser` applies the same filter and returns `expiredGrants`; the principal layer reports the dedicated "held until … — expired" contributor state so "why did access disappear" is self-answering. Spec `ExplainLayerSchema` contributors gain an optional `state: 'active' | 'expired'`.
+  - **plugin-sharing**: `PositionGraphService.expandPositionUsers` filters expired holders — sharing-rule recipients stop including them at resolution time.
+  - **lint (D7)**: two new error rules over seed data — `security-grant-expired-at-authoring` (a `valid_until` in the past, or unparseable, is a grant that can never resolve) and `security-delegation-missing-reason` (a `delegated_from` row without `reason` breaks the D3 dual audit). Also re-exported the missing `SECURITY_MASTER_DETAIL_UNGRANTED` constant.
+
+  No background job is involved anywhere — per ADR-0049, an expired grant simply stops resolving, in every edition.
+
+- f3035bd: ADR-0091 L2 — delegation of duty (职务代理): self-service, time-boxed position delegation without administration.
+
+  - **spec**: `PositionSchema.delegatable` (default false) + the `sys_position.delegatable` field. A position opts in to being self-service delegated.
+  - **plugin-security (D12 gate)**: a new self-service branch — a non-admin holder of a `delegatable` position may insert a `sys_user_position` row assigning it to a delegate, WITHOUT any `adminScope`, iff the row is a well-formed delegation: `delegated_from` = the writer (you delegate your OWN authority), a mandatory `valid_until` in the future and within the 30-day ceiling, a mandatory `reason`, and the writer holds the position **directly** (validity-filtered — a grant that itself arrived via delegation is not re-delegatable). Insert-only, so a delegation is not self-renewable. A `delegatable` position that distributes an `adminScope`-carrying set is rejected fail-closed — administration is never self-delegated (D12 containment). Dual audit: `granted_by` (writer) + `delegated_from` (authority source).
+  - **plugin-security (explain)**: `buildContextForUser` surfaces delegation provenance; the principal layer attributes a delegated position "via delegation from X, until Y".
+  - **liveness / proof (ADR-0054)**: `position.delegatable` is a bound high-risk class with an end-to-end dogfood proof (`delegation-of-duty`) — a gated delegation write over the real HTTP API, then the delegate's grant resolving in-window and dying at `valid_until` via the real resolver.
+
+  Break-glass activation and recertification campaigns stay enterprise (D7); their community shapes are the L1 substrate.
+
+### Patch Changes
+
+- 82c0d94: Agent capability — open-edition honesty pass (docs + liveness annotation), no
+  behavior change:
+
+  - The `agent`/`skill`/`tool`/`action` liveness files cite
+    `packages/services/service-ai/...` as evidence, but that tree is a stale,
+    untracked build artifact — the real runtime is the closed cloud
+    `@objectstack/service-ai`. Each file's `_note` now says so explicitly, so an
+    auditor reading the ledger understands these props are `live` because a
+    CLOUD/EE runtime consumes them and the OPEN framework edition does not.
+  - Docs (`content/docs/ai`): removed the `aggregate_data` over-claim from
+    Natural Language Queries — the open MCP surface registers 9 tools and
+    `query_records` has no aggregation args; `aggregate_data` is a cloud data
+    tool. And disambiguated the two things called "skill" (authoring `SKILL.md`
+    modules vs. runtime `defineSkill` agent capability bundles) with cross-linked
+    callouts on both pages.
+
+- 7449476: Permission-zoo audit follow-ups:
+
+  **FLS keys must be object-qualified (`security-fls-unqualified-key`, error).**
+  The runtime evaluator matches field-permission keys by `<object>.<field>`
+  prefix — a bare `budget` key matches NOTHING and the declared masking
+  silently never enforces. The showcase itself shipped exactly that bug: its
+  contributor FLS block (bare `budget`/`spent`/`budget_remaining`) was a
+  runtime no-op, and the "FLS proof" in earlier verification was actually a
+  validation-rule rejection. Fixed: keys qualified
+  (`showcase_project.budget` …), a new D7 lint rule rejects bare keys at
+  compile time with a fix-it, and the permission-zoo dogfood now proves the
+  served pipeline denies a contributor's budget write while allowing ordinary
+  field edits.
+
+  **Release pipeline: PROTOCOL_VERSION auto-sync.** `changeset version` now
+  runs `scripts/sync-protocol-version.mjs`, regenerating the handshake
+  constant from the spec package major. Release PRs opened by
+  changesets/action with the default GITHUB_TOKEN never trigger CI (GitHub's
+  anti-recursion rule), so the lockstep guard could only fire AFTER a release
+  merged — the drift class that broke main at 14.0.0 (#2769) is now fixed at
+  version time, the one spot that cannot be skipped.
+
+  **D11 `externalSharingModel` honestly marked.** The dial has no runtime
+  consumer yet (authoring lint + Studio badges only); its liveness entry
+  moves from a bespoke `authorable` status to the documented `planned` +
+  `authorWarn`, and the sharing docs / design doc / showcase comments now say
+  explicitly that evaluation of external principals lands with the
+  principal-taxonomy phase (#2696).
+
 ## 14.3.0
 
 ### Minor Changes

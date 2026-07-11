@@ -1,5 +1,73 @@
 # @objectstack/cli
 
+## 14.4.0
+
+### Patch Changes
+
+- 1c19139: refactor(sms): rename `@objectstack/plugin-sms` to `@objectstack/service-sms`
+
+  Infrastructure services follow the `service-*` convention
+  (`service-messaging`, `service-settings`, …) — the `plugin-*` prefix was a
+  misfit for a package whose whole job is registering the `sms` kernel
+  service (`plugin-email` is legacy debt, not precedent). Same exports, same
+  `SmsServicePlugin` class, same `sms` service id and settings namespace —
+  only the package name and its home (`packages/services/service-sms`)
+  change. The one published `@objectstack/plugin-sms@14.3.0` release should
+  be npm-deprecated in favour of `@objectstack/service-sms`.
+
+- Updated dependencies [7953832]
+- Updated dependencies [82e745e]
+- Updated dependencies [f3035bd]
+- Updated dependencies [82c0d94]
+- Updated dependencies [9887465]
+- Updated dependencies [7449476]
+- Updated dependencies [1c19139]
+  - @objectstack/spec@14.4.0
+  - @objectstack/objectql@14.4.0
+  - @objectstack/driver-sql@14.4.0
+  - @objectstack/driver-sqlite-wasm@14.4.0
+  - @objectstack/platform-objects@14.4.0
+  - @objectstack/service-messaging@14.4.0
+  - @objectstack/service-automation@14.4.0
+  - @objectstack/plugin-audit@14.4.0
+  - @objectstack/core@14.4.0
+  - @objectstack/plugin-security@14.4.0
+  - @objectstack/plugin-sharing@14.4.0
+  - @objectstack/lint@14.4.0
+  - @objectstack/plugin-auth@14.4.0
+  - @objectstack/service-sms@14.4.0
+  - @objectstack/account@14.4.0
+  - @objectstack/setup@14.4.0
+  - @objectstack/client@14.4.0
+  - @objectstack/cloud-connection@14.4.0
+  - @objectstack/formula@14.4.0
+  - @objectstack/mcp@14.4.0
+  - @objectstack/observability@14.4.0
+  - @objectstack/driver-memory@14.4.0
+  - @objectstack/driver-mongodb@14.4.0
+  - @objectstack/plugin-approvals@14.4.0
+  - @objectstack/plugin-email@14.4.0
+  - @objectstack/plugin-hono-server@14.4.0
+  - @objectstack/plugin-reports@14.4.0
+  - @objectstack/plugin-webhooks@14.4.0
+  - @objectstack/rest@14.4.0
+  - @objectstack/runtime@14.4.0
+  - @objectstack/service-analytics@14.4.0
+  - @objectstack/service-cache@14.4.0
+  - @objectstack/service-datasource@14.4.0
+  - @objectstack/service-job@14.4.0
+  - @objectstack/service-package@14.4.0
+  - @objectstack/service-queue@14.4.0
+  - @objectstack/service-realtime@14.4.0
+  - @objectstack/service-settings@14.4.0
+  - @objectstack/service-storage@14.4.0
+  - @objectstack/trigger-api@14.4.0
+  - @objectstack/trigger-record-change@14.4.0
+  - @objectstack/trigger-schedule@14.4.0
+  - @objectstack/types@14.4.0
+  - @objectstack/verify@14.4.0
+  - @objectstack/console@14.4.0
+
 ## 14.3.0
 
 ### Minor Changes

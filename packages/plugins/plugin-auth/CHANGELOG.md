@@ -1,5 +1,32 @@
 # Changelog
 
+## 14.4.0
+
+### Patch Changes
+
+- 9887465: fix(auth): make the self-service "Resend Verification Email" action work
+
+  better-auth's stock `POST /send-verification-email` requires `{ email }` in the
+  body, but the `sys_user` `resend_verification_email` action (record-header
+  button, "email unverified" record alert, and record-section quick action) fires
+  with an empty body — so the request bounced with `[body.email] Invalid input:
+expected string, received undefined` and the button was permanently broken. A
+  thin wrapper route now defaults the address to the authenticated caller's own
+  session email when the body omits it, then re-dispatches through the real route.
+  An explicitly-supplied `email` (admin / verify-screen path) passes through
+  untouched.
+
+- Updated dependencies [7953832]
+- Updated dependencies [82e745e]
+- Updated dependencies [f3035bd]
+- Updated dependencies [82c0d94]
+- Updated dependencies [7449476]
+  - @objectstack/spec@14.4.0
+  - @objectstack/platform-objects@14.4.0
+  - @objectstack/core@14.4.0
+  - @objectstack/rest@14.4.0
+  - @objectstack/types@14.4.0
+
 ## 14.3.0
 
 ### Minor Changes

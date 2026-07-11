@@ -1,5 +1,28 @@
 # @objectstack/service-sms
 
+## 14.4.0
+
+### Patch Changes
+
+- 1c19139: refactor(sms): rename `@objectstack/plugin-sms` to `@objectstack/service-sms`
+
+  Infrastructure services follow the `service-*` convention
+  (`service-messaging`, `service-settings`, …) — the `plugin-*` prefix was a
+  misfit for a package whose whole job is registering the `sms` kernel
+  service (`plugin-email` is legacy debt, not precedent). Same exports, same
+  `SmsServicePlugin` class, same `sms` service id and settings namespace —
+  only the package name and its home (`packages/services/service-sms`)
+  change. The one published `@objectstack/plugin-sms@14.3.0` release should
+  be npm-deprecated in favour of `@objectstack/service-sms`.
+
+- Updated dependencies [7953832]
+- Updated dependencies [82e745e]
+- Updated dependencies [f3035bd]
+- Updated dependencies [82c0d94]
+- Updated dependencies [7449476]
+  - @objectstack/spec@14.4.0
+  - @objectstack/core@14.4.0
+
 ## 14.3.0
 
 ### Minor Changes

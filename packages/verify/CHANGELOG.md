@@ -1,5 +1,30 @@
 # @objectstack/verify
 
+## 14.4.0
+
+### Patch Changes
+
+- Updated dependencies [7953832]
+- Updated dependencies [82e745e]
+- Updated dependencies [f3035bd]
+- Updated dependencies [82c0d94]
+- Updated dependencies [9887465]
+- Updated dependencies [7449476]
+  - @objectstack/spec@14.4.0
+  - @objectstack/objectql@14.4.0
+  - @objectstack/driver-sqlite-wasm@14.4.0
+  - @objectstack/service-automation@14.4.0
+  - @objectstack/core@14.4.0
+  - @objectstack/plugin-security@14.4.0
+  - @objectstack/plugin-sharing@14.4.0
+  - @objectstack/plugin-auth@14.4.0
+  - @objectstack/plugin-hono-server@14.4.0
+  - @objectstack/rest@14.4.0
+  - @objectstack/runtime@14.4.0
+  - @objectstack/service-analytics@14.4.0
+  - @objectstack/service-datasource@14.4.0
+  - @objectstack/service-settings@14.4.0
+
 ## 14.3.0
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/sdui-parser",
-  "version": "14.3.0",
+  "version": "14.4.0",
   "license": "Apache-2.0",
   "description": "ObjectStack constrained JSX-source → SDUI SchemaNode tree compiler (parse, never execute). Isomorphic, zero React. ADR-0080.",
   "main": "dist/index.js",
