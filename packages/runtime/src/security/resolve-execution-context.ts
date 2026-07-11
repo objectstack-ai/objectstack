@@ -20,6 +20,7 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { scopesToAgentPermissionSets } from '@objectstack/spec/ai';
 
 import {
   resolveAuthzContext,
@@ -152,7 +153,30 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // through this resolver), so the security plugin's empty-context skip
   // path keeps its meaning.
   if (authz.userId) {
-    ctx.principalKind = 'human';
+    if (oauthPrincipal?.clientId) {
+      // [ADR-0090 D10 — agent principal] An OAuth access token that names an
+      // authorized client (`azp`) is an AI agent acting ON BEHALF OF the human
+      // `sub` (OAuth bearers reach here only on the `/mcp` surface — a
+      // deliberately agent-only door). The agent's OWN grants are its
+      // scope-derived CEILING (`data:read`→read-only, `data:write`→CRUD,
+      // neither→no data), NOT the user's — so we REPLACE the user-derived
+      // positions/permissions/systemPermissions with that ceiling. The human
+      // is the delegator (`onBehalfOf`); the security engine intersects the
+      // two so the agent can never exceed EITHER its consented scope OR the
+      // user's own reach (confused-deputy prevention). `userId` stays the human
+      // so owner-stamping and `current_user.*` RLS resolve to them.
+      ctx.principalKind = 'agent';
+      ctx.onBehalfOf = { userId: authz.userId, principalKind: 'human' };
+      ctx.permissions = scopesToAgentPermissionSets(oauthPrincipal.scopes);
+      ctx.positions = [];
+      // The agent's capabilities come from its ceiling sets (which carry none),
+      // not the user's — clear the user-derived aggregate so a cap-gated action
+      // (checked outside the D10 object intersection) can't ride the user's
+      // system permissions.
+      ctx.systemPermissions = [];
+    } else {
+      ctx.principalKind = 'human';
+    }
   } else {
     ctx.principalKind = 'guest';
     ctx.positions = ['guest'];

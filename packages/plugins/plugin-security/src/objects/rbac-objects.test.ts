@@ -9,14 +9,40 @@ import { SysPosition, SysPermissionSet, SysCapability, defaultPermissionSets } f
  * data owns its tests.
  */
 describe('default permission sets', () => {
-  it('exposes the four canonical platform permission sets', () => {
+  it('exposes the canonical platform permission sets + the ADR-0090 D10 agent ceilings', () => {
     const names = defaultPermissionSets.map((p) => p.name).sort();
     expect(names).toEqual([
       'admin_full_access',
+      // [ADR-0090 D10] MCP agent capability ceilings (scope-derived; one side
+      // of the agent∩user intersection). Never bound to a position/anchor.
+      'mcp_agent_data_read',
+      'mcp_agent_data_write',
+      'mcp_agent_restricted',
       'member_default',
       'organization_admin',
       'viewer_readonly',
     ]);
+  });
+
+  it('the MCP agent ceiling sets carry pure CRUD bits and NO row-level security', () => {
+    const read = defaultPermissionSets.find((p) => p.name === 'mcp_agent_data_read')!;
+    const write = defaultPermissionSets.find((p) => p.name === 'mcp_agent_data_write')!;
+    const restricted = defaultPermissionSets.find((p) => p.name === 'mcp_agent_restricted')!;
+    expect(read.rowLevelSecurity ?? []).toEqual([]);
+    expect(write.rowLevelSecurity ?? []).toEqual([]);
+    // Read-only: read yes, write no.
+    expect(read.objects?.['*']?.allowRead).toBe(true);
+    expect(read.objects?.['*']?.allowEdit ?? false).toBe(false);
+    expect(read.objects?.['*']?.allowCreate ?? false).toBe(false);
+    // Write ceiling: full CRUD on the wildcard.
+    expect(write.objects?.['*']?.allowEdit).toBe(true);
+    expect(write.objects?.['*']?.allowDelete).toBe(true);
+    // Restricted floor: no wildcard object grant at all (fail-closed).
+    expect(restricted.objects?.['*']).toBeUndefined();
+    // None of the agent ceilings carry high-privilege system permissions.
+    for (const s of [read, write, restricted]) {
+      expect(s.systemPermissions ?? []).toEqual([]);
+    }
   });
 
   it('organization_admin has setup.access but not studio.access / manage_metadata / manage_platform_settings', () => {

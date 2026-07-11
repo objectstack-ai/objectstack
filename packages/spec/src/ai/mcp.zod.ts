@@ -107,9 +107,13 @@ export type MCPToolBinding = z.infer<typeof MCPToolBindingSchema>;
  * These are the coarse, tool-family-level grants an OAuth access token can
  * carry when a human-connected MCP client (claude.ai, Claude Desktop,
  * Claude Code, …) authorizes against a deployment's embedded authorization
- * server. Scopes bound the *tool surface* only — every call still executes
- * under the resolved principal's permissions and row-level security, so a
- * scope can never grant more than the logged-in user could do anyway.
+ * server. Scopes narrow the *tool surface* (which tools are exposed) AND, via
+ * `scopesToAgentPermissionSets` below, derive the agent's DATA-LAYER capability
+ * ceiling: an OAuth-authenticated request is a `principalKind:'agent'` acting
+ * on behalf of the human, and the ADR-0090 D10 intersection bounds it by BOTH
+ * that scope-derived ceiling AND the user's own grants. So a scope can never
+ * grant more than the logged-in user could do (the intersection only narrows),
+ * and it now enforces that at the data layer, not just the tool surface.
  *
  * Deliberately minimal (see #2698): finer grades can be added later without
  * breaking these. Constants live in the spec so the authorization server
@@ -131,3 +135,54 @@ export const MCP_OAUTH_SCOPES = [
 ] as const;
 
 export type McpOauthScope = (typeof MCP_OAUTH_SCOPES)[number];
+
+/**
+ * [ADR-0090 D10] Built-in permission sets that express an MCP agent's
+ * capability CEILING, derived from the OAuth scopes the user consented to.
+ *
+ * When an MCP request authenticates via an OAuth token (an AI client acting on
+ * behalf of a human), the engine treats it as a `principalKind:'agent'`
+ * principal `onBehalfOf` that human. The agent's OWN grants are one of these
+ * sets, and the D10 intersection bounds the effective permission by BOTH the
+ * agent's ceiling AND the delegating user's grants — so a `data:read` token can
+ * never write ANY record at the data layer, even via a crafted call, no matter
+ * what the user could do. This promotes the OAuth scope from a tool-surface
+ * hint (bypassable at the API) to a real, enforced data-layer boundary while
+ * staying strictly consistent with "a scope can never grant more than the user
+ * could do anyway" (the intersection only ever narrows).
+ *
+ * These sets are pure capability ceilings — object CRUD bits only, NO
+ * row-level security. All row/owner/tenant narrowing comes from the delegating
+ * user's own sets on the other side of the intersection.
+ */
+/** Read-only ceiling (maps to `data:read`): read every object, write none. */
+export const MCP_AGENT_PERMISSION_SET_READ = 'mcp_agent_data_read';
+/** Read+write ceiling (maps to `data:write`): full CRUD, still bounded by the user. */
+export const MCP_AGENT_PERMISSION_SET_WRITE = 'mcp_agent_data_write';
+/**
+ * No-object-access floor (actions-only / no data scope). Keeps the resolved set
+ * list non-empty so the enforcement middleware fails CLOSED (every object op
+ * denied) rather than falling open on an empty principal.
+ */
+export const MCP_AGENT_PERMISSION_SET_RESTRICTED = 'mcp_agent_restricted';
+
+/** All built-in MCP agent ceiling sets. */
+export const MCP_AGENT_PERMISSION_SETS = [
+  MCP_AGENT_PERMISSION_SET_READ,
+  MCP_AGENT_PERMISSION_SET_WRITE,
+  MCP_AGENT_PERMISSION_SET_RESTRICTED,
+] as const;
+
+/**
+ * [ADR-0090 D10] Map the OAuth scopes on an MCP token to the agent's ceiling
+ * permission set(s). `data:write` (a superset — its set also grants read) wins
+ * over `data:read`; a token with neither data scope (e.g. `actions:execute`
+ * only) gets the no-object-access floor. Always returns at least one set so the
+ * agent principal is never empty (which would fail OPEN in the middleware).
+ */
+export function scopesToAgentPermissionSets(scopes: readonly string[] | undefined): string[] {
+  const s = new Set(scopes ?? []);
+  if (s.has(MCP_OAUTH_SCOPE_DATA_WRITE)) return [MCP_AGENT_PERMISSION_SET_WRITE];
+  if (s.has(MCP_OAUTH_SCOPE_DATA_READ)) return [MCP_AGENT_PERMISSION_SET_READ];
+  return [MCP_AGENT_PERMISSION_SET_RESTRICTED];
+}

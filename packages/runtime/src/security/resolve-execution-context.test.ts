@@ -353,3 +353,54 @@ describe('principal taxonomy at the HTTP entry (ADR-0090 D9/D10)', () => {
   });
 });
 
+describe('resolveExecutionContext — ADR-0090 D10 agent principal (OAuth on /mcp)', () => {
+  // A verified MCP OAuth token: `sub` = the human, `azp` = the agent client.
+  const agentOpts = (verified: any) => ({
+    acceptOAuthAccessToken: true,
+    getService: async (name: string) =>
+      name === 'auth' ? { verifyMcpAccessToken: async () => verified } : undefined,
+    getQl: async () => makeQl([]),
+    request: { headers: { authorization: 'Bearer a.b.c' } },
+  });
+
+  it("data:read token with a client → principalKind 'agent', onBehalfOf the user, read-only ceiling", async () => {
+    const ctx = await resolveExecutionContext(
+      agentOpts({ userId: 'u1', scopes: ['data:read'], clientId: 'agent-app-1' }),
+    );
+    expect(ctx.principalKind).toBe('agent');
+    // userId stays the human so owner-stamping + current_user.* RLS resolve to them.
+    expect(ctx.userId).toBe('u1');
+    expect(ctx.onBehalfOf).toEqual({ userId: 'u1', principalKind: 'human' });
+    // Agent's OWN grants are the scope-derived ceiling, NOT the user's.
+    expect(ctx.permissions).toEqual(['mcp_agent_data_read']);
+    expect(ctx.positions).toEqual([]);
+    expect(ctx.systemPermissions).toEqual([]);
+    // Tool-surface scope gate still applies.
+    expect(ctx.oauthScopes).toEqual(['data:read']);
+  });
+
+  it('data:write token → read+write ceiling set', async () => {
+    const ctx = await resolveExecutionContext(
+      agentOpts({ userId: 'u1', scopes: ['data:write'], clientId: 'c1' }),
+    );
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.permissions).toEqual(['mcp_agent_data_write']);
+  });
+
+  it('actions-only token → restricted (no-object-access) ceiling, still an agent', async () => {
+    const ctx = await resolveExecutionContext(
+      agentOpts({ userId: 'u1', scopes: ['actions:execute'], clientId: 'c1' }),
+    );
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.permissions).toEqual(['mcp_agent_restricted']);
+  });
+
+  it('an OAuth token WITHOUT a client (no azp) stays a human principal — not every bearer is an agent', async () => {
+    const ctx = await resolveExecutionContext(
+      agentOpts({ userId: 'u1', scopes: ['data:read'] }),
+    );
+    expect(ctx.principalKind).toBe('human');
+    expect(ctx.onBehalfOf).toBeUndefined();
+  });
+});
+

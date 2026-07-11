@@ -1,6 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
+import {
+  MCP_AGENT_PERMISSION_SET_READ,
+  MCP_AGENT_PERMISSION_SET_WRITE,
+  MCP_AGENT_PERMISSION_SET_RESTRICTED,
+} from '@objectstack/spec/ai';
 
 /**
  * Identity tables managed by the better-auth plugin (see
@@ -543,5 +548,48 @@ export const defaultPermissionSets: PermissionSet[] = [
         using: 'user_id == current_user.id',
       },
     ],
+  }),
+
+  // ── [ADR-0090 D10] MCP agent ceiling sets ────────────────────────────────
+  // The capability ceiling an OAuth-authenticated MCP agent runs under,
+  // derived from the token's consented scopes (see
+  // `scopesToAgentPermissionSets`). These are ONE SIDE of the D10 intersection:
+  // the delegating user's own sets provide all row/owner/tenant narrowing, so
+  // these carry pure CRUD bits and NO row-level security. They are never bound
+  // to a position or an audience anchor — the producer
+  // (`resolve-execution-context`) injects them onto the agent principal's
+  // context directly — so the anchor high-privilege gate does not apply.
+  PermissionSetSchema.parse({
+    name: MCP_AGENT_PERMISSION_SET_READ,
+    label: 'MCP Agent — Read Only',
+    description:
+      'Read-only ceiling for an AI agent acting on behalf of a user (OAuth `data:read`). ' +
+      'Bounded by the delegating user via the ADR-0090 D10 intersection.',
+    objects: {
+      '*': { allowRead: true },
+    },
+  }),
+  PermissionSetSchema.parse({
+    name: MCP_AGENT_PERMISSION_SET_WRITE,
+    label: 'MCP Agent — Read & Write',
+    description:
+      'Read+write ceiling for an AI agent acting on behalf of a user (OAuth `data:write`). ' +
+      'Full CRUD, still bounded by the delegating user via the ADR-0090 D10 intersection. ' +
+      'Identity tables stay read-only (better-auth managed).',
+    objects: {
+      '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+      // Even a write-scoped agent must not mutate better-auth identity tables
+      // directly — a belt to the intersection's braces (the user's baseline
+      // already denies these, but an admin delegator would not).
+      ...denyWritesOnManagedObjects(),
+    },
+  }),
+  PermissionSetSchema.parse({
+    name: MCP_AGENT_PERMISSION_SET_RESTRICTED,
+    label: 'MCP Agent — No Data Access',
+    description:
+      'No-object-access floor for an agent with no data scope (e.g. `actions:execute` only). ' +
+      'Keeps the resolved set list non-empty so enforcement fails CLOSED, never open.',
+    objects: {},
   }),
 ];

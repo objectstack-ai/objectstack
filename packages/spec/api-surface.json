@@ -1794,6 +1794,10 @@
     "MCPToolBindingSchema (const)",
     "MCPTransport (type)",
     "MCPTransportSchema (const)",
+    "MCP_AGENT_PERMISSION_SETS (const)",
+    "MCP_AGENT_PERMISSION_SET_READ (const)",
+    "MCP_AGENT_PERMISSION_SET_RESTRICTED (const)",
+    "MCP_AGENT_PERMISSION_SET_WRITE (const)",
     "MCP_OAUTH_SCOPES (const)",
     "MCP_OAUTH_SCOPE_ACTIONS (const)",
     "MCP_OAUTH_SCOPE_DATA_READ (const)",
@@ -1867,6 +1871,7 @@
     "defineSkill (function)",
     "defineSolutionBlueprint (function)",
     "defineTool (function)",
+    "scopesToAgentPermissionSets (function)",
     "skillForm (const)",
     "toolForm (const)"
   ],

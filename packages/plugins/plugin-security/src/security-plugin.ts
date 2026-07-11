@@ -3,6 +3,7 @@
 import { Plugin, PluginContext } from '@objectstack/core';
 import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits } from '@objectstack/spec/security';
+import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
 import {
@@ -1427,15 +1428,24 @@ export class SecurityPlugin implements Plugin {
     const positions = context?.positions ?? [];
     const explicitPermissionSets = context?.permissions ?? [];
     const requested = [...positions, ...explicitPermissionSets];
-    // [ADR-0090 D5] Baseline is ADDITIVE, always: the configured baseline set
-    // (default `member_default`) applies to every authenticated request IN
-    // ADDITION to whatever else resolved. The former "only when the user has
-    // nothing else" conditional was the fallback CLIFF — receiving your first
-    // explicit grant silently cost you the entire baseline. The `everyone`
-    // audience anchor carries the same semantics for admin-authored defaults;
-    // this keeps the CLI-configured baseline coherent with it.
-    if (context?.userId && this.fallbackPermissionSet && !requested.includes(this.fallbackPermissionSet)) {
-      requested.push(this.fallbackPermissionSet);
+    // [ADR-0090 D10] An AGENT principal's grants are EXACTLY its scope-derived
+    // ceiling set(s) — the additive human baseline (member_default) must NOT
+    // apply, or its write bit would silently widen a read-only agent past the
+    // scope the user consented to. The agent's floor is instead the restricted
+    // (no-object-access) set, so an agent whose sets fail to resolve fails
+    // CLOSED (every object op denied) rather than falling open. The delegating
+    // user's own baseline still applies on the OTHER side of the intersection
+    // (resolved from `onBehalfOf` via a context without this flag).
+    const isAgent = context?.principalKind === 'agent';
+    const baseline = isAgent ? MCP_AGENT_PERMISSION_SET_RESTRICTED : this.fallbackPermissionSet;
+    // [ADR-0090 D5] Baseline is ADDITIVE, always (for humans): the configured
+    // baseline set applies to every authenticated request IN ADDITION to
+    // whatever else resolved. The former "only when the user has nothing else"
+    // conditional was the fallback CLIFF — receiving your first explicit grant
+    // silently cost you the entire baseline. Agents skip this additive step
+    // (their ceiling is closed, not floored) — see above.
+    if (!isAgent && context?.userId && baseline && !requested.includes(baseline)) {
+      requested.push(baseline);
     }
     let permissionSets = await this.permissionEvaluator.resolvePermissionSets(
       requested,
@@ -1445,15 +1455,17 @@ export class SecurityPlugin implements Plugin {
       { logger: this.logger },
     );
     // Post-resolution fallback — closes the fail-open hole where a populated
-    // `positions` array maps to no permission set yet (no sys_position binding), which
-    // would otherwise skip RLS entirely and expose every tenant's data.
+    // `positions` array maps to no permission set yet (no sys_position binding),
+    // which would otherwise skip RLS entirely and expose every tenant's data.
+    // For an agent, the fallback is the restricted set (deny all objects), NOT
+    // the human baseline — a mis-resolved agent must never inherit member access.
     if (
       permissionSets.length === 0 &&
       context?.userId &&
-      this.fallbackPermissionSet
+      baseline
     ) {
       permissionSets = await this.permissionEvaluator.resolvePermissionSets(
-        [this.fallbackPermissionSet],
+        [baseline],
         this.metadata,
         this.bootstrapPermissionSets,
         this.dbLoader,
