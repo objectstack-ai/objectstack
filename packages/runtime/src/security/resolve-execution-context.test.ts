@@ -402,5 +402,54 @@ describe('resolveExecutionContext — ADR-0090 D10 agent principal (OAuth on /mc
     expect(ctx.principalKind).toBe('human');
     expect(ctx.onBehalfOf).toBeUndefined();
   });
+
+  // ── [ADR-0090 D10 #2] action-capability delegation ───────────────────────
+  // A ql that resolves user `u1` to a set carrying system capabilities, so we
+  // can see whether the agent inherits the user's ACTION authority.
+  const capQl = () => {
+    const tables: Record<string, any[]> = {
+      sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'owner' }],
+      sys_user_permission_set: [{ id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', organization_id: null }],
+      sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access', system_permissions: '["manage_users","manage_platform_settings"]', object_permissions: '{}' }],
+      sys_position: [], sys_position_permission_set: [], sys_user_position: [],
+    };
+    return {
+      async find(object: string, opts: any) {
+        return (tables[object] ?? []).filter((row) =>
+          Object.entries(opts?.where ?? {}).every(([k, v]) =>
+            v !== null && typeof v === 'object'
+              ? (Array.isArray((v as any).$in) ? (v as any).$in.includes(row[k]) : true)
+              : (v ?? null) === (row[k] ?? null),
+          ),
+        );
+      },
+    };
+  };
+  const agentWithQl = (scopes: string[], ql: any) => ({
+    acceptOAuthAccessToken: true,
+    getService: async (name: string) =>
+      name === 'auth' ? { verifyMcpAccessToken: async () => ({ userId: 'u1', scopes, clientId: 'c1' }) } : undefined,
+    getQl: async () => ql,
+    request: { headers: { authorization: 'Bearer a.b.c' } },
+  });
+
+  it("an agent WITH actions:execute inherits the delegating user's action capabilities", async () => {
+    const ctx = await resolveExecutionContext(agentWithQl(['data:read', 'actions:execute'], capQl()));
+    expect(ctx.principalKind).toBe('agent');
+    // The action gate (actionPermissionError) reads these → agent may invoke
+    // actions the user can. Delegated because the user consented actions:execute.
+    expect(ctx.systemPermissions).toContain('manage_users');
+    expect(ctx.systemPermissions).toContain('manage_platform_settings');
+    // But the DATA ceiling is still the scope-derived (read-only) set — the
+    // agent did NOT inherit the user's admin OBJECT grants.
+    expect(ctx.permissions).toEqual(['mcp_agent_data_read']);
+  });
+
+  it('an agent WITHOUT actions:execute holds NO action capabilities (cannot ride the user\'s caps)', async () => {
+    const ctx = await resolveExecutionContext(agentWithQl(['data:write'], capQl()));
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.systemPermissions).toEqual([]);
+    expect(ctx.permissions).toEqual(['mcp_agent_data_write']);
+  });
 });
 

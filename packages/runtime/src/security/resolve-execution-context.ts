@@ -20,7 +20,7 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { scopesToAgentPermissionSets } from '@objectstack/spec/ai';
+import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
 
 import {
   resolveAuthzContext,
@@ -169,11 +169,28 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
       ctx.onBehalfOf = { userId: authz.userId, principalKind: 'human' };
       ctx.permissions = scopesToAgentPermissionSets(oauthPrincipal.scopes);
       ctx.positions = [];
-      // The agent's capabilities come from its ceiling sets (which carry none),
-      // not the user's — clear the user-derived aggregate so a cap-gated action
-      // (checked outside the D10 object intersection) can't ride the user's
-      // system permissions.
-      ctx.systemPermissions = [];
+      // [ADR-0090 D10] System capabilities on the agent principal gate business
+      // ACTION invocation (`actionPermissionError` reads `ctx.systemPermissions`)
+      // — a door SEPARATE from the object CRUD/FLS/RLS intersection, which is
+      // driven by the resolved ceiling SETS (they carry no caps, so cap-gated
+      // OBJECT access stays denied to the agent regardless of this line).
+      //
+      // The `actions:execute` scope IS the user's consent to let this agent
+      // invoke actions on their behalf, so when it is granted we DELEGATE the
+      // user's action capabilities to the gate; without it the agent holds none
+      // (and the MCP tool surface hides the action tools anyway). This never
+      // widens data reach: whatever an action reads/writes still flows through
+      // the object ceiling ∩ user intersection — e.g. a `data:read` agent that
+      // invokes a writing action is still blocked at the write, and even a
+      // `data:write` agent cannot touch better-auth-managed tables. The residual
+      // is a cap-gated action whose effect is purely EXTERNAL (email, webhook) —
+      // exactly what `actions:execute` consents to. Per-action agent scoping
+      // (tighter than this all-or-nothing scope) is the per-client-grants
+      // follow-up.
+      ctx.systemPermissions =
+        oauthPrincipal.scopes?.includes(MCP_OAUTH_SCOPE_ACTIONS)
+          ? (authz.systemPermissions ?? [])
+          : [];
     } else {
       ctx.principalKind = 'human';
     }

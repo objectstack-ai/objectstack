@@ -2440,6 +2440,30 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     expect(executeAction).toHaveBeenCalledWith('todo_task', 'issueLicense', expect.anything());
   });
 
+  // [ADR-0090 D10 #2] An MCP agent acting on behalf of a user carries the user's
+  // action capabilities (delegated by the `actions:execute` scope — the producer
+  // populates `systemPermissions` accordingly). The action gate is identity-
+  // agnostic, so a gated action the user can run is invokable by the agent; an
+  // agent whose scope did not delegate the capability is denied.
+  it('run_action allows a gated action for an AGENT that inherited the delegating user\'s capability', async () => {
+    const { bridge, executeAction } = makeBridge({
+      userId: 'u1', principalKind: 'agent', onBehalfOf: { userId: 'u1' },
+      systemPermissions: ['manage_platform_settings'],
+    });
+    const res = await bridge.runAction('issue_license', {});
+    expect(res.ok).toBe(true);
+    expect(executeAction).toHaveBeenCalledWith('todo_task', 'issueLicense', expect.anything());
+  });
+
+  it('run_action denies a gated action for an AGENT that did NOT inherit the capability (no actions:execute)', async () => {
+    const { bridge, executeAction } = makeBridge({
+      userId: 'u1', principalKind: 'agent', onBehalfOf: { userId: 'u1' },
+      systemPermissions: [],
+    });
+    await expect(bridge.runAction('issue_license', {})).rejects.toThrow(/requires capability/i);
+    expect(executeAction).not.toHaveBeenCalled();
+  });
+
   it('run_action blocks system-object actions fail-closed (even for a system context)', async () => {
     const { bridge, executeAction } = makeBridge({ isSystem: true });
     await expect(bridge.runAction('rotate', { objectName: 'sys_api_key' })).rejects.toThrow(/system object/i);
