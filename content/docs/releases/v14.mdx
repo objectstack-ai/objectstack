@@ -1,0 +1,220 @@
+---
+title: v14.0.0
+description: The v14 series completes the ADR-0090 vocabulary convergence, makes object enable.* capability flags real gates, and adds admin user management, phone/SMS auth, book-audience enforcement, a data-lifecycle contract, and effective-dated grants.
+---
+
+**Released July 2026 — current: 14.4.0 (July 11, 2026).** All `@objectstack/*`
+packages are version-locked, so one number describes the whole platform. This
+page covers the **v14 series**: it opens with the 14.0.0 breaking change, then
+folds in the capabilities that shipped across 14.1 → 14.4.
+
+The v14 line finishes the ADR-0090 permission-model convergence (the last
+role/profile vocabulary leftovers), turns the object `enable.*` capability flags
+into real opt-in / opt-out gates, and — across the minors — ships admin-driven
+user management, phone and SMS authentication, book-audience enforcement at the
+read layer, a data-lifecycle retention contract, and effective-dated grants with
+self-service delegation.
+
+**TL;DR for upgraders:** one type-level breaking rename —
+`book.audience: { profile }` → `{ permissionSet }`. Two behavior changes to know:
+members no longer get **delete** as a baseline right, and `enable.feeds` /
+`enable.activities` are now default-on opt-out gates (behavior-preserving) while
+`enable.files` is opt-in. Everything else is additive.
+
+## Breaking changes (14.0.0)
+
+### `BookAudience` gated arm renamed: `{ profile }` → `{ permissionSet }` (ADR-0090 D2)
+
+ADR-0090 removed the Profile concept, but `book.audience` (docs-as-metadata,
+ADR-0046 §6.7) still modelled its gated arm as a profile reference. Books ship
+in packages, and packages own permission sets but never positions — so the gate
+is a **capability reference**, a permission-set name the reader must hold:
+
+```ts
+// before
+book({ name: 'crm_admin_guide', audience: { profile: 'crm_admin' } })
+// after
+book({ name: 'crm_admin_guide', audience: { permissionSet: 'crm_admin' } })
+```
+
+Pre-launch one-step rename, no alias — the zod union rejects `{ profile }` at
+parse time. The `'org'` and `'public'` literals are unchanged (`'public'` ≡ the
+built-in `guest` position).
+
+### Vocabulary leftovers renamed, no alias
+
+The last "role" / "profile" surfaces from ADR-0090 are renamed one-step:
+
+| Before | After |
+|:---|:---|
+| `PortalSchema.profiles: ['client_portal_user']` | `positions: ['client_portal_user']` — portal admission is position-scoped; use `guest` for anonymous-only portals |
+| `RLSUserContextSchema.role: string \| string[]` | `positions: string[]` — matches the `current_user.positions` the RLS compiler resolves |
+| `sys_record_share.recipient_type: 'role'` | `'position'` — no stored-data migration needed (no reader expanded non-`user` share rows) |
+
+## Behavior changes
+
+### Members no longer get delete as a baseline right (14.2.0)
+
+`member_default` carried `allowDelete` on its `'*'` grant. That bit is dropped:
+members keep **create / read / edit-own**, and deleting records is no longer a
+baseline right. Grant deletes per object via an ordinary position-distributed
+set. (This landed alongside calibrating `describeHighPrivilegeBits` to the exact
+ADR-0090 D5 bit list so the baseline could finally bind to the `everyone`
+anchor — "what new users get" is now literally "what is bound to `everyone`".)
+
+### Object `enable.*` flags become real gates (14.0.0)
+
+The `ObjectCapabilities` flags were parsed but mostly unconsumed. Each now has a
+defined enforcement contract — `ObjectCapabilities` is **100% live**:
+
+- **`enable.activities`** — opt-OUT (default flips `false → true`). CRUD keeps
+  mirroring into the `sys_activity` timeline unless the object declares
+  `activities: false`. Behavior-preserving; the compliance `sys_audit_log` row is
+  never gated.
+- **`enable.feeds`** — opt-OUT with server-side enforcement (default flips
+  `false → true`). An explicit `feeds: false` rejects `sys_comment` creation on
+  that object at the engine hook (403 `FEEDS_DISABLED`, fail-closed).
+- **`enable.trackHistory`** — reclassified live (the console has gated the record
+  History tab on it since 2026-05): object flag = History-tab master switch,
+  per-field flag = diff selector; audit capture stays unconditional.
+- **`enable.files`** — opt-IN (default stays `false`). The generic record
+  **Attachments** panel is a new surface; a `sys_attachment` join row may only
+  target an object that declares `enable: { files: true }` (else 403
+  `FILES_DISABLED`). `Field.file` / `Field.image` are independent and work
+  regardless of this flag.
+
+## New capabilities across the v14 line
+
+### Approvals route to positions (14.0.0, ADR-0090 D3)
+
+A new `position` approver type — `{ type: 'position', value: '<name>' }` expands
+to the position's holders via `sys_user_position`. Keep `type: 'role'` only for
+membership tiers (owner/admin/member); the `department` approver type is now
+honored by its spec spelling. New lint rules (`approval-role-not-membership-tier`,
+`approval-approver-type-unknown`, `approval-escalation-reassign-no-target`) catch
+the mismatches, and SLA escalation `escalateTo` is documented position-first
+(14.1.0).
+
+### Admin user management, phone sign-in, and bulk import (14.3.0, #2766)
+
+`sys_user` is managed by better-auth and its generic CRUD is suppressed, so the
+only way to add a teammate used to be the email invite flow. Three staged
+capabilities land:
+
+- **Admin direct user management** — `POST /api/v1/auth/admin/create-user` and a
+  wrapped `set-user-password` (platform-admin gate; real better-auth pipeline).
+  Optional generated one-time password (returned once, never persisted) and a
+  `sys_user.must_change_password` flag enforced through the auth gate (403
+  `PASSWORD_EXPIRED`).
+- **Phone sign-in** (opt-in `auth.plugins.phoneNumber`) — phone+password via
+  `POST /sign-in/phone-number`. Adds `sys_user.phone_number` (unique) /
+  `phone_number_verified`; phone-only accounts get an undeliverable placeholder
+  email, never derived from the number.
+- **Identity bulk import** — `POST /api/v1/auth/admin/import-users` (rows/csv/xlsx,
+  dryRun, upsert by email or phone) writes every row through better-auth with an
+  `invite` or `temporary` password policy. Sync, ≤500 rows, no undo; upsert never
+  resets an existing user's password.
+
+### SMS infrastructure and phone OTP (14.3.0, #2780)
+
+The platform had no SMS delivery; this adds it end to end:
+
+- **New `@objectstack/plugin-sms`** — `ISmsService` / `ISmsTransport` contracts
+  with Aliyun SMS and Twilio transports plus a dev log fallback, configured
+  through a new `sms` settings namespace. Deliberately no message persistence and
+  no body logging (SMS bodies carry OTP codes).
+- **Messaging `sms` channel** — `notify(channels: ['sms'])` resolves
+  `sys_user.phone_number`, renders `(topic, 'sms', locale)` templates, and
+  inherits outbox retry / dead-letter.
+- **Phone OTP flows** — sign-in/verification and self-service password reset,
+  with abuse hardening (explicit attempt cap, per-number cooldown + rolling-hour
+  cap shared across nodes, per-IP rate-limit rules). OTP codes never reach logs.
+- **SMS invites** — the import `invite` policy supports phone-only rows.
+
+### Book audience enforced at the read layer (14.3.0)
+
+`/meta/book`, `/meta/doc`, and `/meta/book/:name/tree` now **enforce** the
+audience model: anonymous callers see only `public` books/docs; a
+`{ permissionSet }`-gated book requires the caller to hold the named set; a
+doc's effective audience is the union over the books that claim it. Gated
+evaluation fails closed when holdings cannot be resolved.
+
+### Data-lifecycle contract (14.4.0, ADR-0057)
+
+Platform-generated data is now bounded by construction. A new `lifecycle` object
+property (`class: record | audit | telemetry | transient | event` plus
+`retention` / `ttl` / `storage(rotation)` / `archive`) is enforced by a
+platform-owned **LifecycleService** (default-on; disable via
+`OS_LIFECYCLE_DISABLED=1`). The **Reaper** batch-deletes rows past their window
+and reclaims space; **rotation** time-shards a table so expiry is an O(1)
+`DROP`; the **Archiver** does retain → archive → delete for audit objects once a
+`telemetry` datasource is registered. **11 platform objects now carry
+lifecycle declarations** (e.g. `sys_activity` 14d rotated, `sys_audit_log` 90d
+hot → archive), tunable per environment/tenant via a new `lifecycle` settings
+namespace.
+
+### Effective-dated grants and delegation of duty (14.4.0, ADR-0091 L1 + L2)
+
+- **Grant validity windows (L1)** — `sys_user_position` and
+  `sys_user_permission_set` gain `valid_from` / `valid_until` (half-open UTC;
+  null = unbounded), plus `reason` / `delegated_from` / certification columns.
+  `resolveAuthzContext` filters both grant tables through the shared
+  `isGrantActive` predicate, **fail-closed** — an expired `admin_full_access`
+  grant no longer derives `platform_admin`. Explain surfaces the "held until … —
+  expired" contributor state, so "why did access disappear" is self-answering.
+  No background job: an expired grant simply stops resolving.
+- **Delegation of duty / 职务代理 (L2)** — `PositionSchema.delegatable` lets a
+  non-admin holder self-service delegate their own position to a delegate for a
+  bounded window (mandatory future `valid_until` within a 30-day ceiling,
+  mandatory `reason`, insert-only so it is not self-renewable). Administration is
+  never self-delegated — a `delegatable` position that distributes an
+  `adminScope` set is rejected.
+
+### Position assignment panels as pure SDUI (14.2.0)
+
+`RecordRelatedListProps.relationshipValueField` (the generic affordance for
+name-keyed junctions) powers a **Positions** tab on `sys_user` and a new
+`sys_position` detail page (**Holders** / **Permission Sets** tabs) with zero
+bespoke UI. `GET /me/apps` now sources the engine registry (the authority the
+meta routes use) so `tabPermissions` and `AppSchema.requiredPermissions` have a
+real enforced consumer.
+
+## Notable fixes
+
+- **FLS keys must be object-qualified** (14.4.0) — the evaluator matches
+  field-permission keys by `<object>.<field>`, so a bare `budget` key matched
+  nothing and the declared masking silently never enforced. A new
+  `security-fls-unqualified-key` lint rejects bare keys at compile time with a
+  fix-it.
+- **`PROTOCOL_VERSION` auto-sync at version time** (14.4.0) — `changeset version`
+  now regenerates the handshake constant from the spec major, closing the drift
+  class that reddened `main` after the 14.0.0 release (release PRs opened by the
+  changesets action never trigger CI, so the lockstep guard could only fire after
+  a merge).
+- **`externalSharingModel` honestly marked** (14.4.0) — the dial has no runtime
+  consumer yet (authoring lint + Studio badges only); its liveness entry moves to
+  `planned` + `authorWarn`, and the docs say external-principal evaluation lands
+  with the principal-taxonomy phase.
+
+## Console (Studio) notes
+
+The renderer changes that pair with this line ship in the version-locked
+`@objectstack/console` bundle: the generic `record:related_list` Add-picker and
+`relationshipValueField` support (the position panels degrade to read-only lists
+on older renderers), and the `RecordAttachmentsPanel` (the three-step presigned
+storage flow) rendered on record pages when `enable.files` is true.
+
+## Upgrade checklist
+
+1. Update all `@objectstack/*` dependencies to `^14.0.0` (version-locked).
+2. Rename `book.audience: { profile }` → `{ permissionSet }`, and migrate any
+   `PortalSchema.profiles` / `RLSUserContextSchema.role` authoring to `positions`.
+3. Re-grant **delete** per object where members previously relied on the baseline
+   right.
+4. Set `enable: { feeds: false }` / `activities: false` on any object that should
+   stay off (the defaults are now on); set `enable: { files: true }` to turn on
+   the Attachments panel.
+5. Object-qualify any field-permission (FLS) keys — `os compile` now rejects bare
+   keys.
+6. Optionally adopt the `lifecycle` contract on high-volume custom objects and
+   the `sms` namespace + `auth.plugins.phoneNumber` for phone auth.

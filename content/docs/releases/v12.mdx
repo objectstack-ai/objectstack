@@ -1,0 +1,197 @@
+---
+title: v12.0.0
+description: Anonymous data access denied by default (ADR-0056 D2), adaptive record surfaces, an enforced protocol-version handshake, and a wave of author-time correctness lints.
+---
+
+**Released July 2026.** All `@objectstack/*` packages are published at 12.0.0.
+This major flips the platform's default security posture — anonymous requests
+to the data API are now denied — and lands a wave of author-time correctness
+features: adaptive record surfaces derived from metadata, package-shipped
+permission sets, an enforced `engines.protocol` handshake, and build-gating
+lints for view references, form layouts, and import mappings.
+
+**TL;DR for upgraders:** if any deployment serves data anonymously (a demo,
+kiosk, or public playground), you must now set `api: { requireAuth: false }`
+on the stack or every `/data/*` call returns HTTP 401. Everything else in this
+release is additive — existing metadata keeps loading.
+
+## Breaking changes
+
+### `api.requireAuth` defaults to `true` — anonymous data access is denied (ADR-0056 D2)
+
+The global `requireAuth` default flipped from `false` to `true`
+(`RestApiConfigSchema.requireAuth` in `@objectstack/spec`, mirrored by
+`RestServer.normalizeConfig` in `@objectstack/rest`). Anonymous requests to the
+`/data/*` CRUD and batch endpoints are now rejected with **HTTP 401** unless
+the deployment explicitly opts out.
+
+**Migration (one line).** A deployment that intentionally serves data publicly
+sets the flag on the stack config — now a declared
+`ObjectStackDefinitionSchema.api` field, so it survives `defineStack` strict
+parsing (an undeclared top-level `api` key was previously stripped silently):
+
+```ts
+export default defineStack({
+  // …
+  api: { requireAuth: false },
+});
+```
+
+The REST plugin logs a boot warning for the explicit opt-out, so a fail-open
+posture is always visible. A misplaced `api.requireAuth` at the plugin level
+(one nesting short) is also called out with a boot warning instead of being
+ignored.
+
+**What keeps working with no action:**
+
+- **Share links** — validate their token, then read under a system context.
+- **Public forms** — self-authorizing via the declaration-derived
+  `publicFormGrant` (create + read-back on the declared target object only).
+- **Control plane** — `/auth`, `/health`, `/discovery` are exempt.
+- **`objectstack serve` with an auth-less stack** — the CLI passes an explicit
+  `requireAuth: false` for stacks whose tier set has no `auth` (nothing could
+  authenticate against them), with the boot warning.
+
+> Scope note: this gate covers the REST `/data/*` surface. The metadata
+> read/write endpoints and the dispatcher GraphQL route have their own
+> pre-existing anonymous posture, tracked separately.
+
+## New in the framework
+
+### Adaptive record surfaces and semantic field spans (#2578)
+
+Because all metadata is AI-authored, the design goal is to make the model
+unable to get layout wrong — so these features are **derived**, not authored:
+
+- **`deriveRecordSurface` (ADR-0085 §5)** — a record's default surface (full
+  `page` vs. `drawer`/`modal` overlay) is derived from how heavy the record is
+  (visible, non-system field count; mobile always pages). No new object key; an
+  explicit form/navigation config still wins.
+- **`FormField.span: 'auto' | 'full'`** — replaces absolute `colSpan` as the
+  primary primitive. Under a per-surface derived column count (mobile 1 /
+  modal 2 / page 3–4), `span` is decoupled from the count so a field lays out
+  correctly at any width. `colSpan` is retained and clamped for back-compat.
+- **`NavigationConfig.size`** — a T-shirt bucket (`auto`/`sm`/`md`/`lg`/`xl`/
+  `full`) replacing the pixel `width`/`drawerWidth`, which an AI author cannot
+  choose blind. `auto` lets the renderer size from field count and clamp to the
+  viewport.
+- **`validateFormLayout` lint** — advisory `form-field-unknown` (a section
+  references a field not on the bound object) and `absolute-colspan-discouraged`.
+
+`deriveRecordFlowSurface` (12.2.0) extends this to be flow-aware: `view` keeps
+the shipped behavior, while the `create`/`edit`/`child-*` task flows are always
+overlays (a task's URL is a false promise — a refresh loses the draft).
+
+### Detail-page related lists: `'primary'` prominence (#2579)
+
+`Field.relatedList` on a child's `lookup`/`master_detail` FK becomes a
+tri-state `boolean | 'primary'`. `'primary'` marks a core relationship that the
+detail page promotes to its own tab; non-primary children collapse into a
+single shared **Related** tab. `RecordRelatedListProps.columns` becomes
+optional — when omitted, columns derive from the child object's
+`highlightFields`. Purely additive and opt-in per relationship.
+
+### Package-shipped permission sets (ADR-0086 P1)
+
+Packages now ship working default access for their own objects, with a
+machine-checkable metadata↔config boundary:
+
+- `PermissionSetSchema.packageId` (owning package) and per-record provenance
+  `managedBy: 'package' | 'platform' | 'user'`, persisted on
+  `sys_permission_set` as `package_id` / `managed_by`.
+- **`bootstrapDeclaredPermissions`** materializes `stack.permissions` into
+  `sys_permission_set` at boot (`managed_by: 'package'`). Idempotent and
+  upgrade-aware: seeder-owned rows are re-seeded to the shipped declaration;
+  rows owned by a different package are refused loudly; env-authored rows are
+  never clobbered. Closes the inert-metadata gap where declared sets were
+  enforced at runtime but never materialized (invisible to the admin surface).
+
+### The protocol-version handshake is now enforced (ADR-0087 P0)
+
+`PluginEnginesSchema.protocol` was declared, documented, and checked by no
+loader or installer. Now:
+
+- `@objectstack/spec` exports **`PROTOCOL_VERSION` / `PROTOCOL_MAJOR`** — the
+  single source of truth, kept in lockstep with the package major by a drift
+  test.
+- `@objectstack/metadata-core` adds `checkProtocolCompat()` /
+  `assertProtocolCompat()` and the structured `ProtocolIncompatibleError`
+  (`OS_PROTOCOL_INCOMPATIBLE`, carrying both versions and the
+  `objectstack migrate meta --from N` command).
+- `installPackage` runs the handshake **before** writing to the registry — an
+  incompatible package is refused with a machine-actionable diagnostic instead
+  of crashing later in a schema `.parse()`.
+
+Additive: packages that declare no `engines.protocol` range keep loading (with
+a warning).
+
+### Named import mappings (#2611)
+
+`POST /data/:object/import` accepts `mappingName`, resolving a registered
+`defineMapping` artifact (stack `mappings:`) and applying its `fieldMapping`
+pipeline (rename + constant/map/split/join; lookups delegate to the built-in
+reference resolution) as a strict projection before coercion. Errors are loud
+and specific (`MAPPING_NOT_FOUND`, `MAPPING_TARGET_MISMATCH`,
+`UNSUPPORTED_TRANSFORM` for `javascript`, …). `defineStack` cross-reference
+validation rejects mappings targeting undefined objects at build time.
+
+### Smaller declarative additions
+
+- **`ObjectNavItem.filters`** — declarative URL filter conditions
+  (`filter[field]=value`) targeting the parameterized bare data surface, for
+  one-off / parameterized slices (dashboard drill-throughs, "assigned to me").
+  Values support the `{current_user_id}` / `{current_org_id}` template
+  variables. Combining `filters` with `recordId`/`viewName` is now unwritable
+  (correct-by-construction).
+- **`SelectOption.visibleWhen`** — a per-option CEL visibility predicate for
+  `select`/`multiselect`/`radio`, expressing cascading / dependent options
+  (`record.country == 'cn'`) and context gating without a bespoke matrix.
+- **`Action.order`** — an explicit ordering lever (lower = more prominent) for
+  which action holds the record-header primary-button slot, instead of relying
+  on fragile cross-file registration order. Fully backward compatible (unset =
+  `0`, stable sort).
+- **Retired placeholder metadata kinds** (ADR-0088) — `trigger`, `router`,
+  `function`, `service` are removed from `MetadataTypeSchema` (30 → 26 kinds);
+  each had no authoring surface. The delivered replacements are `hook` /
+  `record_change` flows, plugin `contributes.routes` + declarative `apis:`,
+  `defineStack({ functions })`, and the plugin/service registry.
+
+## Author-time correctness (lints that gate the build)
+
+- **`lint-view-refs`** (#2554) — a `type: 'form'` action whose `target`
+  resolves to a list view now **fails `os compile`** (the concrete breakage: a
+  blank form, a silently no-op submit). Silent `<object>.<key>_2` rename
+  collisions are surfaced as warnings. Shifts objectui's runtime `viewKind`
+  guard left to compile time.
+- **`validateListViewMode`** (ADR-0053 phase 4) — `userFilters` on an object
+  list view is now a `tsc` error via `ObjectListViewSchema`, stripped at parse
+  for back-compat, and reported pre-parse with a fix hint.
+- **`transfer` / `restore` / `purge` pre-mapped to RBAC bits** (#1883) — the
+  permission evaluator maps the destructive lifecycle operations to
+  `allowTransfer` / `allowRestore` / `allowPurge` (with the `modifyAllRecords`
+  bypass), so the gate exists ahead of the operations themselves (roadmap M2).
+  Descriptions moved from `[EXPERIMENTAL — not enforced]` to `[RBAC-gated;
+  operation pending M2]`.
+
+## Notable fixes
+
+- **Package seed can no longer wedge the platform via record-change
+  automation** (12.5.0). A seeded record whose lifecycle flow self-triggered
+  looped forever because a boolean re-entry guard never tripped (booleans
+  persist as integer `1` on SQLite/libsql and CEL `1 != true`). Fixed at three
+  layers: `ExecutionContext.skipTriggers` for seed/bulk writes,
+  `coerceBooleanFields()` on the after-hook view, and an `activeRecordFlows`
+  self-trigger backstop in the automation engine.
+- **`Field.relatedList` JSDoc corrected** (12.1.0) — non-primary related lists
+  stack under one shared "Related" tab; there is no count-based auto-split.
+
+## Upgrade checklist
+
+1. Update all `@objectstack/*` dependencies to `^12.0.0` (they are
+   version-locked — upgrade them together).
+2. If any deployment serves data anonymously, add `api: { requireAuth: false }`
+   to its `defineStack` config and confirm the boot warning appears.
+3. Re-run `os compile` / `os validate` — the new view-reference, list-view-mode,
+   and form-layout lints may flag pre-existing authoring mistakes.
+4. Declare `engines.protocol` on any package you ship so the handshake
+   advertises a real range instead of grandfathering with a warning.

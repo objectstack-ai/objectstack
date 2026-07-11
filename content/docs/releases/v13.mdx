@@ -1,0 +1,201 @@
+---
+title: v13.0.0
+description: Permission Model v2 (ADR-0090) — Roles and Profiles converge on Positions, custom objects default to private, and the model gains an explain engine, delegated administration, and self-serve MCP OAuth.
+---
+
+**Released July 2026.** All `@objectstack/*` packages are published at 13.0.0.
+This is the **Permission Model v2** release (ADR-0090): the authorization
+vocabulary converges on a single concept — **Positions** — replacing the
+overlapping Role and Profile ideas, and the row/field-security model gains a
+secure-by-default posture, an explain engine, delegated administration, and
+self-serve OAuth for MCP.
+
+**TL;DR for upgraders:** this is a one-step, no-alias rename wave (launch-window
+discipline — breaking changes do not burn a major while the whole stack is in
+lockstep). If your metadata authors roles, profiles, RLS role context, or
+role-based sharing recipients, or if your code imports `sys_role*` tables or the
+`SysRole*` exports, you must rename them to their **position** equivalents. And:
+a custom object with an owner field and **no explicit `sharingModel`** now
+defaults to **private** — previously it was fully public.
+
+## Breaking changes
+
+### 1. Roles and Profiles → Positions (ADR-0090 P1)
+
+Positions are **flat** — hierarchy lives on the business-unit tree, not on the
+position graph — so `parent` is gone. The Profile concept is removed entirely.
+Rename across metadata, config, and code:
+
+| Before | After |
+|:---|:---|
+| `sys_role` / `sys_user_role` (field `role`) / `sys_role_permission_set` (`role_id`) | `sys_position` / `sys_user_position` (`position`) / `sys_position_permission_set` (`position_id`) |
+| `RoleSchema` / `defineRole` (with `parent`) | `PositionSchema` / `definePosition` (flat, no `parent`) |
+| `ExecutionContext.roles[]`; CEL `current_user.roles` | `ExecutionContext.positions[]`; `current_user.positions` |
+| stack property `roles:` | stack property `positions:` |
+| metadata kinds `role` / `profile` | `position` (`profile` kind removed) |
+| `PermissionSetSchema.isProfile` | removed; `isDefault` narrows to an install-time suggestion |
+| `appDefaultProfileName` | `appDefaultPermissionSetName` |
+| sharing recipient `role` / `role_and_subordinates` | `position` / `unit_and_subordinates` |
+| `SysRole` / `SysUserRole` / `SysRolePermissionSet` (plugin-security exports) | `SysPosition` / `SysUserPosition` / `SysPositionPermissionSet` |
+| `sys_business_unit_member.role_in_business_unit` | `function_in_business_unit` (values member/lead/deputy unchanged) |
+
+Sharing recipients now expand a `position` via `sys_user_position` ∪ the
+better-auth membership transition source; `unit_and_subordinates` expands the
+business-unit subtree.
+
+### 2. Secure OWD default — custom objects are private (ADR-0090 D1)
+
+A custom object with an owner field and no `sharingModel` now resolves
+**`private`** (was fully public). System objects keep their explicit posture,
+and unrecognised stored values fail closed. The OWD enum drops the legacy
+aliases `read` / `read_write` / `full`. A new optional
+`externalSharingModel` (external-audience dial, `private` default) lands as P1
+spec shape.
+
+If you relied on the implicit public default, declare it explicitly:
+
+```ts
+defineObject({
+  name: 'crm_lead',
+  sharingModel: 'public_read_write', // make the previous behavior explicit
+  // …
+});
+```
+
+### 3. RBAC link-table writes require a delegated-admin scope
+
+Writes to `sys_user_position`, `sys_position_permission_set`,
+`sys_user_permission_set`, and `sys_permission_set` are now governed by the new
+`DelegatedAdminGate` (see below). Tenant-level admins pass through; a plain CRUD
+grant on those tables **no longer suffices** for anyone else. The `everyone` /
+`guest` anchors stay tenant-level only.
+
+## New capabilities
+
+### Audience anchors: built-in `everyone` / `guest` positions (P2)
+
+`EVERYONE_POSITION` / `GUEST_POSITION` are seeded, system-managed positions.
+Every authenticated principal implicitly holds `everyone`, so a set bound to it
+resolves as an ordinary position-bound grant — **additive**. The old fallback
+"cliff" is abolished: the configured baseline (`fallbackPermissionSet`, default
+`member_default`) now applies **in addition to** explicit grants, and is seeded
+as an `everyone` binding on the same table/audit/explain path. Sessionless HTTP
+principals resolve as `principalKind: 'guest'` holding exactly `['guest']`. An
+anchor-binding gate rejects binding a high-privilege set (View/Modify-All,
+delete/purge/transfer, system permissions, `'*'`) to `everyone`/`guest`.
+
+### Delegated administration (P3, D12)
+
+`PermissionSetSchema.adminScope` (persisted as `sys_permission_set.admin_scope`)
+declares **where** a delegate may act (a `sys_business_unit` subtree), **what**
+(`manageAssignments` / `manageBindings` / `authorEnvironmentSets`), and **which**
+sets they may hand out (`assignablePermissionSets`). Delegates operate inside
+their subtree, with allowlisted sets only, single-row writes, and
+`granted_by`-stamped audit. Granting or authoring a set that itself carries an
+`adminScope` requires a held scope that strictly contains it.
+
+### The explain engine (P4, D6)
+
+`explain(principal, object, operation)` reports the verdict of **every**
+evaluation-pipeline layer in order (principal → required_permissions →
+object_crud → fls → owd_baseline → depth → sharing → vama_bypass → rls), with
+per-layer contributor attribution and — for reads — the composed row filter as
+a machine artifact. It is **"explained by construction"**: it calls the same
+resolution, evaluator, FLS mask, and RLS composition the enforcement middleware
+calls, so the report cannot drift from enforcement. Exposed on the `security`
+kernel service; explaining another user requires `manage_users`.
+
+### Access-matrix snapshot gate
+
+`buildAccessMatrix(stack)` derives the (permission set × object) capability
+matrix purely from metadata; `diffAccessMatrix` renders semantic review lines
+("'crm_admin' gains delete on 'crm_lead'"). `os compile` gains an opt-in gate:
+with `access-matrix.json` committed next to the config, any drift fails the
+build until re-snapshotted via `--update-access-matrix` — every capability
+change becomes a reviewable diff.
+
+### Self-serve OAuth 2.1 for MCP (#2698)
+
+Any OAuth-capable MCP client (claude.ai custom connectors, Claude Desktop,
+Claude Code) can now connect to a deployment **self-serve** — no admin-minted
+API key, no central registry. You sign in through the browser as yourself and
+every tool call runs under your own permissions and row-level security.
+
+- **Each deployment is its own authorization server**, backed by the embedded
+  better-auth instance.
+- **Discovery** via RFC 9728 / RFC 8414 metadata; 401s advertise resource
+  metadata through `WWW-Authenticate` so clients bootstrap automatically.
+- **Dynamic Client Registration (RFC 7591)**, **authorization-code + PKCE**, and
+  **RFC 8707 resource binding** (`aud=<origin>/api/v1/mcp`, verified locally
+  against the deployment's JWKS, fail-closed).
+- **Coarse scopes → tool families** enforced at dispatch: `data:read`,
+  `data:write`, `actions:execute`.
+- **TLS required, localhost exempt** (OAuth 2.1).
+
+API keys are unchanged (dual-track): `x-api-key` / `Authorization: Bearer osk_…`
+keep working for CI and headless agents.
+
+### Author-time authorization lints
+
+- **Security-domain publish linter** (`validateSecurityPosture`, D7), wired into
+  `os compile` (errors gate the build) and `os lint`:
+  `security-owd-unset`, `security-owd-alias`,
+  `security-external-wider-than-internal`, `security-wildcard-vama`,
+  `security-anchor-high-privilege`, `security-role-word` (D3 vocabulary
+  freeze), and advisory `security-private-no-readscope`.
+- **Capability-reference lint** (ADR-0066 ⑨) — `validateCapabilityReferences`
+  warns when a `requiredPermissions` names a capability registered nowhere (a
+  typo like `mange_users` is schema-valid and fails closed silently at runtime).
+  Built-in capabilities are sourced from one canonical list in
+  `@objectstack/spec` (`security/capabilities.ts`).
+
+### Per-operation object `requiredPermissions` (ADR-0066 ⑤)
+
+`Object.requiredPermissions` now accepts either the original `string[]` (gate
+every operation) **or** a `{ read?, create?, update?, delete? }` map that gates
+each operation class independently — so an object can be read-open / write-gated.
+`transfer`/`restore` fold into `update`, `purge` into `delete`. The `string[]`
+form keeps its semantics, so existing objects are unaffected; the map's keys are
+`.strict()`-validated.
+
+### Package namespace-prefix enforcement
+
+Studio/runtime-authored packages were created without a namespace, so the
+protocol's per-object prefix rule (`crm_account`) was silently inert.
+`protocol.installPackage` now derives a default namespace from the package id,
+and `protocol.publishPackageDrafts` rejects any object draft whose name lacks
+the package prefix, atomically, with an actionable message.
+
+## Removed: declared-but-never-enforced subsystems (ADR-0056 D8)
+
+Compliance-grade configuration must never merely look live. These schemas were
+read by no runtime path and are removed:
+
+- `ComplianceConfigSchema` / `GDPRConfigSchema` / `HIPAAConfigSchema` — there is
+  no data-subject-rights engine, retention enforcer, or BAA gate.
+- `MaskingConfigSchema` / `MaskingRuleSchema` — use field-level security
+  (permission-set field rules, enforced by the field masker).
+- Global `RLSConfigSchema` / `RLSAuditConfigSchema` — the enforced RLS path
+  reads the per-policy `RowLevelSecurityPolicySchema`, never the global config.
+
+Kept `[EXPERIMENTAL]`: `EncryptionConfigSchema` (at-rest field encryption).
+Marked `[EXPERIMENTAL — NOT ENFORCED]`: `AgentSchema.visibility` — it does not
+hide an agent; use `access` / `permissions` for real gating.
+
+## Notable fixes
+
+- **`PROTOCOL_VERSION` re-synced to the spec major** — the version roll left the
+  handshake constant behind, reddening the lockstep test on `main`. The release
+  pipeline now regenerates it at version time (finished in v14).
+
+## Upgrade checklist
+
+1. Update all `@objectstack/*` dependencies to `^13.0.0` (version-locked).
+2. Run a repo-wide rename from the role/profile vocabulary to positions using
+   the table above; `os lint`'s `security-role-word` rule flags the leftovers.
+3. Declare `sharingModel` explicitly on any custom object that should stay
+   readable to everyone — the new default is `private`.
+4. Move RBAC link-table administration to a `PermissionSet.adminScope` (or a
+   tenant-level admin); a bare CRUD grant on those tables no longer works.
+5. Re-run `os compile` — `validateSecurityPosture` errors now gate the build.
+6. Remove imports of the deleted compliance/masking/global-RLS schemas.
