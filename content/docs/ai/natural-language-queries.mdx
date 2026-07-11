@@ -1,6 +1,6 @@
 ---
 title: Natural Language Queries
-description: How agents query live data through the built-in data tools (query_records, get_record, aggregate_data) under RLS
+description: How agents query live data through the open MCP data tools (query_records, get_record) under RLS
 ---
 
 # Natural Language Queries
@@ -14,15 +14,25 @@ row-level security as the REST API. The data tools and the ObjectQL engine that
 back this are part of the open framework — no `@objectstack/service-ai` and no
 cloud studio are required.
 
-Your AI queries your data through the built-in **data tools** —
-`query_records`, `get_record`, and `aggregate_data` — which the model calls with
-structured arguments. These run as ordinary [ObjectQL](/docs/protocol/objectql) queries over
+Your AI queries your data through the open MCP **data tools** — `query_records`
+(filter, field selection, sort, pagination) and `get_record`, plus the
+discovery tools `list_objects` and `describe_object` — which the model calls
+with structured arguments. These run as ordinary [ObjectQL](/docs/protocol/objectql) queries over
 your objects (ObjectStack uses ObjectQL, not SOQL), and they execute under the
 caller's `ExecutionContext`, so row-level security applies exactly as it does
 for the REST API.
 
+<Callout type="info">
+**Aggregation is a cloud data tool.** The open MCP surface reads and filters
+rows; it does not ship a server-side `aggregate_data` (group-by / roll-up)
+tool — `query_records` has no aggregation arguments. A BYO agent aggregates by
+fetching the rows it's allowed to see and summing client-side; the built-in
+`aggregate_data` tool is part of the cloud in-product chat runtime (below).
+</Callout>
+
 The open MCP server plugin exposes these tools automatically — it bridges the
-kernel's tool registry, metadata, and data engine to any connected MCP client:
+metadata and data engine to any connected MCP client, served per-request at
+`/api/v1/mcp` (default-on):
 
 ```typescript
 import { LiteKernel } from '@objectstack/core';
@@ -34,18 +44,19 @@ await kernel.bootstrap();
 ```
 
 Point any MCP client at the server and ask questions in natural language: the
-model discovers `query_records` / `get_record` / `aggregate_data` and calls them
-under RLS as the authenticated caller.
+model discovers `list_objects` / `describe_object` / `query_records` /
+`get_record` and calls them under RLS as the authenticated caller.
 
 There is no separate natural-language-to-query metadata type to author — the
 model is prompted with the available objects and translates the user's question
-into `query_records` / `aggregate_data` calls at runtime.
+into `query_records` calls at runtime.
 
 <Callout type="info">
 **Cloud / Enterprise — bundled in-product chat.** The cloud tier's in-UI AI
 runtime (`@objectstack/service-ai`, the `ask` data-query assistant, and the
-`/api/v1/ai/*` chat endpoints) registers these same data tools into its chat
-loop via `registerDataTools`:
+`/api/v1/ai/*` chat endpoints) registers these data tools — plus the
+group-by/roll-up `aggregate_data` tool — into its chat loop via
+`registerDataTools`:
 
 ```typescript
 import { registerDataTools } from '@objectstack/service-ai';

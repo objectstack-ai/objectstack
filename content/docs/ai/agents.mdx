@@ -85,11 +85,19 @@ API-key-only, fail-closed.
 
 ## You extend the platform with **skills**, not agents
 
+<Callout type="warn">
+**"Agent skill" ≠ "authoring skill."** The `*.skill.ts` / `defineSkill` files
+here are **agent skills** — runtime capability bundles the `ask` / `build`
+agents consume. They are a different thing from the `SKILL.md` **authoring
+skills** on the [AI Skills System](/docs/ai/skills) page, which teach a coding
+assistant to *write* your metadata and never run. Same word, two layers.
+</Callout>
+
 `*.agent.ts` is **closed to third parties** — the `agent` metadata type is
 `allowRuntimeCreate:false, allowOrgOverride:false`, reserved for the two platform
 agents and platform-owned subagents (ADR-0063 §2). To give the `ask` agent a new
-capability you author a **skill** (`*.skill.ts`) whose `tools` reference your
-Actions / Flows / queries; it then attaches to `ask`. Every skill declares
+capability you author an agent **skill** (`*.skill.ts`) whose `tools` reference
+your Actions / Flows / queries; it then attaches to `ask`. Every skill declares
 `surface: 'ask' | 'build' | 'both'`, and an agent's tool set is the **union of its
 surface-compatible skills' tools** — there is no global fall-through, so a skill
 reaches an agent only when their surfaces match

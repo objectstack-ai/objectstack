@@ -1,6 +1,6 @@
 {
   "type": "action",
-  "_note": "ActionSchema. Seeded from docs/audits/2026-06-actionschema-property-liveness.md. Renderers live in objectui (evidence cited as prose, not framework paths); framework-side: service-ai action-tools, runtime body-runner/http-dispatcher. Containers (params/resultDialog/ai/aria) classified at top level — no divergent sub-statuses in the audit.",
+  "_note": "ActionSchema. Seeded from docs/audits/2026-06-actionschema-property-liveness.md. Renderers live in objectui (evidence cited as prose, not framework paths); framework-side: service-ai action-tools, runtime body-runner/http-dispatcher. Containers (params/resultDialog/ai/aria) classified at top level — no divergent sub-statuses in the audit. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary.",
   "props": {
     "name": {
       "status": "live",

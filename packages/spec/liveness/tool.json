@@ -1,6 +1,6 @@
 {
   "type": "tool",
-  "_note": "ToolSchema. Seeded from docs/audits/2026-06-toolschema-property-liveness.md. Tool metadata is WRITE-ONLY (projected one-way for Studio; runtime uses a separate AIToolDefinition). LIVE props are live via that same-named surface, not metadata read-back.",
+  "_note": "ToolSchema. Seeded from docs/audits/2026-06-toolschema-property-liveness.md. Tool metadata is WRITE-ONLY (projected one-way for Studio; runtime uses a separate AIToolDefinition). LIVE props are live via that same-named surface, not metadata read-back. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary.",
   "props": {
     "name": {
       "status": "live",

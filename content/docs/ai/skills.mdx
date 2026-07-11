@@ -13,6 +13,16 @@ ObjectStack introduces a **Skills System** — structured, domain-specific knowl
 Skills are **not runtime code**. They are machine-readable knowledge definitions that teach AI assistants the ObjectStack protocol — its schemas, patterns, constraints, and best practices.
 </Callout>
 
+<Callout type="warn">
+**Two different things share the word "skill."** This page is about **authoring
+skills** — `SKILL.md` knowledge modules (from `skills.sh`) that teach a coding
+assistant to *write* correct ObjectStack metadata, at development time. They are
+unrelated to **agent skills** (`defineSkill` / `SkillSchema`) — the *runtime*
+capability bundles (tools + instructions + trigger conditions) attached to the
+`ask` / `build` platform agents, which are the cloud in-product chat runtime.
+See [Agents](/docs/ai/agents#you-extend-the-platform-with-skills-not-agents) for those.
+</Callout>
+
 ---
 
 ## Installing skills

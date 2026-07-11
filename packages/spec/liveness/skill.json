@@ -1,6 +1,6 @@
 {
   "type": "skill",
-  "_note": "SkillSchema. Seeded from docs/audits/2026-06-skillschema-property-liveness.md. skill-registry.ts + agent-runtime.ts are the runtime consumers.",
+  "_note": "SkillSchema. Seeded from docs/audits/2026-06-skillschema-property-liveness.md. skill-registry.ts + agent-runtime.ts are the runtime consumers. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary.",
   "props": {
     "name": {
       "status": "live",
