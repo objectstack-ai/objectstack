@@ -664,6 +664,38 @@ export default class Serve extends Command {
              trackPlugin(resolved.engine === 'memory' ? 'MemoryDriver' : resolved.engine === 'sqlite-wasm' ? 'SqliteWasmDriver' : 'SqlDriver');
              resolvedDriverLabel = resolved.label;
              resolvedDatabaseUrl = resolved.engine === 'memory' ? '(in-memory)' : (databaseUrl ?? ':memory:');
+
+             // ADR-0057 §3.6 (#2834 ②): provision the dedicated `telemetry`
+             // datasource — a sibling SQLite file the engine routes every
+             // telemetry/event/audit-classed object to, so platform-generated
+             // growth can never again bloat the business DB. Dev default-on
+             // for file-backed primaries; `OS_TELEMETRY_DB=0` opts out,
+             // `OS_TELEMETRY_DB=<path>` opts in anywhere (incl. serve).
+             if (resolved.engine !== 'memory') {
+               const { resolveTelemetryDbPath } = await import('../utils/telemetry-datasource.js');
+               const telemetryPath = resolveTelemetryDbPath({ primaryPath: filePath, env: process.env, dev: isDev });
+               if (telemetryPath) {
+                 try {
+                   const telemetry = await resolveSqliteDriver({
+                     filename: telemetryPath,
+                     dev: isDev,
+                     autoMigrate: isDev ? 'safe' : undefined,
+                     warn: (m) => console.warn(chalk.yellow(m)),
+                   });
+                   if (telemetry.engine !== 'memory') {
+                     // The engine keys datasources by driver name — the
+                     // lifecycle router looks this exact name up.
+                     Object.defineProperty(telemetry.driver, 'name', { value: 'telemetry' });
+                     await kernel.use(new DriverPlugin(telemetry.driver, { datasourceName: 'telemetry', registerAsDefault: false }));
+                     trackPlugin('TelemetryDatasource');
+                     console.log(chalk.dim(`  telemetry datasource: ${telemetryPath} (lifecycle-classed system data; OS_TELEMETRY_DB=0 to disable)`));
+                   }
+                 } catch {
+                   // Best-effort: a failed telemetry provision must never block
+                   // boot — objects simply stay on the primary datasource.
+                 }
+               }
+             }
            } else if (driverType === 'sqlite-wasm' || driverType === 'wasm-sqlite' || driverType === 'wasm') {
              const { SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm');
              const filePath = (databaseUrl ?? ':memory:').replace(/^file:/, '').replace(/^wasm-sqlite:\/\//, '').replace(/^sqlite:/, '');
