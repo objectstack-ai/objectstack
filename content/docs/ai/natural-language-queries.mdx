@@ -52,21 +52,12 @@ model is prompted with the available objects and translates the user's question
 into `query_records` calls at runtime.
 
 <Callout type="info">
-**Cloud / Enterprise — bundled in-product chat.** The cloud tier's in-UI AI
-runtime (`@objectstack/service-ai`, the `ask` data-query assistant, and the
-`/api/v1/ai/*` chat endpoints) registers these data tools — plus the
-group-by/roll-up `aggregate_data` tool — into its chat loop via
-`registerDataTools`:
-
-```typescript
-import { registerDataTools } from '@objectstack/service-ai';
-
-ctx.hook('ai:ready', async (ai) => {
-  registerDataTools(ai.toolRegistry, { dataEngine: ctx.getService('data') });
-});
-```
-
-This is the cloud runtime, not the open path. On the open edition, use
+**Cloud / Enterprise — bundled in-product chat.** The cloud tier ships an in-UI
+AI runtime (`@objectstack/service-ai`, closed) — the `ask` data-query assistant
+and the `/api/v1/ai/*` chat endpoints — that registers these same data tools,
+plus the group-by/roll-up `aggregate_data` tool, into its own chat loop. That
+package is not part of the open framework and is documented separately in the
+cloud docs; this page covers the open path only. On the open edition, use
 `@objectstack/mcp` above to get the same natural-language querying with your
 own AI.
 </Callout>
