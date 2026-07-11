@@ -20,6 +20,15 @@ export const SysUser = ObjectSchema.create({
   icon: 'user',
   isSystem: true,
   managedBy: 'better-auth',
+  // ADR-0092 D4 — the ONE generic affordance opened on an identity table:
+  // standard row editing. Safe because the plugin-auth identity write guard
+  // (ADR-0092 D2) enforces the profile whitelist server-side — a user-context
+  // update may only touch SYS_USER_PROFILE_EDIT_FIELDS ({name, image});
+  // everything else is stripped/rejected regardless of what a form submits.
+  // The permission layer still decides WHO may edit (platform admins only by
+  // default; member/org-admin sets keep allowEdit: false). create / import /
+  // delete stay bucket-default (off).
+  userActions: { edit: true },
   // ADR-0010 §3.7 — identity table is managed by better-auth; schema must not drift.
   protection: {
     lock: 'full',
@@ -462,9 +471,14 @@ export const SysUser = ObjectSchema.create({
       group: 'Identity',
     }),
 
+    // ADR-0092 D4 — with the generic edit affordance open, every non-profile
+    // field is readonly so the standard edit form renders it non-editable.
+    // This is UX only; the server boundary is the plugin-auth identity write
+    // guard (ADR-0092 D2), which strips/rejects these regardless.
     email: Field.email({
       label: 'Email',
       required: true,
+      readonly: true, // login identity — change flows through better-auth change-email verification
       searchable: true,
       group: 'Identity',
     }),
@@ -472,12 +486,14 @@ export const SysUser = ObjectSchema.create({
     email_verified: Field.boolean({
       label: 'Email Verified',
       defaultValue: false,
+      readonly: true,
       group: 'Identity',
     }),
 
     two_factor_enabled: Field.boolean({
       label: 'Two-Factor Enabled',
       defaultValue: false,
+      readonly: true,
       group: 'Identity',
       description: 'Whether two-factor authentication is enabled for this user. Maintained by the better-auth `twoFactor` plugin.',
     }),
@@ -486,6 +502,7 @@ export const SysUser = ObjectSchema.create({
     role: Field.text({
       label: 'Platform Role',
       required: false,
+      readonly: true, // ADR-0092 — set via the Set Platform Role action, never the edit form
       maxLength: 64,
       group: 'Admin',
       description: 'Platform-level role (admin, user, …). Set via the Set Platform Role action.',
@@ -494,6 +511,7 @@ export const SysUser = ObjectSchema.create({
     banned: Field.boolean({
       label: 'Banned',
       defaultValue: false,
+      readonly: true, // ADR-0092 — toggled via Ban/Unban actions (session side effects)
       group: 'Admin',
       description: 'When true, the user cannot sign in. Toggle via Ban User / Unban User actions.',
     }),
@@ -501,6 +519,7 @@ export const SysUser = ObjectSchema.create({
     ban_reason: Field.text({
       label: 'Ban Reason',
       required: false,
+      readonly: true, // ADR-0092 — written by the Ban User action
       maxLength: 255,
       group: 'Admin',
     }),
@@ -508,6 +527,7 @@ export const SysUser = ObjectSchema.create({
     ban_expires: Field.datetime({
       label: 'Ban Expires',
       required: false,
+      readonly: true, // ADR-0092 — written by the Ban User action
       group: 'Admin',
       description: 'When set, the ban auto-clears at this time.',
     }),
@@ -618,6 +638,7 @@ export const SysUser = ObjectSchema.create({
     ai_access: Field.boolean({
       label: 'AI Access',
       defaultValue: false,
+      readonly: true, // ADR-0092 — a licensed-seat grant; flows through the AiSeatPlugin enforcement path
       group: 'Admin',
       description:
         'Whether this user holds an AI seat — grants access to the in-UI AI ' +
@@ -639,6 +660,7 @@ export const SysUser = ObjectSchema.create({
     manager_id: Field.lookup('sys_user', {
       label: 'Manager',
       required: false,
+      readonly: true, // ADR-0092 — drives own_and_reports RLS scope; org-structure maintenance is its own surface
       group: 'Organization',
       description: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise).",
     }),
@@ -646,6 +668,7 @@ export const SysUser = ObjectSchema.create({
     primary_business_unit_id: Field.lookup('sys_business_unit', {
       label: 'Primary Business Unit',
       required: false,
+      readonly: true, // ADR-0092 — denormalised projection maintained by plugin-sharing; never hand-edited
       group: 'Organization',
       description: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing (ADR-0057 addendum D12). Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership.",
     }),
