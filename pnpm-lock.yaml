@@ -361,6 +361,9 @@ importers:
       '@objectstack/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@objectstack/metadata':
+        specifier: workspace:*
+        version: link:../metadata
       '@objectstack/objectql':
         specifier: workspace:^
         version: link:../objectql

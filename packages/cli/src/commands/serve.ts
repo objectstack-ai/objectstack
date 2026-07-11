@@ -849,6 +849,55 @@ export default class Serve extends Command {
         }
       }
 
+      // ── Dev-only: metadata HMR SSE endpoint for host/aggregator configs ──
+      //
+      // Host configs (their `plugins[]` holds instantiated Plugin objects) skip
+      // the standalone stack — see `shouldBootWithLibrary()`. That stack is the
+      // only place `@objectstack/metadata`'s MetadataPlugin gets composed, and
+      // MetadataPlugin is what registers `GET /api/v1/dev/metadata-events` in
+      // its start(). So when serving a host config the Console's dev
+      // metadata-HMR reloader hits a 404 and the page never auto-reloads after
+      // a recompile.
+      //
+      // Compose a lightweight, artifact-sourced MetadataPlugin here so the
+      // endpoint exists regardless of boot shape. Guards:
+      //   • `isDev` only — production / cloud host deployments are untouched.
+      //   • `flags.server` — pointless without an HTTP server to mount it on.
+      //   • skipped when a MetadataPlugin is already present (the standalone /
+      //     artifact-fallback paths compose their own upstream).
+      //   • skipped when no local compiled artifact resolves to source from.
+      // Registered AFTER the HonoServer plugin so the `http-server` service
+      // (and its `getRawApp()`) is available when MetadataPlugin.start() mounts
+      // the route.
+      if (isDev && flags.server) {
+        const hasMetadataPlugin = plugins.some(
+          (p: any) => p?.constructor?.name === 'MetadataPlugin'
+        );
+        if (!hasMetadataPlugin) {
+          try {
+            const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
+            const hmrArtifactPath = resolveDefaultArtifactPath();
+            if (hmrArtifactPath && !/^https?:\/\//i.test(hmrArtifactPath)) {
+              const { MetadataPlugin } = await import('@objectstack/metadata');
+              // Mirror the standalone stack's dev config exactly
+              // (packages/runtime/src/standalone-stack.ts): declarative
+              // metadata is loaded from the compiled artifact — no source-file
+              // scanner (redundant + EMFILE-prone) — and `artifactWatch` polls
+              // the single artifact file so an `os dev` recompile broadcasts a
+              // reload over the SSE stream.
+              await kernel.use(new MetadataPlugin({
+                watch: false,
+                artifactWatch: true,
+                artifactSource: { mode: 'local-file', path: hmrArtifactPath },
+              }));
+              trackPlugin('Metadata');
+            }
+          } catch (e: any) {
+            console.warn(chalk.yellow(`  ⚠ Dev metadata-HMR endpoint not enabled: ${e?.message}`));
+          }
+        }
+      }
+
       // Serve /runtime/assets/* unconditionally — branding logos, favicons,
       // and other static runtime assets must resolve even when the Console
       // dist hasn't been built yet.  The directory is resolved as:

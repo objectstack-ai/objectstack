@@ -51,6 +51,7 @@
     "@objectstack/formula": "workspace:*",
     "@objectstack/lint": "workspace:*",
     "@objectstack/mcp": "workspace:*",
+    "@objectstack/metadata": "workspace:*",
     "@objectstack/objectql": "workspace:^",
     "@objectstack/observability": "workspace:^",
     "@objectstack/platform-objects": "workspace:*",
