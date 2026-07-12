@@ -329,6 +329,38 @@ export function warnOnConsoleShaDrift(
 // ─── Plugin Factory ─────────────────────────────────────────────────
 
 /**
+ * Resolve the `http.server` service from a plugin context, tolerating both
+ * ways it can be registered:
+ *
+ *   - **synchronously** — the runtime `serve` path, where `Runtime` registers
+ *     the concrete server instance; and
+ *   - as an **async factory** — the console / schema-migration boot path,
+ *     for which the *synchronous* `getService` throws
+ *     `Service 'http.server' is async - use await`. Without this the throw
+ *     escaped these static-asset plugins' `start()` and aborted kernel
+ *     bootstrap (`com.objectstack.runtime-assets` failed to start), taking
+ *     down the CONSOLE/migration boot entirely.
+ *
+ * Prefer the async accessor (`getServiceAsync`, which resolves either kind),
+ * falling back to the sync one — mirroring plugin-auth's async `cache` lookup.
+ * Never throws: an unavailable server resolves to `undefined`, so these
+ * optional static-asset plugins skip cleanly instead of crashing boot.
+ */
+async function resolveHttpServer(ctx: any): Promise<any> {
+  try {
+    const svc = await ctx.getServiceAsync?.('http.server');
+    if (svc) return svc;
+  } catch {
+    // fall through to the synchronous accessor
+  }
+  try {
+    return ctx.getService?.('http.server');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Create a lightweight kernel plugin that serves the pre-built Console
  * portal static files at `/_console/*`.
  *
@@ -347,7 +379,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
     init: async () => {},
 
     start: async (ctx: any) => {
-      const httpServer = ctx.getService?.('http.server');
+      const httpServer = await resolveHttpServer(ctx);
       if (!httpServer?.getRawApp) {
         ctx.logger?.warn?.('Console static: http.server service not found — skipping');
         return;
@@ -468,7 +500,7 @@ export function createRuntimeAssetsPlugin(distPath: string) {
     init: async () => {},
 
     start: async (ctx: any) => {
-      const httpServer = ctx.getService?.('http.server');
+      const httpServer = await resolveHttpServer(ctx);
       if (!httpServer?.getRawApp) return;
 
       const app = httpServer.getRawApp();
