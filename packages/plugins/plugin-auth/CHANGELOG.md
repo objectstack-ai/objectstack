@@ -1,5 +1,117 @@
 # Changelog
 
+## 14.5.0
+
+### Minor Changes
+
+- a348394: feat(auth): identity write guard — `managedBy: 'better-auth'` is now enforced at the engine (ADR-0092 D2/D3/D6)
+
+  Every object whose schema declares `managedBy: 'better-auth'` (`sys_user`,
+  `sys_member`, `sys_session`, `sys_api_key`, …) is now protected by engine
+  `beforeInsert` / `beforeUpdate` / `beforeDelete` hooks registered by
+  plugin-auth: **user-context** writes through the generic data path are
+  rejected fail-closed with `403 PERMISSION_DENIED`, closing the hole where a
+  wildcard admin permission set could raw-write any identity column (including
+  `email` and credential stamps) via the data API. Internal writes are
+  unaffected — the better-auth adapter, `isSystem` plugin/system contexts, and
+  the identity import keep working unchanged.
+
+  The only opening is a per-object update whitelist
+  (`registerManagedUpdateWhitelist(object, fields)`): non-whitelisted fields are
+  stripped from the payload, and a payload that strips to nothing throws. The
+  first registration ships here: `sys_user → { name, image }` (pure profile
+  fields), backed by the new shared `SYS_USER_PROFILE_EDIT_FIELDS` /
+  `SYS_USER_IMPORT_UPDATE_FIELDS` constants — the import upsert's field
+  discipline is now derived from the same module (subset-by-construction, no
+  drift).
+
+  After a guarded profile edit, an `afterUpdate` companion hook re-writes the
+  user's cached `{session, user}` snapshots in better-auth's secondary storage
+  (same TTL, mirror of better-auth's own `refreshUserSessions`) so session
+  reads stay coherent; it rewrites rather than deletes, and no-ops when no
+  secondary storage is wired.
+
+  Migration note: server-side scripts that previously updated identity tables
+  with a **user** execution context must either run with a system context
+  (`{ isSystem: true }`) if they are genuinely internal, or move to the
+  dedicated auth endpoints (invite / create-user / set-user-password / ban /
+  better-auth APIs). Flows and automations that wrote non-profile `sys_user`
+  columns under a user identity are now filtered the same way.
+
+- 5bced2f: feat(auth): `passwordPolicy: 'none'` is the identity import's new default — import provisions identity, not credentials
+
+  `POST /api/v1/auth/admin/import-users` now supports (and defaults to)
+  `passwordPolicy: 'none'`: accounts are created without a credential record
+  (better-auth's optional-password create), so no password material is
+  generated, returned, or distributed at all. Users first sign in through a
+  channel — phone OTP, magic link, or a password-reset link — and the Console's
+  existing credential-less detection (`hasLocalPassword()` → set-initial-password)
+  nudges them to set a password afterwards.
+
+  The `invite` policy also no longer mints a throwaway password: it creates the
+  same credential-less account and sends the set-your-password invitation
+  (better-auth's reset flow creates the credential record on first set).
+  `temporary` is unchanged and remains the fallback for deployments without
+  email/SMS infrastructure.
+
+  Breaking-ish note: `passwordPolicy` was previously required — requests that
+  omitted it got a 400. They now succeed with the `none` behavior.
+
+- e2c05d6: feat(auth/i18n): localised, tenant-customisable phone SMS texts (#2815)
+
+  The OTP and invitation SMS bodies were hard-coded English. They now resolve
+  in two layers: a `sys_notification_template` row for
+  `(auth.phone_otp | auth.phone_invite, channel 'sms', locale)` — editable in
+  Setup, seeded once with built-in en/zh rows, tenant edits never overwritten —
+  falling back to the bundled bilingual texts. The locale follows the
+  deployment default (`localization.locale` setting, live-rebound); per-user
+  locale is deferred until `sys_user` grows a locale column. The OTP wording
+  is purpose-neutral (one provider template covers sign-in and reset, and the
+  SMS reveals nothing about what the code unlocks). Template lookups are
+  best-effort — an outage never blocks an OTP send — and the no-OTP-in-logs
+  red line is unchanged.
+
+### Patch Changes
+
+- 3fd87b2: fix(auth): invitation accept link is now an absolute URL under the Console base
+
+  `sendInvitationEmail` built the accept URL straight from `config.baseUrl` with
+  no scheme guarantee and no UI mount prefix — `${baseUrl}/accept-invitation/<id>`.
+  Two problems surfaced in real deployments:
+
+  1. When `baseUrl` was a bare host (e.g. `cloud.objectos.ai`, no scheme), the
+     emailed link was relative-looking; email clients would not linkify it and
+     clicking it went nowhere.
+  2. The accept-invitation page is a Console SPA route mounted under `uiBasePath`
+     (default `/_console`) — the same router/basename as `/login`, `/register`
+     and `/oauth/consent`, and the exact link the Console itself generates for its
+     "copy invitation link" action (`${origin}${BASE_URL}accept-invitation/<id>`).
+     The root-path link omitted that prefix, so it 404'd at the host root instead
+     of resolving to the page.
+
+  The link is now built as
+  `${origin}${uiBasePath}/accept-invitation/<id>` via a hardened
+  `getCanonicalOrigin()` that guarantees an absolute origin (prepends `https://`
+  when `baseUrl` has no scheme). The scheme hardening also applies to the OAuth
+  issuer / consent / device-flow URLs that share the helper. Deployments that
+  mount the Console elsewhere are honoured through the existing `uiBasePath`
+  config.
+
+- Updated dependencies [526805e]
+- Updated dependencies [d79ca07]
+- Updated dependencies [4d9dd7b]
+- Updated dependencies [33ebd34]
+- Updated dependencies [c044f08]
+- Updated dependencies [01274eb]
+- Updated dependencies [8f23746]
+- Updated dependencies [b97af7e]
+- Updated dependencies [6da03ee]
+  - @objectstack/spec@14.5.0
+  - @objectstack/platform-objects@14.5.0
+  - @objectstack/rest@14.5.0
+  - @objectstack/core@14.5.0
+  - @objectstack/types@14.5.0
+
 ## 14.4.0
 
 ### Patch Changes

@@ -1,5 +1,63 @@
 # @objectstack/runtime
 
+## 14.5.0
+
+### Minor Changes
+
+- 261aff5: ADR-0090 D10 (follow-up) — an MCP agent may now invoke the business **actions** its delegating user can run, gated by the `actions:execute` scope. Previously an agent principal carried no system capabilities, so any capability-gated action (`requiredPermissions`) was denied even when the user was entitled to it.
+
+  `resolve-execution-context` now keeps the delegating user's `systemPermissions` on the agent context **only when the token carries `actions:execute`** (otherwise none — and the MCP tool surface already hides the action tools). The `actions:execute` scope is the user's explicit consent to let the agent act on their behalf, so the capability gate (`actionPermissionError`) is delegated accordingly.
+
+  This never widens the agent's **data** reach: what an action reads or writes still flows through the object CRUD/FLS/RLS ceiling ∩ user intersection. A `data:read` agent that invokes a writing action is still blocked at the write; even a `data:write` agent cannot touch better-auth-managed tables; and capability-gated **object** access stays denied to the agent (that gate is driven by the resolved ceiling sets, which carry no capabilities). The residual is a capability-gated action whose effect is purely external (email, webhook) — exactly what `actions:execute` consents to. Tighter per-action agent scoping is the per-client-grants follow-up.
+
+- d79ca07: ADR-0090 D10 — activate the agent principal (OAuth → `principalKind:'agent'` + scope-derived ceiling). This wires the _producer_ side of the D10 intersection that shipped in #2838, so it stops being dormant: an MCP request authenticated with an OAuth access token is now resolved as an AI **agent acting on behalf of** the human `sub`, and its effective permission is the intersection of a scope-derived capability ceiling AND the user's own grants.
+
+  - **`resolve-execution-context` (producer)**: when a verified MCP OAuth token names an authorized client (`azp`), the request resolves to `principalKind:'agent'` with `onBehalfOf:{ userId }` (the human), and the agent's OWN grants are replaced by the scope-derived ceiling — `data:read` → read-only, `data:write` → full CRUD, neither → no data access. `userId` stays the human so owner-stamping and `current_user.*` RLS resolve to them; the user-derived `systemPermissions` are cleared so a cap-gated action can't ride the user's capabilities. A token without a client stays a `human` principal.
+  - **`plugin-security`**: three built-in ceiling sets (`mcp_agent_data_read` / `mcp_agent_data_write` / `mcp_agent_restricted`) — pure CRUD bits, no row-level security (all row/owner/tenant narrowing comes from the delegating user on the other side of the intersection). An `agent` principal skips the additive human baseline (`member_default`) — its grants are exactly its ceiling — and its fallback is the restricted (no-object-access) set, so a mis-resolved agent fails CLOSED, never open.
+  - **`spec`**: `MCP_AGENT_PERMISSION_SET_*` names + `scopesToAgentPermissionSets()`, single-sourced next to the OAuth scope constants.
+
+  **Behaviour change (a security tightening).** Previously an MCP OAuth request executed with the FULL authority of the logged-in user, and scopes narrowed only the tool surface. Now the scope is also a real data-layer ceiling: a `data:read` token can never write ANY record, even via a crafted call, no matter what the user could do. This is strictly consistent with the existing contract that "a scope can never grant more than the user could do" — the intersection only ever narrows — and closes the gap where a compromised or confused agent could act with the user's full reach.
+
+  Verified end-to-end: a `data:read` agent acting for a member who owns a record can read it but cannot edit or create; a `data:write` agent for the same user can. Producer mapping unit-tested in `@objectstack/runtime`; enforcement dogfooded against the served engine (`showcase-agent-scope-ceiling`).
+
+### Patch Changes
+
+- 5f43f88: **Security fix (#2852): `/analytics/query` and `/analytics/sql` now run scoped to the caller.**
+
+  `handleAnalytics` dropped the request's execution context — `analyticsService.query(body)` was called with no context, so the analytics service's per-object read-scope provider (`getReadScope` → security `getReadFilter`) received `undefined` and applied **no tenant/RLS filter**. An authenticated caller could query analytics datasets and receive rows their row-level security would otherwise hide.
+
+  Fix: thread `context.executionContext` into `analyticsService.query(…)` and `generateSql(…)` (both already accept it), so each object in the query is scoped by its per-object read filter.
+
+  Note: the analytics read-scope provider (`getReadFilter`) does not yet apply the ADR-0090 D10 agent delegator intersection — latent today because analytics is not reachable over the OAuth `/mcp` surface; tracked in #2852 for when it is.
+
+- Updated dependencies [526805e]
+- Updated dependencies [f70eb2c]
+- Updated dependencies [d79ca07]
+- Updated dependencies [a348394]
+- Updated dependencies [4d9dd7b]
+- Updated dependencies [5bced2f]
+- Updated dependencies [3fd87b2]
+- Updated dependencies [33ebd34]
+- Updated dependencies [e2c05d6]
+- Updated dependencies [c044f08]
+- Updated dependencies [01274eb]
+  - @objectstack/spec@14.5.0
+  - @objectstack/plugin-security@14.5.0
+  - @objectstack/plugin-auth@14.5.0
+  - @objectstack/rest@14.5.0
+  - @objectstack/objectql@14.5.0
+  - @objectstack/core@14.5.0
+  - @objectstack/formula@14.5.0
+  - @objectstack/metadata@14.5.0
+  - @objectstack/observability@14.5.0
+  - @objectstack/driver-memory@14.5.0
+  - @objectstack/driver-sql@14.5.0
+  - @objectstack/driver-sqlite-wasm@14.5.0
+  - @objectstack/service-cluster@14.5.0
+  - @objectstack/service-datasource@14.5.0
+  - @objectstack/service-i18n@14.5.0
+  - @objectstack/types@14.5.0
+
 ## 14.4.0
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "create-objectstack",
-  "version": "14.4.0",
+  "version": "14.5.0",
   "description": "Create a new ObjectStack project — npx create-objectstack",
   "bin": {
     "create-objectstack": "./bin/create-objectstack.js"

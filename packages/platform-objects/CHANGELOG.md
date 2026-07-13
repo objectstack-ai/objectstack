@@ -1,5 +1,55 @@
 # @objectstack/platform-objects
 
+## 14.5.0
+
+### Minor Changes
+
+- 6da03ee: feat(identity): open the standard Edit affordance on sys_user for profile fields (ADR-0092 D4)
+
+  `sys_user` now sets `userActions: { edit: true }`, so the generic row-edit
+  form is available (create / import / delete stay off). The two profile fields
+  (`name`, `image`) are editable; every other column — `email`, `role`, ban
+  state, phone, and all system-managed stamps — is marked `readonly` so the
+  standard edit form renders it non-editable.
+
+  This is safe because the server boundary is the identity write guard shipped
+  in the previous change (ADR-0092 D2): a user-context update to `sys_user` may
+  only touch `{name, image}` regardless of what any form submits; everything
+  else is stripped or rejected. The `readonly` flags here are UX only.
+
+  The dedicated action dialogs are unaffected — `create_user` / `invite_user` /
+  `set_user_role` reference `email` and `role` as action **params** (their own
+  inputs), which do not inherit the field-level `readonly` and stay editable
+  (verified in the running Console).
+
+  Note: the Console's record-form renderer must honor `userActions.edit` +
+  per-field `readonly` on `managedBy:'better-auth'` objects for the edit form to
+  be functional; that is an objectui-side change vendored via `objectui:refresh`
+  and tracked separately.
+
+### Patch Changes
+
+- 526805e: ADR-0057 data-lifecycle follow-ups (#2834): the per-plugin retention sweepers are retired, telemetry separation goes live in dev, and the lifecycle contract reaches the Studio.
+
+  - **BREAKING (ships as minor per the launch-window convention)**: `JobRunRetention` / `NotificationRetention` and the `retentionDays` / `retentionSweepMs` options on `JobServicePlugin` / `MessagingServicePlugin` are removed. The platform LifecycleService enforces the same windows from the `lifecycle` declarations (`sys_job_run` 30d, notification pipeline 90d); tune them at runtime via the `lifecycle` settings namespace (`retention_overrides`, tenant-scoped).
+  - **Fix**: `sys_automation_run` no longer declares a blanket 30d lifecycle retention — that table interleaves live SUSPENDED runs (an approval may stay paused for months) with terminal history, and a blanket age reap could strand in-flight approvals. Bounding stays with the automation store's terminal-only sweep.
+  - **CLI**: `objectstack dev` now provisions a dedicated `telemetry` datasource (`<primary>.telemetry.db`) for file-backed SQLite primaries, so lifecycle-classed system data stops sharing the business dev DB (`OS_TELEMETRY_DB=0` opts out; `OS_TELEMETRY_DB=<path>` opts in anywhere). New `os db clean` runs the one-time `VACUUM` that lets legacy files adopt `auto_vacuum=INCREMENTAL` and reports reclaimed bytes.
+  - **Studio**: the object metadata form exposes the `lifecycle` block (class + retention/TTL/rotation/archive/reclaim); metadata-forms i18n bundles regenerated with curated zh-CN translations.
+
+- 8f23746: `sys_sso_provider` domain-verification `resultDialog` paths now address the
+  inner `data` payload (`dnsRecordType`, not `data.dnsRecordType`), matching every
+  other object. Pairs with the objectui `apiHandler` envelope-unwrap fix
+  (objectui#2396) — the old `data.` prefix compensated for a runtime bug and would
+  blank the dialog once the runtime unwraps correctly.
+- b97af7e: `sys_user` account-management actions (Ban/Unban, Unlock Account, Set Password, Set Platform Role, Impersonate) now also surface on the user record-detail header (`record_header`, overflowing into the ⋯ "More" menu), not just the Users list row menu — so a platform admin can manage an account from an open user record without navigating back to the list.
+- Updated dependencies [526805e]
+- Updated dependencies [d79ca07]
+- Updated dependencies [33ebd34]
+- Updated dependencies [c044f08]
+- Updated dependencies [01274eb]
+  - @objectstack/spec@14.5.0
+  - @objectstack/metadata-core@14.5.0
+
 ## 14.4.0
 
 ### Minor Changes

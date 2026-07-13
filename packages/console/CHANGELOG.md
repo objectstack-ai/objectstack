@@ -1,5 +1,31 @@
 # @objectstack/console
 
+## 14.5.0
+
+### Minor Changes
+
+- 0719fc7: Console (objectui) refreshed to `839536b1f4c0`. Frontend changes in this range:
+
+  - feat(plugin-detail,app-shell): Edit as primary CTA; enter inline edit by double-clicking a field (#2401) (#2402)
+  - feat(app-shell,plugin-detail): permission sets — Studio designs, Setup assigns (ADR-0056) (#2403)
+
+  objectui range: `787b0e7bd90f...839536b1f4c0`
+
+### Patch Changes
+
+- 6da03ee: Console (objectui) refreshed to `5da9905b30fc`. Frontend changes in this range:
+
+  - fix(plugin-form): honor userActions.edit on managed objects, don't blanket-disable fields (ADR-0092 D4) (#2395)
+
+  objectui range: `6fa8e6aeb67c...5da9905b30fc`
+
+- 0719fc7: Console (objectui) refreshed to `787b0e7bd90f`. Frontend changes in this range:
+
+  - fix(app-shell,components): Setup-app UX — accurate teams empty state + stop form prop leak (#2397)
+  - fix(app-shell): unwrap the {success,data} envelope in apiHandler so resultDialog fields resolve (#2396)
+
+  objectui range: `5da9905b30fc...787b0e7bd90f`
+
 ## 14.4.0
 
 ## 14.3.0

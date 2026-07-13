@@ -1,5 +1,16 @@
 # @objectstack/metadata-core
 
+## 14.5.0
+
+### Patch Changes
+
+- Updated dependencies [526805e]
+- Updated dependencies [d79ca07]
+- Updated dependencies [33ebd34]
+- Updated dependencies [c044f08]
+- Updated dependencies [01274eb]
+  - @objectstack/spec@14.5.0
+
 ## 14.4.0
 
 ### Minor Changes
