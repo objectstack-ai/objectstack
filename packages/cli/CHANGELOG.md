@@ -1,5 +1,99 @@
 # @objectstack/cli
 
+## 14.7.0
+
+### Minor Changes
+
+- 824a395: Tenancy mode as a first-class capability + a single owner for the user→membership
+  lifecycle (ADR-0093, Phases 1–3).
+
+  **Tenancy service (`@objectstack/types`, `@objectstack/plugin-auth`).** plugin-auth
+  registers a `tenancy` service — the single source of truth for tenancy mode
+  (`mode`, `isolationActive`, `requested`, `degraded`, `defaultOrgId()`). It derives
+  `isolationActive` from the presence of the `org-scoping` service, so the
+  enterprise `@objectstack/organizations` package lights it up with no change.
+  SecurityPlugin's RLS-strip gate and `/auth/config` (`features.multiOrgEnabled`,
+  new `features.degradedTenancy`) now consume it instead of re-deriving the fact.
+
+  **Fail-fast on degraded tenancy (`@objectstack/cli`, ADR-0093 D5).**
+  `OS_MULTI_ORG_ENABLED=true` without a working `@objectstack/organizations` now
+  **refuses to boot** — a deployment that requested tenant isolation must not serve
+  traffic without it (tenant RLS would be silently stripped). Escape hatch:
+  `OS_ALLOW_DEGRADED_TENANCY=1` boots in an explicitly branded degraded state
+  (`features.degradedTenancy`). **This may halt upgrades for deployments that were
+  silently degraded — intentionally; install the enterprise package or set the
+  escape hatch.**
+
+  **Membership reconciler (`@objectstack/plugin-auth`, ADR-0093 D1–D3, D6).** A
+  single reconciler composed into better-auth's `user.create.after` hook owns the
+  "every new user gets a membership" invariant across all creation paths (signup,
+  admin create-user, import, SSO JIT). It yields to any existing membership (host
+  hooks win), honors a new `membershipPolicy: 'auto' | 'invite-only'` auth option
+  (default `auto`), and binds only to an unambiguous target org (single-org default;
+  multi-org binds nothing). A bounded, idempotent `kernel:ready` backfill covers
+  pre-existing member-less users in single-org/auto deployments
+  (`OS_SKIP_MEMBERSHIP_BACKFILL=1` to opt out). The endpoint-level create-user bind
+  from #2882 now delegates to this shared reconciler.
+
+  New env vars: `OS_ALLOW_DEGRADED_TENANCY`, `OS_SKIP_MEMBERSHIP_BACKFILL`. New docs:
+  Deployment → Tenancy Modes & Membership.
+
+### Patch Changes
+
+- Updated dependencies [9f03fdd]
+- Updated dependencies [f71339c]
+- Updated dependencies [35f6c61]
+- Updated dependencies [d6a72eb]
+- Updated dependencies [da5e686]
+- Updated dependencies [824a395]
+- Updated dependencies [f344ee1]
+  - @objectstack/console@14.7.0
+  - @objectstack/spec@14.7.0
+  - @objectstack/plugin-sharing@14.7.0
+  - @objectstack/plugin-auth@14.7.0
+  - @objectstack/types@14.7.0
+  - @objectstack/plugin-security@14.7.0
+  - @objectstack/plugin-webhooks@14.7.0
+  - @objectstack/account@14.7.0
+  - @objectstack/setup@14.7.0
+  - @objectstack/client@14.7.0
+  - @objectstack/cloud-connection@14.7.0
+  - @objectstack/core@14.7.0
+  - @objectstack/formula@14.7.0
+  - @objectstack/lint@14.7.0
+  - @objectstack/mcp@14.7.0
+  - @objectstack/metadata@14.7.0
+  - @objectstack/objectql@14.7.0
+  - @objectstack/observability@14.7.0
+  - @objectstack/platform-objects@14.7.0
+  - @objectstack/driver-memory@14.7.0
+  - @objectstack/driver-mongodb@14.7.0
+  - @objectstack/driver-sql@14.7.0
+  - @objectstack/driver-sqlite-wasm@14.7.0
+  - @objectstack/plugin-approvals@14.7.0
+  - @objectstack/plugin-audit@14.7.0
+  - @objectstack/plugin-email@14.7.0
+  - @objectstack/plugin-hono-server@14.7.0
+  - @objectstack/plugin-reports@14.7.0
+  - @objectstack/rest@14.7.0
+  - @objectstack/runtime@14.7.0
+  - @objectstack/service-analytics@14.7.0
+  - @objectstack/service-automation@14.7.0
+  - @objectstack/service-cache@14.7.0
+  - @objectstack/service-datasource@14.7.0
+  - @objectstack/service-job@14.7.0
+  - @objectstack/service-messaging@14.7.0
+  - @objectstack/service-package@14.7.0
+  - @objectstack/service-queue@14.7.0
+  - @objectstack/service-realtime@14.7.0
+  - @objectstack/service-settings@14.7.0
+  - @objectstack/service-sms@14.7.0
+  - @objectstack/service-storage@14.7.0
+  - @objectstack/trigger-api@14.7.0
+  - @objectstack/trigger-record-change@14.7.0
+  - @objectstack/trigger-schedule@14.7.0
+  - @objectstack/verify@14.7.0
+
 ## 14.6.0
 
 ### Patch Changes
