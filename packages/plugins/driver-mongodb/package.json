@@ -20,7 +20,7 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/spec": "workspace:*",
-    "mongodb": "^7.4.0",
+    "mongodb": "^7.5.0",
     "nanoid": "^5.1.16"
   },
   "devDependencies": {
