@@ -137,13 +137,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           team: "team",
           business_unit: "business_unit",
           position: "position",
-          unit_and_subordinates: "unit_and_subordinates",
-          queue: "queue"
+          unit_and_subordinates: "unit_and_subordinates"
         }
       },
       recipient_id: {
         label: "Recipient",
-        help: "business unit id / team id / position name / queue name / user id depending on recipient_type"
+        help: "business unit id / team id / position name / user id depending on recipient_type"
       },
       access_level: {
         label: "Access Level",

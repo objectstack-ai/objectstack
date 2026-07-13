@@ -92,6 +92,10 @@
       "status": "live",
       "note": "renderer."
     },
+    "widget": {
+      "status": "live",
+      "note": "objectui generic form widget override. ObjectForm (packages/plugin-form/src/ObjectForm.tsx) threads `field.widget` into the renderer; form.tsx resolves `widget || type` and looks it up as `field:<widget>` in the ComponentRegistry (renderFieldComponent). Used to render pick-not-type controls for sys_sharing_rule (object-ref / filter-condition / recipient-picker) and sys_permission_set (capability-multiselect). Degrades to the `type` renderer when the widget is unregistered."
+    },
     "requiredPermissions": {
       "status": "live",
       "evidence": "packages/plugins/plugin-security/src/security-plugin.ts",

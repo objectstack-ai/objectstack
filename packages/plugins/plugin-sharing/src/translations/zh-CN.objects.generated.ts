@@ -137,8 +137,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           team: "团队",
           business_unit: "business_unit",
           position: "岗位",
-          unit_and_subordinates: "unit_and_subordinates",
-          queue: "队列"
+          unit_and_subordinates: "unit_and_subordinates"
         }
       },
       recipient_id: {

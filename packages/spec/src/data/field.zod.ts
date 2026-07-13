@@ -597,6 +597,20 @@ export const FieldSchema = lazySchema(() => z.object({
    *  @deprecated Alias of `requiredWhen` — kept for back-compat. */
   conditionalRequired: ExpressionInputSchema.optional().describe('Predicate (CEL) — field is required when TRUE. Alias of `requiredWhen`.'),
 
+  /**
+   * Form widget override. Names a registered field/UI component to render this
+   * field with, overriding the default widget derived from `type`. Honored by
+   * the generic object form (objectui `ObjectForm`/`form.tsx` resolve
+   * `widget || type`, looking the value up as `field:<widget>` in the component
+   * registry). Use it when the raw `type` renderer would force a user to type
+   * machine data that should be *picked* instead — e.g. an object-name field
+   * (`widget: 'object-ref'`), a stored FilterCondition (`widget:
+   * 'filter-condition'`), or a recipient reference whose target depends on a
+   * sibling field (`widget: 'recipient-picker'`). Unknown/unregistered values
+   * fall back to the `type` renderer, so it degrades safely.
+   */
+  widget: z.string().optional().describe('Form widget override — names a registered field component (resolved as `field:<widget>`) to render this field instead of the `type` default. Degrades to the `type` renderer when unregistered. e.g. "object-ref", "filter-condition", "recipient-picker".'),
+
   /** Security & Visibility */
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
   readonly: z.boolean().default(false).describe('Read-only in UI'),

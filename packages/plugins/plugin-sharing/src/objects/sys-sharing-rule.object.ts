@@ -120,6 +120,10 @@ export const SysSharingRule = ObjectSchema.create({
       label: 'Object',
       required: true,
       maxLength: 100,
+      // Rendered as an object picker (choose a registered object by name)
+      // instead of a free-text machine-name input. Falls back to a text input
+      // when the `field:object-ref` widget is unavailable.
+      widget: 'object-ref',
       description: 'Short object name (e.g. opportunity, account)',
       group: 'Target',
     }),
@@ -127,12 +131,21 @@ export const SysSharingRule = ObjectSchema.create({
     criteria_json: Field.textarea({
       label: 'Criteria (FilterCondition JSON)',
       required: false,
+      // Rendered as a visual criteria builder scoped to the selected object's
+      // fields (dependsOn: object_name), storing the same JSON FilterCondition.
+      // An "Edit as JSON" fallback keeps hand-authored / advanced filters
+      // editable. Falls back to a textarea when the widget is unavailable.
+      widget: 'filter-condition',
+      dependsOn: ['object_name'],
       description: 'JSON FilterCondition matched against records of object_name. Empty = match all.',
       group: 'Target',
     }),
 
     recipient_type: Field.select(
-      ['user', 'team', 'business_unit', 'position', 'unit_and_subordinates', 'queue'],
+      // `queue` was removed: it is declared-but-unenforced (the evaluator returns
+      // no users for it), so offering it would author a silently-inert rule
+      // (ADR-0078). The five values below are the ones the evaluator expands.
+      ['user', 'team', 'business_unit', 'position', 'unit_and_subordinates'],
       {
         label: 'Recipient Type',
         required: true,
@@ -146,7 +159,14 @@ export const SysSharingRule = ObjectSchema.create({
       label: 'Recipient',
       required: true,
       maxLength: 200,
-      description: 'business-unit id / team id / position name / queue name / user id depending on recipient_type',
+      // Rendered as a record picker whose target object follows recipient_type
+      // (dependsOn: recipient_type): sys_user / sys_team / sys_business_unit /
+      // sys_position. Stores the value the evaluator matches on — a record id
+      // for user/team/business_unit, the position NAME for `position`. Falls
+      // back to a text input when the widget is unavailable.
+      widget: 'recipient-picker',
+      dependsOn: ['recipient_type'],
+      description: 'business-unit id / team id / position name / user id depending on recipient_type',
       group: 'Recipient',
     }),
 

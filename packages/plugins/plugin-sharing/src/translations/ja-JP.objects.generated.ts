@@ -137,8 +137,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           team: "チーム",
           business_unit: "business_unit",
           position: "ポジション",
-          unit_and_subordinates: "unit_and_subordinates",
-          queue: "キュー"
+          unit_and_subordinates: "unit_and_subordinates"
         }
       },
       recipient_id: {
