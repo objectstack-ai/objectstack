@@ -1655,6 +1655,12 @@ export class ObjectStackClient {
      * - OIDC/enterprise providers: calls POST /sign-in/oauth2 with `{ providerId }`.
      *
      * After the provider callback better-auth sets the session cookie and redirects to `callbackURL`.
+     *
+     * The default `callbackURL` is the CURRENT page (`window.location.href`),
+     * not a hard-coded `/login`: the SDK cannot know the app's mount path (the
+     * Console lives under `/_console`, others differ), so returning the user to
+     * where they started is the only base-path-correct default. This mirrors
+     * `linkSocial`. Pass an explicit `callbackURL` to land somewhere else.
      */
     signInWithProvider: async (
       provider: string,
@@ -1664,7 +1670,7 @@ export class ObjectStackClient {
         throw new Error('signInWithProvider requires a browser environment');
       }
       const route = this.getRoute('auth');
-      const callbackURL = opts?.callbackURL ?? window.location.origin + '/login';
+      const callbackURL = opts?.callbackURL ?? window.location.href;
       const isOidc = opts?.type === 'oidc';
       const endpoint = isOidc ? '/sign-in/oauth2' : '/sign-in/social';
       const body: Record<string, string> = isOidc

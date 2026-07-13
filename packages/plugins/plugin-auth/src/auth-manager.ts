@@ -1516,15 +1516,12 @@ export class AuthManager {
         // operators / UI can fall back to copy-paste flows. Replace this
         // with a real mail integration when available.
         sendInvitationEmail: async ({ email: recipientEmail, invitation, organization: org, inviter }) => {
-          // The accept-invitation page is a Console SPA route mounted under
-          // `uiBasePath` (default `/_console`) — the SAME router/basename as
-          // /login, /register and /oauth/consent. The Console builds the very
-          // same link for its "copy invitation link" action
-          // (`${origin}${BASE_URL}accept-invitation/<id>`), so the emailed link
-          // MUST carry that prefix (and an absolute https origin) or it 404s at
-          // the host root instead of resolving to the page.
-          const uiBase = (this.config.uiBasePath ?? '/_console').replace(/\/$/, '');
-          const acceptUrl = `${this.getCanonicalOrigin()}${uiBase}/accept-invitation/${invitation.id}`;
+          // The accept-invitation page is a Console SPA route; the Console
+          // builds the very same link for its "copy invitation link" action
+          // (`${origin}${BASE_URL}accept-invitation/<id>`). Compose it through
+          // the single-source helper so the `/_console` prefix and absolute
+          // https origin are guaranteed.
+          const acceptUrl = this.getConsolePageUrl(`/accept-invitation/${invitation.id}`);
           // #2766 V1.5 — placeholder addresses are never real recipients.
           if (isPlaceholderEmail(recipientEmail)) {
             throw new Error(
@@ -1723,15 +1720,13 @@ export class AuthManager {
       plugins.push(jwt({ schema: buildJwtPluginSchema() }));
 
       const { oauthProvider } = await import('@better-auth/oauth-provider');
-      const baseUrl = this.getCanonicalOrigin();
-      const uiBase = (this.config.uiBasePath ?? '/_console').replace(/\/$/, '');
       const dcr = resolveDcrEnabled(pluginConfig);
       plugins.push(oauthProvider({
         // Console SPA renders both pages (replaces the legacy Account SPA at
         // /_account). Override `uiBasePath` in AuthConfig if Console is
         // mounted elsewhere.
-        loginPage: `${baseUrl}${uiBase}/login`,
-        consentPage: `${baseUrl}${uiBase}/oauth/consent`,
+        loginPage: this.getConsolePageUrl('/login'),
+        consentPage: this.getConsolePageUrl('/oauth/consent'),
         schema: buildOauthProviderPluginSchema(),
         // ── MCP OAuth track (#2698) ────────────────────────────────
         // Coarse tool-family scopes for the platform's own MCP endpoint,
@@ -1815,10 +1810,8 @@ export class AuthManager {
     // `verification_uri_complete`.
     if (enabled.deviceAuthorization) {
       const { deviceAuthorization } = await import('better-auth/plugins/device-authorization');
-      const baseUrl = this.getCanonicalOrigin();
-      const uiBase = (this.config.uiBasePath ?? '/_console').replace(/\/$/, '');
       plugins.push(deviceAuthorization({
-        verificationUri: `${baseUrl}${uiBase}/auth/device`,
+        verificationUri: this.getConsolePageUrl('/auth/device'),
         schema: buildDeviceAuthorizationPluginSchema(),
       }));
     }
@@ -2201,11 +2194,14 @@ export class AuthManager {
     if (!sms) {
       throw new Error('SMS_SERVICE_REQUIRED: no SMS service is configured for this deployment.');
     }
-    const baseUrl = this.getCanonicalOrigin();
     // #2815 — localised, tenant-customisable body (see deliverPhoneOtp).
+    // `loginUrl` points at the actual Console sign-in page; `baseUrl` (bare
+    // origin) is kept for backward-compatibility with tenant-overridden
+    // templates that still interpolate `{{baseUrl}}`.
     const body = await this.renderPhoneSmsBody(PHONE_SMS_TOPICS.invite, {
       appName: this.getAppName(),
-      baseUrl,
+      baseUrl: this.getCanonicalOrigin(),
+      loginUrl: this.getConsolePageUrl('/login'),
     });
     const result = await sms.send({ to: phone, body, templateParams: { content: body } });
     if (result.status === 'failed') {
@@ -2376,6 +2372,23 @@ export class AuthManager {
     // email clients won't linkify and that break when clicked — prepend
     // https:// so invitation / OAuth URLs open correctly.
     return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  }
+
+  /**
+   * Absolute URL of a page served by the Console SPA. The Console is mounted
+   * under `uiBasePath` (default `/_console`) — it owns `/login`, `/register`,
+   * `/oauth/consent`, `/auth/device`, `/accept-invitation/:id`, … — so EVERY
+   * link we hand to a user (email, SMS, OAuth redirect, device flow) must be
+   * `${origin}${uiBasePath}${path}`. This is the single source of truth for
+   * that composition: build page links through here, never by hand, so a bare
+   * host (missing scheme) or a missing `/_console` prefix can't creep back in
+   * one link at a time. Set `uiBasePath` in AuthConfig if Console is mounted
+   * elsewhere.
+   */
+  private getConsolePageUrl(path: string): string {
+    const uiBase = (this.config.uiBasePath ?? '/_console').replace(/\/$/, '');
+    const rel = path.startsWith('/') ? path : `/${path}`;
+    return `${this.getCanonicalOrigin()}${uiBase}${rel}`;
   }
 
   /**

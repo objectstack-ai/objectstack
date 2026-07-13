@@ -1251,7 +1251,8 @@ describe('AuthManager', () => {
       expect(sms.sent).toHaveLength(1);
       expect(sms.sent[0].to).toBe(PHONE);
       expect(sms.sent[0].body).toMatch(/verification code/);
-      expect(sms.sent[0].body).toContain('http://localhost:3000');
+      // Links to the actual Console sign-in page, not the bare origin.
+      expect(sms.sent[0].body).toContain('http://localhost:3000/_console/login');
     });
 
     // #2815 — localised, tenant-customisable SMS bodies.
@@ -1268,7 +1269,7 @@ describe('AuthManager', () => {
 
       await manager.sendPhoneInviteSms(PHONE);
       expect(sms.sent[1].body).toContain('账号已开通');
-      expect(sms.sent[1].body).toContain('http://localhost:3000');
+      expect(sms.sent[1].body).toContain('http://localhost:3000/_console/login');
     });
 
     it('a tenant sys_notification_template row overrides the built-in text', async () => {

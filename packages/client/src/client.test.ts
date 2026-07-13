@@ -447,6 +447,39 @@ describe('Auth enhancements', () => {
         // Token should be auto-set
         expect((client as any).token).toBe('refreshed-token');
     });
+
+    it('signInWithProvider defaults callbackURL to the current page (base-path-correct)', async () => {
+        const assign = vi.fn();
+        vi.stubGlobal('window', {
+            location: { href: 'https://app.example.com/_console/login', assign },
+        });
+        try {
+            const { client, fetchMock } = createMockClient({ url: 'https://accounts.google.com/o/oauth2/auth' });
+            await client.auth.signInWithProvider('google');
+            const [, opts] = fetchMock.mock.calls[0];
+            // The SDK can't know the app's mount path, so it returns the user to
+            // where they started rather than a hard-coded root '/login'.
+            expect(JSON.parse(opts.body).callbackURL).toBe('https://app.example.com/_console/login');
+            expect(assign).toHaveBeenCalledWith('https://accounts.google.com/o/oauth2/auth');
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('signInWithProvider honours an explicit callbackURL', async () => {
+        const assign = vi.fn();
+        vi.stubGlobal('window', {
+            location: { href: 'https://app.example.com/_console/login', assign },
+        });
+        try {
+            const { client, fetchMock } = createMockClient({ url: 'https://accounts.google.com/o/oauth2/auth' });
+            await client.auth.signInWithProvider('google', { callbackURL: 'https://app.example.com/_console/home' });
+            const [, opts] = fetchMock.mock.calls[0];
+            expect(JSON.parse(opts.body).callbackURL).toBe('https://app.example.com/_console/home');
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
 });
 
 describe('Notifications namespace', () => {
