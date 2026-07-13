@@ -1,5 +1,13 @@
 # @objectstack/platform-objects
 
+## 14.7.0
+
+### Patch Changes
+
+- Updated dependencies [d6a72eb]
+  - @objectstack/spec@14.7.0
+  - @objectstack/metadata-core@14.7.0
+
 ## 14.6.0
 
 ### Patch Changes
