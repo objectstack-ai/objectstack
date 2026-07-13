@@ -3,10 +3,10 @@ title: v14.0.0
 description: The v14 series completes the ADR-0090 vocabulary convergence, makes object enable.* capability flags real gates, and adds admin user management, phone/SMS auth, book-audience enforcement, a data-lifecycle contract, and effective-dated grants.
 ---
 
-**Released July 2026 — current: 14.4.0 (July 11, 2026).** All `@objectstack/*`
+**Released July 2026 — current: 14.5.0 (July 13, 2026).** All `@objectstack/*`
 packages are version-locked, so one number describes the whole platform. This
 page covers the **v14 series**: it opens with the 14.0.0 breaking change, then
-folds in the capabilities that shipped across 14.1 → 14.4.
+folds in the capabilities that shipped across 14.1 → 14.5.
 
 The v14 line finishes the ADR-0090 permission-model convergence (the last
 role/profile vocabulary leftovers), turns the object `enable.*` capability flags
@@ -179,6 +179,55 @@ bespoke UI. `GET /me/apps` now sources the engine registry (the authority the
 meta routes use) so `tabPermissions` and `AppSchema.requiredPermissions` have a
 real enforced consumer.
 
+### MCP agents run under a scope-derived ceiling (14.5.0, ADR-0090 D10)
+
+The agent principal goes live. An MCP request authenticated with an OAuth access
+token now resolves as an AI **agent acting on behalf of** the human `sub`, and
+its effective permission is the **intersection** of a scope-derived capability
+ceiling **and** the user's own grants — never more than either:
+
+- `data:read` → read-only, `data:write` → full CRUD, neither → no data access.
+  `userId` stays the human, so owner-stamping and `current_user.*` RLS still
+  resolve to them; the user's own `systemPermissions` are cleared so a
+  capability-gated action can't ride the user's capabilities.
+- A mis-resolved agent falls back to the **restricted** (no-object-access) set,
+  so it fails **closed**, never open. A token without an authorized client stays
+  an ordinary `human` principal.
+- Capability-gated business **actions** are delegated **only** when the token
+  carries the `actions:execute` scope — the user's explicit consent to let the
+  agent act on their behalf. Data reach is unaffected: an action's reads/writes
+  still flow through the CRUD/FLS/RLS ceiling ∩ user intersection.
+
+**Security tightening.** Previously an OAuth request executed with the logged-in
+user's *full* authority and scopes narrowed only the tool surface; now the scope
+is also a real data-layer ceiling, so a `data:read` token can never write any
+record no matter what the user could do.
+
+### Data-lifecycle follow-ups (14.5.0, ADR-0057)
+
+The lifecycle contract that landed in 14.4 is now the single owner of platform
+data bounding:
+
+- **Per-plugin retention sweepers retired** — `JobRunRetention` /
+  `NotificationRetention` and the `retentionDays` / `retentionSweepMs` options on
+  `JobServicePlugin` / `MessagingServicePlugin` are **removed** (breaking, shipped
+  as minor per the launch-window convention). The platform LifecycleService
+  enforces the same windows from the `lifecycle` declarations (`sys_job_run` 30d,
+  notifications 90d), tunable via the `lifecycle` settings namespace
+  (`retention_overrides`, tenant-scoped).
+- **`retention.onlyWhen` status predicate** — a mixed table can scope its age
+  reap to a row filter, so `sys_automation_run` reaps only `completed` / `failed`
+  runs and never strands a `paused`, in-flight approval. Rejected when combined
+  with rotation `storage` or `archive`.
+- **Telemetry datasource split** — `objectstack dev` provisions a dedicated
+  `telemetry` datasource (`<primary>.telemetry.db`) so lifecycle-classed system
+  data stops sharing the business dev DB (`OS_TELEMETRY_DB=0` opts out,
+  `=<path>` opts in anywhere). New **`os db clean`** runs the one-time `VACUUM`
+  that lets legacy files adopt `auto_vacuum=INCREMENTAL` and reports reclaimed
+  bytes.
+- **Studio** — the object metadata form now exposes the `lifecycle` block (class
+  + retention / TTL / rotation / archive / reclaim).
+
 ## Notable fixes
 
 - **FLS keys must be object-qualified** (14.4.0) — the evaluator matches
@@ -195,10 +244,32 @@ real enforced consumer.
   consumer yet (authoring lint + Studio badges only); its liveness entry moves to
   `planned` + `authorWarn`, and the docs say external-principal evaluation lands
   with the principal-taxonomy phase.
+- **Settings routes no longer trust identity headers (14.5.0, Critical, #2848)** —
+  `GET/PUT/POST /api/settings/*` derived the caller from spoofable
+  `x-user-id` / `x-tenant-id` / `x-permissions` headers and `setMany` ran no
+  permission check, so on a default `os serve --server` deployment an
+  **unauthenticated** client could write tenant- or platform-scoped settings and
+  enumerate every namespace. Identity now comes from the verified resolution
+  (`resolveAuthzContext`), manifest `readPermission` / `writePermission` are
+  enforced at the HTTP boundary, and the missing `setup.write` capability is now
+  declared and granted to `admin_full_access` / `organization_admin`.
+  In-process/boot callers are unchanged.
+- **Share-link routes hardened (14.5.0, #2851)** — the raw-app
+  `POST/GET/DELETE /api/v1/share-links` routes trusted `x-user-id` / `x-tenant-id`
+  headers and ignored the caller on revoke, so an attacker could forge link
+  attribution, enumerate another user's tokens (`?createdBy=<victim>`), and revoke
+  anyone's links. Identity is now verified; list is forced to the caller's own
+  links; revoke requires the link's creator; and `createLink` checks the record is
+  visible to the caller first. The public `/:token/resolve` route stays public.
+- **Analytics queries scoped to the caller (14.5.0, #2852)** — `handleAnalytics`
+  dropped the execution context, so the per-object read-scope provider ran with no
+  tenant/RLS filter and a caller could read rows their row-level security hides.
+  The execution context is now threaded into `analyticsService.query` /
+  `generateSql`, scoping every object by its read filter.
 
 ## New in Console (Studio)
 
-The Console bundled across the 14.x line (objectui `397dcad7..6fa8e6ae`) carries:
+The Console bundled across the 14.x line (objectui `397dcad7..839536b1`) carries:
 
 - **Position assignment panels** — `relationshipValueField` renderer support
   (aligned to 14.3) renders the `sys_user` **Positions** tab and the
@@ -212,6 +283,12 @@ The Console bundled across the 14.x line (objectui `397dcad7..6fa8e6ae`) carries
 - **Dynamic runtime branding** consumed across the console, a cloud **AI
   model-status** admin panel, and spreadsheet attachments that reach the build
   agent.
+- **Edit as the primary CTA** (14.5) — record detail leads with Edit, and you
+  enter inline edit by **double-clicking a field** (objectui #2401 / #2402); the
+  affordance honors `userActions.edit` on managed objects instead of
+  blanket-disabling fields (ADR-0092 D4).
+- **Permission sets — Studio designs, Setup assigns** (14.5, ADR-0056,
+  objectui #2403) — the two apps split the design vs. assignment surfaces.
 
 The record **Attachments panel** and the **"why can this user access?" explain
 panel** landed in the console bundled during the 13.x line — see
@@ -234,3 +311,16 @@ For exhaustive, per-commit frontend detail, see the
    keys.
 6. Optionally adopt the `lifecycle` contract on high-volume custom objects and
    the `sms` namespace + `auth.plugins.phoneNumber` for phone auth.
+7. **(14.5)** Drop any `retentionDays` / `retentionSweepMs` options on
+   `JobServicePlugin` / `MessagingServicePlugin` (removed) — retention is now
+   enforced from `lifecycle` declarations; tune it via the `lifecycle` settings
+   namespace (`retention_overrides`).
+8. **(14.5)** MCP OAuth integrations: an agent no longer inherits the user's full
+   authority — confirm each client's token scopes (`data:read` / `data:write` /
+   `actions:execute`) grant the intended ceiling, and add `actions:execute` where
+   an agent must run capability-gated actions.
+9. **(14.5)** Any custom integration hitting `/api/settings/*` or
+   `/api/v1/share-links` must present a verified session / API-key / OAuth
+   credential (the header-trusted default is removed); grant `setup.write` to
+   principals that write branding / company / localization / feature-flag
+   namespaces.
