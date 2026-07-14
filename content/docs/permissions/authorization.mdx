@@ -133,6 +133,15 @@ one of two doors, each writing only what it owns:
   matrix plus subject **assignment** (`sys_user_permission_set`,
   `sys_position_permission_set`), edited **live** (config). It owns env-authored
   sets (`managedBy` `platform`/`user`) and assignments — not package sets.
+  Since ADR-0094 the set **definition** itself has one authoritative store —
+  the metadata layer: an env-door write to `sys_permission_set` (the Setup
+  CRUD) is transparently redirected into an env-scope metadata save
+  (`saveMetaItem`), and the data record is a **pure projection** the platform
+  re-derives on every metadata mutation (awaited — no staleness window) and at
+  boot. Deleting an artifact-backed set through this door **resets** it to its
+  declared body rather than removing it; renaming through the data door is
+  rejected (the name is the metadata identity — clone instead). Subject
+  assignments remain plain config rows, unchanged.
 - **Data-layer write gate** — the security middleware **refuses** any admin-door
   write to a `managedBy:'package'` `sys_permission_set` row, and refuses a
   payload that forges that provenance (insert or update, single or array). It
