@@ -28,9 +28,12 @@
  * The `filters` → `filter` alias has since been **retired from this shim** and
  * promoted into the ADR-0087 D2 conversion layer (`@objectstack/spec` conversion
  * `flow-node-crud-filter-alias`): it is rewritten to the canonical key **at
- * load**, so the CRUD executors read `cfg.filter` directly. That is the PD #12
- * retirement path the ADR prescribes — a scattered consumer-side fallback
- * replaced by one declared, loud, tested, expiring conversion entry. The
+ * load** — including the runtime rehydration seam (`AutomationEngine.registerFlow`
+ * runs the conversion before parse), which is exactly the stored-prod-flow gap
+ * this shim describes above, now closed for `filters` by the conversion instead
+ * of an executor fallback. So the CRUD executors read `cfg.filter` directly. That
+ * is the PD #12 retirement path the ADR prescribes — a scattered consumer-side
+ * fallback replaced by one declared, loud, tested, expiring conversion entry. The
  * remaining `object` → `objectName` alias is the next candidate to graduate.
  *
  * @see crud-nodes.ts for the remaining call site (`objectName`).

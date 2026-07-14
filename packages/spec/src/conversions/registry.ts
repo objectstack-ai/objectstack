@@ -31,11 +31,30 @@ const flowNodeHttpRename: MetadataConversion = {
   toMajor: 11,
   surface: 'flow.node.type',
   summary: "flow callout node types 'http_request' / 'http_call' / 'webhook' → 'http'",
-  apply(stack, emit) {
+  apply(stack, emit, context) {
     const aliases = new Set(['http_request', 'http_call', 'webhook']);
     return mapFlowNodes(stack, (node, path) => {
       const type = node.type;
       if (typeof type !== 'string' || !aliases.has(type)) return node;
+      // `flow.node.type` is an OPEN namespace (ADR-0018 removed the enum gate),
+      // so a retired official name could be re-registered by a third party. If a
+      // live executor owns this token in this environment, refuse the rewrite —
+      // clobbering it would silently break that node — and report a loud,
+      // actionable conflict instead (ADR-0078). On the pure build/validate seam
+      // `context` is absent, so the historical alias converts as normal.
+      if (context?.reservedNodeTypes?.has(type)) {
+        context.reportConflict?.({
+          token: type,
+          path: `${path}.type`,
+          reason:
+            `'${type}' is a protocol-11 retired official flow-node type, but a live ` +
+            `executor is registered under that exact name in this environment. The ` +
+            `conversion to 'http' was skipped to avoid breaking it. Rename your ` +
+            `custom node to a non-reserved type (the reserved names are ` +
+            `'http_request' / 'http_call' / 'webhook', all superseded by 'http').`,
+        });
+        return node;
+      }
       emit({ from: type, to: 'http', path: `${path}.type` });
       return { ...node, type: 'http' };
     });

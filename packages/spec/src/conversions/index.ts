@@ -10,8 +10,12 @@
  */
 
 export {
+  CONVERSION_CONFLICT_CODE,
   CONVERSION_NOTICE_CODE,
   type ConversionApplication,
+  type ConversionConflictDetail,
+  type ConversionConflictNotice,
+  type ConversionContext,
   type ConversionFixture,
   type ConversionNotice,
   type MetadataConversion,
@@ -19,6 +23,7 @@ export {
 export { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
 export {
   applyConversions,
+  applyConversionsToFlow,
   collectConversionNotices,
   type ApplyConversionsOptions,
 } from './apply.js';

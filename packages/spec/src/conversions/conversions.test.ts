@@ -78,6 +78,36 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
+  describe('flow-node-http-callout-rename — reserved-name conflict guard', () => {
+    it('refuses to rewrite an alias a live executor owns, reporting a conflict', () => {
+      const notices: ConversionNotice[] = [];
+      const conflicts: { token: string; path: string; conversionId: string }[] = [];
+      const out = applyConversions(
+        { flows: [{ name: 'f', nodes: [{ id: 'a', type: 'webhook' }] }] },
+        {
+          onNotice: (n) => notices.push(n),
+          onConflict: (c) => conflicts.push({ token: c.token, path: c.path, conversionId: c.conversionId }),
+          reservedNodeTypes: new Set(['webhook']), // a third-party custom node owns this name
+        },
+      );
+      // Not rewritten — the custom node is preserved.
+      expect((out.flows as any[])[0].nodes[0].type).toBe('webhook');
+      expect(notices).toHaveLength(0);
+      expect(conflicts).toEqual([
+        { token: 'webhook', path: 'flows[0].nodes[0].type', conversionId: 'flow-node-http-callout-rename' },
+      ]);
+    });
+
+    it('converts normally when the alias is not a live type (build/validate seam)', () => {
+      // No reservedNodeTypes → the historical alias converts as usual.
+      const { stack, notices } = collectConversionNotices({
+        flows: [{ name: 'f', nodes: [{ id: 'a', type: 'webhook' }] }],
+      });
+      expect((stack.flows as any[])[0].nodes[0].type).toBe('http');
+      expect(notices).toHaveLength(1);
+    });
+  });
+
   describe('flow-node-crud-filter-alias (PD #12 retirement)', () => {
     it('renames config.filters → config.filter only for CRUD node types', () => {
       const { stack, notices } = collectConversionNotices({

@@ -28,6 +28,15 @@
 export const CONVERSION_NOTICE_CODE = 'OS_METADATA_CONVERTED' as const;
 
 /**
+ * Stable code for a **conversion conflict** — a rename whose old token is, in
+ * this environment, a *live* name owned by something else (e.g. a third-party
+ * flow-node executor registered under a since-retired official node type). The
+ * conversion refuses to rewrite it (which would silently break that owner) and
+ * instead surfaces this loud, actionable diagnostic (ADR-0078: never silent).
+ */
+export const CONVERSION_CONFLICT_CODE = 'OS_METADATA_CONVERSION_CONFLICT' as const;
+
+/**
  * A structured deprecation notice emitted once per applied conversion.
  *
  * Machine-readable first (ADR-0087 D4): the loader, `validate`, and the future
@@ -59,6 +68,48 @@ export interface ConversionApplication {
   from: string;
   to: string;
   path: string;
+}
+
+/** The per-conflict detail a conversion reports when it refuses to rewrite a live name. */
+export interface ConversionConflictDetail {
+  /** The reserved/retired token that is currently a live name owned by something else. */
+  token: string;
+  /** Where the conflicting site is, e.g. `flows[0].nodes[2].type`. */
+  path: string;
+  /** Why the rewrite was refused (actionable — tells the owner what to do). */
+  reason: string;
+}
+
+/**
+ * A structured conflict notice: a rename was **refused** because its old token
+ * is a live name in this environment. Same machine-first shape as
+ * {@link ConversionNotice}; different code.
+ */
+export interface ConversionConflictNotice {
+  code: typeof CONVERSION_CONFLICT_CODE;
+  conversionId: string;
+  surface: string;
+  token: string;
+  path: string;
+  message: string;
+}
+
+/**
+ * Environment-supplied context for a conversion pass. Empty on the pure
+ * build/validate seam (no runtime registry to consult); populated on the
+ * runtime load seam (`engine.registerFlow`) so a rename over an *open*
+ * namespace (flow node types) can detect a collision with a live owner instead
+ * of silently clobbering it.
+ */
+export interface ConversionContext {
+  /**
+   * Node types that are *live* in this environment (registered executors +
+   * action descriptors + structural types). A node-type rename whose old token
+   * is in this set is a conflict, not a conversion.
+   */
+  reservedNodeTypes?: ReadonlySet<string>;
+  /** Sink for a refused rewrite (see {@link ConversionConflictDetail}). */
+  reportConflict?: (detail: ConversionConflictDetail) => void;
 }
 
 /**
@@ -96,11 +147,15 @@ export interface MetadataConversion {
   summary: string;
   /**
    * Apply the conversion to a normalized stack, immutably. Returns the (possibly
-   * new) stack and calls `emit` once per rewritten site.
+   * new) stack and calls `emit` once per rewritten site. A conversion over an
+   * open namespace consults `context` (when supplied) to refuse — and report via
+   * `context.reportConflict` — a rewrite whose old token is a live name; a
+   * conversion over a closed surface ignores `context`.
    */
   apply(
     stack: Record<string, unknown>,
     emit: (detail: ConversionApplication) => void,
+    context?: ConversionContext,
   ): Record<string, unknown>;
   /** Old→new fixture pair driving the CI check. */
   fixture: ConversionFixture;

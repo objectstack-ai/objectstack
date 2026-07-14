@@ -12,7 +12,13 @@
  */
 
 import { ALL_CONVERSIONS } from './registry.js';
-import { CONVERSION_NOTICE_CODE, type ConversionNotice } from './types.js';
+import {
+  CONVERSION_CONFLICT_CODE,
+  CONVERSION_NOTICE_CODE,
+  type ConversionConflictNotice,
+  type ConversionContext,
+  type ConversionNotice,
+} from './types.js';
 
 export interface ApplyConversionsOptions {
   /**
@@ -21,6 +27,18 @@ export interface ApplyConversionsOptions {
    * choice. `objectstack validate` passes a sink that prints them.
    */
   onNotice?: (notice: ConversionNotice) => void;
+  /**
+   * Sink for each structured **conflict** — a rename refused because its old
+   * token is a live name in this environment (see {@link ConversionContext}).
+   * Populated by the runtime load seam; absent on the build/validate seam.
+   */
+  onConflict?: (notice: ConversionConflictNotice) => void;
+  /**
+   * Node types that are live in this environment. Supplied by the runtime load
+   * seam so open-namespace renames can detect a collision with a live owner
+   * rather than silently clobber it.
+   */
+  reservedNodeTypes?: ReadonlySet<string>;
 }
 
 /**
@@ -35,32 +53,69 @@ export function applyConversions(
   stack: Record<string, unknown>,
   options: ApplyConversionsOptions = {},
 ): Record<string, unknown> {
-  const { onNotice } = options;
+  const { onNotice, onConflict, reservedNodeTypes } = options;
   let current = stack;
 
   for (const conversion of ALL_CONVERSIONS) {
     const retiresIn = conversion.toMajor + 1;
-    current = conversion.apply(current, (detail) => {
-      if (!onNotice) return;
-      onNotice({
-        code: CONVERSION_NOTICE_CODE,
-        conversionId: conversion.id,
-        surface: conversion.surface,
-        toMajor: conversion.toMajor,
-        retiresIn,
-        from: detail.from,
-        to: detail.to,
-        path: detail.path,
-        message:
-          `[protocol] converted ${conversion.surface} at ${detail.path}: ` +
-          `'${detail.from}' → '${detail.to}' (deprecated; ADR-0087 conversion ` +
-          `'${conversion.id}', retires from the load path in protocol ${retiresIn}). ` +
-          `Update the source to '${detail.to}'.`,
-      });
-    });
+    const context: ConversionContext = {
+      reservedNodeTypes,
+      reportConflict: onConflict
+        ? (detail) =>
+            onConflict({
+              code: CONVERSION_CONFLICT_CODE,
+              conversionId: conversion.id,
+              surface: conversion.surface,
+              token: detail.token,
+              path: detail.path,
+              message: `[protocol] ${detail.reason} (ADR-0087 conversion '${conversion.id}').`,
+            })
+        : undefined,
+    };
+    current = conversion.apply(
+      current,
+      (detail) => {
+        if (!onNotice) return;
+        onNotice({
+          code: CONVERSION_NOTICE_CODE,
+          conversionId: conversion.id,
+          surface: conversion.surface,
+          toMajor: conversion.toMajor,
+          retiresIn,
+          from: detail.from,
+          to: detail.to,
+          path: detail.path,
+          message:
+            `[protocol] converted ${conversion.surface} at ${detail.path}: ` +
+            `'${detail.from}' → '${detail.to}' (deprecated; ADR-0087 conversion ` +
+            `'${conversion.id}', retires from the load path in protocol ${retiresIn}). ` +
+            `Update the source to '${detail.to}'.`,
+        });
+      },
+      context,
+    );
   }
 
   return current;
+}
+
+/**
+ * Apply the conversion pass to a **single flow definition** — the shape the
+ * runtime automation engine loads one at a time via `registerFlow`.
+ *
+ * This is the runtime load seam ADR-0087 D2 calls for: a stored flow authored
+ * against an old shape (e.g. a `delete_record` node with `config.filters`, or a
+ * `webhook` callout node) is canonicalized on rehydration, so the executor only
+ * ever sees the canonical shape. Callers pass `reservedNodeTypes` (their live
+ * executor registry) so an open-namespace rename over a live custom node becomes
+ * a reported conflict, not a silent clobber. Non-object input is returned
+ * unchanged.
+ */
+export function applyConversionsToFlow<T>(flow: T, options: ApplyConversionsOptions = {}): T {
+  if (flow == null || typeof flow !== 'object' || Array.isArray(flow)) return flow;
+  const converted = applyConversions({ flows: [flow as Record<string, unknown>] }, options);
+  const flows = converted.flows;
+  return Array.isArray(flows) && flows.length > 0 ? (flows[0] as T) : flow;
 }
 
 /**

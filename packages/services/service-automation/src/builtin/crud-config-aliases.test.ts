@@ -90,30 +90,28 @@ describe('CRUD config-key aliases: object→objectName (executor shim) + filters
     expect(warns.length).toBe(before);
   });
 
-  it('no longer honors a raw `filters` alias in the executor (retired to the D2 conversion layer)', async () => {
-    const engine = new AutomationEngine(silentLogger());
-    const { data, calls } = fakeData();
-    const warns: string[] = [];
-    registerCrudNodes(engine, ctxWith(data, collectingLogger(warns)));
-
-    // A flow that reached the executor WITHOUT going through the load conversion
-    // still carries `filters`. The executor now reads only the canonical `filter`,
-    // so `filters` is ignored and no `filters`→`filter` warning is emitted here.
-    engine.registerFlow('gr', getRecordFlow({ objectName: 'crm_lead', filters: { id: 'L1' } }));
-    await engine.execute('gr');
-
-    expect(calls[0].opts.where).toEqual({}); // `filters` no longer honored by the executor
-    const filterWarn = warns.find((w) => w.includes("'filters'"));
-    expect(filterWarn).toBeFalsy();
-  });
-
-  it('the D2 conversion at load rewrites `filters` → `filter` so the flow works end-to-end', async () => {
+  it('a stored `filters` flow is canonicalized at registerFlow, so the filter is NOT dropped', async () => {
+    // Risk-1 regression guard (ADR-0087 D2 runtime load seam). Before the seam
+    // was wired, retiring the executor's `filters` fallback meant a stored
+    // `delete_record`/`get_record` flow carrying `filters` reached the executor
+    // with an empty `filter` — silently widening the query to the whole table.
+    // Now `registerFlow` runs the D2 conversion, so `filters`→`filter` happens
+    // on rehydration and the stored filter survives.
     const engine = new AutomationEngine(silentLogger());
     const { data, calls } = fakeData();
     registerCrudNodes(engine, ctxWith(data, silentLogger()));
 
-    // Author with the deprecated `filters` key, then run it through the same load
-    // seam a real stack load uses. The conversion canonicalizes it to `filter`.
+    engine.registerFlow('gr', getRecordFlow({ objectName: 'crm_lead', filters: { id: 'L1' } }));
+    await engine.execute('gr');
+
+    expect(calls[0].opts.where).toEqual({ id: 'L1' }); // filter preserved, not dropped
+  });
+
+  it('the same conversion runs on the build/validate seam too (normalizeStackInput)', async () => {
+    const engine = new AutomationEngine(silentLogger());
+    const { data, calls } = fakeData();
+    registerCrudNodes(engine, ctxWith(data, silentLogger()));
+
     const raw = getRecordFlow({ objectName: 'crm_lead', filters: { id: 'L1' }, outputVariable: 'lead' });
     const converted = (normalizeStackInput({ flows: [raw] }).flows as any[])[0];
     engine.registerFlow('gr', converted);
