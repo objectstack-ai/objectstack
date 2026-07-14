@@ -215,3 +215,71 @@ tracked as framework#2898 rather than silently expanding this change.
 - Implementation: `packages/plugins/plugin-security/src/permission-set-projection.ts`,
   `packages/metadata-protocol/src/protocol.ts` (`registerMutationProjector`),
   `packages/plugins/plugin-security/src/security-plugin.ts` (wiring).
+
+---
+
+## Addendum (2026-07-14): generalizing to the sibling declared-metadata ↔ queryable-record types
+
+`sys_permission_set` is not the only object with **two stores** — a declared
+definition in the metadata layer AND a queryable `sys_*` record, historically
+synced only at boot and on publish. An audit found three siblings seeded the
+same way: `sys_position` (`bootstrapDeclaredPositions`), `sys_sharing_rule`
+(`bootstrapDeclaredSharingRules`), and `sys_capability`
+(`bootstrapSystemCapabilities`). This addendum promotes the decision from a
+permission-set-specific fix to a **classification rule** for all of them, so a
+future maintainer neither leaves a split-brain unaddressed nor naively applies
+the wrong cure.
+
+### The general invariant
+
+A declared definition and its queryable record must not be **two independently
+writable authorities** reconciled only at boot/publish. Exactly one is
+authoritative; the other is derived and documented as such — enforced
+structurally (a choke point every write traverses), not by a subscriber a new
+path can bypass.
+
+### The classification criterion — *which store does enforcement read at request time?*
+
+The cure follows the authority, and the authority is decided by one question:
+**at request time, does the runtime read the metadata definition or the data
+record?**
+
+- **Metadata-authoritative** (enforcement resolves the definition from the
+  metadata layer) → the record is a **pure projection** (this ADR's machinery:
+  data-door write-through + awaited `registerMutationProjector` +
+  `registerAuthoringGate` + boot reconciliation). The record must never be an
+  independent authority, because it isn't the one enforcement trusts.
+- **Record-authoritative** (enforcement reads the `sys_*` record live) → the
+  record is the authority and the declared metadata is a **boot SEED only**,
+  not a competing overlay. The cure is the mirror image: the seeder must not
+  clobber an environment-edited record, and no path may treat the declared
+  body as a live override that silently loses to (or fights) the record. **Do
+  not** apply the projection machinery here — projecting the record *from*
+  metadata would invert the real authority.
+
+The generic protocol seams added by this ADR (`registerMutationProjector`,
+`registerAuthoringGate`) serve the *metadata-authoritative* case and are
+reusable by any such type; the record-authoritative case needs no new seam,
+only a seed-not-clobber discipline.
+
+### Per-type decisions
+
+| Type | Enforcement reads | Class | Decision |
+| :-- | :-- | :-- | :-- |
+| `sys_permission_set` | metadata (`PermissionEvaluator.resolvePermissionSets` → `metadata.list('permission')`, DB row only as fallback) | metadata-authoritative | **Record is a projection — done** (this ADR). |
+| `sys_sharing_rule` | the record, live (`sharing-plugin.ts` "rule evaluation reads `sys_sharing_rule` live"; `sharing-rule-service` `engine.find`) | **record-authoritative** | Declared rules are a **boot seed**; the record is the authority. Do **not** project. Audit that `bootstrapDeclaredSharingRules` preserves env-edited rows (seed-not-clobber) and that the metadata overlay is not read as a live override. |
+| `sys_position` | mixed — position→permission-set resolution is metadata-first for the *sets*, but the `sys_position` **record** (incl. its `permissions` field, bindings, `delegatable`, `admin` gating) is read live by the anchor gate and `DelegatedAdminGate` | **needs the seed-vs-authority audit** against the criterion above; likely record-authoritative for bindings with metadata seeding identity | Classify precisely, then either project (if the position *definition* is enforced from metadata) or make declared positions seed-only. |
+| `sys_capability` | the record (curated registry read for capability existence) | record-authoritative (registry) | Seed-only; low authoring surface. Audit seed-not-clobber. |
+
+Only `sys_permission_set` was both metadata-authoritative **and** carried a
+harmful, actively-drifting split-brain, which is why it was fixed first and in
+full. The others are recorded here with their class so the follow-up work is
+scoped, not rediscovered — tracked in framework#2909.
+
+### Why an addendum, not a new ADR
+
+The decision — *one authoritative store; the other derived; enforced
+structurally* — is identical; only the per-type **direction** differs. A
+separate ADR would duplicate the rationale and split the classification from
+the decision that motivates it. This addendum keeps the rule and its
+applications in one place.
