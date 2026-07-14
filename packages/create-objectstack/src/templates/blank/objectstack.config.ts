@@ -11,10 +11,4 @@ export default defineStack({
     description: 'Minimal ObjectStack environment — a clean slate for building.',
   },
   objects: Object.values(objects),
-  api: {
-    rest: {
-      enabled: true,
-      basePath: '/api',
-    },
-  },
 });

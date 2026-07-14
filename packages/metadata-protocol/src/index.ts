@@ -2,6 +2,7 @@
 
 export { ObjectStackProtocolImplementation, ConcurrentUpdateError, normalizeViewMetadata } from './protocol.js';
 export type { UninstallCleanup, UninstallCleanupOutcome } from './protocol.js';
+export type { MetadataMutationEvent, MetadataMutationProjector, MutationProjectionOutcome } from './protocol.js';
 
 export { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 export type {

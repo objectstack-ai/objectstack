@@ -1,0 +1,267 @@
+---
+title: Your First Project
+description: Scaffold a standalone ObjectStack project with npm, understand what was generated, extend the data model, call the REST API, and build a deployable artifact — no monorepo checkout, no AI agent required.
+---
+
+# Your First Project
+
+This is the hands-on path for developers building **on** ObjectStack from the
+published npm packages — you never clone the framework repository. In about ten
+minutes you will scaffold a project, run it, add a field by hand, call the
+generated REST API, and compile the artifact you would deploy.
+
+<Callout type="info">
+**Two ways to build.** ObjectStack is designed AI-first: normally
+[an agent authors the metadata and you verify it](/docs/getting-started/build-with-claude-code).
+This page walks the same ground *manually* so you understand every file the
+agent would touch — useful for evaluating the platform, wiring CI, or working
+without an agent. The two paths produce identical projects.
+</Callout>
+
+## Prerequisites
+
+| Tool | Minimum | Check |
+|:---|:---|:---|
+| **Node.js** | 18+ | `node --version` |
+| A package manager | npm 9+ / pnpm 8+ / yarn / bun | `npm --version` |
+
+That's all. A standalone project does **not** need pnpm, TypeScript pre-installed,
+or a database server — the default template runs on an in-memory driver, and
+TypeScript comes in as a dev dependency.
+
+## 1. Scaffold
+
+```bash
+npm create objectstack@latest my-app
+cd my-app
+```
+
+The scaffolder (`create-objectstack`) does four things:
+
+1. **Copies a template** into `my-app/` and rewrites its identity — the npm
+   package name, the manifest `name`/`displayName`, and a **namespace** derived
+   from your project name (`my-app` → `my_app`). Every object in the template is
+   renamed to carry that prefix (`my_app_note`), which is what
+   `os validate` later enforces.
+2. **Installs dependencies** (pnpm if available, otherwise npm).
+3. **Installs the AI skills bundle** (`npx skills add objectstack-ai/framework --all`)
+   so a coding agent is productive in the project from the first prompt.
+4. **Writes `AGENTS.md`** (and `.github/copilot-instructions.md`) with the
+   project conventions — including the rule to run `npm run validate` after
+   every metadata change.
+
+Steps 3–4 cost nothing if you never use an agent; skip them with
+`--skip-skills` if you prefer.
+
+### Templates
+
+| Template | Source | Description |
+|:---|:---|:---|
+| `blank` *(default)* | bundled, works offline | One object, REST API — a clean slate |
+| `todo` | remote | Universal task & project management starter |
+| `compliance` | remote | Compliance posture & evidence management (SOC2 / ISO27001) |
+| `content` | remote | Content marketing pipeline — editorial calendar & channel ROI |
+| `contracts` | remote | Post-signature CLM — approvals, obligations, renewals |
+| `procurement` | remote | Source-to-pay — vendors, POs, receipts, invoice matching |
+
+```bash
+npm create objectstack@latest my-app -- --template todo
+```
+
+Remote templates are fetched from the
+[`objectstack-ai/templates`](https://github.com/objectstack-ai/templates)
+repository at scaffold time and need network access; `blank` is bundled inside
+the npm package and always works offline.
+
+<Callout type="tip">
+`os init` (from `@objectstack/cli`) is an alternative scaffolder with `app` /
+`plugin` / `empty` templates — see the [CLI reference](/docs/getting-started/cli#os-init).
+`npm create objectstack` is the recommended entry point for new standalone projects.
+</Callout>
+
+## 2. What was generated
+
+```
+my-app/
+├── objectstack.config.ts        # defineStack() — the single entry point
+├── objectstack.manifest.json    # name, namespace, version
+├── package.json
+├── tsconfig.json
+├── AGENTS.md                    # conventions for coding agents
+└── src/
+    └── objects/
+        ├── index.ts             # barrel — re-exports every object
+        └── note.object.ts       # a sample object
+```
+
+Two files matter most:
+
+**`objectstack.config.ts`** wires everything together. There is no
+filename-suffix magic — metadata exists in the app only if it is imported here:
+
+```typescript title="objectstack.config.ts"
+import { defineStack } from '@objectstack/spec';
+import * as objects from './src/objects/index.js';
+
+export default defineStack({
+  manifest: {
+    id: 'my-app',
+    namespace: 'my_app',
+    version: '0.1.0',
+    type: 'app',
+    name: 'My App',
+  },
+  objects: Object.values(objects),
+});
+```
+
+The REST API needs no configuration — it is on by default for every object
+with `apiEnabled`.
+
+**`src/objects/note.object.ts`** is a complete data model — schema, validation,
+API surface, and searchability in one typed definition:
+
+```typescript title="src/objects/note.object.ts"
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+export const Note = ObjectSchema.create({
+  name: 'my_app_note',          // namespace-prefixed, snake_case
+  label: 'Note',
+  pluralLabel: 'Notes',
+  icon: 'sticky-note',
+
+  fields: {
+    title: Field.text({ label: 'Title', required: true, searchable: true, maxLength: 200 }),
+    body: Field.textarea({ label: 'Body' }),
+  },
+
+  sharingModel: 'private',      // org-wide default — an explicit, authored decision
+  enable: { apiEnabled: true, searchable: true },
+});
+```
+
+### The packages you depend on
+
+A standalone project uses a handful of published packages — this is the entire
+framework surface you install:
+
+| Package | What it does |
+|:---|:---|
+| `@objectstack/spec` | The protocol: `defineStack`, `ObjectSchema`, `Field.*` builders, all Zod schemas. Your metadata imports only this. |
+| `@objectstack/runtime` | The kernel that interprets metadata at runtime. |
+| `@objectstack/driver-memory` | In-memory database driver for development. Swap for SQLite / Postgres / MongoDB in production — [no code changes](/docs/data-modeling/drivers). |
+| `@objectstack/plugin-hono-server` | The HTTP server that mounts the generated REST API. |
+| `@objectstack/cli` *(dev)* | The `os` / `objectstack` CLI: `dev`, `validate`, `build`, `start`. |
+
+## 3. Run it
+
+```bash
+npm run dev            # objectstack dev — hot reload
+```
+
+Or with the visual Console (data browser, metadata explorer, API docs):
+
+```bash
+npx os dev --ui        # then open http://localhost:3000/_console/
+```
+
+## 4. Call your API
+
+The REST API is derived from the object metadata — you wrote no routes. Data
+endpoints run under the same permission model as the UI, so first sign in as
+the dev admin the server seeds on an empty database
+(`admin@objectos.ai` / `admin123`):
+
+```bash
+# Sign in once — stores the session cookie
+curl -c cookies.txt -X POST http://localhost:3000/api/v1/auth/sign-in/email \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@objectos.ai", "password": "admin123"}'
+
+# Create a record
+curl -b cookies.txt -X POST http://localhost:3000/api/v1/data/my_app_note \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Hello ObjectStack", "body": "Created via the generated API"}'
+
+# Query records (filtering, sorting, pagination built in)
+curl -b cookies.txt "http://localhost:3000/api/v1/data/my_app_note?select=title&sort=-created_at&top=10"
+```
+
+See the [Data API](/docs/api/data-api) for the full CRUD, batch, and analytics
+surface, and the [Client SDK](/docs/api/client-sdk) for the typed TypeScript
+client (`@objectstack/client`).
+
+## 5. Extend the model
+
+Add a field and a second object by hand — the same edit an agent would make.
+
+```typescript title="src/objects/note.object.ts"
+  fields: {
+    title: Field.text({ label: 'Title', required: true, searchable: true, maxLength: 200 }),
+    body: Field.textarea({ label: 'Body' }),
+    status: Field.select({
+      label: 'Status',
+      options: [
+        { label: 'Draft', value: 'draft', default: true },
+        { label: 'Published', value: 'published' },
+      ],
+    }),
+  },
+```
+
+New objects follow the same pattern: create `src/objects/<name>.object.ts` with
+a `name` of `<namespace>_<short_name>`, then re-export it from
+`src/objects/index.ts` (the barrel is what the config imports).
+
+After **every** metadata change, run the gate:
+
+```bash
+npm run validate
+```
+
+`os validate` checks schema compliance, CEL predicate scoping, and widget
+bindings — the classes of mistakes that otherwise fail *silently* at runtime.
+See [Validating Metadata](/docs/getting-started/validating-metadata).
+
+## 6. Build the deployable artifact
+
+```bash
+npm run build          # objectstack build → dist/objectstack.json
+```
+
+The artifact is a **portable, self-describing deployment unit**: one JSON file
+containing your entire app. Any server with `@objectstack/cli` can boot it —
+no TypeScript, no build step on the host:
+
+```bash
+npx os start --artifact ./dist/objectstack.json --port 8080
+```
+
+Database URL, auth secret, and environment identity stay *outside* the
+artifact and are injected at boot via flags or `OS_*` environment variables —
+which is exactly what makes it container-friendly.
+
+## Next steps
+
+<Cards>
+  <Card
+    title="Build with Claude Code"
+    href="/docs/getting-started/build-with-claude-code"
+    description="The AI-first loop — describe the app, let an agent author the metadata you just wrote by hand."
+  />
+  <Card
+    title="Self-Hosted Deployment"
+    href="/docs/deployment/self-hosting"
+    description="Ship the artifact you just built — Docker, Postgres, reverse proxy, health checks."
+  />
+  <Card
+    title="Data Modeling"
+    href="/docs/data-modeling"
+    description="The full field catalog, relationships, validation rules, and formulas."
+  />
+  <Card
+    title="CLI Reference"
+    href="/docs/getting-started/cli"
+    description="Every os command — dev, validate, build, start, generate, migrate."
+  />
+</Cards>

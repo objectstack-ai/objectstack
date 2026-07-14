@@ -52,7 +52,7 @@ export const SysOrganizationDetailPage: Page = {
         position: 'top',
         items: [
           {
-            label: 'Members',
+            label: { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros' },
             icon: 'users',
             children: [
               {
@@ -64,13 +64,13 @@ export const SysOrganizationDetailPage: Page = {
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'Members',
+                  title: { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros' },
                 },
               },
             ],
           },
           {
-            label: 'Invitations',
+            label: { en: 'Invitations', 'zh-CN': '邀请', 'ja-JP': '招待', 'es-ES': 'Invitaciones' },
             icon: 'mail',
             children: [
               {
@@ -82,13 +82,13 @@ export const SysOrganizationDetailPage: Page = {
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'Invitations',
+                  title: { en: 'Invitations', 'zh-CN': '邀请', 'ja-JP': '招待', 'es-ES': 'Invitaciones' },
                 },
               },
             ],
           },
           {
-            label: 'Teams',
+            label: { en: 'Teams', 'zh-CN': '团队', 'ja-JP': 'チーム', 'es-ES': 'Equipos' },
             icon: 'users-round',
             children: [
               {
@@ -100,7 +100,7 @@ export const SysOrganizationDetailPage: Page = {
                   sort: [{ field: 'name', order: 'asc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'Teams',
+                  title: { en: 'Teams', 'zh-CN': '团队', 'ja-JP': 'チーム', 'es-ES': 'Equipos' },
                 },
               },
             ],

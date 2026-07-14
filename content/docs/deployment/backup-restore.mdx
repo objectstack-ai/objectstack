@@ -1,0 +1,126 @@
+---
+title: Backup & Restore
+description: What state an ObjectStack deployment actually holds, how to back up each piece per database driver, and the restore drill to rehearse before you need it.
+---
+
+# Backup & Restore
+
+The [go-live checklist](/docs/deployment/production-readiness#go-live-checklist)
+requires a documented, tested backup/restore drill. This page is that drill:
+what to back up, how, and how to prove the restore works.
+
+## What state a deployment holds
+
+An ObjectStack app is deliberately easy to back up because almost everything
+lives in one of four places:
+
+| State | Where it lives | Backup strategy |
+|:---|:---|:---|
+| **Business data** (records, users, orgs, runtime-authored metadata, encrypted `sys_secret` values) | The database behind `OS_DATABASE_URL` | Database-native backup — see below |
+| **Authored metadata** (objects, views, flows, …) | Your project source + the compiled artifact | Git. The artifact is rebuildable with `os build`; no runtime backup needed |
+| **Secrets** (`OS_SECRET_KEY`, `OS_AUTH_SECRET`, DB credentials) | Your secret manager | Escrow the values themselves — see the warning below |
+| **The ObjectStack home dir** (`~/.objectstack` or `<cwd>/.objectstack`: default SQLite DB under `data/`, uploaded files under `data/uploads/`, dev-minted keys) | Local filesystem | Include in file backups on single-host deployments; empty on stateless containers that set `OS_DATABASE_URL` + `OS_SECRET_KEY` explicitly |
+
+<Callout type="warn">
+**A database backup without `OS_SECRET_KEY` is an incomplete backup.** Every
+`sys_secret` value (encrypted settings, `secret` fields, datasource
+credentials) is encrypted under that one key. Restoring the database on a new
+host without the original key leaves those values permanently undecryptable.
+Escrow the key in your secret manager the day you generate it, and treat
+key + database as one backup unit.
+</Callout>
+
+## Backing up the database
+
+Use the native tooling of whatever `OS_DATABASE_URL` points at — ObjectStack
+adds no extra backup surface on top of the database.
+
+### PostgreSQL
+
+```bash
+# Logical backup (small/medium databases; restore with pg_restore)
+pg_dump --format=custom "$OS_DATABASE_URL" > backup-$(date +%F).dump
+
+# Larger deployments: continuous archiving / point-in-time recovery
+# (WAL archiving, or your provider's managed snapshots)
+```
+
+### SQLite (single host)
+
+The database is a single file — but never copy it while the server is
+writing. Use SQLite's online backup instead:
+
+```bash
+sqlite3 /srv/data/app.db ".backup '/backups/app-$(date +%F).db'"
+```
+
+The default location when `OS_DATABASE_URL` is unset is
+`<home>/data/objectstack.db` under the ObjectStack home directory.
+
+### Turso / libSQL and managed databases
+
+Use the provider's snapshot, branching, or point-in-time-restore facilities.
+Nothing ObjectStack-specific applies.
+
+## Backing up uploaded files
+
+The local storage adapter keeps uploads under `OS_STORAGE_ROOT` (default
+`./.objectstack/data/uploads`). On single-host deployments, include that
+directory in the same schedule as the database so records and their
+attachments restore to the same point in time. Deployments using an external
+storage service (S3-compatible, etc.) inherit that service's durability and
+versioning instead.
+
+## The restore drill
+
+Rehearse this on a scratch host **before** go-live, and again after any
+storage change. A backup you haven't restored is a hope, not a backup.
+
+<Steps>
+
+### Provision a clean host
+
+Fresh container or VM. Install Node 18+ and `@objectstack/cli`.
+
+### Restore the database
+
+```bash
+pg_restore --clean --if-exists -d "$OS_DATABASE_URL" backup-2026-07-14.dump
+# or copy the SQLite file / restore the provider snapshot
+```
+
+### Provide the original secrets
+
+Set `OS_SECRET_KEY` and `OS_AUTH_SECRET` to the **escrowed originals** — not
+freshly generated values. Restore `OS_STORAGE_ROOT` contents if you use local
+file storage.
+
+### Boot from the artifact and verify
+
+```bash
+OS_ARTIFACT_PATH=./objectstack.json OS_PORT=8080 os start
+curl -fsS http://localhost:8080/api/v1/health
+curl -fsS http://localhost:8080/api/v1/ready
+```
+
+Then prove the restore end-to-end: sign in with a real account, open a record
+that existed before the backup, and read a value that lives in an encrypted
+setting (which exercises `OS_SECRET_KEY`).
+
+</Steps>
+
+## Retention is not backup
+
+The platform's `lifecycle` declarations bound telemetry data (activity 14d,
+job runs 30d, notifications 90d, audit 90d-hot) — deleted-by-policy data is
+gone from backups taken afterwards. If compliance needs longer, extend
+`lifecycle.retention_overrides` **before** go-live, and register an `archive`
+datasource if audit data must move to cold storage instead of being retained
+hot. See [Production Readiness](/docs/deployment/production-readiness).
+
+## Related
+
+- [Self-Hosted Deployment](/docs/deployment/self-hosting)
+- [Production Readiness](/docs/deployment/production-readiness)
+- [Environment Variables](/docs/deployment/environment-variables)
+- [Drivers](/docs/data-modeling/drivers)

@@ -61,7 +61,7 @@ export const Ticket = ObjectSchema.create({
 
   fields: {
     subject: Field.text({ label: 'Subject', required: true, searchable: true, maxLength: 200 }),
-    description: Field.longText({ label: 'Description' }),
+    description: Field.textarea({ label: 'Description' }),
 
     status: Field.select({
       label: 'Status',
@@ -75,6 +75,7 @@ export const Ticket = ObjectSchema.create({
     }),
   },
 
+  sharingModel: 'private',      // org-wide default (OWD) — required by the security gate
   enable: { apiEnabled: true, searchable: true },
 });
 ```
@@ -83,11 +84,14 @@ export const Ticket = ObjectSchema.create({
 
 - **Names** are `snake_case` and namespace-prefixed (`support_desk_ticket`) — the
   scaffolder derives the prefix from your project name.
-- **Field types** are `Field.*` builders (`text`, `longText`, `select`, `date`,
+- **Field types** are `Field.*` builders (`text`, `textarea`, `select`, `date`,
   `lookup`, …), not raw strings. A `select`'s `options` carry the exact labels,
   values, and colors you'll see in the UI — verify these match your intent.
 - **`required`, `default`, `searchable`** encode behavior the UI and API inherit
   automatically.
+- **`sharingModel`** is the org-wide default for records the user doesn't own —
+  an explicit, authored security decision (`private` unless you have a reason
+  otherwise). The validation gate rejects custom objects that omit it.
 
 <Callout type="info">
 This one definition powers the REST API, the Console UI, **and the MCP tools

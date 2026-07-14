@@ -14,7 +14,12 @@ import {
 } from './explain-engine.js';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
-import { bootstrapDeclaredPermissions, upsertPackagePermissionSet, subscribeEnvPermissionProjection } from './bootstrap-declared-permissions.js';
+import { bootstrapDeclaredPermissions, upsertPackagePermissionSet } from './bootstrap-declared-permissions.js';
+import {
+  createPermissionSetWriteThrough,
+  registerPermissionSetProjection,
+  reconcilePermissionSetProjection,
+} from './permission-set-projection.js';
 import {
   syncAudienceBindingSuggestions,
   listAudienceBindingSuggestions,
@@ -487,17 +492,21 @@ export class SecurityPlugin implements Plugin {
         );
       }
 
-      // [ADR-0086 P2 — 块2] Two-doors write gate. A permission set stamped
-      // `managed_by:'package'` is owned by the PACKAGE door: it is authored in
-      // the package and lands via publish (块1). The ADMIN door (this data-plane
-      // write path) must NOT edit, delete, or forge that provenance — otherwise
-      // the next boot re-seed silently reverts the admin's change and the
-      // provenance axis becomes a lie. Placed BEFORE the empty-principal
-      // fall-open and the CRUD check so it is a real, unconditional data-layer
-      // boundary — it holds even for a principal-less context and even for a
-      // superuser with modifyAllRecords. System/boot writes carry `isSystem` and
-      // already short-circuited the whole middleware above, so the seeder and
-      // the publish materializer pass straight through.
+      // [ADR-0086 P2 — 块2, evolved by ADR-0094] Two-doors write gate. A
+      // permission set stamped `managed_by:'package'` is owned by the PACKAGE
+      // door: its BASELINE is authored in the package and lands via publish
+      // (块1). The admin door must never FORGE that provenance (insert or
+      // update), and the lifecycle ops with no overlay translation
+      // (transfer/restore/purge) stay refused on package rows. Ordinary
+      // `update`/`delete` on a package row are handled downstream by the
+      // ADR-0094 write-through, which translates them into env-scope OVERLAY
+      // operations (customize / reset via the standard ADR-0005 layering) —
+      // the boot re-seed can no longer revert an admin's change, because the
+      // change lives in the overlay and the record projects overlay-wins.
+      // Placed BEFORE the empty-principal fall-open and the CRUD check so the
+      // forging boundary holds even for a principal-less context and a
+      // superuser with modifyAllRecords. System/boot writes carry `isSystem`
+      // and already short-circuited the whole middleware above.
       await this.assertPackageManagedWriteGate(opCtx);
 
       // [ADR-0090 D5/D9] Audience-anchor binding guard — like the package
@@ -1047,16 +1056,37 @@ export class SecurityPlugin implements Plugin {
 
     ctx.logger.info('Security middleware registered on ObjectQL engine');
 
+    // [ADR-0094] Data-door write-through: every non-system CRUD write on
+    // `sys_permission_set` is redirected into the metadata store (the ONE
+    // authoritative store for definitions); the record is projector-owned.
+    // Registered AFTER the security middleware, so it runs INSIDE it — the
+    // two-doors gate, the delegated-admin gate, and the CRUD/FLS checks have
+    // all passed before a write is translated. Kernels without a capable
+    // metadata protocol pass through to the legacy direct write (single
+    // store — no split brain to prevent).
+    ql.registerMiddleware(
+      createPermissionSetWriteThrough({
+        ql,
+        metadata,
+        getProtocol: () => {
+          try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
+        },
+        logger: ctx.logger,
+      }),
+      { object: 'sys_permission_set' },
+    );
+
     // Defer platform admin bootstrap until all plugins finish starting —
     // sys_user / sys_permission_set objects must be registered (by
     // plugin-auth and platform-objects respectively) before we can
     // insert seed rows. Falls back to immediate execution when the
     // kernel does not expose `hook` (test stubs).
     let bootstrapRanOnce = false;
-    // [framework#2857] Guard so the env-projection mutation subscriber is wired
-    // exactly once even though runBootstrap re-runs (e.g. after the first user
-    // insert) — onMetadataMutation appends listeners, so re-wiring would project
-    // each save N times.
+    // [ADR-0094] Guard so the env-projection wiring runs exactly once even
+    // though runBootstrap re-runs (e.g. after the first user insert) —
+    // registerMutationProjector replaces idempotently, but the legacy
+    // onMetadataMutation fallback appends listeners, and re-wiring that would
+    // project each save N times.
     let envProjectionWired = false;
     const runBootstrap = async () => {
       try {
@@ -1179,19 +1209,29 @@ export class SecurityPlugin implements Plugin {
               },
             );
           }
-          // [framework#2857] Environment door — project an env-scope permission
-          // metadata save onto its sys_permission_set record. saveMetaItem writes
-          // only the sys_metadata overlay, so without this the admin/Setup surface
-          // (which reads the record) went stale while the layered read showed the
-          // edit. onMetadataMutation fires post-persistence for active (non-draft)
-          // saves; the subscriber re-reads the FRESH effective body via the layered
-          // read (the MetadataManager registry would hand back the stale
-          // boot-declared body for a seeded set) and projects it. Env-authored
-          // rows only — a package record's baseline is its declaration, owned by
-          // boot re-seed / publish, never an env override.
+          // [ADR-0094] Environment door — the `permission` mutation projector.
+          // The protocol AWAITS it inside saveMetaItem / publishMetaItem /
+          // deleteMetaItem, so the sys_permission_set record (and the metadata
+          // manager's in-memory entry, which the evaluator's registry-first
+          // list('permission') resolution reads) already reflects a Studio
+          // save when it returns — no projection race. Falls back to the
+          // fire-and-forget onMetadataMutation subscription (#2857/#2867) on
+          // protocols that predate registerMutationProjector.
           if (!envProjectionWired) {
-            const unsub = subscribeEnvPermissionProjection(protocol, ql, ctx.logger);
-            if (unsub) envProjectionWired = true;
+            envProjectionWired = registerPermissionSetProjection(protocol, {
+              ql, metadata: this.metadata, logger: ctx.logger,
+            });
+          }
+          // [ADR-0094 D4] Converge record ↔ metadata: project env overlays
+          // onto records (creating missing ones), backfill legacy data-door
+          // creations into the metadata store once, and heal drifted records
+          // from the effective body (metadata wins). Idempotent per boot.
+          try {
+            await reconcilePermissionSetProjection(protocol, {
+              ql, metadata: this.metadata, logger: ctx.logger,
+            });
+          } catch (e) {
+            ctx.logger.warn('[security] permission-set projection reconciliation failed (ADR-0094)', { error: (e as Error).message });
           }
         } catch (e) {
           ctx.logger.warn('[security] permission publish-materializer registration failed', { error: (e as Error).message });
@@ -1512,16 +1552,21 @@ export class SecurityPlugin implements Plugin {
    * `*Many` paths, out of scope for the by-id pre-image check).
    */
   /**
-   * [ADR-0086 P2 — 块2] Two-doors data-layer write gate for `sys_permission_set`.
+   * [ADR-0086 P2 — 块2, evolved by ADR-0094] Two-doors data-layer gate for
+   * `sys_permission_set`.
    *
-   * A row with `managed_by:'package'` is owned by the package door (authored in
-   * the package, materialized on publish). The admin door — the generic
-   * `/api/v1/data/sys_permission_set` write path this middleware guards — must
-   * not mutate or delete it, nor may it forge that provenance on insert. Fails
-   * CLOSED and never depends on the caller's grants, so a platform admin with
-   * `modifyAllRecords` is blocked just the same. System/boot writes never reach
-   * here (the middleware short-circuits on `isSystem`), so the seeder and the
-   * publish materializer are unaffected.
+   * A row with `managed_by:'package'` is owned by the package door (its
+   * baseline is authored in the package, materialized on publish). This gate
+   * refuses (a) FORGING that provenance through the admin door — insert or
+   * update, single object or array — and (b) the lifecycle ops with no
+   * overlay translation (`transfer`/`restore`/`purge`) on package rows.
+   * Ordinary `update`/`delete` pass through: the ADR-0094 write-through
+   * downstream translates them into env-scope overlay operations (customize /
+   * reset), and re-asserts the refusal itself when the kernel has no metadata
+   * overlay layer. Fails CLOSED and never depends on the caller's grants, so
+   * a platform admin with `modifyAllRecords` cannot forge provenance either.
+   * System/boot writes never reach here (the middleware short-circuits on
+   * `isSystem`), so the seeder and the publish materializer are unaffected.
    */
   /**
    * [ADR-0090 D5/D9] Reject binding a HIGH-PRIVILEGE permission set to an
@@ -1600,6 +1645,16 @@ export class SecurityPlugin implements Plugin {
       );
     }
     if (op === 'insert') return; // no existing row to protect
+
+    // [ADR-0094, direction confirmed 2026-07-14] `update`/`delete` on a
+    // package-managed row are no longer refused here: the write-through
+    // middleware (which runs after this gate + the delegated-admin gate +
+    // the CRUD checks) translates them into env-scope OVERLAY operations —
+    // customize / reset via the standard ADR-0005 layering — and itself
+    // re-asserts the legacy refusal when the kernel has no metadata overlay
+    // layer to carry the customization. The lifecycle ops below have no
+    // overlay translation, so the package-row protection stays for them.
+    if (op === 'update' || op === 'delete') return;
 
     if (!this.ql) return;
 
@@ -1742,7 +1797,15 @@ export class SecurityPlugin implements Plugin {
     ) {
       return null;
     }
-    const withCheck = this.collectRLSPolicies(permissionSets, object, operation).filter(
+    // [ADR-0090 P2] Pass the caller's held positions — a `check` policy that
+    // declares a `positions` applicability domain must fire for holders of
+    // those positions (and only them), exactly like the `using` path.
+    const withCheck = this.collectRLSPolicies(
+      permissionSets,
+      object,
+      operation,
+      (context?.positions ?? []) as string[],
+    ).filter(
       (p) => typeof (p as { check?: string }).check === 'string' && (p as { check?: string }).check!.trim() !== '',
     );
     if (withCheck.length === 0) return null;

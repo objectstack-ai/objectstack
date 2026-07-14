@@ -22,11 +22,11 @@ The CLI is available as `objectstack` or the shorter alias `os`. Installed as a 
 ### Create a project
 
 ```bash
-npx @objectstack/cli init my-app
+npm create objectstack@latest my-app
 cd my-app
 ```
 
-This scaffolds a working project with `objectstack.config.ts`, a sample object, and all dependencies installed.
+This scaffolds a working project with `objectstack.config.ts`, a sample object, and all dependencies installed — plus the AI skills bundle and an `AGENTS.md` for coding agents. (`os init` is the CLI's own scaffolder for plugin skeletons and bare configs — see [below](#os-init).)
 
 ### Add more metadata
 
@@ -79,6 +79,11 @@ predicate/schema/binding mistakes that fail silently at runtime), and `os dev --
 #### `os init`
 
 Scaffolds a new ObjectStack project with configuration, TypeScript setup, and initial metadata files.
+
+> **Which scaffolder?** For a new app, prefer **`npm create objectstack@latest`** — it
+> also derives your namespace, pins the framework packages to the current release, and
+> installs the AI skills bundle + `AGENTS.md`. Reach for `os init` when you want a
+> **plugin** skeleton or a **bare config** in an existing directory.
 
 ```bash
 os init my-app                    # Create with default "app" template

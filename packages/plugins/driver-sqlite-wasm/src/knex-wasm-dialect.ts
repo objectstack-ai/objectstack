@@ -65,10 +65,20 @@ export interface WasmSqliteConnectionSettings {
 /**
  * Coerce JS values that sql.js cannot bind directly. Mirrors
  * `Client_BetterSQLite3._formatBindings`.
+ *
+ * `undefined` is mapped to `null`: sql.js's binder only accepts
+ * string/number/bigint/boolean/null (and array/blob) and `throw`s a *raw
+ * string* — `"Wrong API use : tried to bind a value of an unknown type
+ * (undefined)."` — for anything else. Because it throws a string rather than
+ * an `Error`, it logs as a garbled char-indexed object and aborts the whole
+ * write. Mapping to `null` matches the `useNullAsDefault` semantics the
+ * dialect is configured with, so a missing/undefined value persists as SQL
+ * `NULL` exactly as it would through better-sqlite3.
  */
 function formatBindings(bindings: unknown[] | undefined): unknown[] {
   if (!bindings) return [];
   return bindings.map((b) => {
+    if (b === undefined) return null;
     if (b instanceof Date) return b.valueOf();
     if (typeof b === 'boolean') return Number(b);
     return b;

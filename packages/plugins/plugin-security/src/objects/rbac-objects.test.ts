@@ -144,6 +144,19 @@ describe('RBAC object canonical names + row actions', () => {
     const names = (SysPermissionSet.actions ?? []).map((a) => a.name).sort();
     expect(names).toEqual(['activate_permission_set', 'clone_permission_set', 'deactivate_permission_set']);
   });
+
+  it('[ADR-0094] locks the API name after creation (readonly on edit, editable on create)', () => {
+    // The name is the metadata identity the record projects from — renaming
+    // through the data door is rejected (400); this is the matching UI lock.
+    const nameField: any = (SysPermissionSet.fields as any).name;
+    expect(nameField.readonlyWhen, 'name carries a readonlyWhen lock').toBeTruthy();
+    // The predicate keys off the server-assigned id: absent on create, present
+    // on edit — so create stays editable and edit is locked.
+    const pred = JSON.stringify(nameField.readonlyWhen);
+    expect(pred).toContain('record.id');
+    // The static readonly flag is NOT set (that would block create too).
+    expect(nameField.readonly ?? false).toBe(false);
+  });
 });
 
 

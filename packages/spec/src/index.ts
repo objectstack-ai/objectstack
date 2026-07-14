@@ -108,7 +108,13 @@ export type { Skill } from './ai/skill.zod';
 export { objectStackErrorMap, formatZodError, formatZodIssue, safeParsePretty } from './shared/error-map.zod';
 export { suggestFieldType, findClosestMatches, formatSuggestion } from './shared/suggestions.zod';
 export { normalizeMetadataCollection, normalizeStackInput, normalizePluginMetadata, MAP_SUPPORTED_FIELDS, METADATA_ALIASES } from './shared/metadata-collection.zod';
-export type { MetadataCollectionInput, MapSupportedField } from './shared/metadata-collection.zod';
+export type { MetadataCollectionInput, MapSupportedField, NormalizeStackInputOptions } from './shared/metadata-collection.zod';
+
+// Metadata conversion layer (ADR-0087 D2) — old-shape → canonical-shape transforms applied at load.
+export * from './conversions/index.js';
+
+// Metadata migration chain + change manifest (ADR-0087 D3/D4).
+export * from './migrations/index.js';
 
 export { type PluginContext } from './kernel/plugin.zod';
 

@@ -43,44 +43,44 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "设置后，到达该时间会自动解除封禁。"
       },
       failed_login_count: {
-        label: "Failed Login Count",
-        help: "Consecutive failed sign-in attempts; reset to 0 on success. Maintained by the auth manager."
+        label: "连续登录失败次数",
+        help: "连续登录失败的次数；登录成功后重置为 0。由认证管理器维护。"
       },
       locked_until: {
-        label: "Locked Until",
-        help: "When set and in the future, sign-in is rejected (brute-force lockout). Auto-clears past this time; an admin can clear it early via Unlock."
+        label: "锁定至",
+        help: "设置且时间在未来时，登录会被拒绝（防暴力破解锁定）。超过该时间自动解除；管理员也可通过“解锁账号”提前解除。"
       },
       password_changed_at: {
-        label: "Password Changed At",
-        help: "Timestamp of the last password change. Backs password_expiry_days; system-managed."
+        label: "密码修改时间",
+        help: "最近一次修改密码的时间。支撑 password_expiry_days（密码有效期）；系统维护。"
       },
       phone_number: {
-        label: "Phone Number",
-        help: "Sign-in phone number (E.164 recommended). Unique per user; managed by better-auth when the phoneNumber plugin is enabled."
+        label: "手机号码",
+        help: "用于登录的手机号（建议 E.164 格式）。每个用户唯一；启用 phoneNumber 插件时由 better-auth 管理。"
       },
       phone_number_verified: {
-        label: "Phone Verified",
-        help: "Whether the phone number has been verified (OTP verification requires SMS infrastructure; false until that ships). System-managed."
+        label: "手机已验证",
+        help: "手机号是否已验证（OTP 验证依赖短信基础设施，在其上线前保持 false）。系统维护。"
       },
       must_change_password: {
-        label: "Must Change Password",
-        help: "When true, the user is blocked (403 PASSWORD_EXPIRED) until they change their password. Stamped by the admin user-management routes; system-managed."
+        label: "须修改密码",
+        help: "为 true 时，用户会被阻止访问（403 PASSWORD_EXPIRED），直到修改密码。由管理员用户管理接口写入；系统维护。"
       },
       mfa_required_at: {
-        label: "MFA Required At",
-        help: "When enforced MFA first applied to this user (grace-period clock). Backs mfa_required; system-managed."
+        label: "MFA 强制生效时间",
+        help: "强制 MFA 首次对该用户生效的时间（宽限期计时起点）。支撑 mfa_required；系统维护。"
       },
       last_login_at: {
-        label: "Last Login At",
-        help: "Timestamp of the last successful sign-in. Stamped by the auth manager; system-managed."
+        label: "最近登录时间",
+        help: "最近一次成功登录的时间。由认证管理器写入；系统维护。"
       },
       last_login_ip: {
-        label: "Last Login IP",
-        help: "Client IP of the last successful sign-in (from the trusted proxy forwarded header). System-managed."
+        label: "最近登录 IP",
+        help: "最近一次成功登录的客户端 IP（取自可信代理转发头）。系统维护。"
       },
       ai_access: {
-        label: "AI Access",
-        help: "Whether this user holds an AI seat — grants access to the in-UI AI agents (build / ask). The framework synthesizes the `ai_seat` capability from this flag (plugin-hono-server resolveCtx). Assignment is capped by the licensed / purchased seat count (enforced by @objectstack/security-enterprise AiSeatPlugin). Owned by objectql (better-auth is oblivious to this column)."
+        label: "AI 访问权限",
+        help: "该用户是否占用一个 AI 席位——授予界面内 AI 智能体（build / ask）的使用权限。框架会根据此标志合成 `ai_seat` 能力（plugin-hono-server resolveCtx）。可分配数量受许可/已购席位数限制（由 @objectstack/security-enterprise AiSeatPlugin 强制执行）。归 objectql 所有（better-auth 不感知此列）。"
       },
       image: {
         label: "头像"
@@ -94,11 +94,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing (ADR-0057 addendum D12). Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership."
       },
       source: {
-        label: "Identity Source",
-        help: "How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.",
+        label: "身份来源",
+        help: "该身份的创建方式——idp_provisioned（联合 SSO 即时开通）或 env_native（本地注册 / 应用最终用户）。系统维护，请勿编辑。",
         options: {
-          idp_provisioned: "IdP-Provisioned",
-          env_native: "Env-Native"
+          idp_provisioned: "IdP 开通",
+          env_native: "环境本地"
         }
       },
       id: {
@@ -113,7 +113,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       me: {
-        label: "My Profile"
+        label: "我的资料"
       },
       all_users: {
         label: "全部用户"
@@ -143,12 +143,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "用户已解除封禁"
       },
       unlock_user: {
-        label: "Unlock Account",
-        successMessage: "Account unlocked"
+        label: "解锁账号",
+        successMessage: "账号已解锁"
       },
       create_user: {
-        label: "Create User",
-        successMessage: "User created"
+        label: "创建用户",
+        successMessage: "用户已创建"
       },
       set_user_password: {
         label: "设置密码",
@@ -176,8 +176,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已发送验证邮件，请前往新邮箱确认。"
       },
       resend_verification_email: {
-        label: "Resend Verification Email",
-        successMessage: "Verification email sent — check your inbox."
+        label: "重发验证邮件",
+        successMessage: "验证邮件已发送，请查收。"
       },
       delete_my_account: {
         label: "删除我的账号",
@@ -185,18 +185,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已删除账号"
       },
       enable_two_factor: {
-        label: "Enable Two-Factor Auth",
-        successMessage: "Two-factor authentication enabled. Scan the QR code or paste the otpauth URI into your authenticator app, then verify a code to complete setup."
+        label: "启用双因素认证",
+        successMessage: "双因素认证已启用。用身份验证器 App 扫描二维码或粘贴 otpauth URI，然后验证一次动态码以完成设置。"
       },
       disable_two_factor: {
-        label: "Disable Two-Factor Auth",
-        confirmText: "Turn off two-factor authentication? Your account will be less secure.",
-        successMessage: "Two-factor authentication disabled."
+        label: "停用双因素认证",
+        confirmText: "要关闭双因素认证吗？您的账户安全性将降低。",
+        successMessage: "双因素认证已停用。"
       },
       generate_backup_codes: {
-        label: "Regenerate Backup Codes",
-        confirmText: "Generate a new set of backup codes? Any previously generated codes will stop working.",
-        successMessage: "New backup codes generated — save them somewhere safe."
+        label: "重新生成备用码",
+        confirmText: "要生成一组新的备用码吗？之前生成的备用码将全部失效。",
+        successMessage: "新备用码已生成——请妥善保存。"
       }
     }
   },
@@ -396,8 +396,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON 序列化的组织元数据"
       },
       require_mfa: {
-        label: "Require Multi-Factor Auth",
-        help: "When true, every member of this organization must enroll an authenticator app to access data."
+        label: "强制多因素认证",
+        help: "为 true 时，该组织的每位成员都必须注册身份验证器 App 才能访问数据。"
       },
       id: {
         label: "组织 ID"
@@ -438,9 +438,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "你已退出该组织"
       },
       change_slug: {
-        label: "Change Slug",
-        confirmText: "Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?",
-        successMessage: "Organization slug changed"
+        label: "修改标识符",
+        confirmText: "重命名标识符会重写该组织所有平台子域名，旧标识符将保留占用 90 天。继续吗？",
+        successMessage: "组织标识符已修改"
       }
     }
   },
@@ -724,7 +724,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       org_chart: {
-        label: "Org Chart"
+        label: "组织架构"
       },
       active: {
         label: "启用"

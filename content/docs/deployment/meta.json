@@ -3,6 +3,8 @@
   "icon": "Cloud",
   "pages": [
     "index",
+    "self-hosting",
+    "backup-restore",
     "vercel",
     "production-readiness",
     "publish-and-preview",

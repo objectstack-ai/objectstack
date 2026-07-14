@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, IHttpServer, IDataEngine } from '@objectstack/core';
+import { Plugin, PluginContext, IHttpServer, IDataEngine, resolveAuthzContext } from '@objectstack/core';
 import {
     RestServerConfig,
 } from '@objectstack/spec/api';
@@ -533,135 +533,43 @@ export class HonoServerPlugin implements Plugin {
         const getObjectQL = () => ctx.getService<IDataEngine>('objectql');
 
         // Helper: resolve ExecutionContext from request headers (cookie session
-        // or API key). Mirrors the runtime's resolveExecutionContext but
-        // self-contained to avoid a cross-package dep. We DO query the
-        // `sys_user_permission_set` link tables because hardcoding a single
-        // permission set name (e.g. `member_default`) would silently ignore
-        // any explicit admin / role assignment — including the platform-admin
-        // promotion seeded by `bootstrapPlatformAdmin`.
+        // or API key). Delegates ALL identity + position/permission/RLS
+        // aggregation to the SINGLE shared resolver (`resolveAuthzContext`,
+        // @objectstack/core) — the same one the REST server and the runtime
+        // dispatcher use, so this entry point can never drift on authorization.
+        // This path previously kept its own copy that silently omitted
+        // `sys_user_position` / `sys_position_permission_set`: positions never
+        // resolved here, so /auth/me/permissions under-reported position-granted
+        // capability (console rendered read-only forms) while the data plane —
+        // which resolves through the shared resolver — accepted the same writes.
         const resolveCtx = async (c: any): Promise<any | undefined> => {
             try {
                 const authService: any = ctx.getService('auth');
-                if (!authService) return undefined;
-                let api: any = authService.api;
-                if (!api && typeof authService.getApi === 'function') {
+                let api: any = authService?.api;
+                if (!api && typeof authService?.getApi === 'function') {
                     api = await authService.getApi();
                 }
-                if (!api?.getSession) return undefined;
-                const session = await api.getSession({ headers: c.req.raw.headers });
-                if (!session?.user?.id) return undefined;
-                const userId = session.user.id;
-                const tenantId = session.session?.activeOrganizationId ?? undefined;
-                const permissions: string[] = [];
-                const roles: string[] = [];
-                try {
-                    const ql = getObjectQL();
-                    const sysCtx = { context: { isSystem: true } };
-                    // Roles via sys_member (org-scoped if active org).
-                    const memberRows = await ql?.find?.(
-                        'sys_member',
-                        {
-                            where: tenantId
-                                ? { user_id: userId, organization_id: tenantId }
-                                : { user_id: userId },
-                            limit: 50,
-                            ...sysCtx,
-                        } as any,
-                    ).catch(() => []);
-                    for (const m of (memberRows ?? []) as any[]) {
-                        if (typeof m.role === 'string') {
-                            for (const r of m.role.split(',').map((s: string) => s.trim()).filter(Boolean)) {
-                                if (!roles.includes(r)) roles.push(r);
-                            }
-                        }
+                const getSession = api?.getSession
+                    ? async (h: any) => {
+                        try { return await api.getSession({ headers: h }); } catch { return undefined; }
                     }
-                    // User-scoped permission sets — match BOTH (a) the active
-                    // org's link rows and (b) the cross-tenant rows
-                    // (organization_id IS NULL) so the platform-admin
-                    // promotion seeded by `bootstrapPlatformAdmin` applies
-                    // regardless of the user's active org.
-                    const upsRows = await ql?.find?.(
-                        'sys_user_permission_set',
-                        { where: { user_id: userId }, limit: 100, ...sysCtx } as any,
-                    ).catch(() => []);
-                    const psIds = new Set<string>();
-                    for (const r of (upsRows ?? []) as any[]) {
-                        const orgScope = r.organization_id ?? null;
-                        if (!orgScope || (tenantId && orgScope === tenantId)) {
-                            const pid = r.permission_set_id ?? r.permissionSetId;
-                            if (pid) psIds.add(pid);
-                        }
-                    }
-                    if (psIds.size > 0) {
-                        const psRows = await ql?.find?.(
-                            'sys_permission_set',
-                            { where: { id: { $in: Array.from(psIds) } }, limit: 500, ...sysCtx } as any,
-                        ).catch(() => []);
-                        for (const ps of (psRows ?? []) as any[]) {
-                            if (ps.name && !permissions.includes(ps.name)) permissions.push(ps.name);
-                        }
-                    }
-                } catch {
-                    /* fall through with whatever we resolved so far */
-                }
-                // Resolve fellow-org user IDs so identity-table RLS (sys_user
-                // org-members policy) can scope @-mention pickers, owner
-                // lookups and reviewer selectors to the active organization.
-                // Mirrors the resolvers in `@objectstack/rest` and
-                // `@objectstack/runtime` so all three REST entry-points
-                // produce a consistent ExecutionContext shape.
-                let orgUserIds: string[] = [userId];
-                if (tenantId) {
-                    try {
-                        const ql = getObjectQL();
-                        const sysCtx = { context: { isSystem: true } };
-                        const memberRows = await ql?.find?.(
-                            'sys_member',
-                            { where: { organization_id: tenantId }, limit: 1000, ...sysCtx } as any,
-                        ).catch(() => []);
-                        const ids = new Set<string>([userId]);
-                        for (const m of (memberRows ?? []) as any[]) {
-                            const uid = m.user_id ?? m.userId;
-                            if (typeof uid === 'string' && uid.length > 0) ids.add(uid);
-                        }
-                        orgUserIds = Array.from(ids);
-                    } catch {
-                        /* fall back to self-only */
-                    }
-                }
-                // Env-side AI-seat marker (simple model). The single-org env
-                // DB has no permission-set/org dimension for this — the seat is
-                // the boolean `sys_user.ai_access`. Read it with a GUARDED system
-                // query (NOT a better-auth additionalField: sys_user is
-                // better-auth-managed and better-auth SELECTs explicit columns,
-                // so an additionalField would make getSession query a possibly-
-                // missing column → broken auth; a guarded read can only no-op).
-                // When true, synthesize the `ai_seat` capability so the per-agent
-                // gate (evaluateAgentAccess → requires `ai_seat`) admits the user
-                // with no permission-set grant. Absent/false/missing-column →
-                // no synthesis (deny, as before).
-                if (!permissions.includes('ai_seat')) {
-                    try {
-                        const ql = getObjectQL();
-                        const sysCtx = { context: { isSystem: true } };
-                        const uRows = await ql?.find?.(
-                            'sys_user',
-                            { where: { id: userId }, limit: 1, ...sysCtx } as any,
-                        ).catch(() => []);
-                        // Turso returns sqlite booleans as 1/0; memory driver as boolean.
-                        const aiAccess = (uRows?.[0] as any)?.ai_access;
-                        if (aiAccess === true || aiAccess === 1 || aiAccess === '1') permissions.push('ai_seat');
-                    } catch {
-                        /* no ai_access column / query failed → no seat (safe) */
-                    }
-                }
+                    : undefined;
+                const authz = await resolveAuthzContext({
+                    ql: getObjectQL(),
+                    headers: c.req.raw.headers,
+                    getSession,
+                });
+                if (!authz.userId) return undefined;
                 return {
-                    userId,
-                    tenantId,
-                    roles,
-                    permissions,
+                    userId: authz.userId,
+                    tenantId: authz.tenantId,
+                    email: authz.email,
+                    positions: authz.positions,
+                    permissions: authz.permissions,
+                    systemPermissions: authz.systemPermissions,
+                    ...(authz.tabPermissions ? { tabPermissions: authz.tabPermissions } : {}),
                     isSystem: false,
-                    org_user_ids: orgUserIds,
+                    org_user_ids: authz.org_user_ids,
                 } as any;
             } catch {
                 return undefined;

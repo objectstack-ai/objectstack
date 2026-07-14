@@ -50,7 +50,7 @@ export const SysPositionDetailPage: Page = {
         position: 'top',
         items: [
           {
-            label: 'Holders',
+            label: { en: 'Holders', 'zh-CN': '任职人员', 'ja-JP': '在任者', 'es-ES': 'Titulares' },
             icon: 'users',
             children: [
               {
@@ -63,21 +63,21 @@ export const SysPositionDetailPage: Page = {
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'Holders',
+                  title: { en: 'Holders', 'zh-CN': '任职人员', 'ja-JP': '在任者', 'es-ES': 'Titulares' },
                   add: {
                     picker: {
                       object: 'sys_user',
                       labelField: 'name',
                     },
                     linkField: 'user_id',
-                    label: 'Assign user',
+                    label: { en: 'Assign user', 'zh-CN': '分配用户', 'ja-JP': 'ユーザーを割り当て', 'es-ES': 'Asignar usuario' },
                   },
                 },
               },
             ],
           },
           {
-            label: 'Permission Sets',
+            label: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos' },
             icon: 'lock',
             children: [
               {
@@ -89,14 +89,14 @@ export const SysPositionDetailPage: Page = {
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'Permission Sets',
+                  title: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos' },
                   add: {
                     picker: {
                       object: 'sys_permission_set',
                       labelField: 'label',
                     },
                     linkField: 'permission_set_id',
-                    label: 'Bind permission set',
+                    label: { en: 'Bind permission set', 'zh-CN': '绑定权限集', 'ja-JP': '権限セットをバインド', 'es-ES': 'Vincular conjunto de permisos' },
                   },
                 },
               },

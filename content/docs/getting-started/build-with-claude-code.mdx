@@ -114,7 +114,7 @@ export const Ticket = ObjectSchema.create({
 
   fields: {
     subject: Field.text({ label: 'Subject', required: true, searchable: true, maxLength: 200 }),
-    description: Field.longText({ label: 'Description' }),
+    description: Field.textarea({ label: 'Description' }),
 
     priority: Field.select({
       label: 'Priority',
@@ -139,6 +139,7 @@ export const Ticket = ObjectSchema.create({
     }),
   },
 
+  sharingModel: 'private',      // org-wide default (OWD) — required by the security gate
   enable: { apiEnabled: true, searchable: true },
 });
 ```

@@ -1063,6 +1063,75 @@ describe('SecurityPlugin', () => {
       const opCtx: any = { object: 'task', operation: 'delete', data: { id: 'r1' }, context: ctx() };
       await expect(h.run(opCtx)).resolves.toBeDefined();
     });
+
+    // [ADR-0090 P2] A check policy that declares a `positions` applicability
+    // domain must be enforced for callers HOLDING one of those positions —
+    // and only for them. Regression: the write-check path used to drop the
+    // caller's held positions, so every positions-scoped check policy was
+    // silently skipped for everyone.
+    describe('positions-scoped check policies', () => {
+      const scopedSet: PermissionSet = {
+        name: 'member_default',
+        label: 'Member',
+        objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+        rowLevelSecurity: [
+          {
+            name: 'contributor_owner_immutable',
+            object: '*',
+            operation: 'update',
+            check: 'owner == current_user.email',
+            positions: ['contributor'],
+          },
+        ],
+      } as any;
+
+      const startedScoped = async (findOneImpl?: (q: any) => any) => {
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+        const harness = makeMiddlewareCtx({
+          permissionSets: [scopedSet],
+          objectFields: ['id', 'owner', 'owner_id', 'name'],
+          findOneImpl,
+        });
+        await plugin.init(harness.ctx);
+        await plugin.start(harness.ctx);
+        return harness;
+      };
+      const holderCtx = () => ({
+        userId: 'u1',
+        email: 'ada@example.com',
+        tenantId: 'org-1',
+        positions: ['contributor'],
+        permissions: ['member_default'],
+      });
+
+      it('FIRES for a caller holding the position (violating post-image denied)', async () => {
+        const h = await startedScoped(() => ({ id: 'r1', owner: 'ada@example.com', name: 'X' }));
+        const opCtx: any = {
+          object: 'invoice', operation: 'update',
+          data: { id: 'r1', owner: 'linus@example.com' }, context: holderCtx(),
+        };
+        await expect(h.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+      });
+
+      it('passes for a holder whose post-image satisfies the check', async () => {
+        const h = await startedScoped(() => ({ id: 'r1', owner: 'ada@example.com', name: 'X' }));
+        const opCtx: any = {
+          object: 'invoice', operation: 'update',
+          data: { id: 'r1', name: 'renamed' }, context: holderCtx(),
+        };
+        await expect(h.run(opCtx)).resolves.toBeDefined();
+      });
+
+      it('does NOT bind a caller outside the positions domain', async () => {
+        const h = await startedScoped(() => ({ id: 'r1', owner: 'ada@example.com', name: 'X' }));
+        const opCtx: any = {
+          object: 'invoice', operation: 'update',
+          data: { id: 'r1', owner: 'linus@example.com' },
+          context: { userId: 'u2', email: 'newbie@example.com', tenantId: 'org-1', positions: [], permissions: ['member_default'] },
+        };
+        await expect(h.run(opCtx)).resolves.toBeDefined();
+      });
+    });
   });
 
   // ── ADR-0086 P2 (块2) — two-doors data-layer write gate ────────────────
@@ -1091,20 +1160,25 @@ describe('SecurityPlugin', () => {
       return harness.run(opCtx);
     };
 
-    it('DENIES an admin update of a package-managed set (even with modifyAllRecords)', async () => {
+    it('PASSES an admin update of a package-managed set (ADR-0094: the write-through turns it into an env overlay)', async () => {
+      // Direction confirmed 2026-07-14: update/delete on a package row are no
+      // longer refused at this gate — the ADR-0094 write-through downstream
+      // translates them into env-scope overlay operations (customize / reset).
+      // The single-store refusal lives in the write-through itself, covered in
+      // permission-set-projection.test.ts.
       const opCtx: any = {
         object: 'sys_permission_set', operation: 'update',
-        data: { id: 'ps_pkg', label: 'hijack' }, options: { where: { id: 'ps_pkg' } },
+        data: { id: 'ps_pkg', label: 'customize' }, options: { where: { id: 'ps_pkg' } },
         context: adminCtx,
       };
       await expect(
         runGate(opCtx, () => ({ id: 'ps_pkg', name: 'crm_sales_rep', managed_by: 'package', package_id: 'com.example.crm' })),
-      ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+      ).resolves.toBeDefined();
     });
 
-    it('DENIES an admin delete of a package-managed set', async () => {
+    it('still DENIES lifecycle ops with no overlay translation (purge) on a package-managed set', async () => {
       const opCtx: any = {
-        object: 'sys_permission_set', operation: 'delete',
+        object: 'sys_permission_set', operation: 'purge',
         options: { where: { id: 'ps_pkg' } },
         context: adminCtx,
       };
@@ -1158,9 +1232,9 @@ describe('SecurityPlugin', () => {
       ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
     });
 
-    it('DENIES even a principal-less write to a package row (gate is before the fall-open)', async () => {
+    it('DENIES even a principal-less lifecycle write to a package row (gate is before the fall-open)', async () => {
       const opCtx: any = {
-        object: 'sys_permission_set', operation: 'delete',
+        object: 'sys_permission_set', operation: 'purge',
         options: { where: { id: 'ps_pkg' } },
         context: {}, // no roles, no permissions, no userId, not isSystem
       };
@@ -1178,9 +1252,9 @@ describe('SecurityPlugin', () => {
       await expect(runGate(opCtx)).resolves.toBeDefined();
     });
 
-    it('DENIES a filter write whose filter matches a package-managed row', async () => {
+    it('DENIES a filter LIFECYCLE write whose filter matches a package-managed row', async () => {
       const opCtx: any = {
-        object: 'sys_permission_set', operation: 'delete',
+        object: 'sys_permission_set', operation: 'purge',
         options: { where: { active: true } }, // no single id → filter path
         context: adminCtx,
       };
@@ -1190,16 +1264,13 @@ describe('SecurityPlugin', () => {
       ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
     });
 
-    it('ALLOWS a filter write that matches only env-authored rows (no over-broad block)', async () => {
+    it('ALLOWS a filter update (bulk edits route through the write-through downstream)', async () => {
       const opCtx: any = {
         object: 'sys_permission_set', operation: 'update',
         data: { label: 'bulk-rename' }, options: { where: { managed_by: 'user' } },
         context: adminCtx,
       };
-      await expect(
-        // the gate's package-row probe finds nothing within the filter → allow
-        runGate(opCtx, () => null),
-      ).resolves.toBeDefined();
+      await expect(runGate(opCtx, () => null)).resolves.toBeDefined();
     });
 
     it('lets system/boot writes through (isSystem bypass) even on a package row', async () => {

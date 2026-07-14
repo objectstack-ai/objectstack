@@ -154,6 +154,28 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     blockedReason:
       'the form layout/section/widget surface is not yet governed and has no runtime proof (ADR-0054 Phase 2).',
   },
+  {
+    id: 'permission-set-projection',
+    label: 'sys_permission_set pure projection',
+    summary:
+      'the metadata layer is the sole authoritative store for a permission-set definition; the '
+      + 'sys_permission_set record is a derived projection (data-door write-through + awaited '
+      + 'projection). A record that could drift from — or independently authorize against — its '
+      + 'metadata is the two-store split-brain ADR-0094 retires.',
+    proofId: 'permission-set-projection',
+    proofRef: 'packages/dogfood/test/showcase-permission-projection.dogfood.test.ts#permission-set-projection',
+    // Unbound: this is a STORAGE/architecture invariant, not an authorable
+    // `type.path` property the ledger ratchet can key on — there is no
+    // permission-set field whose `live` status this proof gates. The proof is
+    // still registered here (so the tag is not an orphan) and runs
+    // unconditionally in the dogfood suite; it simply has no ledger property to
+    // bind. Kept honest per ADR-0054 §3 rather than faking a binding.
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'projection is a storage invariant (ADR-0094), not an authorable spec property — no ledger '
+      + 'entry to ratchet; the proof runs unconditionally in the dogfood suite instead.',
+  },
 ];
 
 /** Bound ledger paths → the class that binds them. Key: `<type>/<path>`. */

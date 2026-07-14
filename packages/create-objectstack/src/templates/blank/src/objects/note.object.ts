@@ -16,10 +16,14 @@ export const Note = ObjectSchema.create({
       searchable: true,
       maxLength: 200,
     }),
-    body: Field.longText({
+    body: Field.textarea({
       label: 'Body',
     }),
   },
+
+  // Org-wide default (OWD): who can see records they don't own. The security
+  // posture gate (ADR-0090) requires an explicit, authored decision here.
+  sharingModel: 'private',
 
   enable: {
     apiEnabled: true,

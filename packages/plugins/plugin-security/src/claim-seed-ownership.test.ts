@@ -55,6 +55,25 @@ describe('claimSeedOwnership', () => {
     expect(updates).toHaveLength(0);
   });
 
+  it('skips external (federated) objects even when they expose owner_id', async () => {
+    // Federated read-only objects (ADR-0015) bind to a remote table; the
+    // platform must not scan or re-own them — and the remote table may not even
+    // exist at boot, so a scan would error with "no such table".
+    const schemas = [
+      {
+        name: 'showcase_ext_customer',
+        external: { remoteName: 'customers' },
+        fields: [{ name: 'owner_id' }],
+      },
+    ];
+    const { ql, updates } = makeQL(schemas, {
+      showcase_ext_customer: [{ id: 'c1', owner_id: null }],
+    });
+    expect(await claimSeedOwnership(ql, ADMIN)).toEqual([]);
+    expect(ql.find).not.toHaveBeenCalled();
+    expect(updates).toHaveLength(0);
+  });
+
   it('skips objects without an owner_id field', async () => {
     const schemas = [{ name: 'crm_pricebook', fields: [{ name: 'name' }] }];
     const { ql, updates } = makeQL(schemas, { crm_pricebook: [{ id: 'p1' }] });

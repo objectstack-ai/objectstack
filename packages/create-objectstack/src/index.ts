@@ -41,6 +41,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 // eslint-disable-next-line import/no-unresolved
 import * as tar from 'tar';
 
+import { syncObjectStackDeps } from './pkg-utils.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const BUNDLED_TEMPLATES_DIR = path.resolve(__dirname, 'templates');
@@ -276,12 +278,19 @@ function rewriteProjectIdentity(
     }
   }
 
-  // package.json — set .name
+  // package.json — set .name and pin @objectstack/* deps to this scaffolder's
+  // own release line. All @objectstack packages (including create-objectstack)
+  // version in lockstep, so `^<own version>` always resolves and always matches
+  // the framework the docs describe. Without this, a template whose literal
+  // ranges have gone stale scaffolds a project several majors behind the
+  // published framework (the `^6.0.0`-era templates installed 6.x while the
+  // registry was at 14.x).
   const pkgPath = path.join(targetDir, 'package.json');
   if (fs.existsSync(pkgPath)) {
     try {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
       pkg.name = projectName;
+      syncObjectStackDeps(pkg, readCliVersion());
       fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
     } catch {
       // leave the file alone if it isn't valid JSON

@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
-import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
+import { ObjectStackDefinitionSchema, normalizeStackInput, type ConversionNotice } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { validateStackExpressions } from '@objectstack/lint';
 import { validateListViewMode } from '@objectstack/lint';
@@ -15,6 +15,7 @@ import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
 import { validateVisibilityPredicates } from '@objectstack/lint';
+import { validateSecurityPosture } from '@objectstack/lint';
 import {
   printHeader,
   printKV,
@@ -59,9 +60,16 @@ export default class Validate extends Command {
         printKV('Load time', `${duration}ms`);
       }
 
-      // 2. Normalize map-formatted stack definition and validate against schema
+      // 2. Normalize map-formatted stack definition and validate against schema.
+      //    The ADR-0087 D2 conversion layer runs here (inside normalizeStackInput);
+      //    surface each applied conversion as a non-blocking deprecation notice so
+      //    the author knows the source still carries an old-shape key that will
+      //    retire from the load path in a future major.
       if (!flags.json) printStep('Validating against ObjectStack Protocol...');
-      const normalized = normalizeStackInput(config as Record<string, unknown>);
+      const conversionNotices: ConversionNotice[] = [];
+      const normalized = normalizeStackInput(config as Record<string, unknown>, {
+        onConversionNotice: (n) => conversionNotices.push(n),
+      });
       const result = ObjectStackDefinitionSchema.safeParse(normalized);
 
       if (!result.success) {
@@ -333,6 +341,40 @@ export default class Validate extends Command {
         }
       }
 
+      // 3f. [ADR-0090 D7] Security posture — the same gate `os compile`/`os build`
+      //     run. Without it here, `os validate` passed a stack (e.g. a custom
+      //     object with no explicit sharingModel) that the build then rejected,
+      //     breaking this command's contract of being the artifact-free run of
+      //     the same gates. Errors gate; advisories print dimmed.
+      if (!flags.json) printStep('Checking security posture (ADR-0090 D7)...');
+      const securityFindings = validateSecurityPosture(result.data as Record<string, unknown>);
+      const securityErrors = securityFindings.filter((f) => f.severity === 'error');
+      const securityAdvisories = securityFindings.filter((f) => f.severity !== 'error');
+      if (securityErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({
+            valid: false,
+            errors: securityErrors,
+            duration: timer.elapsed(),
+          }, null, 2));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Security posture check failed (${securityErrors.length} issue${securityErrors.length > 1 ? 's' : ''})`);
+        for (const f of securityErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+        }
+        this.exit(1);
+      }
+      if (!flags.json) {
+        for (const f of securityAdvisories.slice(0, 50)) {
+          console.log(chalk.yellow(`  ⚠ ${f.where}: ${f.message}`));
+          console.log(chalk.dim(`      ${f.hint}`));
+        }
+      }
+
       // 4. Collect and display stats
       const stats = collectMetadataStats(config);
 
@@ -341,7 +383,8 @@ export default class Validate extends Command {
           valid: true,
           manifest: config.manifest,
           stats,
-          warnings: [...exprWarnings, ...widgetWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings],
+          warnings: [...exprWarnings, ...widgetWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...securityAdvisories],
+          conversions: conversionNotices,
           duration: timer.elapsed(),
         }, null, 2));
         return;
@@ -359,6 +402,12 @@ export default class Validate extends Command {
         warnings.push(`${f.where}: ${f.message} — ${f.hint}`);
       }
 
+      // ADR-0087 D2 conversion notices: the source used a deprecated shape that
+      // was auto-converted at load. No action is required to keep loading, but
+      // the notice steers the author to the canonical key before it retires.
+      for (const n of conversionNotices) {
+        warnings.push(`${n.path}: '${n.from}' → '${n.to}' (converted at load; conversion '${n.conversionId}', retires in protocol ${n.retiresIn})`);
+      }
       for (const i of exprWarnings) {
         warnings.push(`${i.where}: ${i.message}`);
       }

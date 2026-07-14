@@ -192,13 +192,47 @@ tenant-level.
 
 A package ships its own sets (`managedBy: 'package'` + `packageId`), seeded
 idempotently at boot and re-seeded on upgrade; environment-authored sets
-(`platform`/`user`) are never clobbered. The data layer refuses admin-door
-writes to package rows (two-doors separation), which is what makes package
-uninstall well-defined — and enforced: uninstalling a package
-(`DELETE /api/v1/packages/:id`) revokes its own sets, their position/user
-bindings, and its pending audience-binding suggestions in the same request
-(no ghost grants); the uninstall response reports the revocation under
-`cleanups`. Environment-authored sets and other packages' rows survive.
+(`platform`/`user`) are never clobbered. The data layer refuses forging package
+provenance through the admin door (two-doors separation, evolved by ADR-0094 —
+ordinary edits of a packaged set become environment overlays, see below), which
+is what makes package uninstall well-defined — and enforced: uninstalling a
+package (`DELETE /api/v1/packages/:id`) revokes its own sets, their
+position/user bindings, and its pending audience-binding suggestions in the
+same request (no ghost grants); the uninstall response reports the revocation
+under `cleanups`. Environment-authored sets and other packages' rows survive.
+
+## One authoritative store — the record is a projection (ADR-0094)
+
+A permission-set **definition** has a single authoritative store: the metadata
+layer (packaged declarations plus the `sys_metadata` overlay). The queryable
+`sys_permission_set` record — what Setup lists and user assignment reads — is a
+**pure projection** of that definition, never independently authoritative.
+Every non-system write on the record (Setup CRUD, a bulk import, any API that
+goes through the data engine) is redirected into a metadata write and the
+record is re-derived by an awaited projector, so the two can never drift. This
+has three author-visible consequences:
+
+- **Editing any declared set through Setup — packaged sets included** becomes
+  an environment overlay of that definition (the standard metadata
+  customization): it genuinely takes effect, where a record-only edit
+  previously displayed but never enforced. The row keeps its package
+  provenance; the Studio layered view diffs the shipped baseline against your
+  customization, and removing the overlay resets to the baseline. Note the
+  trade every overlay makes: while an overlay pins a set, the vendor's later
+  baseline changes don't take effect for it until you reset or re-author.
+- **The API name is immutable after creation.** It is the definition's metadata
+  identity, so the create form accepts it but the edit form locks it, and a
+  rename through the data door is rejected. Clone the set to a new name instead.
+- **Deleting through the data door depends on where the definition lives.** A
+  set you created in this environment is removed. A set that ships with an
+  installed package/app cannot be removed from the environment — "delete"
+  **resets** it to the shipped definition (the customization overlay is
+  dropped), and the row remains. Uninstall the owning package to remove a
+  packaged set entirely.
+
+A cross-package job function needs no hand-authored cross-package set: bind
+each package's own sets to one **position** (the union model adds), and use an
+overlay where a packaged set must be narrowed.
 
 ---
 

@@ -97,6 +97,13 @@ async function loadSqlJs(
  * configurable persistence strategy so the on-disk file stays in sync.
  */
 export class WasmSqliteConnection {
+  /**
+   * Process-wide counter making each atomic-write temp filename unique, so
+   * concurrent connections (or overlapping flushes) never target the same
+   * temp path. Combined with `process.pid` for cross-process uniqueness.
+   */
+  private static tmpSeq = 0;
+
   readonly filename: string;
   readonly persist: PersistMode;
   readonly isEphemeral: boolean;
@@ -177,7 +184,71 @@ export class WasmSqliteConnection {
       if (e?.code !== 'ENOENT') throw e;
     }
 
-    this.db = bytes ? new SQL.Database(bytes) : new SQL.Database();
+    if (!bytes) {
+      this.db = new SQL.Database();
+      return;
+    }
+
+    // Open the on-disk bytes, but guard against a corrupt image. A torn write
+    // (process killed mid-flush before atomic writes existed) or otherwise
+    // damaged file makes `new SQL.Database(bytes)` either throw ("file is not a
+    // database") or open a handle whose every query fails with "database disk
+    // image is malformed" — which, for a background dispatcher on a tick loop,
+    // means the same error spammed forever with no path to recovery. Detect it
+    // once at open, quarantine the bad file, and start fresh so the dev server
+    // becomes usable again instead of wedging.
+    try {
+      const candidate = new SQL.Database(bytes);
+      this.assertReadable(candidate);
+      this.db = candidate;
+    } catch (err) {
+      await this.quarantineCorruptFile(err);
+      this.db = new SQL.Database();
+    }
+  }
+
+  /**
+   * Force sql.js to actually read a page so a malformed image surfaces now
+   * rather than on the first business query. `PRAGMA quick_check` walks the
+   * b-tree structure without the full-scan cost of `integrity_check`; a healthy
+   * database returns a single `ok` row. Any thrown error (raw string or Error)
+   * or a non-`ok` result is treated as corruption.
+   */
+  private assertReadable(db: Database): void {
+    const res = db.exec('PRAGMA quick_check(1)');
+    const first = res?.[0]?.values?.[0]?.[0];
+    if (typeof first === 'string' && first.toLowerCase() !== 'ok') {
+      throw new Error(`sqlite quick_check failed: ${first}`);
+    }
+  }
+
+  /**
+   * Move a corrupt database file aside so its bytes are preserved for
+   * post-mortem while a fresh, empty database takes its place. Best-effort:
+   * failures here must not prevent the server from booting on a clean DB.
+   */
+  private async quarantineCorruptFile(cause: unknown): Promise<void> {
+    if (!this.fs) return;
+    const reason =
+      typeof cause === 'string' ? cause : (cause as Error)?.message ?? String(cause);
+    const backup = `${this.filename}.corrupt-${Date.now()}`;
+    try {
+      await this.fs.rename(this.filename, backup);
+      this.logger.warn(
+        `[driver-sqlite-wasm] Database image at ${this.filename} is corrupt ` +
+          `(${reason}). Quarantined to ${backup} and starting from an empty ` +
+          `database so the server can boot.`,
+      );
+    } catch (renameErr) {
+      // Could not move it aside (e.g. permissions) — overwrite is still better
+      // than looping forever on a malformed image. Warn loudly and continue.
+      this.logger.warn(
+        `[driver-sqlite-wasm] Database image at ${this.filename} is corrupt ` +
+          `(${reason}) and could not be quarantined (${String(renameErr)}). ` +
+          `Starting from an empty database; the corrupt file will be overwritten ` +
+          `on the next flush.`,
+      );
+    }
   }
 
   /**
@@ -271,8 +342,8 @@ export class WasmSqliteConnection {
       try {
         const exported = this.db.export();
         // sql.js returns a Uint8Array; Buffer.from on it shares memory but
-        // works fine for the synchronous writeFile enqueue below.
-        await this.fs!.writeFile(this.filename, Buffer.from(exported));
+        // works fine for the atomic write below.
+        await this.atomicWriteFile(Buffer.from(exported));
       } catch (err) {
         this.dirty = true; // let a later flush retry
         throw err;
@@ -282,6 +353,50 @@ export class WasmSqliteConnection {
     // flush doesn't poison every future flush; the awaited `step` still throws.
     this.flushChain = step.catch(() => {});
     await step;
+  }
+
+  /**
+   * Write the database bytes to disk atomically: write to a sibling temp file,
+   * fsync it, then `rename()` it over the target.
+   *
+   * A plain `writeFile(this.filename, …)` truncates the target and streams the
+   * new bytes in place, so a process killed mid-write (a dev-server restart,
+   * Ctrl-C, or crash — likely under `on-write`, where every dispatcher tick
+   * flushes) leaves a half-written file. sql.js then rejects that file on the
+   * next boot with "database disk image is malformed". `rename(2)` is atomic
+   * within a filesystem, so a reader always sees either the complete old file
+   * or the complete new one — never a torn image. The temp file lives in the
+   * same directory as the target so the rename stays intra-filesystem.
+   */
+  private async atomicWriteFile(data: Buffer): Promise<void> {
+    if (!this.fs) return;
+    const tmp = `${this.filename}.tmp-${process.pid}-${(WasmSqliteConnection.tmpSeq += 1)}`;
+    let handle: import('node:fs/promises').FileHandle | undefined;
+    try {
+      handle = await this.fs.open(tmp, 'w');
+      await handle.writeFile(data);
+      // Flush the bytes to the platter before the rename so a crash can't leave
+      // a renamed-but-empty file behind on filesystems that reorder the two.
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await this.fs.rename(tmp, this.filename);
+    } catch (err) {
+      if (handle) {
+        try {
+          await handle.close();
+        } catch {
+          /* ignore */
+        }
+      }
+      // Clean up the temp file so a failed flush doesn't litter the data dir.
+      try {
+        await this.fs.unlink(tmp);
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    }
   }
 
   /** Close the database, flushing any pending writes first. */

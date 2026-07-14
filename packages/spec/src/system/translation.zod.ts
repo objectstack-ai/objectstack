@@ -62,10 +62,16 @@ export const ObjectTranslationDataSchema = lazySchema(() => z.object({
    * Convention (auto-resolved by `resolveViewLabel`):
    *   objects.<object>._views.<view_name>.label
    *   objects.<object>._views.<view_name>.description
+   *   objects.<object>._views.<view_name>.emptyState.title
+   *   objects.<object>._views.<view_name>.emptyState.message
    */
   _views: z.record(z.string(), z.object({
     label: z.string().optional().describe('Translated view label'),
     description: z.string().optional().describe('Translated view description'),
+    emptyState: z.object({
+      title: z.string().optional().describe('Translated empty-state title'),
+      message: z.string().optional().describe('Translated empty-state message'),
+    }).optional().describe('Translated empty-state copy shown when the view has no rows'),
   })).optional().describe('View translations keyed by view name'),
 
   /**
@@ -478,6 +484,10 @@ export const ObjectTranslationNodeSchema = lazySchema(() => z.object({
   _views: z.record(z.string(), z.object({
     label: z.string().optional().describe('Translated view label'),
     description: z.string().optional().describe('Translated view description'),
+    emptyState: z.object({
+      title: z.string().optional().describe('Translated empty-state title'),
+      message: z.string().optional().describe('Translated empty-state message'),
+    }).optional().describe('Translated empty-state copy shown when the view has no rows'),
   })).optional().describe('View translations keyed by view name'),
 
   /** Section (form section / tab) translations keyed by section name */

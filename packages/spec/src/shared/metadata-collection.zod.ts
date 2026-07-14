@@ -32,6 +32,9 @@
  * @module
  */
 
+import { applyConversions } from '../conversions/apply.js';
+import type { ConversionNotice } from '../conversions/types.js';
+
 /**
  * Input type for metadata collections: accepts either an array or a named map.
  * When using map format, the key is injected as the `name` field of each item.
@@ -207,23 +210,54 @@ export function normalizeMetadataCollection(value: unknown, keyField = 'name'): 
 }
 
 /**
+ * Options for {@link normalizeStackInput}.
+ */
+export interface NormalizeStackInputOptions {
+  /**
+   * Sink for the structured deprecation notices emitted by the ADR-0087 D2
+   * conversion pass (one per rewritten old-shape site). Defaults to a no-op:
+   * the conversion still runs (zero consumer action is the point), but the
+   * notice is only *surfaced* when a caller asks — `objectstack validate`
+   * passes a sink that prints them.
+   */
+  onConversionNotice?: (notice: ConversionNotice) => void;
+  /**
+   * Whether to run the D2 conversion pass. Defaults to `true` (the load-time
+   * behavior). Set `false` to get map→array normalization *only* — used by
+   * `objectstack migrate meta`, which must replay the conversions itself as
+   * chain steps against the raw authored source so each rewrite is attributed
+   * to the chain rather than silently pre-applied here.
+   */
+  convert?: boolean;
+}
+
+/**
  * Normalize all metadata collections in a stack definition input.
- * Converts any map-formatted collections to arrays with key→name injection.
- * 
+ * Converts any map-formatted collections to arrays with key→name injection,
+ * then runs the ADR-0087 D2 **conversion layer** so old (N−1) metadata shapes
+ * are rewritten to the canonical protocol-N shape at load — the single seam
+ * every load path (`defineStack`, `validate`, `lint`, `info`, `doctor`) shares.
+ *
  * This function is applied to the raw input before Zod validation,
  * ensuring the canonical internal format is always arrays.
- * 
+ *
  * @param input - The raw stack definition input
- * @returns A new object with all map collections normalized to arrays
+ * @param options - Optional conversion-notice sink (see {@link NormalizeStackInputOptions})
+ * @returns A new object with all map collections normalized to arrays and
+ *          off-spec shapes converted to canonical
  */
-export function normalizeStackInput<T extends Record<string, unknown>>(input: T): T {
+export function normalizeStackInput<T extends Record<string, unknown>>(
+  input: T,
+  options: NormalizeStackInputOptions = {},
+): T {
   const result = { ...input };
   for (const field of MAP_SUPPORTED_FIELDS) {
     if (field in result) {
       (result as Record<string, unknown>)[field] = normalizeMetadataCollection(result[field]);
     }
   }
-  return result;
+  if (options.convert === false) return result;
+  return applyConversions(result, { onNotice: options.onConversionNotice }) as T;
 }
 
 /**

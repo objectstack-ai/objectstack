@@ -9,7 +9,17 @@ pnpm install
 pnpm dev
 ```
 
-The REST API is served at `http://localhost:3000/api`.
+The REST API is served at `http://localhost:3000/api/v1`. Data endpoints
+require a session — the dev server seeds a login-ready admin
+(`admin@objectos.ai` / `admin123`) on an empty database:
+
+```bash
+curl -c cookies.txt -X POST http://localhost:3000/api/v1/auth/sign-in/email \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@objectos.ai","password":"admin123"}'
+
+curl -b cookies.txt "http://localhost:3000/api/v1/data/<your_object>"
+```
 
 ## Layout
 

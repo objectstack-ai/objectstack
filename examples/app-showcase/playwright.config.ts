@@ -11,6 +11,8 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = 3000;
 export default defineConfig({
   testDir: './e2e',
+  // permission-model.spec.ts has its own opt-in config (playwright.permission.config.ts)
+  testIgnore: 'permission-model.spec.ts',
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,

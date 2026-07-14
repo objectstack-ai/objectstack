@@ -1,13 +1,14 @@
 {
   "name": "create-objectstack",
   "version": "14.7.0",
-  "description": "Create a new ObjectStack project — npx create-objectstack",
+  "description": "Create a new ObjectStack project \u2014 npx create-objectstack",
   "bin": {
     "create-objectstack": "./bin/create-objectstack.js"
   },
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch"
+    "dev": "tsup --watch",
+    "test": "vitest run"
   },
   "keywords": [
     "objectstack",
@@ -27,7 +28,8 @@
     "@types/node": "^26.1.1",
     "@types/tar": "^7.0.87",
     "tsup": "^8.5.1",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   },
   "repository": {
     "type": "git",

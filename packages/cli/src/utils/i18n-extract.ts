@@ -21,6 +21,7 @@
  *   objects.<name>.fields.<field>.options.<value>
  *   objects.<name>._views.<view>.label
  *   objects.<name>._views.<view>.description
+ *   objects.<name>._views.<view>.emptyState.title / .message
  *   objects.<name>._actions.<action>.label
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
@@ -119,6 +120,22 @@ function viewObjectName(view: any): string | undefined {
   return view?.objectName ?? view?.object ?? view?.data?.object;
 }
 
+/**
+ * Emit `_views.<view>.emptyState.{title,message}` entries when the view
+ * declares empty-state copy. Mirrors the client-side resolver convention
+ * (`viewEmptyState` in @object-ui/i18n) and `ObjectTranslationDataSchema`.
+ */
+function pushViewEmptyState(out: ExpectedEntry[], viewPath: string[], view: any, objectName: string): void {
+  const emptyState = view?.emptyState;
+  if (!emptyState || typeof emptyState !== 'object') return;
+  if (typeof emptyState.title === 'string' && emptyState.title.length > 0) {
+    pushEntry(out, [...viewPath, 'emptyState', 'title'], emptyState.title, 'view', { objectName });
+  }
+  if (typeof emptyState.message === 'string' && emptyState.message.length > 0) {
+    pushEntry(out, [...viewPath, 'emptyState', 'message'], emptyState.message, 'view', { objectName });
+  }
+}
+
 function pushEntry(
   out: ExpectedEntry[],
   path: string[],
@@ -200,6 +217,7 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
         if (view.description) {
           pushEntry(out, ['objects', objectName, '_views', viewName, 'description'], view.description, 'view', { objectName });
         }
+        pushViewEmptyState(out, ['objects', objectName, '_views', viewName], view, objectName);
       }
     }
 
@@ -229,6 +247,7 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
     if (view.description) {
       pushEntry(out, ['objects', objectName, '_views', view.name, 'description'], view.description, 'view', { objectName });
     }
+    pushViewEmptyState(out, ['objects', objectName, '_views', view.name], view, objectName);
   }
 
   // ── Top-level actions ────────────────────────────────────────────

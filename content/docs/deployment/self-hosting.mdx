@@ -1,0 +1,303 @@
+---
+title: Self-Hosted Deployment
+description: Run a compiled ObjectStack app on your own infrastructure — bare Node.js, systemd, Docker, and Docker Compose with Postgres, including health checks, reverse-proxy wiring, and the secrets you must pin.
+---
+
+# Self-Hosted Deployment
+
+This guide takes the artifact produced by `os build` / `os compile` and runs it
+on infrastructure **you** operate: a Linux host, a Docker container, or a
+compose stack with Postgres. It complements the platform-specific
+[Vercel guide](/docs/deployment/vercel) and assumes you have read
+[Deployment Modes](/docs/deployment).
+
+The deployment model is deliberately simple:
+
+```
+objectstack.config.ts ──(os build, CI)──▶ dist/objectstack.json ──(os start, server)──▶ running app
+```
+
+- The **artifact** (`dist/objectstack.json`) is a portable, self-describing
+  JSON file — your entire app. Build it once in CI; the host needs no
+  TypeScript and no build step.
+- **`os start`** boots a production server directly from that artifact
+  ([reference](/docs/getting-started/cli#os-start)).
+- **Deployment config stays outside the artifact.** Database URL, secrets, and
+  environment identity are injected via `OS_*` environment variables or flags.
+
+## The minimum viable production environment
+
+Four values every self-hosted deployment must pin — everything else has a
+workable default:
+
+| Variable | Why it must be set |
+|:---|:---|
+| `OS_DATABASE_URL` | Without it, data lands in a SQLite file under the ObjectStack home directory (`~/.objectstack`, or `<cwd>/.objectstack` next to a project config) — fine for one box, wrong for containers. Use `postgres://…`, `libsql://…`, or a mounted `file:…` path. |
+| `OS_AUTH_SECRET` | Session secret for the auth plugin (`AUTH_SECRET` is the legacy alias). Without it, `/api/v1/auth/*` is **silently skipped** — the server runs unauthenticated. |
+| `OS_SECRET_KEY` | 32-byte master key encrypting every stored secret (`openssl rand -hex 32`). On a container's ephemeral filesystem the auto-minted key is **lost on restart**, making previously-encrypted secrets undecryptable. |
+| `OS_PORT` | `os start` **fails loudly** if the port is busy (it never auto-shifts like `os dev`). Pin it and keep your reverse-proxy upstream in sync. |
+
+Generate strong values once and store them in your secret manager:
+
+```bash
+OS_AUTH_SECRET=$(openssl rand -hex 32)
+OS_SECRET_KEY=$(openssl rand -hex 32)
+```
+
+The full catalog is in
+[Environment Variables](/docs/deployment/environment-variables).
+
+## Option 1 — Bare Node.js (systemd)
+
+The simplest deployment: Node 18+ and the CLI on a Linux host.
+
+```bash
+# On the host — no repo clone, just the CLI and your artifact
+npm install -g @objectstack/cli
+scp dist/objectstack.json server:/opt/my-app/objectstack.json
+```
+
+```ini title="/etc/systemd/system/my-app.service"
+[Unit]
+Description=My ObjectStack App
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=objectstack
+WorkingDirectory=/opt/my-app
+Environment=NODE_ENV=production
+Environment=OS_ARTIFACT_PATH=/opt/my-app/objectstack.json
+Environment=OS_PORT=8080
+EnvironmentFile=/opt/my-app/secrets.env   # OS_DATABASE_URL, OS_AUTH_SECRET, OS_SECRET_KEY
+ExecStart=/usr/bin/os start
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now my-app
+curl -fsS http://localhost:8080/api/v1/health
+```
+
+Upgrades are atomic: replace the artifact file and restart the service. Roll
+back by restoring the previous artifact.
+
+## Option 2 — Docker
+
+The artifact model maps cleanly onto containers: the image contains Node, the
+CLI, and one JSON file. The Dockerfile below (plus the compose stack in the
+next section and a `.dockerignore`) also ships ready-to-copy in
+[`examples/docker`](https://github.com/objectstack-ai/framework/tree/main/examples/docker)
+— drop the files into your scaffolded project.
+
+```dockerfile title="Dockerfile"
+# ── Build stage: compile TypeScript metadata to the artifact ─────────
+FROM node:22-slim AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npx os build              # → dist/objectstack.json
+
+# ── Runtime stage: CLI + artifact only ───────────────────────────────
+FROM node:22-slim
+WORKDIR /srv/app
+RUN npm install -g @objectstack/cli
+COPY --from=build /app/dist/objectstack.json ./objectstack.json
+
+ENV NODE_ENV=production \
+    OS_ARTIFACT_PATH=/srv/app/objectstack.json \
+    OS_PORT=8080
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s \
+  CMD node -e "fetch('http://localhost:8080/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+
+CMD ["os", "start"]
+```
+
+```bash
+docker build -t my-app .
+docker run -p 8080:8080 \
+  -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
+  -e OS_AUTH_SECRET \
+  -e OS_SECRET_KEY \
+  my-app
+```
+
+<Callout type="warn">
+**Never bake `OS_AUTH_SECRET` / `OS_SECRET_KEY` into the image.** Pass them at
+runtime from your orchestrator's secret store. And never rely on the
+auto-minted dev crypto key inside a container — it lives on the ephemeral
+filesystem and dies with it.
+</Callout>
+
+## Option 3 — Docker Compose with Postgres
+
+A complete single-host production stack:
+
+```yaml title="docker-compose.yml"
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      OS_DATABASE_URL: postgres://objectstack:${POSTGRES_PASSWORD}@db:5432/myapp
+      OS_AUTH_SECRET: ${OS_AUTH_SECRET}
+      OS_SECRET_KEY: ${OS_SECRET_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: objectstack
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: myapp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U objectstack -d myapp"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+```
+
+```bash
+# .env next to docker-compose.yml (never committed)
+POSTGRES_PASSWORD=…
+OS_AUTH_SECRET=…
+OS_SECRET_KEY=…
+
+docker compose up -d
+curl -fsS http://localhost:8080/api/v1/health
+```
+
+Prefer SQLite on a single small host? Skip the `db` service, mount a volume,
+and point `OS_DATABASE_URL` at it: `file:/srv/data/app.db` (with
+`- appdata:/srv/data` on the app service). See
+[Drivers](/docs/data-modeling/drivers) for when to reach for which database.
+
+## Health checks & orchestration
+
+Every runtime exposes two probe endpoints — wire them into Docker
+`HEALTHCHECK`, Kubernetes probes, or your load balancer:
+
+| Endpoint | Meaning | Use as |
+|:---|:---|:---|
+| `GET /api/v1/health` | Process is up and serving HTTP | Liveness probe |
+| `GET /api/v1/ready` | Kernel booted, ready for traffic | Readiness probe |
+
+### Kubernetes
+
+The same image works unchanged. A minimal reference Deployment — secrets from
+a `Secret`, probes on the two endpoints above:
+
+```yaml title="deployment.yaml"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 1            # >1 requires OS_CLUSTER_DRIVER — see below
+  selector:
+    matchLabels: { app: my-app }
+  template:
+    metadata:
+      labels: { app: my-app }
+    spec:
+      containers:
+        - name: app
+          image: registry.example.com/my-app:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: my-app-secrets   # OS_DATABASE_URL, OS_AUTH_SECRET, OS_SECRET_KEY
+          livenessProbe:
+            httpGet: { path: /api/v1/health, port: 8080 }
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /api/v1/ready, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+spec:
+  selector: { app: my-app }
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+`/api/v1/ready` returns 503 while the kernel is booting *and* during graceful
+shutdown, so rolling restarts drain cleanly. Before setting `replicas > 1`,
+read the multi-node note below.
+
+## Reverse proxy & TLS
+
+Terminate TLS in front of the app (Caddy, nginx, Traefik, or your cloud LB)
+and keep three things in sync with the public origin:
+
+```bash
+OS_AUTH_URL=https://app.example.com          # auth callbacks / cookie origin
+OS_TRUSTED_ORIGINS=https://app.example.com   # CORS allow-list
+OS_PORT=8080                                 # must match the proxy upstream
+```
+
+```text title="Caddyfile"
+app.example.com {
+    reverse_proxy localhost:8080
+}
+```
+
+A drifted port or origin is the classic self-hosting failure: the app runs,
+but logins bounce and browsers block API calls. Enable HSTS and tune security
+headers only after TLS is confirmed — see
+[Production Readiness](/docs/deployment/production-readiness).
+
+## Scaling beyond one node
+
+The default in-process coordination (locks, queues, schedules) is
+single-node. Before running replicas, set `OS_CLUSTER_DRIVER` — the runtime
+then treats the deployment as multi-node and **refuses to boot without an
+explicit `OS_SECRET_KEY`** rather than minting per-node keys that can't
+decrypt each other's secrets. All replicas must share the same
+`OS_SECRET_KEY`, `OS_AUTH_SECRET`, and database. See
+[Cluster](/docs/kernel/cluster).
+
+## Go-live
+
+Before pointing real users at the deployment, walk the
+[Production Readiness](/docs/deployment/production-readiness) checklist —
+security headers, rate limits, metrics, error reporting, backup/restore
+drills, and data-retention windows.
+
+<Callout type="tip">
+**Your self-hosted app is AI-operable out of the box:** every deployment
+serves an MCP server at `/api/v1/mcp` under the same permissions and RLS.
+Disable with `OS_MCP_SERVER_ENABLED=false`. See
+[Your app as an MCP server](/docs/api#your-app-as-an-mcp-server).
+</Callout>
+
+## Related
+
+- [Backup & Restore](/docs/deployment/backup-restore) — what to back up, and the restore drill
+- [Deployment Modes](/docs/deployment) — the map of local / standalone / Cloud
+- [`os start` reference](/docs/getting-started/cli#os-start) — every flag and env var
+- [Environment Variables](/docs/deployment/environment-variables) — the full catalog
+- [Deploy to Vercel](/docs/deployment/vercel) — the serverless alternative
+- [Troubleshooting & FAQ](/docs/deployment/troubleshooting)

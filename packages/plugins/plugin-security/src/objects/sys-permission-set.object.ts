@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { P } from '@objectstack/spec';
 
 /**
  * sys_permission_set — System Permission Set Object
@@ -137,7 +138,16 @@ export const SysPermissionSet = ObjectSchema.create({
       required: true,
       searchable: true,
       maxLength: 100,
-      description: 'Unique machine name for the permission set',
+      description:
+        'Unique machine name for the permission set. This is the set’s metadata identity ' +
+        '(ADR-0094) and cannot be changed after creation — the data door rejects a rename; ' +
+        'clone the set to a new name instead.',
+      // [ADR-0094] The name is the metadata key the record projects from, so it
+      // is immutable once the record exists. `record.id` is server-assigned:
+      // absent on the create form (editable), present on edit (locked). The
+      // data-door write-through independently rejects a rename (400), so this
+      // is the matching UI affordance rather than the only guard.
+      readonlyWhen: P`record.id != null && record.id != ''`,
       group: 'Identity',
     }),
 

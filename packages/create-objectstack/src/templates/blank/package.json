@@ -11,13 +11,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@objectstack/spec": "^6.0.0",
-    "@objectstack/runtime": "^6.0.0",
-    "@objectstack/driver-memory": "^6.0.0",
-    "@objectstack/plugin-hono-server": "^6.0.0"
+    "@objectstack/spec": "^14.0.0",
+    "@objectstack/runtime": "^14.0.0",
+    "@objectstack/driver-memory": "^14.0.0",
+    "@objectstack/plugin-hono-server": "^14.0.0"
   },
   "devDependencies": {
-    "@objectstack/cli": "^6.0.0",
-    "typescript": "^5.3.0"
+    "@objectstack/cli": "^14.0.0",
+    "typescript": "^6.0.0"
   }
 }
