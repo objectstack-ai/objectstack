@@ -117,7 +117,9 @@ export const SysPermissionSet = ObjectSchema.create({
       name: 'all_permsets',
       label: 'All',
       data: { provider: 'object', object: 'sys_permission_set' },
-      columns: ['label', 'name', 'active', 'updated_at'],
+      // [ADR-0094] Surface provenance + the customized flag so admins can tell
+      // a packaged set (and whether they've overlaid it) from an env set.
+      columns: ['label', 'name', 'managed_by', 'customized', 'active', 'updated_at'],
       sort: [{ field: 'label', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
@@ -232,6 +234,20 @@ export const SysPermissionSet = ObjectSchema.create({
         "Record provenance: 'package' = versioned package metadata (re-seeded on upgrade, " +
         "read-mostly for admins); 'platform'/'user' = environment config (live-edited, never " +
         'touched by package seeding). Absent on legacy rows.',
+      group: 'Provenance',
+    }),
+
+    // [ADR-0094] TRUE when this package-owned set is currently shadowed by an
+    // environment overlay (customized in this env, away from its shipped
+    // baseline). Projector-maintained; deleting the overlay (reset) clears it.
+    // Only meaningful on `managed_by:'package'` rows.
+    customized: Field.boolean({
+      label: 'Customized',
+      defaultValue: false,
+      readonly: true,
+      description:
+        'This packaged permission set has an environment customization overlay (ADR-0094). ' +
+        'Reset it (delete through the data door) to return to the shipped baseline.',
       group: 'Provenance',
     }),
 

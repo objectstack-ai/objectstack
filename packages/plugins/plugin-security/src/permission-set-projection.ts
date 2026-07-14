@@ -204,9 +204,16 @@ export async function upsertEnvPermissionSet(
   ql: any,
   ps: any,
   _logger?: ProjectionLogger,
+  opts?: { customized?: boolean },
 ): Promise<PermissionSeedOutcome> {
   const out: PermissionSeedOutcome = { seeded: 0, updated: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
   if (!ql || typeof ql.find !== 'function' || !ps?.name) return out;
+
+  // [ADR-0094] `customized` marks a PACKAGE-owned row that an env overlay is
+  // currently shadowing, so the Setup list can badge it "customized" and the
+  // reset action reads honestly. An env-authored row is not a customization of
+  // anything (it IS the definition), so the flag only rides on package rows.
+  const customized = opts?.customized;
 
   const existing = (await tryFind(ql, 'sys_permission_set', { name: ps.name }, 1))[0];
   if (!existing?.id) {
@@ -216,6 +223,7 @@ export async function upsertEnvPermissionSet(
       ...permissionSetRowFields(ps),
       active: ps.active != null ? asBool(ps.active) : true,
       managed_by: 'user',
+      ...(customized !== undefined ? { customized: !!customized } : {}),
     });
     if (created) out.seeded += 1;
     return out;
@@ -226,6 +234,11 @@ export async function upsertEnvPermissionSet(
   // customization, and an env row keeps its user/platform/legacy provenance.
   const patch: Record<string, any> = { id: existing.id, ...permissionSetRowFields(ps) };
   if (ps.active != null) patch.active = asBool(ps.active);
+  // Only stamp `customized` on package-owned rows (an overlay of a packaged
+  // set). For env rows the concept doesn't apply — clear any stale flag.
+  if (customized !== undefined) {
+    patch.customized = existing.managed_by === 'package' ? !!customized : false;
+  }
   if (await tryUpdate(ql, 'sys_permission_set', patch)) {
     out.updated += 1;
   }
@@ -388,7 +401,7 @@ export async function projectPermissionMutation(
     await syncEvaluatorRegistry(metadata, evt.name, null, false);
     return retirePermissionSetRecord(ql, metadata, evt.name, logger);
   }
-  const out = await upsertEnvPermissionSet(ql, body, logger);
+  const out = await upsertEnvPermissionSet(ql, body, logger, { customized: overlayBacked });
   if (out.seeded + out.updated > 0) {
     await syncEvaluatorRegistry(metadata, evt.name, body, overlayBacked);
   }

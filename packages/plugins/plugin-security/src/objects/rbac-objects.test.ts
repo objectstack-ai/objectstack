@@ -145,6 +145,16 @@ describe('RBAC object canonical names + row actions', () => {
     expect(names).toEqual(['activate_permission_set', 'clone_permission_set', 'deactivate_permission_set']);
   });
 
+  it('[ADR-0094] declares a readonly `customized` provenance flag surfaced in the All list view', () => {
+    const f: any = (SysPermissionSet.fields as any).customized;
+    expect(f, 'customized field exists').toBeDefined();
+    expect(f.type).toBe('boolean');
+    expect(f.readonly).toBe(true);
+    const allView: any = (SysPermissionSet.listViews as any).all_permsets;
+    expect(allView.columns).toContain('customized');
+    expect(allView.columns).toContain('managed_by');
+  });
+
   it('[ADR-0094] locks the API name after creation (readonly on edit, editable on create)', () => {
     // The name is the metadata identity the record projects from — renaming
     // through the data door is rejected (400); this is the matching UI lock.

@@ -134,18 +134,22 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
       item: { ...baseline, label: 'Contributor (env customized)' },
     });
 
-    // Awaited projection: the record already reflects the overlay, and the
-    // package provenance is untouched.
+    // Awaited projection: the record already reflects the overlay, the
+    // package provenance is untouched, and it is flagged customized so the
+    // Setup list can badge it.
     const after = await findSet('showcase_contributor');
     expect(after.label).toBe('Contributor (env customized)');
     expect(after.managed_by).toBe('package');
     expect(after.package_id).toBe(contributor.package_id);
+    expect(after.customized).toBe(true);
 
-    // Deleting the overlay resets the record to the shipped declaration.
+    // Deleting the overlay resets the record to the shipped declaration and
+    // clears the customized flag.
     await protocol.deleteMetaItem({ type: 'permission', name: 'showcase_contributor' });
     const reset = await findSet('showcase_contributor');
     expect(reset.label).toBe(contributor.label);
     expect(reset.managed_by).toBe('package');
+    expect(reset.customized).toBe(false);
   });
 
   it('a brand-new environment set authored through the metadata door appears as a Setup record', async () => {

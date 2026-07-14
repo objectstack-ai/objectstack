@@ -323,6 +323,7 @@ describe('package-owned set customization lifecycle (env overlay)', () => {
     expect(JSON.parse(row.system_permissions)).toEqual(['customized']);
     expect(row.managed_by).toBe('package');
     expect(row.package_id).toBe('com.example.crm');
+    expect(row.customized, 'package row now carries an overlay → flagged customized').toBe(true);
   });
 
   it('deleting the overlay RESETS the package record to its declared baseline', async () => {
@@ -341,6 +342,7 @@ describe('package-owned set customization lifecycle (env overlay)', () => {
     expect(row, 'a packaged definition is never removed by an overlay reset').toBeTruthy();
     expect(JSON.parse(row.system_permissions)).toEqual(['pkg.baseline']);
     expect(row.managed_by).toBe('package');
+    expect(row.customized, 'reset clears the customized flag').toBe(false);
   });
 });
 
