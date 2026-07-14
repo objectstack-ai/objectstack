@@ -43,44 +43,44 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "設定されている場合、この日時に利用停止が自動解除されます。"
       },
       failed_login_count: {
-        label: "Failed Login Count",
-        help: "Consecutive failed sign-in attempts; reset to 0 on success. Maintained by the auth manager."
+        label: "連続ログイン失敗回数",
+        help: "連続してサインインに失敗した回数。成功すると 0 にリセットされます。認証マネージャーが管理します。"
       },
       locked_until: {
-        label: "Locked Until",
-        help: "When set and in the future, sign-in is rejected (brute-force lockout). Auto-clears past this time; an admin can clear it early via Unlock."
+        label: "ロック解除日時",
+        help: "設定されており未来の日時の場合、サインインは拒否されます（ブルートフォース対策ロック）。この日時を過ぎると自動解除され、管理者は「アカウントのロック解除」で早期解除できます。"
       },
       password_changed_at: {
-        label: "Password Changed At",
-        help: "Timestamp of the last password change. Backs password_expiry_days; system-managed."
+        label: "パスワード変更日時",
+        help: "最後にパスワードを変更した日時。password_expiry_days の基準になります。システム管理。"
       },
       phone_number: {
-        label: "Phone Number",
-        help: "Sign-in phone number (E.164 recommended). Unique per user; managed by better-auth when the phoneNumber plugin is enabled."
+        label: "電話番号",
+        help: "サインイン用の電話番号（E.164 形式を推奨）。ユーザーごとに一意。phoneNumber プラグイン有効時は better-auth が管理します。"
       },
       phone_number_verified: {
-        label: "Phone Verified",
-        help: "Whether the phone number has been verified (OTP verification requires SMS infrastructure; false until that ships). System-managed."
+        label: "電話番号確認済み",
+        help: "電話番号が確認済みかどうか（OTP 確認には SMS 基盤が必要で、提供されるまでは false）。システム管理。"
       },
       must_change_password: {
-        label: "Must Change Password",
-        help: "When true, the user is blocked (403 PASSWORD_EXPIRED) until they change their password. Stamped by the admin user-management routes; system-managed."
+        label: "パスワード変更必須",
+        help: "true の場合、パスワードを変更するまでユーザーはブロックされます（403 PASSWORD_EXPIRED）。管理者のユーザー管理ルートが設定します。システム管理。"
       },
       mfa_required_at: {
-        label: "MFA Required At",
-        help: "When enforced MFA first applied to this user (grace-period clock). Backs mfa_required; system-managed."
+        label: "MFA 強制適用日時",
+        help: "強制 MFA がこのユーザーに最初に適用された日時（猶予期間の起点）。mfa_required の基準になります。システム管理。"
       },
       last_login_at: {
-        label: "Last Login At",
-        help: "Timestamp of the last successful sign-in. Stamped by the auth manager; system-managed."
+        label: "最終ログイン日時",
+        help: "最後に成功したサインインの日時。認証マネージャーが記録します。システム管理。"
       },
       last_login_ip: {
-        label: "Last Login IP",
-        help: "Client IP of the last successful sign-in (from the trusted proxy forwarded header). System-managed."
+        label: "最終ログイン IP",
+        help: "最後に成功したサインインのクライアント IP（信頼済みプロキシの転送ヘッダー由来）。システム管理。"
       },
       ai_access: {
-        label: "AI Access",
-        help: "Whether this user holds an AI seat — grants access to the in-UI AI agents (build / ask). The framework synthesizes the `ai_seat` capability from this flag (plugin-hono-server resolveCtx). Assignment is capped by the licensed / purchased seat count (enforced by @objectstack/security-enterprise AiSeatPlugin). Owned by objectql (better-auth is oblivious to this column)."
+        label: "AI アクセス",
+        help: "このユーザーが AI シートを保有しているかどうか。UI 内 AI エージェント（build / ask）へのアクセスを付与します。フレームワークはこのフラグから `ai_seat` ケイパビリティを合成します（plugin-hono-server resolveCtx）。割り当て数はライセンス／購入済みシート数が上限です（@objectstack/security-enterprise AiSeatPlugin が強制）。objectql が所有します（better-auth はこの列を認識しません）。"
       },
       image: {
         label: "プロフィール画像"
@@ -94,11 +94,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing (ADR-0057 addendum D12). Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership."
       },
       source: {
-        label: "Identity Source",
-        help: "How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.",
+        label: "ID ソース",
+        help: "この ID の作成方法 — idp_provisioned（フェデレーション SSO の JIT）または env_native（ローカルサインアップ／アプリのエンドユーザー）。システム管理のため編集しないでください。",
         options: {
-          idp_provisioned: "IdP-Provisioned",
-          env_native: "Env-Native"
+          idp_provisioned: "IdP プロビジョニング",
+          env_native: "環境ネイティブ"
         }
       },
       id: {
@@ -113,7 +113,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       me: {
-        label: "My Profile"
+        label: "マイプロフィール"
       },
       all_users: {
         label: "すべてのユーザー"
@@ -143,12 +143,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "ユーザーの利用停止を解除しました"
       },
       unlock_user: {
-        label: "Unlock Account",
-        successMessage: "Account unlocked"
+        label: "アカウントのロック解除",
+        successMessage: "アカウントのロックを解除しました"
       },
       create_user: {
-        label: "Create User",
-        successMessage: "User created"
+        label: "ユーザーを作成",
+        successMessage: "ユーザーを作成しました"
       },
       set_user_password: {
         label: "パスワードを設定",
@@ -176,8 +176,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "確認メールを送信しました。新しいメールアドレスで確認してください。"
       },
       resend_verification_email: {
-        label: "Resend Verification Email",
-        successMessage: "Verification email sent — check your inbox."
+        label: "確認メールを再送",
+        successMessage: "確認メールを送信しました。受信トレイをご確認ください。"
       },
       delete_my_account: {
         label: "アカウント削除",
@@ -185,18 +185,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "アカウントを削除しました"
       },
       enable_two_factor: {
-        label: "Enable Two-Factor Auth",
-        successMessage: "Two-factor authentication enabled. Scan the QR code or paste the otpauth URI into your authenticator app, then verify a code to complete setup."
+        label: "二要素認証を有効化",
+        successMessage: "二要素認証を有効にしました。認証アプリで QR コードをスキャンするか otpauth URI を貼り付け、コードを検証して設定を完了してください。"
       },
       disable_two_factor: {
-        label: "Disable Two-Factor Auth",
-        confirmText: "Turn off two-factor authentication? Your account will be less secure.",
-        successMessage: "Two-factor authentication disabled."
+        label: "二要素認証を無効化",
+        confirmText: "二要素認証をオフにしますか？アカウントの安全性が低下します。",
+        successMessage: "二要素認証を無効にしました。"
       },
       generate_backup_codes: {
-        label: "Regenerate Backup Codes",
-        confirmText: "Generate a new set of backup codes? Any previously generated codes will stop working.",
-        successMessage: "New backup codes generated — save them somewhere safe."
+        label: "バックアップコードを再生成",
+        confirmText: "新しいバックアップコードを生成しますか？以前に生成されたコードはすべて使用できなくなります。",
+        successMessage: "新しいバックアップコードを生成しました。安全な場所に保管してください。"
       }
     }
   },
@@ -396,8 +396,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON シリアライズされた組織メタデータ"
       },
       require_mfa: {
-        label: "Require Multi-Factor Auth",
-        help: "When true, every member of this organization must enroll an authenticator app to access data."
+        label: "多要素認証を必須化",
+        help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。"
       },
       id: {
         label: "組織 ID"
@@ -438,9 +438,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "組織から退出しました"
       },
       change_slug: {
-        label: "Change Slug",
-        confirmText: "Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?",
-        successMessage: "Organization slug changed"
+        label: "スラッグを変更",
+        confirmText: "スラッグを変更すると、この組織のすべてのプラットフォームサブドメインが書き換えられ、旧スラッグは 90 日間確保されます。続行しますか？",
+        successMessage: "組織のスラッグを変更しました"
       }
     }
   },
@@ -724,7 +724,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       org_chart: {
-        label: "Org Chart"
+        label: "組織図"
       },
       active: {
         label: "有効"

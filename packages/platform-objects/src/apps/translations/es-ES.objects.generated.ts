@@ -43,44 +43,44 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Si se establece, el bloqueo se elimina automáticamente en ese momento."
       },
       failed_login_count: {
-        label: "Failed Login Count",
-        help: "Consecutive failed sign-in attempts; reset to 0 on success. Maintained by the auth manager."
+        label: "Intentos fallidos consecutivos",
+        help: "Intentos de inicio de sesión fallidos consecutivos; se restablece a 0 tras un inicio correcto. Lo mantiene el gestor de autenticación."
       },
       locked_until: {
-        label: "Locked Until",
-        help: "When set and in the future, sign-in is rejected (brute-force lockout). Auto-clears past this time; an admin can clear it early via Unlock."
+        label: "Bloqueado hasta",
+        help: "Si está establecido y es una fecha futura, el inicio de sesión se rechaza (bloqueo por fuerza bruta). Se limpia automáticamente pasado ese momento; un administrador puede levantarlo antes con «Desbloquear cuenta»."
       },
       password_changed_at: {
-        label: "Password Changed At",
-        help: "Timestamp of the last password change. Backs password_expiry_days; system-managed."
+        label: "Contraseña cambiada el",
+        help: "Fecha y hora del último cambio de contraseña. Sirve de base a password_expiry_days; gestionado por el sistema."
       },
       phone_number: {
-        label: "Phone Number",
-        help: "Sign-in phone number (E.164 recommended). Unique per user; managed by better-auth when the phoneNumber plugin is enabled."
+        label: "Número de teléfono",
+        help: "Número de teléfono para iniciar sesión (se recomienda E.164). Único por usuario; lo gestiona better-auth cuando el plugin phoneNumber está habilitado."
       },
       phone_number_verified: {
-        label: "Phone Verified",
-        help: "Whether the phone number has been verified (OTP verification requires SMS infrastructure; false until that ships). System-managed."
+        label: "Teléfono verificado",
+        help: "Indica si el número de teléfono se ha verificado (la verificación OTP requiere infraestructura de SMS; false hasta que esté disponible). Gestionado por el sistema."
       },
       must_change_password: {
-        label: "Must Change Password",
-        help: "When true, the user is blocked (403 PASSWORD_EXPIRED) until they change their password. Stamped by the admin user-management routes; system-managed."
+        label: "Debe cambiar la contraseña",
+        help: "Si es true, el usuario queda bloqueado (403 PASSWORD_EXPIRED) hasta que cambie su contraseña. Lo establecen las rutas de administración de usuarios; gestionado por el sistema."
       },
       mfa_required_at: {
-        label: "MFA Required At",
-        help: "When enforced MFA first applied to this user (grace-period clock). Backs mfa_required; system-managed."
+        label: "MFA exigido desde",
+        help: "Cuándo se aplicó por primera vez el MFA obligatorio a este usuario (inicio del período de gracia). Sirve de base a mfa_required; gestionado por el sistema."
       },
       last_login_at: {
-        label: "Last Login At",
-        help: "Timestamp of the last successful sign-in. Stamped by the auth manager; system-managed."
+        label: "Último inicio de sesión",
+        help: "Fecha y hora del último inicio de sesión correcto. Lo registra el gestor de autenticación; gestionado por el sistema."
       },
       last_login_ip: {
-        label: "Last Login IP",
-        help: "Client IP of the last successful sign-in (from the trusted proxy forwarded header). System-managed."
+        label: "IP del último inicio de sesión",
+        help: "IP del cliente del último inicio de sesión correcto (de la cabecera reenviada por el proxy de confianza). Gestionado por el sistema."
       },
       ai_access: {
-        label: "AI Access",
-        help: "Whether this user holds an AI seat — grants access to the in-UI AI agents (build / ask). The framework synthesizes the `ai_seat` capability from this flag (plugin-hono-server resolveCtx). Assignment is capped by the licensed / purchased seat count (enforced by @objectstack/security-enterprise AiSeatPlugin). Owned by objectql (better-auth is oblivious to this column)."
+        label: "Acceso a IA",
+        help: "Indica si este usuario dispone de una plaza de IA: otorga acceso a los agentes de IA integrados en la interfaz (build / ask). El framework sintetiza la capacidad `ai_seat` a partir de este indicador (plugin-hono-server resolveCtx). La asignación está limitada por el número de plazas licenciadas o compradas (aplicado por AiSeatPlugin de @objectstack/security-enterprise). Propiedad de objectql (better-auth ignora esta columna)."
       },
       image: {
         label: "Imagen de perfil"
@@ -94,11 +94,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing (ADR-0057 addendum D12). Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership."
       },
       source: {
-        label: "Identity Source",
-        help: "How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.",
+        label: "Origen de la identidad",
+        help: "Cómo se creó esta identidad: idp_provisioned (JIT de SSO federado) o env_native (registro local / usuario final de la aplicación). Gestionado por el sistema; no editar.",
         options: {
-          idp_provisioned: "IdP-Provisioned",
-          env_native: "Env-Native"
+          idp_provisioned: "Aprovisionada por IdP",
+          env_native: "Nativa del entorno"
         }
       },
       id: {
@@ -113,7 +113,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       me: {
-        label: "My Profile"
+        label: "Mi perfil"
       },
       all_users: {
         label: "Todos los usuarios"
@@ -143,12 +143,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Usuario desbloqueado"
       },
       unlock_user: {
-        label: "Unlock Account",
-        successMessage: "Account unlocked"
+        label: "Desbloquear cuenta",
+        successMessage: "Cuenta desbloqueada"
       },
       create_user: {
-        label: "Create User",
-        successMessage: "User created"
+        label: "Crear usuario",
+        successMessage: "Usuario creado"
       },
       set_user_password: {
         label: "Establecer contraseña",
@@ -176,8 +176,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Correo de verificación enviado; revisa la nueva dirección para confirmar."
       },
       resend_verification_email: {
-        label: "Resend Verification Email",
-        successMessage: "Verification email sent — check your inbox."
+        label: "Reenviar correo de verificación",
+        successMessage: "Correo de verificación enviado; revisa tu bandeja de entrada."
       },
       delete_my_account: {
         label: "Eliminar mi cuenta",
@@ -185,18 +185,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Cuenta eliminada"
       },
       enable_two_factor: {
-        label: "Enable Two-Factor Auth",
-        successMessage: "Two-factor authentication enabled. Scan the QR code or paste the otpauth URI into your authenticator app, then verify a code to complete setup."
+        label: "Habilitar autenticación de dos factores",
+        successMessage: "Autenticación de dos factores habilitada. Escanea el código QR o pega el URI otpauth en tu aplicación de autenticación y verifica un código para completar la configuración."
       },
       disable_two_factor: {
-        label: "Disable Two-Factor Auth",
-        confirmText: "Turn off two-factor authentication? Your account will be less secure.",
-        successMessage: "Two-factor authentication disabled."
+        label: "Deshabilitar autenticación de dos factores",
+        confirmText: "¿Desactivar la autenticación de dos factores? Tu cuenta será menos segura.",
+        successMessage: "Autenticación de dos factores deshabilitada."
       },
       generate_backup_codes: {
-        label: "Regenerate Backup Codes",
-        confirmText: "Generate a new set of backup codes? Any previously generated codes will stop working.",
-        successMessage: "New backup codes generated — save them somewhere safe."
+        label: "Regenerar códigos de respaldo",
+        confirmText: "¿Generar un nuevo juego de códigos de respaldo? Los códigos generados anteriormente dejarán de funcionar.",
+        successMessage: "Nuevos códigos de respaldo generados; guárdalos en un lugar seguro."
       }
     }
   },
@@ -396,8 +396,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Metadatos de la organización serializados en JSON."
       },
       require_mfa: {
-        label: "Require Multi-Factor Auth",
-        help: "When true, every member of this organization must enroll an authenticator app to access data."
+        label: "Exigir autenticación multifactor",
+        help: "Si es true, todos los miembros de esta organización deben registrar una aplicación de autenticación para acceder a los datos."
       },
       id: {
         label: "ID de organización"
@@ -438,9 +438,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Ha abandonado la organización"
       },
       change_slug: {
-        label: "Change Slug",
-        confirmText: "Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?",
-        successMessage: "Organization slug changed"
+        label: "Cambiar slug",
+        confirmText: "Renombrar el slug reescribe todos los subdominios de la plataforma para esta organización y reserva el slug anterior durante 90 días. ¿Continuar?",
+        successMessage: "Slug de la organización cambiado"
       }
     }
   },
@@ -724,7 +724,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       org_chart: {
-        label: "Org Chart"
+        label: "Organigrama"
       },
       active: {
         label: "Activo"

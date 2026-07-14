@@ -62,13 +62,30 @@ export const SysUserDetailPage: Page = {
         properties: {
           severity: 'warning',
           icon: 'mail',
-          title: '邮箱未验证',
-          body: '验证你的邮箱以接收密码重置和重要的系统通知。',
+          // Inline-i18n object labels: the renderer resolves them with
+          // pickLocalized (exact → base → default → en → first).
+          title: {
+            en: 'Email not verified',
+            'zh-CN': '邮箱未验证',
+            'ja-JP': 'メールが未認証です',
+            'es-ES': 'Correo no verificado',
+          },
+          body: {
+            en: 'Verify your email to receive password resets and important system notifications.',
+            'zh-CN': '验证你的邮箱以接收密码重置和重要的系统通知。',
+            'ja-JP': 'パスワードリセットや重要なシステム通知を受け取るには、メールアドレスを認証してください。',
+            'es-ES': 'Verifica tu correo para recibir restablecimientos de contraseña y notificaciones importantes del sistema.',
+          },
           visible: 'record.id == ctx.user.id && record.email_verified == false',
           dismissible: false,
           action: {
             actionName: 'resend_verification_email',
-            label: '重新发送验证邮件',
+            label: {
+              en: 'Resend verification email',
+              'zh-CN': '重新发送验证邮件',
+              'ja-JP': '認証メールを再送信',
+              'es-ES': 'Reenviar correo de verificación',
+            },
           },
         },
       },
@@ -99,11 +116,11 @@ export const SysUserDetailPage: Page = {
         ],
         sections: [
           {
-            label: 'Identity',
+            label: { en: 'Identity', 'zh-CN': '身份', 'ja-JP': 'アイデンティティ', 'es-ES': 'Identidad' },
             fields: ['name', 'image'],
           },
           {
-            label: 'Audit',
+            label: { en: 'Audit', 'zh-CN': '审计', 'ja-JP': '監査', 'es-ES': 'Auditoría' },
             fields: ['created_at', 'updated_at'],
           },
         ],
@@ -122,7 +139,7 @@ export const SysUserDetailPage: Page = {
         position: 'top',
         items: [
           {
-            label: 'Positions',
+            label: { en: 'Positions', 'zh-CN': '岗位', 'ja-JP': 'ポジション', 'es-ES': 'Puestos' },
             icon: 'shield-check',
             children: [
               {
@@ -139,7 +156,7 @@ export const SysUserDetailPage: Page = {
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'Positions',
+                  title: { en: 'Positions', 'zh-CN': '岗位', 'ja-JP': 'ポジション', 'es-ES': 'Puestos' },
                   add: {
                     picker: {
                       object: 'sys_position',
@@ -147,14 +164,19 @@ export const SysUserDetailPage: Page = {
                       labelField: 'label',
                     },
                     linkField: 'position',
-                    label: 'Assign position',
+                    label: {
+                      en: 'Assign position',
+                      'zh-CN': '分配岗位',
+                      'ja-JP': 'ポジションを割り当て',
+                      'es-ES': 'Asignar puesto',
+                    },
                   },
                 },
               },
             ],
           },
           {
-            label: 'Sessions',
+            label: { en: 'Sessions', 'zh-CN': '会话', 'ja-JP': 'セッション', 'es-ES': 'Sesiones' },
             icon: 'monitor',
             children: [
               {
@@ -166,13 +188,13 @@ export const SysUserDetailPage: Page = {
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'Sessions',
+                  title: { en: 'Sessions', 'zh-CN': '会话', 'ja-JP': 'セッション', 'es-ES': 'Sesiones' },
                 },
               },
             ],
           },
           {
-            label: 'Linked Accounts',
+            label: { en: 'Linked Accounts', 'zh-CN': '关联账号', 'ja-JP': '連携アカウント', 'es-ES': 'Cuentas vinculadas' },
             icon: 'link',
             children: [
               {
@@ -184,13 +206,13 @@ export const SysUserDetailPage: Page = {
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'Linked Accounts',
+                  title: { en: 'Linked Accounts', 'zh-CN': '关联账号', 'ja-JP': '連携アカウント', 'es-ES': 'Cuentas vinculadas' },
                 },
               },
             ],
           },
           {
-            label: 'Organizations',
+            label: { en: 'Organizations', 'zh-CN': '组织', 'ja-JP': '組織', 'es-ES': 'Organizaciones' },
             icon: 'building-2',
             children: [
               {
@@ -202,13 +224,13 @@ export const SysUserDetailPage: Page = {
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'Organizations',
+                  title: { en: 'Organizations', 'zh-CN': '组织', 'ja-JP': '組織', 'es-ES': 'Organizaciones' },
                 },
               },
             ],
           },
           {
-            label: 'OAuth Apps',
+            label: { en: 'OAuth Apps', 'zh-CN': 'OAuth 应用', 'ja-JP': 'OAuth アプリ', 'es-ES': 'Aplicaciones OAuth' },
             icon: 'key-square',
             children: [
               {
@@ -220,7 +242,7 @@ export const SysUserDetailPage: Page = {
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'OAuth Apps',
+                  title: { en: 'OAuth Apps', 'zh-CN': 'OAuth 应用', 'ja-JP': 'OAuth アプリ', 'es-ES': 'Aplicaciones OAuth' },
                 },
               },
             ],
@@ -232,21 +254,31 @@ export const SysUserDetailPage: Page = {
           // `location: 'record_section'` so they only render here, not
           // in the global header row.
           {
-            label: 'Security',
+            label: { en: 'Security', 'zh-CN': '安全', 'ja-JP': 'セキュリティ', 'es-ES': 'Seguridad' },
             icon: 'shield',
             children: [
               {
                 type: 'element:text',
                 properties: {
                   variant: 'subheading',
-                  content: 'Password & Sign-in',
+                  content: {
+                    en: 'Password & Sign-in',
+                    'zh-CN': '密码与登录',
+                    'ja-JP': 'パスワードとサインイン',
+                    'es-ES': 'Contraseña e inicio de sesión',
+                  },
                 },
               },
               {
                 type: 'element:text',
                 properties: {
                   variant: 'caption',
-                  content: 'Change your password or the email address associated with this account.',
+                  content: {
+                    en: 'Change your password or the email address associated with this account.',
+                    'zh-CN': '修改密码或此账号绑定的邮箱地址。',
+                    'ja-JP': 'パスワード、またはこのアカウントに関連付けられたメールアドレスを変更します。',
+                    'es-ES': 'Cambia tu contraseña o la dirección de correo asociada a esta cuenta.',
+                  },
                 },
               },
               {
@@ -262,14 +294,24 @@ export const SysUserDetailPage: Page = {
                 type: 'element:text',
                 properties: {
                   variant: 'subheading',
-                  content: 'Two-Factor Authentication',
+                  content: {
+                    en: 'Two-Factor Authentication',
+                    'zh-CN': '两步验证',
+                    'ja-JP': '二要素認証',
+                    'es-ES': 'Autenticación de dos factores',
+                  },
                 },
               },
               {
                 type: 'element:text',
                 properties: {
                   variant: 'caption',
-                  content: 'Add a second layer of security using a TOTP authenticator app. Backup codes let you sign in if you lose your device.',
+                  content: {
+                    en: 'Add a second layer of security using a TOTP authenticator app. Backup codes let you sign in if you lose your device.',
+                    'zh-CN': '使用 TOTP 验证器应用添加第二层安全防护。备用验证码可在设备丢失时用于登录。',
+                    'ja-JP': 'TOTP 認証アプリでセキュリティをもう一段強化します。バックアップコードがあれば、デバイスを紛失してもサインインできます。',
+                    'es-ES': 'Añade una segunda capa de seguridad con una app de autenticación TOTP. Los códigos de respaldo te permiten iniciar sesión si pierdes tu dispositivo.',
+                  },
                 },
               },
               {
@@ -285,14 +327,24 @@ export const SysUserDetailPage: Page = {
                 type: 'element:text',
                 properties: {
                   variant: 'subheading',
-                  content: 'Email Verification',
+                  content: {
+                    en: 'Email Verification',
+                    'zh-CN': '邮箱验证',
+                    'ja-JP': 'メール認証',
+                    'es-ES': 'Verificación de correo',
+                  },
                 },
               },
               {
                 type: 'element:text',
                 properties: {
                   variant: 'caption',
-                  content: 'Verify your email so password resets and notifications reach you. The button appears only while verification is pending.',
+                  content: {
+                    en: 'Verify your email so password resets and notifications reach you. The button appears only while verification is pending.',
+                    'zh-CN': '验证你的邮箱,以便接收密码重置和系统通知。按钮仅在邮箱待验证时显示。',
+                    'ja-JP': 'パスワードリセットや通知を受け取れるよう、メールアドレスを認証してください。ボタンは未認証の間のみ表示されます。',
+                    'es-ES': 'Verifica tu correo para recibir restablecimientos de contraseña y notificaciones. El botón solo aparece mientras la verificación está pendiente.',
+                  },
                 },
               },
               {
@@ -308,7 +360,12 @@ export const SysUserDetailPage: Page = {
                 type: 'element:text',
                 properties: {
                   variant: 'subheading',
-                  content: 'Danger Zone',
+                  content: {
+                    en: 'Danger Zone',
+                    'zh-CN': '危险操作',
+                    'ja-JP': '危険な操作',
+                    'es-ES': 'Zona de peligro',
+                  },
                 },
                 className: 'text-destructive',
               },
@@ -316,7 +373,12 @@ export const SysUserDetailPage: Page = {
                 type: 'element:text',
                 properties: {
                   variant: 'caption',
-                  content: 'Permanent. Once deleted, your account cannot be recovered.',
+                  content: {
+                    en: 'Permanent. Once deleted, your account cannot be recovered.',
+                    'zh-CN': '此操作不可逆,账号一经删除将无法恢复。',
+                    'ja-JP': 'この操作は取り消せません。削除されたアカウントは復元できません。',
+                    'es-ES': 'Permanente. Una vez eliminada, tu cuenta no se puede recuperar.',
+                  },
                 },
               },
               {
@@ -334,7 +396,7 @@ export const SysUserDetailPage: Page = {
           // user_id FK; the sys_api_key object's own list-item actions
           // (revoke / restore) handle row operations.
           {
-            label: 'API Keys',
+            label: { en: 'API Keys', 'zh-CN': 'API 密钥', 'ja-JP': 'API キー', 'es-ES': 'Claves de API' },
             icon: 'key-round',
             children: [
               {
@@ -346,7 +408,7 @@ export const SysUserDetailPage: Page = {
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
-                  title: 'API Keys',
+                  title: { en: 'API Keys', 'zh-CN': 'API 密钥', 'ja-JP': 'API キー', 'es-ES': 'Claves de API' },
                 },
               },
             ],
