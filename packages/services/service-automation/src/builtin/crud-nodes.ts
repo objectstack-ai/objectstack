@@ -47,7 +47,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const objectName = String(readAliasedConfig(cfg, 'get_record', 'objectName', ['object'], ctx.logger) ?? '');
                 if (!objectName) return { success: false, error: 'get_record: objectName required' };
 
-                const filter = interpolate(readAliasedConfig(cfg, 'get_record', 'filter', ['filters'], ctx.logger) ?? {}, variables, context) as Record<string, unknown>;
+                // `filters` → `filter` is now handled at load by the ADR-0087 D2
+                // conversion layer ('flow-node-crud-filter-alias'), so the executor
+                // reads the canonical key directly (PD #12 fallback retired).
+                const filter = interpolate(cfg.filter ?? {}, variables, context) as Record<string, unknown>;
                 const fields = cfg.fields as string[] | undefined;
                 const limit = typeof cfg.limit === 'number' ? cfg.limit : undefined;
                 const outputVariable = cfg.outputVariable as string | undefined;
@@ -138,7 +141,8 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const objectName = String(readAliasedConfig(cfg, 'update_record', 'objectName', ['object'], ctx.logger) ?? '');
                 if (!objectName) return { success: false, error: 'update_record: objectName required' };
 
-                const filter = interpolate(readAliasedConfig(cfg, 'update_record', 'filter', ['filters'], ctx.logger) ?? {}, variables, context) as Record<string, unknown>;
+                // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
+                const filter = interpolate(cfg.filter ?? {}, variables, context) as Record<string, unknown>;
                 // `fields` is the single canonical write-map key — no alias (the wrong key
                 // `fieldValues` is corrected at the authoring source + rejected by graph-lint).
                 const fields = interpolate(cfg.fields ?? {}, variables, context) as Record<string, unknown>;
@@ -173,7 +177,8 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const objectName = String(readAliasedConfig(cfg, 'delete_record', 'objectName', ['object'], ctx.logger) ?? '');
                 if (!objectName) return { success: false, error: 'delete_record: objectName required' };
 
-                const filter = interpolate(readAliasedConfig(cfg, 'delete_record', 'filter', ['filters'], ctx.logger) ?? {}, variables, context) as Record<string, unknown>;
+                // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
+                const filter = interpolate(cfg.filter ?? {}, variables, context) as Record<string, unknown>;
 
                 const data = getData();
                 if (!data) return { success: true };

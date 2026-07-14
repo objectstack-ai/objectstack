@@ -5,6 +5,7 @@ import type { ExecutionLog, ActionDescriptor } from '@objectstack/spec/automatio
 import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, ScreenSpec } from '@objectstack/spec/contracts';
 import type { Logger } from '@objectstack/spec/contracts';
 import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
+import { applyConversionsToFlow } from '@objectstack/spec';
 import type { FlowRegionParsed } from '@objectstack/spec/automation';
 import type { Connector } from '@objectstack/spec/integration';
 import { ConnectorSchema } from '@objectstack/spec/integration';
@@ -884,7 +885,26 @@ export class AutomationEngine implements IAutomationService {
     // ── IAutomationService Contract Implementation ────────
 
     registerFlow(name: string, definition: unknown): void {
-        const parsed = FlowSchema.parse(definition);
+        // ADR-0087 D2 — the runtime load seam. A stored flow authored against an
+        // old shape (a `webhook`/`http_request` callout node, a `delete_record`
+        // with `config.filters`) is canonicalized on rehydration, BEFORE parse +
+        // execution, so the executor only ever sees the canonical shape and a
+        // dropped-alias upgrade never silently changes behavior (e.g. an empty
+        // `filter` deleting a whole table). `reservedNodeTypes` is this engine's
+        // live executor registry: an open-namespace node-type rename over a type
+        // a custom executor owns becomes a loud, refused conflict — never a
+        // silent clobber of the third party's node.
+        const reservedNodeTypes = new Set<string>([
+            ...FLOW_STRUCTURAL_NODE_TYPES,
+            ...this.nodeExecutors.keys(),
+            ...this.actionDescriptors.keys(),
+        ]);
+        const converted = applyConversionsToFlow(definition, {
+            reservedNodeTypes,
+            onNotice: (n) => this.logger.warn(`[flow '${name}'] ${n.code}: ${n.message}`),
+            onConflict: (c) => this.logger.warn(`[flow '${name}'] ${c.code}: ${c.message}`),
+        });
+        const parsed = FlowSchema.parse(converted);
 
         // DAG cycle detection
         this.detectCycles(parsed);
