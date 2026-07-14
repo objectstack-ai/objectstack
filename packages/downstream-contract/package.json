@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/downstream-contract",
-  "version": "0.0.31",
+  "version": "0.0.32",
   "description": "Frozen third-party consumer fixture — a backward-compatibility gate for @objectstack/spec. Authored the way an external project on a published release authors metadata; if a spec change breaks it, that change is breaking (#2035).",
   "license": "Apache-2.0",
   "private": true,

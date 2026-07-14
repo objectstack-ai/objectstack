@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata-protocol",
-  "version": "14.7.0",
+  "version": "14.8.0",
   "license": "Apache-2.0",
   "description": "ObjectStack metadata management protocol: sys_metadata CRUD, draft/publish, locks, package ownership, diagnostics (ADR-0076).",
   "type": "module",

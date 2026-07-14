@@ -1,5 +1,88 @@
 # @objectstack/spec
 
+## 14.8.0
+
+### Minor Changes
+
+- 16b4bf6: ADR-0087 P1:元数据转换层(conversion layer,D2)——大多数破坏性变更对使用方零操作。
+
+  `@objectstack/spec` 新增 `conversions/` 模块:一张按协议大版本组织、声明式、无损的转换表,在**加载时**(`normalizeStackInput` —— `defineStack` / `objectstack validate` / `lint` / `info` / `doctor` 共用的同一入口)把旧(N−1)形态的元数据改写为规范的 N 形态,并对每处改写发出结构化弃用通知(`OS_METADATA_CONVERTED`)。使用方仍按旧形态编写也能零操作加载,运行时只会看到规范形态。这是把 Kubernetes storage-version/conversion 模型套用到元数据上;它与 Prime Directive #12 禁止的“使用方侧方言兜底”在每个维度上都相反:一张集中、随 spec 版本化、声明化、显式(每次应用都发通知)、带测试(每条附 old→new fixture)、会过期(仅在一个大版本内加载期生效,之后退役并沉淀进 P2 迁移链)的表,而非散落的 `cfg.a ?? cfg.b`。
+
+  首批以已发布的 protocol 11 重命名回填播种:
+
+  - `flow-node-http-callout-rename`:流程回调节点 `http_request` / `http_call` / `webhook` → `http`。
+  - `page-kind-jsx-to-html`:页面 `kind: 'jsx'` → `'html'`(ADR-0080 规范拼写)。
+  - `flow-node-crud-filter-alias`:CRUD 流程节点 `config.filters` → `config.filter`。
+
+  **运行时加载 seam(存量流程零回归的关键)。** 转换不仅接在构建/校验入口,也接到运行时 `AutomationEngine.registerFlow`(在 `FlowSchema.parse` 之前跑,新增 `applyConversionsToFlow`)。这样从数据库 rehydrate 的**存量流程**也会被规范化——否则删掉 `filters` 执行器兜底会让存量 `delete_record` / `update_record` 的过滤条件被静默清空(退化成作用于全表)。这才真正兑现 D2 “applied at load, the same seam”。
+
+  **开放命名空间的冲突守卫(第三方零静默误伤)。** `flow.node.type` 是开放命名空间(ADR-0018 移除了 enum gate),退役的官方名可能被第三方复用为自定义节点。转换层新增“保留名冲突”感知:运行时 seam 传入本环境已注册的执行器类型,若某退役别名(`http_request`/`http_call`/`webhook`)正被活的自定义执行器占用,则**拒绝改写并发出响亮的结构化告警 `OS_METADATA_CONVERSION_CONFLICT`**(带节点位置、conversion id、“请改名”的处置建议),而不是静默把它改成 `http` 破坏第三方节点。构建/校验入口无注册表上下文,历史别名照常转换。
+
+  并落实 PD #12 退役路径示范:`filters` → `filter` 别名从 `service-automation` 执行器的 `readAliasedConfig` 兜底中删除,提升为上面这条声明式转换条目;执行器改为直接读取规范键 `cfg.filter`。
+
+  新增导出(纯增量,无破坏):`applyConversions`、`applyConversionsToFlow`、`collectConversionNotices`、`ALL_CONVERSIONS`、`CONVERSIONS_BY_MAJOR`、`CONVERSION_NOTICE_CODE`、`CONVERSION_CONFLICT_CODE`,以及类型 `MetadataConversion`、`ConversionNotice`、`ConversionApplication`、`ConversionFixture`、`ConversionContext`、`ConversionConflictNotice`、`ConversionConflictDetail`、`ApplyConversionsOptions`、`NormalizeStackInputOptions`。`normalizeStackInput` 现接受可选第二参 `{ onConversionNotice, convert }`(向后兼容)。
+
+- 16b4bf6: ADR-0087 P2:可重放迁移链 + 机器可读变更清单(D3 / D4)。
+
+  **D3 —— 迁移链(`@objectstack/spec` 新增 `migrations/`)。** 一条永久、有序、按协议大版本组织的迁移链。每个大版本的步骤由两个来源合成:**已毕业的转换**(P1 的 D2 转换条目从加载路径退役后,以其 id 引用复用,作为该大版本的“机械变换”,转换与 fixture 不重复)和**语义变更**(无损映射无法表达的破坏,以结构化 TODO —— surface / 原因 / 验收标准 —— 呈现,而非静默或有损自动改写)。
+
+  - `applyMetaMigrations(stack, fromMajor, toMajor?)` 折叠 `fromMajor+1 … 当前` 的步骤,一次性把任意历史大版本的元数据迁到当前;跨大版本是设计主场景。每一跳(hop)都做检查点,便于逐跳验证与二分定位。**时效性从不承重** —— 迟到的使用方到达时重放链即可。
+  - `composeMigrationChain`、`MigrationFloorError`,以及显式的发布策略旋钮 `MIGRATION_SUPPORT_FLOOR`(链能回溯到多久)。
+  - 种子:protocol 11 步骤 —— 机械项为三条已毕业的 P1 转换;语义项为两个真实存量窗口:`titleFormat` 复合模板 → `nameField`(需公式字段,非无损)、SQL 式 RLS 谓词 → 规范 CEL。
+  - CI 把整条链当作链来测:每条转换的 old-shape fixture 从支持下限重放到目标大版本,组合性破坏即发布阻断。
+
+  **D4 —— `spec-changes.json` 变更清单。** Zod 定义的机器可读记录 `{ from, to, added, converted, migrated, removed }`,由 `composeSpecChanges(from, to, surfaceDiff?)` 跨大版本折叠转换表(D2)与迁移集(D3),并与发布期 api-surface 差异连接。按大版本的清单可组合成单一 `from→to` 视图;后续生成式升级指南与 P3 的 MCP `spec_changes` 工具都是它的投影。
+
+  **CLI —— `objectstack migrate meta --from N`。** 重放迁移链:展示生成的、经 `ObjectStackDefinitionSchema` 校验的机械变更 diff(逐条 `path: 旧 → 新`)与需人工判断的语义 TODO;`--to`、`--step`(逐跳检查点)、`--out <file.json>`(把规范化后的栈写为可 diff 的 JSON 快照)、`--json`。命令不静默改写 TS 配置源(AST 改写不安全且有损)—— 输出供使用方 agent 审阅采纳,这正是握手错误(P0)所指向的命令。
+
+  `normalizeStackInput` 新增可选 `convert: false`(仅做 map→array,不跑 D2 转换),供 `migrate meta` 对原始编写源重放链、把每处改写归因到对应链步。新增导出纯增量,无破坏性移除。
+
+- 10e8983: ADR-0089: unify the conditional-visibility predicate under one canonical key, `visibleWhen`, across every layer (data field, view form section/field, page component). This aligns visibility with the existing `readonlyWhen` / `requiredWhen` family and the `conditionalRequired → requiredWhen` precedent.
+
+  **Canonical key:** `visibleWhen` — a CEL predicate; the element is shown only when it is TRUE. The binding _root_ is still set by the layer: runtime record forms and pages bind `record` + `current_user` (pages also expose `page.<var>`); metadata-editing forms (`*.form.ts`) bind `data`.
+
+  **Deprecated aliases (still accepted):** the view key `visibleOn` and the page key `visibility` are now `@deprecated`. Both are folded into `visibleWhen` **once, at the schema boundary** (a zod `.transform()`), so consumers only ever read `visibleWhen`. When both a canonical and an alias key are present, the canonical wins.
+
+  Migration (L1 — no consumer action required; existing metadata keeps working):
+
+  - View form section/field: `visibleOn: "<cel>"` → `visibleWhen: "<cel>"`
+  - Page component: `visibility: "<cel>"` → `visibleWhen: "<cel>"`
+  - Data field / field option: already `visibleWhen` — unchanged.
+
+  Out of scope (unchanged): the boolean `visible` (Tab on/off), field `hidden`, gallery `visibleFields`, and unrelated `visibility` _enums_ (feed / package / environment / agent). Aliases remain for the standard deprecation window and are removed in a future major.
+
+- bb71321: i18n: translate the system account/messaging surfaces end to end.
+
+  - **spec**: `ObjectTranslationDataSchema` / `ObjectTranslationNodeSchema` now
+    accept `_views.<view>.emptyState.{title,message}` so list-view empty states
+    are translatable (contract-first for the extractor below).
+  - **cli**: `os i18n extract` emits `_views.<view>.emptyState` keys when a view
+    declares an empty state.
+  - **platform-objects**: fill every missing zh-CN/ja-JP/es-ES translation for
+    `sys_user`, `sys_organization` and `sys_business_unit` (fields, options,
+    views, actions); replace the hardcoded English tab/section/action labels in
+    the `sys_user`, `sys_organization` and `sys_position` detail pages with
+    inline i18n label objects, and route the user Security tab through
+    `record:quick_actions` so object action labels localize.
+  - **service-messaging**: new ADR-0029 D8 translation bundle
+    (`MessagingTranslations`) covering the seven `sys_*` messaging objects
+    (inbox message, receipts, deliveries, preferences, subscriptions, templates,
+    HTTP deliveries), registered on `kernel:ready`; zh-CN is fully translated
+    and ja-JP/es-ES cover `sys_inbox_message` (incl. the `mine` view empty
+    state).
+
+### Patch Changes
+
+- 607aaf4: 导出文件名本地化 + 系统字段标签内置多语言回退。
+
+  **`@objectstack/rest` — 导出下载文件名**:`GET /data/:object/export` 的 `Content-Disposition` 不再是裸的 `<对象名>.<扩展名>`,改为「对象显示名-时间戳」:ASCII 兜底用 API 名(`filename="contracts-20260714-153045.xlsx"`),本地化标签(如中文)按 RFC 5987/6266 编码进 `filename*=UTF-8''…`(浏览器直接下载得到 `合同-20260714-153045.xlsx`)。新增导出 `exportContentDisposition(objectName, label, ext, now?)`。
+
+  **`@objectstack/spec` — 系统字段标签回退**:ObjectQL 注册表给每个对象注入的系统字段(`owner_id`/`created_at`/`created_by`/`updated_at`/`updated_by`)只带英文标签,自定义对象又没有对应的翻译条目,导致中文界面的列表表头、导出文件、导入模板里漏出 "Owner"/"Created At" 等英文。`translateObject` 现内置这五个字段的 en/zh-CN/ja-JP/es-ES 标签表(措辞与平台生成的翻译包一致),仅当字段仍是注入的英文默认值时套用——作者自定义的标签绝不覆盖;无翻译包时也生效(`translateObject` 不再因缺 bundle 而提前返回,REST 元数据翻译路径同步放宽,缓存 ETag 本就按 locale 分键,无缓存串味风险)。
+
+  **`@objectstack/plugin-reports` — 附件文件名**:定时报表附件的文件名清洗从「非 ASCII 全部替换成 `_`」改为按 Unicode 字母/数字保留(`\p{L}\p{N}`),中文计划名不再变成一串下划线。
+
+  **`@objectstack/rest` — 导入接受翻译后的选项标签(导出 ↔ 导入闭环)**:导出与导入模板写出的是*翻译后*的选项标签(如 `待规划`),但导入强制转换只认作者原始 schema 的标签/值,导致用户把自己刚导出的本地化文件原样导回时 select 字段全部报 `invalid_option`。`prepareImportRequest` 新增 `localizeSchema` 钩子(REST 导入路由传入 `translateMetaItem`),把当前 locale 的翻译标签合并进字段选项作为匹配同义词——作者标签与选项 code 照常匹配,非法值照常报错,翻译失败时降级为仅作者标签匹配。新增导出 `mergeLocalizedOptionSynonyms(metaMap, localizedMetaMap)`。
+
 ## 14.7.0
 
 ### Minor Changes

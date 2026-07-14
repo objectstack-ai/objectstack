@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/setup",
-  "version": "14.7.0",
+  "version": "14.8.0",
   "license": "Apache-2.0",
   "description": "ObjectStack Setup — the platform administration app, packaged as its own ObjectStack app package (ADR-0048: one app per package).",
   "main": "dist/index.js",

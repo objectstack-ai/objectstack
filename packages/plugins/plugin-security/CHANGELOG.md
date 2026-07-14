@@ -1,5 +1,50 @@
 # @objectstack/plugin-security
 
+## 14.8.0
+
+### Minor Changes
+
+- f0acf25: Surface a `customized` flag on `sys_permission_set` so Setup can tell — at a glance — which packaged permission sets have an environment overlay (ADR-0094).
+
+  - The env projector stamps `customized: true` on a `managed_by:'package'` row while an overlay shadows its shipped baseline, and clears it when the overlay is removed (the data-door "reset"). Env-authored rows are never flagged (an env set is the definition, not a customization of one).
+  - The new read-only boolean field is added to `sys_permission_set` and to the "All" Setup list view (alongside `managed_by`), so a packaged-but-customized set is visible without opening the Studio layered diff.
+
+- 712328a: Package-owned permission sets are now customizable through the standard environment metadata overlay (ADR-0094 D5, revised — closes framework#2898 by making the overlay FIRST-CLASS instead of rejecting it).
+
+  - An env-scope `saveMetaItem('permission', …)` on a package-owned set is a real customization: the awaited projector applies the effective (overlay-wins) body to the `sys_permission_set` record while preserving its `managed_by:'package'` + `package_id` provenance, and the evaluator enforces it.
+  - A data-door edit of a packaged set (Setup PATCH) is translated into exactly that overlay — no more flat 403; a data-door "delete" removes the overlay and RESETS the record to the shipped declaration (the row survives).
+  - The ADR-0086 two-doors data gate narrows to what stays structurally true: forging package provenance through the admin door remains refused, as do the lifecycle ops with no overlay translation (`transfer`/`restore`/`purge`) on package rows; kernels without a metadata overlay layer keep the legacy full refusal.
+  - Cross-package roles compose via positions (bind several packages' sets); overlays narrow. Rationale: rejecting the overlay would make `permission` the one type whose declared `allowOrgOverride: true` is a lie, and clone-to-customize forks away from vendor baseline updates.
+
+  Note the standard overlay trade, now applicable to permission sets: while an overlay pins a set, later vendor baseline changes (including tightenings) don't take effect for that name until the overlay is reset or re-authored — surfaced by the Studio layered diff and covered by ADR-0091 recertification.
+
+  Also lands a dogfood proof (`showcase-permission-projection`) covering the full ADR-0094 invariant set — write-through, awaited projection, declared-set edit becomes an enforced overlay, package-set customize/reset lifecycle — registered in the liveness proof registry.
+
+- 1dede32: Make the `sys_permission_set` data record a pure projection of the metadata layer (ADR-0094; framework#2875) — one authoritative store for permission-set definitions, retiring the two-store split-brain behind the #2857 display-freshness class.
+
+  - **`@objectstack/metadata-protocol`**: new `registerMutationProjector(type, fn)` — an awaited, best-effort per-type hook invoked after persistence inside `saveMetaItem` / `publishMetaItem` / `deleteMetaItem`, so a derived data-plane read-model is already consistent when the write returns (outcome surfaced as `projectionApplied` on the response). Complements the fire-and-forget `onMetadataMutation` listeners.
+  - **`@objectstack/plugin-security`**: every non-system data-door write on `sys_permission_set` (Setup CRUD, bulk imports, any ObjectQL path) is redirected into the metadata store by an engine middleware; the record is written only by the projector. Boot reconciliation projects env overlays onto records (Studio-created sets now appear in Setup), backfills legacy data-door-only records into metadata once, and re-projects drifted records from the effective body (metadata wins). The projector also syncs the metadata manager's in-memory `permission` entry, so evaluator resolution and the Setup display can no longer disagree.
+
+  Behavior changes: "deleting" an artifact-backed permission set through the data door now resets it to its declared body instead of removing the row; renaming a set through the data door is rejected (`400`) — clone to a new name instead; record edits that predate this change and are shadowed by a metadata definition are discarded (loud warning) at first boot, since they were never enforced.
+
+  Moved exports (from `@objectstack/plugin-security`): `upsertEnvPermissionSet` now lives in `permission-set-projection.js` (still re-exported from the package root) and **creates** missing records; `projectEnvPermissionOnMutation` / `subscribeEnvPermissionProjection` are replaced by `projectPermissionMutation` / `registerPermissionSetProjection`.
+
+### Patch Changes
+
+- a199626: `claimSeedOwnership` now skips **external (federated) objects** — those with an `external` remote-table binding (ADR-0015) — the same way it already skips `managedBy` and `sys_*` objects.
+
+  The seed-ownership backfill walks every registered object that exposes an `owner_id` column and re-owns its unowned rows to the first admin. Federated objects get `owner_id` auto-injected into their schema, so they passed the filter and the backfill issued `select id from <remote_table> where owner_id is null` against a read-only remote datasource whose table may not be provisioned yet at boot — producing startup errors like `Find operation failed … no such table: customers`. External objects are read-only (DDL forbidden, writes double-opt-in) and their ownership is not the platform's to reassign, so they are excluded from the scan entirely.
+
+- Updated dependencies [16b4bf6]
+- Updated dependencies [16b4bf6]
+- Updated dependencies [10e8983]
+- Updated dependencies [607aaf4]
+- Updated dependencies [bb71321]
+  - @objectstack/spec@14.8.0
+  - @objectstack/platform-objects@14.8.0
+  - @objectstack/core@14.8.0
+  - @objectstack/formula@14.8.0
+
 ## 14.7.0
 
 ### Patch Changes

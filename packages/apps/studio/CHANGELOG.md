@@ -1,5 +1,17 @@
 # @objectstack/studio
 
+## 14.8.0
+
+### Patch Changes
+
+- Updated dependencies [16b4bf6]
+- Updated dependencies [16b4bf6]
+- Updated dependencies [10e8983]
+- Updated dependencies [607aaf4]
+- Updated dependencies [bb71321]
+  - @objectstack/spec@14.8.0
+  - @objectstack/platform-objects@14.8.0
+
 ## 14.7.0
 
 ### Patch Changes

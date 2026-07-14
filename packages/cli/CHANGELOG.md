@@ -1,5 +1,133 @@
 # @objectstack/cli
 
+## 14.8.0
+
+### Minor Changes
+
+- 16b4bf6: ADR-0087 P2:可重放迁移链 + 机器可读变更清单(D3 / D4)。
+
+  **D3 —— 迁移链(`@objectstack/spec` 新增 `migrations/`)。** 一条永久、有序、按协议大版本组织的迁移链。每个大版本的步骤由两个来源合成:**已毕业的转换**(P1 的 D2 转换条目从加载路径退役后,以其 id 引用复用,作为该大版本的“机械变换”,转换与 fixture 不重复)和**语义变更**(无损映射无法表达的破坏,以结构化 TODO —— surface / 原因 / 验收标准 —— 呈现,而非静默或有损自动改写)。
+
+  - `applyMetaMigrations(stack, fromMajor, toMajor?)` 折叠 `fromMajor+1 … 当前` 的步骤,一次性把任意历史大版本的元数据迁到当前;跨大版本是设计主场景。每一跳(hop)都做检查点,便于逐跳验证与二分定位。**时效性从不承重** —— 迟到的使用方到达时重放链即可。
+  - `composeMigrationChain`、`MigrationFloorError`,以及显式的发布策略旋钮 `MIGRATION_SUPPORT_FLOOR`(链能回溯到多久)。
+  - 种子:protocol 11 步骤 —— 机械项为三条已毕业的 P1 转换;语义项为两个真实存量窗口:`titleFormat` 复合模板 → `nameField`(需公式字段,非无损)、SQL 式 RLS 谓词 → 规范 CEL。
+  - CI 把整条链当作链来测:每条转换的 old-shape fixture 从支持下限重放到目标大版本,组合性破坏即发布阻断。
+
+  **D4 —— `spec-changes.json` 变更清单。** Zod 定义的机器可读记录 `{ from, to, added, converted, migrated, removed }`,由 `composeSpecChanges(from, to, surfaceDiff?)` 跨大版本折叠转换表(D2)与迁移集(D3),并与发布期 api-surface 差异连接。按大版本的清单可组合成单一 `from→to` 视图;后续生成式升级指南与 P3 的 MCP `spec_changes` 工具都是它的投影。
+
+  **CLI —— `objectstack migrate meta --from N`。** 重放迁移链:展示生成的、经 `ObjectStackDefinitionSchema` 校验的机械变更 diff(逐条 `path: 旧 → 新`)与需人工判断的语义 TODO;`--to`、`--step`(逐跳检查点)、`--out <file.json>`(把规范化后的栈写为可 diff 的 JSON 快照)、`--json`。命令不静默改写 TS 配置源(AST 改写不安全且有损)—— 输出供使用方 agent 审阅采纳,这正是握手错误(P0)所指向的命令。
+
+  `normalizeStackInput` 新增可选 `convert: false`(仅做 map→array,不跑 D2 转换),供 `migrate meta` 对原始编写源重放链、把每处改写归因到对应链步。新增导出纯增量,无破坏性移除。
+
+- 10e8983: ADR-0089 D3b: add the `validateVisibilityPredicates` lint rule for conditional-visibility keys, wired into `os validate` and `os compile` as advisory warnings.
+
+  Two rules, both `warning` (never fail the build):
+
+  - `visibility-alias-deprecated` — a `visibleOn` (view form section/field) or `visibility` (page component) key in authored source. It still works — the schema normalizes it to `visibleWhen` at parse — but the canonical key is `visibleWhen`. Fix: rename the key (same CEL value).
+  - `visibility-root-mislayered` — a runtime view/page visibility predicate rooted at `data.` (the metadata-editing-form root). Runtime record surfaces bind `record` + `current_user` (pages also expose `page.<var>`), so a `data.`-rooted predicate here never matches and the element renders unconditionally. Fix: use `record.`/`page.`.
+
+  The rule runs on the **pre-parse** stack (like `validate-list-view-mode`) so it can see the deprecated alias the author actually wrote before the schema folds it into `visibleWhen`.
+
+- 5540ced: feat(cli): surface the migration guide when an app's specVersion trails the installed platform
+
+  `os validate`, `os build`/`os compile`, and `os doctor` now emit a non-blocking
+  advisory when the app's authored `manifest.specVersion` declares an OLDER major
+  than the `@objectstack/spec` actually installed in its `node_modules` — pointing
+  at the curated per-major migration guide (`https://docs.objectstack.ai/docs/releases/v<major>`,
+  guaranteed to exist by `scripts/check-release-notes.mjs`).
+
+  This closes a discoverability gap for downstream/third-party apps: on a platform
+  upgrade the release notes were only reachable by reverse-engineering per-package
+  `CHANGELOG.md` files. The advisory now surfaces the guide at the exact moment the
+  upgrade is exercised. It never fails a build/validate and is not gated by
+  `--strict`; it also appears in the `--json` output as `specVersionGap`. Logic
+  lives in a new shared `checkSpecVersionGap()` util (unit-tested; installed
+  version injectable for tests).
+
+- bb71321: i18n: translate the system account/messaging surfaces end to end.
+
+  - **spec**: `ObjectTranslationDataSchema` / `ObjectTranslationNodeSchema` now
+    accept `_views.<view>.emptyState.{title,message}` so list-view empty states
+    are translatable (contract-first for the extractor below).
+  - **cli**: `os i18n extract` emits `_views.<view>.emptyState` keys when a view
+    declares an empty state.
+  - **platform-objects**: fill every missing zh-CN/ja-JP/es-ES translation for
+    `sys_user`, `sys_organization` and `sys_business_unit` (fields, options,
+    views, actions); replace the hardcoded English tab/section/action labels in
+    the `sys_user`, `sys_organization` and `sys_position` detail pages with
+    inline i18n label objects, and route the user Security tab through
+    `record:quick_actions` so object action labels localize.
+  - **service-messaging**: new ADR-0029 D8 translation bundle
+    (`MessagingTranslations`) covering the seven `sys_*` messaging objects
+    (inbox message, receipts, deliveries, preferences, subscriptions, templates,
+    HTTP deliveries), registered on `kernel:ready`; zh-CN is fully translated
+    and ja-JP/es-ES cover `sys_inbox_message` (incl. the `mine` view empty
+    state).
+
+### Patch Changes
+
+- eaff014: `os validate` now runs the ADR-0090 D7 security posture check, restoring its documented contract of being the artifact-free run of the same gates as `os compile`/`os build`. Previously a stack could pass `validate` and then fail the build — e.g. a custom object with no explicit `sharingModel` (OWD), which the posture linter rejects at compile. Error findings gate validation; advisory findings print as warnings (and join the `--json` warnings array).
+- Updated dependencies [16b4bf6]
+- Updated dependencies [16b4bf6]
+- Updated dependencies [10e8983]
+- Updated dependencies [10e8983]
+- Updated dependencies [a199626]
+- Updated dependencies [d1b1a94]
+- Updated dependencies [84650c5]
+- Updated dependencies [607aaf4]
+- Updated dependencies [e46169c]
+- Updated dependencies [f0acf25]
+- Updated dependencies [712328a]
+- Updated dependencies [1dede32]
+- Updated dependencies [bb71321]
+- Updated dependencies [a199626]
+  - @objectstack/spec@14.8.0
+  - @objectstack/service-automation@14.8.0
+  - @objectstack/lint@14.8.0
+  - @objectstack/plugin-security@14.8.0
+  - @objectstack/console@14.8.0
+  - @objectstack/driver-sql@14.8.0
+  - @objectstack/rest@14.8.0
+  - @objectstack/plugin-reports@14.8.0
+  - @objectstack/client@14.8.0
+  - @objectstack/platform-objects@14.8.0
+  - @objectstack/service-messaging@14.8.0
+  - @objectstack/driver-sqlite-wasm@14.8.0
+  - @objectstack/account@14.8.0
+  - @objectstack/setup@14.8.0
+  - @objectstack/cloud-connection@14.8.0
+  - @objectstack/core@14.8.0
+  - @objectstack/formula@14.8.0
+  - @objectstack/mcp@14.8.0
+  - @objectstack/metadata@14.8.0
+  - @objectstack/objectql@14.8.0
+  - @objectstack/observability@14.8.0
+  - @objectstack/driver-memory@14.8.0
+  - @objectstack/driver-mongodb@14.8.0
+  - @objectstack/plugin-approvals@14.8.0
+  - @objectstack/plugin-audit@14.8.0
+  - @objectstack/plugin-auth@14.8.0
+  - @objectstack/plugin-email@14.8.0
+  - @objectstack/plugin-hono-server@14.8.0
+  - @objectstack/plugin-sharing@14.8.0
+  - @objectstack/plugin-webhooks@14.8.0
+  - @objectstack/runtime@14.8.0
+  - @objectstack/service-analytics@14.8.0
+  - @objectstack/service-cache@14.8.0
+  - @objectstack/service-datasource@14.8.0
+  - @objectstack/service-job@14.8.0
+  - @objectstack/service-package@14.8.0
+  - @objectstack/service-queue@14.8.0
+  - @objectstack/service-realtime@14.8.0
+  - @objectstack/service-settings@14.8.0
+  - @objectstack/service-sms@14.8.0
+  - @objectstack/service-storage@14.8.0
+  - @objectstack/trigger-api@14.8.0
+  - @objectstack/trigger-record-change@14.8.0
+  - @objectstack/trigger-schedule@14.8.0
+  - @objectstack/types@14.8.0
+  - @objectstack/verify@14.8.0
+
 ## 14.7.0
 
 ### Minor Changes

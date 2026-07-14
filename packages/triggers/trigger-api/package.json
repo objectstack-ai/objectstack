@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/trigger-api",
-  "version": "14.7.0",
+  "version": "14.8.0",
   "license": "Apache-2.0",
   "description": "Inbound HTTP/webhook flow trigger for ObjectStack — per-flow HMAC-verified endpoints with queue-backed ingestion (ADR-0041)",
   "main": "dist/index.js",

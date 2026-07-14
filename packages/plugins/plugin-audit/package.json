@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-audit",
-  "version": "14.7.0",
+  "version": "14.8.0",
   "license": "Apache-2.0",
   "description": "Audit Plugin for ObjectStack — System audit log object and audit trail",
   "main": "dist/index.js",

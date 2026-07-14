@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-knowledge",
-  "version": "14.7.0",
+  "version": "14.8.0",
   "license": "Apache-2.0",
   "description": "Knowledge Service for ObjectStack — orchestrator implementing IKnowledgeService over pluggable IKnowledgeAdapter backends (RAGFlow, LlamaIndex, Dify, in-memory).",
   "type": "module",
