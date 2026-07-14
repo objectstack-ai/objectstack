@@ -9,6 +9,7 @@ import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/s
 import { loadConfig } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { validateStackExpressions } from '@objectstack/lint';
+import { validateVisibilityPredicates } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateSecurityPosture, buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
@@ -165,6 +166,20 @@ export default class Compile extends Command {
         for (const i of exprWarnings.slice(0, 50)) {
           console.log(`  • ${i.where}: ${i.message}`);
           console.log(`      source: \`${i.source}\``);
+        }
+      }
+
+      // 3b-bis. ADR-0089 D3b — deprecated visibility aliases + mis-layered
+      //     binding root. Checked on `normalized` (PRE-parse): the schema folds
+      //     `visibleOn`/`visibility` into `visibleWhen` at parse, so `result.data`
+      //     no longer carries the alias the author wrote. Advisory, never fatal.
+      const visibilityFindings = validateVisibilityPredicates(normalized as Record<string, unknown>);
+      if (visibilityFindings.length > 0 && !flags.json) {
+        printWarning(`Visibility warnings (${visibilityFindings.length}) — ADR-0089`);
+        for (const f of visibilityFindings.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(`      ${f.hint}`);
+          console.log(`      rule: ${f.rule}  at ${f.path}`);
         }
       }
 

@@ -14,6 +14,7 @@ import { validateWidgetBindings } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
+import { validateVisibilityPredicates } from '@objectstack/lint';
 import {
   printHeader,
   printKV,
@@ -348,6 +349,15 @@ export default class Validate extends Command {
 
       // 5. Warnings (non-blocking)
       const warnings: string[] = [];
+
+      // ADR-0089 D3b — deprecated visibility aliases + mis-layered binding root.
+      // Checked on `normalized` (PRE-parse): the schema folds `visibleOn`/
+      // `visibility` into `visibleWhen` during parse, so `result.data` no longer
+      // carries the alias the author actually wrote.
+      const visibilityFindings = validateVisibilityPredicates(normalized as Record<string, unknown>);
+      for (const f of visibilityFindings) {
+        warnings.push(`${f.where}: ${f.message} — ${f.hint}`);
+      }
 
       for (const i of exprWarnings) {
         warnings.push(`${i.where}: ${i.message}`);

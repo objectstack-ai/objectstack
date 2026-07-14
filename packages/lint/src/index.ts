@@ -70,6 +70,13 @@ export {
 export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layout.js';
 
 export {
+  validateVisibilityPredicates,
+  VISIBILITY_ALIAS_DEPRECATED,
+  VISIBILITY_ROOT_MISLAYERED,
+} from './validate-visibility-predicates.js';
+export type { VisibilityFinding, VisibilitySeverity } from './validate-visibility-predicates.js';
+
+export {
   validateCapabilityReferences,
   CAPABILITY_REFERENCE_UNKNOWN,
 } from './validate-capability-references.js';
