@@ -54,7 +54,9 @@ function hasOwnerField(schema: ServiceObject): boolean {
  * Walks `ql.registry.getAllObjects()`, filters to schemas that
  *   (a) are not `managedBy` (skip sys_/auth/platform tables),
  *   (b) are not `sys_*`-namespaced,
- *   (c) declare an `owner_id` field,
+ *   (c) are not `external` (federated remote-table bindings — read-only, DDL
+ *       forbidden, and their `owner_id` is not ours to reassign),
+ *   (d) declare an `owner_id` field,
  * and updates the unowned rows as `isSystem`. Returns a per-object summary.
  */
 export async function claimSeedOwnership(
@@ -80,6 +82,13 @@ export async function claimSeedOwnership(
     if (!schema?.name) continue;
     if ((schema as any).managedBy) continue;
     if (schema.name.startsWith('sys_')) continue;
+    // External (federated) objects bind to a remote table on another datasource
+    // (ADR-0015): reads are remapped, DDL is forbidden, and writes need a double
+    // opt-in. Their `owner_id` — if the remote even has the column — is not the
+    // platform's to reassign, and the remote table may not be provisioned when
+    // this runs at boot (e.g. a fixture that seeds later), so a scan errors with
+    // "no such table". Skip them entirely.
+    if ((schema as any).external) continue;
     if (!hasOwnerField(schema)) continue;
 
     try {
