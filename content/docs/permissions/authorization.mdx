@@ -142,15 +142,17 @@ one of two doors, each writing only what it owns:
   declared body rather than removing it; renaming through the data door is
   rejected (the name is the metadata identity — clone instead). Subject
   assignments remain plain config rows, unchanged.
-- **Data-layer write gate** — the security middleware **refuses** any admin-door
-  write to a `managedBy:'package'` `sys_permission_set` row, and refuses a
-  payload that forges that provenance (insert or update, single or array). It
-  fails closed ahead of the CRUD check — even a `modifyAllRecords` super-user is
-  blocked — so the door separation is a real boundary, not a UI hint. System /
-  boot writes carry `isSystem` and bypass it, so the seeder and materializer are
-  never self-blocked. An environment adjusts a packaged set through the
-  ADR-0005 overlay / muting subtract layer (below), never by editing the base
-  record.
+- **Data-layer gate (evolved by ADR-0094)** — the security middleware still
+  **refuses** any payload that forges package provenance (insert or update,
+  single or array) and the lifecycle ops with no overlay translation
+  (`transfer`/`restore`/`purge`) on package rows, failing closed ahead of the
+  CRUD check — even a `modifyAllRecords` super-user is blocked. Ordinary
+  admin-door **edits of a packaged set are no longer refused**: the ADR-0094
+  write-through translates them into the standard ADR-0005 env-scope
+  **overlay** — the record projects the effective body while the package keeps
+  owning the row, and "delete" resets to the shipped declaration. System /
+  boot writes carry `isSystem` and bypass it, so the seeder and materializer
+  are never self-blocked.
 
 ## Lifecycle coverage (five stages)
 

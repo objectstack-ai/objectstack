@@ -17,8 +17,6 @@ import {
   upsertEnvPermissionSet,
   projectPermissionMutation,
   registerPermissionSetProjection,
-  registerPermissionAuthoringGate,
-  assertEnvPermissionSaveAllowed,
   createPermissionSetWriteThrough,
   reconcilePermissionSetProjection,
 } from './permission-set-projection.js';
@@ -196,14 +194,19 @@ describe('upsertEnvPermissionSet (ADR-0094 — record is a pure projection)', ()
     expect(r.updated).toBe(1);
   });
 
-  it('refuses to touch a package-owned row (record stays the package baseline)', async () => {
+  it('projects onto a PACKAGE-OWNED row (overlay customization) while preserving its provenance', async () => {
+    // Direction confirmed 2026-07-14: an env overlay of a packaged set is the
+    // platform's standard ADR-0005 customization — the record follows the
+    // effective body; the package still owns the row.
     const ql = makeQl();
     ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg"]' });
-    const warns: string[] = [];
-    const r = await upsertEnvPermissionSet(ql, envBody(), { warn: (m) => warns.push(m) });
-    expect(r.skippedForeign).toBe(1);
-    expect(ql.permRows[0].system_permissions).toBe('["pkg"]');
-    expect(warns.some((w) => w.includes('package-owned'))).toBe(true);
+    const r = await upsertEnvPermissionSet(ql, envBody());
+    expect(r.updated).toBe(1);
+    const row = ql.permRows[0];
+    expect(JSON.parse(row.system_permissions)).toEqual(['setup.access', 'manage_org_users']);
+    expect(row.managed_by).toBe('package'); // provenance preserved
+    expect(row.package_id).toBe('com.example.crm');
+    expect(row.id).toBe('ps_pkg'); // id stable
   });
 });
 
@@ -303,47 +306,41 @@ describe('registerPermissionSetProjection', () => {
   });
 });
 
-// ── Authoring gate (ADR-0094 D5 / framework#2898) ───────────────────────────
+// ── Package-set customization via overlay (ADR-0094, direction 2026-07-14) ──
 
-describe('assertEnvPermissionSaveAllowed', () => {
-  it('rejects an env-door save targeting a package-owned record', async () => {
+describe('package-owned set customization lifecycle (env overlay)', () => {
+  it('a Studio env-scope save on a PACKAGE name customizes the record and keeps provenance', async () => {
     const ql = makeQl();
-    ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm' });
-    const r = await assertEnvPermissionSaveAllowed(ql, { name: 'crm_rep', packageId: null });
-    expect(r?.code).toBe('package_owned');
-    expect(r?.status).toBe(403);
+    const declaredBody = envBody({ systemPermissions: ['pkg.baseline'] });
+    (ql as any)._registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    const protocol = makeProtocol(ql, { organization_admin: declaredBody });
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]' });
+
+    await protocol.saveMetaItem({ type: 'permission', name: 'organization_admin', item: envBody({ systemPermissions: ['customized'] }) });
+
+    const row = ql.permRows[0];
+    expect(JSON.parse(row.system_permissions)).toEqual(['customized']);
+    expect(row.managed_by).toBe('package');
+    expect(row.package_id).toBe('com.example.crm');
   });
 
-  it('allows the package door (save carries the owning packageId)', async () => {
+  it('deleting the overlay RESETS the package record to its declared baseline', async () => {
     const ql = makeQl();
-    ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm' });
-    expect(await assertEnvPermissionSaveAllowed(ql, { name: 'crm_rep', packageId: 'com.example.crm' })).toBeNull();
-  });
+    const declaredBody = envBody({ systemPermissions: ['pkg.baseline'] });
+    (ql as any)._registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    const protocol = makeProtocol(ql, { organization_admin: declaredBody });
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]' });
 
-  it('allows an env-authored set and a brand-new name', async () => {
-    const ql = makeQl();
-    ql.permRows.push({ id: 'ps_env', name: 'my_custom', managed_by: 'user' });
-    expect(await assertEnvPermissionSaveAllowed(ql, { name: 'my_custom', packageId: null })).toBeNull();
-    expect(await assertEnvPermissionSaveAllowed(ql, { name: 'does_not_exist', packageId: null })).toBeNull();
-  });
+    await protocol.saveMetaItem({ type: 'permission', name: 'organization_admin', item: envBody({ systemPermissions: ['customized'] }) });
+    expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['customized']);
 
-  it('registers the gate on a capable protocol and refuses the save through it', async () => {
-    const ql = makeQl();
-    ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm' });
-    let gate: any = null;
-    const protocol = { registerAuthoringGate: (_t: string, fn: any) => { gate = fn; } };
-    expect(registerPermissionAuthoringGate(protocol, ql)).toBe(true);
-    expect(typeof gate).toBe('function');
-    const rej = await gate({ type: 'permission', name: 'crm_rep', item: {}, organizationId: null, packageId: null, mode: 'publish' });
-    expect(rej?.code).toBe('package_owned');
-    // env-owned name passes
-    ql.permRows.push({ id: 'ps_env', name: 'ok_set', managed_by: 'user' });
-    expect(await gate({ type: 'permission', name: 'ok_set', item: {}, organizationId: null, packageId: null, mode: 'publish' })).toBeNull();
-  });
-
-  it('returns false on a protocol without registerAuthoringGate', () => {
-    expect(registerPermissionAuthoringGate({}, makeQl())).toBe(false);
-    expect(registerPermissionAuthoringGate(null, makeQl())).toBe(false);
+    await protocol.deleteMetaItem({ type: 'permission', name: 'organization_admin' });
+    const row = ql.permRows[0];
+    expect(row, 'a packaged definition is never removed by an overlay reset').toBeTruthy();
+    expect(JSON.parse(row.system_permissions)).toEqual(['pkg.baseline']);
+    expect(row.managed_by).toBe('package');
   });
 });
 
@@ -476,6 +473,67 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     expect(nextCalled).toBe(false);
     expect(ql.permRows.length).toBe(1); // record survives…
     expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['declared.only']); // …reset to the declaration
+  });
+
+  it('UPDATE of a PACKAGE-OWNED set becomes an env overlay; the record keeps its provenance', async () => {
+    const ql = makeQl();
+    const declaredBody = envBody({ name: 'crm_rep', systemPermissions: ['pkg.baseline'] });
+    (ql as any)._registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    const protocol = makeProtocol(ql, { crm_rep: declaredBody });
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push({
+      id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm',
+      system_permissions: '["pkg.baseline"]',
+    });
+    const mw = makeMiddleware(ql, protocol);
+    const opCtx: any = {
+      object: 'sys_permission_set', operation: 'update', context: userCtx,
+      data: { id: 'ps_pkg', system_permissions: '["customized"]' },
+    };
+    const nextCalled = await run(mw, opCtx);
+    expect(nextCalled).toBe(false);
+    // The customization lives in the metadata overlay…
+    expect(JSON.parse(ql.metaRows[0].metadata).systemPermissions).toEqual(['customized']);
+    // …the record projects it, and the package still owns the row.
+    const row = ql.permRows[0];
+    expect(JSON.parse(row.system_permissions)).toEqual(['customized']);
+    expect(row.managed_by).toBe('package');
+    expect(row.package_id).toBe('com.example.crm');
+  });
+
+  it('DELETE of a customized PACKAGE set removes the overlay and resets to the declared baseline', async () => {
+    const ql = makeQl();
+    const declaredBody = envBody({ name: 'crm_rep', systemPermissions: ['pkg.baseline'] });
+    (ql as any)._registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    const protocol = makeProtocol(ql, { crm_rep: declaredBody });
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]' });
+    const mw = makeMiddleware(ql, protocol);
+    // customize first
+    await run(mw, { object: 'sys_permission_set', operation: 'update', context: userCtx, data: { id: 'ps_pkg', system_permissions: '["customized"]' } });
+    expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['customized']);
+    // "delete" = reset
+    const nextCalled = await run(mw, { object: 'sys_permission_set', operation: 'delete', options: { where: { id: 'ps_pkg' } }, context: userCtx });
+    expect(nextCalled).toBe(false);
+    expect(ql.metaRows.length).toBe(0); // overlay gone
+    expect(ql.permRows.length).toBe(1); // record survives
+    expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['pkg.baseline']);
+    expect(ql.permRows[0].managed_by).toBe('package');
+  });
+
+  it('SINGLE-STORE kernel (no protocol): package rows keep the legacy two-doors refusal', async () => {
+    const ql = makeQl();
+    ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm' });
+    const mw = createPermissionSetWriteThrough({ ql, getProtocol: () => null });
+    await expect(
+      run(mw, { object: 'sys_permission_set', operation: 'update', data: { id: 'ps_pkg', label: 'hijack' }, context: userCtx }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      run(mw, { object: 'sys_permission_set', operation: 'delete', options: { where: { id: 'ps_pkg' } }, context: userCtx }),
+    ).rejects.toMatchObject({ status: 403 });
+    // env rows still pass through to the driver in single-store kernels
+    ql.permRows.push({ id: 'ps_env', name: 'my_custom', managed_by: 'user' });
+    expect(await run(mw, { object: 'sys_permission_set', operation: 'update', data: { id: 'ps_env', label: 'ok' }, context: userCtx })).toBe(true);
   });
 
   it('leaves non-sys_permission_set objects and unrelated operations alone', async () => {

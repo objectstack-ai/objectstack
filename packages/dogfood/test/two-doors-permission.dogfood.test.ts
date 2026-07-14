@@ -9,10 +9,12 @@
 //        `package_id` (publish-time, not just at boot). A draft alone
 //        materializes nothing — only publish makes it live.
 //
-//  块2 — the ADMIN door: the generic data-plane write path
-//        (`PATCH /data/sys_permission_set/:id`) refuses to mutate a
-//        package-managed row — even for the platform admin — so the two doors
-//        never overwrite each other. An env-authored row stays freely editable.
+//  块2 — the ADMIN door (evolved by ADR-0094, direction 2026-07-14): a
+//        data-plane edit of a package-managed row is TRANSLATED into an
+//        env-scope metadata OVERLAY (the standard ADR-0005 customization) —
+//        the record projects the effective body while the package keeps
+//        owning the row, and "delete" resets to the shipped declaration.
+//        Forging package provenance through the admin door stays refused.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -70,19 +72,38 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
     });
   });
 
-  // ── 块2 — admin door: write gate on package-managed rows ──────────────────
-  it('块2: the admin data door CANNOT edit a package-managed set (403), even as platform admin', async () => {
+  // ── 块2 — admin door: package rows customize via overlay (ADR-0094) ───────
+  it('块2: an admin edit of a package-managed set becomes an env OVERLAY; provenance is preserved', async () => {
     const contributor = await findSet('showcase_contributor');
     expect(contributor?.managed_by, 'showcase_contributor is package-owned').toBe('package');
 
     const res = await stack.apiAs(adminToken, 'PATCH', `/data/sys_permission_set/${contributor.id}`, {
-      label: 'hijacked-through-admin-door',
+      label: 'Contributor (customized)',
     });
-    expect(res.status).toBe(403);
+    expect(res.status).toBeLessThan(300);
 
-    // And the row is untouched.
+    // The customization landed as a metadata overlay of the packaged definition…
+    const layered = await protocol.getMetaItemLayered({ type: 'permission', name: 'showcase_contributor' });
+    expect(layered?.overlay, 'edit persisted as an env-scope overlay').toBeTruthy();
+    expect(layered.overlay.label).toBe('Contributor (customized)');
+    // …the record projects the effective body, and the package still owns it.
     const after = await findSet('showcase_contributor');
-    expect(after.label).toBe(contributor.label);
+    expect(after.label).toBe('Contributor (customized)');
+    expect(after.managed_by).toBe('package');
+    expect(after.package_id).toBe(contributor.package_id);
+  });
+
+  it('块2: "deleting" the customized package set removes the overlay and RESETS to the shipped declaration', async () => {
+    const before = await findSet('showcase_contributor');
+    const res = await stack.apiAs(adminToken, 'DELETE', `/data/sys_permission_set/${before.id}`);
+    expect(res.status).toBeLessThan(300);
+
+    const after = await findSet('showcase_contributor');
+    expect(after, 'a packaged definition is never removed by the env door').toBeTruthy();
+    expect(after.label, 'label reset to the shipped declaration').not.toBe('Contributor (customized)');
+    expect(after.managed_by).toBe('package');
+    const layered = await protocol.getMetaItemLayered({ type: 'permission', name: 'showcase_contributor' });
+    expect(layered?.overlay, 'overlay gone after the reset').toBeFalsy();
   });
 
   it('块2: the admin door CAN still edit an env-authored set (isolates the gate to package rows)', async () => {

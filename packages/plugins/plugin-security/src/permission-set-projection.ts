@@ -25,9 +25,16 @@
  *    drift left by historic writes and migrates legacy data-door-created
  *    records into the metadata store (one-time backfill).
  *
- * Package-owned records (`managed_by:'package'`) remain the package door's
- * territory (ADR-0086): their baseline is the shipped declaration, projected
- * by boot seeding / publish materialization; the env door refuses them.
+ * Package-owned records (`managed_by:'package'`) keep their shipped
+ * declaration as the BASELINE (boot seeding / publish materialization), and —
+ * direction confirmed 2026-07-14 — the environment customizes them through
+ * the platform's standard ADR-0005 metadata overlay: a data-door edit of a
+ * package set becomes an env-scope overlay, the record projects the EFFECTIVE
+ * (overlay-wins) body with its package provenance preserved, and deleting the
+ * overlay (the data-door "delete") resets the record to the declaration.
+ * Cross-package composition stays a POSITION concern (bind several packages'
+ * sets to one position); package-first authoring (ADR-0070) gives
+ * runtime-created sets a home package.
  */
 
 export const SYSTEM_CTX = { isSystem: true };
@@ -179,21 +186,24 @@ function hasSchemaRegistry(ql: any): boolean {
 }
 
 /**
- * Project an ENVIRONMENT-authored PermissionSet body onto its
- * `sys_permission_set` row — the env-door counterpart of
- * `upsertPackagePermissionSet` (ADR-0086 two-doors).
+ * Project a PermissionSet body onto its `sys_permission_set` row from the
+ * ENVIRONMENT side.
  *
- * [ADR-0094] The record is a pure projection now, so a missing row is
- * CREATED (`managed_by:'user'`) — a Studio-authored set appears in Setup —
- * where the #2867 band-aid declined to create. Ownership is still decided by
- * the EXISTING RECORD's `managed_by`, never the body (the layered read stamps
- * `_packageId` provenance on env-authored sets too): a package-owned row is
- * refused — its baseline is the shipped declaration.
+ * [ADR-0094] The record is a pure projection, so a missing row is CREATED
+ * (`managed_by:'user'` — a Studio-authored set appears in Setup, where the
+ * #2867 band-aid declined to create). A PACKAGE-OWNED row is also projected —
+ * an env-scope overlay is the platform's standard customization of a packaged
+ * definition (ADR-0005; direction confirmed 2026-07-14, reversing the earlier
+ * refuse-the-env-door rule): the facets update to the EFFECTIVE (overlay-wins)
+ * body while the `managed_by:'package'` + `package_id` provenance is
+ * PRESERVED — the row still belongs to the package; the overlay is a
+ * customization of it, and deleting the overlay resets the row to the shipped
+ * declaration (the layered read reveals the baseline again).
  */
 export async function upsertEnvPermissionSet(
   ql: any,
   ps: any,
-  logger?: ProjectionLogger,
+  _logger?: ProjectionLogger,
 ): Promise<PermissionSeedOutcome> {
   const out: PermissionSeedOutcome = { seeded: 0, updated: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
   if (!ql || typeof ql.find !== 'function' || !ps?.name) return out;
@@ -211,15 +221,9 @@ export async function upsertEnvPermissionSet(
     return out;
   }
 
-  // A package-owned record is the package's declared baseline (re-seeded at
-  // boot / on publish); an env override lives in the overlay/effective layer,
-  // not this row. Refusing here keeps the two doors from fighting.
-  if (existing.managed_by === 'package') {
-    out.skippedForeign += 1;
-    logger?.warn?.('[security] env permission save targets a package-owned set — record left at package baseline', { name: ps.name });
-    return out;
-  }
-
+  // Facets follow the effective body; provenance columns are never touched
+  // here — a package-owned row keeps its owner while carrying the overlay's
+  // customization, and an env row keeps its user/platform/legacy provenance.
   const patch: Record<string, any> = { id: existing.id, ...permissionSetRowFields(ps) };
   if (ps.active != null) patch.active = asBool(ps.active);
   if (await tryUpdate(ql, 'sys_permission_set', patch)) {
@@ -422,61 +426,6 @@ export function registerPermissionSetProjection(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Authoring gate (ADR-0094 D5, framework#2898)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Reject an ENVIRONMENT-door `permission` save whose target name is a
- * package-owned `sys_permission_set` record. A package set's definition lives
- * in its package (edited via the package door → publish); an env-scope overlay
- * of it would persist a layered overlay that the projector refuses to apply
- * (ADR-0086 D4) and the resolver never enforces as an override — the exact
- * declared-but-inert surface ADR-0049 forbids. Rejecting at authoring time
- * turns that silent no-op into an actionable error.
- *
- * Scoped to the ENV door precisely: a save carrying the owning `packageId`
- * (the package door re-authoring its own set, draft→publish) is allowed, and
- * so is any save for a name with no package-owned record (new env sets,
- * env-authored sets, package sets being materialized by the system path —
- * which never routes through here). Fail-open on lookup error: this closes an
- * inert-metadata hole, not a hard boundary (the data-plane two-doors gate and
- * the projector's refusal already protect the record).
- */
-export async function assertEnvPermissionSaveAllowed(
-  ql: any,
-  args: { name: string; packageId: string | null; item?: unknown },
-): Promise<{ code: string; status: number; message: string } | null> {
-  // Package door — the package re-authoring its own metadata; not the env door.
-  if (args.packageId) return null;
-  if (!ql || typeof ql.find !== 'function' || !args.name) return null;
-  const existing = (await tryFind(ql, 'sys_permission_set', { name: args.name }, 1))[0];
-  if (existing?.managed_by === 'package') {
-    return {
-      code: 'package_owned',
-      status: 403,
-      message:
-        `[Security] '${args.name}' is a package-managed permission set (managed_by:'package') — ` +
-        `it cannot be customized through the environment door. Edit it in its package and re-publish, ` +
-        `or clone it to a new name to author an environment-owned set (ADR-0094 D5 / ADR-0086 two-doors).`,
-    };
-  }
-  return null;
-}
-
-/**
- * Register the `permission` authoring gate on the protocol (ADR-0094 D5).
- * Returns `true` when wired, `false` on a protocol that predates
- * `registerAuthoringGate`.
- */
-export function registerPermissionAuthoringGate(protocol: any, ql: any): boolean {
-  if (!protocol || typeof protocol.registerAuthoringGate !== 'function') return false;
-  protocol.registerAuthoringGate('permission', async (a: any) =>
-    assertEnvPermissionSaveAllowed(ql, { name: a.name, packageId: a.packageId ?? null, item: a.item }),
-  );
-  return true;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Data-door write-through (ADR-0094 D3)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -550,16 +499,20 @@ export interface WriteThroughDeps extends ProjectionDeps {
 /**
  * Engine middleware: redirect every non-system data-door write on
  * `sys_permission_set` into the metadata store (ADR-0094 D3). Registered
- * INSIDE the security middleware (later in the onion), so the two-doors gate,
- * the delegated-admin gate, and the ordinary CRUD/FLS checks have all passed
- * before a write is translated. The driver write never executes — `opCtx.result`
- * is the projected record — so no data-plane path can desync record from
- * metadata.
+ * INSIDE the security middleware (later in the onion), so the provenance-
+ * forging gate, the delegated-admin gate, and the ordinary CRUD/FLS checks
+ * have all passed before a write is translated. The driver write never
+ * executes — `opCtx.result` is the projected record — so no data-plane path
+ * can desync record from metadata.
  *
+ * A PACKAGE-OWNED row is writable through here too: its update/delete
+ * translate into env-scope overlay operations (customize / reset) — the
+ * ADR-0005 layering carries the two doors now, instead of a flat refusal.
  * System-context writes pass through untouched: they ARE the projector /
  * seeder channel. Kernels without a capable metadata protocol (minimal
- * embeddings, unit-test stubs) also pass through — a single store has no
- * split brain to prevent.
+ * embeddings, unit-test stubs) pass through for env rows and keep the legacy
+ * two-doors refusal for package rows — with no overlay layer there is
+ * nothing to carry a customization.
  */
 export function createPermissionSetWriteThrough(
   deps: WriteThroughDeps,
@@ -585,7 +538,28 @@ export function createPermissionSetWriteThrough(
       && typeof protocol.saveMetaItem === 'function'
       && typeof protocol.deleteMetaItem === 'function'
       && typeof protocol.getMetaItemLayered === 'function';
-    if (!capable) return next();
+    if (!capable) {
+      // Single-store kernel: there is no overlay layer to translate a
+      // package-set customization into, so the legacy ADR-0086 two-doors
+      // protection applies HERE (the outer security gate delegates the
+      // update/delete package-row check to this middleware): a
+      // package-managed row stays read-only through the data door.
+      if (op === 'update' || op === 'delete') {
+        const targets = await resolveTargetRows(ql, opCtx);
+        const pkg = targets.find((t: any) => t?.managed_by === 'package');
+        if (pkg) {
+          const err: any = new Error(
+            `[Security] Access denied: '${String(pkg.name ?? pkg.id)}' is a package-managed permission set ` +
+              `(managed_by:'package') and this kernel has no metadata overlay layer to carry an environment ` +
+              `customization — change it by editing its package and re-publishing (ADR-0086 two-doors).`,
+          );
+          err.name = 'PermissionDeniedError';
+          err.status = 403;
+          throw err;
+        }
+      }
+      return next();
+    }
 
     const actor = opCtx?.context?.userId ? String(opCtx.context.userId) : undefined;
     const actorArg = actor ? { actor } : {};

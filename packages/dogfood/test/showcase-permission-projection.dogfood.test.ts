@@ -14,8 +14,10 @@
 //   3. Deleting a runtime-only set retires its record; deleting an
 //      artifact-backed set RESETS it to the declared body (the definition
 //      ships with the app and cannot be removed from the environment).
-//   4. [framework#2898 / ADR-0094 D5] An environment-door metadata save that
-//      targets a package-owned set is rejected at authoring time.
+//   4. [ADR-0094, direction 2026-07-14] An environment-door metadata save that
+//      targets a package-owned set is a FIRST-CLASS overlay customization:
+//      the record projects the effective body with its package provenance
+//      preserved, and deleting the overlay resets to the shipped declaration.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -118,22 +120,32 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
     expect(after.description ?? null).not.toBe('customized via Setup (ADR-0094)');
   });
 
-  // ── 4. Authoring gate — env door refuses a package-owned set (#2898) ──────
-  it('an environment-door metadata save targeting a package-owned set is rejected (ADR-0094 D5)', async () => {
+  // ── 4. Env overlay of a PACKAGE set is first-class (ADR-0094) ─────────────
+  it('an environment-door metadata save on a package-owned set customizes it and projects immediately', async () => {
     const contributor = await findSet('showcase_contributor');
     expect(contributor?.managed_by, 'showcase_contributor is package-owned').toBe('package');
+    const layeredBefore = await protocol.getMetaItemLayered({ type: 'permission', name: 'showcase_contributor' });
+    const baseline = layeredBefore?.code ?? null;
+    expect(baseline, 'the packaged declaration is the code layer').toBeTruthy();
 
-    await expect(
-      protocol.saveMetaItem({
-        type: 'permission',
-        name: 'showcase_contributor',
-        item: { name: 'showcase_contributor', label: 'hijack-via-env-door', objects: {} },
-      }),
-      'the environment door must refuse a package-owned set',
-    ).rejects.toMatchObject({ code: 'package_owned' });
+    await protocol.saveMetaItem({
+      type: 'permission',
+      name: 'showcase_contributor',
+      item: { ...baseline, label: 'Contributor (env customized)' },
+    });
 
-    // The record stays at its package baseline.
-    expect((await findSet('showcase_contributor')).label).toBe(contributor.label);
+    // Awaited projection: the record already reflects the overlay, and the
+    // package provenance is untouched.
+    const after = await findSet('showcase_contributor');
+    expect(after.label).toBe('Contributor (env customized)');
+    expect(after.managed_by).toBe('package');
+    expect(after.package_id).toBe(contributor.package_id);
+
+    // Deleting the overlay resets the record to the shipped declaration.
+    await protocol.deleteMetaItem({ type: 'permission', name: 'showcase_contributor' });
+    const reset = await findSet('showcase_contributor');
+    expect(reset.label).toBe(contributor.label);
+    expect(reset.managed_by).toBe('package');
   });
 
   it('a brand-new environment set authored through the metadata door appears as a Setup record', async () => {

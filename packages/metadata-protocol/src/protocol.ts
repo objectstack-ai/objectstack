@@ -792,37 +792,6 @@ export interface MutationProjectionOutcome {
     error?: string;
 }
 
-/**
- * Structured rejection a {@link MetadataAuthoringGate} returns to refuse a
- * save. Surfaced by `saveMetaItem` as a thrown Error carrying `code`/`status`,
- * so an authoring surface (Studio / REST) renders an actionable message.
- */
-export interface AuthoringGateRejection {
-    code: string;
-    status: number;
-    message: string;
-}
-
-/**
- * Per-type authoring gate (ADR-0094 D5, framework#2898). Invoked by
- * `saveMetaItem` BEFORE persistence; returning an {@link AuthoringGateRejection}
- * refuses the write. The generic protocol layer must not know a domain's
- * data-plane shape (e.g. `sys_permission_set`'s `managed_by`), so the owning
- * plugin registers a gate that reads whatever it needs and decides. The
- * package door (a save carrying the owning `packageId`) and system/boot writes
- * are already distinguishable via the gate's args, so a gate can scope itself
- * to the environment door precisely.
- */
-export type MetadataAuthoringGate = (args: {
-    type: string;
-    name: string;
-    item: unknown;
-    organizationId: string | null;
-    packageId: string | null;
-    mode: 'draft' | 'publish';
-    actor?: string;
-}) => Promise<AuthoringGateRejection | null | void>;
-
 export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     private engine: MetadataHostEngine;
     private getServicesRegistry?: () => Map<string, any>;
@@ -871,14 +840,6 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
      */
     private mutationProjectors = new Map<string, MetadataMutationProjector>();
 
-    /**
-     * Per-type authoring gates (ADR-0094 D5, framework#2898), keyed by singular
-     * metadata type. Run in `saveMetaItem` before persistence; a returned
-     * rejection refuses the write. One per type; a second registration
-     * replaces the first (idempotent re-init).
-     */
-    private authoringGates = new Map<string, MetadataAuthoringGate>();
-
     constructor(
         engine: IDataEngine,
         getServicesRegistry?: () => Map<string, any>,
@@ -924,56 +885,6 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     registerMutationProjector(type: string, projector: MetadataMutationProjector): void {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
         this.mutationProjectors.set(singular, projector);
-    }
-
-    /**
-     * Register the authoring gate for a metadata type (ADR-0094 D5,
-     * framework#2898). Called by the plugin that owns the type's data-plane
-     * projection (e.g. plugin-security gates env-scope `permission` saves that
-     * target a package-owned set). Singular or plural type names both resolve.
-     */
-    registerAuthoringGate(type: string, gate: MetadataAuthoringGate): void {
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        this.authoringGates.set(singular, gate);
-    }
-
-    /**
-     * Run the registered authoring gate for a save (ADR-0094 D5). Throws a
-     * structured Error when the gate rejects; a no-op when no gate is
-     * registered. A gate that itself throws is treated as FAIL-OPEN (logged):
-     * this gate closes an inert-metadata hole, not a hard security boundary
-     * (the data-plane two-doors gate + the projector's package-owned refusal
-     * already protect the record), so a transient lookup failure must not
-     * block a legitimate save.
-     */
-    private async runAuthoringGate(args: {
-        type: string;
-        name: string;
-        item: unknown;
-        organizationId: string | null;
-        packageId: string | null;
-        mode: 'draft' | 'publish';
-        actor?: string;
-    }): Promise<void> {
-        const singular = PLURAL_TO_SINGULAR[args.type] ?? args.type;
-        const gate = this.authoringGates.get(singular);
-        if (!gate) return;
-        let rejection: AuthoringGateRejection | null | void;
-        try {
-            rejection = await gate({ ...args, type: singular });
-        } catch (e) {
-            console.warn(
-                `[Protocol] authoring gate for ${singular}/${args.name} threw — allowing the save (fail-open): `
-                + `${e instanceof Error ? e.message : String(e)}`,
-            );
-            return;
-        }
-        if (rejection) {
-            const err = new Error(rejection.message);
-            (err as any).code = rejection.code;
-            (err as any).status = rejection.status;
-            throw err;
-        }
     }
 
     /**
@@ -3962,24 +3873,6 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                 // they just skip the safety check.
             }
         }
-
-        // [ADR-0094 D5 / framework#2898] Per-type authoring gate. Runs after the
-        // basic authorization/lock/destructive checks and before persistence, so
-        // a plugin that owns a type's data-plane projection can refuse a save the
-        // generic layer can't reason about — e.g. plugin-security rejects an
-        // environment-door `permission` overlay that targets a package-owned set
-        // (which would persist an overlay that neither projects nor enforces —
-        // the inert-metadata hole ADR-0049 forbids). The gate sees `packageId`
-        // and `mode`, so the package door re-authoring its own set is allowed.
-        await this.runAuthoringGate({
-            type: request.type,
-            name: request.name,
-            item: request.item,
-            organizationId: request.organizationId ?? null,
-            packageId: request.packageId ?? null,
-            mode,
-            ...(request.actor ? { actor: request.actor } : {}),
-        });
 
         // Defense-in-depth: reject the layered *read* envelope as a write body.
         //

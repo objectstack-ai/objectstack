@@ -33,8 +33,6 @@ export {
   upsertEnvPermissionSet,
   projectPermissionMutation,
   registerPermissionSetProjection,
-  registerPermissionAuthoringGate,
-  assertEnvPermissionSaveAllowed,
   createPermissionSetWriteThrough,
   reconcilePermissionSetProjection,
 } from './permission-set-projection.js';

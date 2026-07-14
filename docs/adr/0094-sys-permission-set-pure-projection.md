@@ -32,9 +32,12 @@ not by a subscriber a new write path might forget to trigger:
    re-derived from metadata (metadata wins), and legacy records that exist **only** in
    the data plane are migrated into the metadata store once.
 
-Package-owned records (`managed_by:'package'`) keep their ADR-0086 semantics: their
-baseline is the shipped declaration, projected by boot seeding / publish
-materialization; the environment door never touches them.
+Package-owned records (`managed_by:'package'`) keep the shipped declaration as their
+BASELINE (boot seeding / publish materialization), and — per the revised D5 — the
+environment customizes them through the standard ADR-0005 overlay: the record projects
+the effective (overlay-wins) body with its package provenance preserved, and removing
+the overlay resets it to the declaration. Forging package provenance through the data
+door stays impossible.
 
 ---
 
@@ -94,10 +97,10 @@ thrown, the metadata write itself succeeded and boot reconciliation heals on nex
 `plugin-security` registers the `permission` projector. It re-reads the **fresh layered
 effective body** and:
 
-- upserts the env record (creates it if missing, `managed_by:'user'` — Studio-created
-  sets now appear in Setup);
-- **refuses package-owned records** (`managed_by:'package'`) — the package door owns
-  them (ADR-0086 D4);
+- upserts the record (creates it if missing, `managed_by:'user'` — Studio-created
+  sets now appear in Setup); a PACKAGE-OWNED record's facets follow the effective
+  body too, with its `managed_by:'package'` + `package_id` provenance preserved
+  (see D5 — an env overlay is the standard customization of a packaged set);
 - syncs the **metadata manager's in-memory `permission` entry**
   (`registerInMemory`) so the evaluator's registry-first `list('permission')`
   resolution sees the same effective body it projects — closing the
@@ -155,14 +158,45 @@ convergence pass:
 
 The pass is idempotent and re-runs harmlessly on every boot.
 
-### D5 — Env-scope overlays of package-owned sets remain inert (and should be rejected at authoring)
+### D5 — Env-scope overlays of package-owned sets are FIRST-CLASS customizations (revised 2026-07-14)
 
-For a name whose record is package-owned, the environment door is refused at
-projection (existing #2867 rule, kept). The metadata type registry currently allows
-authoring such an overlay (`allowOrgOverride: true`), which produces a layered overlay
-that neither projects nor enforces — an ADR-0049 violation surfaced but not fixed here.
-Rejecting it at `saveMetaItem` requires a per-type authoring gate in the protocol;
-tracked as framework#2898 rather than silently expanding this change.
+**History.** As first landed, the projector refused env-scope bodies for
+package-owned records (the #2867 rule), which left an authored overlay of a
+packaged set inert — neither projecting nor enforcing. The initial follow-up
+(#2898) proposed rejecting such overlays at authoring time. The maintainers
+reversed that direction on 2026-07-14: rejection would have made permission
+sets the one metadata type whose declared `allowOrgOverride: true` is a lie,
+and "clone to customize" **forks** — a clone stops receiving the vendor's
+subsequent baseline changes (including security tightenings) and loses the
+layered code-vs-overlay diff.
+
+**Decision.** An environment-scope overlay of a package-owned permission set
+is the platform's **standard ADR-0005 customization**, fully supported:
+
+- the projector projects the EFFECTIVE (overlay-wins) body onto the record
+  while **preserving** `managed_by:'package'` + `package_id` — the package
+  still owns the row; the overlay customizes it;
+- a data-door edit of a package row is translated by the write-through into
+  exactly this overlay (no more flat 403); a data-door "delete" removes the
+  overlay — an ADR-0005 **reset** to the shipped declaration;
+- the ADR-0086 two-doors gate narrows to what is still structurally true:
+  the admin door can never **forge** package provenance, and lifecycle ops
+  with no overlay translation (`transfer`/`restore`/`purge`) stay refused on
+  package rows. In a kernel without a metadata overlay layer the legacy full
+  refusal applies (there is nothing to carry a customization);
+- cross-package composition remains a POSITION concern (bind several
+  packages' sets to one position — the union model adds; an overlay narrows),
+  and package-first authoring (ADR-0070) gives runtime-created sets a home
+  package, so the loose `managed_by:'user'` category can retire over time.
+
+**The risk this accepts, deliberately.** ADR-0005 overlays are whole-document:
+an env overlay can widen a vendor baseline, and a vendor's later baseline
+*tightening* does not reach a name that is pinned by an overlay until the
+overlay is reset or re-authored. Mitigations: the Studio layered view diffs
+code-vs-overlay; upgrade flows should surface "customized packaged sets" for
+review; ADR-0091 recertification covers overlays like any other grant source.
+This is the same trade every overlayable type makes — permission sets no
+longer get a bespoke, stricter rule that the rest of the platform contradicts.
 
 ## Consequences
 
