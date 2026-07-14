@@ -1,0 +1,182 @@
+# Scaffold E2E — the first-run experience as a regression gate (#2908).
+#
+# Two failure classes broke `npm create objectstack` in the past and neither
+# was visible to unit tests:
+#   1. The bundled template drifted from the published framework (pinned
+#      ^6.0.0 while the registry was at 14.x; used APIs removed in 14.x).
+#   2. Nothing ever exercised the published package end-to-end, so registry
+#      breakage would only be found by a real new user.
+#
+# Job 1 (PRs touching the scaffolder / docker example) scaffolds with the
+# repo-built scaffolder and runs the generated project against the registry:
+# install → validate → build → boot → health probes → docker build/run.
+# Job 2 (nightly) does the same via the *published* `create-objectstack@latest`
+# across every template in the registry — the new-user canary.
+
+name: Scaffold E2E
+
+on:
+  pull_request:
+    paths:
+      - 'packages/create-objectstack/**'
+      - 'examples/docker/**'
+      - '.github/workflows/scaffold-e2e.yml'
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scaffold-local:
+    name: Scaffold with repo dist
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the scaffolder
+        run: pnpm --filter create-objectstack build
+
+      - name: Scaffold a project
+        run: |
+          cd "$RUNNER_TEMP"
+          node "$GITHUB_WORKSPACE/packages/create-objectstack/bin/create-objectstack.js" e2e-app --skip-install --skip-skills
+
+      - name: Install generated project (registry deps)
+        run: |
+          cd "$RUNNER_TEMP/e2e-app"
+          # The scaffolder pins ^<repo version>. Right after a version bump
+          # lands but before the release publishes, that version is not on the
+          # registry yet — fall back to the latest published release so the
+          # template is still exercised against the real registry.
+          if ! npm install --no-fund --no-audit; then
+            echo "::warning::repo version not published yet — falling back to latest"
+            node -e '
+              const fs = require("fs");
+              const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+              for (const deps of [pkg.dependencies, pkg.devDependencies]) {
+                if (!deps) continue;
+                for (const d of Object.keys(deps)) {
+                  if (d.startsWith("@objectstack/")) deps[d] = "latest";
+                }
+              }
+              fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+            '
+            npm install --no-fund --no-audit
+          fi
+
+      - name: Validate and build the generated project
+        run: |
+          cd "$RUNNER_TEMP/e2e-app"
+          npm run validate
+          npm run build
+
+      - name: Boot from the artifact and probe health
+        run: |
+          cd "$RUNNER_TEMP/e2e-app"
+          npx os start --artifact ./dist/objectstack.json --port 8080 > server.log 2>&1 &
+          SERVER_PID=$!
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/api/v1/health > /dev/null 2>&1; then ok=1; break; fi
+            sleep 2
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::server never became healthy"; cat server.log; exit 1
+          fi
+          curl -fsS http://localhost:8080/api/v1/ready
+          kill "$SERVER_PID"
+
+      - name: Docker build and run (examples/docker)
+        run: |
+          cd "$RUNNER_TEMP/e2e-app"
+          cp "$GITHUB_WORKSPACE"/examples/docker/Dockerfile \
+             "$GITHUB_WORKSPACE"/examples/docker/docker-compose.yml \
+             "$GITHUB_WORKSPACE"/examples/docker/.dockerignore .
+          docker build -t e2e-app .
+          docker run -d --name e2e -p 18080:8080 \
+            -e OS_SECRET_KEY="$(openssl rand -hex 32)" \
+            -e OS_AUTH_SECRET="$(openssl rand -hex 32)" \
+            e2e-app
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:18080/api/v1/health > /dev/null 2>&1; then ok=1; break; fi
+            sleep 2
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::container never became healthy"; docker logs e2e; exit 1
+          fi
+          docker rm -f e2e
+
+  registry-canary:
+    name: 'Registry canary: ${{ matrix.template }}'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        template: [blank, todo, compliance, content, contracts, procurement]
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Scaffold with published create-objectstack@latest
+        run: |
+          cd "$RUNNER_TEMP"
+          npx -y create-objectstack@latest canary-app -t ${{ matrix.template }} --skip-skills
+
+      # Remote templates ship `build` (same gates) but not always `validate`.
+      - name: Gate the generated project
+        run: |
+          cd "$RUNNER_TEMP/canary-app"
+          if node -e "process.exit(JSON.parse(require('fs').readFileSync('package.json','utf8')).scripts?.validate ? 0 : 1)"; then
+            npm run validate
+          fi
+          npm run build
+
+      - name: Boot and probe health (blank only)
+        if: matrix.template == 'blank'
+        run: |
+          cd "$RUNNER_TEMP/canary-app"
+          npx os start --artifact ./dist/objectstack.json --port 8080 > server.log 2>&1 &
+          SERVER_PID=$!
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/api/v1/health > /dev/null 2>&1; then ok=1; break; fi
+            sleep 2
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::server never became healthy"; cat server.log; exit 1
+          fi
+          curl -fsS http://localhost:8080/api/v1/ready
+          kill "$SERVER_PID"

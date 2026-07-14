@@ -14,7 +14,7 @@
     "test:e2e": "turbo run test:e2e",
     "clean": "turbo run clean && rm -rf dist",
     "setup": "pnpm install && pnpm --filter @objectstack/spec build",
-    "version": "changeset version && node scripts/sync-protocol-version.mjs",
+    "version": "changeset version && node scripts/sync-protocol-version.mjs && node scripts/sync-template-versions.mjs",
     "release": "pnpm run build && bash scripts/build-console.sh && bash scripts/release-publish.sh",
     "docs:dev": "pnpm --filter @objectstack/docs dev",
     "docs:build": "pnpm --filter @objectstack/docs build",
