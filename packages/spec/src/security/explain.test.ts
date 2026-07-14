@@ -23,6 +23,9 @@ import {
   ExplainDecisionSchema,
   AccessMatrixEntrySchema,
   AccessMatrixSchema,
+  AuthzPostureSchema,
+  ExplainMatchedRuleSchema,
+  ExplainRecordAttributionSchema,
 } from './explain.zod';
 
 describe('ExplainOperationSchema — the operation vocabulary is fixed', () => {
@@ -36,15 +39,18 @@ describe('ExplainOperationSchema — the operation vocabulary is fixed', () => {
   });
 });
 
-describe('ExplainLayerSchema — the nine-layer pipeline + contributor shape', () => {
+describe('ExplainLayerSchema — the ten-layer pipeline + contributor shape', () => {
   const LAYERS = [
+    // [ADR-0095 D1] Layer 0 — the always-first tenant wall, ahead of principal.
+    'tenant_isolation',
     'principal', 'required_permissions', 'object_crud', 'fls',
     'owd_baseline', 'depth', 'sharing', 'vama_bypass', 'rls',
   ];
-  it('locks the nine layer ids, in order', () => {
+  it('locks the ten layer ids, including the ADR-0095 tenant_isolation Layer 0', () => {
     for (const layer of LAYERS) {
       expect(ExplainLayerSchema.parse({ layer, verdict: 'neutral', detail: 'x' }).layer).toBe(layer);
     }
+    // A near-miss ('tenant') is still rejected — only the full id is a member.
     expect(() => ExplainLayerSchema.parse({ layer: 'tenant', verdict: 'neutral', detail: 'x' })).toThrow();
   });
 
@@ -86,6 +92,76 @@ describe('ExplainLayerSchema — the nine-layer pipeline + contributor shape', (
       contributors: [{ kind: 'position', name: 'x', state: 'suspended' }],
     })).toThrow();
   });
+
+  it('[C2] kernelTier + record are optional — object-level layers omit them', () => {
+    const bare = ExplainLayerSchema.parse({ layer: 'sharing', verdict: 'not_applicable', detail: 'x' });
+    expect(bare.kernelTier).toBeUndefined();
+    expect(bare.record).toBeUndefined();
+  });
+
+  it('[ADR-0095 D1] kernelTier tags Layer 0 vs Layer 1; rejects other values', () => {
+    expect(ExplainLayerSchema.parse({
+      layer: 'tenant_isolation', verdict: 'narrows', detail: 'x', kernelTier: 'layer_0_tenant',
+    }).kernelTier).toBe('layer_0_tenant');
+    expect(ExplainLayerSchema.parse({
+      layer: 'rls', verdict: 'narrows', detail: 'x', kernelTier: 'layer_1_business',
+    }).kernelTier).toBe('layer_1_business');
+    expect(() => ExplainLayerSchema.parse({
+      layer: 'rls', verdict: 'narrows', detail: 'x', kernelTier: 'layer_2',
+    })).toThrow();
+  });
+
+  it('[C2] a record-grained layer carries per-record attribution', () => {
+    const layer = ExplainLayerSchema.parse({
+      layer: 'sharing', verdict: 'widens', detail: 'x', kernelTier: 'layer_1_business',
+      record: {
+        outcome: 'admitted',
+        rowFilter: { owner: 'u2' },
+        matchesRecord: true,
+        rules: [
+          { kind: 'record_share', name: 'share_row_42', grants: 'read', via: 'group:sales_team', effect: 'admits' },
+          { kind: 'ownership', name: 'owner-check', via: 'owner', effect: 'neutral' },
+        ],
+        detail: 'admitted: an explicit share targets this row',
+      },
+    });
+    expect(layer.record?.outcome).toBe('admitted');
+    expect(layer.record?.matchesRecord).toBe(true);
+    expect(layer.record?.rules.map((r) => r.kind)).toEqual(['record_share', 'ownership']);
+    expect(layer.record?.rules[0].grants).toBe('read');
+  });
+});
+
+describe('[ADR-0095 D2] AuthzPostureSchema — the monotonic posture ladder', () => {
+  it('locks the four rungs', () => {
+    for (const rung of ['PLATFORM_ADMIN', 'TENANT_ADMIN', 'MEMBER', 'EXTERNAL']) {
+      expect(AuthzPostureSchema.parse(rung)).toBe(rung);
+    }
+    expect(() => AuthzPostureSchema.parse('SUPERUSER')).toThrow();
+  });
+});
+
+describe('[C2] ExplainMatchedRule / ExplainRecordAttribution — row-level attribution', () => {
+  it('matched rule locks its kinds, effect, and optional grants/via/predicate', () => {
+    for (const kind of ['tenant_filter', 'owd_baseline', 'ownership', 'record_share', 'sharing_rule', 'team', 'territory', 'rls_policy']) {
+      expect(ExplainMatchedRuleSchema.parse({ kind, name: 'r', effect: 'admits' }).kind).toBe(kind);
+    }
+    expect(() => ExplainMatchedRuleSchema.parse({ kind: 'guess', name: 'r', effect: 'admits' })).toThrow();
+    expect(() => ExplainMatchedRuleSchema.parse({ kind: 'ownership', name: 'r', effect: 'maybe' })).toThrow();
+    const full = ExplainMatchedRuleSchema.parse({
+      kind: 'sharing_rule', name: 'open_leads_to_sales', grants: 'edit',
+      via: 'criteria: status == open', predicate: { status: 'open' }, effect: 'admits',
+    });
+    expect(full.grants).toBe('edit');
+    expect(full.predicate).toEqual({ status: 'open' });
+  });
+
+  it('record attribution defaults rules to [] and locks outcome', () => {
+    const bare = ExplainRecordAttributionSchema.parse({ outcome: 'excluded' });
+    expect(bare.rules).toEqual([]);
+    expect(bare.matchesRecord).toBeUndefined();
+    expect(() => ExplainRecordAttributionSchema.parse({ outcome: 'hidden' })).toThrow();
+  });
 });
 
 describe('ExplainRequestSchema — the request contract', () => {
@@ -95,6 +171,15 @@ describe('ExplainRequestSchema — the request contract', () => {
     });
     expect(ExplainRequestSchema.parse({ object: 'x', operation: 'update', userId: 'u2' }).userId).toBe('u2');
     expect(() => ExplainRequestSchema.parse({ operation: 'read' })).toThrow();
+  });
+
+  it('[C2] recordId is optional and round-trips; object-level requests stay backward-compatible', () => {
+    // Backward compat: the pre-C2 object-level request still parses, recordId absent.
+    const objectLevel = ExplainRequestSchema.parse({ object: 'leave_request', operation: 'read' });
+    expect(objectLevel.recordId).toBeUndefined();
+    // Record-grained request round-trips the recordId.
+    const recordLevel = ExplainRequestSchema.parse({ object: 'leave_request', operation: 'update', recordId: 'lr_42' });
+    expect(recordLevel.recordId).toBe('lr_42');
   });
 });
 
@@ -129,6 +214,68 @@ describe('ExplainDecisionSchema — the full decision report L3 consumes', () =>
     expect(parsed.principal.onBehalfOf).toEqual({ userId: 'u9' });
     expect(parsed.layers).toHaveLength(2);
     expect(parsed.readFilter).toEqual({ owner: 'u2' });
+  });
+
+  it('[C2] round-trips a record-grained decision with posture + per-record trace', () => {
+    const decision = {
+      allowed: false,
+      object: 'leave_request',
+      operation: 'update',
+      principal: {
+        userId: 'u2',
+        positions: ['approver', 'everyone'],
+        permissionSets: ['approve_set', 'member_default'],
+        principalKind: 'human',
+        posture: 'MEMBER',
+      },
+      layers: [
+        {
+          layer: 'tenant_isolation', verdict: 'narrows', detail: '…', kernelTier: 'layer_0_tenant',
+          record: { outcome: 'admitted', matchesRecord: true, rules: [{ kind: 'tenant_filter', name: 'org_wall', effect: 'admits' }] },
+        },
+        {
+          layer: 'sharing', verdict: 'not_applicable', detail: '…', kernelTier: 'layer_1_business',
+          record: {
+            outcome: 'excluded',
+            rowFilter: { owner: 'u2' },
+            matchesRecord: false,
+            rules: [{ kind: 'ownership', name: 'owner-check', via: 'owner', effect: 'excludes' }],
+            detail: 'excluded: you are not the owner and no share targets this row',
+          },
+        },
+      ],
+      record: { recordId: 'lr_42', visible: false, decidedBy: 'sharing' },
+    };
+    const parsed = ExplainDecisionSchema.parse(decision);
+    expect(parsed.principal.posture).toBe('MEMBER');
+    expect(parsed.record?.recordId).toBe('lr_42');
+    expect(parsed.record?.visible).toBe(false);
+    expect(parsed.record?.decidedBy).toBe('sharing');
+    expect(parsed.layers[0].kernelTier).toBe('layer_0_tenant');
+    expect(parsed.layers[1].record?.outcome).toBe('excluded');
+  });
+
+  it('[C2] object-level decisions omit record + posture (backward-compatible)', () => {
+    const parsed = ExplainDecisionSchema.parse({
+      allowed: true, object: 'x', operation: 'read',
+      principal: { userId: 'u2' },
+      layers: [{ layer: 'rls', verdict: 'narrows', detail: 'x', contributors: [] }],
+      readFilter: { owner: 'u2' },
+    });
+    expect(parsed.record).toBeUndefined();
+    expect(parsed.principal.posture).toBeUndefined();
+  });
+
+  it('[ADR-0095] rejects an unknown posture or decidedBy layer', () => {
+    expect(() => ExplainDecisionSchema.parse({
+      allowed: true, object: 'x', operation: 'read',
+      principal: { userId: 'u', posture: 'GOD_MODE' }, layers: [],
+    })).toThrow();
+    expect(() => ExplainDecisionSchema.parse({
+      allowed: true, object: 'x', operation: 'read',
+      principal: { userId: 'u' }, layers: [],
+      record: { recordId: 'r1', visible: true, decidedBy: 'quantum' },
+    })).toThrow();
   });
 
   it('principal.userId is nullable (anonymous), positions/permissionSets default to []', () => {

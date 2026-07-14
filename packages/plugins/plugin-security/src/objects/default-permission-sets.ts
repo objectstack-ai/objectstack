@@ -110,7 +110,7 @@ export const defaultPermissionSets: PermissionSet[] = [
   //
   // Third tier between platform admin (`admin_full_access`) and rank-and-file
   // member. Lives at the *organization* scope: full CRUD on business
-  // objects within their org (governed by `tenant_isolation` RLS), plus
+  // objects within their org (governed by the Layer 0 tenant wall, ADR-0095 D1), plus
   // `setup.access` so the Setup app shell is reachable.
   //
   // **Deliberately withheld** vs `admin_full_access`:
@@ -157,12 +157,12 @@ export const defaultPermissionSets: PermissionSet[] = [
     },
     systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
     rowLevelSecurity: [
-      {
-        name: 'tenant_isolation',
-        object: '*',
-        operation: 'all',
-        using: 'organization_id == current_user.organization_id',
-      },
+      // [ADR-0095 D1] The wildcard `tenant_isolation` policy RETIRED here — the
+      // tenant wall is now Layer 0 (`tenant-layer.ts`), AND-composed ahead of and
+      // independently of business RLS. Keeping it as an OR-merged RLS policy is
+      // what let a permissive business policy widen tenant scope (W1). The
+      // per-object `_org` / `_self` carve-outs below are NOT tenant walls — they
+      // are identity-table scoping and stay.
       // ── better-auth system tables that lack `organization_id` and would
       //    otherwise be denied by the wildcard policy. Same self-only
       //    carve-outs as `member_default` — an org admin does not get to
@@ -247,8 +247,8 @@ export const defaultPermissionSets: PermissionSet[] = [
       },
       // OAuth applications a user has registered themselves (self-service
       // developer flow exposed in the Account app's Developer section).
-      // `sys_oauth_application` has no `organization_id` so the wildcard
-      // `tenant_isolation` policy would otherwise deny every row.
+      // `sys_oauth_application` has no `organization_id`; this `_self` carve-out
+      // is its Layer 1 scoping (Layer 0 is inert on a non-tenant object).
       {
         name: 'sys_oauth_application_self',
         object: 'sys_oauth_application',
@@ -298,12 +298,11 @@ export const defaultPermissionSets: PermissionSet[] = [
       ...denyWritesOnManagedObjects(),
     },
     rowLevelSecurity: [
-      {
-        name: 'tenant_isolation',
-        object: '*',
-        operation: 'all',
-        using: 'organization_id == current_user.organization_id',
-      },
+      // [ADR-0095 D1] The wildcard `tenant_isolation` policy RETIRED here — the
+      // tenant wall is now Layer 0 (`tenant-layer.ts`). Its old OR-merge with the
+      // owner-scoped policies below is exactly what widened a member's by-id write
+      // back to org-wide (W1's write-side twin); Layer 0 now AND-composes the
+      // tenant scope, so `owner_only_writes/deletes` finally narrow as intended.
       // Owner-scoped writes/deletes for rank-and-file members: you may modify
       // and delete the records you created, not other users'. Keyed on
       // `created_by` — the column the engine stamps on EVERY record — rather
@@ -436,8 +435,8 @@ export const defaultPermissionSets: PermissionSet[] = [
       },
       // OAuth applications a user has registered themselves (Account →
       // Developer → OAuth Applications). `sys_oauth_application` has no
-      // `organization_id`, so without this carve-out the wildcard
-      // `tenant_isolation` policy returns zero rows even for the owner.
+      // `organization_id`; this `_self` carve-out is its Layer 1 scoping
+      // (Layer 0 is inert on a non-tenant object).
       {
         name: 'sys_oauth_application_self',
         object: 'sys_oauth_application',
@@ -462,12 +461,9 @@ export const defaultPermissionSets: PermissionSet[] = [
       ...denyWritesOnManagedObjects(),
     },
     rowLevelSecurity: [
-      {
-        name: 'tenant_isolation',
-        object: '*',
-        operation: 'select',
-        using: 'organization_id == current_user.organization_id',
-      },
+      // [ADR-0095 D1] The wildcard `tenant_isolation` policy RETIRED here — the
+      // tenant wall is now Layer 0 (`tenant-layer.ts`). The `_self` carve-outs
+      // below are identity-table scoping, not tenant walls, and stay.
       {
         name: 'sys_organization_self',
         object: 'sys_organization',

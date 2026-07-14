@@ -17,11 +17,16 @@
  *
  * - `visibility-alias-deprecated` — a `visibleOn` / `visibility` key in authored
  *   source. Autofix intent: rename the key to `visibleWhen` (same value).
- * - `visibility-root-mislayered` — a runtime view/page visibility predicate
- *   rooted at `data.` (the metadata-editing-form root, ADR-0089 §Context). Runtime
- *   record surfaces bind `record` + `current_user` (pages also expose `page.<var>`),
- *   so a `data.`-rooted predicate here is almost always a wrong-layer paste that
- *   silently never matches.
+ * - `visibility-root-mislayered` — a visibility predicate whose binding root does
+ *   not match its layer (ADR-0089 D3, §Context). The check is **bidirectional**:
+ *   - **runtime** view/page surfaces (`*.view.ts` / `*.page.ts`) bind
+ *     `record` + `current_user` (pages also expose `page.<var>`), so a `data.`-rooted
+ *     predicate here is a wrong-layer paste that silently never matches; and
+ *   - **metadata-editing** forms (`*.form.ts` — the row under edit) bind `data`, so
+ *     a `record.`-rooted predicate there is the same bug in the other direction.
+ *   The layer is supplied by the caller (`opts.layer`, default `'runtime'`): the
+ *   app-lint path (`os validate` / `compile`) always lints runtime surfaces, while a
+ *   file-aware caller linting a `*.form.ts` passes `layer: 'metadata'`.
  *
  * Scope: `views` (form `sections` / legacy `groups`, and their `fields`) and
  * `pages` (`regions[].components[]`). Data-field `visibleWhen` is already covered
@@ -32,6 +37,19 @@ export const VISIBILITY_ALIAS_DEPRECATED = 'visibility-alias-deprecated';
 export const VISIBILITY_ROOT_MISLAYERED = 'visibility-root-mislayered';
 
 export type VisibilitySeverity = 'error' | 'warning';
+
+/**
+ * Which binding environment the linted surface belongs to (ADR-0089 §Context):
+ * - `runtime`  — `*.view.ts` / `*.page.ts`; binds `record` + `current_user` (+ `page`).
+ * - `metadata` — `*.form.ts` metadata-editing forms; binds `data` (the row under edit).
+ */
+export type VisibilityLayer = 'runtime' | 'metadata';
+
+/** Options for {@link validateVisibilityPredicates}. */
+export interface VisibilityOptions {
+  /** Binding layer of the surface being linted. Defaults to `'runtime'`. */
+  layer?: VisibilityLayer;
+}
 
 export interface VisibilityFinding {
   /** Always `warning` today — both rules are advisory (see module note). */
@@ -72,22 +90,58 @@ function predicateSource(v: unknown): string | undefined {
   return undefined;
 }
 
-/** Does the predicate reference `data.<x>` as a binding root? */
-function usesDataRoot(source: string): boolean {
-  // `data` as a leading identifier followed by a property access — the
-  // metadata-editing-form root. Excludes `foo.data` (a field named data).
-  return /(^|[^.\w$])data\.\w/.test(source);
+/** Does the predicate reference `<root>.<x>` as a leading binding root? */
+function usesRoot(source: string, root: string): boolean {
+  // `<root>` as a leading identifier followed by a property access. The leading
+  // `(^|[^.\w$])` guard excludes a nested access like `foo.data` (a field named
+  // `data`) or `my_record.x` (an identifier that merely ends in `record`).
+  return new RegExp(`(^|[^.\\w$])${root}\\.\\w`).test(source);
 }
+
+/**
+ * Per-layer mis-rooted-predicate description. The `runtime` layer forbids the
+ * metadata-editing-form root (`data.`); the `metadata` layer forbids the runtime
+ * record-surface root (`record.`) — ADR-0089 D3 spells out both directions.
+ */
+const MISLAYER_BY_LAYER: Record<
+  VisibilityLayer,
+  { forbiddenRoot: string; message: string; hint: string }
+> = {
+  runtime: {
+    forbiddenRoot: 'data',
+    message:
+      'visibility predicate is rooted at `data.` — that is the ' +
+      'metadata-editing-form root (a `*.form.ts` row under edit), not a runtime ' +
+      'surface. A runtime view/page predicate that binds `data.` never matches ' +
+      'and the element renders unconditionally (ADR-0089).',
+    hint:
+      'Runtime record surfaces bind `record` + `current_user` (pages also ' +
+      "expose `page.<var>`). Use e.g. `record.status == 'open'` instead of " +
+      "`data.status == 'open'`.",
+  },
+  metadata: {
+    forbiddenRoot: 'record',
+    message:
+      'visibility predicate is rooted at `record.` — that is the runtime ' +
+      'record-surface root (a `*.view.ts` / `*.page.ts` live record), not a ' +
+      'metadata-editing form. A `*.form.ts` predicate that binds `record.` never ' +
+      'matches and the element renders unconditionally (ADR-0089).',
+    hint:
+      'Metadata-editing forms bind `data` (the row under edit). Use e.g. ' +
+      "`data.type == 'grid'` instead of `record.type == 'grid'`.",
+  },
+};
 
 /**
  * Inspect one element carrying a visibility predicate. Emits the alias-deprecated
  * finding (when an alias key is present) and the mis-layered-root finding (when
- * the effective predicate is rooted at `data.`).
+ * the effective predicate's binding root does not match `layer`).
  */
 function checkElement(
   el: AnyRec,
   where: string,
   path: string,
+  layer: VisibilityLayer,
   findings: VisibilityFinding[],
 ): void {
   // (1) deprecated alias key present → steer to `visibleWhen`.
@@ -107,24 +161,19 @@ function checkElement(
     }
   }
 
-  // (2) mis-layered binding root — check the effective predicate (canonical wins).
+  // (2) mis-layered binding root — check the effective predicate (canonical wins)
+  // against the root expected for this layer.
   const raw = el[CANONICAL] ?? el.visibleOn ?? el.visibility;
   const source = predicateSource(raw);
-  if (source && usesDataRoot(source)) {
+  const rule = MISLAYER_BY_LAYER[layer];
+  if (source && usesRoot(source, rule.forbiddenRoot)) {
     findings.push({
       severity: 'warning',
       rule: VISIBILITY_ROOT_MISLAYERED,
       where,
       path,
-      message:
-        `visibility predicate is rooted at \`data.\` — that is the ` +
-        `metadata-editing-form root (a \`*.form.ts\` row under edit), not a runtime ` +
-        `surface. A runtime view/page predicate that binds \`data.\` never matches ` +
-        `and the element renders unconditionally (ADR-0089).`,
-      hint:
-        `Runtime record surfaces bind \`record\` + \`current_user\` (pages also ` +
-        `expose \`page.<var>\`). Use e.g. \`record.status == 'open'\` instead of ` +
-        `\`data.status == 'open'\`.`,
+      message: rule.message,
+      hint: rule.hint,
     });
   }
 }
@@ -141,8 +190,18 @@ function isFieldObject(entry: unknown): entry is AnyRec {
  * `visibleOn` / `visibility` aliases before the schema folds them into
  * `visibleWhen`. Returns findings (empty = clean); all advisory (`warning`) —
  * the caller must never fail the build on these alone.
+ *
+ * The binding-root check is layer-directional (ADR-0089 D3): pass
+ * `opts.layer = 'metadata'` when linting a `*.form.ts` metadata-editing form (so a
+ * `record.`-rooted predicate is flagged), or leave it at the `'runtime'` default for
+ * `*.view.ts` / `*.page.ts` surfaces (so a `data.`-rooted predicate is flagged). The
+ * alias-deprecated check is layer-agnostic.
  */
-export function validateVisibilityPredicates(stack: AnyRec): VisibilityFinding[] {
+export function validateVisibilityPredicates(
+  stack: AnyRec,
+  opts: VisibilityOptions = {},
+): VisibilityFinding[] {
+  const layer: VisibilityLayer = opts.layer ?? 'runtime';
   const findings: VisibilityFinding[] = [];
 
   // ── Views: form sections / legacy groups, and their fields ──────────
@@ -161,13 +220,13 @@ export function validateVisibilityPredicates(stack: AnyRec): VisibilityFinding[]
         const sec = sections[s];
         if (!sec || typeof sec !== 'object') continue;
         const secPath = `views[${i}].${bucket}[${s}]`;
-        checkElement(sec as AnyRec, where, secPath, findings);
+        checkElement(sec as AnyRec, where, secPath, layer, findings);
 
         const secFields = Array.isArray((sec as AnyRec).fields) ? ((sec as AnyRec).fields as unknown[]) : [];
         for (let f = 0; f < secFields.length; f++) {
           const entry = secFields[f];
           if (isFieldObject(entry)) {
-            checkElement(entry, where, `${secPath}.fields[${f}]`, findings);
+            checkElement(entry, where, `${secPath}.fields[${f}]`, layer, findings);
           }
         }
       }
@@ -190,7 +249,7 @@ export function validateVisibilityPredicates(stack: AnyRec): VisibilityFinding[]
       for (let c = 0; c < components.length; c++) {
         const comp = components[c];
         if (comp && typeof comp === 'object') {
-          checkElement(comp as AnyRec, where, `pages[${i}].regions[${r}].components[${c}]`, findings);
+          checkElement(comp as AnyRec, where, `pages[${i}].regions[${r}].components[${c}]`, layer, findings);
         }
       }
     }

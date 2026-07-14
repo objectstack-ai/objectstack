@@ -74,7 +74,12 @@ export {
   VISIBILITY_ALIAS_DEPRECATED,
   VISIBILITY_ROOT_MISLAYERED,
 } from './validate-visibility-predicates.js';
-export type { VisibilityFinding, VisibilitySeverity } from './validate-visibility-predicates.js';
+export type {
+  VisibilityFinding,
+  VisibilitySeverity,
+  VisibilityLayer,
+  VisibilityOptions,
+} from './validate-visibility-predicates.js';
 
 export {
   validateCapabilityReferences,

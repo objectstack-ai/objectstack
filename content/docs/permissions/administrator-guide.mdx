@@ -1,0 +1,219 @@
+---
+title: Administrator Guide
+description: The task-first operations manual for customer system administrators — onboard a tenant in four steps (build the org tree, add people, assign positions, verify), with the 90% rule — daily administration is assigning positions; the capability plumbing ships built-in.
+---
+
+# Administrator Guide
+
+You are the **system administrator** of an ObjectStack tenant. You opened
+Setup for the first time and found dozens of positions and permission sets you
+never created. This page is the *"I'm the admin — what do I actually do?"*
+manual: one real task — onboarding your organization — walked start to finish,
+with the platform concepts introduced only where you need them.
+
+The one thing to internalize before anything else:
+
+> **90% of daily administration is assigning people to positions.** The
+> positions, the permission sets behind them, and the security baseline all
+> ship with the platform and the apps you install. You almost never build
+> capability from scratch — and you shouldn't.
+
+## Four concepts — only one is a daily tool
+
+| Concept | What it is | Who authors it | You touch it |
+|:--|:--|:--|:--|
+| **Permission set** | The only capability container — object CRUD, field security, access depth, system capabilities | Platform & app developers (in Studio) | Rarely — [Step 5](#step-5--configure-permissions-only-when-the-shipped-positions-dont-fit) |
+| **Position** (岗位) | A flat, named job function that binds permission sets; users hold positions | Ships with apps; you assign it | **Daily** |
+| **Business unit** | The *one* hierarchy — org tree that decides visibility depth and delegation boundaries | You, at onboarding and reorgs | Occasionally |
+| **User** | The person signing in | You | Daily |
+
+A user's effective access is the **union** of every permission set reached
+through their positions, plus direct grants, plus the built-in additive
+baseline (`member_default`) every authenticated user gets. Restriction is done
+by *not granting* — there are no subtraction rules to maintain. Details:
+[Permission Sets](/docs/permissions/permission-sets) ·
+[Positions](/docs/permissions/positions).
+
+## The whole flow at a glance
+
+Onboarding a tenant is four ordered steps — each depends on the previous one:
+
+1. **Build the organization** — create the business-unit tree.
+2. **Add people** — invite, create, or import users; place them in units.
+3. **Assign positions** — give each person their job function (the daily 90%).
+4. **Verify** — impersonate a user and ask the explain engine why access
+   resolves the way it does.
+
+A fifth step exists only for the minority case where a shipped position
+doesn't fit.
+
+## Step 1 — Build the organization (Business Units)
+
+**Setup → People & Organization → Business Units** (`/apps/setup`).
+
+The default **Org Chart** tab renders the tree as an indented
+expand-and-collapse tree grid. Create the root first (kind `company`), then
+add children with **New**, picking the **Parent Business Unit** in the form —
+`division` / `department` / `office` / `cost_center` are display hints; the
+tree works the same regardless. Reorganizing works the same way: **Edit** a
+unit and change its parent. *(Rough edge today: the tree view is a read-only
+presentation — re-parenting happens through the record form, not drag-and-drop.)*
+
+Three similarly-named things, three different jobs — don't mix them up:
+
+| Object | Job |
+|:--|:--|
+| **Business unit** (`sys_business_unit`) | The hierarchy. Drives visibility depth (`unit`, `unit_and_below`) and delegated-admin boundaries |
+| **Team** (`sys_team`) | Flat collaboration group. Teams *receive* sharing; they never carry capability |
+| **Organization** (`sys_organization`) | The tenant itself — your company's account, not a node inside it |
+
+Keep the tree shallow and honest to your real structure; you'll revisit it
+only on reorgs. Why the tree matters:
+[access depth](/docs/permissions/permission-sets#access-depth--readscope--writescope-adr-0057-d1).
+
+## Step 2 — Add people (Users)
+
+**Setup → People & Organization → Users.** Three ways in, all first-class:
+
+| Path | When to use | What happens |
+|:--|:--|:--|
+| **Invite User** (toolbar) | The person has a reachable email | Sends a better-auth invitation; they set their own password on accept |
+| **Create User** (toolbar) | No email flow wanted — or phone-only staff | Creates a sign-in-ready account (email and/or phone); a generated temporary password is shown **once**, with password-change forced on first login |
+| **Import** (toolbar) | Bulk onboarding from CSV/Excel | Wizard with column mapping and dry-run preview; up to 500 rows per batch. Pick the sign-in policy: no password (first sign-in via OTP/magic/reset link), send invitations, or one-time temporary passwords |
+
+Day-to-day lifecycle actions live on each user's row menu and record header:
+**Ban / Unban** (blocks sign-in), **Unlock Account** (clears a brute-force
+lockout early), **Set Password** (also mints one-time temporary passwords),
+and **Impersonate User** (see [Step 4](#step-4--verify)). *(Rough edge today:
+users' own self-service password recovery depends on a configured email or
+SMS delivery service — wiring tracked in cloud#580. Until then, admin **Set
+Password** is the reliable fallback.)*
+
+Placing a person in the org tree is a separate record: a **Business Unit
+Member** row (`sys_business_unit_member` — user + business unit, one marked
+*primary*). Depth-based visibility and `unit_and_subordinates` sharing resolve
+through this membership, so don't skip it.
+
+Endpoint-level detail (payloads, password policies, phone-only accounts):
+[Authentication → Admin User Management](/docs/permissions/authentication#admin-user-management).
+
+## Step 3 — Assign positions
+
+This is the daily 90%. An assignment is one row: **User Position**
+(`sys_user_position`) = *user* + *position* + optionally the **business unit**
+they hold it in. The anchor decides *where* the position's depth grants apply
+— "sales manager **of East**" sees East's records, not the whole company's.
+
+From **Setup → Access Control → Positions**, open a position and add
+assignments from its related list (or create User Position rows directly).
+These writes are governed: tenant-level admins pass; a
+[delegated admin](/docs/permissions/delegated-administration) can only assign
+allowlisted sets inside their own subtree — self-escalation is structurally
+refused.
+
+Two adjacent surfaces complete the picture:
+
+- **Direct grants** — on a permission set's record page
+  (**Setup → Access Control → Permission Sets**), the **Assigned Users** panel
+  adds per-user grants without a position. Rows held *via a position* are
+  shown but removed on the position, not here.
+- **Business-unit membership** — from Step 2; independent of the assignment
+  anchor.
+
+*(Rough edge today: position assignments, BU membership, and direct grants
+are three separate entry points — they aren't consolidated into a single
+panel on the user page yet.)*
+
+## Step 4 — Verify
+
+Never announce "you're all set" untested. Two built-in verification tools:
+
+- **Impersonate.** Users list → row menu → **Impersonate User**. You get that
+  user's session — open the apps they'd open, confirm they see what they
+  should (and *don't* see what they shouldn't). Impersonation is for
+  legitimate support and verification; sessions are logged.
+- **Explain.** Studio's **Access** pillar → **Explain access**: pick the user,
+  an object, and an operation, and the engine returns the verdict plus every
+  evaluation layer — which permission set granted, held via which position,
+  which sharing rule widened, which policy narrowed. The same report is
+  available over REST at `/api/v1/security/explain`. See
+  [Explain Engine](/docs/permissions/explain).
+
+When something resolves wrong, explain-first beats guess-and-toggle: the
+report names the exact permission set and layer to fix.
+
+## Step 5 — Configure permissions (only when the shipped positions don't fit)
+
+One rule of thumb: **permissions are *designed* in Studio, *assigned* in
+Setup.** If you are in this section, you've confirmed no shipped position
+covers the need.
+
+The permission-set **matrix editor** (Studio → Access) is a structured
+spreadsheet — you never hand-write JSON:
+
+- **Object grid** — per object: Create / Read / Update / Delete, lifecycle
+  bits (Transfer / Restore / Purge), and View All / Modify All, with per-row
+  bulk buttons (Read / CRUD / All / None) and the object's sharing baseline
+  (OWD) shown alongside.
+- **Field-level security** — expand an object for per-field Read / Edit.
+- **Capabilities** — named grants like `manage_users` or `studio.access`.
+
+Prefer the smallest change that works, in this order: **bind an existing set
+to a position** → **clone and adjust** → **author a new set**. Editing a set
+that shipped with an app creates an *environment overlay* — your change wins,
+survives upgrades, and can be reset back to the vendor baseline; the API name
+is immutable after creation. And keep the additive model in mind: author
+coherent capability bundles, never "subtraction sets".
+Full model: [Permission Sets](/docs/permissions/permission-sets).
+
+## Quick paths
+
+| I need to… | Do this |
+|:--|:--|
+| Onboard a new employee | Invite/Create the user → Business Unit Member row → assign their position ([2](#step-2--add-people-users)→[3](#step-3--assign-positions)) |
+| Offboard someone | **Ban User** (blocks sign-in immediately) — then remove assignments at leisure |
+| "I can't sign in" | User record → is it banned? locked? **Unlock Account** or **Set Password** (temporary, must-change) |
+| "Why can't I see X?" | Studio → Access → **Explain access** for that user + object |
+| Someone changed departments | Update their Business Unit Member row; re-anchor their User Position rows |
+| Let a subsidiary manage its own staff | Grant a set carrying a [delegated admin scope](/docs/permissions/delegated-administration) |
+| Give one user one extra capability | Permission set record → **Assigned Users** → add (direct grant) |
+
+## FAQ
+
+**Do I need Studio?** Rarely. Setup is the administrator's home; Studio is
+where permission sets are *designed* — you enter it for Step 5 and for the
+Explain panel.
+
+**A new user sees almost nothing — broken?** No: that's the baseline working.
+Access arrives when you assign a position (Step 3).
+
+**Department vs. team?** Department = business unit (hierarchy, visibility).
+Team = flat sharing group. If it should affect *what records people see* by
+org structure, it's a business unit.
+
+**Can I delete the built-in permission sets?** No — sets like
+`member_default` and `organization_admin` are the platform baseline. Shipped
+sets can be overlaid (Step 5) or simply left unassigned.
+
+## Where is everything
+
+| Thing | Location |
+|:--|:--|
+| Users, invitations | Setup → People & Organization → Users / Invitations |
+| Business-unit tree | Setup → People & Organization → Business Units |
+| Teams | Setup → People & Organization → Teams |
+| Positions, permission sets, capabilities | Setup → Access Control |
+| Sharing rules, record shares | Setup → Access Control |
+| Password policy, MFA, lockout, SSO | Setup → Configuration → Authentication |
+| Company info, localization, branding | Setup → Configuration |
+| Sessions, notification events, audit logs | Setup → Diagnostics |
+| Permission matrix editor, Explain access | Studio → Access |
+
+---
+
+## See also
+
+- [Permissions & Identity overview](/docs/permissions) — the full model
+- [Positions](/docs/permissions/positions) · [Permission Sets](/docs/permissions/permission-sets)
+- [Delegated Administration](/docs/permissions/delegated-administration) — scale yourself out
+- [Authentication](/docs/permissions/authentication) — hardening and sign-in flows

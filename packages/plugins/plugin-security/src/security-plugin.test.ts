@@ -203,7 +203,11 @@ describe('SecurityPlugin', () => {
       context: { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] },
     };
     await harness.run(opCtx);
-    expect(opCtx.ast.where).toEqual({ organization_id: 'org-1' });
+    // [ADR-0095 D1] Layer 0 (the tenant wall) AND the fixture's own legacy
+    // tenant_isolation policy (Layer 1) — same rows. Production seeds no longer
+    // carry the Layer-1 tenant policy, so in production this is Layer 0's
+    // `{organization_id}` alone; this fixture keeps it to exercise composition.
+    expect(opCtx.ast.where).toEqual({ $and: [{ organization_id: 'org-1' }, { organization_id: 'org-1' }] });
   });
 
   // Regression: when a schema explicitly opts out of tenancy
@@ -414,7 +418,9 @@ describe('SecurityPlugin', () => {
       context: { userId: 'u1', tenantId: 'org-1', roles: ['owner'], permissions: [] },
     };
     await harness.run(opCtx);
-    expect(opCtx.ast.where).toEqual({ organization_id: 'org-1' });
+    // [ADR-0095 D1] Tenant scope is now guaranteed by Layer 0 regardless of which
+    // Layer-1 sets resolve; ANDed with the fixture's legacy tenant policy (same rows).
+    expect(opCtx.ast.where).toEqual({ $and: [{ organization_id: 'org-1' }, { organization_id: 'org-1' }] });
   });
 
   // -------------------------------------------------------------------------
@@ -556,8 +562,11 @@ describe('SecurityPlugin', () => {
         context: { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] },
       };
       await harness.run(opCtx);
-      // The member is still tenant-scoped — the managedBy bypass is admin-only.
-      expect(opCtx.ast.where).toEqual({ organization_id: 'org-1' });
+      // The member is still tenant-scoped — the managedBy superuser bypass is
+      // admin-only (Layer 0's exemption requires the platform-admin bit). Here
+      // the object HAS organization_id, so Layer 0 applies the wall; ANDed with
+      // the fixture's legacy tenant policy (Layer 1) — same rows, no leak.
+      expect(opCtx.ast.where).toEqual({ $and: [{ organization_id: 'org-1' }, { organization_id: 'org-1' }] });
     });
   });
 
@@ -666,7 +675,9 @@ describe('SecurityPlugin', () => {
       await plugin.start(harness.ctx);
       const ctx = { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] };
       const filter = await plugin.getReadFilter('task', ctx);
-      expect(filter).toEqual({ organization_id: 'org-1' });
+      // [ADR-0095 D1] Same Layer0-AND-Layer1 composition as the find path — the
+      // point of this test (getReadFilter parity) holds by construction.
+      expect(filter).toEqual({ $and: [{ organization_id: 'org-1' }, { organization_id: 'org-1' }] });
     });
 
     it('returns undefined (no scope) when tenant_isolation is stripped (org-scoping off)', async () => {
@@ -1212,6 +1223,188 @@ describe('SecurityPlugin', () => {
       };
       await expect(
         runGate(opCtx, () => ({ id: 'ps_pkg', managed_by: 'package', package_id: 'com.example.crm' })),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  // ── ADR-0066 / #2918 — built-in row-write guardrail (sys_position / sys_capability) ──
+  // Platform/application-managed asset rows are not the admin's to delete or
+  // rewrite. Unlike sys_permission_set these objects have no ADR-0094 overlay
+  // write-through, so the refusal must hold for update/delete at this gate.
+  // Matrix: non-admin/admin × managed/admin-authored × delete/update.
+  describe('system-row write gate (sys_position / sys_capability provenance)', () => {
+    const adminSet: PermissionSet = {
+      name: 'admin_full_access', label: 'Admin',
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, modifyAllRecords: true } },
+    } as any;
+    const adminCtx = { userId: 'admin1', tenantId: 'org-1', positions: [], permissions: ['admin_full_access'] };
+
+    const runGate = async (opCtx: any, findOneImpl?: (q: any) => any) => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'admin_full_access' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [adminSet],
+        objectFields: ['id', 'name', 'label', 'managed_by'],
+        ...(findOneImpl ? { findOneImpl } : {}),
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      return harness.run(opCtx);
+    };
+
+    it('DENIES deleting a platform-managed position (sys_position managed_by:system)', async () => {
+      const opCtx: any = {
+        object: 'sys_position', operation: 'delete',
+        options: { where: { id: 'pos_admin' } }, context: adminCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'pos_admin', name: 'platform_admin', managed_by: 'system' })),
+      ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('DENIES updating a package-declared position (sys_position managed_by:config)', async () => {
+      const opCtx: any = {
+        object: 'sys_position', operation: 'update',
+        data: { id: 'pos_sales', label: 'renamed' }, options: { where: { id: 'pos_sales' } },
+        context: adminCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'pos_sales', name: 'sales_rep', managed_by: 'config' })),
+      ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('DENIES deleting a platform-owned capability (sys_capability managed_by:platform)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'delete',
+        options: { where: { id: 'cap_plat' } }, context: adminCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'cap_plat', name: 'manage_users', managed_by: 'platform' })),
+      ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('DENIES updating a package-owned capability (sys_capability managed_by:package)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { id: 'cap_pkg', label: 'renamed' }, options: { where: { id: 'cap_pkg' } },
+        context: adminCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'cap_pkg', name: 'crm.export', managed_by: 'package' })),
+      ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('ALLOWS deleting an admin-authored position (sys_position managed_by:user)', async () => {
+      const opCtx: any = {
+        object: 'sys_position', operation: 'delete',
+        options: { where: { id: 'pos_user' } }, context: adminCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'pos_user', name: 'my_team', managed_by: 'user' })),
+      ).resolves.toBeDefined();
+    });
+
+    it('ALLOWS updating an admin-authored position with NO managed_by (tenant-created)', async () => {
+      const opCtx: any = {
+        object: 'sys_position', operation: 'update',
+        data: { id: 'pos_user', label: 'renamed' }, options: { where: { id: 'pos_user' } },
+        context: adminCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'pos_user', name: 'my_team', managed_by: null })),
+      ).resolves.toBeDefined();
+    });
+
+    it('ALLOWS updating an admin-authored capability (sys_capability managed_by:admin)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { id: 'cap_admin', label: 'renamed' }, options: { where: { id: 'cap_admin' } },
+        context: adminCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'cap_admin', name: 'my_cap', managed_by: 'admin' })),
+      ).resolves.toBeDefined();
+    });
+
+    it('DENIES an admin-door insert that forges platform provenance (sys_position managed_by:system)', async () => {
+      const opCtx: any = {
+        object: 'sys_position', operation: 'insert',
+        data: { name: 'forged', managed_by: 'system' }, context: adminCtx,
+      };
+      await expect(runGate(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('DENIES a bulk/ARRAY insert that forges package provenance on any element (sys_capability)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'insert',
+        data: [
+          { name: 'ok_admin_cap' },
+          { name: 'forged', managed_by: 'package' },
+        ],
+        context: adminCtx,
+      };
+      await expect(runGate(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('DENIES an update that RE-BADGES an admin row as package-managed (update-to-forge)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { id: 'cap_admin', managed_by: 'package' }, options: { where: { id: 'cap_admin' } },
+        context: adminCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'cap_admin', name: 'my_cap', managed_by: 'admin' })),
+      ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('ALLOWS a normal admin-door capability insert (no forged provenance)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'insert',
+        data: { name: 'my_cap', label: 'Custom', managed_by: 'admin' },
+        context: adminCtx,
+      };
+      await expect(runGate(opCtx)).resolves.toBeDefined();
+    });
+
+    it('DENIES a filter DELETE whose filter matches a platform/package-managed row', async () => {
+      const opCtx: any = {
+        object: 'sys_position', operation: 'delete',
+        options: { where: { active: false } }, // no single id → filter path
+        context: adminCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'pos_admin', managed_by: 'system' })),
+      ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('ALLOWS a filter delete that matches only admin-authored rows (probe finds none)', async () => {
+      const opCtx: any = {
+        object: 'sys_position', operation: 'delete',
+        options: { where: { managed_by: 'user' } },
+        context: adminCtx,
+      };
+      // The managed-row probe finds nothing → the write proceeds.
+      await expect(runGate(opCtx, () => null)).resolves.toBeDefined();
+    });
+
+    it('DENIES even a principal-less delete of a managed row (gate is before the fall-open)', async () => {
+      const opCtx: any = {
+        object: 'sys_position', operation: 'delete',
+        options: { where: { id: 'pos_admin' } },
+        context: {}, // no roles, no permissions, no userId, not isSystem
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'pos_admin', name: 'platform_admin', managed_by: 'system' })),
+      ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('lets system/boot writes through (isSystem bypass) even on a platform-managed position', async () => {
+      const opCtx: any = {
+        object: 'sys_position', operation: 'update',
+        data: { id: 'pos_admin', label: 'reseed' }, options: { where: { id: 'pos_admin' } },
+        context: { isSystem: true },
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'pos_admin', name: 'platform_admin', managed_by: 'system' })),
       ).resolves.toBeDefined();
     });
   });

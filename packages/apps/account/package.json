@@ -13,8 +13,7 @@
     }
   },
   "scripts": {
-    "build": "tsup",
-    "test": "vitest run --passWithNoTests"
+    "build": "tsup"
   },
   "dependencies": {
     "@objectstack/platform-objects": "workspace:*",

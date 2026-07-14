@@ -3,6 +3,7 @@
   "icon": "Shield",
   "pages": [
     "index",
+    "administrator-guide",
     "authentication",
     "sso",
     "authorization",

@@ -85,9 +85,12 @@ describe('default permission sets', () => {
     expect(wildcard.modifyAllRecords).toBe(true);
   });
 
-  it('member_default ships tenant + owner RLS policies plus better-auth system table guards', () => {
+  it('member_default ships owner + better-auth self RLS policies; tenant wall is Layer 0 (ADR-0095 D1)', () => {
     const member = defaultPermissionSets.find((p) => p.name === 'member_default')!;
     const policyNames = (member.rowLevelSecurity ?? []).map((p) => p.name).sort();
+    // [ADR-0095 D1] `tenant_isolation` RETIRED from the seed — the tenant wall is
+    // now Layer 0 (`tenant-layer.ts`), not an OR-merged RLS policy. The remaining
+    // policies are business RLS: owner-scoped writes + better-auth `_self` carve-outs.
     expect(policyNames).toEqual([
       'owner_only_deletes',
       'owner_only_writes',
@@ -105,10 +108,8 @@ describe('default permission sets', () => {
       'sys_user_org_members',
       'sys_user_preference_self',
       'sys_user_self',
-      'tenant_isolation',
     ]);
-    const tenantPolicy = (member.rowLevelSecurity ?? []).find((p) => p.name === 'tenant_isolation')!;
-    expect(tenantPolicy.using).toBe('organization_id == current_user.organization_id');
+    expect(policyNames).not.toContain('tenant_isolation');
     const orgSelf = (member.rowLevelSecurity ?? []).find((p) => p.name === 'sys_organization_self')!;
     expect(orgSelf.object).toBe('sys_organization');
     expect(orgSelf.using).toBe('id == current_user.organization_id');

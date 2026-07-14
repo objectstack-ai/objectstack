@@ -176,6 +176,83 @@ export const SysUserDetailPage: Page = {
             ],
           },
           {
+            // [ADR-0091 D1] Direct permission-set grants (直接授权) — pure SDUI.
+            // sys_user_permission_set is an ordinary id-keyed junction:
+            // user_id / permission_set_id are lookups keyed by record id, so
+            // the list keys on `relationshipField: 'user_id'` (no
+            // relationshipValueField). The Add picker binds a permission set by
+            // its id (linkField: 'permission_set_id'); server-side gates
+            // (audience-anchor D5/D9, delegated-admin D12) surface their denial
+            // reason in the Add dialog.
+            label: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos' },
+            icon: 'lock',
+            children: [
+              {
+                type: 'record:related_list',
+                properties: {
+                  objectName: 'sys_user_permission_set',
+                  relationshipField: 'user_id',
+                  columns: ['permission_set_id', 'organization_id', 'granted_by', 'created_at'],
+                  sort: [{ field: 'created_at', order: 'desc' }],
+                  limit: 25,
+                  showViewAll: true,
+                  title: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos' },
+                  add: {
+                    picker: {
+                      object: 'sys_permission_set',
+                      labelField: 'label',
+                    },
+                    linkField: 'permission_set_id',
+                    label: {
+                      en: 'Grant permission set',
+                      'zh-CN': '授予权限集',
+                      'ja-JP': '権限セットを付与',
+                      'es-ES': 'Otorgar conjunto de permisos',
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          {
+            // Business-unit membership (业务单元归属) — pure SDUI.
+            // sys_business_unit_member is an id-keyed junction: user_id /
+            // business_unit_id are lookups keyed by record id, so the list keys
+            // on `relationshipField: 'user_id'` (no relationshipValueField).
+            // The Add picker binds a BU by its id (linkField: 'business_unit_id');
+            // sys_business_unit has no `label` field so the picker labels rows by
+            // its display field `name`.
+            label: { en: 'Business Units', 'zh-CN': '业务单元', 'ja-JP': 'ビジネスユニット', 'es-ES': 'Unidades de negocio' },
+            icon: 'network',
+            children: [
+              {
+                type: 'record:related_list',
+                properties: {
+                  objectName: 'sys_business_unit_member',
+                  relationshipField: 'user_id',
+                  columns: ['business_unit_id', 'function_in_business_unit', 'is_primary', 'created_at'],
+                  sort: [{ field: 'created_at', order: 'desc' }],
+                  limit: 25,
+                  showViewAll: true,
+                  title: { en: 'Business Units', 'zh-CN': '业务单元', 'ja-JP': 'ビジネスユニット', 'es-ES': 'Unidades de negocio' },
+                  add: {
+                    picker: {
+                      object: 'sys_business_unit',
+                      labelField: 'name',
+                    },
+                    linkField: 'business_unit_id',
+                    label: {
+                      en: 'Add to business unit',
+                      'zh-CN': '加入业务单元',
+                      'ja-JP': 'ビジネスユニットに追加',
+                      'es-ES': 'Añadir a unidad de negocio',
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          {
             label: { en: 'Sessions', 'zh-CN': '会话', 'ja-JP': 'セッション', 'es-ES': 'Sesiones' },
             icon: 'monitor',
             children: [

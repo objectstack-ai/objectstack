@@ -1,0 +1,283 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+//
+// ── Unit-layer authorization matrix gate (ADR-0095 D1) ──────────────────────
+//
+// ADR-0095 makes tenant isolation a refactor validated by a `role × object ×
+// expected-visible-rows` snapshot: every cell must match across the Layer 0
+// extraction EXCEPT the four deltas the architect accepted (all W1-class,
+// all toward stronger/correcter isolation — see below). The existing
+// conformance matrix (`packages/dogfood/test/authz-conformance.matrix.ts`)
+// proves this end-to-end through a real app boot (minutes). This file is the
+// UNIT-LAYER equivalent so the loop is seconds: it drives the real
+// SecurityPlugin CRUD middleware with the real seeded permission sets and
+// snapshots the *effective RLS filter* each (role × object × operation) cell
+// produces — the compiled filter the engine ANDs onto a read, or verifies the
+// by-id write target against. Two filters selecting the same rows are the same
+// visibility; the snapshot is that filter, verbatim.
+//
+// This file adds NO production code; it is the gate the extraction landed behind.
+// The four accepted, ADR-authorized deltas (post-extraction values below):
+//   (a) [W1 read]  a permissive business policy no longer OR-widens tenant scope
+//       — a cross-org `public` row becomes INVISIBLE (Layer0 AND Layer1).
+//   (b) [W1 write] `owner_only_writes` is no longer OR-diluted by the tenant
+//       policy — a member's by-id write narrows to OWNER-only (was org-wide).
+//   (c) [tenancy-disabled] a member reading a `tenancy.enabled:false` global
+//       object is no longer scoped by a phantom org filter — the global catalog
+//       is VISIBLE (Layer 0 correctly treats it as a non-tenant object; this
+//       also retires the `extractTargetField` `==` blind spot for tenant scope).
+//   (e) [no active org] a write by a principal with no active organization on a
+//       tenant object is FAIL-CLOSED by Layer 0 (was owner-scoped only).
+// Every OTHER change vs the pre-extraction snapshot is a same-visibility filter
+// simplification (duplicate-OR dedup; dead org-clause removal on non-tenant
+// objects) and is annotated inline.
+
+import { describe, it, expect, vi } from 'vitest';
+import { SecurityPlugin } from './security-plugin.js';
+import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { RLS_DENY_FILTER } from './rls-compiler.js';
+import type { PermissionSet } from '@objectstack/spec/security';
+
+// A permissive, admin-authored business RLS policy (ADR-0095 W1's worked
+// example): "everyone may read rows whose status is public". At the RLS layer
+// this is OR-merged with the wildcard tenant policy today — so it is, by itself,
+// sufficient to admit a row from ANOTHER organization. Modeled here as a custom
+// set because W1 is about ANY permissive business policy, not a seeded one.
+const publicReader: PermissionSet = {
+  name: 'public_reader',
+  label: 'Public Reader (permissive business RLS)',
+  objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true } },
+  rowLevelSecurity: [
+    { name: 'public_read', object: '*', operation: 'select', using: "status == 'public'" },
+  ],
+} as any;
+
+const ALL_SETS: PermissionSet[] = [...defaultPermissionSets, publicReader];
+const DENY = RLS_DENY_FILTER.id; // the fail-closed sentinel's marker value
+
+// ── Minimal middleware harness ──────────────────────────────────────────────
+// Drives the REAL security CRUD middleware against a single-object schema whose
+// posture (public / private / tenancy-disabled / better-auth-managed) and field
+// set are configurable, so one helper covers the whole object axis.
+function makeHarness(opts: {
+  objectName: string;
+  objectFields: string[];
+  schemaExtra?: Record<string, any>;
+  orgScoping?: boolean;
+  findOneImpl?: (q: any) => any;
+}) {
+  const fields: Record<string, any> = {};
+  for (const f of opts.objectFields) fields[f] = { name: f };
+  const baseSchema: any = { name: opts.objectName, fields, ...(opts.schemaExtra ?? {}) };
+  let middleware: any;
+  const findOne = vi.fn(async (_o: string, q: any) => (opts.findOneImpl ? opts.findOneImpl(q) : null));
+  const ql = {
+    registerMiddleware: (mw: any) => { if (!middleware) middleware = mw; },
+    getSchema: () => baseSchema,
+    findOne,
+  };
+  const metadata = { get: async () => baseSchema, list: () => ALL_SETS };
+  const services: Record<string, any> = { manifest: { register: vi.fn() }, objectql: ql, metadata };
+  // Multi-org isolation active iff org-scoping is wired (ADR-0093 D4 — the exact
+  // signal SecurityPlugin probes). `tenancy` service is absent here, so the
+  // plugin falls back to the `org-scoping` probe (same as production baseline).
+  if (opts.orgScoping) services['org-scoping'] = { name: 'org-scoping' };
+  const ctx: any = {
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    registerService: vi.fn(),
+    getService: (name: string) => {
+      if (!(name in services)) throw new Error(`no service: ${name}`);
+      return services[name];
+    },
+  };
+  return { ctx, findOne, run: async (opCtx: any) => { await middleware(opCtx, async () => {}); return opCtx; } };
+}
+
+/** Effective READ filter the engine would AND onto a `find` (the visible-row set). */
+async function readFilter(cell: any, roleCtx: any): Promise<unknown> {
+  const plugin = new SecurityPlugin();
+  const h = makeHarness({ ...cell, orgScoping: cell.orgScoping ?? true });
+  await plugin.init(h.ctx); await plugin.start(h.ctx);
+  const opCtx: any = { object: cell.objectName, operation: 'find', ast: { where: undefined }, context: roleCtx };
+  try { await h.run(opCtx); } catch (e: any) { return `CRUD_DENY:${e?.name ?? 'err'}`; }
+  return opCtx.ast.where ?? null;
+}
+
+/**
+ * Effective WRITE filter used by the by-id update pre-image check — the row the
+ * caller is allowed to mutate must satisfy it. Returned as the array of RLS
+ * parts ANDed with the `{id}` guard (that guard is stripped). `BYPASS` = no
+ * write filter (superuser). `CRUD_DENY` = blocked before the pre-image check.
+ */
+async function writeFilter(cell: any, roleCtx: any): Promise<unknown> {
+  const plugin = new SecurityPlugin();
+  const h = makeHarness({ ...cell, orgScoping: cell.orgScoping ?? true, findOneImpl: () => null });
+  await plugin.init(h.ctx); await plugin.start(h.ctx);
+  const opCtx: any = {
+    object: cell.objectName, operation: 'update',
+    data: { id: 'r1', name: 'x' }, options: { where: { id: 'r1' } }, context: roleCtx,
+  };
+  let threw: any = null;
+  try { await h.run(opCtx); } catch (e: any) { threw = e; }
+  if (h.findOne.mock.calls.length === 0) {
+    return threw ? `CRUD_DENY:${threw?.name ?? 'err'}` : 'BYPASS(no-write-filter)';
+  }
+  return h.findOne.mock.calls[0][1].where.$and.slice(1);
+}
+
+// ── Axes ─────────────────────────────────────────────────────────────────────
+const OBJECTS = {
+  // Ordinary tenant business object: has organization_id, public posture.
+  task: { objectName: 'task', objectFields: ['id', 'organization_id', 'created_by', 'status', 'name'] },
+  // Private object (access.default: private) — plain wildcard grant does NOT cover it (ADR-0066 ④).
+  private_obj: { objectName: 'crm_secret', objectFields: ['id', 'organization_id', 'created_by', 'name'], schemaExtra: { access: { default: 'private' } } },
+  // Platform-global object (tenancy.enabled: false), no organization_id column.
+  platform_global: { objectName: 'sys_package', objectFields: ['id', 'name', 'visibility'], schemaExtra: { tenancy: { enabled: false } } },
+  // Better-auth-managed identity table (managedBy: 'better-auth'); writes flow through better-auth.
+  better_auth: { objectName: 'sys_user', objectFields: ['id', 'email', 'name'], schemaExtra: { managedBy: 'better-auth' } },
+};
+
+const ROLES = {
+  // Platform admin: holds admin_full_access (viewAllRecords/modifyAllRecords) — the superuser bypass evidence.
+  platform_admin: { userId: 'padmin', tenantId: 'org-1', positions: ['platform_admin'], permissions: ['admin_full_access'] },
+  // Org admin: holds organization_admin (also viewAll/modifyAll, but tenant-scoped by its RLS).
+  org_admin: { userId: 'oadmin', tenantId: 'org-1', positions: ['org_admin'], permissions: ['organization_admin'] },
+  // Rank-and-file member: only the additive member_default baseline; org_member gates owner_only_*.
+  member: { userId: 'u1', tenantId: 'org-1', positions: ['org_member'], permissions: [] },
+  // Authenticated user with NO active organization → tenant scoping cannot resolve → fail-closed.
+  no_org_member: { userId: 'u2', positions: ['org_member'], permissions: [] },
+};
+
+// The locked snapshot of POST-EXTRACTION behavior (Layer0 AND Layer1). Read the
+// annotations against ADR-0095. Cells tagged [D1 accepted delta] are the four
+// authorized changes; all others are unchanged or same-visibility simplifications.
+const EXPECTED_MATRIX: Record<string, Record<string, { read: unknown; write: unknown }>> = {
+  task: {
+    // [posture-gate] Public business object → superuser bypass withheld, admin stays org-scoped (Layer 0).
+    platform_admin: { read: { organization_id: 'org-1' }, write: [{ organization_id: 'org-1' }] },
+    // Simplification: the pre-extraction duplicate-OR (`{$or:[{org},{org}]}` from
+    // organization_admin + baseline) collapses to `{org}` — Layer 0 is the single owner.
+    org_admin: {
+      read: { organization_id: 'org-1' },
+      write: [{ organization_id: 'org-1' }],
+    },
+    // [D1 accepted delta (b)] WRITE narrows from `org OR created_by` (org-wide) to
+    // `org AND created_by` (owner-only) — owner_only_writes finally enforces.
+    member: {
+      read: { organization_id: 'org-1' },
+      write: [{ $and: [{ organization_id: 'org-1' }, { created_by: 'u1' }] }],
+    },
+    // [D1 accepted delta (e)] no active org: Layer 0 fail-closes the WRITE
+    // (was owner-scoped only). Read stays deny-sentinel (unchanged).
+    no_org_member: { read: { id: DENY }, write: [{ $and: [{ id: DENY }, { created_by: 'u2' }] }] },
+  },
+  private_obj: {
+    // [W2] Layer 0 exemption + Layer 1 short-circuit both fire for superuser on a private object → null.
+    platform_admin: { read: null, write: 'BYPASS(no-write-filter)' },
+    org_admin: { read: null, write: 'BYPASS(no-write-filter)' },
+    // A member's plain wildcard grant does not cover a private object → denied at the CRUD gate, before RLS.
+    member: { read: 'CRUD_DENY:PermissionDeniedError', write: 'CRUD_DENY:PermissionDeniedError' },
+    no_org_member: { read: 'CRUD_DENY:PermissionDeniedError', write: 'CRUD_DENY:PermissionDeniedError' },
+  },
+  platform_global: {
+    // [W2] superuser bypass fires on tenancy-disabled posture → null.
+    platform_admin: { read: null, write: 'BYPASS(no-write-filter)' },
+    org_admin: { read: null, write: 'BYPASS(no-write-filter)' },
+    // [D1 accepted delta (c)] A member reading a `tenancy.enabled:false` global
+    // object: Layer 0 treats it as a NON-tenant object (no phantom org filter) →
+    // the global catalog is VISIBLE (read: null). The write drops the dead
+    // org-disjunct to plain owner scope (same visibility, no org column exists).
+    member: { read: null, write: [{ created_by: 'u1' }] },
+    // [D1 accepted delta (c)] no-org member likewise sees the global catalog (was deny-sentinel).
+    no_org_member: { read: null, write: [{ created_by: 'u2' }] },
+  },
+  better_auth: {
+    // [W2] better-auth-managed posture → superuser read bypass → null.
+    platform_admin: { read: null, write: 'BYPASS(no-write-filter)' },
+    // Simplification: `sys_user` has no organization_id, so the pre-extraction
+    // dead org-disjuncts drop; the duplicated `_self` policies remain (self only).
+    org_admin: {
+      read: { $or: [{ id: 'oadmin' }, { id: 'oadmin' }] },
+      write: 'CRUD_DENY:PermissionDeniedError',
+    },
+    // Member: self only (dead org-clause removed); writes denied (better-auth door).
+    member: { read: { id: 'u1' }, write: 'CRUD_DENY:PermissionDeniedError' },
+    // No-org member: self only; writes denied.
+    no_org_member: { read: { id: 'u2' }, write: 'CRUD_DENY:PermissionDeniedError' },
+  },
+};
+
+describe('authz Layer-0 matrix gate — ADR-0095 D1 (post-extraction)', () => {
+  it('locks the role × object × {read,write} effective-filter matrix', async () => {
+    const actual: Record<string, Record<string, { read: unknown; write: unknown }>> = {};
+    for (const [oName, cell] of Object.entries(OBJECTS)) {
+      actual[oName] = {};
+      for (const [rName, role] of Object.entries(ROLES)) {
+        actual[oName][rName] = { read: await readFilter(cell, role), write: await writeFilter(cell, role) };
+      }
+    }
+    expect(actual).toEqual(EXPECTED_MATRIX);
+  });
+
+  // ── W1: cross-tenant read leak, CLOSED by Layer 0 ─────────────────────────
+  // [ADR-0095 D1 accepted delta (a)] A user holding a permissive business RLS
+  // policy (`status == 'public'`) reads a tenant object. Pre-extraction the
+  // wildcard tenant policy was OR-merged with it (`tenant OR status==public`), so
+  // a foreign-org public row matched the second disjunct and was VISIBLE. Layer 0
+  // now AND-composes the tenant wall ahead of business RLS, so the effective read
+  // is `Layer0(org) AND Layer1(status==public)` — the foreign-org public row is
+  // INVISIBLE. This is the W1 fix.
+  it('[W1] permissive business RLS is AND-composed under Layer 0 (cross-org public row INVISIBLE)', async () => {
+    const filter = await readFilter(OBJECTS.task, {
+      userId: 'u3', tenantId: 'org-1', positions: ['org_member'], permissions: ['public_reader'],
+    });
+    // Post-D1: tenant wall AND business policy — no OR-widening.
+    expect(filter).toEqual({ $and: [{ organization_id: 'org-1' }, { status: 'public' }] });
+    // A foreign-org public row now FAILS the tenant conjunct → invisible.
+    const foreignPublicRow: Record<string, unknown> = { organization_id: 'org-2', status: 'public' };
+    const andClauses = (filter as any).$and as Array<Record<string, unknown>>;
+    const visible = andClauses.every((c) =>
+      Object.entries(c).every(([k, v]) => foreignPublicRow[k] === v));
+    expect(visible).toBe(false); // ← [ADR-0095 W1 fix] the leak is closed.
+  });
+
+  // ── W1's write-side twin: owner_only now enforces (delta b) ───────────────
+  // [ADR-0095 D1 accepted delta (b)] The same OR-merge that leaked reads also
+  // WIDENED a restrictive write policy: a member's `owner_only_writes`
+  // (created_by == me) was OR'd with the tenant policy, so the by-id write
+  // pre-image resolved to `org OR created_by` = any row in the member's org.
+  // Layer 0 now AND-composes the tenant scope, so the pre-image is
+  // `Layer0(org) AND Layer1(created_by == me)` = owner-only, as authored.
+  it('[W1-write] member by-id write narrows to owner-only under Layer 0', async () => {
+    const wf = await writeFilter(OBJECTS.task, ROLES.member);
+    expect(wf).toEqual([{ $and: [{ organization_id: 'org-1' }, { created_by: 'u1' }] }]);
+  });
+
+  // ── W2: the superuser bypass short-circuits BOTH layers via one bit ────────
+  // On private / platform-global / better-auth objects a superuser-bit holder
+  // skips ALL wildcard RLS — tenant wall included — through a single check. On a
+  // PUBLIC business object the posture gate withholds the bypass, so the admin
+  // stays org-scoped. Both facets locked.
+  it('[W2] superuser bypass fires on private/platform-global/better-auth, withheld on public business objects', async () => {
+    expect(await readFilter(OBJECTS.private_obj, ROLES.platform_admin)).toBeNull();
+    expect(await readFilter(OBJECTS.platform_global, ROLES.platform_admin)).toBeNull();
+    expect(await readFilter(OBJECTS.better_auth, ROLES.platform_admin)).toBeNull();
+    // Withheld on a public tenant object → admin remains org-scoped (the posture gate).
+    expect(await readFilter(OBJECTS.task, ROLES.platform_admin)).toEqual({ organization_id: 'org-1' });
+  });
+
+  // ── Fail-closed: an authenticated user with no active org sees no tenant rows ─
+  it('[fail-closed] no active organization → tenant read denies via the sentinel', async () => {
+    expect(await readFilter(OBJECTS.task, ROLES.no_org_member)).toEqual({ id: DENY });
+  });
+
+  // ── Single-org mode: Layer 0 is inert; tenant policy stripped (parity today) ─
+  // With org-scoping absent, collectRLSPolicies strips the wildcard tenant policy
+  // entirely, so a member's read carries NO tenant where and the write keeps only
+  // the owner scope. ADR-0095: in single mode Layer 0 contributes nothing — this
+  // cell must NOT move after the extraction.
+  it('[single-mode] tenant policy stripped when org-scoping is absent', async () => {
+    const single = { ...OBJECTS.task, orgScoping: false };
+    expect(await readFilter(single, ROLES.member)).toBeNull();
+    expect(await writeFilter(single, ROLES.member)).toEqual([{ created_by: 'u1' }]);
+  });
+});

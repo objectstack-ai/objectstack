@@ -136,12 +136,43 @@ compiler:
   than by auditing every policy. The driver-level `applyTenantScope` seam is
   unchanged (defense in depth, now behind a real first line).
 
-**Behavior contract.** The extraction is behavior-preserving under the matrix
-gate, with one deliberate exception: where the current OR-merge (W1) would
-admit a cross-org row that the documented AND semantics forbid, Layer 0
-enforces the documented semantics. That is a **security fix**, not drift; the
-matrix suite gains explicit rows for it (a permissive business policy × a
-foreign-org row → invisible).
+**Behavior contract (as built).** The extraction is behavior-preserving under
+the matrix gate — every `role × object × operation` cell is identical or a
+same-visibility filter simplification (duplicate-OR dedup; dead org-clause
+removal on non-tenant objects) — **except four deliberate deltas**. All four are
+the same structural defect (the tenant policy sharing the OR-merge / a
+`==`-blind field net with business RLS) resolving toward stronger, more correct
+isolation; the matrix suite (`plugin-security/authz-matrix-gate.test.ts`) gains
+an explicit, annotated cell for each:
+
+- **(a) W1 read.** A permissive business policy (e.g. `status == 'public'`) no
+  longer OR-widens tenant scope: a foreign-org public row becomes **invisible**
+  (`Layer0(org) AND Layer1(status==public)`). *The* headline W1 fix.
+- **(b) W1 write (its twin).** The same OR-merge silently widened a *restrictive*
+  write policy: `owner_only_writes` (`created_by == me`) was OR'd with the tenant
+  policy, so a member's by-id write resolved to `org OR created_by` = **any row
+  in their org**. Layer 0 AND-composes the tenant scope, so the write narrows to
+  **owner-only**, as authored. (Release-notes BREAKING — see Consequences.)
+- **(c) Platform-global object.** A member reading a `tenancy.enabled:false`
+  global object was scoped by a *phantom* `organization_id` filter — the seeded
+  tenant policy uses canonical `==`, which the field-existence/tenancy-disabled
+  net (`extractTargetField`, single-`=`/`IN` only) cannot parse, so the
+  tenancy-disabled skip never fired and the policy compiled against a column the
+  object lacks. Layer 0 decides "tenant object?" **directly** from the field set
+  + posture (not via `extractTargetField`), so a global object correctly
+  contributes nothing and its **catalog is visible**. (The broader
+  `extractTargetField` `==` blind spot still affects Layer-1 *business* policies
+  and is tracked separately — out of scope for D1.)
+- **(e) No active organization.** A write by a principal with no active org on a
+  tenant object is now **fail-closed by Layer 0** (was owner-scoped only).
+
+**Not touched.** `computeWriteCheckFilter` gains no tenant post-image check: the
+seeded `tenant_isolation` carried only a `using` clause (never a `check`), so
+there is no post-image tenant behavior to preserve; insert tenant placement is
+owned by the enterprise auto-stamp, and update/delete targeting is enforced by
+the Layer 0 pre-image path. Adding a mandatory post-image tenant check would
+risk denying legitimate inserts before the auto-stamp runs — a regression, not a
+fix — so it is deliberately excluded from D1.
 
 ### D2 — A monotonic posture ladder, resolved once
 
@@ -224,12 +255,18 @@ each step lands only behind the snapshot gate:
   need, instead of under portal-feature deadline pressure.
 
 **Negative / accepted.**
-- The seeded permission sets change (the `tenant_isolation` policy retires).
-  Environments that customized seeded sets keep their overlays (ADR-0094
-  semantics), but the diff is visible; release notes must call it out.
-- W1's resolution is a behavior change in deliberately-misconfigured corners
-  (a business policy that was silently widening tenant scope stops doing so).
-  This is the point, and it ships loudly.
+- The seeded permission sets change (the `tenant_isolation` policy retires from
+  `organization_admin` / `member_default` / `viewer_readonly`). Environments that
+  customized seeded sets keep their overlays (ADR-0094 semantics), but the diff
+  is visible; release notes must call it out.
+- **Four behavior deltas ship (release-notes BREAKING), all W1-class** — see the
+  D1 behavior contract for the enumerated cells. The load-bearing one for
+  operators is **(b)**: a deployment that relied on *members editing each other's
+  records within the org* (the OR-merge silently permitting it) will find member
+  by-id writes now restricted to records they own (`created_by`); grant an
+  explicit per-object edit set where org-wide editing is intended. Deltas (a) W1
+  read, (c) global-catalog visibility for members, and (e) fail-closed no-org
+  writes are each toward stronger/correcter isolation. These ship loudly.
 - `resolveAuthzContext` gains one more derived field; hot-path cost is one
   enum computation over already-loaded grants (negligible).
 

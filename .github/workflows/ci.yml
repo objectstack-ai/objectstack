@@ -8,6 +8,13 @@ on:
     branches:
       - main
 
+# Superseded runs on the same PR/branch waste runners and delay feedback;
+# cancel them. Push runs to main group by commit ref as well, so an in-flight
+# main run is cancelled only by a newer main push.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   filter:
     runs-on: ubuntu-latest
@@ -56,6 +63,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # Full history so `turbo --affected` can diff against the PR base.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -93,13 +103,29 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run all tests
-        run: pnpm turbo run test
+      # PRs: only test packages affected by the diff against the PR base.
+      # spec sits at the root of the dependency graph, so spec-touching PRs
+      # still run (close to) everything — but the many PRs that don't touch
+      # spec skip the bulk of the 75-package matrix.
+      - name: Run affected tests (PR)
+        if: github.event_name == 'pull_request'
+        env:
+          TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+        run: pnpm turbo run test --affected
+
+      # Push to main: full run, but exclude spec's plain test task — the
+      # coverage step below executes the exact same 250-file spec suite once,
+      # with coverage. Previously the spec suite ran twice per push.
+      - name: Run all tests (push)
+        if: github.event_name == 'push'
+        run: pnpm turbo run test --filter=!@objectstack/spec
 
       - name: Generate coverage report
+        if: github.event_name == 'push'
         run: pnpm --filter @objectstack/spec test:coverage
 
       - name: Upload coverage reports
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
