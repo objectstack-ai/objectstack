@@ -59,7 +59,7 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
     // env-owned, not forged package provenance.
     const row = await findSet(NAME);
     expect(row, 'record projected synchronously with the create').toBeTruthy();
-    expect(row.managed_by).toBe('user');
+    expect(row.managed_by).toBe('admin');
     expect(JSON.parse(row.object_permissions)).toEqual({ crm_lead: { allowRead: true } });
 
     // …and the authoritative store is the metadata overlay, not the row.
@@ -163,7 +163,7 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
     // the projector, not left invisible as before ADR-0094).
     const row = await findSet(NAME);
     expect(row, 'Studio-authored env set appears in Setup').toBeTruthy();
-    expect(row.managed_by).toBe('user');
+    expect(row.managed_by).toBe('admin');
     expect(JSON.parse(row.object_permissions)).toEqual({ crm_lead: { allowRead: true } });
   });
 });
