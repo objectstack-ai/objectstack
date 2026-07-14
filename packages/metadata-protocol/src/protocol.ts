@@ -759,6 +759,39 @@ export interface MetadataMutationEvent {
     organizationId?: string | null;
 }
 
+/**
+ * Awaited per-type mutation projector (ADR-0094). Invoked AFTER a metadata
+ * mutation persists — `saveMetaItem` (draft AND active saves),
+ * `publishMetaItem`, `deleteMetaItem` — and AWAITED before the write returns,
+ * so a data-plane read-model derived from the metadata (e.g. `permission` →
+ * `sys_permission_set`) is already consistent when the caller's next read
+ * lands. This is what makes such a read-model a PURE projection: the
+ * projector is its only writer, and it runs in the same awaited operation as
+ * every metadata write, instead of a fire-and-forget subscriber a new write
+ * path might race or forget.
+ *
+ * Complements (does not replace) {@link MetadataMutationEvent} listeners,
+ * which stay fire-and-forget for cache-invalidation consumers.
+ *
+ * Best-effort: a projector failure is surfaced on the write's response
+ * (`projectionApplied: { success:false, error }`) and logged, never thrown —
+ * the metadata write itself already succeeded, and boot reconciliation heals
+ * the projection on next start.
+ *
+ * `body` carries the just-persisted item when the mutation has one in hand
+ * (save/publish); projectors that need the EFFECTIVE (layered) body should
+ * re-read it — a delete, for instance, may reveal the artifact baseline.
+ */
+export type MetadataMutationProjector = (
+    evt: MetadataMutationEvent & { body?: unknown },
+) => Promise<void>;
+
+/** Per-write outcome of the awaited mutation projector (ADR-0094). */
+export interface MutationProjectionOutcome {
+    success: boolean;
+    error?: string;
+}
+
 export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     private engine: MetadataHostEngine;
     private getServicesRegistry?: () => Map<string, any>;
@@ -797,6 +830,16 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     /** [#2747] Named uninstall cleanups, run by {@link deletePackage}. */
     private uninstallCleanups = new Map<string, UninstallCleanup>();
 
+    /**
+     * Awaited per-type mutation projectors (ADR-0094), keyed by singular
+     * metadata type. Unlike {@link publishMaterializers} (publish-only,
+     * package door) a projector runs on EVERY persisted mutation of its type
+     * — save, publish, delete — so a derived data-plane read-model can be a
+     * pure projection with no unsynchronized door. One per type; a second
+     * registration replaces the first (idempotent re-init).
+     */
+    private mutationProjectors = new Map<string, MetadataMutationProjector>();
+
     constructor(
         engine: IDataEngine,
         getServicesRegistry?: () => Map<string, any>,
@@ -831,6 +874,40 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
      */
     registerUninstallCleanup(name: string, cleanup: UninstallCleanup): void {
         this.uninstallCleanups.set(name, cleanup);
+    }
+
+    /**
+     * Register the awaited mutation projector for a metadata type (ADR-0094).
+     * Called by the domain plugin that owns the derived read-model (e.g.
+     * plugin-security registers the `permission` → `sys_permission_set`
+     * projector). Singular or plural type names both resolve.
+     */
+    registerMutationProjector(type: string, projector: MetadataMutationProjector): void {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        this.mutationProjectors.set(singular, projector);
+    }
+
+    /**
+     * Run the registered projector for a just-persisted mutation (ADR-0094).
+     * Returns `undefined` when no projector is registered for the type;
+     * otherwise a {@link MutationProjectionOutcome} that callers attach to
+     * the write's response as `projectionApplied`. Never throws.
+     */
+    private async runMutationProjector(
+        evt: MetadataMutationEvent & { body?: unknown },
+    ): Promise<MutationProjectionOutcome | undefined> {
+        const projector = this.mutationProjectors.get(evt.type);
+        if (!projector) return undefined;
+        try {
+            await projector(evt);
+            return { success: true };
+        } catch (e) {
+            const error = e instanceof Error ? e.message : String(e);
+            console.warn(
+                `[Protocol] mutation projector failed for ${evt.type}/${evt.name} (state=${evt.state}): ${error}`,
+            );
+            return { success: false, error };
+        }
     }
 
     /**
@@ -4020,6 +4097,16 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     source: 'protocol.saveMetaItem',
                     note: mode === 'draft' ? 'draft' : 'active',
                 });
+                // [ADR-0094] Awaited projection BEFORE the fire-and-forget
+                // listeners: a derived read-model (e.g. sys_permission_set)
+                // is already consistent when this save returns.
+                const projectionApplied = await this.runMutationProjector({
+                    type: singularTypeForRepo,
+                    name: request.name,
+                    state: mode === 'draft' ? 'draft' : 'active',
+                    organizationId: orgId,
+                    body: request.item,
+                });
                 this.emitMetadataMutation({
                     type: singularTypeForRepo,
                     name: request.name,
@@ -4030,6 +4117,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     success: true,
                     version: result.version,
                     seq: result.seq,
+                    ...(projectionApplied ? { projectionApplied } : {}),
                     state: mode === 'draft' ? 'draft' : 'active',
                     message: orgId
                         ? `Saved customization overlay (org=${orgId}, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
@@ -4282,6 +4370,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                 message?: string;
                 seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
                 materializeApplied?: PublishMaterializeResult;
+                projectionApplied?: MutationProjectionOutcome;
             } = {
                 success: true,
                 version: result.version,
@@ -4319,6 +4408,17 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     };
                 }
             }
+            // [ADR-0094] Awaited projection: runs AFTER the package-door
+            // materializer (which stamps package provenance) so the projector
+            // sees final record state; refuses/no-ops per its own rules.
+            const publishProjection = await this.runMutationProjector({
+                type: singularType,
+                name: request.name,
+                state: 'active',
+                organizationId: orgId,
+                body: result.item.body,
+            });
+            if (publishProjection) response.projectionApplied = publishProjection;
             this.emitMetadataMutation({
                 type: singularType,
                 name: request.name,
@@ -5514,6 +5614,8 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         message?: string;
         reset?: boolean;
         seq?: number;
+        /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
+        projectionApplied?: MutationProjectionOutcome;
     }> {
         // Two-tier authorization for delete (mirrors saveMetaItem).
         //  • Artifact-backed item → delete becomes a tombstone overlay,
@@ -5643,6 +5745,15 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     note: targetState,
                 });
 
+                // [ADR-0094] Awaited projection: a delete may retire the
+                // derived record OR reset it to the artifact baseline — the
+                // projector re-reads the layered state and decides.
+                const deleteProjection = await this.runMutationProjector({
+                    type: singularTypeForRepo,
+                    name: request.name,
+                    state: 'deleted',
+                    organizationId: orgId,
+                });
                 this.emitMetadataMutation({
                     type: singularTypeForRepo,
                     name: request.name,
@@ -5653,6 +5764,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     success: true,
                     reset: true,
                     seq: result.seq,
+                    ...(deleteProjection ? { projectionApplied: deleteProjection } : {}),
                     message: (request.state === 'draft')
                         ? `Draft discarded — ${request.type}/${request.name}. [seq=${result.seq}]`
                         : `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`,

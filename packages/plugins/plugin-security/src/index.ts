@@ -26,6 +26,22 @@ export {
 } from './auto-org-admin-grant.js';
 export { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
 export { bootstrapDeclaredPermissions } from './bootstrap-declared-permissions.js';
+// [ADR-0094] sys_permission_set pure-projection machinery.
+export {
+  permissionSetRowFields,
+  permissionSetBodyFromRow,
+  upsertEnvPermissionSet,
+  projectPermissionMutation,
+  registerPermissionSetProjection,
+  createPermissionSetWriteThrough,
+  reconcilePermissionSetProjection,
+} from './permission-set-projection.js';
+export type {
+  PermissionSeedOutcome,
+  ProjectionDeps,
+  ProjectionReconcileOutcome,
+  WriteThroughDeps,
+} from './permission-set-projection.js';
 export { cleanupPackagePermissions } from './cleanup-package-permissions.js';
 export type { PackagePermissionCleanupOutcome } from './cleanup-package-permissions.js';
 export { claimSeedOwnership } from './claim-seed-ownership.js';
