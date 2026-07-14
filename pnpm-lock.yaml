@@ -150,6 +150,9 @@ importers:
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@objectstack/service-datasource':
+        specifier: workspace:*
+        version: link:../../packages/services/service-datasource
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../packages/spec

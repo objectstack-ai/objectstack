@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { SqlDriver } from '@objectstack/driver-sql';
+import { resolveSqliteDriver } from '@objectstack/service-datasource';
 
 /**
  * Fixture provisioning for the external-datasource federation demo
@@ -10,6 +10,14 @@ import { SqlDriver } from '@objectstack/driver-sql';
  * SQLite file with `customers` / `orders` tables + a little seed data (a MANAGED
  * driver — DDL allowed) so `os dev` needs no external server. It runs from the
  * stack's `onEnable` hook at boot.
+ *
+ * The MANAGED driver is built via the shared `resolveSqliteDriver` step-down
+ * (#2229) rather than a raw `new SqlDriver({ client: 'better-sqlite3' })`: in dev
+ * a native `better-sqlite3` ABI/load failure (e.g. a `NODE_MODULE_VERSION`
+ * mismatch after a Node upgrade) steps down to wasm SQLite instead of throwing.
+ * Without this, an ABI mismatch here crashed the whole `onEnable` hook —
+ * bricking `plugin.app.<showcase>` boot even though the default datasource had
+ * already fallen back to wasm.
  *
  * **It no longer registers a driver or syncs object schemas (ADR-0062 D8).** The
  * declared `external` datasource (see `showcase-external.datasource.ts`) now
@@ -71,11 +79,17 @@ interface OnEnableContext {
  * datasource auto-connects at boot (ADR-0062 D1/D8).
  */
 export async function setupShowcaseExternalDatasource(ctx: OnEnableContext): Promise<void> {
-  const fixture = new SqlDriver({
-    client: 'better-sqlite3',
-    connection: { filename: EXTERNAL_DB_FILE },
-    useNullAsDefault: true,
-  }) as unknown as {
+  // Build the managed provisioning driver through the shared native → wasm →
+  // in-memory step-down (#2229). In dev, a native better-sqlite3 ABI/load
+  // failure steps down to wasm SQLite (real SQL + on-disk persistence) so the
+  // fixture — and therefore `onEnable` / app-plugin boot — never crashes on a
+  // `NODE_MODULE_VERSION` mismatch; in production it returns the native driver
+  // unprobed (fail-closed), preserving the historical behavior.
+  const resolved = await resolveSqliteDriver({
+    filename: EXTERNAL_DB_FILE,
+    warn: (m: string) => ctx.logger?.warn?.(m),
+  });
+  const fixture = resolved.driver as unknown as {
     name: string;
     connect: () => Promise<void>;
     disconnect: () => Promise<void>;
