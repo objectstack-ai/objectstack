@@ -580,7 +580,33 @@ export class SqlDriver implements IDataDriver {
       try {
         await this.knex.raw('PRAGMA auto_vacuum = INCREMENTAL');
       } catch (e) {
-        this.logger.warn('Failed to set PRAGMA auto_vacuum=INCREMENTAL', e);
+        // A native better-sqlite3 load failure surfaces HERE first — this PRAGMA
+        // is the first query that forces the lazy `.node` addon to load. Two
+        // real-world variants, both handled by `resolveSqliteDriver`'s probe,
+        // which catches the failure and steps down to wasm SQLite with a clean
+        // one-line notice (#2229):
+        //   • ABI mismatch  — `ERR_DLOPEN_FAILED` / "…NODE_MODULE_VERSION 127…"
+        //                      (a stale prebuilt binary after a Node upgrade)
+        //   • not built     — "Could not locate the bindings file" (native addon
+        //                      never compiled, e.g. a fresh clone / blocked build)
+        // Dumping the full multi-line stack for either looks like a fatal crash
+        // to the reader (it isn't), so log a concise, actionable one-liner and
+        // let the step-down message that follows explain the outcome. Any OTHER
+        // PRAGMA failure keeps the full warning (with stack) as before.
+        const code = (e as { code?: string } | null | undefined)?.code;
+        const msg = e instanceof Error ? e.message : String(e);
+        const isNativeLoadFailure =
+          code === 'ERR_DLOPEN_FAILED' ||
+          code === 'MODULE_NOT_FOUND' ||
+          code === 'ERR_MODULE_NOT_FOUND' ||
+          /NODE_MODULE_VERSION|could not locate the bindings|was compiled against a different/i.test(msg);
+        if (isNativeLoadFailure) {
+          this.logger.warn(
+            'native better-sqlite3 unavailable (ABI mismatch or not built) — will step down to wasm SQLite; run `pnpm rebuild better-sqlite3` for native speed',
+          );
+        } else {
+          this.logger.warn('Failed to set PRAGMA auto_vacuum=INCREMENTAL', e);
+        }
       }
     }
   }
