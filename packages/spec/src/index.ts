@@ -113,6 +113,9 @@ export type { MetadataCollectionInput, MapSupportedField, NormalizeStackInputOpt
 // Metadata conversion layer (ADR-0087 D2) — old-shape → canonical-shape transforms applied at load.
 export * from './conversions/index.js';
 
+// Metadata migration chain + change manifest (ADR-0087 D3/D4).
+export * from './migrations/index.js';
+
 export { type PluginContext } from './kernel/plugin.zod';
 
 // Expression Protocol (M9 — canonical wire format for formulas / predicates / conditions)

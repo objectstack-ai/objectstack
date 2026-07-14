@@ -221,6 +221,14 @@ export interface NormalizeStackInputOptions {
    * passes a sink that prints them.
    */
   onConversionNotice?: (notice: ConversionNotice) => void;
+  /**
+   * Whether to run the D2 conversion pass. Defaults to `true` (the load-time
+   * behavior). Set `false` to get map→array normalization *only* — used by
+   * `objectstack migrate meta`, which must replay the conversions itself as
+   * chain steps against the raw authored source so each rewrite is attributed
+   * to the chain rather than silently pre-applied here.
+   */
+  convert?: boolean;
 }
 
 /**
@@ -248,6 +256,7 @@ export function normalizeStackInput<T extends Record<string, unknown>>(
       (result as Record<string, unknown>)[field] = normalizeMetadataCollection(result[field]);
     }
   }
+  if (options.convert === false) return result;
   return applyConversions(result, { onNotice: options.onConversionNotice }) as T;
 }
 
