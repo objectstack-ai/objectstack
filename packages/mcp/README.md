@@ -115,13 +115,22 @@ the open framework.
 ```
 
 `list_actions` enumerates each object's headless-invokable actions (script /
-flow), filtered to what the caller is permitted to run — declared
-`requiredPermissions` (ADR-0066 D4) are enforced and `sys_*`-object actions are
-held back fail-closed. `run_action` resolves the action by name and dispatches
-it through the framework's own action mechanism (`engine.executeAction` /
-automation flow runner) as the caller, so a BYO-AI MCP client (Claude Code,
-Cursor, …) can trigger real business logic — e.g. "complete this task",
-"convert this lead" — exactly as the UI would, under the same guardrails.
+flow), filtered to what the author exposed and the caller may run: only actions
+opted into the AI surface (`ai: { exposed: true }`, ADR-0011 / #2849) are
+listed, declared `requiredPermissions` (ADR-0066 D4) are enforced, and
+`sys_*`-object actions are held back fail-closed. `run_action` resolves the
+action by name and dispatches it through the framework's own action mechanism
+(`engine.executeAction` / automation flow runner), so a BYO-AI MCP client
+(Claude Code, Cursor, …) can trigger real business logic — e.g. "complete this
+task", "convert this lead".
+
+> **Security model (#2849):** gating happens at *invoke* time (`ai.exposed` +
+> capability gate + record-context loads under the caller's RLS). Once invoked,
+> a script/body action executes as **trusted application code** — its internal
+> reads/writes carry the app's full data authority and are *not* bounded by the
+> caller's RLS/FLS. Expose an action to AI only when its body is safe to run on
+> behalf of anyone allowed through the gate. Flow actions honour the flow's
+> `runAs` declaration (ADR-0049) with the caller's identity forwarded.
 
 ### Custom Tools
 
@@ -301,8 +310,11 @@ TLS is required for OAuth (localhost is exempt, per OAuth 2.1). Local clients
 (Claude Code / Desktop) can reach intranet deployments; claude.ai web
 connectors additionally need the endpoint publicly reachable. Coarse scopes
 (`data:read`, `data:write`, `actions:execute`) narrow the exposed tool
-families at consent time; permissions/RLS still bind every call to the
-logged-in user.
+families at consent time; permissions/RLS bind every *object CRUD* call to the
+logged-in user. Business actions are the exception: `actions:execute` gates
+*which* actions may be invoked (author AI opt-in + capabilities), but an
+invoked action's body runs as trusted app code, not under the caller's RLS
+(#2849).
 
 **API key — the headless track (CI, scripts, background agents).** Mint a key
 (`POST /api/v1/keys`, shown once) and send it as a header — no browser

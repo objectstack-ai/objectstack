@@ -2350,6 +2350,7 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     type: 'script',
     target: 'issueLicense',
     requiredPermissions: ['manage_platform_settings'],
+    ai: { exposed: true, description: 'Issue a license for the current tenant.' },
   };
   const modalAction = {
     name: 'defer_task',
@@ -2358,11 +2359,20 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     type: 'modal',
     target: 'defer_modal',
   };
+  // Invokable script the author did NOT expose to AI (`ai.exposed` absent) —
+  // must be invisible + fail-closed on the MCP surface (#2849).
+  const unexposedAction = {
+    name: 'internal_cleanup',
+    label: 'Internal Cleanup',
+    objectName: 'todo_task',
+    type: 'script',
+    target: 'internalCleanup',
+  };
   const todoObject = {
     name: 'todo_task',
     label: 'Task',
     fields: { subject: { type: 'text', label: 'Subject' }, status: { type: 'select', label: 'Status' } },
-    actions: [completeAction, gatedAction, modalAction],
+    actions: [completeAction, gatedAction, modalAction, unexposedAction],
   };
   // A system object carrying an action — must be hidden + fail-closed.
   const sysObject = {
@@ -2410,13 +2420,33 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     return { bridge, executeAction, store };
   };
 
-  it('list_actions returns only invokable, permitted, non-system actions', async () => {
+  it('list_actions returns only AI-exposed, invokable, permitted, non-system actions', async () => {
     const { bridge } = makeBridge({ userId: 'u1', systemPermissions: [] });
     const names = (await bridge.listActions()).map((a: any) => a.name);
-    expect(names).toContain('complete_task'); // script + permitted
+    expect(names).toContain('complete_task'); // script + exposed + permitted
     expect(names).not.toContain('issue_license'); // gated, caller lacks the capability
     expect(names).not.toContain('defer_task'); // modal = UI-only, no headless path
+    expect(names).not.toContain('internal_cleanup'); // ai.exposed absent → hidden (#2849)
     expect(names).not.toContain('rotate'); // sys_api_key → hidden fail-closed
+  });
+
+  // [#2849 / ADR-0011] The AI-exposure gate is the real agent-facing boundary:
+  // action bodies run TRUSTED (context-less engine, RLS/FLS-bypassing), so an
+  // action the author never opted into the AI surface must be uninvokable —
+  // fail-closed, never reaching the handler.
+  it('run_action refuses an action the author did not expose to AI (ai.exposed absent)', async () => {
+    const { bridge, executeAction } = makeBridge({ userId: 'u1', systemPermissions: [] });
+    await expect(bridge.runAction('internal_cleanup', { recordId: 't1' })).rejects.toThrow(/not exposed to AI/i);
+    expect(executeAction).not.toHaveBeenCalled();
+  });
+
+  it('run_action refuses an unexposed action even for an AGENT holding every capability', async () => {
+    const { bridge, executeAction } = makeBridge({
+      userId: 'u1', principalKind: 'agent', onBehalfOf: { userId: 'u1' },
+      systemPermissions: ['manage_platform_settings'],
+    });
+    await expect(bridge.runAction('internal_cleanup', { recordId: 't1' })).rejects.toThrow(/not exposed to AI/i);
+    expect(executeAction).not.toHaveBeenCalled();
   });
 
   it('list_actions surfaces record-context + summary metadata', async () => {
@@ -2508,6 +2538,7 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     type: 'flow',
     target: 'escalation_flow',
     locations: ['record_header'],
+    ai: { exposed: true, description: 'Escalate a ticket to the on-call team.' },
   };
   const makeFlowBridge = (execCtx: any, automation: any) => {
     const flowObject = { ...{ name: 'todo_task', label: 'Task', fields: {} }, actions: [flowAction] };
@@ -2547,9 +2578,31 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     const res = await bridge.runAction('escalate_ticket', { recordId: 't1', params: { reason: 'sla' } });
     expect(res.ok).toBe(true);
     expect(ql.executeAction).not.toHaveBeenCalled(); // flow path, not executeAction
+    // A proper AutomationContext (not the former `triggerData` envelope the
+    // engine never read): record + object + explicit params (winning on clash).
     expect(execute).toHaveBeenCalledWith(
       'escalation_flow',
-      expect.objectContaining({ triggerData: expect.objectContaining({ action: 'escalate_ticket', params: { reason: 'sla' } }) }),
+      expect.objectContaining({
+        record: expect.objectContaining({ id: 't1' }),
+        object: 'todo_task',
+        params: expect.objectContaining({ reason: 'sla' }),
+      }),
+    );
+  });
+
+  // [#2849 / ADR-0049] The caller's identity must reach the flow engine so a
+  // `runAs:'user'` flow enforces RLS as the invoker instead of falling into the
+  // user-less UNSCOPED (fail-open) path.
+  it('run_action forwards the caller identity (userId/positions/tenantId) into the flow context', async () => {
+    const execute = vi.fn(async () => ({ success: true }));
+    const { bridge } = makeFlowBridge(
+      { userId: 'u1', positions: ['support_rep'], tenantId: 'org_1', systemPermissions: [] },
+      { execute },
+    );
+    await bridge.runAction('escalate_ticket', { recordId: 't1' });
+    expect(execute).toHaveBeenCalledWith(
+      'escalation_flow',
+      expect.objectContaining({ userId: 'u1', positions: ['support_rep'], tenantId: 'org_1' }),
     );
   });
 

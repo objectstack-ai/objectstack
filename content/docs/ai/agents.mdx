@@ -57,13 +57,18 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   pre-registered with Anthropic or any central service, so **self-hosted and
   private deployments work out of the box**. You authorize the client in the
   browser; it then acts as an **agent on your behalf** (`principalKind: 'agent'`),
-  bounded by the **intersection** of the consent scopes and your own
-  permissions/RLS — it can never exceed either. The consent scopes
-  (`data:read`, `data:write`, `actions:execute`) are a real ceiling, not just a
+  its **data access** bounded by the **intersection** of the consent scopes and
+  your own permissions/RLS — it can never exceed either. For object CRUD the
+  consent scopes (`data:read`, `data:write`) are a real ceiling, not just a
   tool-family filter: they narrow the exposed tools **and** cap what the agent
   can do at the data layer — a `data:read` token can never write a record even
-  where you could, and `actions:execute` lets the agent invoke the business
-  actions you are entitled to run.
+  where you could. **Business actions are gated differently** (#2849):
+  `actions:execute` + the action's declared capabilities decide *which* actions
+  the agent may invoke, and only actions the app author explicitly exposed to
+  AI (`ai: { exposed: true }`) are invokable at all — but an invoked action's
+  *body* runs as trusted application code with the app's full data authority,
+  **not** under the agent's data ceiling. The author's AI opt-in, not the data
+  layer, is the boundary for what actions can do.
 - **API key (headless).** Mint a key (`POST /api/v1/keys`, shown once) and
   send it as `x-api-key` — for CI, scripts, and agents without a browser.
 

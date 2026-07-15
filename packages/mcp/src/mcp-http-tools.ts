@@ -381,9 +381,15 @@ export function registerObjectTools(
  * caller's principal.
  *
  * Symmetry with the object tools is deliberate — like `list_objects`/CRUD, the
- * action surface exposes the *mechanism* and relies on the bridge's
- * permission + RLS enforcement (not a separate AI opt-in flag) for safety,
- * with `sys_*`-scoped actions held back fail-closed by default.
+ * action surface exposes the *mechanism* and delegates enforcement to the
+ * bridge, with `sys_*`-scoped actions held back fail-closed by default.
+ *
+ * SECURITY (#2849): unlike object CRUD — where every call is RLS/FLS-bounded —
+ * an action's body executes as TRUSTED app code once invoked. The bridge
+ * therefore gates at invoke time: `ai.exposed` (the author's explicit AI
+ * opt-in, ADR-0011) + the ADR-0066 D4 capability gate. The earlier design
+ * ("no separate AI opt-in flag; rely on permission + RLS enforcement") was
+ * revised, because there is no data-layer backstop inside an action body.
  */
 export function registerActionTools(
   server: McpServer,
@@ -403,8 +409,8 @@ export function registerActionTools(
       description:
         'List the business actions you can invoke in this app (e.g. "complete task", "convert lead"). ' +
         'Returns each action\'s name, the object it operates on, a description, whether it needs a record id, ' +
-        'whether it is destructive, and its input parameters. Only actions the caller is permitted to run are returned. ' +
-        'Use run_action to invoke one.',
+        'whether it is destructive, and its input parameters. Only actions the app author has exposed to AI ' +
+        'and that the caller is permitted to run are returned. Use run_action to invoke one.',
       inputSchema: {},
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
@@ -425,8 +431,9 @@ export function registerActionTools(
     'run_action',
     {
       description:
-        'Invoke a business action by name (see list_actions). Runs the app\'s registered business logic ' +
-        'under the caller\'s permissions and row-level security — this can mutate data or trigger flows. ' +
+        'Invoke a business action by name (see list_actions). Runs the app\'s registered business logic — ' +
+        'this can mutate data or trigger flows. Invocation is gated (author AI opt-in + your capabilities), ' +
+        'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs.',
       inputSchema: {
         actionName: z.string().describe('The action name from list_actions, e.g. "complete_task"'),

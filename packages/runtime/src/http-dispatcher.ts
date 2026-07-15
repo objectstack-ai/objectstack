@@ -748,9 +748,12 @@ export class HttpDispatcher {
 
             // ── Business-action surface (McpActionBridge) ──────────────
             // Resolution + dispatch flow through the framework's own action
-            // mechanism (engine.executeAction / automation flow runner) bound to
-            // THIS request's ExecutionContext — the same permission + RLS path
-            // the REST `/actions/...` route uses. No `@objectstack/service-ai`.
+            // mechanism (engine.executeAction / automation flow runner). All
+            // gating is at INVOKE time — `ai.exposed` (author opt-in, #2849) +
+            // the ADR-0066 D4 capability gate + record load under the caller's
+            // RLS. Script/body handlers then run TRUSTED (see
+            // buildActionEngineFacade); flows honour `runAs` with the caller's
+            // identity forwarded. No `@objectstack/service-ai`.
             listActions: async () => {
                 const meta: any = await getMeta();
                 const objs: any[] = (await meta?.listObjects?.()) ?? [];
@@ -765,6 +768,11 @@ export class HttpDispatcher {
                     for (const action of actions) {
                         if (!action || typeof action.name !== 'string') continue;
                         if (!this.isHeadlessInvokableAction(action, hasAutomation)) continue;
+                        // [#2849 / ADR-0011] MCP is an AI surface: only actions the
+                        // author explicitly opted in via `ai.exposed` are listed.
+                        // Fail-closed — bodies run as trusted code (see
+                        // buildActionEngineFacade), so author opt-in is the boundary.
+                        if (this.actionAiExposureError(action)) continue;
                         // Hide actions the caller is not permitted to run.
                         if (this.actionPermissionError(action, ec)) continue;
                         out.push(this.summarizeAction(action, obj, objectName));
@@ -802,6 +810,27 @@ export class HttpDispatcher {
         return (
             `Action '${actionDef?.name ?? 'unknown'}'${on} requires capability ` +
             `[${required.join(', ')}] — caller is missing [${missing.join(', ')}]`
+        );
+    }
+
+    /**
+     * [#2849 / ADR-0011] AI-exposure gate for the MCP action surface. Returns a
+     * human-readable error string unless the action's author explicitly opted it
+     * into the AI surface with `ai.exposed: true`, or `null` when exposed.
+     *
+     * This gate is the REAL agent-facing boundary for actions: script/body
+     * handlers execute as TRUSTED application code (the engine facade carries no
+     * ExecutionContext — see {@link buildActionEngineFacade}), so once invoked, a
+     * body's reads/writes are NOT bounded by the caller's RLS/FLS or an agent's
+     * data ceiling (ADR-0090 D10). The author's explicit opt-in — not a data-layer
+     * backstop — therefore decides what AI may trigger. Fail-closed by default.
+     */
+    private actionAiExposureError(actionDef: any, objectName?: string): string | null {
+        if (actionDef?.ai?.exposed === true) return null;
+        const on = objectName ? ` on '${objectName}'` : '';
+        return (
+            `Action '${actionDef?.name ?? 'unknown'}'${on} is not exposed to AI — ` +
+            `the app author must opt it in with \`ai: { exposed: true, description: … }\``
         );
     }
 
@@ -893,7 +922,18 @@ export class HttpDispatcher {
         return out;
     }
 
-    /** Slim engine facade matching the ActionContext.engine shape handlers expect. */
+    /**
+     * Slim engine facade matching the ActionContext.engine shape handlers expect.
+     *
+     * ⚠️ TRUSTED (SECURITY-DEFINER-like) BY DESIGN (#2849): these calls carry NO
+     * ExecutionContext, so the data engine's security middleware skips RLS / FLS /
+     * CRUD / tenant scoping entirely. Action bodies are the app author's own code
+     * and legitimately perform cross-object writes the invoking user could not
+     * (convert-lead, cascade-close). The boundary is therefore enforced at INVOKE
+     * time (`ai.exposed` + ADR-0066 D4 capability gate), and every dispatch is
+     * audit-logged. Longer-term direction: an action-level `runAs: 'user'|'system'`
+     * mirroring flows (ADR-0049) — tracked in #2849.
+     */
     private buildActionEngineFacade(ql: any): any {
         return {
             async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
@@ -922,11 +962,19 @@ export class HttpDispatcher {
 
     /**
      * Resolve + invoke a business action by its declarative name for the MCP
-     * `run_action` tool. Enforces the ADR-0066 D4 capability gate and RLS as the
-     * caller, loads the subject record under RLS for row-context actions, and
-     * dispatches through the framework's `engine.executeAction` (script/body) or
-     * automation flow runner (flow). Throws on denial / not-found / handler
-     * failure so the tool surfaces a clean tool-error. No service-ai dependency.
+     * `run_action` tool. Enforces the AI-exposure gate (`ai.exposed`, #2849), the
+     * ADR-0066 D4 capability gate, loads the subject record under the caller's
+     * RLS for row-context actions, and dispatches through the framework's
+     * `engine.executeAction` (script/body) or automation flow runner (flow).
+     * Throws on denial / not-found / handler failure so the tool surfaces a
+     * clean tool-error. No service-ai dependency.
+     *
+     * SECURITY MODEL (#2849): all gating happens at INVOKE time. A script/body
+     * handler then runs as trusted code — its engine facade performs
+     * context-less reads/writes that bypass RLS/FLS (SECURITY-DEFINER-like), so
+     * the caller's permissions and an agent's ADR-0090 D10 data ceiling do NOT
+     * bound what the body does internally. Flow actions differ: the flow engine
+     * receives the caller's identity below and honours `runAs` (ADR-0049).
      */
     private async invokeBusinessAction(
         name: string,
@@ -966,6 +1014,12 @@ export class HttpDispatcher {
             );
         }
 
+        // [#2849 / ADR-0011] AI-exposure gate — fail-closed. Bodies run trusted
+        // (unbounded by the caller's RLS or an agent's data ceiling), so only
+        // actions the author explicitly exposed to AI may be invoked here.
+        const exposureError = this.actionAiExposureError(action, objectName);
+        if (exposureError) throw new Error(exposureError);
+
         // ADR-0066 D4 capability gate — same declaration the REST route enforces.
         const gateError = this.actionPermissionError(action, ec, objectName);
         if (gateError) throw new Error(gateError);
@@ -993,8 +1047,21 @@ export class HttpDispatcher {
             if (!automation || typeof automation.execute !== 'function') {
                 throw new Error(`Action '${name}' is a flow but no automation service is available`);
             }
+            // Pass a proper AutomationContext (the engine never read the former
+            // `triggerData` envelope). Forwarding the caller's identity is what
+            // lets a `runAs:'user'` flow enforce RLS as the invoker instead of
+            // falling into the user-less UNSCOPED path (#2849, ADR-0049 / #1888;
+            // mirrors the record-change trigger's context shape).
             const result: any = await automation.execute(action.target, {
-                triggerData: { record, params, user, action: action.name },
+                record,
+                ...(objectName !== 'global' ? { object: objectName } : {}),
+                userId: ec?.userId,
+                ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
+                ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
+                ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
+                // Record fields seed flows' named `isInput` variables (like the
+                // record-change trigger); explicit action params win on clash.
+                params: { ...record, ...params },
             });
             if (result && typeof result === 'object' && 'success' in result && result.success === false) {
                 throw new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
@@ -1007,6 +1074,13 @@ export class HttpDispatcher {
         if (!ql || typeof ql.executeAction !== 'function') {
             throw new Error('Data engine not available for action dispatch');
         }
+        // [#2849] Trusted-mode elevation must be AUDIBLE: the body's engine
+        // facade bypasses RLS/FLS, so record who triggered which action.
+        console.info(
+            `[action-audit] MCP run_action '${action.name}' on '${objectName}' — body executes TRUSTED ` +
+            `(context-less engine, RLS/FLS-bypassing) for user '${ec?.userId ?? 'anonymous'}'` +
+            (ec?.principalKind === 'agent' ? ` (AGENT on behalf of '${ec?.onBehalfOf?.userId ?? 'unknown'}')` : ''),
+        );
         const actionContext: any = {
             record,
             user,
@@ -3497,7 +3571,9 @@ export class HttpDispatcher {
         }
         if (record && (record as any).id == null && recordId) (record as any).id = recordId;
 
-        // Slim engine facade matching the ActionContext.engine shape used by CRM handlers.
+        // Slim engine facade matching the ActionContext.engine shape used by CRM
+        // handlers. ⚠️ TRUSTED — context-less, RLS/FLS-bypassing by design; see
+        // buildActionEngineFacade for the full security-model rationale (#2849).
         const engineFacade = {
             async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
                 const res = await ql.insert(object, data);
@@ -3543,6 +3619,12 @@ export class HttpDispatcher {
             engine: engineFacade,
             params: { ...reqParams, recordId, objectName },
         };
+
+        // [#2849] Same trusted-mode elevation as the MCP path — keep it audible.
+        console.info(
+            `[action-audit] REST action '${objectName}/${actionName}' — body executes TRUSTED ` +
+            `(context-less engine, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
+        );
 
         try {
             // Try object-specific first; on "not found" error, fall back to wildcard.

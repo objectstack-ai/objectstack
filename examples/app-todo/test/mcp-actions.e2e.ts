@@ -165,6 +165,21 @@ function mcpRequest(body: unknown): Request {
   const allowList = JSON.parse((await callMcp(allowBridge, toolsCall(8, 'list_actions', {}))).result.content[0].text).actions as any[];
   check(allowList.some((a) => a.name === 'clone_task'), 'list_actions reveals the gated action to a holder');
 
+  // ── Step 6 — AI-exposure gate (#2849) end-to-end ───────────────────
+  console.log('\n🔒 Step 6 — an action without ai.exposed is hidden and uninvokable');
+  // Same app, but clone_task no longer opts into the AI surface.
+  const unexposedObjects = mergedObjects.map((o) =>
+    o.name !== 'todo_task'
+      ? o
+      : { ...o, actions: o.actions.map((a: any) => (a.name === 'clone_task' ? (({ ai: _ai, ...rest }: any) => rest)(a) : a)) },
+  );
+  const unexposedBridge = bridgeFor({ userId: 'user_3', positions: [], permissions: [], systemPermissions: ['todo_admin'] }, unexposedObjects);
+  const unexposedList = JSON.parse((await callMcp(unexposedBridge, toolsCall(9, 'list_actions', {}))).result.content[0].text).actions as any[];
+  check(!unexposedList.some((a) => a.name === 'clone_task'), 'list_actions hides an action the author did not expose to AI');
+  const unexposedRun = await callMcp(unexposedBridge, toolsCall(10, 'run_action', { actionName: 'clone_task', recordId: taskId }));
+  check(unexposedRun.result?.isError === true, 'run_action refuses the unexposed action (fail-closed)');
+  check(/not exposed to AI/i.test(unexposedRun.result?.content?.[0]?.text ?? ''), 'refusal names the AI-exposure gate');
+
   console.log('\n────────────────────────────────────────────────────────────────────────────────');
   if (failures > 0) {
     console.error(`❌ MCP action E2E FAILED — ${failures} check(s) failed`);
