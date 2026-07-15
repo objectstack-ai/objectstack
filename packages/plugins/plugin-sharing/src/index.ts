@@ -32,8 +32,14 @@ export { TeamGraphService, expandPrincipal, type TeamGraphOptions } from './team
 export { BusinessUnitGraphService, type BusinessUnitGraphOptions } from './business-unit-graph.js';
 export { bindRuleHooks, unbindAllRuleHooks, SHARING_RULE_HOOK_PACKAGE } from './rule-hooks.js';
 export {
+  bindRuleProvenanceStamp,
+  unbindRuleProvenanceStamp,
+  SHARING_RULE_PROVENANCE_PACKAGE,
+} from './sharing-rule-provenance.js';
+export {
   SharingServicePlugin,
   buildSharingMiddleware,
+  backfillRuleGrants,
   type SharingPluginOptions,
 } from './sharing-plugin.js';
 export type {

@@ -155,6 +155,19 @@ export interface SharingRuleRow {
   recipient_id: string;
   access_level: ShareAccessLevel;
   active: boolean;
+  /**
+   * [#2909 P0] Record provenance — unified A4 tri-state
+   * (`platform` / `package` / `admin`). Package/platform rows are boot-seeded
+   * and become seed-not-clobber once `customized` is set; admin rows are
+   * tenant-authored and never touched by the seeder.
+   */
+  managed_by?: 'platform' | 'package' | 'admin' | null;
+  /**
+   * [#2909 T1] Stamped when an admin edits a package/platform-seeded rule;
+   * the boot seeder then stops overwriting the row (an admin's
+   * `active: false` survives redeploys instead of being resurrected).
+   */
+  customized?: boolean | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -170,6 +183,14 @@ export interface DefineSharingRuleInput {
   recipientId: string;
   accessLevel?: ShareAccessLevel;
   active?: boolean;
+  /**
+   * [#2909 P0] Provenance to stamp on the row. Passing `package` or
+   * `platform` puts defineRule in SEED mode: existing rows that an admin
+   * authored (managed_by `admin`) or customized are left untouched;
+   * pristine seeded rows keep receiving declared updates. Omitted /
+   * `admin` = programmatic/tenant authoring (existing clobber semantics).
+   */
+  managedBy?: 'platform' | 'package' | 'admin';
 }
 
 /** Result of a rule evaluation pass. */

@@ -52,6 +52,8 @@ function rowFromRule(row: any): SharingRuleRow {
     recipient_id: row.recipient_id,
     access_level: row.access_level as ShareAccessLevel,
     active: row.active !== false,
+    managed_by: row.managed_by ?? null,
+    customized: row.customized === true,
     created_at: row.created_at ?? undefined,
     updated_at: row.updated_at ?? undefined,
   };
@@ -102,8 +104,30 @@ export class SharingRuleService implements ISharingRuleService {
       limit: 1,
       context: SYSTEM_CTX,
     });
+    // [#2909 P0/T1] Seed mode: a package/platform managedBy marks this call
+    // as the boot seeder (bootstrapDeclaredSharingRules) rather than an
+    // admin/programmatic authoring path. sys_sharing_rule is
+    // RECORD-AUTHORITATIVE (ADR-0094 addendum): the declared metadata is a
+    // seed, not a live override, so the seeder must never clobber a row the
+    // admin owns or has customized — most importantly an admin's
+    // `active: false` on an over-sharing rule must survive redeploys.
+    const seedMode = input.managedBy === 'package' || input.managedBy === 'platform';
+
     if (Array.isArray(existing) && existing[0]) {
       const row: any = existing[0];
+      if (seedMode) {
+        if (row.managed_by === 'admin') {
+          // Name collision with a tenant-authored rule — the admin's row wins.
+          this.logger?.warn?.('[sharing-rule] declared rule name collides with an admin-authored rule — seed skipped', {
+            rule: input.name,
+          });
+          return rowFromRule(row);
+        }
+        if (row.customized === true) {
+          // Admin edited/deactivated this seeded rule — never resurrect it.
+          return rowFromRule(row);
+        }
+      }
       const patch: any = {
         id: row.id,
         label: input.label,
@@ -115,6 +139,9 @@ export class SharingRuleService implements ISharingRuleService {
         access_level: accessLevel,
         active,
         updated_at: now,
+        // Seed mode adopts pristine/legacy (pre-provenance) rows so future
+        // boots recognize them; non-seed calls never touch provenance.
+        ...(seedMode ? { managed_by: input.managedBy } : {}),
       };
       await this.engine.update('sys_sharing_rule', patch, { context: SYSTEM_CTX });
       return rowFromRule({ ...row, ...patch });
@@ -132,6 +159,8 @@ export class SharingRuleService implements ISharingRuleService {
       recipient_id: input.recipientId,
       access_level: accessLevel,
       active,
+      managed_by: input.managedBy ?? 'admin',
+      customized: false,
       created_at: now,
       updated_at: now,
     };

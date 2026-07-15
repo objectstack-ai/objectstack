@@ -188,6 +188,42 @@ export const SysSharingRule = ObjectSchema.create({
       group: 'Lifecycle',
     }),
 
+    // ── Provenance (#2909 P0 — record-authoritative seed-not-clobber) ──
+    // Unified A4 (#2920) tri-state, shared verbatim with sys_position /
+    // sys_capability / sys_permission_set. Both columns are `readonly`:
+    // the engine strips them from non-system payloads (forge/clear-proof),
+    // while the seeder and the provenance stamp hook write with isSystem.
+    // NOTE deliberately NOT in SYSTEM_ROW_PROVENANCE (no write gate):
+    // sharing rules are a first-class admin authoring/tuning surface —
+    // admins may edit or deactivate package rules; the seeder simply stops
+    // overwriting rows once `customized` is stamped (ADR-0094 addendum).
+    managed_by: Field.select({
+      label: 'Managed By',
+      required: false,
+      readonly: true,
+      defaultValue: 'admin',
+      description:
+        'Record provenance (unified tri-state, A4 #2920): platform = framework built-in / ' +
+        'package = app/package-declared (boot-seeded) / admin = tenant-created in Setup.',
+      options: [
+        { value: 'platform', label: 'Platform' },
+        { value: 'package', label: 'Package' },
+        { value: 'admin', label: 'Admin' },
+      ],
+      group: 'System',
+    }),
+
+    customized: Field.boolean({
+      label: 'Customized',
+      required: false,
+      readonly: true,
+      defaultValue: false,
+      description:
+        'Set when an admin edits a package-declared rule; boot seeding will no longer ' +
+        'overwrite the row (deactivations survive redeploys). Meaningless on admin rows.',
+      group: 'System',
+    }),
+
     created_at: Field.datetime({
       label: 'Created At',
       required: true,

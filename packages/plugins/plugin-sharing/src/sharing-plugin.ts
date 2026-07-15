@@ -11,6 +11,7 @@ import { SharingRuleService } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
 import { bindRuleHooks, unbindAllRuleHooks, RULE_REBIND_TRIGGER_PACKAGE } from './rule-hooks.js';
+import { bindRuleProvenanceStamp, unbindRuleProvenanceStamp } from './sharing-rule-provenance.js';
 import { bindPrimaryBuHooks, backfillPrimaryBu } from './primary-bu-projection.js';
 import { bootstrapDeclaredSharingRules } from './bootstrap-declared-sharing-rules.js';
 
@@ -300,6 +301,11 @@ export class SharingServicePlugin implements Plugin {
             unbindAllRuleHooks(engine);
             bindRuleHooks(engine, this.ruleService, rules, ctx.logger as any);
             this.bindRuleRebindTriggers(engine, ctx);
+
+            // [#2909 T1] Stamp `customized` on admin edits of seeded rules so
+            // the boot seeder stops overwriting them (seed-not-clobber).
+            unbindRuleProvenanceStamp(engine);
+            bindRuleProvenanceStamp(engine, ctx.logger as any);
 
             await backfillRuleGrants(this.ruleService, rules, ctx.logger as any);
           } else {

@@ -122,6 +122,10 @@ export async function bootstrapDeclaredSharingRules(
         recipientId: String(r.sharedWith.value),
         accessLevel: (r.accessLevel ?? 'read') as ShareAccessLevel,
         active: r.active !== false,
+        // [#2909 P0] Declared rules ship with the app/package → seed mode:
+        // pristine rows keep receiving declared updates; admin-authored or
+        // customized rows are never clobbered (defineRule seed-not-clobber).
+        managedBy: 'package',
       } as any, SYSTEM_CTX as any);
       seeded += 1;
     } catch (err: any) {
