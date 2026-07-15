@@ -8,6 +8,9 @@ on:
       - '.changeset/config.json'
       - 'pnpm-workspace.yaml'
       - 'scripts/check-changeset-fixed.mjs'
+      # Re-run when the workflow itself changes, so edits to these gates are
+      # exercised on the PR that introduces them.
+      - '.github/workflows/validate-deps.yml'
   schedule:
     # Run weekly on Monday at 03:00 UTC
     - cron: '0 3 * * 1'
