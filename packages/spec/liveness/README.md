@@ -189,7 +189,7 @@ EOF
 
 | Type | live | exp | dead | planned | Notes |
 |---|---|---|---|---|---|
-| object | 37 | – | 12 | 1 | versioning/partitioning/cdc tier dead; ObjectCapabilities fully live post-#2707/#2727; `tenancy.strategy`/`crossTenantAccess` REMOVED at 16.0.0 (#2763) — tenancy block is now strict with tombstone guidance |
+| object | 37 | – | 12 | 1 | versioning/partitioning/cdc tier dead; ObjectCapabilities fully live post-#2707/#2727; `tenancy.strategy`/`crossTenantAccess` REMOVED post-15.0 (#2763) — tenancy block is now strict with tombstone guidance |
 | field | 55 | – | 6 | – | near-healthy; dead = referenceFilters/columnName/index/vectorConfig/fileAttachmentConfig/dependencies, all authorWarn'd |
 | flow | 27 | – | 4 | – | dead = description/template/nodes.outputSchema/errorHandling.fallbackNodeId (engine uses fault edges) |
 | action | 34 | 1 | 1 | – | `disabled` went LIVE via metadata-admin authoring UI (2026-06 audit missed objectui); only `timeout` dead |

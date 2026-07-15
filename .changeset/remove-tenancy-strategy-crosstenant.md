@@ -4,10 +4,11 @@
 
 feat(spec)!: remove `tenancy.strategy` + `tenancy.crossTenantAccess`; tenancy block is now strict (#2763)
 
-> ⚠️ RELEASE NOTE — promote to `major` in the v16 release PR (the #2950 v15
-> precedent: land as minor, promote at release). This IS a breaking change;
-> do not ship a 15.x minor while it is pending, and carry it in
-> `content/docs/releases/v16.mdx`.
+> ⚠️ RELEASE NOTE — breaking by strict semver, shipped as `minor` per the
+> launch-window policy (owner decision on PR #2962): the fields had zero
+> consumers, behavior is unchanged, and the parse error carries the
+> migration. Fold into the v15 release page's "What's new in 15.x" section
+> when versioning.
 
 BREAKING CHANGE: `TenancyConfigSchema` drops its two zero-consumer fields, and
 the `tenancy` block is now `.strict()` — an unknown key is a loud parse error

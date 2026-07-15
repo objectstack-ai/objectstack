@@ -157,19 +157,19 @@ export const SearchConfigSchema = lazySchema(() => z.object({
  * Tombstones for RETIRED tenancy keys — same doctrine as the top-level
  * `UNKNOWN_KEY_GUIDANCE` map below: a retired key's rejection must carry the
  * upgrade prescription, because the parse error is the one channel every
- * consumer bumping `@objectstack/spec` is guaranteed to hit. Removed at
- * spec 16.0.0 by owner decision #2763 (enforce-or-remove, ADR-0049; precedent
+ * consumer bumping `@objectstack/spec` is guaranteed to hit. Removed after
+ * spec 15.0 by owner decision #2763 (enforce-or-remove, ADR-0049; precedent
  * ADR-0056 D8 — compliance-grade config must never merely look live).
  */
 const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   strategy:
-    '`tenancy.strategy` was removed in @objectstack/spec 16.0.0 (#2763) — it never ' +
-    'had a consumer. The platform has exactly two tenancy modes and neither is ' +
+    '`tenancy.strategy` was removed from @objectstack/spec after v15.0 (#2763) — it ' +
+    'never had a consumer. The platform has exactly two tenancy modes and neither is ' +
     'object-level config: database-per-tenant isolation is an environment/deployment ' +
     'choice (each environment carries its own database URL), and row-level isolation ' +
     'is `tenancy.enabled` + `tenancy.tenantField`. Delete the key.',
   crossTenantAccess:
-    '`tenancy.crossTenantAccess` was removed in @objectstack/spec 16.0.0 (#2763) — it ' +
+    '`tenancy.crossTenantAccess` was removed from @objectstack/spec after v15.0 (#2763) — it ' +
     'never had a consumer; setting it granted nothing. Cross-tenant visibility is ' +
     'governed by sharing rules / OWD (ADR-0056), `externalSharingModel` (ADR-0090 ' +
     'D11), and the object access posture. Delete the key.',

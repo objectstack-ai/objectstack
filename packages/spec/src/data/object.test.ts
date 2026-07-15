@@ -1311,7 +1311,7 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
     const result = TenancyConfigSchema.safeParse({ enabled: true, strategy: 'isolated' });
     expect(result.success).toBe(false);
     const message = result.error!.issues.map((i) => i.message).join('\n');
-    expect(message).toContain('removed in @objectstack/spec 16.0.0 (#2763)');
+    expect(message).toContain('removed from @objectstack/spec after v15.0 (#2763)');
     expect(message).toContain('environment/deployment');
     expect(message).toContain('`tenancy.enabled` + `tenancy.tenantField`');
   });
@@ -1339,6 +1339,6 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
         tenancy: { enabled: false, strategy: 'shared' } as never,
         fields: { name: { type: 'text' } },
       }),
-    ).toThrow(/removed in @objectstack\/spec 16\.0\.0/);
+    ).toThrow(/removed from @objectstack\/spec after v15\.0/);
   });
 });

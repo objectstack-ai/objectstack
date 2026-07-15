@@ -118,7 +118,7 @@ describe('lintLivenessProperties', () => {
   });
 
   it('warns on the security-shaped dead props (tool.permissions / permission.contextVariables)', () => {
-    // tenancy.strategy/crossTenantAccess left this list at spec 16.0.0 (#2763):
+    // tenancy.strategy/crossTenantAccess left this list after spec 15.0 (#2763):
     // the schema now REJECTS them (strict tenancy block), so the ledger entries
     // are gone and the live tenancy knobs must not warn.
     const tenancy = lintLivenessProperties(objStack({ tenancy: { enabled: true, tenantField: 'org_id' } }));

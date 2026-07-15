@@ -135,7 +135,7 @@
         "tenantField": {
           "status": "live",
           "evidence": "packages/plugins/driver-sql/src/sql-driver.ts",
-          "note": "row-level tenant scoping (org-scoping plugin path) reads tenancy.tenantField — audit called it inert; corrected. strategy/crossTenantAccess were REMOVED at spec 16.0.0 (#2763): zero consumers; tenancy block is now .strict() with tombstone guidance."
+          "note": "row-level tenant scoping (org-scoping plugin path) reads tenancy.tenantField — audit called it inert; corrected. strategy/crossTenantAccess were REMOVED after spec 15.0 (#2763): zero consumers; tenancy block is now .strict() with tombstone guidance."
         }
       }
     },
