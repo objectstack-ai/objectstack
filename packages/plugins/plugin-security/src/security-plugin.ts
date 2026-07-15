@@ -53,6 +53,36 @@ import {
 } from './manifest.js';
 
 /**
+ * [ADR-0095 D3 / Finding 2 / #2937] Platform-admin-EXCLUSIVE capabilities — the
+ * platform-scoped `systemPermissions` that `admin_full_access` carries and
+ * `organization_admin` DELIBERATELY withholds (see `default-permission-sets.ts`:
+ * org admin is granted only `manage_org_users`/`setup.access`/`setup.write`).
+ *
+ * Holding ANY of these is the enforcement stand-in for the `PLATFORM_ADMIN`
+ * posture rung (ADR-0095 D3): it is what distinguishes a true PLATFORM operator
+ * from a TENANT org admin. Both hold `viewAllRecords`/`modifyAllRecords` via
+ * their `'*'` wildcard grant, so the superuser-bypass bit ALONE cannot tell them
+ * apart — which is exactly why an org admin used to cross the Layer 0 tenant wall
+ * on private/platform-global/better-auth objects (Finding 2). `setup.access`/
+ * `setup.write` are EXCLUDED on purpose: org admins hold them (they are the Setup
+ * app shell + tenant-settings-write caps, not platform powers).
+ *
+ * NOTE: the fully-correct signal is the `PLATFORM_ADMIN` posture already derived
+ * in `resolve-authz-context.ts` (`ctx.posture`), but that field is NOT plumbed
+ * into the ExecutionContext the enforcement middleware receives (the REST/runtime
+ * transports drop it), so consuming it here would silently no-op. This capability
+ * probe reads the SAME resolved permission sets enforcement already uses, works on
+ * every entry point, and — being a strict subset of the old superuser-bit gate —
+ * can only NARROW the exemption, never widen it (fail-safe).
+ */
+const PLATFORM_ADMIN_ONLY_CAPABILITIES: readonly string[] = [
+  'manage_metadata',
+  'manage_platform_settings',
+  'studio.access',
+  'manage_users',
+];
+
+/**
  * [ADR-0066 D3/⑤] Object `requiredPermissions` normalized into per-CRUD buckets.
  * `all` holds capabilities required for EVERY operation (the `string[]` form);
  * the per-op buckets hold capabilities from the `{read,create,update,delete}`
@@ -1024,28 +1054,50 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
-      // 3.7. [ADR-0095 D1 / #2937] Layer 0 tenant post-image check for INSERT.
+      // 3.7. [ADR-0095 D1 / #2937 / Finding 1] Layer 0 tenant post-image check
+      // for INSERT and UPDATE.
       //
       // The tenant wall (Layer 0) is AND-composed onto reads and onto the
-      // update/delete PRE-image, but an insert has no pre-image and carries no
-      // AST, so the wall never reached it: a member could `insert` a row bearing
-      // a FORGED `organization_id` (pointing at another org) and land it in the
-      // victim tenant — the enterprise auto-stamp only fills a MISSING value, it
-      // never overwrites a supplied one. Close it here by validating the insert
-      // post-image against the SAME Layer 0 filter the read side uses (identical
-      // rule: isolation active, tenant object, platform-admin posture exemption,
-      // fail-closed on a missing active org).
+      // update/delete PRE-image, but two write paths escaped it because they
+      // carry a `organization_id` VALUE that the pre-image/AST scoping never
+      // inspects:
       //
-      // Scope: only a SUPPLIED (non-empty) `organization_id` is validated — an
-      // ABSENT value is the organizations-plugin auto-stamp's responsibility
-      // (separation of concerns; plugin-security no longer stamps org ids), and a
-      // pure plugin-security deployment has no isolation active (Layer 0 → null),
-      // so this is ordering-independent w.r.t. the auto-stamp middleware. System /
-      // boot writes carry `isSystem` and short-circuited the whole middleware
-      // above, so legitimate on-behalf `organization_id` writes (import engine,
-      // migrations, plugin SYSTEM_CTX) are unaffected.
+      //   • INSERT has no pre-image and builds no AST, so a member could `insert`
+      //     a row bearing a FORGED `organization_id` (another org) and land it in
+      //     the victim tenant (the enterprise auto-stamp only fills a MISSING
+      //     value, never overwrites a supplied one).
+      //   • UPDATE (Finding 1 / BLOCKER): the pre-image check (step 2.7) validates
+      //     only that the caller may touch the EXISTING row (old org == A); it
+      //     never sees the NEW value. `organization_id` is auto-stamp-insert-only,
+      //     FLS doesn't protect it, server-side `readonly` isn't enforced, and the
+      //     RLS `check` fires only for explicit policies — so a member owning a
+      //     row R in org A could `update` R with `{organization_id: victim org B}`
+      //     and MOVE the row into another tenant, where it becomes visible. This
+      //     is a cross-tenant write by any member.
+      //
+      // Both close identically here: a SUPPLIED (non-empty) `organization_id` in
+      // the write payload must satisfy the SAME Layer 0 filter the read side uses
+      // (isolation active, tenant object, platform-admin posture exemption,
+      // fail-closed on a missing active org). For UPDATE this makes
+      // `organization_id` effectively immutable in non-platform user contexts: the
+      // only value that passes is the caller's active org (which — since the
+      // pre-image already scoped the target to that org — equals the row's current
+      // org), so a re-point to any OTHER tenant is denied. A bulk update carrying a
+      // cross-tenant `organization_id` change-set is caught too (the check inspects
+      // the change-set value, not a per-row post-image).
+      //
+      // Scope: only a SUPPLIED `organization_id` is validated — an ABSENT value on
+      // insert is the organizations-plugin auto-stamp's responsibility, and an
+      // update that doesn't touch `organization_id` carries no value here, so
+      // ordinary writes are unaffected. A pure plugin-security deployment has no
+      // isolation active (Layer 0 → null), so this is ordering-independent w.r.t.
+      // the auto-stamp middleware. System / boot writes carry `isSystem` and
+      // short-circuited the whole middleware above, so legitimate cross-org moves
+      // (import engine, migrations, plugin SYSTEM_CTX) are unaffected. A true
+      // platform admin on a posture-permitting object is exempt via Layer 0 (same
+      // rule as reads/insert).
       if (
-        opCtx.operation === 'insert' &&
+        (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
         typeof opCtx.data === 'object' &&
         !Array.isArray(opCtx.data) &&
@@ -1054,16 +1106,17 @@ export class SecurityPlugin implements Plugin {
         const data = opCtx.data as Record<string, unknown>;
         const suppliedOrg = data.organization_id;
         if (suppliedOrg != null && suppliedOrg !== '') {
-          const tenantCheck = await this.computeInsertTenantCheckFilter(
+          const tenantCheck = await this.computeWriteTenantCheckFilter(
             permissionSets,
             opCtx.object,
+            opCtx.operation,
             opCtx.context,
           );
           // [ADR-0090 D10] The post-image must also satisfy the delegator's tenant
-          // wall — an on-behalf-of insert may not land a row in a tenant the
+          // wall — an on-behalf-of write may not land a row in a tenant the
           // delegator itself could not reach.
           const delTenantCheck = delegatorSets
-            ? await this.computeInsertTenantCheckFilter(delegatorSets, opCtx.object, delegatorContext)
+            ? await this.computeWriteTenantCheckFilter(delegatorSets, opCtx.object, opCtx.operation, delegatorContext)
             : null;
           const tenantParts = [tenantCheck, delTenantCheck].filter(Boolean) as Record<string, unknown>[];
           if (
@@ -1071,11 +1124,11 @@ export class SecurityPlugin implements Plugin {
             !tenantParts.every((f) => matchesFilterCondition(data as any, f as any))
           ) {
             this.logger.warn?.(
-              `[Security] Layer 0 tenant CHECK FAILED on insert '${opCtx.object}' — write denied ` +
+              `[Security] Layer 0 tenant CHECK FAILED on ${opCtx.operation} '${opCtx.object}' — write denied ` +
                 `(fail-closed); a supplied organization_id does not match the active organization`,
             );
             throw new PermissionDeniedError(
-              `[Security] Access denied: the insert would place '${opCtx.object}' in another tenant ` +
+              `[Security] Access denied: the ${opCtx.operation} would place '${opCtx.object}' in another tenant ` +
                 `(organization_id does not match the active organization)`,
               { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
             );
@@ -2024,6 +2077,23 @@ export class SecurityPlugin implements Plugin {
    * wall (Layer 0) and business RLS (Layer 1) to a record SEPARATELY. Single code
    * path → the record story cannot drift from the effective filter enforcement uses.
    */
+  /**
+   * [Finding 2 / ADR-0095 D3] Does the caller resolve to the `PLATFORM_ADMIN`
+   * posture rung? True iff the resolved permission sets grant any
+   * platform-EXCLUSIVE capability ({@link PLATFORM_ADMIN_ONLY_CAPABILITIES}) — the
+   * caps `admin_full_access` carries and `organization_admin` deliberately
+   * withholds. This is what separates a platform operator from a tenant org admin
+   * (both hold the `viewAllRecords`/`modifyAllRecords` superuser bit), and it is
+   * the ONLY signal permitted to cross the Layer 0 tenant wall.
+   */
+  private hasPlatformAdminPosture(permissionSets: PermissionSet[]): boolean {
+    const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+    for (const cap of PLATFORM_ADMIN_ONLY_CAPABILITIES) {
+      if (held.has(cap)) return true;
+    }
+    return false;
+  }
+
   private async computeLayeredRlsFilter(
     permissionSets: PermissionSet[],
     object: string,
@@ -2039,11 +2109,20 @@ export class SecurityPlugin implements Plugin {
     // private / platform-global / better-auth-managed objects. Public tenant
     // business objects do NOT permit it, so a platform admin stays org-scoped.
     const posturePermits = meta.isPrivate || meta.tenancyDisabled || meta.isBetterAuthManaged;
-    const platformAdminBypass = posturePermits
+    // The superuser bit (`viewAllRecords`/`modifyAllRecords`) governs the BUSINESS
+    // RLS (Layer 1) short-circuit below — a TENANT_ADMIN legitimately sees every
+    // row WITHIN its org, no ownership/depth/sharing narrowing (ADR-0095 D2).
+    const superuserBypass = posturePermits
       ? (isWrite
           ? this.permissionEvaluator.hasSuperuserWriteBypass(object, permissionSets, { isPrivate: meta.isPrivate })
           : this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate }))
       : false;
+    // [Finding 2 / #2937] The Layer 0 cross-tenant EXEMPTION is stricter: it
+    // requires a TRUE PLATFORM_ADMIN (the superuser bit AND a platform-exclusive
+    // capability), never merely the superuser bit an `organization_admin` also
+    // holds. This is the ONLY place the platform-admin posture gates crossing the
+    // tenant wall; a tenant org admin stays org-scoped even on private objects.
+    const isPlatformAdmin = superuserBypass && this.hasPlatformAdminPosture(permissionSets);
 
     // Field set drives BOTH the Layer 1 field-existence net and the Layer 0
     // "is this a tenant object?" check.
@@ -2055,7 +2134,7 @@ export class SecurityPlugin implements Plugin {
     // this superuser short-circuit now governs BUSINESS RLS only — it can no
     // longer skip the tenant wall (that is Layer 0's own exemption, below).
     let layer1: Record<string, unknown> | null = null;
-    if (!(posturePermits && platformAdminBypass)) {
+    if (!(posturePermits && superuserBypass)) {
       const allRlsPolicies = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
       if (allRlsPolicies.length > 0) {
         // Field-existence safety: a wildcard policy targeting a column the object
@@ -2092,7 +2171,7 @@ export class SecurityPlugin implements Plugin {
       objectHasOrgIdField: objectFields ? objectFields.has('organization_id') : undefined,
       tenancyDisabled,
       posturePermitsCrossTenant: posturePermits,
-      platformAdminBypass,
+      isPlatformAdmin,
     });
 
     return { layer0, layer1 };
@@ -2128,22 +2207,25 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [ADR-0095 D1 / #2937] Compute the Layer 0 (tenant) filter that an INSERT
-   * post-image must satisfy — the write-side twin of the read/update Layer 0
-   * wall. Reuses {@link computeLayeredRlsFilter} so the tenant decision is
-   * DERIVED FROM ONE PLACE and can never drift from the read side: same
-   * isolation probe, same "is this a tenant object?" field/posture test, same
-   * platform-admin posture exemption, same fail-closed deny sentinel when the
-   * context has no active organization. Only `layer0` is returned — business RLS
-   * (`layer1`) is NOT applied to the insert post-image (that path is governed by
-   * explicit `check` clauses via {@link computeWriteCheckFilter}).
+   * [ADR-0095 D1 / #2937] Compute the Layer 0 (tenant) filter that a WRITE
+   * post-image must satisfy — the write-side twin of the read Layer 0 wall,
+   * applied to both INSERT (Finding: forged `organization_id`) and UPDATE
+   * (Finding 1: `organization_id` RE-POINTED to another tenant). Reuses
+   * {@link computeLayeredRlsFilter} so the tenant decision is DERIVED FROM ONE
+   * PLACE and can never drift from the read side: same isolation probe, same
+   * "is this a tenant object?" field/posture test, same platform-admin posture
+   * exemption, same fail-closed deny sentinel when the context has no active
+   * organization. Only `layer0` is returned — business RLS (`layer1`) is NOT
+   * applied to the write post-image (that path is governed by explicit `check`
+   * clauses via {@link computeWriteCheckFilter}).
    */
-  private async computeInsertTenantCheckFilter(
+  private async computeWriteTenantCheckFilter(
     permissionSets: PermissionSet[],
     object: string,
+    operation: string,
     context: any,
   ): Promise<Record<string, unknown> | null> {
-    const { layer0 } = await this.computeLayeredRlsFilter(permissionSets, object, 'insert', context);
+    const { layer0 } = await this.computeLayeredRlsFilter(permissionSets, object, operation, context);
     return layer0;
   }
 

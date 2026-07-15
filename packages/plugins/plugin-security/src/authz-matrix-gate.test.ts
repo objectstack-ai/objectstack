@@ -143,6 +143,27 @@ async function insertOrg(cell: any, roleCtx: any, orgId: unknown): Promise<unkno
   return 'organization_id' in opCtx.data ? opCtx.data.organization_id : '<<absent>>';
 }
 
+/**
+ * [Finding 1 / #2937] Effective by-id UPDATE outcome for a supplied
+ * `organization_id`. Drives the REAL update path; the pre-image re-read (step 2.7)
+ * is stubbed to return a matching row so the test isolates the Layer 0 post-image
+ * tenant guard (step 3.7). `CRUD_DENY:*` = blocked (pre-image RLS, or the Layer 0
+ * post-image re-point guard); otherwise the `organization_id` the row would keep.
+ */
+async function updateOrg(cell: any, roleCtx: any, orgId: unknown): Promise<unknown> {
+  const plugin = new SecurityPlugin();
+  const preImage = { id: 'r1', organization_id: roleCtx.tenantId ?? 'org-1', created_by: roleCtx.userId, name: 'old' };
+  const h = makeHarness({ ...cell, orgScoping: cell.orgScoping ?? true, findOneImpl: () => preImage });
+  await plugin.init(h.ctx); await plugin.start(h.ctx);
+  const opCtx: any = {
+    object: cell.objectName, operation: 'update',
+    data: { id: 'r1', name: 'x', ...(orgId === undefined ? {} : { organization_id: orgId }) },
+    options: { where: { id: 'r1' } }, context: roleCtx,
+  };
+  try { await h.run(opCtx); } catch (e: any) { return `CRUD_DENY:${e?.name ?? 'err'}`; }
+  return 'organization_id' in opCtx.data ? opCtx.data.organization_id : '<<absent>>';
+}
+
 // ── Axes ─────────────────────────────────────────────────────────────────────
 const OBJECTS = {
   // Ordinary tenant business object: has organization_id, public posture.
@@ -190,9 +211,20 @@ const EXPECTED_MATRIX: Record<string, Record<string, { read: unknown; write: unk
     no_org_member: { read: { id: DENY }, write: [{ $and: [{ id: DENY }, { created_by: 'u2' }] }] },
   },
   private_obj: {
-    // [W2] Layer 0 exemption + Layer 1 short-circuit both fire for superuser on a private object → null.
+    // [W2] TRUE platform admin: Layer 0 exemption (platform posture) + Layer 1
+    // short-circuit (superuser bit) both fire on a private object → null.
     platform_admin: { read: null, write: 'BYPASS(no-write-filter)' },
-    org_admin: { read: null, write: 'BYPASS(no-write-filter)' },
+    // [Finding 2 / #2937 — SECURITY NARROWING] An `organization_admin` holds the
+    // superuser bit via its `'*'` wildcard, so it used to ALSO get the Layer 0
+    // exemption and read/write EVERY tenant's rows on this private TENANT object
+    // (a cross-tenant wall breach). It is NOT a platform admin (no platform-
+    // exclusive capability), so the exemption is now WITHHELD: Layer 1 is still
+    // short-circuited by the superuser bit (TENANT_ADMIN sees all rows in-org, no
+    // ownership narrowing), but Layer 0 walls it to its own org.
+    org_admin: {
+      read: { organization_id: 'org-1' },
+      write: [{ organization_id: 'org-1' }],
+    },
     // A member's plain wildcard grant does not cover a private object → denied at the CRUD gate, before RLS.
     member: { read: 'CRUD_DENY:PermissionDeniedError', write: 'CRUD_DENY:PermissionDeniedError' },
     no_org_member: { read: 'CRUD_DENY:PermissionDeniedError', write: 'CRUD_DENY:PermissionDeniedError' },
@@ -338,6 +370,67 @@ describe('authz Layer-0 matrix gate — ADR-0095 D1 (post-extraction)', () => {
     it('single-org mode: Layer 0 inert, a supplied organization_id is NOT checked', async () => {
       const single = { ...OBJECTS.task, orgScoping: false };
       expect(await insertOrg(single, ROLES.member, 'org-2')).toBe('org-2');
+    });
+  });
+
+  // ── [Finding 1 / #2937 BLOCKER] Layer 0 UPDATE post-image tenant guard ──────
+  // The insert post-image guard has a symmetric UPDATE twin: a member owning a
+  // row in org A could `update` it with `{organization_id: victim org B}` and
+  // MOVE the row into another tenant (auto-stamp is insert-only, FLS/readonly
+  // don't protect it, the pre-image check validates only the OLD org). The Layer
+  // 0 post-image check makes `organization_id` immutable in non-platform user
+  // contexts — the only value that passes is the caller's active org.
+  describe('[Finding 1 / #2937] Layer 0 update post-image tenant guard (cross-tenant re-point)', () => {
+    it('member RE-POINTING organization_id to another tenant is DENIED', async () => {
+      expect(await updateOrg(OBJECTS.task, ROLES.member, 'org-2')).toBe('CRUD_DENY:PermissionDeniedError');
+    });
+    it('member updating with the SAME (active-org) organization_id is allowed', async () => {
+      expect(await updateOrg(OBJECTS.task, ROLES.member, 'org-1')).toBe('org-1');
+    });
+    it('member update that does NOT touch organization_id is unaffected', async () => {
+      expect(await updateOrg(OBJECTS.task, ROLES.member, undefined)).toBe('<<absent>>');
+    });
+    it('member with NO active org supplying ANY organization_id is fail-closed DENIED', async () => {
+      expect(await updateOrg(OBJECTS.task, ROLES.no_org_member, 'org-1')).toBe('CRUD_DENY:PermissionDeniedError');
+    });
+    it('org_admin RE-POINTING organization_id to another tenant is DENIED (not a platform admin)', async () => {
+      // org_admin holds the superuser bit but not the platform posture, so it is
+      // Layer-0-walled to its own org on the public business object too.
+      expect(await updateOrg(OBJECTS.task, ROLES.org_admin, 'org-2')).toBe('CRUD_DENY:PermissionDeniedError');
+    });
+    it('platform admin may re-point organization_id on a PRIVATE object (posture exemption)', async () => {
+      expect(await updateOrg(OBJECTS.private_obj, ROLES.platform_admin, 'org-2')).toBe('org-2');
+    });
+    it('platform admin stays org-scoped on a PUBLIC business object (re-point DENIED)', async () => {
+      expect(await updateOrg(OBJECTS.task, ROLES.platform_admin, 'org-2')).toBe('CRUD_DENY:PermissionDeniedError');
+    });
+    it('single-org mode: Layer 0 inert, a supplied organization_id is NOT checked on update', async () => {
+      const single = { ...OBJECTS.task, orgScoping: false };
+      expect(await updateOrg(single, ROLES.member, 'org-2')).toBe('org-2');
+    });
+  });
+
+  // ── [Finding 2 / #2937] org_admin does NOT cross the Layer 0 wall ───────────
+  // The Layer 0 cross-tenant exemption is gated on the TRUE PLATFORM_ADMIN posture
+  // (a platform-exclusive capability), not the raw superuser bit an
+  // `organization_admin` also holds. So an org admin is walled to its own tenant
+  // on PRIVATE tenant objects, while a real platform admin still crosses it, and
+  // the better-auth carve-out is untouched.
+  describe('[Finding 2 / #2937] Layer 0 cross-tenant exemption requires the platform posture', () => {
+    it('org_admin on a PRIVATE tenant object is Layer-0-walled to its own org (read)', async () => {
+      expect(await readFilter(OBJECTS.private_obj, ROLES.org_admin)).toEqual({ organization_id: 'org-1' });
+    });
+    it('org_admin on a PRIVATE tenant object is Layer-0-walled to its own org (write pre-image)', async () => {
+      expect(await writeFilter(OBJECTS.private_obj, ROLES.org_admin)).toEqual([{ organization_id: 'org-1' }]);
+    });
+    it('TRUE platform admin still crosses the wall on a PRIVATE object (read null)', async () => {
+      expect(await readFilter(OBJECTS.private_obj, ROLES.platform_admin)).toBeNull();
+    });
+    it('org_admin stays walled on a PUBLIC tenant object too (regression)', async () => {
+      expect(await readFilter(OBJECTS.task, ROLES.org_admin)).toEqual({ organization_id: 'org-1' });
+    });
+    it('better-auth-managed identity table carve-out is unaffected for org_admin (self-only, no org filter)', async () => {
+      expect(await readFilter(OBJECTS.better_auth, ROLES.org_admin)).toEqual({ $or: [{ id: 'oadmin' }, { id: 'oadmin' }] });
     });
   });
 

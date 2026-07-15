@@ -53,12 +53,22 @@ export interface TenantLayer0Input {
    */
   posturePermitsCrossTenant: boolean;
   /**
-   * Platform-admin evidence for THIS operation side — the same capability the
-   * superuser bypass already trusts (`viewAllRecords` on reads /
-   * `modifyAllRecords` on writes). This is the D1 stand-in for the full posture
-   * enum (B2); it is NOT the better-auth role.
+   * TRUE-platform-admin evidence (ADR-0095 D3 `PLATFORM_ADMIN` rung) for THIS
+   * operation side. This is the ONLY gate that lets a caller cross the tenant
+   * wall, so it MUST distinguish a PLATFORM operator from a TENANT `org_admin`.
+   *
+   * It is NOT merely the superuser bit (`viewAllRecords`/`modifyAllRecords`):
+   * `organization_admin` holds that bit via its `'*'` wildcard grant
+   * (`default-permission-sets.ts`), so gating the exemption on the superuser bit
+   * alone let an org admin cross the wall on a `private` (or platform-global /
+   * better-auth) TENANT object — the D1 "B2 posture stand-in" gap this field's
+   * former semantics carried. The caller now requires the superuser bit AND a
+   * platform-EXCLUSIVE capability (`manage_metadata`/`manage_platform_settings`/
+   * `studio.access`/`manage_users` — the caps `admin_full_access` carries and
+   * `organization_admin` deliberately withholds), i.e. the `PLATFORM_ADMIN`
+   * posture. It is NEVER the better-auth role.
    */
-  platformAdminBypass: boolean;
+  isPlatformAdmin: boolean;
 }
 
 /**
@@ -83,10 +93,11 @@ export function computeTenantLayer0Filter(
   if (input.tenancyDisabled) return null;
   if (input.objectHasOrgIdField === false) return null;
 
-  // Exemption is a Layer 0 rule (W2 fix): only a PLATFORM_ADMIN-posture caller on
-  // an object whose posture permits it crosses the wall. Layer 1's bypass no
-  // longer implies Layer 0's.
-  if (input.platformAdminBypass && input.posturePermitsCrossTenant) return null;
+  // Exemption is a Layer 0 rule (W2 fix): only a TRUE PLATFORM_ADMIN caller on an
+  // object whose posture permits it crosses the wall — NOT a tenant `org_admin`
+  // that merely holds the superuser bit (Finding 2 / #2937). Layer 1's superuser
+  // bypass no longer implies Layer 0's.
+  if (input.isPlatformAdmin && input.posturePermitsCrossTenant) return null;
 
   // Enforce the wall. Missing active org in multi mode → fail closed.
   if (!input.organizationId) return { ...RLS_DENY_FILTER };
