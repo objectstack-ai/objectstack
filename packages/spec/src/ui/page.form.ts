@@ -52,7 +52,21 @@ export const pageForm = defineForm({
       visibleWhen: "data.type != 'list'",
       fields: [
         { field: 'object', widget: 'ref:object', helpText: 'Bound object (for Record pages)' },
-        { field: 'variables', type: 'repeater', helpText: 'Local page state variables' },
+        {
+          field: 'variables',
+          type: 'repeater',
+          helpText: 'Local page state variables',
+          // Explicit sub-fields so `source` can use the `ref:component` picker —
+          // a variable's `source` names the component (by `id`) that writes it,
+          // so it's chosen from the page's real canvas components, not typed by
+          // hand. Keep in sync with PageVariableSchema.
+          fields: [
+            { field: 'name', required: true, helpText: 'Variable name — exposed to expressions as `page.<name>`' },
+            { field: 'type', helpText: 'Value type' },
+            { field: 'defaultValue', helpText: 'Initial value (defaults to a type-appropriate empty value)' },
+            { field: 'source', widget: 'ref:component', helpText: 'Component (by id) that writes this variable — e.g. an element:record_picker' },
+          ],
+        },
       ],
     },
     {
