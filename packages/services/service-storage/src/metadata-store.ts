@@ -20,6 +20,9 @@ export interface FileRecord {
   metadata?: string;
   created_at?: string;
   updated_at?: string;
+  /** Orphan tombstone (#2755) — set when the last sys_attachment reference
+   * is removed; the sys_file lifecycle TTL reaps after the grace window. */
+  deleted_at?: string | null;
 }
 
 /**

@@ -13,6 +13,7 @@ import { S3StorageAdapter } from './s3-storage-adapter.js';
 import type { S3StorageAdapterOptions } from './s3-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
+import { installAttachmentLifecycleHooks, createSysFileReapGuard } from './attachment-lifecycle.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
 // ADR-0052 §3 ownership: `sys_attachment` (a file↔record link) belongs with the
 // storage domain, not the audit/compliance ledger. Definition stays in
@@ -183,6 +184,36 @@ export class StorageServicePlugin implements Plugin {
 
   async start(ctx: PluginContext): Promise<void> {
     ctx.hook('kernel:ready', async () => {
+      let engine: IDataEngine | null = null;
+      try {
+        engine = ctx.getService<IDataEngine>('objectql');
+      } catch {
+        // data engine not wired — routes fall back to the in-memory store,
+        // attachment lifecycle is inert (nothing persists sys_attachment).
+      }
+
+      // ── sys_file orphan lifecycle (#2755) ─────────────────────────
+      // Tombstone hooks on sys_attachment + the reap guard that reclaims
+      // storage bytes (and re-verifies references) inside the platform
+      // lifecycle sweep. Both degrade silently on bare kernels.
+      if (engine && typeof (engine as any).registerHook === 'function') {
+        installAttachmentLifecycleHooks(engine as any, ctx.logger);
+        try {
+          const lifecycle = ctx.getService<any>('lifecycle');
+          if (lifecycle && typeof lifecycle.registerReapGuard === 'function') {
+            lifecycle.registerReapGuard(
+              'sys_file',
+              createSysFileReapGuard(engine as any, () => this.storage, ctx.logger),
+            );
+            ctx.logger.info('StorageServicePlugin: sys_file reap guard registered with the lifecycle service');
+          }
+        } catch {
+          // lifecycle service absent (bare kernel) — the sys_file lifecycle
+          // declaration stays safe: rows only gain reap triggers via the
+          // hooks above, and nothing sweeps without the LifecycleService.
+        }
+      }
+
       // ── HTTP routes (existing behaviour) ───────────────────────────
       if (this.options.registerRoutes !== false) {
         let httpServer: IHttpServer | null = null;
@@ -193,12 +224,6 @@ export class StorageServicePlugin implements Plugin {
         }
 
         if (httpServer && this.storage) {
-          let engine: IDataEngine | null = null;
-          try {
-            engine = ctx.getService<IDataEngine>('objectql');
-          } catch {
-            // data engine not wired — use in-memory fallback
-          }
           this.store = new StorageMetadataStore(engine);
 
           registerStorageRoutes(httpServer, this.storage, this.store, {

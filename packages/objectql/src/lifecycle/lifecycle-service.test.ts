@@ -17,10 +17,13 @@ function captureEngine(
     deleteImpl?: (object: string, options: any) => any;
     driver?: Record<string, unknown>;
     datasources?: Record<string, unknown>;
+    /** When set, the engine exposes `find` (guarded-reap candidate reads). */
+    findImpl?: (object: string, options: any) => any;
   } = {},
 ) {
   const deletes: Array<{ object: string; where: any; multi: any; context: any }> = [];
-  const engine = {
+  const finds: Array<{ object: string; where: any; limit: any; context: any }> = [];
+  const engine: any = {
     registry: { getAllObjects: () => objects },
     async delete(object: string, options: any) {
       deletes.push({ object, where: options?.where, multi: options?.multi, context: options?.context });
@@ -33,7 +36,13 @@ function captureEngine(
       return ds;
     },
   };
-  return { engine, deletes };
+  if (opts.findImpl) {
+    engine.find = async (object: string, options: any) => {
+      finds.push({ object, where: options?.where, limit: options?.limit, context: options?.context });
+      return opts.findImpl!(object, options);
+    };
+  }
+  return { engine, deletes, finds };
 }
 
 function service(engine: any, extra: Partial<ConstructorParameters<typeof LifecycleService>[0]> = {}) {
@@ -304,6 +313,107 @@ describe('LifecycleService.sweep — Reaper', () => {
     } finally {
       delete process.env.OS_LIFECYCLE_DISABLED;
     }
+  });
+});
+
+describe('LifecycleService.sweep — reap guard', () => {
+  const guarded: LifecycleObjectLike[] = [
+    { name: 'sys_file', lifecycle: { class: 'transient', ttl: { field: 'deleted_at', expireAfter: '30d' } } },
+  ];
+
+  it('deletes only guard-confirmed ids, by $in, after fetching candidates with the cutoff filter', async () => {
+    const rows = [
+      { id: 'f1', deleted_at: '2020-01-01T00:00:00Z' },
+      { id: 'f2', deleted_at: '2020-01-02T00:00:00Z' },
+      { id: 'f3', deleted_at: '2020-01-03T00:00:00Z' },
+    ];
+    const { engine, deletes, finds } = captureEngine(guarded, { findImpl: () => rows });
+    const svc = service(engine);
+    const guard = vi.fn(async () => ['f1', 'f3']); // vetoes f2
+    svc.registerReapGuard('sys_file', guard);
+
+    const report = await svc.sweep();
+
+    expect(finds).toHaveLength(1);
+    expect(finds[0].where).toEqual({ deleted_at: { $lt: isoCutoff('30d') } });
+    expect(finds[0].context).toEqual({ isSystem: true, positions: [], permissions: [] });
+    expect(guard).toHaveBeenCalledWith('sys_file', rows);
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0].where).toEqual({ id: { $in: ['f1', 'f3'] } });
+    expect(deletes[0].multi).toBe(true);
+    expect(report.swept).toEqual([
+      { object: 'sys_file', class: 'transient', policy: 'ttl', cutoff: isoCutoff('30d'), deleted: 2 },
+    ]);
+    expect(report.errors).toEqual([]);
+  });
+
+  it('an erroring guard fails safe: no rows deleted, error reported', async () => {
+    const { engine, deletes } = captureEngine(guarded, { findImpl: () => [{ id: 'f1' }] });
+    const svc = service(engine);
+    svc.registerReapGuard('sys_file', async () => {
+      throw new Error('storage unreachable');
+    });
+
+    const report = await svc.sweep();
+
+    expect(deletes).toHaveLength(0);
+    expect(report.swept).toEqual([]);
+    expect(report.errors).toEqual([{ object: 'sys_file', error: 'storage unreachable' }]);
+  });
+
+  it('a guard on one object never changes the blind reap of others (regression pin)', async () => {
+    const { engine, deletes } = captureEngine(
+      [
+        ...guarded,
+        { name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } },
+      ],
+      { findImpl: () => [] },
+    );
+    const svc = service(engine);
+    svc.registerReapGuard('sys_file', async () => []);
+
+    const report = await svc.sweep();
+
+    // sys_file: no candidates → no delete. sys_job_run: classic blind reap.
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0].object).toBe('sys_job_run');
+    expect(deletes[0].where).toEqual({ created_at: { $lt: isoCutoff('30d') } });
+    expect(report.errors).toEqual([]);
+  });
+
+  it('a guarded object on an engine without find is skipped, never blind-deleted', async () => {
+    const { engine, deletes } = captureEngine(guarded); // no findImpl → no engine.find
+    const svc = service(engine);
+    svc.registerReapGuard('sys_file', async () => ['f1']);
+
+    const report = await svc.sweep();
+
+    expect(deletes).toHaveLength(0);
+    expect(report.swept).toEqual([]);
+    expect(report.skipped).toEqual([{ object: 'sys_file', reason: 'reap-guard-unsupported' }]);
+  });
+
+  it('drains full batches but stops the pass when a batch is not fully confirmed', async () => {
+    // Two "pages" of 500, then a short page. All of page 1 confirmed → loop
+    // continues; page 2 only partially confirmed → pass ends (vetoed rows
+    // would be re-fetched forever within one sweep).
+    const page = (n: number, prefix: string) =>
+      Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, deleted_at: '2020-01-01T00:00:00Z' }));
+    const pages = [page(500, 'a'), page(500, 'b')];
+    let call = 0;
+    const { engine, deletes, finds } = captureEngine(guarded, { findImpl: () => pages[call++] ?? [] });
+    const svc = service(engine);
+    svc.registerReapGuard('sys_file', async (_object, rows) =>
+      rows[0].id === 'a0' ? rows.map((r: any) => r.id) : rows.slice(0, 10).map((r: any) => r.id),
+    );
+
+    const report = await svc.sweep();
+
+    expect(finds).toHaveLength(2);
+    expect(deletes).toHaveLength(2);
+    expect((deletes[0].where.id.$in as string[]).length).toBe(500);
+    expect((deletes[1].where.id.$in as string[]).length).toBe(10);
+    expect(report.swept[0].deleted).toBe(510);
   });
 });
 

@@ -63,6 +63,11 @@ export const SystemFile = ObjectSchema.create({
         { label: 'Public', value: 'public' },
         { label: 'Private', value: 'private' },
         { label: 'Temp', value: 'temp' },
+        // Files uploaded through the generic Attachments surface (#2727).
+        // Their only legitimate referrers are sys_attachment join rows, so
+        // this scope is the discriminator for orphan tombstoning (#2755) —
+        // field-attachment scopes above are never tombstoned.
+        { label: 'Attachments', value: 'attachments' },
       ],
     }),
 
@@ -107,5 +112,27 @@ export const SystemFile = ObjectSchema.create({
     updated_at: Field.datetime({
       label: 'Updated At',
     }),
+
+    deleted_at: Field.datetime({
+      label: 'Deleted At',
+      description:
+        'Tombstone timestamp — set when the last sys_attachment reference to an attachments-scope file is removed; the lifecycle TTL reaps the row (and its storage bytes, via the sys_file reap guard) after the grace window. NULL for live rows.',
+    }),
+  },
+
+  // ADR-0057 (#2755): sys_file rows are mostly permanent business truth, but
+  // two terminal states are garbage that would otherwise grow forever:
+  //   - tombstoned attachment orphans (status='deleted', deleted_at set by
+  //     the attachment lifecycle hooks when the last join row is removed)
+  //   - never-completed presigned/chunked uploads (status='pending')
+  // Committed rows carry neither trigger (NULL deleted_at, status≠pending),
+  // so they are immortal. Byte reclaim + sweep-time re-verification happen in
+  // the reap guard registered by StorageServicePlugin. A kernel that loads
+  // ObjectQL without this plugin reaps matching rows without byte cleanup —
+  // harmless there, since only this plugin's hooks ever write the triggers.
+  lifecycle: {
+    class: 'transient',
+    ttl: { field: 'deleted_at', expireAfter: '30d' },
+    retention: { maxAge: '7d', onlyWhen: { status: 'pending' } },
   },
 });

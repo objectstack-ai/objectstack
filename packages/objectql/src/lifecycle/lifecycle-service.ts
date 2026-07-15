@@ -200,6 +200,28 @@ interface ArchiveCapableDriver {
 const ARCHIVE_BATCH_SIZE = 500;
 const ARCHIVE_MAX_BATCHES_PER_SWEEP = 20;
 
+/** Guarded reap batching — same posture as the Archiver: bound one sweep's
+ * work, drain the backlog across sweeps. */
+const REAP_GUARD_BATCH_SIZE = 500;
+const REAP_GUARD_MAX_BATCHES_PER_SWEEP = 20;
+
+/**
+ * Reap guard (ADR-0057 amendment): a domain callback consulted by the Reaper
+ * before rows of the guarded object are deleted. The guard receives the
+ * candidate rows and returns the ids it CONFIRMS for deletion — performing
+ * any external cleanup (e.g. storage-byte reclaim) for those ids before
+ * returning. Ids not returned are kept this sweep (vetoed — e.g. the row
+ * regained references since it was marked).
+ *
+ * Guards are registered at runtime (`registerReapGuard`), not declared in the
+ * spec: detection and scheduling stay inside the single platform sweep
+ * (ADR-0057 §3.3 — a guard is a domain callback, not a second sweeper).
+ */
+export type LifecycleReapGuard = (
+  object: string,
+  rows: Array<Record<string, unknown>>,
+) => Promise<Array<string | number>>;
+
 export class LifecycleService {
   private readonly now: () => number;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -209,6 +231,8 @@ export class LifecycleService {
   private lastCounts = new Map<string, number>();
   /** Governance snapshot for the sweep in flight. */
   private governance: GovernanceSnapshot = DEFAULT_GOVERNANCE;
+  /** Per-object reap guards ({@link LifecycleReapGuard}). */
+  private readonly reapGuards = new Map<string, LifecycleReapGuard>();
 
   constructor(private readonly opts: LifecycleServiceOptions) {
     this.now = opts.now ?? (() => Date.now());
@@ -239,6 +263,17 @@ export class LifecycleService {
     if (this.timer) clearInterval(this.timer);
     this.initialTimer = undefined;
     this.timer = undefined;
+  }
+
+  /**
+   * Register a {@link LifecycleReapGuard} for one object. From then on the
+   * Reaper never blind-deletes that object's rows: candidates are fetched,
+   * the guard confirms (after external cleanup) or vetoes each row, and only
+   * confirmed ids are deleted. One guard per object (last registration wins —
+   * guards are platform wiring, not user surface).
+   */
+  registerReapGuard(object: string, guard: LifecycleReapGuard): void {
+    this.reapGuards.set(object, guard);
   }
 
   /**
@@ -604,54 +639,87 @@ export class LifecycleService {
     // rows outside it (live workflow state) are retained regardless of age.
     const scope = onlyWhen ?? {};
 
+    // A guarded object is NEVER blind-deleted: without row reads the guard
+    // cannot confirm, so the reap is skipped (fail-safe), not degraded.
+    const guard = this.reapGuards.get(object);
+    if (guard && typeof engine.find !== 'function') {
+      if (!report.skipped.some((s) => s.object === object && s.reason === 'reap-guard-unsupported')) {
+        report.skipped.push({ object, reason: 'reap-guard-unsupported' });
+      }
+      return 0;
+    }
+
     let total: number | undefined = 0;
-    const accumulate = (res: unknown) => {
-      const n = countDeleted(res);
+    const accumulate = (n: number | undefined) => {
       if (n === undefined) total = undefined;
       else if (total !== undefined) total += n;
     };
+    const reapWhere = async (where: Record<string, unknown>): Promise<number | undefined> =>
+      guard
+        ? this.guardedReap(engine, object, guard, where)
+        : countDeleted(await engine.delete(object, { where, multi: true, context: { ...SYSTEM_CTX } }));
 
     if (tenantWindows.length === 0) {
-      accumulate(
-        await engine.delete(object, {
-          where: { [field]: { $lt: cutoff }, ...scope },
-          multi: true,
-          context: { ...SYSTEM_CTX },
-        }),
-      );
+      accumulate(await reapWhere({ [field]: { $lt: cutoff }, ...scope }));
     } else {
       // Tenant-level windows (P4): each overriding tenant gets its own
       // cutoff on its own rows…
       for (const t of tenantWindows) {
         const tMs = this.effectiveWindowMs(t[overrideKey], windowMs, `${object} (tenant ${t.tenantId})`);
         const tCutoff = new Date(this.now() - tMs).toISOString();
-        accumulate(
-          await engine.delete(object, {
-            where: { [field]: { $lt: tCutoff }, organization_id: t.tenantId, ...scope },
-            multi: true,
-            context: { ...SYSTEM_CTX },
-          }),
-        );
+        accumulate(await reapWhere({ [field]: { $lt: tCutoff }, organization_id: t.tenantId, ...scope }));
       }
       // …and the global pass covers everyone else, INCLUDING rows with no
       // organization (a bare `$nin` would silently skip NULL-org rows).
       accumulate(
-        await engine.delete(object, {
-          where: {
-            [field]: { $lt: cutoff },
-            $or: [
-              { organization_id: { $nin: tenantWindows.map((t) => t.tenantId) } },
-              { organization_id: null },
-            ],
-            ...scope,
-          },
-          multi: true,
-          context: { ...SYSTEM_CTX },
+        await reapWhere({
+          [field]: { $lt: cutoff },
+          $or: [
+            { organization_id: { $nin: tenantWindows.map((t) => t.tenantId) } },
+            { organization_id: null },
+          ],
+          ...scope,
         }),
       );
     }
 
     report.swept.push({ object, class: lc.class, policy, cutoff, deleted: total });
+    return total;
+  }
+
+  /**
+   * Guarded reap: fetch candidate rows in batches, let the guard confirm
+   * (after performing external cleanup) or veto each, delete only confirmed
+   * ids. A guard error propagates to the per-object handler in `sweep()` —
+   * an erroring guard must never fail open into deletion. A batch that isn't
+   * fully confirmed ends the pass: vetoed rows still match the cutoff filter
+   * and would be re-fetched forever; the next sweep retries them.
+   */
+  private async guardedReap(
+    engine: LifecycleEngineLike,
+    object: string,
+    guard: LifecycleReapGuard,
+    where: Record<string, unknown>,
+  ): Promise<number> {
+    let total = 0;
+    for (let batch = 0; batch < REAP_GUARD_MAX_BATCHES_PER_SWEEP; batch++) {
+      const rows = await engine.find!(object, {
+        where,
+        limit: REAP_GUARD_BATCH_SIZE,
+        context: { ...SYSTEM_CTX },
+      });
+      if (!rows?.length) break;
+      const confirmed = (await guard(object, rows)).filter((id) => id !== null && id !== undefined);
+      if (confirmed.length > 0) {
+        await engine.delete(object, {
+          where: { id: { $in: confirmed } },
+          multi: true,
+          context: { ...SYSTEM_CTX },
+        });
+        total += confirmed.length;
+      }
+      if (confirmed.length < rows.length || rows.length < REAP_GUARD_BATCH_SIZE) break;
+    }
     return total;
   }
 }

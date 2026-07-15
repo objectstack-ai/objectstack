@@ -189,3 +189,45 @@ describe('StorageServicePlugin: settings live-wire', () => {
     expect(proxy.getInner()).toBe(before); // no swap
   });
 });
+
+describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () => {
+  it('installs sys_attachment hooks and registers the sys_file reap guard at kernel:ready', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'oss-lifecycle-'));
+    const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir: dir }, registerRoutes: false });
+    const ctx = makeCtx();
+
+    const hookEvents: string[] = [];
+    ctx.registerService('objectql', {
+      registerHook: (event: string, _fn: unknown, opts: any) => {
+        expect(opts?.object).toBe('sys_attachment');
+        hookEvents.push(event);
+      },
+      find: async () => [],
+      findOne: async () => null,
+      update: async () => ({}),
+    });
+    const guards: Array<{ object: string; guard: unknown }> = [];
+    ctx.registerService('lifecycle', {
+      registerReapGuard: (object: string, guard: unknown) => guards.push({ object, guard }),
+    });
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await ctx._flushReady();
+
+    expect(hookEvents.sort()).toEqual(['afterDelete', 'afterInsert', 'beforeDelete']);
+    expect(guards).toHaveLength(1);
+    expect(guards[0].object).toBe('sys_file');
+    expect(typeof guards[0].guard).toBe('function');
+  });
+
+  it('degrades silently on a bare kernel (no engine, no lifecycle service)', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'oss-bare-'));
+    const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir: dir }, registerRoutes: false });
+    const ctx = makeCtx();
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await expect(ctx._flushReady()).resolves.toBeUndefined();
+  });
+});

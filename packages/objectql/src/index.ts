@@ -63,6 +63,7 @@ export type {
   LifecycleObjectLike,
   LifecycleSettingsLike,
   LifecycleGovernanceAlert,
+  LifecycleReapGuard,
 } from './lifecycle/lifecycle-service.js';
 export { parseLifecycleDuration } from './lifecycle/duration.js';
 export { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
