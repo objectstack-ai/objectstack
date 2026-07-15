@@ -189,13 +189,13 @@ EOF
 
 | Type | live | exp | dead | planned | Notes |
 |---|---|---|---|---|---|
-| object | 36 | – | 14 | – | versioning/partitioning/cdc tier dead; ObjectCapabilities fully live post-#2707/#2727; `tenancy.strategy`/`crossTenantAccess` inert (only `enabled`+`tenantField` read) |
-| field | 54 | – | 6 | – | near-healthy; dead = referenceFilters/columnName/index/vectorConfig/fileAttachmentConfig/dependencies, all authorWarn'd |
+| object | 37 | – | 12 | 1 | versioning/partitioning/cdc tier dead; ObjectCapabilities fully live post-#2707/#2727; `tenancy.strategy`/`crossTenantAccess` REMOVED post-15.0 (#2763) — tenancy block is now strict with tombstone guidance |
+| field | 55 | – | 6 | – | near-healthy; dead = referenceFilters/columnName/index/vectorConfig/fileAttachmentConfig/dependencies, all authorWarn'd |
 | flow | 27 | – | 4 | – | dead = description/template/nodes.outputSchema/errorHandling.fallbackNodeId (engine uses fault edges) |
 | action | 34 | 1 | 1 | – | `disabled` went LIVE via metadata-admin authoring UI (2026-06 audit missed objectui); only `timeout` dead |
 | hook | 11 | – | 2 | – | model-healthy; only label/description dead (benign) |
 | permission | 32 | – | 1 | – | CRUD/FLS/RLS live; `contextVariables` dead (RLS uses current_user.* built-ins only) |
-| position | 3 | – | – | – | (role's ADR-0090 successor) fully live |
+| position | 4 | – | – | – | (role's ADR-0090 successor) fully live |
 | agent | 14 | 5 | 1 | – | `tenantId` dead (tenancy comes from request context); autonomy tier experimental |
 | tool | 9 | 1 | 1 | – | `permissions` dead — tool invocation not permission-gated by it |
 | skill | 10 | – | – | – | fully live |

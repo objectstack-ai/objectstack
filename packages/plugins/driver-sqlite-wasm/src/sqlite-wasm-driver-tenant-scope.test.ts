@@ -192,7 +192,7 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
         {
           name: 'workspace_item',
           // Custom tenant column name — not the conventional organization_id.
-          tenancy: { enabled: true, strategy: 'shared', tenantField: 'workspace_id', crossTenantAccess: false },
+          tenancy: { enabled: true, tenantField: 'workspace_id' },
           fields: {
             workspace_id: { type: 'string' },
             name: { type: 'string' },

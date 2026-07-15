@@ -45,7 +45,7 @@ export const SysSsoProvider = ObjectSchema.create({
   // Together: admins see all env providers; non-admins get 403. better-auth's
   // own endpoints already read via a system context. (Env-only object — no
   // control-plane cross-tenant risk.)
-  tenancy: { enabled: false, strategy: 'shared' },
+  tenancy: { enabled: false },
   requiredPermissions: ['manage_platform_settings'],
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema.
   protection: {

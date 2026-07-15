@@ -154,23 +154,70 @@ export const SearchConfigSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Tombstones for RETIRED tenancy keys — same doctrine as the top-level
+ * `UNKNOWN_KEY_GUIDANCE` map below: a retired key's rejection must carry the
+ * upgrade prescription, because the parse error is the one channel every
+ * consumer bumping `@objectstack/spec` is guaranteed to hit. Removed after
+ * spec 15.0 by owner decision #2763 (enforce-or-remove, ADR-0049; precedent
+ * ADR-0056 D8 — compliance-grade config must never merely look live).
+ */
+const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
+  strategy:
+    '`tenancy.strategy` was removed from @objectstack/spec after v15.0 (#2763) — it ' +
+    'never had a consumer. The platform has exactly two tenancy modes and neither is ' +
+    'object-level config: database-per-tenant isolation is an environment/deployment ' +
+    'choice (each environment carries its own database URL), and row-level isolation ' +
+    'is `tenancy.enabled` + `tenancy.tenantField`. Delete the key.',
+  crossTenantAccess:
+    '`tenancy.crossTenantAccess` was removed from @objectstack/spec after v15.0 (#2763) — it ' +
+    'never had a consumer; setting it granted nothing. Cross-tenant visibility is ' +
+    'governed by sharing rules / OWD (ADR-0056), `externalSharingModel` (ADR-0090 ' +
+    'D11), and the object access posture. Delete the key.',
+};
+
+/**
+ * Custom zod `error` for the `.strict()` tenancy block (#2763, pattern of
+ * `strictVisibilityError` / ADR-0089 D3a): an unknown key — a retired
+ * `strategy`/`crossTenantAccess` or a typo — is a loud, *fixable* parse error
+ * instead of a silent strip (#1535), and a retired key's error carries its
+ * upgrade prescription. Every other issue code defers to zod's default.
+ */
+const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
+  if (issue.code !== 'unrecognized_keys') return undefined;
+  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
+  const lines = keys.map((key) =>
+    TENANCY_RETIRED_KEY_GUIDANCE[key] ?? `\`${key}\` is not a \`tenancy\` key.`,
+  );
+  return (
+    `Unrecognized key(s) on \`tenancy\`: ${keys.map((k) => `\`${k}\``).join(', ')}. ` +
+    'The two supported tenancy modes are: database-per-tenant = environment-level ' +
+    'deployment (no object config); row-level isolation = `tenancy.enabled` + ' +
+    '`tenancy.tenantField`.\n' +
+    lines.map((l) => `  • ${l}`).join('\n')
+  );
+};
+
+/**
  * Multi-Tenancy Configuration Schema
- * Configures tenant isolation strategy for SaaS applications
- * 
- * @example Shared database with tenant_id isolation
+ * Row-level tenant isolation for shared-database SaaS applications: the
+ * tenant field is injected on write and enforced on read (RLS predicate).
+ * Platform objects declare `enabled: false` to opt out of org row-scoping
+ * (environment-level objects). Database-per-tenant isolation is NOT object
+ * metadata — it is an environment/deployment choice.
+ *
+ * `.strict()`: unknown keys (incl. the retired `strategy` /
+ * `crossTenantAccess`, #2763) are rejected with guidance, not stripped (#1535).
+ *
+ * @example Shared database with tenant_id row isolation
  * {
  *   enabled: true,
- *   strategy: 'shared',
- *   tenantField: 'tenant_id',
- *   crossTenantAccess: false
+ *   tenantField: 'tenant_id'
  * }
  */
 export const TenancyConfigSchema = lazySchema(() => z.object({
   enabled: z.boolean().describe('Enable multi-tenancy for this object'),
-  strategy: z.enum(['shared', 'isolated', 'hybrid']).describe('Tenant isolation strategy: shared (single DB, row-level), isolated (separate DB per tenant), hybrid (mix)'),
   tenantField: z.string().default('tenant_id').describe('Field name for tenant identifier'),
-  crossTenantAccess: z.boolean().default(false).describe('Allow cross-tenant data access (with explicit permission)'),
-}));
+}, { error: strictTenancyError }).strict());
 
 /**
  * [ADR-0066 D2] Secure-by-default object posture.

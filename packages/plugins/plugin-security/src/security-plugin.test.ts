@@ -224,7 +224,7 @@ describe('SecurityPlugin', () => {
       permissionSets: [tenantPolicySet],
       // Catalog table without organization_id; opts out of tenancy.
       objectFields: ['id', 'manifest_id', 'visibility', 'owner_org_id'],
-      schemaExtra: { tenancy: { enabled: false, strategy: 'shared' } },
+      schemaExtra: { tenancy: { enabled: false } },
       orgScoping: true,
     });
     await plugin.init(harness.ctx);
@@ -809,7 +809,7 @@ describe('SecurityPlugin', () => {
       const harness = makeMiddlewareCtx({
         permissionSets: [tenantPolicySet],
         objectFields: ['id', 'name'],
-        schemaExtra: { tenancy: { enabled: false, strategy: 'shared' } },
+        schemaExtra: { tenancy: { enabled: false } },
         orgScoping: true,
       });
       await plugin.init(harness.ctx);
