@@ -35,6 +35,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "デフォルトポジション",
         help: "新規ユーザーに自動的に割り当てられます"
       },
+      managed_by: {
+        label: "管理元",
+        help: "レコードの出所：platform（組み込み）/ package（宣言済み）/ admin（テナント作成）。",
+        options: {
+          platform: "プラットフォーム",
+          package: "パッケージ",
+          admin: "管理者"
+        }
+      },
       id: {
         label: "ポジション ID"
       },
@@ -80,6 +89,29 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_capability: {
+    label: "ケイパビリティ",
+    pluralLabel: "ケイパビリティ",
+    description: "権限セットおよびリソース要件から名前で参照される認可ケイパビリティ定義。",
+    fields: {
+      managed_by: {
+        label: "管理元",
+        help: "レコードの出所：platform / package（配布物、ユーザー削除不可）/ admin（設定で作成）。",
+        options: {
+          platform: "プラットフォーム",
+          package: "パッケージ",
+          admin: "管理者"
+        }
+      },
+      scope: {
+        label: "スコープ",
+        options: {
+          platform: "プラットフォーム",
+          org: "組織"
+        }
+      }
+    }
+  },
   sys_permission_set: {
     label: "権限セット",
     pluralLabel: "権限セット",
@@ -117,6 +149,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "有効"
+      },
+      managed_by: {
+        label: "管理元",
+        help: "レコードの出所：platform（配布）/ package（パッケージ）/ admin（環境作成）。",
+        options: {
+          platform: "プラットフォーム",
+          package: "パッケージ",
+          admin: "管理者"
+        }
       },
       id: {
         label: "権限セット ID"

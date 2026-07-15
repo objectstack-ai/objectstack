@@ -39,8 +39,8 @@ describe('audience anchors (ADR-0090 D5/D9)', () => {
       expect.arrayContaining(['platform_admin', 'org_owner', 'org_admin', 'org_member', 'everyone', 'guest']),
     );
     expect(res.seeded).toBe(6);
-    // system-managed, undeletable posture
-    for (const r of ql.tables.sys_position) expect(r.managed_by).toBe('system');
+    // platform-managed, undeletable posture (A4 #2920 unified vocab; formerly 'system')
+    for (const r of ql.tables.sys_position) expect(r.managed_by).toBe('platform');
   });
 
   it('re-seed is idempotent (updates, no duplicates)', async () => {

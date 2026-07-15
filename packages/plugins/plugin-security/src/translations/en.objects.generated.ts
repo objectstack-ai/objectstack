@@ -35,6 +35,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Default Position",
         help: "Automatically assigned to new users"
       },
+      managed_by: {
+        label: "Managed By",
+        help: "Record provenance: platform (built-in) / package (declared) / admin (tenant-created).",
+        options: {
+          platform: "Platform",
+          package: "Package",
+          admin: "Admin"
+        }
+      },
       id: {
         label: "Position ID"
       },
@@ -80,6 +89,29 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_capability: {
+    label: "Capability",
+    pluralLabel: "Capabilities",
+    description: "Authorization capability definitions referenced by name from permission sets and resource requirements.",
+    fields: {
+      managed_by: {
+        label: "Managed By",
+        help: "Record provenance: platform / package (shipped, not user-deletable) / admin (created in Setup).",
+        options: {
+          platform: "Platform",
+          package: "Package",
+          admin: "Admin"
+        }
+      },
+      scope: {
+        label: "Scope",
+        options: {
+          platform: "Platform",
+          org: "Organization"
+        }
+      }
+    }
+  },
   sys_permission_set: {
     label: "Permission Set",
     pluralLabel: "Permission Sets",
@@ -117,6 +149,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "Active"
+      },
+      managed_by: {
+        label: "Managed By",
+        help: "Record provenance: platform (shipped) / package (packaged) / admin (env-authored).",
+        options: {
+          platform: "Platform",
+          package: "Package",
+          admin: "Admin"
+        }
       },
       id: {
         label: "Permission Set ID"

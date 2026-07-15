@@ -164,13 +164,14 @@ describe('permissionSetBodyFromRow / permissionSetRowFields (round-trip)', () =>
 });
 
 describe('upsertEnvPermissionSet (ADR-0094 — record is a pure projection)', () => {
-  it('CREATES a missing record (managed_by user) — Studio-authored sets appear in Setup', async () => {
+  it('CREATES a missing record (managed_by admin) — Studio-authored sets appear in Setup', async () => {
     const ql = makeQl();
     const r = await upsertEnvPermissionSet(ql, envBody());
     expect(r.seeded).toBe(1);
     const row = ql.permRows[0];
     expect(row.name).toBe('organization_admin');
-    expect(row.managed_by).toBe('user');
+    // [A4 #2920] env/Studio-authored sets are ADMIN-owned (formerly 'user').
+    expect(row.managed_by).toBe('admin');
     expect(row.active).toBe(true);
     expect(JSON.parse(row.object_permissions)).toEqual(envBody().objects);
   });
@@ -218,7 +219,7 @@ describe('projectPermissionMutation (the awaited projector)', () => {
     const metadata = makeMetadataFacade();
     const r = await projectPermissionMutation(protocol, { ql, metadata }, { type: 'permission', name: 'organization_admin', state: 'active' });
     expect(r?.seeded).toBe(1);
-    expect(ql.permRows[0].managed_by).toBe('user');
+    expect(ql.permRows[0].managed_by).toBe('admin');
     // evaluator's registry-first list('permission') now resolves the same body,
     // marked as a projection echo so it can never masquerade as an artifact
     const entry = metadata.registry.get('permission/organization_admin');
@@ -394,7 +395,7 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     expect(protocol.saves[0].actor).toBe('usr_admin');
     expect(protocol.saves[0].item.objects).toEqual({ ticket: { allowRead: true } });
     expect(ql.permRows.length).toBe(1);
-    expect(ql.permRows[0].managed_by).toBe('user');
+    expect(ql.permRows[0].managed_by).toBe('admin');
     expect(opCtx.result?.name).toBe('support_agent');
   });
 
@@ -556,7 +557,7 @@ describe('reconcilePermissionSetProjection', () => {
     const out = await reconcilePermissionSetProjection(protocol, { ql });
     expect(out.projectedFromMetadata).toBe(1);
     expect(ql.permRows[0]?.name).toBe('organization_admin');
-    expect(ql.permRows[0]?.managed_by).toBe('user');
+    expect(ql.permRows[0]?.managed_by).toBe('admin');
   });
 
   it('backfills a legacy data-door-only record into the metadata store ONCE', async () => {

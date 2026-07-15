@@ -35,6 +35,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Puesto predeterminado",
         help: "Se asigna automáticamente a los nuevos usuarios."
       },
+      managed_by: {
+        label: "Gestionado por",
+        help: "Procedencia del registro: platform (integrado) / package (declarado) / admin (creado por el inquilino).",
+        options: {
+          platform: "Plataforma",
+          package: "Paquete",
+          admin: "Administrador"
+        }
+      },
       id: {
         label: "ID de rol"
       },
@@ -80,6 +89,29 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_capability: {
+    label: "Capacidad",
+    pluralLabel: "Capacidades",
+    description: "Definiciones de capacidades de autorización referenciadas por nombre desde conjuntos de permisos y requisitos de recursos.",
+    fields: {
+      managed_by: {
+        label: "Gestionado por",
+        help: "Procedencia del registro: platform / package (distribuido, no eliminable por el usuario) / admin (creado en Configuración).",
+        options: {
+          platform: "Plataforma",
+          package: "Paquete",
+          admin: "Administrador"
+        }
+      },
+      scope: {
+        label: "Ámbito",
+        options: {
+          platform: "Plataforma",
+          org: "Organización"
+        }
+      }
+    }
+  },
   sys_permission_set: {
     label: "Conjunto de permisos",
     pluralLabel: "Conjuntos de permisos",
@@ -117,6 +149,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "Activo"
+      },
+      managed_by: {
+        label: "Gestionado por",
+        help: "Procedencia del registro: platform (distribuido) / package (empaquetado) / admin (creado en el entorno).",
+        options: {
+          platform: "Plataforma",
+          package: "Paquete",
+          admin: "Administrador"
+        }
       },
       id: {
         label: "ID de conjunto de permisos"

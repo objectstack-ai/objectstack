@@ -31,6 +31,7 @@ import {
 import { cleanupPackagePermissions } from './cleanup-package-permissions.js';
 import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
+import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
@@ -1321,6 +1322,15 @@ export class SecurityPlugin implements Plugin {
           });
         } catch (e) {
           ctx.logger.warn('[security] capability seeding failed', { error: (e as Error).message });
+        }
+        // [A4 #2920] Heal residual legacy `managed_by` values (env sets stamped
+        // 'user'; older positions stamped system/config/user) onto the unified
+        // platform/package/admin vocab. Runs after the seeders so their canonical
+        // writes land first; idempotent and non-fatal.
+        try {
+          await normalizeManagedByVocab(ql, { logger: ctx.logger });
+        } catch (e) {
+          ctx.logger.warn('[security] managed_by vocab normalization failed (non-fatal)', { error: (e as Error).message });
         }
         bootstrapRanOnce = true;
         ctx.logger.info('[security] platform bootstrap complete', report);

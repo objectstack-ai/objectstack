@@ -45,6 +45,7 @@ export type {
 export { cleanupPackagePermissions } from './cleanup-package-permissions.js';
 export type { PackagePermissionCleanupOutcome } from './cleanup-package-permissions.js';
 export { claimSeedOwnership } from './claim-seed-ownership.js';
+export { normalizeManagedByVocab } from './normalize-managed-by.js';
 export { appDefaultPermissionSetName } from './app-default-permission-set.js';
 export { DelegatedAdminGate, isTenantAdmin } from './delegated-admin-gate.js';
 export { explainAccess, buildContextForUser } from './explain-engine.js';

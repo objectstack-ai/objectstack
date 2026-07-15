@@ -146,6 +146,38 @@ describe('RBAC object canonical names + row actions', () => {
     expect(names).toEqual(['activate_permission_set', 'clone_permission_set', 'deactivate_permission_set']);
   });
 
+  it('[A4 #2920] SysPermissionSet.managed_by is a select on the unified platform/package/admin vocab', () => {
+    const f: any = (SysPermissionSet.fields as any).managed_by;
+    expect(f, 'managed_by field exists').toBeDefined();
+    expect(f.type).toBe('select');
+    expect(f.readonly).toBe(true);
+    const opts = (f.options ?? []).map((o: any) => o.value).sort();
+    expect(opts).toEqual(['admin', 'package', 'platform']);
+  });
+
+  it('[A4 #2920] SysPosition.managed_by is a select on the unified vocab and appears in every list view', () => {
+    const f: any = (SysPosition.fields as any).managed_by;
+    expect(f, 'managed_by field exists').toBeDefined();
+    expect(f.type).toBe('select');
+    expect(f.readonly).toBe(true);
+    const opts = (f.options ?? []).map((o: any) => o.value).sort();
+    expect(opts).toEqual(['admin', 'package', 'platform']);
+    // The provenance column is surfaced in all four position list views.
+    const views: any = SysPosition.listViews;
+    for (const v of ['active', 'default_positions', 'custom', 'all_positions']) {
+      expect(views[v].columns, `${v} view shows managed_by`).toContain('managed_by');
+    }
+  });
+
+  it('[A4 #2920] all three RBAC catalogs share the identical managed_by vocabulary', () => {
+    const vocab = (schema: any) =>
+      ((schema.fields.managed_by.options ?? []) as any[]).map((o) => o.value).sort();
+    const cap = vocab(SysCapability);
+    expect(cap).toEqual(['admin', 'package', 'platform']);
+    expect(vocab(SysPermissionSet)).toEqual(cap);
+    expect(vocab(SysPosition)).toEqual(cap);
+  });
+
   it('[ADR-0094] declares a readonly `customized` provenance flag surfaced in the All list view', () => {
     const f: any = (SysPermissionSet.fields as any).customized;
     expect(f, 'customized field exists').toBeDefined();

@@ -24,8 +24,9 @@ export const SysPosition = ObjectSchema.create({
   // ADR-0068 D3: position-DEFINITION authority follows the isolation boundary.
   // Framework-reserved built-in identities (platform_admin / org_*) and the
   // ADR-0090 D9 audience anchors (everyone / guest) are seeded with
-  // `managed_by = 'system'` and MUST NOT be repurposed by a tenant; ad-hoc
-  // position definitions in a shared cross-tenant kernel namespace are forbidden.
+  // `managed_by = 'platform'` (A4 #2920 unified vocab; formerly 'system') and
+  // MUST NOT be repurposed by a tenant; ad-hoc position definitions in a shared
+  // cross-tenant kernel namespace are forbidden.
   protection: {
     lock: 'no-overlay',
     reason: 'RBAC schema is platform-defined — see ADR-0010.',
@@ -35,7 +36,7 @@ export const SysPosition = ObjectSchema.create({
   displayNameField: 'label',
   nameField: 'label', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{label}',
-  highlightFields: ['label', 'name', 'active', 'is_default'],
+  highlightFields: ['label', 'name', 'managed_by', 'active', 'is_default'],
 
   // Custom actions — positions drive capability distribution and are edited
   // rarely but require the four high-frequency sysadmin affordances every IdP
@@ -121,7 +122,7 @@ export const SysPosition = ObjectSchema.create({
       name: 'active',
       label: 'Active',
       data: { provider: 'object', object: 'sys_position' },
-      columns: ['label', 'name', 'is_default', 'updated_at'],
+      columns: ['label', 'name', 'managed_by', 'is_default', 'updated_at'],
       filter: [{ field: 'active', operator: 'equals', value: true }],
       sort: [{ field: 'label', order: 'asc' }],
       pagination: { pageSize: 50 },
@@ -131,7 +132,7 @@ export const SysPosition = ObjectSchema.create({
       name: 'default_positions',
       label: 'Default',
       data: { provider: 'object', object: 'sys_position' },
-      columns: ['label', 'name', 'description', 'active'],
+      columns: ['label', 'name', 'managed_by', 'description', 'active'],
       filter: [{ field: 'is_default', operator: 'equals', value: true }],
       sort: [{ field: 'label', order: 'asc' }],
       pagination: { pageSize: 50 },
@@ -141,7 +142,7 @@ export const SysPosition = ObjectSchema.create({
       name: 'custom',
       label: 'Custom',
       data: { provider: 'object', object: 'sys_position' },
-      columns: ['label', 'name', 'active', 'updated_at'],
+      columns: ['label', 'name', 'managed_by', 'active', 'updated_at'],
       filter: [{ field: 'is_default', operator: 'equals', value: false }],
       sort: [{ field: 'label', order: 'asc' }],
       pagination: { pageSize: 50 },
@@ -151,7 +152,7 @@ export const SysPosition = ObjectSchema.create({
       name: 'all_positions',
       label: 'All',
       data: { provider: 'object', object: 'sys_position' },
-      columns: ['label', 'name', 'active', 'is_default', 'updated_at'],
+      columns: ['label', 'name', 'managed_by', 'active', 'is_default', 'updated_at'],
       sort: [{ field: 'label', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
@@ -217,13 +218,28 @@ export const SysPosition = ObjectSchema.create({
     }),
 
     // ── System ───────────────────────────────────────────────────
-    // ADR-0068 D2/D3 — provenance of this row. `system` = a framework-reserved
-    // built-in identity position (seeded by bootstrapBuiltinPositions); `config` =
-    // stack-declared; null / `user` = tenant-created. Built-in rows are read-only.
-    managed_by: Field.text({
+    // [A4 #2920] Unified provenance tri-state — platform / package / admin —
+    // shared verbatim with sys_capability and sys_permission_set. Converted from
+    // free `text` to a constrained `select`. `platform` = a framework-reserved
+    // built-in identity position (seeded by bootstrapBuiltinRoles, read-only);
+    // `package` = stack/package-declared; `admin` = tenant-created in Setup.
+    // Back-compat: legacy rows may carry system (== platform) / config (== package)
+    // / user (== admin); no runtime path branches on those (every read keys on
+    // 'package' / 'platform'), and the boot normalizer heals them to the canonical
+    // vocab. Built-in (`platform`) rows self-heal on the next bootstrap upsert.
+    managed_by: Field.select({
       label: 'Managed By',
       readonly: true,
-      description: 'Provenance: system (built-in) / config (declared) / user (tenant)',
+      defaultValue: 'admin',
+      description:
+        'Record provenance (unified tri-state, A4 #2920): platform = framework built-in ' +
+        '(read-only) / package = stack/package-declared / admin = tenant-created. Legacy rows ' +
+        'may carry system (== platform) / config (== package) / user (== admin).',
+      options: [
+        { value: 'platform', label: 'Platform' },
+        { value: 'package', label: 'Package' },
+        { value: 'admin', label: 'Admin' },
+      ],
       group: 'System',
     }),
 

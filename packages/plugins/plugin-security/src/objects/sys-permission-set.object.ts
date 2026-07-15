@@ -225,15 +225,29 @@ export const SysPermissionSet = ObjectSchema.create({
       group: 'Provenance',
     }),
 
-    managed_by: Field.text({
+    // [A4 #2920] Unified provenance tri-state — platform / package / admin —
+    // shared verbatim with sys_capability and sys_position so an admin reads one
+    // vocabulary across all three RBAC catalogs. Converted from free `text` to a
+    // constrained `select` so the value is a labelled, i18n-able badge.
+    // Back-compat: legacy env rows carry 'user' (== admin). No runtime path
+    // branches on 'user' (every read keys on 'package' / 'platform', both
+    // unchanged), so those rows stay semantically correct; the boot normalizer
+    // (`normalizeManagedByVocab`) rewrites them to 'admin' idempotently.
+    managed_by: Field.select({
       label: 'Managed By',
       required: false,
       readonly: true,
-      maxLength: 16,
+      defaultValue: 'admin',
       description:
-        "Record provenance: 'package' = versioned package metadata (re-seeded on upgrade, " +
-        "read-mostly for admins); 'platform'/'user' = environment config (live-edited, never " +
-        'touched by package seeding). Absent on legacy rows.',
+        "Record provenance (unified tri-state, A4 #2920): 'platform' = shipped by the " +
+        "platform; 'package' = versioned package metadata (re-seeded on upgrade, read-mostly " +
+        "for admins); 'admin' = created/owned in this environment by an administrator " +
+        "(live-edited, never touched by package seeding). Legacy rows may carry 'user' (== admin).",
+      options: [
+        { value: 'platform', label: 'Platform' },
+        { value: 'package', label: 'Package' },
+        { value: 'admin', label: 'Admin' },
+      ],
       group: 'Provenance',
     }),
 

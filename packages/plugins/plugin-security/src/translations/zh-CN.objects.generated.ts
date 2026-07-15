@@ -35,6 +35,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "默认岗位",
         help: "自动分配给新用户"
       },
+      managed_by: {
+        label: "管理来源",
+        help: "记录来源：platform（平台内置）/ package（应用包声明）/ admin（租户创建）。",
+        options: {
+          platform: "平台",
+          package: "应用包",
+          admin: "管理员"
+        }
+      },
       id: {
         label: "岗位 ID"
       },
@@ -80,6 +89,29 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_capability: {
+    label: "能力",
+    pluralLabel: "能力",
+    description: "授权能力定义，由权限集和资源需求按名称引用。",
+    fields: {
+      managed_by: {
+        label: "管理来源",
+        help: "记录来源：platform / package（随包发布，不可用户删除）/ admin（在设置中创建）。",
+        options: {
+          platform: "平台",
+          package: "应用包",
+          admin: "管理员"
+        }
+      },
+      scope: {
+        label: "范围",
+        options: {
+          platform: "平台",
+          org: "组织"
+        }
+      }
+    }
+  },
   sys_permission_set: {
     label: "权限集",
     pluralLabel: "权限集",
@@ -117,6 +149,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "启用"
+      },
+      managed_by: {
+        label: "管理来源",
+        help: "记录来源：platform（平台发布）/ package（应用包发布）/ admin（环境自建）。",
+        options: {
+          platform: "平台",
+          package: "应用包",
+          admin: "管理员"
+        }
       },
       id: {
         label: "权限集 ID"

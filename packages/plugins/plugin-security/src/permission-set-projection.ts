@@ -190,7 +190,8 @@ function hasSchemaRegistry(ql: any): boolean {
  * ENVIRONMENT side.
  *
  * [ADR-0094] The record is a pure projection, so a missing row is CREATED
- * (`managed_by:'user'` — a Studio-authored set appears in Setup, where the
+ * (`managed_by:'admin'` — A4 #2920 unified vocab, formerly 'user'; a
+ * Studio-authored set appears in Setup, where the
  * #2867 band-aid declined to create). A PACKAGE-OWNED row is also projected —
  * an env-scope overlay is the platform's standard customization of a packaged
  * definition (ADR-0005; direction confirmed 2026-07-14, reversing the earlier
@@ -222,7 +223,10 @@ export async function upsertEnvPermissionSet(
       name: ps.name,
       ...permissionSetRowFields(ps),
       active: ps.active != null ? asBool(ps.active) : true,
-      managed_by: 'user',
+      // [A4 #2920] Unified provenance vocab: an env/Studio-authored set is
+      // ADMIN-owned (formerly stamped 'user'). No runtime path branches on the
+      // value except the 'package' guard, so this is a pure vocab rename.
+      managed_by: 'admin',
       ...(customized !== undefined ? { customized: !!customized } : {}),
     });
     if (created) out.seeded += 1;

@@ -12,9 +12,10 @@
  * `sys_member.role` for the org_* roles and the unscoped `admin_full_access`
  * grant for platform_admin — are NEVER changed by this seed.
  *
- * Idempotent upsert-by-name, no prune. Rows are stamped `managed_by = 'system'`
- * so tenants can see (but not repurpose) them. Runs on `kernel:ready` alongside
- * the platform-admin and declared-role bootstraps.
+ * Idempotent upsert-by-name, no prune. Rows are stamped `managed_by = 'platform'`
+ * (A4 #2920 unified vocab; formerly 'system') so tenants can see (but not
+ * repurpose) them. Runs on `kernel:ready` alongside the platform-admin and
+ * declared-role bootstraps.
  */
 
 import { BUILTIN_IDENTITY_NAMES, BUILTIN_IDENTITY_METADATA, EVERYONE_POSITION, GUEST_POSITION } from '@objectstack/spec';
@@ -77,7 +78,10 @@ export async function bootstrapBuiltinRoles(
     ...Object.entries(AUDIENCE_ANCHOR_METADATA),
   ];
   for (const [name, meta] of rows) {
-    const fields = { label: meta.label, description: meta.description, managed_by: 'system' };
+    // [A4 #2920] Unified provenance vocab: built-in identity/anchor positions are
+    // PLATFORM-shipped (formerly stamped 'system'). Re-upserted every boot, so
+    // legacy 'system' rows self-heal to 'platform' on the next kernel:ready.
+    const fields = { label: meta.label, description: meta.description, managed_by: 'platform' };
     const existing = await tryFind(ql, 'sys_position', { name }, 1);
     if (existing[0]?.id) {
       if (await tryUpdate(ql, 'sys_position', { id: existing[0].id, ...fields })) updated += 1;
