@@ -63,6 +63,7 @@ export {
   ObjectStackCapabilitiesSchema,
   ObjectQLCapabilitiesSchema,
   ObjectUICapabilitiesSchema,
+  KernelCapabilitiesSchema,
   ObjectOSCapabilitiesSchema
 } from './stack.zod';
 

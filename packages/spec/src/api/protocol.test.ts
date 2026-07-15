@@ -355,7 +355,7 @@ describe('GetDiscoveryResponseSchema (capabilities)', () => {
 
   it('should accept full DiscoverySchema-compatible response', () => {
     const result = GetDiscoveryResponseSchema.safeParse({
-      name: 'ObjectOS',
+      name: 'ObjectStack',
       version: '1.0.0',
       environment: 'development',
       routes: { data: '/api/v1/data', metadata: '/api/v1/meta' },
@@ -366,7 +366,7 @@ describe('GetDiscoveryResponseSchema (capabilities)', () => {
     });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.name).toBe('ObjectOS');
+      expect(result.data.name).toBe('ObjectStack');
       expect(result.data.environment).toBe('development');
     }
   });

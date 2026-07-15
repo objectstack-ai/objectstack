@@ -6,7 +6,7 @@ import { z } from 'zod';
  * # Environment Artifact Format Protocol (v0)
  *
  * Defines the immutable envelope produced by `objectstack compile` and consumed
- * by ObjectOS at boot. The artifact carries everything an ObjectOS instance
+ * by the ObjectStack runtime at boot. The artifact carries everything a runtime instance
  * needs to hydrate an environment kernel without reading control-plane DB rows
  * directly.
  *
@@ -49,7 +49,7 @@ export type EnvironmentArtifactHashAlgorithm = z.infer<typeof EnvironmentArtifac
 
 /**
  * Content-addressable checksum of the canonical JSON-serialized artifact body
- * (everything except the `checksum` field itself). Used by ObjectOS to verify
+ * (everything except the `checksum` field itself). Used by the runtime to verify
  * that the artifact bytes were not tampered with in transit and to key the
  * local artifact cache.
  */
@@ -126,7 +126,7 @@ export type EnvironmentArtifactFunction = z.infer<typeof EnvironmentArtifactFunc
 // ==========================================
 
 /**
- * Plugin/driver requirement entry. ObjectOS uses these to verify that the
+ * Plugin/driver requirement entry. The runtime uses these to verify that the
  * runtime has every plugin the environment depends on before hydrating the kernel.
  * Configuration values live in **Deployment Config**, not in the artifact.
  */
@@ -180,7 +180,7 @@ export type EnvironmentArtifactManifest = z.infer<typeof EnvironmentArtifactMani
  * artifact envelope to every domain schema bump.
  *
  * Treat this as a typed bag of arrays keyed by metadata category. Unknown
- * categories are passed through (`passthrough()`) so older ObjectOS builds can
+ * categories are passed through (`passthrough()`) so older runtime builds can
  * boot newer artifacts safely if no breaking changes were made.
  */
 export const EnvironmentArtifactMetadataSchema = z
@@ -247,7 +247,7 @@ export type EnvironmentArtifactPayloadRef = z.infer<typeof EnvironmentArtifactPa
  *
  * Produced by `objectstack compile`, served by the Environment Artifact API
  * (`GET /api/v1/cloud/environments/:environmentId/artifact`), and consumed by the
- * ObjectOS metadata loader to hydrate an environment kernel.
+ * runtime metadata loader to hydrate an environment kernel.
  *
  * Required fields (v0):
  * - `schemaVersion`: tracks the envelope itself.
@@ -274,7 +274,7 @@ export const EnvironmentArtifactSchema = z
 
     /**
      * Monotonic, content-addressable revision id assigned by the control plane
-     * when the artifact is published. Used as a cache key by ObjectOS and as
+     * when the artifact is published. Used as a cache key by the runtime and as
      * the rollback target by Studio.
      */
     commitId: z.string().min(1).describe('Content-addressable revision id'),

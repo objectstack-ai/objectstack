@@ -5,7 +5,7 @@
  * These define the "Law of Location" - where things must be in ObjectStack packages.
  * 
  * These paths are the source of truth used by:
- * - ObjectOS Runtime (to locate package components)
+ * - the ObjectStack runtime (to locate package components)
  * - ObjectStack CLI (to scaffold and validate packages)
  * - ObjectStudio IDE (to provide intelligent navigation and validation)
  */

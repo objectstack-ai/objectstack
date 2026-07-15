@@ -1229,16 +1229,16 @@ export function composeStacks(
 /**
  * 2. RUNTIME CAPABILITIES PROTOCOL (Dynamic)
  * ----------------------------------------------------------------------
- * Describes what the ObjectOS Platform *is* and *can do*.
+ * Describes what the ObjectStack platform *is* and *can do*.
  * AI Agents read this to understand:
  * - What APIs are available?
  * - What features are enabled?
  * - What limits exist?
- * 
+ *
  * The capabilities are organized by subsystem for clarity:
  * - ObjectQL: Data Layer capabilities
- * - ObjectUI: User Interface Layer capabilities  
- * - ObjectOS: System Layer capabilities
+ * - ObjectUI: User Interface Layer capabilities
+ * - Kernel: System Layer capabilities
  */
 
 /**
@@ -1322,17 +1322,17 @@ export const ObjectUICapabilitiesSchema = lazySchema(() => z.object({
 }));
 
 /**
- * ObjectOS Capabilities Schema
- * 
+ * Kernel Capabilities Schema
+ *
  * Defines capabilities related to the System Layer:
  * - Runtime environment and platform features
  * - API and integration capabilities
  * - Security and multi-tenancy
  * - System services (events, jobs, audit)
  */
-export const ObjectOSCapabilitiesSchema = lazySchema(() => z.object({
+export const KernelCapabilitiesSchema = lazySchema(() => z.object({
   /** System Identity */
-  version: z.string().describe('ObjectOS Kernel Version'),
+  version: z.string().describe('Kernel version'),
   environment: z.enum(['development', 'test', 'staging', 'production']),
   
   /** API Surface */
@@ -1424,14 +1424,19 @@ export const ObjectStackCapabilitiesSchema = lazySchema(() => z.object({
   /** User Interface Layer Capabilities (ObjectUI) */
   ui: ObjectUICapabilitiesSchema.describe('UI Layer capabilities'),
   
-  /** System/Runtime Layer Capabilities (ObjectOS) */
-  system: ObjectOSCapabilitiesSchema.describe('System/Runtime Layer capabilities'),
+  /** System/Runtime Layer Capabilities (Kernel) */
+  system: KernelCapabilitiesSchema.describe('System/Runtime Layer capabilities'),
 }));
 
 export type ObjectQLCapabilities = z.infer<typeof ObjectQLCapabilitiesSchema>;
 export type ObjectUICapabilities = z.infer<typeof ObjectUICapabilitiesSchema>;
-export type ObjectOSCapabilities = z.infer<typeof ObjectOSCapabilitiesSchema>;
+export type KernelCapabilities = z.infer<typeof KernelCapabilitiesSchema>;
 export type ObjectStackCapabilities = z.infer<typeof ObjectStackCapabilitiesSchema>;
+
+/** @deprecated Renamed — use {@link KernelCapabilitiesSchema}. The "ObjectOS" layer name is retired; ObjectOS now names the commercial runtime environment. */
+export const ObjectOSCapabilitiesSchema = KernelCapabilitiesSchema;
+/** @deprecated Renamed — use {@link KernelCapabilities}. */
+export type ObjectOSCapabilities = KernelCapabilities;
 
 
 

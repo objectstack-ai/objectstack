@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   ObjectQLCapabilitiesSchema,
   ObjectUICapabilitiesSchema,
-  ObjectOSCapabilitiesSchema,
+  KernelCapabilitiesSchema,
   ObjectStackCapabilitiesSchema,
   ObjectStackDefinitionSchema,
   defineStack,
   type ObjectQLCapabilities,
   type ObjectUICapabilities,
-  type ObjectOSCapabilities,
+  type KernelCapabilities,
   type ObjectStackCapabilities,
   type ObjectStackDefinitionInput,
 } from './stack.zod';
@@ -148,9 +148,14 @@ describe('ObjectUICapabilitiesSchema', () => {
   });
 });
 
-describe('ObjectOSCapabilitiesSchema', () => {
-  it('should accept valid ObjectOS capabilities with all features enabled', () => {
-    const capabilities: ObjectOSCapabilities = {
+describe('KernelCapabilitiesSchema', () => {
+  it('keeps the deprecated ObjectOS aliases pointing at the renamed exports', async () => {
+    const mod = await import('./stack.zod');
+    expect(mod.ObjectOSCapabilitiesSchema).toBe(mod.KernelCapabilitiesSchema);
+  });
+
+  it('should accept valid kernel capabilities with all features enabled', () => {
+    const capabilities: KernelCapabilities = {
       version: '1.0.0',
       environment: 'production',
       restApi: true,
@@ -183,20 +188,20 @@ describe('ObjectOSCapabilitiesSchema', () => {
       },
     };
 
-    expect(() => ObjectOSCapabilitiesSchema.parse(capabilities)).not.toThrow();
+    expect(() => KernelCapabilitiesSchema.parse(capabilities)).not.toThrow();
   });
 
   it('should require version and environment fields', () => {
-    expect(() => ObjectOSCapabilitiesSchema.parse({})).toThrow();
+    expect(() => KernelCapabilitiesSchema.parse({})).toThrow();
 
     expect(() =>
-      ObjectOSCapabilitiesSchema.parse({
+      KernelCapabilitiesSchema.parse({
         version: '1.0.0',
       })
     ).toThrow();
 
     expect(() =>
-      ObjectOSCapabilitiesSchema.parse({
+      KernelCapabilitiesSchema.parse({
         version: '1.0.0',
         environment: 'development',
       })
@@ -205,7 +210,7 @@ describe('ObjectOSCapabilitiesSchema', () => {
 
   it('should validate environment enum values', () => {
     expect(() =>
-      ObjectOSCapabilitiesSchema.parse({
+      KernelCapabilitiesSchema.parse({
         version: '1.0.0',
         environment: 'invalid',
       })
@@ -214,7 +219,7 @@ describe('ObjectOSCapabilitiesSchema', () => {
     const validEnvironments = ['development', 'test', 'staging', 'production'];
     validEnvironments.forEach((env) => {
       expect(() =>
-        ObjectOSCapabilitiesSchema.parse({
+        KernelCapabilitiesSchema.parse({
           version: '1.0.0',
           environment: env,
         })
@@ -223,7 +228,7 @@ describe('ObjectOSCapabilitiesSchema', () => {
   });
 
   it('should use default values for boolean fields', () => {
-    const result = ObjectOSCapabilitiesSchema.parse({
+    const result = KernelCapabilitiesSchema.parse({
       version: '1.0.0',
       environment: 'development',
     });
@@ -236,7 +241,7 @@ describe('ObjectOSCapabilitiesSchema', () => {
   });
 
   it('should accept optional limits object', () => {
-    const withLimits = ObjectOSCapabilitiesSchema.parse({
+    const withLimits = KernelCapabilitiesSchema.parse({
       version: '1.0.0',
       environment: 'production',
       limits: {
@@ -248,7 +253,7 @@ describe('ObjectOSCapabilitiesSchema', () => {
     expect(withLimits.limits?.maxObjects).toBe(500);
     expect(withLimits.limits?.apiRateLimit).toBe(100);
 
-    const withoutLimits = ObjectOSCapabilitiesSchema.parse({
+    const withoutLimits = KernelCapabilitiesSchema.parse({
       version: '1.0.0',
       environment: 'development',
     });
