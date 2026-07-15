@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, type ServiceObject } from './object.zod';
+import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, type ServiceObject } from './object.zod';
 
 describe('ObjectCapabilities', () => {
   it('should apply default values correctly', () => {
@@ -1279,7 +1279,7 @@ describe('ADR-0066 — object access posture (D2) + requiredPermissions (D3)', (
   it('round-trips access + requiredPermissions on an object', () => {
     const obj = ObjectSchema.create({
       name: 'sys_license',
-      tenancy: { enabled: false, strategy: 'shared' },
+      tenancy: { enabled: false },
       access: { default: 'private' },
       requiredPermissions: ['manage_licenses'],
       fields: { signed_token: { type: 'text' } },
@@ -1295,5 +1295,50 @@ describe('ADR-0066 — object access posture (D2) + requiredPermissions (D3)', (
     });
     expect(obj.access).toBeUndefined();
     expect(obj.requiredPermissions).toBeUndefined();
+  });
+});
+
+describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () => {
+  it('accepts the two live knobs and applies the tenantField default', () => {
+    const result = TenancyConfigSchema.parse({ enabled: true });
+    expect(result.enabled).toBe(true);
+    expect(result.tenantField).toBe('tenant_id');
+    expect(TenancyConfigSchema.parse({ enabled: false, tenantField: 'workspace_id' }))
+      .toEqual({ enabled: false, tenantField: 'workspace_id' });
+  });
+
+  it('rejects the retired `strategy` with a tombstone pointing at the two real modes', () => {
+    const result = TenancyConfigSchema.safeParse({ enabled: true, strategy: 'isolated' });
+    expect(result.success).toBe(false);
+    const message = result.error!.issues.map((i) => i.message).join('\n');
+    expect(message).toContain('removed in @objectstack/spec 16.0.0 (#2763)');
+    expect(message).toContain('environment/deployment');
+    expect(message).toContain('`tenancy.enabled` + `tenancy.tenantField`');
+  });
+
+  it('rejects the retired `crossTenantAccess` with a tombstone pointing at sharing/OWD', () => {
+    const result = TenancyConfigSchema.safeParse({ enabled: true, crossTenantAccess: true });
+    expect(result.success).toBe(false);
+    const message = result.error!.issues.map((i) => i.message).join('\n');
+    expect(message).toContain('crossTenantAccess');
+    expect(message).toContain('ADR-0056');
+    expect(message).toContain('externalSharingModel');
+  });
+
+  it('rejects arbitrary unknown tenancy keys instead of silently stripping them (#1535)', () => {
+    const result = TenancyConfigSchema.safeParse({ enabled: true, tenantfield: 'org_id' });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.message).join('\n'))
+      .toContain('`tenantfield` is not a `tenancy` key');
+  });
+
+  it('rejects a retired key on ObjectSchema.create() (the authoring entrypoint)', () => {
+    expect(() =>
+      ObjectSchema.create({
+        name: 'sys_license',
+        tenancy: { enabled: false, strategy: 'shared' } as never,
+        fields: { name: { type: 'text' } },
+      }),
+    ).toThrow(/removed in @objectstack\/spec 16\.0\.0/);
   });
 });

@@ -23,9 +23,31 @@ enforcement, minus the throw.
 
 Layer order mirrors the runtime pipeline:
 
-principal → required_permissions → object_crud → fls → owd_baseline →
+tenant_isolation → principal → required_permissions → object_crud → fls →
 
-depth → sharing → vama_bypass → rls.
+owd_baseline → depth → sharing → vama_bypass → rls.
+
+[C2 / ADR-0095] Record-grained explanation. The contract carries an optional
+
+`recordId` on the request and, when present, a per-layer `record` attribution
+
+plus a top-level `record` verdict on the response — so the sharing / rls / owd
+
+layers can report the ROW-LEVEL story for one concrete record (which share
+
+admitted it, which filter excluded it, whether the effective row filter
+
+matches). Object-level requests (no `recordId`) stay byte-compatible.
+
+[ADR-0095 D1/D2] The contract also reserves the kernel-chain vocabulary the
+
+β engine + UI will fill: the always-first tenant wall as `tenant_isolation`
+
+(Layer 0), a per-layer `kernelTier` marking Layer 0 vs. business RLS
+
+(Layer 1), and the monotonic posture ladder
+
+(PLATFORM_ADMIN > TENANT_ADMIN > MEMBER > EXTERNAL) on the resolved principal.
 
 <Callout type="info">
 **Source:** `packages/spec/src/security/explain.zod.ts`
@@ -34,8 +56,8 @@ depth → sharing → vama_bypass → rls.
 ## TypeScript Usage
 
 ```typescript
-import { AccessMatrix, AccessMatrixEntry, ExplainDecision, ExplainLayer, ExplainOperation, ExplainRequest } from '@objectstack/spec/security';
-import type { AccessMatrix, AccessMatrixEntry, ExplainDecision, ExplainLayer, ExplainOperation, ExplainRequest } from '@objectstack/spec/security';
+import { AccessMatrix, AccessMatrixEntry, AuthzPosture, ExplainDecision, ExplainLayer, ExplainMatchedRule, ExplainOperation, ExplainRecordAttribution, ExplainRequest } from '@objectstack/spec/security';
+import type { AccessMatrix, AccessMatrixEntry, AuthzPosture, ExplainDecision, ExplainLayer, ExplainMatchedRule, ExplainOperation, ExplainRecordAttribution, ExplainRequest } from '@objectstack/spec/security';
 
 // Validate data
 const result = AccessMatrix.parse(data);
@@ -76,6 +98,20 @@ const result = AccessMatrix.parse(data);
 
 ---
 
+## AuthzPosture
+
+ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows.
+
+### Allowed Values
+
+* `PLATFORM_ADMIN`
+* `TENANT_ADMIN`
+* `MEMBER`
+* `EXTERNAL`
+
+
+---
+
 ## ExplainDecision
 
 ### Properties
@@ -88,6 +124,7 @@ const result = AccessMatrix.parse(data);
 | **principal** | `Object` | ✅ |  |
 | **layers** | `Object[]` | ✅ |  |
 | **readFilter** | `any` | optional |  |
+| **record** | `Object` | optional | Row-level verdict for the specific record; set only for record-grained requests. |
 
 
 ---
@@ -98,10 +135,28 @@ const result = AccessMatrix.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **layer** | `Enum<'principal' \| 'required_permissions' \| 'object_crud' \| 'fls' \| 'owd_baseline' \| 'depth' \| 'sharing' \| 'vama_bypass' \| 'rls'>` | ✅ |  |
+| **layer** | `Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| 'fls' \| 'owd_baseline' \| 'depth' \| 'sharing' \| 'vama_bypass' \| 'rls'>` | ✅ |  |
+| **kernelTier** | `Enum<'layer_0_tenant' \| 'layer_1_business'>` | optional | ADR-0095 kernel layer: layer_0_tenant = the always-first org wall; layer_1_business = business RLS/sharing/ownership. |
 | **verdict** | `Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>` | ✅ |  |
 | **detail** | `string` | ✅ |  |
 | **contributors** | `Object[]` | ✅ |  |
+| **record** | `Object` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
+
+
+---
+
+## ExplainMatchedRule
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `Enum<'tenant_filter' \| 'owd_baseline' \| 'ownership' \| 'record_share' \| 'sharing_rule' \| 'team' \| 'territory' \| 'rls_policy'>` | ✅ | The row-visibility source kind evaluated for this record at this layer. |
+| **name** | `string` | ✅ | Stable identifier of the concrete rule, share, or policy that was evaluated. |
+| **grants** | `Enum<'read' \| 'edit' \| 'full'>` | optional | Access level a sharing source grants on the record (mirrors SharingLevel). |
+| **via** | `string` | optional | How the rule reached the principal — recipient group/position, ownership, or the matching criteria. |
+| **predicate** | `any` | optional | The row predicate this rule contributed, when it is filter-shaped (null = unrestricted). |
+| **effect** | `Enum<'admits' \| 'excludes' \| 'neutral'>` | ✅ | The rule's effect on THIS record: admits, excludes, or neutral. |
 
 
 ---
@@ -121,6 +176,21 @@ const result = AccessMatrix.parse(data);
 
 ---
 
+## ExplainRecordAttribution
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **outcome** | `Enum<'admitted' \| 'excluded' \| 'not_evaluated'>` | ✅ | This layer's row-level outcome for the record: admitted, excluded, or not_evaluated (skipped/not row-scoped). |
+| **rowFilter** | `any` | optional | The effective row predicate this layer contributed for the record set (null = unrestricted, __deny_all__ = zero rows). |
+| **matchesRecord** | `boolean` | optional | Whether the specific record satisfies rowFilter — the judgement behind outcome. |
+| **rules** | `Object[]` | ✅ | Concrete rules, shares, or policies this layer evaluated against the record, in evaluation order. |
+| **detail** | `string` | optional | Human-readable, record-specific explanation of this layer's outcome. |
+
+
+---
+
 ## ExplainRequest
 
 ### Properties
@@ -129,6 +199,7 @@ const result = AccessMatrix.parse(data);
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ |  |
 | **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge'>` | ✅ |  |
+| **recordId** | `string` | optional | Optional id of one concrete record to explain at row granularity; omitted = object-level (pre-C2) request. |
 | **userId** | `string` | optional |  |
 
 

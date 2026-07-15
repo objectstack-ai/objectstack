@@ -2,6 +2,7 @@
   "title": "Security Protocol",
   "pages": [
     "explain",
+    "misc",
     "permission",
     "rls",
     "sharing",

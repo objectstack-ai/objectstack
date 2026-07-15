@@ -1,0 +1,38 @@
+---
+title: Misc
+description: Misc protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/security/misc.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { CapabilityDeclaration } from '@objectstack/spec/security';
+import type { CapabilityDeclaration } from '@objectstack/spec/security';
+
+// Validate data
+const result = CapabilityDeclaration.parse(data);
+```
+
+---
+
+## CapabilityDeclaration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Stable capability key referenced by systemPermissions / requiredPermissions |
+| **label** | `string` | optional | Human label shown in Setup |
+| **description** | `string` | optional | What holding this capability permits |
+| **scope** | `Enum<'platform' \| 'org'>` | ✅ | platform = a platform-wide power; org = scoped to an organization |
+| **packageId** | `string` | optional | [ADR-0086 D3] Owning package id (author-declared fallback; absent = registry-stamped) |
+
+
+---
+

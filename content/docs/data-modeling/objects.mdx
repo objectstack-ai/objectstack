@@ -108,12 +108,15 @@ enable: {
 
 #### Multi-Tenancy
 
+Row-level tenant isolation in a shared database — the tenant field is injected
+on write and enforced on read. Database-per-tenant isolation is an
+environment/deployment choice (each environment carries its own database URL),
+not object metadata.
+
 ```typescript
 tenancy: {
   enabled: true,
-  strategy: 'shared',         // 'shared' | 'isolated' | 'hybrid'
   tenantField: 'tenant_id',
-  crossTenantAccess: false,
 }
 ```
 

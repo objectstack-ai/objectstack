@@ -14,8 +14,8 @@ API Operations Enum
 ## TypeScript Usage
 
 ```typescript
-import { ApiMethod, Index, ObjectAccessConfig, ObjectCapabilities, ObjectExternalBinding, ObjectFieldGroup, ObjectOwnershipEnum, ObjectRequiredPermissions, PerOperationRequiredPermissions, SoftDeleteConfig, TenancyConfig, VersioningConfig } from '@objectstack/spec/data';
-import type { ApiMethod, Index, ObjectAccessConfig, ObjectCapabilities, ObjectExternalBinding, ObjectFieldGroup, ObjectOwnershipEnum, ObjectRequiredPermissions, PerOperationRequiredPermissions, SoftDeleteConfig, TenancyConfig, VersioningConfig } from '@objectstack/spec/data';
+import { ApiMethod, Index, Lifecycle, LifecycleClass, ObjectAccessConfig, ObjectCapabilities, ObjectExternalBinding, ObjectFieldGroup, ObjectOwnershipEnum, ObjectRequiredPermissions, PerOperationRequiredPermissions, SoftDeleteConfig, TenancyConfig, VersioningConfig } from '@objectstack/spec/data';
+import type { ApiMethod, Index, Lifecycle, LifecycleClass, ObjectAccessConfig, ObjectCapabilities, ObjectExternalBinding, ObjectFieldGroup, ObjectOwnershipEnum, ObjectRequiredPermissions, PerOperationRequiredPermissions, SoftDeleteConfig, TenancyConfig, VersioningConfig } from '@objectstack/spec/data';
 
 // Validate data
 const result = ApiMethod.parse(data);
@@ -56,6 +56,35 @@ const result = ApiMethod.parse(data);
 | **type** | `Enum<'btree' \| 'hash' \| 'gin' \| 'gist' \| 'fulltext'>` | ✅ | Index algorithm type |
 | **unique** | `boolean` | ✅ | Whether the index enforces uniqueness |
 | **partial** | `string` | optional | Partial index condition (SQL WHERE clause for conditional indexes) |
+
+
+---
+
+## Lifecycle
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **class** | `Enum<'record' \| 'audit' \| 'telemetry' \| 'transient' \| 'event'>` | ✅ | Persistence contract: record (business truth, permanent) | audit (compliance ledger) | telemetry (high-freq log) | transient (ephemeral state) | event (bus messages). |
+| **retention** | `Object` | optional | Age-based retention window enforced by the LifecycleService Reaper. |
+| **ttl** | `Object` | optional | Per-row TTL auto-expiry (transient/event classes). |
+| **storage** | `Object` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
+| **archive** | `Object` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
+| **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
+
+
+---
+
+## LifecycleClass
+
+### Allowed Values
+
+* `record`
+* `audit`
+* `telemetry`
+* `transient`
+* `event`
 
 
 ---
@@ -199,9 +228,7 @@ Type: `string[]`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable multi-tenancy for this object |
-| **strategy** | `Enum<'shared' \| 'isolated' \| 'hybrid'>` | ✅ | Tenant isolation strategy: shared (single DB, row-level), isolated (separate DB per tenant), hybrid (mix) |
 | **tenantField** | `string` | ✅ | Field name for tenant identifier |
-| **crossTenantAccess** | `boolean` | ✅ | Allow cross-tenant data access (with explicit permission) |
 
 
 ---

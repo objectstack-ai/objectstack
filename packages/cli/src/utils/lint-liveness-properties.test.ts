@@ -117,11 +117,12 @@ describe('lintLivenessProperties', () => {
     expect(paths(findings).some((m) => m.includes('`timeout`'))).toBe(true);
   });
 
-  it('warns on the security-shaped dead props (tenancy.strategy / tool.permissions / permission.contextVariables)', () => {
-    const tenancy = lintLivenessProperties(objStack({ tenancy: { enabled: true, strategy: 'isolated' } }));
-    expect(paths(tenancy).some((m) => m.includes('tenancy.strategy'))).toBe(true);
-    // tenancy.enabled itself is live — must NOT warn.
-    expect(paths(tenancy).some((m) => m.includes('tenancy.enabled'))).toBe(false);
+  it('warns on the security-shaped dead props (tool.permissions / permission.contextVariables)', () => {
+    // tenancy.strategy/crossTenantAccess left this list at spec 16.0.0 (#2763):
+    // the schema now REJECTS them (strict tenancy block), so the ledger entries
+    // are gone and the live tenancy knobs must not warn.
+    const tenancy = lintLivenessProperties(objStack({ tenancy: { enabled: true, tenantField: 'org_id' } }));
+    expect(paths(tenancy).some((m) => m.includes('tenancy'))).toBe(false);
 
     const tool = lintLivenessProperties({ tools: [{ name: 't1', permissions: ['crm.admin'] }] });
     expect(paths(tool).some((m) => m.includes('`permissions`'))).toBe(true);

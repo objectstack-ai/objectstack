@@ -615,7 +615,7 @@ OAuth clients). These hit a non-obvious interaction:
 **Recipe — env-global, admin-only object that admins can fully see:**
 
 ```typescript
-tenancy: { enabled: false, strategy: 'shared' }, // env IS the tenant; admin viewAllRecords bypass applies
+tenancy: { enabled: false }, // env IS the tenant; admin viewAllRecords bypass applies
 requiredPermissions: ['manage_platform_settings'], // object-level gate → members get 403
 ```
 

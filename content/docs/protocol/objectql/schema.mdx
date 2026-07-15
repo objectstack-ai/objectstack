@@ -642,8 +642,7 @@ Isolate data by tenant:
 ```yaml
 name: customer
 tenancy:
-  enabled: true       # Automatically filter by the tenant field
-  strategy: shared    # shared (row-level) | isolated (DB per tenant) | hybrid
+  enabled: true       # Automatically filter by the tenant field (row-level isolation)
   tenantField: tenant_id
 fields:
   tenant_id:

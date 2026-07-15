@@ -57,6 +57,7 @@ const result = ExecutionContext.parse(data);
 | **positions** | `string[]` | ✅ |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
 | **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
 | **onBehalfOf** | `Object` | optional |  |
 | **permissions** | `string[]` | ✅ |  |
 | **systemPermissions** | `string[]` | optional |  |
@@ -65,6 +66,7 @@ const result = ExecutionContext.parse(data);
 | **rlsMembership** | `Record<string, string[]>` | optional |  |
 | **isSystem** | `boolean` | ✅ |  |
 | **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
 | **oauthScopes** | `string[]` | optional |  |
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |
