@@ -124,6 +124,14 @@ pnpm dev
 
 Alternatively, with the CLI installed: `os init my-app && cd my-app && os dev`.
 
+Ready for production? The scaffolded project is container-ready:
+
+```bash
+docker build -t my-app . && docker compose up -d   # app + Postgres on the official runtime image
+```
+
+See [Self-Hosted Deployment](https://docs.objectstack.ai/docs/deployment/self-hosting) for bare Node, Kubernetes, and the secrets you must pin.
+
 ### For Framework Contributors
 
 ```bash

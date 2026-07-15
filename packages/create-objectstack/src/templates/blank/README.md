@@ -40,6 +40,29 @@ otherwise fail *silently at runtime* — e.g. a bare `done` (instead of
 `record.done`) in an action predicate that would hide the action on every
 record. See `AGENTS.md` for the full convention.
 
+## Deploy
+
+The project ships container-ready — the `Dockerfile` builds your metadata into
+an artifact and runs it on the official ObjectStack runtime image
+(`ghcr.io/objectstack-ai/objectstack`):
+
+```bash
+# Image only
+docker build -t my-app .
+
+# Or the full app + Postgres stack
+cat > .env <<EOF
+POSTGRES_PASSWORD=$(openssl rand -hex 16)
+OS_AUTH_SECRET=$(openssl rand -hex 32)
+OS_SECRET_KEY=$(openssl rand -hex 32)
+EOF
+docker compose up -d
+curl -fsS http://localhost:8080/api/v1/health
+```
+
+Bare Node, Kubernetes, reverse-proxy wiring, and the required secrets are
+covered in [Self-Hosted Deployment](https://docs.objectstack.ai/docs/deployment/self-hosting).
+
 ## Next steps
 
 - Add an object: see the `objectstack-data` skill.
