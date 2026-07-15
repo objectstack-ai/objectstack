@@ -4945,11 +4945,14 @@ export class RestServer {
                     object: src.object,
                     operation: src.operation ?? 'read',
                     ...(src.userId != null && src.userId !== '' ? { userId: src.userId } : {}),
+                    // [C2 / ADR-0095] Optional record id — explains ONE concrete
+                    // row at record granularity; omitted stays object-level.
+                    ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
                 });
                 if (!parsed.success) {
                     return res.status(400).json({
                         code: 'VALIDATION_FAILED',
-                        message: 'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string }.',
+                        message: 'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
                         detail: String(parsed.error?.message ?? '').slice(0, 1000),
                     });
                 }

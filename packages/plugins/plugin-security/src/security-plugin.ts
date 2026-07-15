@@ -239,6 +239,13 @@ export class SecurityPlugin implements Plugin {
   private ql: any = null;
   /** [ADR-0090 D12] Delegated-admin write gate — wired in start() once `ql` exists. */
   private delegatedAdminGate: DelegatedAdminGate | null = null;
+  /**
+   * [C2 / ADR-0095] Lazy kernel-service resolver, captured in start(). Used by the
+   * record-grained explain path to reach the optional `sharing` service (a
+   * deployment without plugin-sharing simply resolves `undefined`). Late-bound so
+   * plugin load order does not matter.
+   */
+  private resolveKernelService: ((name: string) => any) | null = null;
   /** Unsubscribe handle for metadata-change cache invalidation (runtime metadata edits). */
   private metadataWatch: { unsubscribe: () => void } | null = null;
   /** ADR-0055: cache the resolved master-detail relation per controlled_by_parent object. */
@@ -356,6 +363,10 @@ export class SecurityPlugin implements Plugin {
     this.ql = ql;
     this.logger = ctx.logger;
     this.rlsCompiler.setLogger?.(ctx.logger);
+    // [C2 / ADR-0095] Late-bound resolver for the optional `sharing` service.
+    this.resolveKernelService = (name: string) => {
+      try { return ctx.getService(name); } catch { return undefined; }
+    };
 
     // Invalidate metadata-derived caches when object/field metadata changes
     // at runtime (Studio / AI authoring). Without this they go stale until
@@ -1461,12 +1472,13 @@ export class SecurityPlugin implements Plugin {
    * the middleware uses.
    */
   async explainAccessForCaller(
-    request: { object: string; operation: string; userId?: string },
+    request: { object: string; operation: string; userId?: string; recordId?: string },
     callerContext?: any,
   ): Promise<ExplainDecision> {
     const operation = String(request?.operation ?? 'read') as ExplainOperation;
     const object = String(request?.object ?? '');
     if (!object) throw new Error('[Security] explain: request.object is required');
+    const recordId = request?.recordId != null && request.recordId !== '' ? String(request.recordId) : undefined;
 
     let targetContext = callerContext ?? {};
     if (request.userId && request.userId !== callerContext?.userId) {
@@ -1494,6 +1506,11 @@ export class SecurityPlugin implements Plugin {
       targetContext = await buildContextForUser(this.ql, request.userId);
     }
 
+    // [C2 / ADR-0095] The optional `sharing` service backs the record-grained
+    // sharing attribution. Resolved lazily; absent (no plugin-sharing) → the
+    // record path still works, the sharing layer simply reports not_evaluated.
+    const sharing = recordId ? (this.resolveKernelService?.('sharing') as any) : undefined;
+
     return explainAccess(
       {
         ql: this.ql,
@@ -1508,8 +1525,31 @@ export class SecurityPlugin implements Plugin {
           return fp as any;
         },
         fallbackPermissionSet: this.fallbackPermissionSet,
+        // ── record-grained deps (only consulted when recordId is present) ──
+        computeLayeredRlsFilter: (sets, o, engineOp, c) => this.computeLayeredRlsFilter(sets as any, o, engineOp, c),
+        fetchRecord: async (o: string, rid: string) => {
+          try {
+            const finder = this.ql?.findOne
+              ? this.ql.findOne(o, { where: { id: rid }, context: { isSystem: true } })
+              : this.ql?.find?.(o, { where: { id: rid }, limit: 1, context: { isSystem: true } });
+            const res = await finder;
+            const row = Array.isArray(res) ? res[0] : res;
+            return row ?? null;
+          } catch {
+            return null;
+          }
+        },
+        ...(sharing && typeof sharing.buildReadFilter === 'function'
+          ? { sharingReadFilter: (o: string, c: any) => sharing.buildReadFilter(o, c) }
+          : {}),
+        ...(sharing && typeof sharing.listShares === 'function'
+          ? { listRecordShares: (o: string, rid: string, c: any) => sharing.listShares(o, rid, c) }
+          : {}),
+        ...(sharing && typeof sharing.canEdit === 'function'
+          ? { canEditRecord: (o: string, rid: string, c: any) => sharing.canEdit(o, rid, c) }
+          : {}),
       },
-      { object, operation, context: targetContext },
+      { object, operation, context: targetContext, recordId },
     );
   }
 
@@ -1904,6 +1944,23 @@ export class SecurityPlugin implements Plugin {
     operation: string,
     context: any,
   ): Promise<Record<string, unknown> | null> {
+    const { layer0, layer1 } = await this.computeLayeredRlsFilter(permissionSets, object, operation, context);
+    return andComposeLayers(layer0, layer1);
+  }
+
+  /**
+   * [C2 / ADR-0095 D1] The layered RLS split — `{ layer0, layer1 }` BEFORE the
+   * AND-compose. `computeRlsFilter` is the thin wrapper that composes them; the
+   * explain engine consumes the split directly so it can attribute the tenant
+   * wall (Layer 0) and business RLS (Layer 1) to a record SEPARATELY. Single code
+   * path → the record story cannot drift from the effective filter enforcement uses.
+   */
+  private async computeLayeredRlsFilter(
+    permissionSets: PermissionSet[],
+    object: string,
+    operation: string,
+    context: any,
+  ): Promise<{ layer0: Record<string, unknown> | null; layer1: Record<string, unknown> | null }> {
     // [ADR-0095 D1] Effective filter = Layer0(tenant) AND Layer1(business RLS).
     // The two are computed independently and never share a compiler, a merge
     // step, or a bypass bit (closes W1 by construction, W2 structurally).
@@ -1969,7 +2026,7 @@ export class SecurityPlugin implements Plugin {
       platformAdminBypass,
     });
 
-    return andComposeLayers(layer0, layer1);
+    return { layer0, layer1 };
   }
 
   /**

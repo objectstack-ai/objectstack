@@ -170,6 +170,140 @@ describe('explainAccess (ADR-0090 D6)', () => {
   });
 });
 
+describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
+  const REC_CTX = { userId: 'u1', tenantId: 'org1', positions: ['sales_rep', 'everyone'], permissions: [] };
+
+  function recDeps(opts: {
+    layered?: { layer0: any; layer1: any };
+    record?: Record<string, unknown> | null;
+    sharingFilter?: unknown;
+    shares?: any[];
+    canEdit?: boolean;
+    sets?: any[];
+    schema?: any;
+  } = {}): ExplainEngineDeps {
+    const base = makeDeps({ sets: opts.sets, schema: opts.schema });
+    return {
+      ...base,
+      computeLayeredRlsFilter: async () => opts.layered ?? { layer0: null, layer1: null },
+      fetchRecord: async () => (opts.record !== undefined ? opts.record : { id: 'r1', organization_id: 'org1', owner_id: 'u1' }),
+      sharingReadFilter: async () => (opts.sharingFilter !== undefined ? opts.sharingFilter : null),
+      listRecordShares: async () => opts.shares ?? [],
+      canEditRecord: async () => opts.canEdit ?? false,
+    };
+  }
+
+  it('leaves the object-level report byte-identical when no recordId is supplied (backward compat)', async () => {
+    const d = await explainAccess(recDeps(), { object: 'leave_request', operation: 'read', context: REC_CTX });
+    expect(d.record).toBeUndefined();
+    expect(d.principal).not.toHaveProperty('posture');
+    expect(d.layers.map((l) => l.layer)).toEqual([
+      'principal', 'required_permissions', 'object_crud', 'fls',
+      'owd_baseline', 'depth', 'sharing', 'vama_bypass', 'rls',
+    ]);
+    expect(d.layers.every((l) => l.kernelTier === undefined)).toBe(true);
+    expect(d.layers.every((l) => l.record === undefined)).toBe(true);
+  });
+
+  it('prepends the tenant_isolation Layer 0, tags every layer with kernelTier, and resolves posture', async () => {
+    const d = await explainAccess(
+      recDeps({ layered: { layer0: { organization_id: 'org1' }, layer1: null }, record: { id: 'r1', organization_id: 'org1', owner_id: 'u1' } }),
+      { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' },
+    );
+    expect(d.layers[0].layer).toBe('tenant_isolation');
+    expect(d.layers[0].kernelTier).toBe('layer_0_tenant');
+    expect(d.layers.find((l) => l.layer === 'rls')!.kernelTier).toBe('layer_1_business');
+    expect(d.principal.posture).toBe('MEMBER');
+    expect(d.record).toMatchObject({ recordId: 'r1', visible: true });
+  });
+
+  it('derives PLATFORM_ADMIN posture from the platform_admin position', async () => {
+    const d = await explainAccess(
+      recDeps({ sets: [ADMIN], layered: { layer0: null, layer1: null } }),
+      { object: 'leave_request', operation: 'read', context: { userId: 'a1', tenantId: 'org1', positions: ['platform_admin', 'everyone'], permissions: [] }, recordId: 'r1' },
+    );
+    expect(d.principal.posture).toBe('PLATFORM_ADMIN');
+  });
+
+  it('Layer 0 (the tenant wall) excludes a cross-org record — decidedBy tenant_isolation', async () => {
+    const d = await explainAccess(
+      recDeps({ layered: { layer0: { organization_id: 'org1' }, layer1: null }, record: { id: 'r1', organization_id: 'org2', owner_id: 'u1' } }),
+      { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' },
+    );
+    const tenant = d.layers.find((l) => l.layer === 'tenant_isolation')!;
+    expect(tenant.record!.outcome).toBe('excluded');
+    expect(tenant.record!.rules[0]).toMatchObject({ kind: 'tenant_filter', effect: 'excludes' });
+    expect(d.record).toMatchObject({ visible: false, decidedBy: 'tenant_isolation' });
+  });
+
+  it('Layer 1 (business RLS) excludes a non-matching record — decidedBy rls', async () => {
+    const d = await explainAccess(
+      recDeps({ layered: { layer0: null, layer1: { status: 'open' } }, record: { id: 'r1', organization_id: 'org1', owner_id: 'u1', status: 'closed' } }),
+      { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' },
+    );
+    const rls = d.layers.find((l) => l.layer === 'rls')!;
+    expect(rls.record!.outcome).toBe('excluded');
+    expect(rls.record!.matchesRecord).toBe(false);
+    expect(d.record).toMatchObject({ visible: false, decidedBy: 'rls' });
+  });
+
+  it('a record_share admits a non-owner on a private object — sharing admits, decidedBy sharing', async () => {
+    const d = await explainAccess(
+      recDeps({
+        layered: { layer0: null, layer1: null },
+        record: { id: 'r1', organization_id: 'org1', owner_id: 'u_other' },
+        shares: [{ id: 'shr_1', recipient_type: 'user', recipient_id: 'u1', access_level: 'read', source: 'manual' }],
+        sharingFilter: { $or: [{ owner_id: 'u1' }, { id: { $in: ['r1'] } }] },
+      }),
+      { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' },
+    );
+    const sharing = d.layers.find((l) => l.layer === 'sharing')!;
+    expect(sharing.record!.outcome).toBe('admitted');
+    expect(sharing.record!.rules[0]).toMatchObject({ kind: 'record_share', effect: 'admits', grants: 'read' });
+    expect(d.record).toMatchObject({ visible: true, decidedBy: 'sharing' });
+  });
+
+  it('private object, non-owner, no admitting share — not visible, decidedBy sharing', async () => {
+    const d = await explainAccess(
+      recDeps({ layered: { layer0: null, layer1: null }, record: { id: 'r1', organization_id: 'org1', owner_id: 'u_other' }, shares: [], sharingFilter: { owner_id: 'u1' } }),
+      { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' },
+    );
+    expect(d.layers.find((l) => l.layer === 'sharing')!.record!.outcome).toBe('excluded');
+    expect(d.record).toMatchObject({ visible: false, decidedBy: 'sharing' });
+  });
+
+  it('a missing record yields not_evaluated row layers and an invisible verdict', async () => {
+    const d = await explainAccess(
+      recDeps({ record: null }),
+      { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'missing' },
+    );
+    expect(d.record).toMatchObject({ visible: false });
+    expect(d.record!.decidedBy).toBeUndefined();
+    expect(d.layers.find((l) => l.layer === 'rls')!.record!.outcome).toBe('not_evaluated');
+    expect(d.layers.find((l) => l.layer === 'tenant_isolation')!.record!.outcome).toBe('not_evaluated');
+  });
+
+  it('write ops use the sharing service canEdit as the by-construction verdict', async () => {
+    const editor = PermissionSetSchema.parse({ name: 'editor', objects: { leave_request: { allowRead: true, allowEdit: true } } });
+    const d = await explainAccess(
+      recDeps({ sets: [editor], layered: { layer0: null, layer1: null }, record: { id: 'r1', organization_id: 'org1', owner_id: 'u_other' }, canEdit: true, shares: [] }),
+      { object: 'leave_request', operation: 'update', context: REC_CTX, recordId: 'r1' },
+    );
+    expect(d.layers.find((l) => l.layer === 'sharing')!.record!.outcome).toBe('admitted');
+    expect(d.record).toMatchObject({ recordId: 'r1', visible: true });
+  });
+
+  it('degrades gracefully with no record-grained deps — object-level layers plus a best-effort verdict', async () => {
+    // Only the base object-level deps: recordId is given but fetchRecord /
+    // computeLayeredRlsFilter etc. are absent (e.g. no plugin-sharing).
+    const d = await explainAccess(makeDeps(), { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' });
+    expect(d.layers[0].layer).toBe('tenant_isolation');
+    expect(d.record).toMatchObject({ recordId: 'r1' });
+    // record could not be fetched → not_evaluated tenant + invisible.
+    expect(d.layers.find((l) => l.layer === 'tenant_isolation')!.record!.outcome).toBe('not_evaluated');
+  });
+});
+
 describe('buildContextForUser', () => {
   const ql = {
     async find(object: string, opts: any) {

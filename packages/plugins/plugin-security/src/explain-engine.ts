@@ -20,15 +20,61 @@
  */
 
 import { isGrantActive, isGrantExpired } from '@objectstack/core';
+import { matchesFilterCondition } from '@objectstack/formula';
+import { BUILTIN_IDENTITY_PLATFORM_ADMIN, ADMIN_FULL_ACCESS } from '@objectstack/spec';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type {
+  AuthzPosture,
   ExplainDecision,
   ExplainLayer,
+  ExplainMatchedRule,
   ExplainOperation,
+  ExplainRecordAttribution,
 } from '@objectstack/spec/security';
 import type { PermissionEvaluator } from './permission-evaluator.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
+
+/** Owner field convention — mirrors plugin-sharing's `OWNER_FIELD` (single-owner MVP). */
+const OWNER_FIELD = 'owner_id';
+
+/**
+ * [C2 / ADR-0095 D1] Which kernel tier a pipeline layer belongs to: the
+ * always-first tenant wall (`layer_0_tenant`) vs. everything downstream of it
+ * (business RLS / sharing / ownership / the capability gates), all
+ * `layer_1_business`. The binary mirrors the enforcement split — Layer 0 has its
+ * own code path and is AND-composed BEFORE any business rule.
+ */
+function kernelTierOf(layer: ExplainLayer['layer']): 'layer_0_tenant' | 'layer_1_business' {
+  return layer === 'tenant_isolation' ? 'layer_0_tenant' : 'layer_1_business';
+}
+
+/**
+ * [C2 / ADR-0095 D2] Resolve the principal's posture rung. This is the B2
+ * stand-in derivation the task calls for — until the full posture resolver lands
+ * it is derived from the SAME evidence enforcement already trusts: the derived
+ * `platform_admin` built-in / an unscoped `admin_full_access` grant (PLATFORM_ADMIN),
+ * the org-admin/owner roles projected by `resolveAuthzContext` (TENANT_ADMIN), an
+ * authenticated user (MEMBER), or an anonymous / guest principal (EXTERNAL).
+ *
+ * TODO(B2): replace with the monotonic posture resolved once in
+ * `resolveAuthzContext` when it merges; the rung values are already stable.
+ */
+function derivePosture(context: any): AuthzPosture {
+  const positions: string[] = Array.isArray(context?.positions) ? context.positions : [];
+  const permissions: string[] = Array.isArray(context?.permissions) ? context.permissions : [];
+  if (!context?.userId || context?.principalKind === 'guest') return 'EXTERNAL';
+  if (positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN) || permissions.includes(ADMIN_FULL_ACCESS)) {
+    return 'PLATFORM_ADMIN';
+  }
+  if (positions.includes('org_owner') || positions.includes('org_admin')) return 'TENANT_ADMIN';
+  return 'MEMBER';
+}
+
+/** True iff a composed filter is the zero-rows deny sentinel. */
+function isDenyAll(filter: unknown): boolean {
+  return !!filter && typeof filter === 'object' && (filter as any).id === '__deny_all__';
+}
 
 /** Explain-operation → engine-operation (the middleware's vocabulary). */
 const EXPLAIN_TO_ENGINE_OP: Record<ExplainOperation, string> = {
@@ -68,6 +114,36 @@ export interface ExplainEngineDeps {
   ) => Record<string, { readable?: boolean; editable?: boolean }>;
   /** Configured additive baseline set name (default member_default), for attribution. */
   fallbackPermissionSet: string | null;
+
+  // ── [C2 / ADR-0095] Record-grained deps. All OPTIONAL: absent → the engine
+  // stays object-level and byte-compatible. Present → the sharing / rls / owd /
+  // tenant_isolation layers gain per-record attribution. Every one reuses an
+  // enforcement code path so the row story cannot drift from execution. ──
+
+  /**
+   * The middleware's RLS composition, SPLIT into its two independent kernel
+   * layers (the same `Layer0(tenant) AND Layer1(business)` the effective filter
+   * is built from). Lets the tenant wall (Layer 0) and business RLS (Layer 1) be
+   * attributed to a record separately. `undefined` return = engine cannot split.
+   */
+  computeLayeredRlsFilter?: (
+    sets: PermissionSet[],
+    object: string,
+    engineOperation: string,
+    context: any,
+  ) => Promise<{ layer0: Record<string, unknown> | null; layer1: Record<string, unknown> | null }>;
+  /** Fetch the one record under a system context (organization_id / owner_id + fields for filter matching). */
+  fetchRecord?: (object: string, recordId: string, engineOperation: string) => Promise<Record<string, unknown> | null>;
+  /** The sharing service's own read-filter contribution for the object (owner-match OR granted-ids), same as enforcement AND-s in. */
+  sharingReadFilter?: (object: string, context: any) => Promise<unknown | null>;
+  /** The concrete `sys_record_share` rows attached to the record (for `rules[]` attribution). */
+  listRecordShares?: (
+    object: string,
+    recordId: string,
+    context: any,
+  ) => Promise<Array<{ id?: string; recipient_type?: string; recipient_id?: string; access_level?: 'read' | 'edit' | 'full'; source?: string; source_id?: string }>>;
+  /** The sharing service's per-record write gate (`canEdit`) — the by-construction verdict for write operations. */
+  canEditRecord?: (object: string, recordId: string, context: any) => Promise<boolean>;
 }
 
 export interface ExplainInput {
@@ -75,6 +151,15 @@ export interface ExplainInput {
   operation: ExplainOperation;
   /** Execution context of the principal being EXPLAINED (not the caller). */
   context: any;
+  /**
+   * [C2 / ADR-0095] Optional id of ONE concrete record to explain at row
+   * granularity. Omitted → object-level (the report is byte-identical to the
+   * pre-C2 engine). Present → the row-scoped layers gain a `record` attribution,
+   * the tenant wall surfaces as the `tenant_isolation` Layer 0, every layer is
+   * tagged with its `kernelTier`, the principal's `posture` is resolved, and the
+   * decision carries a top-level `record` verdict.
+   */
+  recordId?: string;
 }
 
 /**
@@ -267,6 +352,266 @@ function describeOwd(schema: any): { model: string; declared: boolean; effect: '
       : { model: "(unset → 'private', ADR-0090 D1 fail-closed default)", declared: false, effect: 'private' };
   }
   return { model: `${String(m)} (unknown → private, fail-closed)`, declared: true, effect: 'private' };
+}
+
+/**
+ * [C2 / ADR-0095] Inputs the record-grained augmentation needs from the already
+ * computed object-level pass — the row story is decomposed FROM the same facts,
+ * never re-judged.
+ */
+interface RecordAttributionContext {
+  deps: ExplainEngineDeps;
+  object: string;
+  recordId: string;
+  engineOp: string;
+  context: any;
+  sets: PermissionSet[];
+  layers: ExplainLayer[];
+  owd: { model: string; effect: 'private' | 'read' | 'public' };
+  capsDeny: boolean;
+  crudAllowed: boolean;
+}
+
+/**
+ * [C2 / ADR-0095] Fill the per-record row story onto the pipeline. Prepends the
+ * `tenant_isolation` Layer 0, tags every layer with its `kernelTier`, attaches a
+ * `record` attribution to the four row-scoped layers (tenant / owd / sharing /
+ * rls), and returns the top-level `record` verdict. Every row-level judgement is
+ * evaluated with the SAME artifacts enforcement produces:
+ *   - Layer 0 / Layer 1 filters come from `computeLayeredRlsFilter` (the middleware's
+ *     own `Layer0(tenant) AND Layer1(business)` split);
+ *   - "does THIS record satisfy the filter?" is `matchesFilterCondition` — the
+ *     third canonical backend for the same FilterCondition shape the query runs;
+ *   - the write verdict is the sharing service's own `canEdit`.
+ * So the record story is explained by construction, exactly like the object-level pass.
+ */
+async function applyRecordAttribution(
+  ra: RecordAttributionContext,
+): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
+  const { deps, object, recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed } = ra;
+  const isRead = engineOp === 'find';
+  const posture = derivePosture(context);
+
+  const record = deps.fetchRecord
+    ? await deps.fetchRecord(object, recordId, engineOp).catch(() => null)
+    : null;
+  const recordExists = record != null;
+  const matches = (filter: unknown): boolean | undefined => {
+    if (!recordExists) return undefined;
+    if (filter == null) return true;
+    return matchesFilterCondition(record as Record<string, unknown>, filter as any);
+  };
+
+  const layered = deps.computeLayeredRlsFilter
+    ? await deps.computeLayeredRlsFilter(sets, object, engineOp, context).catch(() => ({ layer0: null, layer1: null }))
+    : undefined;
+  const layer0 = layered?.layer0;
+  const layer1 = layered?.layer1;
+
+  // ── Layer 0: tenant_isolation (prepended as the always-first layer) ──────
+  let tenantRecord: ExplainRecordAttribution;
+  if (!recordExists) {
+    tenantRecord = { outcome: 'not_evaluated', rules: [], detail: 'Record not found under a system read — filtered, deleted, or never existed.' };
+  } else if (layered === undefined) {
+    tenantRecord = { outcome: 'not_evaluated', rules: [], detail: 'Tenant layer split is unavailable on this engine build.' };
+  } else if (layer0 == null) {
+    tenantRecord = {
+      outcome: 'not_evaluated', rowFilter: null, rules: [],
+      detail: 'Layer 0 contributes nothing here — single-tenant mode, a non-tenant object, or a platform-admin crossing the wall (ADR-0095 D1).',
+    };
+  } else {
+    const deny = isDenyAll(layer0);
+    const m = matches(layer0);
+    const excluded = deny || m === false;
+    tenantRecord = {
+      outcome: excluded ? 'excluded' : 'admitted',
+      rowFilter: layer0,
+      matchesRecord: deny ? false : m,
+      rules: [{
+        kind: 'tenant_filter',
+        name: 'organization_isolation',
+        predicate: layer0,
+        via: context?.tenantId ? `organization ${context.tenantId}` : 'organization wall',
+        effect: excluded ? 'excludes' : 'admits',
+      }],
+      detail: deny
+        ? 'No active organization on the context — the tenant wall denies all rows (fail closed).'
+        : excluded
+          ? `Record's organization does not match the caller's active organization (${context?.tenantId ?? 'none'}).`
+          : `Record is inside the caller's active organization (${context?.tenantId ?? 'none'}).`,
+    };
+  }
+  layers.unshift({
+    layer: 'tenant_isolation',
+    kernelTier: 'layer_0_tenant',
+    verdict: tenantRecord.outcome === 'excluded' ? 'denies' : layer0 ? 'narrows' : 'not_applicable',
+    detail: 'Layer 0 tenant isolation — the always-first org wall, AND-composed before any business RLS (ADR-0095 D1).',
+    contributors: [],
+    record: tenantRecord,
+  });
+
+  // ── owd_baseline: ownership + the record baseline's own contribution ─────
+  const ownerRaw = recordExists ? (record as Record<string, unknown>)[OWNER_FIELD] : undefined;
+  const hasOwnerField = recordExists && OWNER_FIELD in (record as Record<string, unknown>);
+  const ownerIsMe = ownerRaw != null && context?.userId != null && String(ownerRaw) === String(context.userId);
+  const owdLayer = layers.find((l) => l.layer === 'owd_baseline');
+  if (owdLayer) {
+    const owdRules: ExplainMatchedRule[] = [{
+      kind: 'owd_baseline',
+      name: owd.model,
+      effect: owd.effect === 'private' ? (ownerIsMe ? 'admits' : 'excludes') : 'admits',
+      via: `OWD ${owd.model}`,
+    }];
+    if (hasOwnerField) {
+      owdRules.push({
+        kind: 'ownership',
+        name: OWNER_FIELD,
+        via: ownerIsMe ? 'owner' : `owned by ${ownerRaw ?? 'nobody'}`,
+        effect: ownerIsMe ? 'admits' : 'neutral',
+      });
+    }
+    owdLayer.record = !recordExists
+      ? { outcome: 'not_evaluated', rules: [], detail: 'Record not found; baseline not evaluated.' }
+      : {
+          outcome: owd.effect === 'private' ? (ownerIsMe ? 'admitted' : 'excluded') : 'admitted',
+          matchesRecord: owd.effect === 'private' ? ownerIsMe : true,
+          rules: owdRules,
+          detail: owd.effect === 'private'
+            ? (ownerIsMe
+                ? 'Caller owns the record — the private baseline admits it.'
+                : 'Private baseline admits only the owner; a share or sharing rule may still widen access (see the sharing layer).')
+            : `Baseline ${owd.model} admits the record at the row level; capability and field layers still apply.`,
+        };
+  }
+
+  // ── sharing: the concrete shares + the sharing service's filter/gate ─────
+  const shares = deps.listRecordShares && recordExists
+    ? await deps.listRecordShares(object, recordId, context).catch(() => [])
+    : [];
+  const shareRules: ExplainMatchedRule[] = (shares ?? []).map((s) => {
+    const recipMatchesUser = s.recipient_type === 'user' && s.recipient_id != null && String(s.recipient_id) === String(context?.userId);
+    const kind: ExplainMatchedRule['kind'] =
+      s.source === 'rule' ? 'sharing_rule' : s.source === 'team' ? 'team' : 'record_share';
+    return {
+      kind,
+      name: String(s.source_id || s.id || 'share'),
+      grants: s.access_level,
+      via: `${s.recipient_type ?? 'user'}:${s.recipient_id ?? '?'}`,
+      // A group/role/unit recipient can't be confirmed against the principal
+      // without expansion → reported `neutral` (evaluated, effect unknown here).
+      effect: recipMatchesUser ? 'admits' : 'neutral',
+    };
+  });
+  const sharingFilter = deps.sharingReadFilter && recordExists
+    ? await deps.sharingReadFilter(object, context).catch(() => null)
+    : undefined;
+  const sharingMatches = sharingFilter === undefined ? undefined : matches(sharingFilter);
+  // Write ops: the by-construction verdict is the sharing service's own canEdit.
+  const canEdit = !isRead && deps.canEditRecord && recordExists
+    ? await deps.canEditRecord(object, recordId, context).catch(() => undefined)
+    : undefined;
+  const anyShareAdmits = shareRules.some((r) => r.effect === 'admits');
+  let sharingOutcome: ExplainRecordAttribution['outcome'];
+  if (!recordExists) {
+    sharingOutcome = 'not_evaluated';
+  } else if (owd.effect !== 'private') {
+    sharingOutcome = 'not_evaluated'; // baseline already grants the rows sharing would add
+  } else if (canEdit !== undefined) {
+    sharingOutcome = canEdit ? 'admitted' : 'excluded';
+  } else if (ownerIsMe || anyShareAdmits || sharingMatches === true) {
+    sharingOutcome = 'admitted';
+  } else if (sharingFilter === undefined && shares.length === 0) {
+    sharingOutcome = 'not_evaluated';
+  } else {
+    sharingOutcome = 'excluded';
+  }
+  const sharingLayer = layers.find((l) => l.layer === 'sharing');
+  if (sharingLayer) {
+    sharingLayer.record = {
+      outcome: sharingOutcome,
+      rowFilter: sharingFilter === undefined ? undefined : sharingFilter,
+      matchesRecord: sharingMatches,
+      rules: shareRules,
+      detail: !recordExists
+        ? 'Record not found; sharing not evaluated.'
+        : owd.effect !== 'private'
+          ? 'Baseline is not private — sharing adds nothing beyond it for this record.'
+          : canEdit !== undefined
+            ? (canEdit
+                ? 'The sharing service grants write on this record (ownership or an edit/full share).'
+                : 'No ownership and no edit/full share grants write on this record.')
+            : sharingOutcome === 'admitted'
+              ? (ownerIsMe ? 'Caller owns the record — visible without a share.' : `${shareRules.length} share(s) attached; access is granted for this record.`)
+              : `${shareRules.length} share(s) attached; none grants the caller access to this record.`,
+    };
+  }
+
+  // ── rls: the business (Layer 1) predicate for this record ────────────────
+  const rlsLayer = layers.find((l) => l.layer === 'rls');
+  if (rlsLayer) {
+    if (!recordExists) {
+      rlsLayer.record = { outcome: 'not_evaluated', rules: [], detail: 'Record not found; business RLS not evaluated.' };
+    } else if (layered === undefined) {
+      rlsLayer.record = { outcome: 'not_evaluated', rules: [], detail: 'Business RLS split is unavailable on this engine build.' };
+    } else if (layer1 == null) {
+      rlsLayer.record = { outcome: 'not_evaluated', rowFilter: null, rules: [], detail: 'No business RLS policy applies to this record.' };
+    } else {
+      const deny = isDenyAll(layer1);
+      const m = matches(layer1);
+      const excluded = deny || m === false;
+      rlsLayer.record = {
+        outcome: excluded ? 'excluded' : 'admitted',
+        rowFilter: layer1,
+        matchesRecord: deny ? false : m,
+        rules: [{ kind: 'rls_policy', name: 'business_rls', predicate: layer1, effect: excluded ? 'excludes' : 'admits' }],
+        detail: deny
+          ? 'Business RLS composes to DENY ALL for this principal.'
+          : excluded
+            ? 'The record does not satisfy the business row-level predicate.'
+            : 'The record satisfies the business row-level predicate.',
+      };
+    }
+  }
+
+  // ── kernelTier on every layer + posture resolution ───────────────────────
+  for (const l of layers) {
+    if (!l.kernelTier) l.kernelTier = kernelTierOf(l.layer);
+  }
+
+  // ── decision.record: bottom line + decisive layer ────────────────────────
+  const tenantExcluded = tenantRecord.outcome === 'excluded';
+  const rlsExcluded = rlsLayer?.record?.outcome === 'excluded';
+  const businessRowAdmits = isRead
+    ? owd.effect !== 'private' || ownerIsMe || sharingOutcome === 'admitted'
+    : canEdit !== undefined
+      ? canEdit
+      : owd.effect === 'public' || ownerIsMe || sharingOutcome === 'admitted';
+
+  let visible: boolean;
+  let decidedBy: NonNullable<ExplainDecision['record']>['decidedBy'];
+  if (capsDeny) { visible = false; decidedBy = 'required_permissions'; }
+  else if (!crudAllowed) { visible = false; decidedBy = 'object_crud'; }
+  else if (!recordExists) { visible = false; decidedBy = undefined; }
+  else if (tenantExcluded) { visible = false; decidedBy = 'tenant_isolation'; }
+  else if (rlsExcluded) { visible = false; decidedBy = 'rls'; }
+  else if (!businessRowAdmits) { visible = false; decidedBy = owd.effect === 'private' ? 'sharing' : 'owd_baseline'; }
+  else {
+    visible = true;
+    decidedBy = (owd.effect === 'private' && !ownerIsMe && sharingOutcome === 'admitted')
+      ? 'sharing'
+      : layer1 != null
+        ? 'rls'
+        : owd.effect === 'private' && ownerIsMe
+          ? 'owd_baseline'
+          : layer0 != null
+            ? 'tenant_isolation'
+            : 'object_crud';
+  }
+
+  return {
+    record: { recordId, visible, ...(decidedBy ? { decidedBy } : {}) },
+    posture,
+  };
 }
 
 export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput): Promise<ExplainDecision> {
@@ -546,6 +891,19 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
 
   const allowed = !capsDeny && crudAllowed && !denyAll && !delegatorMissing;
 
+  // ── [C2 / ADR-0095] Record-grained augmentation ─────────────────────────
+  // Object-level (no recordId) is left BYTE-IDENTICAL: no tenant_isolation
+  // layer, no kernelTier, no posture, no per-layer/decision `record`.
+  let recordVerdict: ExplainDecision['record'] | undefined;
+  let posture: AuthzPosture | undefined;
+  if (input.recordId) {
+    const out = await applyRecordAttribution({
+      deps, object, recordId: input.recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed,
+    });
+    recordVerdict = out.record;
+    posture = out.posture;
+  }
+
   const decision: ExplainDecision = {
     allowed,
     object,
@@ -556,9 +914,11 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
       permissionSets: setNames,
       ...(context?.principalKind ? { principalKind: context.principalKind } : {}),
       ...(context?.onBehalfOf?.userId ? { onBehalfOf: { userId: context.onBehalfOf.userId } } : {}),
+      ...(posture ? { posture } : {}),
     },
     layers,
     ...(operation === 'read' ? { readFilter: readFilter ?? null } : {}),
+    ...(recordVerdict ? { record: recordVerdict } : {}),
   };
   return decision;
 }
