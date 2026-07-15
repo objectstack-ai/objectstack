@@ -125,6 +125,11 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       'ui/view.zod.ts:visibleWhen',
       'ui/view.zod.ts:visibleOn',
       'ui/component.zod.ts:onSubmit',
+      // Conditional tabs (framework#2606): `page:tabs` item-level visibility.
+      // Canonical ADR-0089 `visibleWhen` from day one (no deprecated alias on
+      // this new surface). Interpreted by the objectui page:tabs renderer to
+      // omit the whole tab (header + panel) when FALSE.
+      'ui/component.zod.ts:visibleWhen',
       'system/settings-manifest.zod.ts:visible',
     ],
   },
