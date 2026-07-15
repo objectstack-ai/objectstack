@@ -203,11 +203,22 @@ const EXPECTED_MATRIX: Record<string, Record<string, { read: unknown; write: unk
     org_admin: { read: null, write: 'BYPASS(no-write-filter)' },
     // [D1 accepted delta (c)] A member reading a `tenancy.enabled:false` global
     // object: Layer 0 treats it as a NON-tenant object (no phantom org filter) →
-    // the global catalog is VISIBLE (read: null). The write drops the dead
-    // org-disjunct to plain owner scope (same visibility, no org column exists).
-    member: { read: null, write: [{ created_by: 'u1' }] },
-    // [D1 accepted delta (c)] no-org member likewise sees the global catalog (was deny-sentinel).
-    no_org_member: { read: null, write: [{ created_by: 'u2' }] },
+    // the global catalog is VISIBLE (read: null).
+    // [#2936] WRITE now fail-closes to the DENY sentinel. `sys_package` has no
+    // `created_by` column, and the wildcard `owner_only_writes` policy authors
+    // its predicate as `created_by == current_user.id` (canonical `==`).
+    // Pre-#2936 `extractTargetField` did not recognize `==`, so the
+    // field-existence net let the policy through and it compiled to a phantom
+    // `{ created_by: … }` filter against a column the object lacks — a
+    // driver-dependent, effectively-deny result. Now the net recognizes `==`,
+    // sees `created_by` is absent, and drops the only applicable write policy →
+    // deny sentinel (fail-closed). SAME effective visibility (a member cannot
+    // by-id write a column-less global object either way); the mechanism is now
+    // an explicit fail-closed deny instead of a phantom-column filter.
+    member: { read: null, write: [{ id: DENY }] },
+    // [#2936] no-org member: same fail-closed deny on the write (see above); the
+    // global catalog stays VISIBLE on read (Layer 0 non-tenant, delta (c)).
+    no_org_member: { read: null, write: [{ id: DENY }] },
   },
   better_auth: {
     // [W2] better-auth-managed posture → superuser read bypass → null.

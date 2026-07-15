@@ -702,6 +702,34 @@ describe('SecurityPlugin', () => {
       expect(filter).toEqual(RLS_DENY_FILTER);
     });
 
+    it('[#2936] fail-closed on a CANONICAL `==` wildcard policy targeting a missing column → deny sentinel', async () => {
+      // The `=`-form twin above is the L692 test. This is its canonical-CEL
+      // sibling: pre-#2936 `extractTargetField` did not recognize `==`, so the
+      // field-existence net was INERT for it — the policy slipped through and
+      // compiled to a phantom `{ organization_id: … }` filter against a column
+      // the object lacks. The net now recognizes `==` and fails closed here,
+      // exactly as it always did for the legacy `=` form. Real seeds/business
+      // policies author equality as `==`, so this is the path that mattered.
+      const eqPolicySet: PermissionSet = {
+        name: 'member_default',
+        label: 'Member',
+        objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+        rowLevelSecurity: [
+          { name: 'tenant_isolation', object: '*', operation: 'all', using: 'organization_id == current_user.organization_id' },
+        ],
+      } as any;
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [eqPolicySet],
+        objectFields: ['id', 'name'], // no organization_id, tenancy not opted out
+        orgScoping: true,
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const filter = await plugin.getReadFilter('task', { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] });
+      expect(filter).toEqual(RLS_DENY_FILTER);
+    });
+
     it('tenancy opt-out → undefined (not denied), matching the find-path', async () => {
       const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
       const harness = makeMiddlewareCtx({

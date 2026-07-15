@@ -2487,12 +2487,21 @@ export class SecurityPlugin implements Plugin {
    */
   private extractTargetField(using?: string): string | null {
     if (!using) return null;
-    // Match `field =` or `field IN`/`in`. Note: `\b` is omitted after `=`
-    // because `=` is non-word and the next char (space) is non-word too —
-    // a word boundary cannot exist between two non-word chars, so `=\b`
-    // would never match. We instead require the alternation token to be
-    // followed by whitespace or `(`.
-    const m = using.match(/^\s*([a-z_][a-z0-9_]*)\s*(?:=|IN|in)(?=\s|\()/);
+    // Match `field ==` (canonical CEL), `field =` (legacy SQL-ish), or
+    // `field IN`/`in`. [#2936] `==` MUST be listed before `=` in the
+    // alternation: alternation is ordered, so a bare `=` branch would match
+    // the first `=` of `==` and then the `(?=\s|\()` lookahead — seeing the
+    // SECOND `=`, not whitespace — would fail, leaving `==` unrecognized (the
+    // original bug: real seeds/business policies author equality as `==`, so
+    // the field-existence and tenancy-disabled safety nets that consume this
+    // were inert for them). `\b` is omitted after the operator because `=` is
+    // non-word and the next char (space) is non-word too — a word boundary
+    // cannot exist between two non-word chars — so we require the operator to
+    // be followed by whitespace or `(` instead. `!=`/`>`/`<`/`>=`/`<=` are
+    // deliberately NOT recognized: returning `null` keeps such a policy (the
+    // conservative default), matching the pre-#2936 behavior for any shape the
+    // regex did not match.
+    const m = using.match(/^\s*([a-z_][a-z0-9_]*)\s*(?:==|=|IN|in)(?=\s|\()/);
     return m ? m[1] : null;
   }
 }
