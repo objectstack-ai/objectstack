@@ -24,7 +24,28 @@ import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.
  * 
  * This protocol supports multiple authentication strategies, bidirectional sync,
  * field mapping, webhooks, and comprehensive rate limiting.
- * 
+ *
+ * ## Runtime contract — descriptor vs. registered connector (#2612)
+ *
+ * This schema serves TWO distinct consumers; do not conflate them:
+ *
+ * 1. **Runtime registration (plugin-only).** The automation engine's connector
+ *    registry — what `GET /connectors` lists and the `connector_action` flow
+ *    node dispatches — is populated exclusively by plugins calling
+ *    `engine.registerConnector(def, handlers)` with a handler per declared
+ *    action (ADR-0018 §Addendum). The definition is validated against this
+ *    schema at registration.
+ * 2. **Declarative `connectors:` stack entries (catalog descriptors).** Stack
+ *    metadata validated against this schema is registered as kind 'connector'
+ *    for discovery/documentation/marketplace purposes only — it never reaches
+ *    the runtime registry, because an action here carries no execution binding
+ *    (deliberately: ADR-0023 rejected re-inventing OpenAPI inside this schema).
+ *    The automation service warns at boot about declared entries with `actions`
+ *    that lack a same-name runtime registration; mark deliberate catalog-only
+ *    entries with `enabled: false`. Provider-bound declarative instances that
+ *    a generic executor (connector-openapi / connector-mcp) materializes at
+ *    boot are tracked in #2977 (ADR-0096).
+ *
  * Authentication is now imported from the canonical auth/config.zod.ts.
  * 
  * ## When to Use This Layer
@@ -607,9 +628,13 @@ export const ConnectorSchema = lazySchema(() => z.object({
   status: ConnectorStatusSchema.optional().default('inactive').describe('Connector status'),
   
   /**
-   * Enable connector
+   * Enable connector. On a declarative `connectors:` stack entry, `false`
+   * additionally marks a deliberate catalog-only descriptor — it suppresses
+   * the boot audit warning for declared-but-unregistered connectors (#2612).
    */
-  enabled: z.boolean().optional().default(true).describe('Enable connector'),
+  enabled: z.boolean().optional().default(true).describe(
+    'Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612).',
+  ),
   
   /**
    * Error mapping configuration

@@ -30,6 +30,7 @@ import { allJobs } from './src/automation/jobs/index.js';
 import { allEmails } from './src/system/emails/index.js';
 import { allBooks } from './src/system/books/index.js';
 import { allApis } from './src/system/apis/index.js';
+import { allConnectors } from './src/system/connectors/index.js';
 import {
   allPositions,
   allPermissionSets,
@@ -189,6 +190,10 @@ export default defineStack({
   // Declarative REST endpoints (object_operation + flow) — the metadata
   // counterpart of the code-mounted recalc endpoint (see src/system/apis/).
   apis: allApis,
+  // Declarative connector CATALOG DESCRIPTORS (#2612) — metadata-only, never
+  // runtime-dispatchable; the live connectors are the plugins above. See
+  // src/system/connectors/ for the full contract.
+  connectors: allConnectors,
   hooks: allHooks,
   webhooks: allWebhooks,
 

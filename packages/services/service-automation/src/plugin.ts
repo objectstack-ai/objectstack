@@ -52,6 +52,51 @@ export interface AutomationServicePluginOptions {
 }
 
 /**
+ * The shape of a declarative `connectors:` stack entry as it sits in the
+ * ObjectQL metadata registry (registered by `registerApp` under kind
+ * 'connector'). Raw authored values — Zod defaults (e.g. `enabled: true`)
+ * may not have been applied, so `enabled` is only trusted when explicitly
+ * `false`.
+ */
+interface DeclaredConnectorItem {
+    name?: string;
+    enabled?: boolean;
+    actions?: unknown[];
+}
+
+/**
+ * Descriptor-only contract audit (#2612): declarative `connectors:` stack
+ * entries are catalog descriptors — they are registered as metadata but never
+ * reach the engine's connector registry, which is populated exclusively by
+ * plugins calling `engine.registerConnector(def, handlers)` (ADR-0018
+ * §Addendum). A declared connector that also declares `actions` looks
+ * dispatchable but is not — `connector_action` will fail on it at runtime.
+ *
+ * Returns the names of declared connectors that (a) declare at least one
+ * action, (b) have no runtime registration under the same name, and (c) are
+ * not explicitly opted out with `enabled: false` (the marker for a deliberate
+ * catalog-only entry). Provider-bound declarative instances — which will turn
+ * this warning into a hard error for entries that expect materialization —
+ * are tracked in #2977 (ADR-0096).
+ */
+export function findInertDeclaredConnectors(
+    declared: unknown[],
+    liveConnectorNames: ReadonlySet<string>,
+): string[] {
+    return declared
+        .map((c) => c as DeclaredConnectorItem)
+        .filter(
+            (c) =>
+                typeof c?.name === 'string' &&
+                c.name.length > 0 &&
+                (c.actions?.length ?? 0) > 0 &&
+                c.enabled !== false &&
+                !liveConnectorNames.has(c.name),
+        )
+        .map((c) => c.name as string);
+}
+
+/**
  * AutomationServicePlugin — Core engine plugin
  *
  * Responsibilities:
@@ -269,6 +314,10 @@ export class AutomationServicePlugin implements Plugin {
         // flows that vanished so their jobs stop.
         ctx.hook('metadata:reloaded', async () => {
             await this.resyncFlowsFromProtocol(ctx);
+            // A Studio publish / dev reload can introduce new declarative
+            // connector entries — re-audit so the inert-descriptor warning
+            // stays current (see auditDeclaredConnectors).
+            this.auditDeclaredConnectors(ctx);
         });
 
         // ── Cold-boot bind via the PROTOCOL's flattened flow view ─────────────
@@ -289,6 +338,10 @@ export class AutomationServicePlugin implements Plugin {
         // flows — is registered). registerFlow is idempotent with the boot pull.
         ctx.hook('kernel:ready', async () => {
             await this.syncFlowsFromProtocol(ctx);
+            // Every plugin's init()/start() has completed here, so connector
+            // plugins have registered their runtime connectors — the earliest
+            // point the declared-vs-registered comparison is meaningful.
+            this.auditDeclaredConnectors(ctx);
         });
 
         // ADR-0019 follow-up: re-arm auto-resume timers for runs that were
@@ -309,6 +362,41 @@ export class AutomationServicePlugin implements Plugin {
                 ctx.logger.warn(`[Automation] wait-timer re-arm failed: ${(err as Error).message}`);
             }
         }
+    }
+
+    /**
+     * Descriptor-only contract audit (#2612) — warn, once per boot/reload,
+     * about declarative `connectors:` entries that declare actions but have no
+     * runtime registration (see {@link findInertDeclaredConnectors}). Reads
+     * the same ObjectQL registry `registerApp` writes declarative connector
+     * metadata into. Best-effort: without an ObjectQL registry there is
+     * nothing declared, hence nothing to audit.
+     */
+    private auditDeclaredConnectors(ctx: PluginContext): void {
+        if (!this.engine) return;
+        let declared: unknown[] = [];
+        try {
+            const ql = ctx.getService<{
+                registry?: { listItems?: (type: string) => unknown[] };
+            }>('objectql');
+            declared = ql?.registry?.listItems?.('connector') ?? [];
+        } catch {
+            return;
+        }
+        if (declared.length === 0) return;
+        const live = new Set(this.engine.getConnectorDescriptors().map((d) => d.name));
+        const inert = findInertDeclaredConnectors(declared, live);
+        if (inert.length === 0) return;
+        ctx.logger.warn(
+            `[Automation] ${inert.length} declarative connector(s) declare actions but are not registered ` +
+                `in the connector registry — the connector_action node cannot dispatch them: ${inert.join(', ')}. ` +
+                `Declarative \`connectors:\` entries are catalog descriptors (descriptor-only contract, #2612); ` +
+                `runtime connectors are contributed by plugins via engine.registerConnector() — e.g. ` +
+                `@objectstack/connector-rest, @objectstack/connector-slack, @objectstack/connector-openapi, ` +
+                `@objectstack/connector-mcp. Install/instantiate the matching connector plugin, or mark a ` +
+                `deliberate catalog-only entry with \`enabled: false\` to silence this warning. ` +
+                `Declarative provider-bound connector instances are tracked in #2977 (ADR-0096).`,
+        );
     }
 
     /**

@@ -332,8 +332,30 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
 
   /**
    * Integration Protocol
+   *
+   * ⚠ Descriptor-only contract (#2612): entries here are **catalog
+   * descriptors**, registered as metadata (kind 'connector') for discovery,
+   * documentation, and marketplace listing — they do NOT reach the automation
+   * engine's connector registry and the `connector_action` flow node cannot
+   * dispatch them. Runtime connectors are contributed exclusively by plugins
+   * calling `engine.registerConnector(def, handlers)` (ADR-0018 §Addendum) —
+   * e.g. `@objectstack/connector-rest`, `connector-slack`, `connector-openapi`
+   * (ADR-0023), `connector-mcp` (ADR-0024) in the stack's `plugins:` array.
+   *
+   * The automation service audits this at boot: a declared entry with
+   * `actions` and no same-name runtime registration logs a loud warning.
+   * Mark deliberate catalog-only entries with `enabled: false`.
+   * Provider-bound declarative connector *instances* — declarative entries a
+   * generic executor materializes into live connectors at boot — are tracked
+   * in #2977 (ADR-0096).
    */
-  connectors: z.array(ConnectorSchema).optional().describe('External System Connectors'),
+  connectors: z.array(ConnectorSchema).optional().describe(
+    'External System Connectors — catalog descriptors only: NOT runtime-dispatchable. ' +
+    'The connector_action registry is populated exclusively by connector plugins in `plugins:` ' +
+    '(connector-rest / connector-slack / connector-openapi / connector-mcp). Declaring a connector ' +
+    'here does not make flows able to call it; set `enabled: false` on deliberate catalog-only ' +
+    'entries. See #2612; declarative provider-bound instances are tracked in #2977 (ADR-0096).',
+  ),
 
   /**
    * Data Seeding Protocol

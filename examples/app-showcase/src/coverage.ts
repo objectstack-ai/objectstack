@@ -176,10 +176,10 @@ export const STACK_COLLECTION_COVERAGE: Record<string, KindCoverage> = {
       'Declarative ApiEndpoint metadata (object_operation + flow targets), executed by the runtime dispatcher (handleApiEndpoint). Complements the code-mounted endpoint in src/system/server/ (router kind stays waived: code-only).',
   },
   connectors: {
-    status: 'waived',
-    reason:
-      'Declarative connectors: entries never reach the automation connector registry (plugin registerConnector only). Live connectors are demonstrated the delivered way: ConnectorRestPlugin/ConnectorSlackPlugin in objectstack.config.ts.',
-    issue: 'https://github.com/objectstack-ai/framework/issues/2612',
+    status: 'demonstrated',
+    files: ['src/system/connectors/index.ts'],
+    notes:
+      'Demonstrated per the descriptor-only contract (#2612): declarative connectors: entries are catalog descriptors (registered as metadata, never runtime-dispatchable; enabled:false marks the deliberate catalog entry and silences the boot audit). Live connectors are demonstrated the delivered way — ConnectorRestPlugin/ConnectorSlackPlugin in objectstack.config.ts plugins:, exercised by the connector flows. Declarative provider-bound instances (which would make this collection dispatchable) are tracked in #2977 / ADR-0096.',
   },
 };
 
