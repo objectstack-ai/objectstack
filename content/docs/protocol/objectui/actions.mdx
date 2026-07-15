@@ -189,6 +189,7 @@ interface Action {
 
   // Access
   visible?: ExpressionInput;    // Visibility predicate (CEL)
+  requiresFeature?: string;     // Public auth feature flag gate — lowered into `visible` at parse time
   disabled?: boolean | ExpressionInput; // Disabled when TRUE (CEL)
 
   // Bulk
@@ -291,6 +292,27 @@ Prefer the `record.<field>` form: it reads unambiguously and resolves identicall
 
 This is a narrower scope than [record-alert](/docs/protocol/objectui/record-alert) conditions (which also expose `os.user` / `os.org` / `os.env`) — action predicates see the record only.
 
+#### Capability gates: `requiresFeature`
+
+When an action (or param) only works with an opt-in auth capability behind it — the better-auth `admin` plugin, `phoneNumber`, `twoFactor`, … — gate it with **`requiresFeature: '<flag>'`** instead of a hand-written `features.*` predicate. The flag names the public feature flag served at `/api/v1/auth/config` (see `PUBLIC_AUTH_FEATURES` in `@objectstack/spec/kernel`); at parse time the schema lowers it into the canonical `visible` predicate — `features.X == true` for opt-in flags, `features.X != false` for default-on flags — AND-composing with any explicit `visible` you also declare, then strips itself from the output. An unknown flag name fails the parse.
+
+```yaml
+# Hidden entirely when the admin plugin is off (instead of a button that 404s)
+name: ban_user
+label: Ban User
+type: api
+target: /api/v1/auth/admin/ban-user
+requiresFeature: admin
+
+# Composes with a residual row predicate:
+# (record.role != 'owner') && features.organization != false
+name: transfer_ownership
+visible: "record.role != 'owner'"
+requiresFeature: organization
+```
+
+This is how the platform keeps "form follows plugin" (#2874): the UI never advertises an input the default backend would reject.
+
 ## Confirmation & Feedback
 
 Actions express confirmation and feedback through dedicated string fields — there is no nested confirm-dialog object with `requireTyping`/`confirmLabel`.
@@ -375,7 +397,7 @@ params:
       - { label: High, value: high }
 ```
 
-`ActionParam` fields: `name`, `field`, `objectOverride`, `label`, `type`, `required` (default `false`), `options`, `placeholder`, `helpText`, `defaultValue`, `defaultFromRow`.
+`ActionParam` fields: `name`, `field`, `objectOverride`, `label`, `type`, `required` (default `false`), `options`, `placeholder`, `helpText`, `defaultValue`, `defaultFromRow`, `visible` (CEL predicate — the dialog omits the param when false), `requiresFeature` (capability gate, lowered into `visible` — see [Capability gates](#capability-gates-requiresfeature)).
 
 ## AI Tool Exposure (ADR-0011)
 
