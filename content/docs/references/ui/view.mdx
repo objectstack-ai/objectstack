@@ -16,8 +16,8 @@ Migrated to shared/http.zod.ts. Re-exported here for backward compatibility.
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnSummary, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, NavigationConfig, NavigationMode, ObjectUserFilters, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, ViewData, ViewFilterRule, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnSummary, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, NavigationConfig, NavigationMode, ObjectUserFilters, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, ViewData, ViewFilterRule, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnSummary, FormButtonConfig, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, NavigationConfig, NavigationMode, ObjectUserFilters, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, ViewData, ViewFilterRule, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnSummary, FormButtonConfig, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, NavigationConfig, NavigationMode, ObjectUserFilters, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, ViewData, ViewFilterRule, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfig.parse(data);
@@ -86,6 +86,18 @@ Aggregation function for column footer summary
 * `avg`
 * `min`
 * `max`
+
+
+---
+
+## FormButtonConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **show** | `boolean` | optional | Whether the button is rendered (renderer default applies when omitted) |
+| **label** | `string` | optional | Button label (i18n-capable; renderer default when omitted) |
 
 
 ---

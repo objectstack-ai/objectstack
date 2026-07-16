@@ -3227,6 +3227,8 @@
     "FocusManagementSchema (const)",
     "FocusTrapConfig (type)",
     "FocusTrapConfigSchema (const)",
+    "FormButtonConfig (type)",
+    "FormButtonConfigSchema (const)",
     "FormField (type)",
     "FormFieldSchema (const)",
     "FormSection (type)",

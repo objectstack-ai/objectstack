@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   ViewSchema,
   ListViewSchema,
@@ -1928,6 +1929,69 @@ describe('FormViewSchema - defaultSort', () => {
       sections: [{ fields: ['name'] }],
     });
     expect(result.defaultSort).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// FormView structured buttons + defaults (#2998, EXPERIMENTAL until objectui#2545)
+// ============================================================================
+
+describe('FormViewSchema - buttons & defaults', () => {
+  it('should accept structured button config with visibility and labels', () => {
+    const result = FormViewSchema.parse({
+      type: 'simple',
+      sections: [{ fields: ['name'] }],
+      buttons: {
+        submit: { show: true, label: 'Save' },
+        cancel: { show: true, label: 'Discard' },
+        reset: { show: false },
+      },
+    });
+    expect(result.buttons?.submit).toEqual({ show: true, label: 'Save' });
+    expect(result.buttons?.reset).toEqual({ show: false });
+  });
+
+  it('should accept a partial buttons block (each button optional)', () => {
+    const result = FormViewSchema.parse({
+      type: 'simple',
+      sections: [{ fields: ['name'] }],
+      buttons: { submit: { label: 'Create' } },
+    });
+    expect(result.buttons?.submit?.label).toBe('Create');
+    expect(result.buttons?.cancel).toBeUndefined();
+  });
+
+  it('should reject unknown keys inside buttons (strict leaf, ADR-0089 D3a)', () => {
+    expect(() => FormViewSchema.parse({
+      type: 'simple',
+      buttons: { submit: { text: 'Save' } }, // legacy `submitText`-style key
+    })).toThrow();
+    expect(() => FormViewSchema.parse({
+      type: 'simple',
+      buttons: { showSubmit: true }, // flat renderer-invented key
+    })).toThrow();
+  });
+
+  it('should accept defaults as a field-name → value record', () => {
+    const result = FormViewSchema.parse({
+      type: 'simple',
+      sections: [{ fields: ['name', 'status', 'priority'] }],
+      defaults: { status: 'open', priority: 3, tags: ['a', 'b'] },
+    });
+    expect(result.defaults).toEqual({ status: 'open', priority: 3, tags: ['a', 'b'] });
+  });
+
+  it('should accept form view without buttons/defaults (optional)', () => {
+    const result = FormViewSchema.parse({ type: 'simple' });
+    expect(result.buttons).toBeUndefined();
+    expect(result.defaults).toBeUndefined();
+  });
+
+  it('marks both keys experimental until the renderer wiring lands (ADR-0078)', () => {
+    const shape = (FormViewSchema as unknown as z.ZodObject<z.ZodRawShape>).shape;
+    for (const key of ['buttons', 'defaults'] as const) {
+      expect(shape[key].description, `${key} .describe()`).toMatch(/EXPERIMENTAL — NOT ENFORCED/);
+    }
   });
 });
 
