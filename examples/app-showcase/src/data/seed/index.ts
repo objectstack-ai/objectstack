@@ -44,12 +44,12 @@ const accounts = defineSeed(Account, {
     // (`region → sales_region`) and its date range via `dateRange → signed_on`.
     // Prospects have no `signed_on` yet — date-scoped account charts exclude
     // them by design.
-    { name: 'Northwind', industry: 'retail', annual_revenue: 8_000_000, website: 'https://northwind.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(400)`, hq: { lat: 47.6062, lng: -122.3321 }, tax_id: '91-1144442', billing_email: 'ap@northwind.example' },
+    { name: 'Northwind', industry: 'retail', annual_revenue: 8_000_000, website: 'https://northwind.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(80)`, hq: { lat: 47.6062, lng: -122.3321 }, tax_id: '91-1144442', billing_email: 'ap@northwind.example' },
     { name: 'Contoso', industry: 'technology', annual_revenue: 25_000_000, website: 'https://contoso.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(700)`, hq: { lat: 37.7749, lng: -122.4194 }, tax_id: '20-3399881', billing_email: 'billing@contoso.example' },
     { name: 'Fabrikam', industry: 'healthcare', annual_revenue: 12_000_000, website: 'https://fabrikam.example', status: 'prospect', sales_region: 'emea', hq: { lat: 40.7128, lng: -74.0060 }, tax_id: '46-7782013', billing_email: 'accounts@fabrikam.example' },
     // Extra accounts so the record picker has enough volume to exercise search,
     // sorting, pagination and the (non-churned) scoping filter on invoices.
-    { name: 'Initech', industry: 'finance', annual_revenue: 5_400_000, website: 'https://initech.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(300)`, hq: { lat: 30.2672, lng: -97.7431 }, tax_id: '74-2233110', billing_email: 'ap@initech.example' },
+    { name: 'Initech', industry: 'finance', annual_revenue: 5_400_000, website: 'https://initech.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(45)`, hq: { lat: 30.2672, lng: -97.7431 }, tax_id: '74-2233110', billing_email: 'ap@initech.example' },
     { name: 'Globex', industry: 'technology', annual_revenue: 42_000_000, website: 'https://globex.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(500)`, hq: { lat: 34.0522, lng: -118.2437 }, tax_id: '95-8841200', billing_email: 'billing@globex.example' },
     { name: 'Stark Industries', industry: 'technology', annual_revenue: 180_000_000, website: 'https://stark.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(800)`, hq: { lat: 40.7580, lng: -73.9855 }, tax_id: '13-5567421', billing_email: 'ap@stark.example' },
     // CJK-named account so pinyin search recall (#2486) is demonstrable out of
@@ -60,9 +60,9 @@ const accounts = defineSeed(Account, {
     { name: 'Acme Retail', industry: 'retail', annual_revenue: 3_200_000, website: 'https://acme.example', status: 'prospect', sales_region: 'amer', hq: { lat: 41.8781, lng: -87.6298 }, tax_id: '36-4471209', billing_email: 'accounts@acme.example' },
     { name: 'Soylent Foods', industry: 'healthcare', annual_revenue: 9_900_000, website: 'https://soylent.example', status: 'prospect', sales_region: 'emea', hq: { lat: 37.3382, lng: -121.8863 }, tax_id: '77-1029384', billing_email: 'ap@soylent.example' },
     { name: 'Hooli', industry: 'technology', annual_revenue: 96_000_000, website: 'https://hooli.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(150)`, hq: { lat: 37.3861, lng: -122.0839 }, tax_id: '45-7781230', billing_email: 'billing@hooli.example' },
-    { name: 'Vandelay Industries', industry: 'finance', annual_revenue: 6_700_000, website: 'https://vandelay.example', status: 'active', sales_region: 'emea', signed_on: cel`daysAgo(450)`, hq: { lat: 40.6782, lng: -73.9442 }, tax_id: '11-3344556', billing_email: 'ap@vandelay.example' },
+    { name: 'Vandelay Industries', industry: 'finance', annual_revenue: 6_700_000, website: 'https://vandelay.example', status: 'active', sales_region: 'emea', signed_on: cel`daysAgo(160)`, hq: { lat: 40.6782, lng: -73.9442 }, tax_id: '11-3344556', billing_email: 'ap@vandelay.example' },
     { name: 'Umbrella Health', industry: 'healthcare', annual_revenue: 33_000_000, website: 'https://umbrella.example', status: 'churned', sales_region: 'amer', signed_on: cel`daysAgo(600)`, hq: { lat: 39.9526, lng: -75.1652 }, tax_id: '88-2200117', churn_reason: 'Switched to in-house platform', billing_email: 'accounts@umbrella.example' },
-    { name: 'Wonka Brands', industry: 'retail', annual_revenue: 14_500_000, website: 'https://wonka.example', status: 'churned', sales_region: 'emea', signed_on: cel`daysAgo(350)`, hq: { lat: 41.4993, lng: -81.6944 }, tax_id: '52-7741093', churn_reason: 'Budget cuts', billing_email: 'ap@wonka.example' },
+    { name: 'Wonka Brands', industry: 'retail', annual_revenue: 14_500_000, website: 'https://wonka.example', status: 'churned', sales_region: 'emea', signed_on: cel`daysAgo(60)`, hq: { lat: 41.4993, lng: -81.6944 }, tax_id: '52-7741093', churn_reason: 'Budget cuts', billing_email: 'ap@wonka.example' },
   ],
 });
 
