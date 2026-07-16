@@ -203,7 +203,9 @@ describe('ADR-0096 — declarative connector materialization', () => {
         const desc = engine.getConnectorDescriptors().find((d) => d.name === 'billing');
         expect(desc).toBeDefined();
         expect(desc?.actions.map((a) => a.key)).toEqual(['ping']);
-        // Origin is 'declarative', not 'plugin'.
+        // Origin is 'declarative', not 'plugin' — surfaced on the descriptor so a
+        // designer can distinguish a materialized instance from a plugin connector.
+        expect(desc?.origin).toBe('declarative');
         expect(engine.getConnectorOrigin('billing')).toBe('declarative');
         // The factory saw the declared identity.
         expect(calls[0]?.name).toBe('billing');

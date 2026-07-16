@@ -246,6 +246,14 @@ export interface ConnectorDescriptor {
     readonly description?: string;
     readonly icon?: string;
     readonly actions: ConnectorActionDescriptor[];
+    /**
+     * How the connector reached the registry (ADR-0096 §4): `plugin` — registered
+     * by a connector plugin via `registerConnector`; `declarative` — materialized
+     * from a provider-bound `connectors:` stack entry at boot. Lets a designer
+     * distinguish a live declarative instance from a plugin connector (and both
+     * from an inert catalog descriptor, which never reaches this list).
+     */
+    readonly origin: ConnectorOrigin;
 }
 
 // ─── Core Automation Engine ─────────────────────────────────────────
@@ -926,12 +934,13 @@ export class AutomationEngine implements IAutomationService {
      * Handlers are omitted — they are runtime code, not metadata.
      */
     getConnectorDescriptors(): ConnectorDescriptor[] {
-        return [...this.connectors.values()].map(({ def }) => ({
+        return [...this.connectors.values()].map(({ def, origin }) => ({
             name: def.name,
             label: def.label,
             type: def.type,
             description: def.description,
             icon: def.icon,
+            origin,
             actions: (def.actions ?? []).map((a) => ({
                 key: a.key,
                 label: a.label,
