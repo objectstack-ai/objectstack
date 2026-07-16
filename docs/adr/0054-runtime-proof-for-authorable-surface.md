@@ -29,7 +29,7 @@ misbehaves at runtime.
 
 A metadata-driven platform whose authors are AI cannot ship unproven liveness
 for the primitives that matter. The static pointer must be upgradable to a
-**runtime proof** — a [`@objectstack/dogfood`](../../packages/dogfood) test that
+**runtime proof** — a [`@objectstack/dogfood`](../../packages/qa/dogfood) test that
 authors the property against the real, in-process stack and asserts the runtime
 result.
 

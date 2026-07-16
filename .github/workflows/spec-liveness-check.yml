@@ -9,7 +9,7 @@ name: Spec Liveness Check
 #
 # ADR-0054 (prove-it-runs): bound high-risk 'live' properties must carry a `proof`
 # pointing to a dogfood test that declares the matching `@proof:` tag. The gate also
-# triggers on packages/dogfood/** so deleting/renaming a proof re-runs this check and
+# triggers on packages/qa/dogfood/** so deleting/renaming a proof re-runs this check and
 # the dangling reference is caught (the proof files live outside packages/spec/).
 
 on:
@@ -17,7 +17,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'packages/spec/**'
-      - 'packages/dogfood/**'
+      - 'packages/qa/dogfood/**'
 
 permissions:
   contents: read

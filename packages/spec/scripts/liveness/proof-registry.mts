@@ -60,7 +60,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     summary:
       'persistence + read-coercion fidelity across the field-type matrix (write 4 → read 4, not "4").',
     proofId: 'field-type-roundtrip',
-    proofRef: 'packages/dogfood/test/field-zoo-roundtrip.dogfood.test.ts#field-type-roundtrip',
+    proofRef: 'packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts#field-type-roundtrip',
     bound: true,
     ledgerBindings: [{ type: 'field', path: 'type' }],
   },
@@ -70,7 +70,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     summary:
       "row-level read AND by-id-write enforcement (the #1994 can't-write-what-you-can't-read invariant).",
     proofId: 'rls-by-id-write',
-    proofRef: 'packages/dogfood/test/rls-fixture.dogfood.test.ts#rls-by-id-write',
+    proofRef: 'packages/qa/dogfood/test/rls-fixture.dogfood.test.ts#rls-by-id-write',
     bound: true,
     // `using` is the read predicate the #1994 fix re-applies as a by-id-write
     // pre-image check — the property whose end-to-end correctness the proof guards.
@@ -81,7 +81,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     label: 'Master-detail controlled-by-parent',
     summary: "a detail record's read/write access derived from its master record (ADR-0055).",
     proofId: 'cbp-controlled-by-parent',
-    proofRef: 'packages/dogfood/test/controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent',
+    proofRef: 'packages/qa/dogfood/test/controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent',
     bound: true,
     ledgerBindings: [{ type: 'object', path: 'sharingModel' }],
   },
@@ -90,7 +90,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     label: 'Analytics dimensions / measures',
     summary: 'date-dimension bucketing / aggregation under the org timezone (#1982/#2018).',
     proofId: 'analytics-tz-bucketing',
-    proofRef: 'packages/dogfood/test/analytics-timezone.dogfood.test.ts#analytics-tz-bucketing',
+    proofRef: 'packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts#analytics-tz-bucketing',
     bound: true,
     // The org-timezone shift acts on a time dimension's bucketing granularity —
     // the property whose end-to-end correctness the tz proof guards.
@@ -101,7 +101,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     label: 'Flow nodes',
     summary: 'node execution + variable wiring through the automation engine.',
     proofId: 'flow-node-execution',
-    proofRef: 'packages/dogfood/test/flow-node.dogfood.test.ts#flow-node-execution',
+    proofRef: 'packages/qa/dogfood/test/flow-node.dogfood.test.ts#flow-node-execution',
     bound: true,
     // `nodes.type` selects which executor runs — the property whose end-to-end
     // execution + variable wiring the proof guards.
@@ -112,7 +112,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     label: 'Flow runAs identity',
     summary: 'flow.runAs switches the data-layer execution identity — system elevates (RLS-bypass), user de-elevates to the triggering user (#1888).',
     proofId: 'flow-runas-identity',
-    proofRef: 'packages/dogfood/test/flow-runas.dogfood.test.ts#flow-runas-identity',
+    proofRef: 'packages/qa/dogfood/test/flow-runas.dogfood.test.ts#flow-runas-identity',
     bound: true,
     // `runAs` decides whether CRUD nodes run as an elevated system principal or
     // the triggering user — the security property the proof guards in both directions.
@@ -124,7 +124,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     summary:
       'a non-admin holder of a delegatable position may self-service a time-boxed grant that dies at valid_until (ADR-0091 D3) — the write is gated and the resolution expires, both proven end-to-end.',
     proofId: 'delegation-of-duty',
-    proofRef: 'packages/dogfood/test/delegation-of-duty.dogfood.test.ts#delegation-of-duty',
+    proofRef: 'packages/qa/dogfood/test/delegation-of-duty.dogfood.test.ts#delegation-of-duty',
     bound: true,
     // `delegatable` opens the D12 self-service branch — an authority-widening
     // flag whose end-to-end enforcement (gated write + expiring resolution) a
@@ -137,7 +137,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     summary:
       'declared lifecycle policies actually bound growth at runtime — the Reaper deletes past-window rows, record-class/business data stays untouched, archive-declared audit ledgers are never hot-deleted unarchived.',
     proofId: 'adr0057-lifecycle-bounded-growth',
-    proofRef: 'packages/dogfood/test/storage-growth.dogfood.test.ts#adr0057-lifecycle-bounded-growth',
+    proofRef: 'packages/qa/dogfood/test/storage-growth.dogfood.test.ts#adr0057-lifecycle-bounded-growth',
     bound: true,
     // `lifecycle` declares the retention contract the LifecycleService enforces —
     // a declaration whose sweeper stopped running is dead surface (ADR-0049).
@@ -149,7 +149,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     summary:
       'a statically `readonly: true` field cannot be forged by a non-system UPDATE — the write is stripped server-side, not merely hidden by the form (#2948/#3003: approval/status/amount columns "protected" only by readonly were one direct PATCH away from self-approval).',
     proofId: 'readonly-static-write',
-    proofRef: 'packages/dogfood/test/showcase-static-readonly.dogfood.test.ts#readonly-static-write',
+    proofRef: 'packages/qa/dogfood/test/showcase-static-readonly.dogfood.test.ts#readonly-static-write',
     bound: true,
     // `readonly` was renderer-only until #2948 — declared ≠ enforced is exactly
     // the false-compliance class ADR-0049 closes. The proof pins the server-side
@@ -176,7 +176,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
       + 'projection). A record that could drift from — or independently authorize against — its '
       + 'metadata is the two-store split-brain ADR-0094 retires.',
     proofId: 'permission-set-projection',
-    proofRef: 'packages/dogfood/test/showcase-permission-projection.dogfood.test.ts#permission-set-projection',
+    proofRef: 'packages/qa/dogfood/test/showcase-permission-projection.dogfood.test.ts#permission-set-projection',
     // Unbound: this is a STORAGE/architecture invariant, not an authorable
     // `type.path` property the ledger ratchet can key on — there is no
     // permission-set field whose `live` status this proof gates. The proof is

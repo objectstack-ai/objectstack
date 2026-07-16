@@ -440,7 +440,13 @@ describe('audit writers — enable.files server-side enforcement (#2727)', () =>
   });
 });
 
-describe('audit writers — localized activity summaries (framework#3039)', () => {
+// timeout: the FIRST localized case pays the one-off cost of dynamically
+// importing @objectstack/core + the shipped translation bundle (and, with the
+// #3071 src aliases, their vite transforms). On a shared 4-vCPU CI runner that
+// cold start alone was measured at ~5s — right at vitest's default timeout —
+// while every warmed case runs in ~1ms. 20s bounds the cold start without
+// masking a real hang.
+describe('audit writers — localized activity summaries (framework#3039)', { timeout: 20_000 }, () => {
   // Real memory i18n (what the kernel registers as the 'i18n' fallback) loaded
   // with this plugin's shipped bundle plus an app-contributed object label —
   // exercises the actual key shapes (`messages.activityCreated`,

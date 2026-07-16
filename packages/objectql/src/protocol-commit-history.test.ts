@@ -171,7 +171,14 @@ describe('ADR-0067 — publishPackageDrafts records a commit', () => {
       listDrafts: async () => [{ type: 'object', name: 'course' }],
       get: async () => null,
     });
-    vi.spyOn(protocol, 'publishMetaItem' as never).mockResolvedValue({ success: true, version: 'h', seq: 7 } as never);
+    // ADR-0067 D2 — the batch promotes via the phase-1 seam (inside one
+    // transaction), not per-item publishMetaItem; side effects are phase 2.
+    vi.spyOn(protocol as any, 'promoteDraftForPublish').mockImplementation(async (req: any) => ({
+      singularType: req.type,
+      orgId: null,
+      result: { version: 'h', seq: 7, item: { body: { name: req.name } }, packageId: null },
+    }));
+    vi.spyOn(protocol as any, 'runPublishSideEffects').mockResolvedValue({});
 
     const res: any = await (protocol as any).publishPackageDrafts({
       packageId: 'app.edu',

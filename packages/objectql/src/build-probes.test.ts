@@ -183,7 +183,13 @@ describe('publishPackageDrafts — probes ride the response (ADR-0038 L3)', () =
       get: async (_ref: any, opts: any) =>
         opts?.state === 'draft' ? { body: ITEMS['seed expense_sample'], hash: 'h' } : null,
     });
-    vi.spyOn(protocol, 'publishMetaItem' as never).mockResolvedValue({ success: true, version: 'h', seq: 1 } as never);
+    // ADR-0067 D2 — the batch promotes via the phase-1 seam; side effects are phase 2.
+    vi.spyOn(protocol as any, 'promoteDraftForPublish').mockImplementation(async (req: any) => ({
+      singularType: req.type,
+      orgId: null,
+      result: { version: 'h', seq: 1, item: { body: ITEMS[`${req.type} ${req.name}`] ?? { name: req.name } }, packageId: null },
+    }));
+    vi.spyOn(protocol as any, 'runPublishSideEffects').mockResolvedValue({});
     vi.spyOn(protocol as any, 'applySeedBodies').mockResolvedValue({ success: false, inserted: 0, updated: 0, error: 'boom' });
     // Probe reads: active items + an engine whose table stayed empty.
     (protocol as any).getMetaItem = async ({ type, name }: any) => ({ item: ITEMS[`${type} ${name}`] });

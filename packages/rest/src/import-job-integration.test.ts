@@ -120,8 +120,9 @@ function makeRes() {
   return res;
 }
 
-async function boot() {
+async function boot(decorateDriver?: (driver: any) => void) {
   const { driver } = makeMemoryDriver();
+  decorateDriver?.(driver);
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
   await engine.init();
@@ -232,6 +233,96 @@ describe('async import job — real engine + protocol integration', () => {
     expect(r._status).toBe(404);
     const c = await callJob(ctx.cancel, 'imp_nope');
     expect(c._status).toBe(404);
+  });
+
+  // framework#2824 — cancelling a running job must actually stop the worker.
+  it('cancels a running job mid-flight: the worker stops at the next checkpoint', async () => {
+    const rows = Array.from({ length: 1000 }, (_, i) => ({ id: `mc${i}`, title: `t${i}` }));
+    const created = await callCreate(ctx.create, { format: 'json', rows });
+    const jobId = created._json.jobId;
+
+    const c = await callJob(ctx.cancel, jobId);
+    expect(c._json).toMatchObject({ success: true });
+
+    const done = await waitForTerminal(ctx.progress, jobId);
+    expect(done.status).toBe('cancelled');
+
+    // Let the background worker settle (progress stops moving), then prove it
+    // really stopped early instead of importing all 1000 rows (#2824's bug).
+    let settled = -1;
+    for (let i = 0; i < 100; i++) {
+      const r = await callJob(ctx.progress, jobId);
+      const p = Number(r._json?.processed ?? 0);
+      if (p === settled) break;
+      settled = p;
+      await new Promise((rr) => setTimeout(rr, 10));
+    }
+    expect(settled).toBeLessThan(1000);
+    const written = await ctx.engine.find('task', { where: {} });
+    expect(written.length).toBeLessThan(1000);
+  });
+
+  // framework#2824 — a durable 'cancelled' written by another process (no
+  // in-memory flag on this node) must stop the worker too.
+  it('stops the worker when the job row is marked cancelled out-of-band', async () => {
+    const rows = Array.from({ length: 1000 }, (_, i) => ({ id: `oc${i}`, title: `t${i}` }));
+    const created = await callCreate(ctx.create, { format: 'json', rows });
+    const jobId = created._json.jobId;
+
+    // Simulate a cancel accepted by a different node: write the durable row
+    // directly, bypassing this server's cancel route and in-memory flag.
+    await ctx.protocol.updateData({ object: 'sys_import_job', id: jobId, data: { status: 'cancelled' } });
+
+    const done = await waitForTerminal(ctx.progress, jobId);
+    expect(done.status).toBe('cancelled');
+    let settled = -1;
+    for (let i = 0; i < 100; i++) {
+      const r = await callJob(ctx.progress, jobId);
+      const p = Number(r._json?.processed ?? 0);
+      if (p === settled) break;
+      settled = p;
+      await new Promise((rr) => setTimeout(rr, 10));
+    }
+    expect(settled).toBeLessThan(1000);
+  });
+
+  // framework#2824 — a cancel that lands too late to stop the loop must still
+  // win the terminal state: the worker's final patch may not overwrite the
+  // durable 'cancelled' with 'succeeded'.
+  it('keeps the terminal state cancelled when the cancel lands after the last row', async () => {
+    // Slow the task writes so the cancel deterministically arrives while the
+    // job is running — but the 3-row job has no mid-loop checkpoint, so the
+    // loop still completes every row before noticing.
+    const slowCtx = await boot((driver) => {
+      const bulkCreate = driver.bulkCreate.bind(driver);
+      driver.bulkCreate = async (o: string, rows2: any[]) => {
+        if (o === 'task') await new Promise((r) => setImmediate(r));
+        return bulkCreate(o, rows2);
+      };
+      const create = driver.create.bind(driver);
+      driver.create = async (o: string, data: any) => {
+        if (o === 'task') await new Promise((r) => setImmediate(r));
+        return create(o, data);
+      };
+    });
+    const created = await callCreate(slowCtx.create, {
+      format: 'json',
+      rows: [{ id: 'lc1', title: 'a' }, { id: 'lc2', title: 'b' }, { id: 'lc3', title: 'c' }],
+    });
+    const jobId = created._json.jobId;
+    const c = await callJob(slowCtx.cancel, jobId);
+    expect(c._json).toMatchObject({ success: true });
+
+    const done = await waitForTerminal(slowCtx.progress, jobId);
+    // The counts stay truthful (rows were written), but the user's cancel wins
+    // the status — before the fix this flipped back to 'succeeded'.
+    expect(done.status).toBe('cancelled');
+    // Give the worker's final patch time to land, then re-check it did not
+    // overwrite the status.
+    await new Promise((r) => setTimeout(r, 50));
+    const after = await callJob(slowCtx.progress, jobId);
+    expect(after._json.status).toBe('cancelled');
+    expect(after._json.processed).toBe(3);
   });
 
   it('cancel on an already-finished job is a no-op success', async () => {

@@ -228,9 +228,13 @@ authenticated principal from `req.user` — both cookie session
 `aiService.chatWithTools(...)` as
 `toolExecutionContext: { actor, conversationId, environmentId }`. That threads the
 same RLS context through the runtime's built-in data tools and its
-`action_<name>` tools. From a custom server route you opt in by passing the actor
-explicitly; omit `toolExecutionContext` to keep system-level behaviour (cron
-jobs, internal callers).
+`action_<name>` tools. From a custom server route you pass the actor explicitly.
+Omitting `toolExecutionContext` (or its `actor`) is **not** a system fallback:
+the contract fails closed and data tools run as an unauthenticated, RLS-on
+principal that sees nothing (#2991). Trusted internal callers (cron jobs,
+migrations) that genuinely need full authority opt in explicitly with
+`toolExecutionContext: { isSystem: true }` — a deliberate, greppable elevation,
+never the consequence of a forgotten field.
 
 ```typescript
 await aiService.chatWithTools(messages, tools, {

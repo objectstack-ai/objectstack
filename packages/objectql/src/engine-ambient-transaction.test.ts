@@ -11,9 +11,16 @@ import { ObjectQL } from './engine.js';
 
 function makeRecordingDriver() {
   const stores = new Map<string, Map<string, any>>();
-  const seen: { create: Array<{ object: string; transaction: unknown }>; find: Array<{ object: string; transaction: unknown }> } = {
+  const seen: {
+    create: Array<{ object: string; transaction: unknown }>;
+    find: Array<{ object: string; transaction: unknown }>;
+    commit: unknown[];
+    rollback: unknown[];
+  } = {
     create: [],
     find: [],
+    commit: [],
+    rollback: [],
   };
   const storeFor = (o: string) => {
     let s = stores.get(o);
@@ -60,8 +67,8 @@ function makeRecordingDriver() {
     async bulkUpdate() { return []; },
     async bulkDelete() {},
     async beginTransaction() { return { __trx: true, commit: async () => {}, rollback: async () => {} }; },
-    async commit() {},
-    async rollback() {},
+    async commit(trx: unknown) { seen.commit.push(trx); },
+    async rollback(trx: unknown) { seen.rollback.push(trx); },
   };
   return { driver, seen };
 }
@@ -94,5 +101,36 @@ describe('engine ambient transaction (ADR-0034)', () => {
   it('does not leak a transaction to ops outside the transaction() scope', async () => {
     await engine.insert('thing', { name: 'outside' });
     expect(seen.create.at(-1)!.transaction).toBeUndefined();
+  });
+
+  // ADR-0067 D2 — a nested transaction() JOINS the ambient one instead of
+  // opening a second driver transaction (which would deadlock a
+  // single-connection pool and escape the outer rollback). The outer call
+  // owns the one-and-only commit/rollback.
+  it('a nested transaction() joins the ambient transaction (no second begin)', async () => {
+    let outerTrx: unknown;
+    let innerTrx: unknown;
+    await engine.transaction(async (ctx: any) => {
+      outerTrx = ctx.transaction;
+      await engine.transaction(async (innerCtx: any) => {
+        innerTrx = innerCtx.transaction;
+        await engine.insert('thing', { name: 'nested' });
+      });
+    });
+    expect(innerTrx).toBe(outerTrx); // joined, not a fresh begin
+    expect(seen.create[0].transaction).toBe(outerTrx);
+  });
+
+  it('a throw inside a JOINED nested transaction() rolls back the OUTER one', async () => {
+    await expect(engine.transaction(async () => {
+      await engine.insert('thing', { name: 'first' });
+      await engine.transaction(async () => {
+        throw new Error('inner boom');
+      });
+    })).rejects.toThrow('inner boom');
+    // the recording driver saw the write, but the outer tx rolled back —
+    // rollback tracking lives on the driver; assert it was invoked.
+    expect(seen.rollback.length).toBe(1);
+    expect(seen.commit.length).toBe(0);
   });
 });

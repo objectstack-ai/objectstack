@@ -94,6 +94,11 @@ const TASK = {
     score: { name: 'score', type: 'number' as const, label: '分数' },
     due: { name: 'due', type: 'date' as const, label: '截止' },
     owner: { name: 'owner', type: 'lookup' as const, label: '负责人', reference: 'user', displayField: 'name' },
+    members: { name: 'members', type: 'lookup' as const, label: '成员', reference: 'user', displayField: 'name', multiple: true },
+    skills: {
+      name: 'skills', type: 'select' as const, label: '技能', multiple: true,
+      options: [{ label: '焊接', value: 'weld' }, { label: '质检', value: 'qc' }],
+    },
   },
 };
 
@@ -186,6 +191,41 @@ describe('import route — real engine + protocol integration', () => {
       title: '写代码', done: true, priority: 'high', score: 1200, owner: 'u1',
     });
     expect(String(stored.due)).toContain('2026-06-30');
+  });
+
+  it('splits a multi-value lookup cell and resolves every token to an id (issue #3063)', async () => {
+    // The cell holds several display names joined by `;` (issue's CSV). Before
+    // the fix the whole string was resolved as one reference and always failed.
+    const csv = ['ID,标题,成员', '1,结构一班,张三;李四'].join('\n');
+    const res = await call(route, {
+      format: 'csv', csv,
+      mapping: { ID: 'id', 标题: 'title', 成员: 'members' },
+    });
+    expect(res._json).toMatchObject({ total: 1, ok: 1, errors: 0, created: 1 });
+    const stored = await engine.findOne('task', { where: { id: '1' } });
+    expect(stored.members).toEqual(['u1', 'u2']);
+  });
+
+  it('splits a select flagged multiple:true into an option-value array on insert (issue #3063)', async () => {
+    const csv = ['ID,标题,技能', '1,焊工,焊接;质检'].join('\n');
+    const res = await call(route, {
+      format: 'csv', csv,
+      mapping: { ID: 'id', 标题: 'title', 技能: 'skills' },
+    });
+    expect(res._json).toMatchObject({ total: 1, ok: 1, errors: 0, created: 1 });
+    const stored = await engine.findOne('task', { where: { id: '1' } });
+    expect(stored.skills).toEqual(['weld', 'qc']);
+  });
+
+  it('names the specific unmatched token in a multi-value lookup (issue #3063)', async () => {
+    const res = await call(route, {
+      format: 'json',
+      rows: [{ id: 'a', title: 'x', members: '张三;查无此人' }],
+    });
+    const failed = res._json.results.find((r: any) => !r.ok);
+    expect(failed).toMatchObject({ field: 'members', code: 'reference_not_found' });
+    expect(failed.error).toContain('查无此人');
+    expect(failed.error).not.toContain('张三');
   });
 
   it('resolves a lookup by email when displayField is not the match, and reports not-found', async () => {

@@ -767,77 +767,6 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(msw@2.14.6(@types/node@26.1.1)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
 
-  packages/dogfood:
-    dependencies:
-      '@objectstack/connector-mcp':
-        specifier: workspace:*
-        version: link:../connectors/connector-mcp
-      '@objectstack/connector-openapi':
-        specifier: workspace:*
-        version: link:../connectors/connector-openapi
-      '@objectstack/connector-rest':
-        specifier: workspace:*
-        version: link:../connectors/connector-rest
-      '@objectstack/example-crm':
-        specifier: workspace:*
-        version: link:../../examples/app-crm
-      '@objectstack/example-showcase':
-        specifier: workspace:*
-        version: link:../../examples/app-showcase
-      '@objectstack/objectql':
-        specifier: workspace:*
-        version: link:../objectql
-      '@objectstack/plugin-audit':
-        specifier: workspace:*
-        version: link:../plugins/plugin-audit
-      '@objectstack/plugin-auth':
-        specifier: workspace:*
-        version: link:../plugins/plugin-auth
-      '@objectstack/plugin-security':
-        specifier: workspace:*
-        version: link:../plugins/plugin-security
-      '@objectstack/service-storage':
-        specifier: workspace:*
-        version: link:../services/service-storage
-      '@objectstack/spec':
-        specifier: workspace:*
-        version: link:../spec
-      '@objectstack/verify':
-        specifier: workspace:*
-        version: link:../verify
-    devDependencies:
-      '@objectstack/core':
-        specifier: workspace:*
-        version: link:../core
-      '@objectstack/driver-memory':
-        specifier: workspace:*
-        version: link:../plugins/driver-memory
-      '@objectstack/driver-sql':
-        specifier: workspace:*
-        version: link:../plugins/driver-sql
-      '@types/node':
-        specifier: ^26.1.1
-        version: 26.1.1
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(msw@2.14.6(@types/node@26.1.1)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
-
-  packages/downstream-contract:
-    dependencies:
-      '@objectstack/spec':
-        specifier: workspace:*
-        version: link:../spec
-    devDependencies:
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(msw@2.14.6(@types/node@26.1.1)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
-
   packages/formula:
     dependencies:
       '@marcbachmann/cel-js':
@@ -1619,6 +1548,105 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(msw@2.14.6(@types/node@26.1.1)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+
+  packages/qa/dogfood:
+    dependencies:
+      '@objectstack/connector-mcp':
+        specifier: workspace:*
+        version: link:../../connectors/connector-mcp
+      '@objectstack/connector-openapi':
+        specifier: workspace:*
+        version: link:../../connectors/connector-openapi
+      '@objectstack/connector-rest':
+        specifier: workspace:*
+        version: link:../../connectors/connector-rest
+      '@objectstack/example-crm':
+        specifier: workspace:*
+        version: link:../../../examples/app-crm
+      '@objectstack/example-showcase':
+        specifier: workspace:*
+        version: link:../../../examples/app-showcase
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
+      '@objectstack/plugin-audit':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-audit
+      '@objectstack/plugin-auth':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-auth
+      '@objectstack/plugin-security':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-security
+      '@objectstack/service-storage':
+        specifier: workspace:*
+        version: link:../../services/service-storage
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+      '@objectstack/verify':
+        specifier: workspace:*
+        version: link:../../verify
+    devDependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/driver-memory':
+        specifier: workspace:*
+        version: link:../../plugins/driver-memory
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../plugins/driver-sql
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(msw@2.14.6(@types/node@26.1.1)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+
+  packages/qa/downstream-contract:
+    dependencies:
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+    devDependencies:
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(msw@2.14.6(@types/node@26.1.1)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+
+  packages/qa/http-conformance:
+    dependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+    devDependencies:
+      '@objectstack/driver-memory':
+        specifier: workspace:*
+        version: link:../../plugins/driver-memory
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-hono-server
+      '@objectstack/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1

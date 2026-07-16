@@ -7,7 +7,7 @@
  * *static*-checked by the spec suite; these two objects prove the SERVED
  * pipeline (defineStack → artifact → register → REST serialization) neither
  * strips nor mangles them. Guarded by
- * `packages/dogfood/test/semantic-roles.dogfood.test.ts`.
+ * `packages/qa/dogfood/test/semantic-roles.dogfood.test.ts`.
  *
  * Two objects, two role postures:
  *  - `SemanticZoo` authors the full canonical role set (highlightFields,

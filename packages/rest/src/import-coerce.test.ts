@@ -158,6 +158,93 @@ describe('coerceRow', () => {
     expect(none.errors[0]).toMatchObject({ field: 'owner', code: 'reference_not_found' });
   });
 
+  it('splits a multi-value lookup cell and resolves each token to an id', async () => {
+    const metaMap = meta({
+      members: { type: 'lookup', reference: 'sys_user', displayField: 'name', multiple: true },
+    });
+    const ids: Record<string, string> = { 张焊工: 'u1', 李质检: 'u2' };
+    const seen: string[] = [];
+    const resolveRef = async (_obj: string, display: string) => {
+      seen.push(display);
+      return ids[display];
+    };
+    // Semicolon-separated (issue's CSV) and comma-separated (export round-trip).
+    const semi = await coerceRow({ members: '张焊工;李质检' }, metaMap, { resolveRef });
+    expect(semi.errors).toEqual([]);
+    expect(semi.data).toEqual({ members: ['u1', 'u2'] });
+    const comma = await coerceRow({ members: '张焊工, 李质检' }, metaMap, { resolveRef });
+    expect(comma.data).toEqual({ members: ['u1', 'u2'] });
+    expect(seen).toEqual(['张焊工', '李质检', '张焊工', '李质检']);
+  });
+
+  it('names the specific unmatched token in a multi-value lookup', async () => {
+    const metaMap = meta({
+      members: { type: 'lookup', reference: 'sys_user', displayField: 'name', multiple: true },
+    });
+    const resolveRef = async (_obj: string, display: string) =>
+      display === '张焊工' ? 'u1' : undefined;
+    const { data, errors } = await coerceRow({ members: '张焊工;查无此人' }, metaMap, { resolveRef });
+    expect(data.members).toBeUndefined();
+    expect(errors[0]).toMatchObject({ field: 'members', code: 'reference_not_found' });
+    expect(errors[0].message).toContain('查无此人');
+    expect(errors[0].message).not.toContain('张焊工');
+  });
+
+  it('keeps raw multi-value lookup tokens when no resolver is supplied', async () => {
+    const metaMap = meta({
+      members: { type: 'lookup', reference: 'sys_user', multiple: true },
+    });
+    const { data } = await coerceRow({ members: 'u1;u2' }, metaMap, {});
+    expect(data).toEqual({ members: ['u1', 'u2'] });
+  });
+
+  it('splits a select flagged multiple:true into an array of option values', async () => {
+    const metaMap = meta({
+      skills: {
+        type: 'select', multiple: true,
+        options: [{ label: '焊接', value: 'weld' }, { label: '质检', value: 'qc' }],
+      },
+    });
+    const { data, errors } = await coerceRow({ skills: '焊接;质检' }, metaMap, {});
+    expect(errors).toEqual([]);
+    expect(data).toEqual({ skills: ['weld', 'qc'] });
+    // A single-value select (no multiple flag) still stores one scalar.
+    const single = meta({ s: { type: 'select', options: [{ label: '焊接', value: 'weld' }] } });
+    const one = await coerceRow({ s: '焊接' }, single, {});
+    expect(one.data).toEqual({ s: 'weld' });
+  });
+
+  it('names the specific unmatched token in a multiple:true select', async () => {
+    const metaMap = meta({
+      skills: { type: 'select', multiple: true, options: [{ label: '焊接', value: 'weld' }] },
+    });
+    const { errors } = await coerceRow({ skills: '焊接,搬砖' }, metaMap, {});
+    expect(errors[0]).toMatchObject({ field: 'skills', code: 'invalid_option' });
+    expect(errors[0].message).toContain('搬砖');
+    expect(errors[0].message).not.toContain('焊接');
+  });
+
+  it('splits a file/image flagged multiple:true into an array of ids/urls', async () => {
+    const metaMap = meta({ photos: { type: 'image', multiple: true } });
+    const { data } = await coerceRow({ photos: 'a.png;b.png' }, metaMap, {});
+    expect(data).toEqual({ photos: ['a.png', 'b.png'] });
+    // A single-value file passes through untouched.
+    const single = meta({ f: { type: 'file' } });
+    const one = await coerceRow({ f: 'a.png' }, single, {});
+    expect(one.data).toEqual({ f: 'a.png' });
+  });
+
+  it('ignores multiple:true on types the spec does not make multi (master_detail)', async () => {
+    // master_detail is not multi-capable per the spec — a stray multiple flag
+    // must not split it; it stays a single resolved reference (engine parity).
+    const metaMap = meta({
+      parent: { type: 'master_detail', reference: 'order', displayField: 'name', multiple: true },
+    });
+    const resolveRef = async (_obj: string, display: string) => (display === 'A;B' ? 'o1' : undefined);
+    const { data } = await coerceRow({ parent: 'A;B' }, metaMap, { resolveRef });
+    expect(data).toEqual({ parent: 'o1' });
+  });
+
   it('reports coercion errors per field instead of throwing', async () => {
     const metaMap = meta({ n: { type: 'number' }, b: { type: 'boolean' } });
     const { data, errors } = await coerceRow({ n: 'abc', b: 'maybe' }, metaMap, {});

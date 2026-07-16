@@ -137,6 +137,20 @@ function toFailedResult(rowNo: number, err: unknown): ImportRowResult {
 /** Upper bound on rows in one createManyData batch (framework#2678 suggests 100-500). */
 const MAX_CREATE_BATCH_SIZE = 200;
 
+/**
+ * Yield one macrotask so the host's event loop can service pending I/O.
+ * With a synchronous storage driver (better-sqlite3 and the wasm fallback)
+ * every `await` in the row loop resolves as a microtask, so a large import
+ * otherwise monopolizes the event loop for its whole duration: HTTP cancel
+ * and progress requests sit unserviced, and the cooperative `shouldCancel`
+ * flag has nobody able to set it (framework#2824).
+ */
+const yieldToEventLoop = (): Promise<void> =>
+  new Promise<void>((resolve) => {
+    if (typeof setImmediate === 'function') setImmediate(resolve);
+    else setTimeout(resolve, 0);
+  });
+
 export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   const {
     p, objectName, environmentId, context, rows, metaMap,
@@ -367,8 +381,11 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
         await flushPendingCreates();
         if (onProgress) await onProgress(snapshot(processed));
       }
-      if (shouldCancel && processed < rows.length && (processed % progressEvery === 0)) {
-        if (await shouldCancel()) { cancelled = true; break; }
+      if (processed < rows.length && processed % progressEvery === 0) {
+        // Yield BEFORE polling the flag: a cancel request can only set it
+        // once its HTTP handler gets event-loop time (framework#2824).
+        await yieldToEventLoop();
+        if (shouldCancel && (await shouldCancel())) { cancelled = true; break; }
       }
     }
 

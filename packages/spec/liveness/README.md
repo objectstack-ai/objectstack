@@ -50,7 +50,7 @@ outcome.
 "type": {
   "status": "live",
   "evidence": "packages/objectql/src/engine.ts",
-  "proof": "packages/dogfood/test/field-zoo-roundtrip.dogfood.test.ts#field-type-roundtrip"
+  "proof": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts#field-type-roundtrip"
 }
 ```
 
@@ -64,7 +64,7 @@ self-declares the id with a greppable tag near its top:
 The gate validates **statically** (it never runs the test — that's the dogfood
 gate's job, keeping this gate seconds-cheap): the file must exist **and** declare the
 `@proof: <id>` tag. A bound entry must point at *its own class's* proof. The reverse
-is also checked: a `@proof:` tag under `packages/dogfood/test/**` that isn't
+is also checked: a `@proof:` tag under `packages/qa/dogfood/test/**` that isn't
 registered in `../scripts/liveness/proof-registry.mts` is flagged (warning) so a new
 proof gets wired in.
 
@@ -84,7 +84,7 @@ binding lands one class at a time (ADR-0054 §3), never as a big-bang backfill.
 
 To bind a pending class: add its dogfood proof + `@proof:` tag, set `bound: true` and
 its `ledgerBindings` in `proof-registry.mts`, add the `proof` to the ledger entry, and
-confirm the gate is green. Because the gate also triggers on `packages/dogfood/**`,
+confirm the gate is green. Because the gate also triggers on `packages/qa/dogfood/**`,
 deleting or renaming a proof re-runs this check and the dangling reference is caught.
 
 ## Author warnings — closing the loop (`authorWarn`)

@@ -23,7 +23,7 @@ import { ConnectorMcpPlugin } from '@objectstack/connector-mcp';
 import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
 import { ConnectorRestPlugin } from '@objectstack/connector-rest';
 
-const SHOWCASE_DIR = fileURLToPath(new URL('../../../examples/app-showcase/', import.meta.url));
+const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/', import.meta.url));
 
 interface ConnectorDescriptor {
     name: string;

@@ -366,14 +366,20 @@ export interface ChatWithToolsOptions extends AIRequestOptions {
     onToolError?: (toolCall: ToolCallPart, error: string) => 'continue' | 'abort';
     /**
      * Per-call execution context threaded into every tool handler the
-     * loop dispatches. The HTTP route should populate this from
+     * loop dispatches. The HTTP route MUST populate this from
      * `req.user` (and any conversation/environment headers) so that
      * built-in data tools forward the actor into ObjectQL's
      * `ExecutionContext` and row-level security automatically scopes
      * what the LLM can see or change.
      *
-     * Optional for backward compatibility — when omitted, tools fall
-     * back to system-level behaviour.
+     * Optional at the type level only — a missing context is NOT a
+     * grant of authority (#2991). When omitted, executors MUST run
+     * data-touching tools as an unauthenticated (RLS-on, sees-nothing)
+     * principal, exactly as if an empty context had been passed; they
+     * MUST NOT fall back to system-level behaviour. Trusted internal
+     * callers (cron, migrations, server jobs) that genuinely need full
+     * authority opt in explicitly via
+     * {@link ToolExecutionContext.isSystem}.
      */
     toolExecutionContext?: ToolExecutionContext;
 }
@@ -383,12 +389,30 @@ export interface ChatWithToolsOptions extends AIRequestOptions {
  * by {@link ChatWithToolsOptions}. Mirrors {@link ExecutionContext}
  * but is tailored to the AI tool boundary (no transaction handle, no
  * raw access token — those live on the engine call site).
+ *
+ * ## Identity semantics (fail-closed, #2991)
+ *
+ * "No identity" is never a grant of authority. Executors MUST derive
+ * the ObjectQL `ExecutionContext` for data-touching tools as:
+ *
+ * - `actor` present → that user's context (RLS scopes reads/writes).
+ * - `isSystem: true` → system context (RLS bypass) — an explicit,
+ *   greppable elevation, same convention as `IDataEngine` /
+ *   `IKnowledgeService`.
+ * - neither → an anonymous, unauthenticated context (RLS on, sees
+ *   nothing). NEVER system.
  */
 export interface ToolExecutionContext {
     /**
      * Authenticated end user on whose behalf the LLM is acting.
      * Built-in tools promote this into the ObjectQL `ExecutionContext`
-     * so RLS engages. Omit for internal/system invocations.
+     * so RLS engages.
+     *
+     * A missing actor means an UNAUTHENTICATED caller (#2991):
+     * executors MUST run data-touching tools with an anonymous
+     * (RLS-on, sees-nothing) context — never as system. System
+     * execution is only ever the explicit {@link isSystem} opt-in,
+     * not the consequence of a forgotten field.
      */
     actor?: {
         id: string;
@@ -396,6 +420,18 @@ export interface ToolExecutionContext {
         positions?: string[];
         permissions?: string[];
     };
+    /**
+     * Explicit, deliberate elevation: run tool handlers with a
+     * system-level (RLS-bypassing) `ExecutionContext` — the same
+     * convention as `IDataEngine` / `IKnowledgeService`
+     * (`isSystem: true`). Reserved for trusted server-side invocations
+     * (cron, migrations, internal jobs); MUST be set by trusted server
+     * code only, never derived from request input, and ignored when an
+     * {@link actor} is present. This flag is the ONLY way to obtain
+     * system behaviour from the tool loop — a merely absent actor
+     * fails closed to anonymous instead (#2991).
+     */
+    isSystem?: boolean;
     /** Conversation id for trace/HITL correlation. */
     conversationId?: string;
     /**

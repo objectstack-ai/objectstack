@@ -123,9 +123,15 @@ jobs:
       # bad signal to copy from. tsup transpiles them without a full typecheck,
       # so build alone will not catch type drift — typecheck them explicitly.
       # They import from built workspace packages, so the packages must be built
-      # first for cross-package type resolution to succeed.
+      # first for cross-package type resolution to succeed. The examples'
+      # dependency closure is requested EXPLICITLY (`./examples/*^...` = deps
+      # of the examples, not the examples themselves): the bare `./packages/*`
+      # glob only matches direct children, and the connector packages the
+      # showcase imports were previously built only by accident — through
+      # dogfood's dependency chain, which broke when dogfood moved to
+      # packages/qa/ (#3037).
       - name: Build workspace packages
-        run: pnpm exec turbo run build --filter='./packages/*'
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
 
       - name: Type check example apps
         run: pnpm --filter './examples/*' run typecheck

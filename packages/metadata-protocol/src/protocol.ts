@@ -5,7 +5,7 @@ import { IDataEngine } from '@objectstack/core';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type { MetadataHostEngine } from './host-engine.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
-import { ConflictError, assertProtocolCompat } from '@objectstack/metadata-core';
+import { ConflictError, assertProtocolCompat, type MetadataItem } from '@objectstack/metadata-core';
 import type {
     BatchUpdateRequest,
     BatchUpdateResponse,
@@ -4468,6 +4468,55 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
          */
         materializeApplied?: PublishMaterializeResult;
     }> {
+        const { singularType, orgId, result } = await this.promoteDraftForPublish(request);
+        const response: {
+            success: boolean;
+            version: string;
+            seq: number;
+            message?: string;
+            seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+            materializeApplied?: PublishMaterializeResult;
+            projectionApplied?: MutationProjectionOutcome;
+        } = {
+            success: true,
+            version: result.version,
+            seq: result.seq,
+            message: `Published draft — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
+        };
+        const effects = await this.runPublishSideEffects({
+            singularType,
+            requestType: request.type,
+            name: request.name,
+            orgId,
+            body: result.item.body,
+            packageId: result.packageId,
+            ...(request.actor ? { actor: request.actor } : {}),
+            skipSeedApply: !!request._skipSeedApply,
+        });
+        if (effects.seedApplied) response.seedApplied = effects.seedApplied;
+        if (effects.materializeApplied) response.materializeApplied = effects.materializeApplied;
+        if (effects.projectionApplied) response.projectionApplied = effects.projectionApplied;
+        return response;
+    }
+
+    /**
+     * Phase 1 of a publish (ADR-0067 D2) — guards + draft promotion,
+     * METADATA WRITES ONLY: the draftable gate, the ADR-0010 lock check, and
+     * `repo.promoteDraft` (active-row put + draft delete), with
+     * optimistic-lock conflicts translated to `metadata_conflict`. Contains
+     * NO side effects, so a batch caller (`publishPackageDrafts`) can run
+     * many promotions inside ONE `engine.transaction()` and roll them ALL
+     * back together — the "a commit cannot half-land" invariant.
+     * `publishMetaItem` composes it with {@link runPublishSideEffects} for
+     * the single-item path.
+     */
+    private async promoteDraftForPublish(request: {
+        type: string; name: string; organizationId?: string; actor?: string; message?: string;
+    }): Promise<{
+        singularType: string;
+        orgId: string | null;
+        result: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+    }> {
         const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)
             && !ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularType)) {
@@ -4506,80 +4555,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                 ...(request.message ? { message: request.message } : {}),
                 intent,
             });
-            // Drafts skipped the registry mutation; on publish we now
-            // refresh the runtime object registry so live behaviour
-            // catches up immediately (matches saveMetaItem's
-            // post-persistence registry update path).
-            this.applyObjectRegistryMutation({
-                type: request.type,
-                name: request.name,
-                item: result.item.body,
-            });
-            // Create the object's table now so it's CRUD-able without a restart.
-            await this.ensureObjectStorage(request.type, request.name);
-            const response: {
-                success: boolean;
-                version: string;
-                seq: number;
-                message?: string;
-                seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
-                materializeApplied?: PublishMaterializeResult;
-                projectionApplied?: MutationProjectionOutcome;
-            } = {
-                success: true,
-                version: result.version,
-                seq: result.seq,
-                message: `Published draft — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
-            };
-            // Publishing a `seed` is what makes its rows live — materialize them
-            // NOW (best-effort, never fails the publish) so every publish path
-            // (per-ref REST publish, the home banner, package publish-drafts)
-            // lands data, not just metadata. The body is already in hand from
-            // the promote — no read-back, so no org-scope resolution pitfalls.
-            if (singularType === 'seed' && !request._skipSeedApply) {
-                response.seedApplied = await this.applySeedBodies([result.item.body], orgId);
-            }
-            // Publish-time materializer (ADR-0086 P2): project the published body
-            // into its data-plane row (e.g. `permission` → `sys_permission_set`
-            // with `managed_by:'package'`). Unlike seeds this needs no batch
-            // ordering — permission sets carry no cross-item references — so it
-            // runs on every publish path, package-draft batch included. The
-            // owning `package_id` rides on `result.packageId` (the draft's
-            // binding), so a package-door set materializes under the right owner.
-            const materializer = this.publishMaterializers.get(singularType);
-            if (materializer) {
-                try {
-                    response.materializeApplied = await materializer({
-                        body: result.item.body,
-                        packageId: result.packageId,
-                        organizationId: orgId,
-                        actor: request.actor ?? 'system',
-                    });
-                } catch (e: any) {
-                    response.materializeApplied = {
-                        success: false, inserted: 0, updated: 0,
-                        error: e?.message ?? 'materialize failed',
-                    };
-                }
-            }
-            // [ADR-0094] Awaited projection: runs AFTER the package-door
-            // materializer (which stamps package provenance) so the projector
-            // sees final record state; refuses/no-ops per its own rules.
-            const publishProjection = await this.runMutationProjector({
-                type: singularType,
-                name: request.name,
-                state: 'active',
-                organizationId: orgId,
-                body: result.item.body,
-            });
-            if (publishProjection) response.projectionApplied = publishProjection;
-            this.emitMetadataMutation({
-                type: singularType,
-                name: request.name,
-                state: 'active',
-                organizationId: orgId,
-            });
-            return response;
+            return { singularType, orgId, result };
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 const conflict: any = new Error(
@@ -4594,6 +4570,97 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             }
             throw err;
         }
+    }
+
+    /**
+     * Phase 2 of a publish (ADR-0067 D2) — the post-promotion side effects:
+     * runtime object-registry refresh, table DDL, single-item seed apply,
+     * the ADR-0086 P2 publish materializer, the ADR-0094 awaited projector,
+     * and the mutation event. Everything here is (a) non-transactional by
+     * nature (DDL cannot run inside the driver transaction; the registry is
+     * in-memory; projections are best-effort) and (b) healed by boot
+     * reconciliation when it fails — which is why a batch publish runs it
+     * AFTER the metadata transaction commits: side effects can self-heal, a
+     * half-landed metadata batch cannot (the ADR-0094 lesson).
+     */
+    private async runPublishSideEffects(args: {
+        singularType: string;
+        requestType: string;
+        name: string;
+        orgId: string | null;
+        body: unknown;
+        packageId: string | null;
+        actor?: string;
+        skipSeedApply?: boolean;
+    }): Promise<{
+        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+        materializeApplied?: PublishMaterializeResult;
+        projectionApplied?: MutationProjectionOutcome;
+    }> {
+        const out: {
+            seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+            materializeApplied?: PublishMaterializeResult;
+            projectionApplied?: MutationProjectionOutcome;
+        } = {};
+        // Drafts skipped the registry mutation; on publish we now refresh the
+        // runtime object registry so live behaviour catches up immediately
+        // (matches saveMetaItem's post-persistence registry update path).
+        this.applyObjectRegistryMutation({
+            type: args.requestType,
+            name: args.name,
+            item: args.body,
+        });
+        // Create the object's table now so it's CRUD-able without a restart.
+        await this.ensureObjectStorage(args.requestType, args.name);
+        // Publishing a `seed` is what makes its rows live — materialize them
+        // NOW (best-effort, never fails the publish) so every publish path
+        // (per-ref REST publish, the home banner, package publish-drafts)
+        // lands data, not just metadata. The body is already in hand from
+        // the promote — no read-back, so no org-scope resolution pitfalls.
+        if (args.singularType === 'seed' && !args.skipSeedApply) {
+            out.seedApplied = await this.applySeedBodies([args.body], args.orgId);
+        }
+        // Publish-time materializer (ADR-0086 P2): project the published body
+        // into its data-plane row (e.g. `permission` → `sys_permission_set`
+        // with `managed_by:'package'`). Unlike seeds this needs no batch
+        // ordering — permission sets carry no cross-item references — so it
+        // runs on every publish path, package-draft batch included. The
+        // owning `package_id` rides on the draft's binding, so a package-door
+        // set materializes under the right owner.
+        const materializer = this.publishMaterializers.get(args.singularType);
+        if (materializer) {
+            try {
+                out.materializeApplied = await materializer({
+                    body: args.body,
+                    packageId: args.packageId,
+                    organizationId: args.orgId,
+                    actor: args.actor ?? 'system',
+                });
+            } catch (e: any) {
+                out.materializeApplied = {
+                    success: false, inserted: 0, updated: 0,
+                    error: e?.message ?? 'materialize failed',
+                };
+            }
+        }
+        // [ADR-0094] Awaited projection: runs AFTER the package-door
+        // materializer (which stamps package provenance) so the projector
+        // sees final record state; refuses/no-ops per its own rules.
+        const publishProjection = await this.runMutationProjector({
+            type: args.singularType,
+            name: args.name,
+            state: 'active',
+            organizationId: args.orgId,
+            body: args.body,
+        });
+        if (publishProjection) out.projectionApplied = publishProjection;
+        this.emitMetadataMutation({
+            type: args.singularType,
+            name: args.name,
+            state: 'active',
+            organizationId: args.orgId,
+        });
+        return out;
     }
 
     /**
@@ -4812,47 +4879,160 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         // (owned by the env door / another package), not just a clean count.
         const materialize = { any: false, inserted: 0, updated: 0, failures: [] as Array<{ type: string; name: string; error: string }> };
 
-        for (const d of ordered) {
-            try {
-                if (d.type === 'seed') {
-                    // Capture the body BEFORE promote (the draft row is deleted by
-                    // the promote, and a post-publish read-back has org-scope
-                    // resolution pitfalls — reading the draft is unambiguous).
-                    const ref = { type: d.type, name: d.name, org: orgId ?? 'env' } as unknown as Parameters<typeof repo.get>[0];
-                    const draft = await repo.get(ref, { state: 'draft' });
-                    if (draft?.body) seedBodies.push(draft.body);
+        // ═══ Phase 1 — ATOMIC metadata writes (ADR-0067 D2) ═══
+        // Every draft promotion AND the sys_metadata_commit record run inside
+        // ONE engine transaction: any failure rolls ALL of them back — "a
+        // commit cannot half-land". Nested repository writes JOIN this
+        // transaction via the engine's ambient-tx join (a nested begin would
+        // deadlock single-connection pools), and side effects are deliberately
+        // deferred to Phase 2: DDL cannot run inside the driver transaction,
+        // in-memory registry mutations cannot roll back, and projections /
+        // probes are healed by boot reconciliation — side effects can
+        // self-heal, a half-landed metadata batch cannot (the ADR-0094
+        // lesson). Engines without `transaction()` (memory driver, minimal
+        // stubs) fall through to a plain sequential run with the same weaker
+        // guarantee the repository's `withTxn` documents.
+        type PromotedDraft = {
+            d: { type: string; name: string };
+            singularType: string;
+            body: unknown;
+            packageId: string | null;
+            version: string;
+            seq: number;
+        };
+        const promoted: PromotedDraft[] = [];
+        // (assigned inside the transaction closure — keep the wide type)
+        let commit = null as { commitId: string } | null;
+        const inTxn: <T>(cb: () => Promise<T>) => Promise<T> =
+            typeof (this.engine as { transaction?: unknown })?.transaction === 'function'
+                ? (cb) => (this.engine as unknown as { transaction: <R>(fn: () => Promise<R>) => Promise<R> }).transaction(() => cb())
+                : (cb) => cb();
+        try {
+            await inTxn(async () => {
+                for (const d of ordered) {
+                    try {
+                        if (d.type === 'seed') {
+                            // Capture the body BEFORE promote (the draft row is
+                            // deleted by the promote, and a post-publish read-back
+                            // has org-scope resolution pitfalls — reading the
+                            // draft is unambiguous).
+                            const ref = { type: d.type, name: d.name, org: orgId ?? 'env' } as unknown as Parameters<typeof repo.get>[0];
+                            const draft = await repo.get(ref, { state: 'draft' });
+                            if (draft?.body) seedBodies.push(draft.body);
+                        }
+                        const { singularType, result } = await this.promoteDraftForPublish({
+                            type: d.type,
+                            name: d.name,
+                            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+                            ...(request.actor ? { actor: request.actor } : {}),
+                            message: `publish app package '${request.packageId}'`,
+                        });
+                        promoted.push({
+                            d, singularType,
+                            body: result.item.body,
+                            packageId: result.packageId,
+                            version: result.version,
+                            seq: result.seq,
+                        });
+                        if (typeof result.seq === 'number') publishedSeqs.push(result.seq);
+                    } catch (e: unknown) {
+                        // Tag the causal item and abort — the surrounding
+                        // transaction rolls back every promotion made so far.
+                        const err = e instanceof Error ? e : new Error(String(e));
+                        (err as { __batchItem?: unknown }).__batchItem = d;
+                        throw err;
+                    }
                 }
-                const r = await this.publishMetaItem({
-                    type: d.type,
-                    name: d.name,
-                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+                // ADR-0067 — record this turn as ONE commit, INSIDE the same
+                // transaction as the promotions it describes: the commit row and
+                // the published state land or roll back together, so a recorded
+                // commit can never describe a partial publish.
+                if (promoted.length > 0) {
+                    const promotedKeys = new Set(promoted.map((p) => `${p.d.type}/${p.d.name}`));
+                    commit = await this.recordPackageCommit({
+                        orgId,
+                        packageId: request.packageId,
+                        operation: 'apply',
+                        ...(request.message ? { message: request.message } : {}),
+                        ...(request.actor ? { actor: request.actor } : {}),
+                        ...(request.aiModel ? { aiModel: request.aiModel } : {}),
+                        items: commitItems.filter((it) => promotedKeys.has(`${it.type}/${it.name}`)),
+                        ...(publishedSeqs.length
+                            ? { eventSeqStart: Math.min(...publishedSeqs), eventSeqEnd: Math.max(...publishedSeqs) }
+                            : {}),
+                    });
+                }
+            });
+        } catch (e: any) {
+            // The batch rolled back — NOTHING landed (ADR-0067 D2). Report the
+            // causal item with its real error; every other draft is marked
+            // batch_aborted so the caller sees the all-or-nothing semantics
+            // instead of inferring them from publishedCount 0.
+            const causal = e?.__batchItem as { type: string; name: string } | undefined;
+            const failedOut = ordered.map((d) =>
+                causal && d.type === causal.type && d.name === causal.name
+                    ? {
+                        type: d.type, name: d.name,
+                        error: e?.message ?? 'publish failed',
+                        ...(e?.code ? { code: e.code } : {}),
+                        // Carry structured spec-validation issues so the publish
+                        // surface can point at the offending field.
+                        ...(Array.isArray(e?.issues) ? { issues: e.issues } : {}),
+                    }
+                    : {
+                        type: d.type, name: d.name,
+                        error: `not published — the batch is all-or-nothing (ADR-0067 D2) and `
+                            + `${causal ? `${causal.type}/${causal.name}` : 'another item'} failed; the transaction rolled back`,
+                        code: 'batch_aborted',
+                    });
+            return {
+                success: false,
+                publishedCount: 0,
+                failedCount: failedOut.length,
+                published: [],
+                failed: failedOut,
+            };
+        }
+
+        // ═══ Phase 2 — side effects, after the metadata committed ═══
+        // Registry refresh, DDL, materializers, projections, events — per item
+        // in publish order. Best-effort at the batch level: the metadata IS
+        // live at this point, so a side-effect failure must be surfaced (via
+        // materialize.failures / probes), never turned into a fake unpublish.
+        for (const p of promoted) {
+            published.push({ type: p.d.type, name: p.d.name, version: p.version });
+            try {
+                const eff = await this.runPublishSideEffects({
+                    singularType: p.singularType,
+                    requestType: p.d.type,
+                    name: p.d.name,
+                    orgId,
+                    body: p.body,
+                    packageId: p.packageId,
                     ...(request.actor ? { actor: request.actor } : {}),
-                    message: `publish app package '${request.packageId}'`,
-                    _skipSeedApply: true,
+                    skipSeedApply: true,
                 });
-                published.push({ type: d.type, name: d.name, version: r.version });
-                if (typeof r.seq === 'number') publishedSeqs.push(r.seq);
-                if (r.materializeApplied) {
+                if (eff.materializeApplied) {
                     materialize.any = true;
-                    materialize.inserted += r.materializeApplied.inserted;
-                    materialize.updated += r.materializeApplied.updated;
-                    if (!r.materializeApplied.success) {
+                    materialize.inserted += eff.materializeApplied.inserted;
+                    materialize.updated += eff.materializeApplied.updated;
+                    if (!eff.materializeApplied.success) {
                         materialize.failures.push({
-                            type: d.type, name: d.name,
-                            error: r.materializeApplied.error ?? 'materialize failed',
+                            type: p.d.type, name: p.d.name,
+                            error: eff.materializeApplied.error ?? 'materialize failed',
                         });
                     }
                 }
             } catch (e: any) {
-                failed.push({
-                    type: d.type,
-                    name: d.name,
-                    error: e?.message ?? 'publish failed',
-                    ...(e?.code ? { code: e.code } : {}),
-                    // Carry structured spec-validation issues so the publish
-                    // surface can point at the offending field, not just report
-                    // "N failed" (this catch used to flatten them to a message).
-                    ...(Array.isArray(e?.issues) ? { issues: e.issues } : {}),
+                // Boot reconciliation heals registry/DDL/projection drift; the
+                // published metadata is authoritative. Surface, don't lie.
+                console.warn(
+                    `[Protocol] publish side effects failed for ${p.d.type}/${p.d.name}: ${e?.message ?? e}`,
+                );
+                materialize.any = true;
+                materialize.failures.push({
+                    type: p.d.type, name: p.d.name,
+                    error: `side effects failed (metadata is live; boot reconciliation heals): ${e?.message ?? 'unknown'}`,
                 });
             }
         }
@@ -4888,25 +5068,8 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             }
         }
 
-        // ADR-0067 — record this turn as ONE commit (best-effort; never fails
-        // the publish). Only artifacts that actually published are in the revert
-        // plan, so a partial publish reverts exactly what landed.
-        let commit: { commitId: string } | null = null;
-        if (published.length > 0) {
-            const publishedKeys = new Set(published.map((p) => `${p.type}/${p.name}`));
-            commit = await this.recordPackageCommit({
-                orgId,
-                packageId: request.packageId,
-                operation: 'apply',
-                ...(request.message ? { message: request.message } : {}),
-                ...(request.actor ? { actor: request.actor } : {}),
-                ...(request.aiModel ? { aiModel: request.aiModel } : {}),
-                items: commitItems.filter((it) => publishedKeys.has(`${it.type}/${it.name}`)),
-                ...(publishedSeqs.length
-                    ? { eventSeqStart: Math.min(...publishedSeqs), eventSeqEnd: Math.max(...publishedSeqs) }
-                    : {}),
-            });
-        }
+        // ADR-0067 D2 — the commit record was written INSIDE the Phase-1
+        // transaction above, together with the promotions it describes.
 
         return {
             success: failed.length === 0 && published.length > 0,

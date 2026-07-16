@@ -2,6 +2,7 @@ packages:
   - packages/*
   - packages/apps/*
   - packages/plugins/*
+  - packages/qa/*
   - packages/triggers/*
   - packages/services/*
   - packages/adapters/*

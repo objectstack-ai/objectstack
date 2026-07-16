@@ -20,8 +20,8 @@ const repoRoot = resolve(here, '../../../..'); // packages/spec/scripts/liveness
 
 describe('parseProofRef', () => {
   it('splits a well-formed ref into file + id', () => {
-    expect(parseProofRef('packages/dogfood/test/x.test.ts#my-proof')).toEqual({
-      file: 'packages/dogfood/test/x.test.ts',
+    expect(parseProofRef('packages/qa/dogfood/test/x.test.ts#my-proof')).toEqual({
+      file: 'packages/qa/dogfood/test/x.test.ts',
       id: 'my-proof',
     });
   });

@@ -126,7 +126,7 @@ keeps the green gate green):
 # 1. In plugin-security/src/security-plugin.ts, disable the pre-image check:
 #    change `if (` to `if ( false &&` at the `(opCtx.operation === 'update' …` block.
 pnpm --filter @objectstack/plugin-security build   # package resolves to dist
-cd packages/dogfood && npx vitest run test/rls-fixture.dogfood.test.ts -t "owner-scoped"
+cd packages/qa/dogfood && npx vitest run test/rls-fixture.dogfood.test.ts -t "owner-scoped"
 #    → rls_note flips to [rls-hole]: "GET 404 yet MUTATED it by id (PATCH 200)".
 git checkout -- ../plugins/plugin-security/src/security-plugin.ts && pnpm --filter @objectstack/plugin-security build
 ```

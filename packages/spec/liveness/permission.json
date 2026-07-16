@@ -14,7 +14,7 @@
     "packageId": {
       "status": "live",
       "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-permissions.ts (author-declared fallback for the registry `_packageId` provenance; persisted to sys_permission_set.package_id)",
-      "note": "ADR-0086 D3 — owning package for a package-shipped set; proven by packages/dogfood/test/showcase-permission-seeding.dogfood.test.ts."
+      "note": "ADR-0086 D3 — owning package for a package-shipped set; proven by packages/qa/dogfood/test/showcase-permission-seeding.dogfood.test.ts."
     },
     "managedBy": {
       "status": "live",
@@ -29,7 +29,7 @@
     "isDefault": {
       "status": "live",
       "evidence": "plugin-security: packages/plugins/plugin-security/src/security-plugin.ts (constructor) — when no explicit fallbackPermissionSet is configured, the SecurityPlugin resolves the fallback from the permission set marked isDefault:true (ADR-0056 D7).",
-      "note": "LIVE — app-declared default profile; proven by packages/dogfood/test/showcase-default-profile.dogfood.test.ts."
+      "note": "LIVE — app-declared default profile; proven by packages/qa/dogfood/test/showcase-default-profile.dogfood.test.ts."
     },
     "objects": {
       "children": {
@@ -75,7 +75,7 @@
         "readScope": {
           "status": "live",
           "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (getEffectiveScope) + packages/plugins/plugin-sharing/src/sharing-service.ts (owner-match widened by readScope; hierarchy values delegated to IHierarchyScopeResolver)",
-          "note": "ADR-0057 D1 — read access DEPTH (own/own_and_reports/unit/unit_and_below/org). own/org enforced in open edition; hierarchy values via the enterprise hierarchy-scope-resolver (fail-closed to owner-only when absent; defineStack requires 'hierarchy-security'). Proven: packages/dogfood/test/showcase-scope-depth.dogfood.test.ts."
+          "note": "ADR-0057 D1 — read access DEPTH (own/own_and_reports/unit/unit_and_below/org). own/org enforced in open edition; hierarchy values via the enterprise hierarchy-scope-resolver (fail-closed to owner-only when absent; defineStack requires 'hierarchy-security'). Proven: packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts."
         },
         "writeScope": {
           "status": "live",
@@ -132,7 +132,7 @@
         "using": {
           "status": "live",
           "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts",
-          "proof": "packages/dogfood/test/rls-fixture.dogfood.test.ts#rls-by-id-write",
+          "proof": "packages/qa/dogfood/test/rls-fixture.dogfood.test.ts#rls-by-id-write",
           "note": "compiled into find + analytics SQL. ADR-0054 high-risk class (RLS): the proof boots an owner-isolated fixture so a fresh member cannot read an admin-created row, then asserts the runner's verdict in both directions — `rls-consistent` when the owner predicate also gates the by-id write (#1994 pre-image check) and `rls-hole` when it doesn't. Guards read AND by-id-write enforcement, not just the read predicate."
         },
         "check": {

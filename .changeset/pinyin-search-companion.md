@@ -5,7 +5,7 @@
 '@objectstack/cli': minor
 ---
 
-Generic pinyin search recall (#2486, ADR-0097): a locale-gated
+Generic pinyin search recall (#2486, ADR-0098): a locale-gated
 `OS_SEARCH_PINYIN_ENABLED` switch (auto-on when the stack configures any
 `zh-*` locale) provisions a hidden `__search` companion column for each
 object's display/name field at compile time, the new

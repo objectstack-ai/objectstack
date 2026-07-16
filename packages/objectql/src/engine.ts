@@ -2950,6 +2950,18 @@ export class ObjectQL implements IDataEngine {
     callback: (trxCtx: any) => Promise<T>,
     baseContext?: any,
   ): Promise<T> {
+    // ADR-0067 D2 — JOIN an already-open ambient transaction instead of
+    // opening a nested driver transaction. A nested begin would acquire a
+    // second connection (a deadlock on single-connection pools like the
+    // SQLite knex pool) and would NOT be covered by the outer rollback —
+    // exactly the half-landing this join prevents: an outer batch
+    // transaction (e.g. `publishPackageDrafts`) must own the one-and-only
+    // commit/rollback for every write made through nested helpers (the
+    // sys-metadata repository's `withTxn`, hook-driven writes, …).
+    const ambient = this.txStore.getStore();
+    if (ambient?.transaction) {
+      return callback({ ...(baseContext ?? {}), transaction: ambient.transaction });
+    }
     const driver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
     const drv = driver as any;
     if (!drv?.beginTransaction) {

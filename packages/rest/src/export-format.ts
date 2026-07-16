@@ -22,6 +22,8 @@ export interface ExportFieldMeta {
   reference?: string;
   /** Field on the referenced record to show as its label. */
   displayField?: string;
+  /** Field holds multiple values (an array), e.g. a `multiple: true` lookup. */
+  multiple?: boolean;
   // The following four drive the import path's required-field pre-check
   // (import-runner.ts). They mirror the engine's insert-time validation
   // (objectql record-validator.ts) so a dry run can predict a NOT NULL /
@@ -127,6 +129,7 @@ export function buildFieldMetaMap(schema: unknown): Map<string, ExportFieldMeta>
       options: Array.isArray(f.options) ? f.options : undefined,
       reference: typeof f.reference === 'string' ? f.reference : undefined,
       displayField: typeof f.displayField === 'string' ? f.displayField : undefined,
+      multiple: f.multiple === true,
       required: f.required === true,
       system: f.system === true,
       readonly: f.readonly === true,

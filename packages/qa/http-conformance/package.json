@@ -1,0 +1,38 @@
+{
+  "name": "@objectstack/http-conformance",
+  "version": "0.0.1",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "HTTP transport-port conformance gate (ADR-0076 D11/OQ#10, #2462) — a zero-dependency node:http reference implementation of IHttpServer plus a cross-adapter suite that boots the dispatcher bridge and REST generator on it AND on plugin-hono-server, pinning that the port stays free of framework-isms. Not published; validation instrument, not a product server.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@objectstack/driver-memory": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
+    "@objectstack/plugin-hono-server": "workspace:*",
+    "@objectstack/runtime": "workspace:*",
+    "@types/node": "^26.1.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectstack",
+    "qa",
+    "conformance",
+    "http-server",
+    "adapter"
+  ],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/framework.git",
+    "directory": "packages/qa/http-conformance"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/framework/issues"
+}

@@ -15,7 +15,7 @@ import { checkLedger } from '@objectstack/verify';
 import { EXPRESSION_SURFACE } from './expression-conformance.ledger.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(HERE, '../../..');
+const REPO_ROOT = join(HERE, '../../../..');
 const SPEC_SRC = join(REPO_ROOT, 'packages/spec/src');
 
 const MODES = new Set(['compile', 'interpret']);

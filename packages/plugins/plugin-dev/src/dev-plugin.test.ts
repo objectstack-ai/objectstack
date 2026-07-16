@@ -1,6 +1,25 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DevPlugin } from './dev-plugin';
 
+// #3060: init()'s graceful-degradation path dynamically imports ~10 real
+// workspace packages (objectql, runtime, plugin-auth, …). Under a fully
+// parallel `pnpm test` those vite transforms alone can blow past the test
+// timeout — the "handle missing deps" test flaked at 15s while passing in
+// <100ms standalone. The test's INTENT is "peer deps missing", so make them
+// genuinely missing: each factory throws the same shape an absent package
+// produces. The degradation branch is exercised for real, with zero real
+// module resolution on the hot path. (The stub-contract tests below disable
+// all real services, so they never reach these imports.)
+// (vi.mock calls are hoisted above any const, so the factories are inline.)
+vi.mock('@objectstack/objectql', () => { throw Object.assign(new Error("Cannot find package '@objectstack/objectql'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
+vi.mock('@objectstack/runtime', () => { throw Object.assign(new Error("Cannot find package '@objectstack/runtime'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
+vi.mock('@objectstack/driver-memory', () => { throw Object.assign(new Error("Cannot find package '@objectstack/driver-memory'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
+vi.mock('@objectstack/service-i18n', () => { throw Object.assign(new Error("Cannot find package '@objectstack/service-i18n'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
+vi.mock('@objectstack/plugin-auth', () => { throw Object.assign(new Error("Cannot find package '@objectstack/plugin-auth'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
+vi.mock('@objectstack/plugin-security', () => { throw Object.assign(new Error("Cannot find package '@objectstack/plugin-security'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
+vi.mock('@objectstack/plugin-hono-server', () => { throw Object.assign(new Error("Cannot find package '@objectstack/plugin-hono-server'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
+vi.mock('@objectstack/rest', () => { throw Object.assign(new Error("Cannot find package '@objectstack/rest'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
+
 describe('DevPlugin', () => {
   it('should have correct metadata', () => {
     const plugin = new DevPlugin();
@@ -41,10 +60,12 @@ describe('DevPlugin', () => {
       getKernel: vi.fn(),
     };
 
-    // DevPlugin should not throw even if peer dependencies are missing
+    // DevPlugin should not throw even if peer dependencies are missing.
+    // Deps are mocked-away above (#3060), so the default timeout suffices —
+    // if someone removes the mocks, the slowness resurfaces loudly here.
     const plugin = new DevPlugin({ seedAdminUser: false });
     await expect(plugin.init(ctx)).resolves.not.toThrow();
-  }, 15_000);
+  });
 
   it('should register contract-compliant dev stubs for all core services', async () => {
     const registeredServices = new Map<string, any>();

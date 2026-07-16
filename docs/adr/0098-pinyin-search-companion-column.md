@@ -1,4 +1,4 @@
-# ADR-0097: Pinyin Search via a Locale-Gated Companion Column
+# ADR-0098: Pinyin Search via a Locale-Gated Companion Column
 
 - **Status**: Accepted
 - **Date**: 2026-07-16

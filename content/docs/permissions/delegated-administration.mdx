@@ -67,7 +67,7 @@ Writes to the governed tables (`sys_user_position`,
 | No scope, no admin | Holders of plain CRUD on the RBAC tables with **no** scope are refused: administration is a scoped capability now, not a side effect of table access |
 
 Every rule above is exercised end-to-end by the showcase permission zoo
-(`packages/dogfood/test/showcase-permission-zoo.dogfood.test.ts`): the
+(`packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts`): the
 in-subtree allowlisted assignment passes with a `granted_by` stamp; the
 out-of-subtree anchor, the off-allowlist grant (to self), and the
 `manageBindings: false` binding write are each refused.

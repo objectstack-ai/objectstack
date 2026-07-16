@@ -3658,6 +3658,22 @@ export class RestServer {
         // are registered inside registerDataActionEndpoints (before the greedy
         // CRUD `:object/:id`), so the literal `import/jobs` segments win.
 
+        // Shared loader: fetch one job row by id. Used by the read routes, the
+        // cancel route, and the background worker's durable cancellation checks.
+        const loadImportJob = async (p: any, jobId: string, environmentId?: string, context?: any): Promise<any | undefined> => {
+            const r = await p.findData({
+                object: IMPORT_JOB_OBJECT,
+                query: { $filter: { id: jobId }, $top: 1 },
+                ...(environmentId ? { environmentId } : {}),
+                ...(context ? { context } : {}),
+            });
+            const rows = Array.isArray(r?.records) ? r.records
+                : Array.isArray(r?.data) ? r.data
+                    : Array.isArray(r?.rows) ? r.rows
+                        : Array.isArray(r) ? r : [];
+            return rows[0];
+        };
+
         // POST /data/:object/import/jobs — create an async import job.
         this.routeManager.register({
             method: 'POST',
@@ -3731,6 +3747,13 @@ export class RestServer {
                     // import can be logically rolled back later.
                     const captureUndo = !prepared.dryRun && prepared.rows.length <= IMPORT_JOB_UNDO_MAX_ROWS;
                     void (async () => {
+                        // Cancelled while still pending? Don't start (and don't let
+                        // the 'running' patch below overwrite the durable 'cancelled').
+                        if (this.cancelledImportJobs.has(jobId)) {
+                            this.cancelledImportJobs.delete(jobId);
+                            await patch({ status: 'cancelled', completed_at: new Date().toISOString() });
+                            return;
+                        }
                         await patch({ status: 'running', started_at: new Date().toISOString() });
                         try {
                             const summary = await runImport({
@@ -3744,10 +3767,33 @@ export class RestServer {
                                     skipped_count: pr.skipped,
                                     error_count: pr.errors,
                                 }),
-                                shouldCancel: () => this.cancelledImportJobs.has(jobId),
+                                shouldCancel: async () => {
+                                    if (this.cancelledImportJobs.has(jobId)) return true;
+                                    // Durable fallback: the cancel route also writes
+                                    // status='cancelled' to the job row, so a cancel
+                                    // accepted by another process (or after a restart
+                                    // dropped the in-memory flag) still stops the worker.
+                                    try {
+                                        const row = await loadImportJob(p, jobId, environmentId, context);
+                                        return String(row?.status ?? '') === 'cancelled';
+                                    } catch { return false; }
+                                },
                             });
+                            // A cancel that lands after the last checkpoint must still
+                            // win the terminal state: the cancel route already marked
+                            // the durable row 'cancelled', and a late 'succeeded' here
+                            // would silently overwrite it (framework#2824). Counts stay
+                            // truthful either way — they reflect what was written.
+                            let finalStatus = summary.cancelled ? 'cancelled' : 'succeeded';
+                            if (finalStatus === 'succeeded' && this.cancelledImportJobs.has(jobId)) finalStatus = 'cancelled';
+                            if (finalStatus === 'succeeded') {
+                                try {
+                                    const row = await loadImportJob(p, jobId, environmentId, context);
+                                    if (String(row?.status ?? '') === 'cancelled') finalStatus = 'cancelled';
+                                } catch { /* keep succeeded */ }
+                            }
                             await patch({
-                                status: summary.cancelled ? 'cancelled' : 'succeeded',
+                                status: finalStatus,
                                 processed_rows: summary.processed,
                                 created_count: summary.created,
                                 updated_count: summary.updated,
@@ -3777,21 +3823,6 @@ export class RestServer {
                 tags: ['data', 'import'],
             },
         });
-
-        // Shared loader for the read routes: fetch one job row by id.
-        const loadImportJob = async (p: any, jobId: string, environmentId?: string, context?: any): Promise<any | undefined> => {
-            const r = await p.findData({
-                object: IMPORT_JOB_OBJECT,
-                query: { $filter: { id: jobId }, $top: 1 },
-                ...(environmentId ? { environmentId } : {}),
-                ...(context ? { context } : {}),
-            });
-            const rows = Array.isArray(r?.records) ? r.records
-                : Array.isArray(r?.data) ? r.data
-                    : Array.isArray(r?.rows) ? r.rows
-                        : Array.isArray(r) ? r : [];
-            return rows[0];
-        };
 
         // POST /data/import/jobs/:jobId/cancel — request cancellation.
         this.routeManager.register({

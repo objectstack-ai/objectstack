@@ -15,7 +15,7 @@ import { checkLedger } from '@objectstack/verify';
 import { FLOW_TRIGGER_SURFACE } from './flow-trigger-conformance.ledger.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(HERE, '../../..');
+const REPO_ROOT = join(HERE, '../../../..');
 const FLOW_ZOD = join(REPO_ROOT, 'packages/spec/src/automation/flow.zod.ts');
 
 /** Re-discover every `Flow.type` enum value (the one tagged `.describe('Flow type')`). */

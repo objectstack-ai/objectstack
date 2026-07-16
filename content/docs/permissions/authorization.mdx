@@ -318,7 +318,7 @@ Five mechanisms — four CI-time, one runtime — make the security posture a
   `--update-access-matrix` — the snapshot's git diff is the review artifact.
   Opt-in, format, and workflow: **[Access-Matrix Snapshot Gate](/docs/permissions/access-matrix)**.
 
-- **Conformance matrix** (`packages/dogfood/test/authz-conformance.matrix.ts`,
+- **Conformance matrix** (`packages/qa/dogfood/test/authz-conformance.matrix.ts`,
   ADR-0056 D10): every authorization primitive sits in exactly one honest
   state — `enforced` (must name its enforcement site; high-risk rows must
   reference an end-to-end dogfood proof), `experimental`, or `removed`. A new

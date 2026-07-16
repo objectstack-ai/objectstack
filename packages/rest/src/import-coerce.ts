@@ -20,6 +20,12 @@
  *   - select / radio                                → an option *value*
  *   - multiselect / checkboxes / tags               → an array of option values
  *   - lookup / master_detail / user / reference     → a record id (resolved async)
+ *   - file / image                                  → a file id / url (as-is)
+ *
+ * Any of the last four whose field is flagged `multiple: true` (per the spec,
+ * `multiple` applies to select / lookup / file / image; `radio`/`user` share
+ * their branch) instead store an **array** — the cell is split on the export
+ * separator and each token coerced individually. See `isMultiValueField`.
  *
  * Contract: when a field carries no usable metadata the value passes through
  * untouched, so an import stays byte-identical to the pre-coercion behaviour.
@@ -37,6 +43,31 @@ const MULTI_OPTION_TYPES = new Set(['multiselect', 'checkboxes', 'tags']);
 const NUMBER_TYPES = new Set(['number', 'currency', 'percent', 'rating', 'slider']);
 /** Boolean field types (store a real boolean). */
 const BOOL_TYPES = new Set(['boolean', 'toggle']);
+/** Attachment field types (store a file id / url, or an array when `multiple`). */
+const FILE_TYPES = new Set(['file', 'image']);
+
+/**
+ * Single-value field types that become an ARRAY when flagged `multiple: true`.
+ * Mirrors objectql `record-validator.ts` (`MULTI_CAPABLE_TYPES`): per the spec
+ * (`field.zod.ts`), `multiple` applies to select / lookup / file / image;
+ * `radio` shares the select branch and `user` is stored identically to `lookup`.
+ * master_detail / reference / tree are NOT multi-capable, so a stray
+ * `multiple: true` on them is ignored (they stay single — same as the engine).
+ */
+const MULTI_CAPABLE_TYPES = new Set(['select', 'radio', 'lookup', 'user', 'file', 'image']);
+
+/**
+ * Whether a field's stored value is an array — an inherently-multi type
+ * (multiselect / checkboxes / tags) or a multi-capable type flagged
+ * `multiple: true`. Kept in lock-step with the engine's `isMultiValueField`
+ * so a coerced cell has the SAME shape the engine will accept on insert.
+ */
+function isMultiValueField(meta: ExportFieldMeta | undefined): boolean {
+  const t = meta?.type;
+  if (!t) return false;
+  if (MULTI_OPTION_TYPES.has(t)) return true;
+  return MULTI_CAPABLE_TYPES.has(t) && meta?.multiple === true;
+}
 
 /**
  * Structured outcome of a reference lookup. `id` set → a single record matched.
@@ -279,7 +310,24 @@ export async function coerceFieldValue(
     return { value: d };
   }
 
-  if (OPTION_TYPES.has(t)) {
+  // select / radio / multiselect / checkboxes / tags — match the cell against
+  // the field's option list. Multi-valued when the type is inherently multi
+  // (multiselect/…) OR a select/radio is flagged `multiple: true`; split then
+  // and match each token, else match the whole cell as one option.
+  if (OPTION_TYPES.has(t) || MULTI_OPTION_TYPES.has(t)) {
+    if (isMultiValueField(meta)) {
+      const parts = splitMulti(raw);
+      const out: unknown[] = [];
+      for (const part of parts) {
+        const v = matchOption(part, meta?.options);
+        if (v === undefined) {
+          if (ctx.createMissingOptions) { out.push(part); continue; }
+          return { error: { field, code: 'invalid_option', message: `${field}: "${part}" is not a known option` } };
+        }
+        out.push(v);
+      }
+      return { value: out };
+    }
     const v = matchOption(raw, meta?.options);
     if (v === undefined) {
       if (ctx.createMissingOptions) return { value: String(raw).trim() };
@@ -288,21 +336,29 @@ export async function coerceFieldValue(
     return { value: v };
   }
 
-  if (MULTI_OPTION_TYPES.has(t)) {
-    const parts = splitMulti(raw);
-    const out: unknown[] = [];
-    for (const part of parts) {
-      const v = matchOption(part, meta?.options);
-      if (v === undefined) {
-        if (ctx.createMissingOptions) { out.push(part); continue; }
-        return { error: { field, code: 'invalid_option', message: `${field}: "${part}" is not a known option` } };
-      }
-      out.push(v);
-    }
-    return { value: out };
-  }
-
   if (REFERENCE_TYPES.has(t)) {
+    // Multi-value reference (a `multiple: true` lookup / user): the cell holds
+    // several display names joined by the export separator (`, ` / `;`). Split
+    // first, then resolve each token; store an array of ids. Mirrors the
+    // multi-option branch above and the export path's `formatReference` join.
+    if (isMultiValueField(meta)) {
+      const tokens = splitMulti(raw);
+      // If we have no resolver / no target object, store the raw tokens and let
+      // referential integrity be enforced downstream.
+      if (!ctx.resolveRef || !meta.reference) return { value: tokens };
+      const out: unknown[] = [];
+      for (const token of tokens) {
+        const m = normalizeRefMatch(await ctx.resolveRef(meta.reference, token, meta));
+        if (m.ambiguous) {
+          return { error: { field, code: 'reference_ambiguous', message: `${field}: "${token}" matches more than one ${meta.reference} — use a unique value or the record id` } };
+        }
+        if (m.id === undefined) {
+          return { error: { field, code: 'reference_not_found', message: `${field}: no ${meta.reference} matches "${token}"` } };
+        }
+        out.push(m.id);
+      }
+      return { value: out };
+    }
     const display = String(raw).trim();
     // If it already looks resolved (an id was pasted) or we have no resolver /
     // no target object, store the raw value and let referential integrity be
@@ -318,8 +374,17 @@ export async function coerceFieldValue(
     return { value: match.id };
   }
 
-  // Everything else (text, email, phone, json, html, file, …): pass through,
-  // trimming string cells so stray spreadsheet padding doesn't leak into storage.
+  // Attachment fields (file / image): the value is a file id / url the importer
+  // does not resolve. When `multiple: true` the cell holds several joined by the
+  // export separator — split into an array so the stored shape matches what the
+  // engine expects; a single-value attachment passes through untouched below.
+  if (FILE_TYPES.has(t) && isMultiValueField(meta)) {
+    return { value: splitMulti(raw) };
+  }
+
+  // Everything else (text, email, phone, json, html, single file, …): pass
+  // through, trimming string cells so stray spreadsheet padding doesn't leak
+  // into storage.
   return { value: trim && typeof raw === 'string' ? raw.trim() : raw };
 }
 
