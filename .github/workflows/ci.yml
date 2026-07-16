@@ -107,18 +107,26 @@ jobs:
       # spec sits at the root of the dependency graph, so spec-touching PRs
       # still run (close to) everything — but the many PRs that don't touch
       # spec skip the bulk of the 75-package matrix.
+      # --concurrency=4: turbo's default (10) oversubscribes the 4-vCPU
+      # hosted runner. As the task graph grew past ~100 tasks (connector
+      # packages + qa gates), parallel vitest workers + tsup DTS builds
+      # started exhausting runner memory: plugin-audit#test died with ZERO
+      # output (kernel OOM-kill signature) deterministically on the runner
+      # while passing everywhere else — first seen on main @4f8c2d1,
+      # reproduced twice on #3037. Matching concurrency to the core count
+      # bounds peak memory; the job is CPU-bound anyway.
       - name: Run affected tests (PR)
         if: github.event_name == 'pull_request'
         env:
           TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
-        run: pnpm turbo run test --affected
+        run: pnpm turbo run test --affected --concurrency=4
 
       # Push to main: full run, but exclude spec's plain test task — the
       # coverage step below executes the exact same 250-file spec suite once,
       # with coverage. Previously the spec suite ran twice per push.
       - name: Run all tests (push)
         if: github.event_name == 'push'
-        run: pnpm turbo run test --filter=!@objectstack/spec
+        run: pnpm turbo run test --filter=!@objectstack/spec --concurrency=4
 
       - name: Generate coverage report
         if: github.event_name == 'push'
