@@ -1,6 +1,6 @@
 ---
 title: v15.0.0
-description: Authorization kernel chain (ADR-0095) — tenant isolation becomes an independent Layer 0, a monotonic posture ladder derived from capabilities, cross-tenant write hardening, and record-grained access explanation. Breaking changes affect multi-org deployments only.
+description: Authorization kernel chain (ADR-0095) — tenant isolation becomes an independent Layer 0, a monotonic posture ladder, and record-grained access explanation. The 15.1 line adds attachments v1, declarative connectors (ADR-0096/0097), dashboard-level filters, pinyin search, and a broad write-path security hardening sweep.
 ---
 
 **Authorization kernel hardening (ADR-0095) + supporting features (tracking framework#2920).**
@@ -14,7 +14,7 @@ are unaffected.
 
 Read this before upgrading a multi-org or enterprise-hierarchy deployment.
 
-## Breaking changes
+## Breaking changes (15.0.0)
 
 ### Multi-org deployments only
 
@@ -61,7 +61,7 @@ Read this before upgrading a multi-org or enterprise-hierarchy deployment.
   their position BU; multiple positions union; expired/inactive positions fall back
   to membership.
 
-## Non-breaking hardening (same effective visibility)
+## Non-breaking hardening in 15.0.0 (same effective visibility)
 
 - **RLS safety nets recognize canonical `==` (#2936).** The field-existence /
   tenancy-disabled nets were inert for `==`-form policies; now recognized. Only
@@ -74,7 +74,7 @@ Read this before upgrading a multi-org or enterprise-hierarchy deployment.
   now filters by organization directly, and private hierarchy-scoped objects that lack
   an `organization_id` column fail closed at boot.
 
-## New features (additive)
+## New features in 15.0.0 (additive)
 
 - **A3** — the `sys_user` record page gains **Permission Sets** (direct grant) and
   **Business Units** assignment tabs.
@@ -94,7 +94,339 @@ Read this before upgrading a multi-org or enterprise-hierarchy deployment.
 - **C1** — hierarchy RLS enterprise package reaches GA (subtree/reporting-chain caching,
   customer docs, license gate).
 
+---
+
+# What's new in 15.1.0
+
+15.1 is a fast-follow minor with three themes: a **write-path security hardening
+sweep** (every hole below was verified exploitable on 15.0.0 and is now closed),
+**attachments v1** (parent-derived access, lifecycle, authenticated downloads), and
+**declarative connectors** (ADR-0096/0097 — REST/OpenAPI/MCP integrations wired
+purely from metadata). No `major` changesets: strict-semver edges are listed under
+*Behavior changes* below with their migrations.
+
+## Behavior changes (15.1.0)
+
+### Spec: `tenancy.strategy` and `tenancy.crossTenantAccess` removed (#2962)
+
+Strict-semver breaking, shipped in a minor under the launch-window policy: both
+fields had **zero consumers** and no runtime behavior. The `tenancy` block is now
+`.strict()` — unknown keys are a loud parse error with tombstone guidance instead
+of being silently stripped. **Migration:**
+
+- `tenancy: { enabled: false, strategy: 'shared' }` → `tenancy: { enabled: false }`
+- `tenancy: { enabled: true, strategy: '…', tenantField: 'x', crossTenantAccess: false }`
+  → `tenancy: { enabled: true, tenantField: 'x' }`
+- Per-tenant databases are a deployment concern (environment-per-database, ADR-0002),
+  not object metadata. Cross-tenant visibility is expressed via sharing rules / OWD
+  (`externalSharingModel`).
+
+### 'ObjectOS' retired from the spec's public surface (#2963, #2960)
+
+Layer vocabulary converges on **ObjectQL (data) / Kernel (control) / ObjectUI (view)**;
+"ObjectOS" now refers exclusively to the commercial runtime environment. Three
+public identifiers renamed, with deprecated aliases kept for one release:
+`ObjectOSCapabilitiesSchema` → `KernelCapabilitiesSchema`, `ObjectOSCapabilities` →
+`KernelCapabilities`, `ObjectOSKernel` → `IKernel` (`PluginContext.os` is now typed
+`IKernel`). Find/replace is the whole migration; schema shapes and JSON output are
+unchanged. Docs moved from `protocol/objectos` to `protocol/kernel`.
+
+### Anonymous access denied uniformly across HTTP surfaces (#2567)
+
+Under `requireAuth` (the secure default), anonymous `POST /graphql` and the raw
+`/data` routes now return 401 — previously they bypassed the gate and reached
+ObjectQL directly. The dispatcher's `requireAuth` default aligns with the REST
+plugin (`?? true`). **Migration:** deployments that genuinely serve these surfaces
+publicly must opt out explicitly with `requireAuth: false` (boot warns). All
+anonymous-deny seams converge on one shared `shouldDenyAnonymous`, and the
+authz-conformance matrix ratchets newly added `/data`/`/meta`/`/graphql` routes.
+
+### Server-enforced `readonly` / `readonlyWhen` on UPDATE (#2948, #3042, #3003)
+
+`readonly: true` was documented as a server contract but only enforced in the UI —
+#3003 confirmed approval/status/amount columns could be forged via a plain REST
+`PATCH` on 15.0.0. Non-system UPDATEs now **strip** caller-supplied writes to static
+`readonly` fields, and `readonlyWhen` predicates are enforced on the multi-row
+UPDATE path too. Server stamps (audit hooks), write middleware, and `isSystem`
+writes (import/seed/approvals/lifecycle) are unaffected. Multi-row semantics are
+fail-safe: if **any** matched row locks a field, that field is dropped for the whole
+batch — narrow the `where` to unlocked rows to write it.
+
+### Ownership anchor (`owner_id`) is guarded (#3004, #2982)
+
+Unprivileged writers can no longer forge another user's `owner_id` on insert or
+reassign it on update; transfers require a transfer grant (`allowTransfer`, or
+`modifyAllRecords` which implies it). Empty `owner_id` on insert is stamped to the
+current user — now on bulk rows too (previously bulk-inserted rows were NULL-owned
+and invisible even to their creator). Bulk writes (`update({multi:true})`, bulk
+delete) are now scoped by the caller's owner/RLS **write** filter and fail closed if
+the scoping AST is missing. Engine-internal referential cascades (`set_null` on user
+deletion) are exempted via a server-side marker that cannot be forged (#3048).
+**Note:** REST import runs as the importing user — a non-privileged user importing a
+CSV with someone else's `owner_id` column is now correctly rejected.
+
+### MCP action surface gated on `ai.exposed`, fail-closed (#2964)
+
+Action bodies execute as trusted code, yet MCP `run_action` could invoke any
+headless action. Actions that should remain invocable by AI agents must now declare
+`ai: { exposed: true, description: '…' }` (description ≥ 40 chars). Other surfaces
+(UI, REST `/actions/...`) are unchanged. Flow-type actions now receive the caller's
+identity as a real `AutomationContext` (`runAs: 'user'` flows evaluate RLS as the
+caller), and trusted-body invocations are audit-logged on both MCP and REST paths.
+
+### Declarative stdio MCP transports are deny-by-default (#3055)
+
+A declarative `stdio` transport spawns a local child process from metadata — and
+Studio runtime publish can introduce such metadata. Previously-materializing
+declarative stdio instances are now treated as a **configuration error** (boot
+fatal / reload skip), never retried as "upstream unavailable". **Migration:** hosts
+opt in explicitly — `new ConnectorMcpPlugin({ declarativeStdio: ['my-mcp-server'] })`
+(command allowlist) or `{ declarativeStdio: true }` (full trust). `http` transports
+and hand-wired connectors are unaffected.
+
+### OWD posture enforced at metadata-save time (#3050)
+
+A new `registerAuthoringGate` seam in `metadata-protocol` runs pre-persistence for
+draft and publish saves (environment writes only). `plugin-security` registers the
+object posture gate on it: an environment overlay over a packaged object can only
+**tighten** `sharingModel` / `externalSharingModel` (ADR-0086 D1), and
+`externalSharingModel ≤ sharingModel` (ADR-0090 D11) is now rejected at save time
+rather than only flagged by CLI lint. Already-stored metadata loads unchanged.
+
+### Attachments: dead fields removed, downloads authenticated (#2755, #2970)
+
+- **REMOVED: `sys_attachment.share_type` / `sys_attachment.visibility`** — modeled
+  in v1 but with zero runtime consumers. No replacement key: access derives from the
+  parent record. Stop sending these fields (unknown-field validation rejects them);
+  existing DB columns remain as unmanaged leftovers.
+- **Attachment downloads are no longer anonymous capability URLs.** For
+  `scope === 'attachments'` files that are not `public_read`,
+  `GET /storage/files/:fileId` and `/url` require a session (401 `AUTH_REQUIRED`)
+  plus parent-derived read access (403 `ATTACHMENT_DOWNLOAD_DENIED`) and return a
+  short-lived signed URL (default `downloadTtl` 300s). Field files, avatars, and org
+  logos (embedded in `<img src>`) keep stable anonymous URLs.
+- **`sys_attachment.enable.trash` is now `false`** — attachment deletion is a hard
+  delete (declaring the honest state; reap guards reclaim bytes).
+- **Attaching to a record now requires parent EDIT** (was: parent READ), matching
+  Salesforce semantics.
+
+### Other semantics worth knowing
+
+- `ConnectorSchema.authentication` defaults to `{ type: 'none' }` (a relaxation;
+  existing connectors unaffected).
+- Aggregate queries gate FLS on the **input** side: a groupBy/aggregate referencing
+  an FLS-unreadable field is rejected fail-closed with the field named (#2976).
+- `findData` rejects unknown `$`-prefixed query params with 400
+  `UNSUPPORTED_QUERY_PARAM` instead of silently matching zero rows (#2926 ⑩).
+- The FormView `buttons` + `defaults` config (#3014) is **EXPERIMENTAL — declared
+  in the spec but not yet enforced by the Console renderer**.
+
+## Security hardening (15.1.0)
+
+Beyond the behavior changes above, an execution-surface sweep (#2849 class) closed
+three confirmed-exploitable holes (#2975):
+
+- **Reports IDOR + scheduled-report RLS bypass (#2980).** `ReportService` dropped
+  the caller context and read/wrote `sys_saved_report` as system — any authenticated
+  user could read/delete/overwrite any saved report by id, and scheduled dispatch
+  emailed entire tables. Now owner-scoped; scheduled dispatch resolves the owner's
+  real RLS context and **fails closed** when it can't.
+- **Knowledge/RAG fall-open (#2981).** `applyPermissionFilter` returned all hits
+  when the context was missing — an agent omitting `ToolExecutionContext.actor` got
+  unfiltered semantic search over the whole corpus. Missing identity now fails closed.
+- **`$expand` cross-object leak (#2850).** Expanding a reference resolved the
+  target rows directly against the driver, skipping the referenced object's RLS and
+  FLS entirely. Expansion now goes through the engine read path; PUBLIC referenced
+  objects are exempted only from the object-level CRUD gate via a server-side marker.
+- **Public-form anchor forgery (#3022).** Zero-declared-field public forms merged
+  the raw body wholesale, letting anonymous visitors POST `owner_id` /
+  `organization_id` / audit columns / `id`. Server-managed fields are now stripped at
+  the data layer and excluded at the route layer, from a single shared definition.
+- **Seed-not-clobber (#2909).** An admin's `active: false` on an overshared sharing
+  rule — and admin-edited capability `scope` values — are no longer resurrected by
+  boot seeding (`managed_by` / `customized` provenance columns land).
+- **`sys_position` system-row write gate re-armed (#2926 ①)** after the A4
+  `managed_by` vocabulary rename had silently disarmed it.
+- **better-auth pinned to 1.7.0-rc.1** for GHSA-p2fr-6hmx-4528, with the ObjectQL
+  adapter implementing the new `consumeOne`/`incrementOne` contracts and `sys_jwks`
+  gaining `alg`/`crv` columns (#2974).
+
+## New capabilities in 15.1.0
+
+### Attachments v1 (#2755, #2970)
+
+Parent-derived access on the full chain (create/read/list/download/delete —
+`sys_attachment` reads inherit parent-record visibility; aggregate counts don't leak
+hidden rows), authenticated short-lived download URLs, orphan lifecycle for
+`sys_file` (tombstone on last detach, TTL'd reap with a `registerReapGuard` seam
+that re-verifies zero references and deletes storage bytes first), and
+`sys_upload_session` reaping that aborts backend multipart uploads before the row is
+reclaimed (abandoned S3 parts stop accruing). Console ships authenticated uploads
+with friendly denial copy, signed-URL downloads, and file/image upload cells inside
+inline line-item grids; the showcase demonstrates per-line Receipt attachments on
+invoice lines (#3051).
+
+### Declarative connectors (ADR-0096 / ADR-0097)
+
+`connectors:` metadata entries with a `provider` (`openapi` / `mcp` / `rest`)
+materialize at boot into dispatchable connectors — an AI or a package can wire an
+integration end-to-end in pure metadata and call it from flow `connector_action`
+nodes (#2994). Credentials go through `credentialRef` (env-var resolution in the
+open profile; vault/OAuth2 per ADR-0015 are enterprise). Boot fails loudly on
+unknown providers, invalid `providerConfig`, unresolvable credentials, or name
+collisions; descriptor-only entries (actions with no runtime registration) get a
+boot audit warning unless `enabled: false` (#2985). Metadata reloads reconcile
+incrementally (#3001), unreachable upstreams degrade to an action-less husk with
+`state: 'degraded'` and exponential-backoff retry instead of failing boot (#3049),
+OpenAPI specs load from inline objects, package-relative file paths (confined), or
+URLs (#3024), and `GET /api/v1/automation/connectors` reports each descriptor's
+`origin` (`plugin` | `declarative`) — which the flow-designer connector picker
+surfaces (objectui#2563). The showcase runs a live `provider:'mcp'` demo pinned in
+CI (#3062).
+
+### Dashboard-level filters (#2501)
+
+`GlobalFilterSchema.name` gives each dashboard filter a variable key (readable as
+`page.<name>` in widget expressions; `"dateRange"` reserved), and
+`DashboardWidgetSchema.filterBindings` lets each widget retarget a filter to its own
+field or opt out with `false` (#3035). The Console renders a dashboard filter bar,
+AND-merges active values into every bound widget's query, ships a visual
+filterBindings editor in the widget inspector, resolves `optionsFrom` via
+server-side distinct, and localizes the bar (objectui#2576/#2586/#2590). The
+showcase "Revenue Pulse" dashboard demonstrates interactive filters driving multiple
+charts over two objects (#3038).
+
+### Pinyin search (#3027)
+
+Locale-gated (`OS_SEARCH_PINYIN_ENABLED`, auto-on when any `zh-*` locale is
+configured): display/name fields get a hidden `__search` companion column filled
+with full pinyin + initials ("张伟" → `zhangwei zw`) on save, backfilled at boot,
+and OR-ed into `$search` — lookup pickers, list quick search, and ⌘K transparently
+match `zhangwei` / `zw` against CJK values. FLS-restricted/secret/PII fields are
+never indexed.
+
+### Metadata & spec
+
+- **Conditional tabs (#2967):** `page:tabs` items accept a `visibleWhen` CEL
+  predicate over `record` + `current_user` + `page.<var>`; FALSE removes the whole
+  tab, re-evaluated live as page variables change.
+- **View property liveness (#3046):** all 83 view properties classified
+  (68 live / 2 experimental / 5 dead); `os build` warns on dead props with fix-it
+  hints.
+- **Feature-gate registry (#2965):** actions/params declare `requiresFeature`,
+  lowered at parse time to canonical `visible` CEL — 17 capability-dependent actions
+  (platform user management, 2FA, OAuth apps) now hide when their plugin is off
+  instead of rendering 404 buttons.
+- **Page variable `source` renders as a component picker** in Studio (#2968).
+
+### AI / MCP
+
+- **`aggregate_records` MCP tool (#2976):** count/sum/avg/min/max/count_distinct
+  with groupBy (incl. date bucketing), where, and IANA timezones — on the ObjectQL
+  ENGINE read path, so RLS/tenant/delegation intersect exactly like `find`.
+- **Standalone authored actions reach the MCP bridge (#3010):** `list_actions` /
+  `run_action` now union `object.actions` with standalone `action` metadata rows —
+  Studio-authored actions with `ai.exposed: true` are callable by agents without
+  re-declaring them inside the object.
+
+### Deployment
+
+- **Official Docker runtime image (#2952):** `ghcr.io/objectstack-ai/objectstack`
+  (Node 22, pinned CLI, `os start`, non-root, `/api/v1/health` HEALTHCHECK,
+  multi-arch). Deployment is a two-line Dockerfile — or plain `docker run` with a
+  mounted artifact / `OS_ARTIFACT_PATH` URL.
+- **`create-objectstack` scaffolds container-ready projects (#2979):** Dockerfile
+  (two-stage onto the official image), docker-compose (app + Postgres),
+  `.dockerignore`.
+
+### Kernel & protocol
+
+- **`kernel:bootstrapped` lifecycle anchor (#2989):** fires after all `kernel:ready`
+  handlers settle, before `kernel:listening` — the correct anchor for
+  reconcile/backfill work (also fixed: `everyone` auto-bind ordering, so app-level
+  auto-bind happens on fresh deployments).
+- **`app:seeded` event (#3000):** membership backfill re-runs when background
+  seeding settles — seeded users no longer wait for a restart.
+- **ADR-0087 completed (#2972):** the protocol handshake now runs on boot-time
+  durable-package rehydration (incompatible `sys_packages` rows are refused with
+  structured `OS_PROTOCOL_INCOMPATIBLE` diagnostics, boot continues) and on
+  code-defined `AppPlugin` loads (fail-fast); conversion chain backfilled so
+  `migrate meta --from 10` reaches protocol 15; `spec-changes.json` ships with the
+  npm artifact; the upgrade guide is generated and drift-checked.
+- **Honest capability discovery (ADR-0076 slice):** services self-describe
+  stub/degraded/fallback status instead of discovery hardcoding `available`;
+  discovery stops advertising a `/realtime` route and `websockets: true` that
+  always 404'd.
+
+### i18n
+
+- `os i18n extract` emits action-param keys — action dialog forms (e.g. Setup →
+  Create User) are translatable; platform bundles regenerated for
+  en/zh-CN/ja-JP/es-ES (#3030).
+- Audit/feed activity summaries localize to the workspace locale (ADR-0053 verb
+  templates, localized object labels) with English fallback (#3045, #3029).
+
+## Notable fixes (15.1.0)
+
+- **Studio metadata editing under spec 15:** lazy schema proxies stay
+  identity-compatible with `z.toJSONSchema` — Page/View inspectors no longer crash
+  (#3021).
+- **Sharing rules apply to seeded demo data out of the box:** an idempotent boot
+  backfill materializes `sys_record_share` for seed-loaded records (#2926 ③).
+- **Package management REST:** `PATCH /packages/:id` is actually routed (#2995);
+  duplicate `POST /packages` ids return 409 (#2971); `packages.install` passes
+  `overwrite` for upgrade flows (#3007).
+- **Create User:** an explicitly typed password wins over the dialog's default
+  `generatePassword: true` instead of erroring 400 (#3031).
+- **REST status passthrough:** record-level 403s from sharing no longer degrade to
+  a bare 400 (#2926 ⑦).
+- `gen:schema` regression ratchet restores the lost `PageTabsProps` schema and fails
+  CI on future disappearances (#3012).
+
+## New in Console (Studio) — bundled objectui 14.1
+
+The pinned Console picks up the objectui 14.1 line (94 commits). Highlights:
+
+- **Record-level inline edit (#2542, #2549, #2604):** one shared draft across the
+  detail body *and* the highlight strip, one atomic Save
+  (`update` with `ifMatch` optimistic concurrency, only edited keys sent), 409
+  conflict dialog, approval-lock preflight, Esc / Cmd+Enter shortcuts.
+- **CEL editors everywhere (#1582 series):** the formula editor edits the engine's
+  real `expression` key (the old textarea wrote a `formula` key the engine never
+  read) and live-infers the result type; conditional rules
+  (visibleWhen/readonlyWhen/requiredWhen), list-view conditional formatting, RLS
+  policies (with lint, autocomplete, and per-policy test-run against a real record),
+  and condition-builder escape hatches all get lint + field autocomplete instead of
+  bare textareas. Summary fields get a structured roll-up editor.
+- **Dashboard filter bar + visual `filterBindings` editor** (see Dashboard-level
+  filters above).
+- **Studio Access pillar:** package-level OWD overview with inline batch edit and
+  `external ≤ internal` validation (#2508); unsaved-changes guards across matrix
+  edits, SPA header navigation, and OWD rows (#2588/#2606/#2610); read-only packages
+  actually lock the matrix (#2570); record-grained AccessExplainPanel (#2502);
+  three-state provenance badges (#2501).
+- **Flow designer:** searchable add-node palette with keyboard navigation and
+  cloud-synced recents (#2543/#2553); Decision branches pick their target node
+  inline (#2568); the connector picker lists runtime-dispatchable connectors and
+  marks declarative instances (#2563); positions as approver/escalateTo references
+  (#2515).
+- **Kanban:** lanes honor the ADR-0085 `stageField` role, cards default to
+  `highlightFields`, conditional formatting accepts CEL rules (#2596/#2541/#2550).
+- **Record header:** metadata-driven multi-button layout (3 desktop / 1 mobile,
+  `order` + `variant:'primary'` tie-break, ⋯ overflow menu) (#2574).
+- **Fixes:** error-envelope objects no longer crash the page via `toast.error`
+  (React #31, #2580); bare-string sort from spec forms no longer crashes ListView
+  (#2601); CSV import sniffs encoding with a GB18030 fallback — zh-CN Excel CSVs
+  import cleanly (#2557); Studio/metadata-admin follow the in-app locale instead of
+  `navigator.language` (#2602); relative dates localize via `Intl.RelativeTimeFormat`
+  (#2593); action-visibility traps defused — `os.user.*` alias in client predicate
+  scope, `record_more` placement, loud warnings for throwing predicates (#2611);
+  related lists respect the current user's child-object read permission (#2565);
+  FLS fail-open fixed (#2537).
+
 ## Upgrade checklist
+
+### 15.0.0
 
 - **Multi-org:** review any workflow that relies on members editing each other's records
   org-wide (grant an explicit edit permission set) and any integration that supplied a
@@ -107,7 +439,27 @@ Read this before upgrading a multi-org or enterprise-hierarchy deployment.
   end-to-end smoke test in a licensed environment is still owed** — open-core CI cannot
   exercise the multi-org path.
 
+### 15.1.0
+
+- Remove `tenancy.strategy` / `tenancy.crossTenantAccess` from object metadata
+  (parse now fails loudly).
+- Rename `ObjectOSCapabilitiesSchema` / `ObjectOSCapabilities` / `ObjectOSKernel`
+  imports to `KernelCapabilitiesSchema` / `KernelCapabilities` / `IKernel`
+  (deprecated aliases last one release).
+- If you serve `/graphql` or raw `/data` anonymously on purpose, set
+  `requireAuth: false` explicitly.
+- Audit clients that write `readonly` fields or `owner_id` — those writes are now
+  stripped/denied; grant `allowTransfer` where ownership transfer is legitimate.
+- Declare `ai: { exposed: true, description }` on actions AI agents should keep
+  invoking via MCP.
+- Stop sending `sys_attachment.share_type` / `visibility`; expect authenticated,
+  short-lived attachment download URLs; attaching now requires parent EDIT.
+- Hosts using declarative **stdio** MCP connectors must opt in via
+  `ConnectorMcpPlugin({ declarativeStdio: [...] })`.
+
 ## References
 
 ADR-0095 (kernel chain) · ADR-0090 Addendum (position-anchor) · ADR-0094 (overlay
-preservation) · framework#2920 (tracking).
+preservation) · framework#2920 (tracking) · ADR-0096/0097 (declarative connectors) ·
+ADR-0087 (protocol handshake) · ADR-0086 D1 / ADR-0090 D11 (OWD authoring gate) ·
+#2849 (execution-surface sweep) · #2970/#2755 (attachments v1).
