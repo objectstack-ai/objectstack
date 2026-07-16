@@ -134,6 +134,6 @@ keeps serving until its replacement materializes successfully. Boot keeps the
 
 ### Deliberate scope boundaries
 
-- **`providerConfig.spec` (openapi)** accepts an inline document or an http(s) URL; resolving a `./file.json` ref relative to the stack is the stack loader's job, not the connector's.
+- **`providerConfig.spec` (openapi)** accepts an inline document, an http(s) URL, **or a package-relative file path** (#3016 follow-up). The connector still owns no filesystem access: the automation service injects a `loadPackageFile` capability into `ConnectorProviderContext` that resolves the ref against the declaring stack/package root (`packageRoot`, CLI default: the `objectstack.config.ts` directory) and **confines reads to that root** — absolute and `..`-escaping paths are rejected. Read/parse failures follow the reconcile policy above: fatal at boot, skipped on reload.
 - **MCP credentials** ride the transport (ADR-0024); for an http transport a resolved `auth` is folded into the request headers.
 - **MCP at boot** connects during materialization, so an unreachable server fails boot; a fail-soft "optional" marker for boot-time materialization is a possible future refinement (runtime reloads are already soft).

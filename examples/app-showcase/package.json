@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@objectstack/cloud-connection": "workspace:*",
+    "@objectstack/connector-openapi": "workspace:*",
     "@objectstack/connector-rest": "workspace:*",
     "@objectstack/connector-slack": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",

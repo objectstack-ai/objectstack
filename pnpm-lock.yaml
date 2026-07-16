@@ -156,6 +156,9 @@ importers:
       '@objectstack/cloud-connection':
         specifier: workspace:*
         version: link:../../packages/cloud-connection
+      '@objectstack/connector-openapi':
+        specifier: workspace:*
+        version: link:../../packages/connectors/connector-openapi
       '@objectstack/connector-rest':
         specifier: workspace:*
         version: link:../../packages/connectors/connector-rest

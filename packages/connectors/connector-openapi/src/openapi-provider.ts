@@ -1,6 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { ConnectorProviderFactory, ResolvedConnectorAuth } from '@objectstack/spec/integration';
+import type {
+  ConnectorProviderContext,
+  ConnectorProviderFactory,
+  ResolvedConnectorAuth,
+} from '@objectstack/spec/integration';
 import {
   createOpenApiConnector,
   type OpenApiDocument,
@@ -21,24 +25,32 @@ export interface OpenApiProviderDeps {
 
 /** Shape of `providerConfig` for a `provider: 'openapi'` declarative instance. */
 interface OpenApiProviderConfig {
-  /** The OpenAPI 3.x document: an inline object, or an http(s) URL to fetch at boot. */
+  /**
+   * The OpenAPI 3.x document: an inline object, an http(s) URL to fetch at
+   * boot, or a file path resolved relative to the declaring stack/package root
+   * (`'./billing-openapi.json'`, #3016).
+   */
   spec?: unknown;
   /** Override the base URL (else the document's `servers[0].url`). */
   baseUrl?: unknown;
 }
 
 /**
- * Resolve `providerConfig.spec` into a parsed OpenAPI document. Accepts an inline
- * document object (the reliable, no-network-at-boot form used by the showcase) or
- * an http(s) URL fetched at materialization. A bare file path is rejected with a
- * clear message: resolving `./x.json` relative to the stack is the stack loader's
- * job, not the connector's — inline the document or serve it over HTTP.
+ * Resolve `providerConfig.spec` into a parsed OpenAPI document (ADR-0096;
+ * union per #3016): an inline document object (the reliable, no-I/O-at-boot
+ * form used by the showcase), an http(s) URL fetched at materialization, or a
+ * **file path** read through the host's `ctx.loadPackageFile` — which resolves
+ * it relative to the declaring stack/package root and confines the read to
+ * that root (absolute / `..`-escaping paths are rejected there). Every failure
+ * throws, so the materializer's reconcile policy applies: fatal at boot, the
+ * entry is skipped on reload.
  */
 async function loadOpenApiDocument(
   spec: unknown,
   fetchImpl: typeof fetch | undefined,
-  connectorName: string,
+  ctx: ConnectorProviderContext,
 ): Promise<OpenApiDocument> {
+  const connectorName = ctx.name;
   if (spec && typeof spec === 'object' && !Array.isArray(spec)) {
     return spec as OpenApiDocument;
   }
@@ -53,13 +65,39 @@ async function loadOpenApiDocument(
       }
       return (await res.json()) as OpenApiDocument;
     }
-    throw new Error(
-      `connector-openapi provider: connector '${connectorName}' providerConfig.spec '${spec}' is not an http(s) URL. ` +
-        `Provide an inline OpenAPI document object or an http(s) URL — file-path refs are resolved by the stack loader, not the connector.`,
-    );
+    // File path — dereferenced through the host capability so resolution stays
+    // anchored to (and confined within) the declaring stack/package root.
+    if (!ctx.loadPackageFile) {
+      throw new Error(
+        `connector-openapi provider: connector '${connectorName}' providerConfig.spec '${spec}' is a file path, ` +
+          `but this host provides no package file access — inline the OpenAPI document or use an http(s) URL.`,
+      );
+    }
+    let text: string;
+    try {
+      text = await ctx.loadPackageFile(spec);
+    } catch (err) {
+      throw new Error(
+        `connector-openapi provider: connector '${connectorName}' failed to read providerConfig.spec '${spec}': ` +
+          `${(err as Error).message}`,
+      );
+    }
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('not a JSON object');
+      }
+      return parsed as OpenApiDocument;
+    } catch (err) {
+      throw new Error(
+        `connector-openapi provider: connector '${connectorName}' providerConfig.spec '${spec}' is not a parseable ` +
+          `OpenAPI JSON document: ${(err as Error).message}`,
+      );
+    }
   }
   throw new Error(
-    `connector-openapi provider: connector '${connectorName}' requires providerConfig.spec — an inline OpenAPI 3.x document object or an http(s) URL.`,
+    `connector-openapi provider: connector '${connectorName}' requires providerConfig.spec — an inline OpenAPI 3.x ` +
+      `document object, an http(s) URL, or a package-relative file path.`,
   );
 }
 
@@ -82,7 +120,7 @@ export function createOpenApiProviderFactory(deps: OpenApiProviderDeps = {}): Co
         `connector-openapi provider: connector '${ctx.name}' providerConfig.baseUrl must be a string when set.`,
       );
     }
-    const document = await loadOpenApiDocument(cfg.spec, deps.fetchImpl, ctx.name);
+    const document = await loadOpenApiDocument(cfg.spec, deps.fetchImpl, ctx);
     const auth = ctx.auth as ResolvedConnectorAuth | undefined as RestAuth | undefined;
     return createOpenApiConnector({
       name: ctx.name,

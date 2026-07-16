@@ -605,13 +605,18 @@ export const ConnectorSchema = lazySchema(() => z.object({
   /**
    * ADR-0096 — provider-specific configuration, **validated by the provider
    * factory** (not by this schema): the OpenAPI provider expects `{ spec,
-   * baseUrl? }`, the MCP provider a `{ transport }`, the REST provider a
-   * `{ baseUrl }`. Deliberately untyped here — re-modelling each provider's
-   * inputs in the stack schema (an OpenAPI document, an MCP transport) is exactly
-   * what ADR-0023 rejected. Ignored unless `provider` is set.
+   * baseUrl? }` — where `spec` is an inline OpenAPI document object, a file
+   * path resolved relative to the declaring stack/package root (reads are
+   * confined to that root; #3016), or an http(s) URL — the MCP provider a
+   * `{ transport }`, the REST provider a `{ baseUrl }`. Deliberately untyped
+   * here — re-modelling each provider's inputs in the stack schema (an OpenAPI
+   * document, an MCP transport) is exactly what ADR-0023 rejected. Ignored
+   * unless `provider` is set.
    */
   providerConfig: z.record(z.string(), z.unknown()).optional().describe(
-    'Provider-specific config validated by the provider factory at boot (e.g. { spec, baseUrl } for openapi). Requires `provider`.',
+    'Provider-specific config validated by the provider factory at boot (e.g. { spec, baseUrl } for openapi, ' +
+      "where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). " +
+      'Requires `provider`.',
   ),
 
   /**

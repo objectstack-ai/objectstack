@@ -179,7 +179,7 @@ export const STACK_COLLECTION_COVERAGE: Record<string, KindCoverage> = {
     status: 'demonstrated',
     files: ['src/system/connectors/index.ts', 'src/automation/flows/index.ts'],
     notes:
-      'Both connector kinds are demonstrated. (1) Provider-bound INSTANCE (ADR-0096 / #2977): StatusApiConnector declares `provider: rest` and is materialized into a live, dispatchable connector at boot by ConnectorRestPlugin\'s provider factory — ShowcaseDeclarativeConnectorPingFlow calls it via connector_action and it appears in GET /connectors. (2) Catalog DESCRIPTOR (#2612): ErpCatalogConnector has no provider, so it stays inert metadata; enabled:false marks the deliberate catalog entry and silences the boot audit. Plugin-registered connectors (ConnectorRestPlugin/ConnectorSlackPlugin in objectstack.config.ts) are also exercised by the connector flows.',
+      'Both connector kinds are demonstrated. (1) Provider-bound INSTANCES (ADR-0096 / #2977): StatusApiConnector declares `provider: rest` (inline config) and StatusOpenApiConnector declares `provider: openapi` with its OpenAPI document referenced as a package-relative FILE PATH (#3016, read at boot and confined to the package root) — both are materialized into live, dispatchable connectors at boot; ShowcaseDeclarativeConnectorPingFlow calls the rest instance via connector_action and both appear in GET /connectors. (2) Catalog DESCRIPTOR (#2612): ErpCatalogConnector has no provider, so it stays inert metadata; enabled:false marks the deliberate catalog entry and silences the boot audit. Plugin-registered connectors (ConnectorRestPlugin/ConnectorSlackPlugin in objectstack.config.ts) are also exercised by the connector flows.',
   },
 };
 

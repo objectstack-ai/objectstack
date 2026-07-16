@@ -62,6 +62,19 @@ export interface ConnectorProviderContext {
   readonly type: string;
   readonly providerConfig: Record<string, unknown>;
   readonly auth?: ResolvedConnectorAuth;
+  /**
+   * Host-injected package file reader (#3016, ADR-0096 follow-up). Resolves a
+   * **relative** path against the root of the stack/package that declared the
+   * entry and returns the file's UTF-8 text, so a factory can support file-path
+   * refs like `providerConfig.spec: './billing-openapi.json'` without owning
+   * filesystem access itself. The host confines reads to the package root:
+   * absolute paths and `..`-escaping paths are rejected (throws). Missing /
+   * unreadable files also throw, which the materializer's reconcile policy
+   * turns into a hard boot error (fatal) or a skipped entry (reload).
+   * `undefined` on hosts without a filesystem (edge/browser kernels) — a
+   * factory needing a file must then fail with a clear message.
+   */
+  readonly loadPackageFile?: (relativePath: string) => Promise<string>;
 }
 
 /**

@@ -9,14 +9,17 @@
 // Boot fails loudly for unknown provider / unresolvable credentialRef / name
 // conflict / factory failure.
 
-import { describe, it, expect } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
+import { describe, it, expect, afterAll } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type {
     ConnectorProviderContext,
     ConnectorProviderFactory,
     ConnectorInstanceAuth,
 } from '@objectstack/spec/integration';
-import { AutomationServicePlugin, type CredentialResolver } from './plugin.js';
+import { AutomationServicePlugin, createPackageFileLoader, type CredentialResolver } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -81,6 +84,8 @@ interface BootOptions {
     /** Names registered as plugin connectors during init() (for the conflict rule). */
     registerLivePlugin?: string[];
     credentialResolver?: CredentialResolver;
+    /** Stack/package root that relative file refs resolve against (#3016). */
+    packageRoot?: string;
 }
 
 /**
@@ -92,7 +97,7 @@ interface BootOptions {
  */
 async function boot(declared: unknown[], opts: BootOptions = {}): Promise<LiteKernel> {
     const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
-    kernel.use(new AutomationServicePlugin({ credentialResolver: opts.credentialResolver }));
+    kernel.use(new AutomationServicePlugin({ credentialResolver: opts.credentialResolver, packageRoot: opts.packageRoot }));
     const harness = {
         name: 'test.harness',
         type: 'standard' as const,
@@ -160,12 +165,12 @@ function makeClosableProvider() {
  */
 async function bootReloadable(
     initial: unknown[],
-    opts: { providerFactory: ConnectorProviderFactory; credentialResolver?: CredentialResolver },
+    opts: { providerFactory: ConnectorProviderFactory; credentialResolver?: CredentialResolver; packageRoot?: string },
 ) {
     const state = { declared: initial };
     let captured: any;
     const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
-    kernel.use(new AutomationServicePlugin({ credentialResolver: opts.credentialResolver }));
+    kernel.use(new AutomationServicePlugin({ credentialResolver: opts.credentialResolver, packageRoot: opts.packageRoot }));
     const harness = {
         name: 'test.harness',
         type: 'standard' as const,
@@ -424,6 +429,108 @@ describe('ADR-0096 — runtime re-materialization on metadata:reloaded (F1)', ()
         ).resolves.toBeUndefined();
         expect(engine.getRegisteredConnectors()).toContain('billing');
         expect(engine.getRegisteredConnectors()).not.toContain('ghost');
+        await kernel.shutdown();
+    });
+});
+
+// ── #3016 — package file refs (loadPackageFile) ─────────────────────────────
+//
+// The `loadPackageFile` capability lets a provider factory dereference a
+// relative file ref (the openapi provider's `providerConfig.spec:
+// './billing-openapi.json'`) against the declaring stack/package root, with
+// reads CONFINED to that root. Failures follow the reconcile policy above:
+// fatal at boot, skipped on reload.
+
+const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'adr96-pkgfile-'));
+mkdirSync(path.join(fixtureRoot, 'specs'), { recursive: true });
+writeFileSync(path.join(fixtureRoot, 'specs', 'billing.json'), JSON.stringify({ openapi: '3.0.0' }));
+afterAll(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+
+/** A provider whose factory reads `providerConfig.spec` via ctx.loadPackageFile. */
+function makeFileReadingProvider() {
+    const reads: string[] = [];
+    const factory: ConnectorProviderFactory = async (ctx) => {
+        const text = await ctx.loadPackageFile!(String(ctx.providerConfig.spec));
+        reads.push(text);
+        return {
+            def: { name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] },
+            handlers: { ping: async () => ({ ok: true }) },
+        };
+    };
+    return { factory, reads };
+}
+
+describe('#3016 — package file loader (createPackageFileLoader)', () => {
+    const load = createPackageFileLoader(fixtureRoot);
+
+    it('reads a root-relative file (happy path)', async () => {
+        await expect(load('./specs/billing.json')).resolves.toBe(JSON.stringify({ openapi: '3.0.0' }));
+        // Plain relative form (no leading ./) resolves identically.
+        await expect(load('specs/billing.json')).resolves.toContain('openapi');
+    });
+
+    it('rejects absolute paths (posix and windows-drive)', async () => {
+        await expect(load(path.join(fixtureRoot, 'specs', 'billing.json'))).rejects.toThrow(/absolute/);
+        await expect(load('C:\\evil\\creds.json')).rejects.toThrow(/absolute/);
+    });
+
+    it('rejects paths that escape the package root after resolution', async () => {
+        await expect(load('../outside.json')).rejects.toThrow(/escapes the stack\/package root/);
+        await expect(load('specs/../../outside.json')).rejects.toThrow(/escapes the stack\/package root/);
+    });
+
+    it('rejects empty refs and reports unreadable files with the resolved path', async () => {
+        await expect(load('')).rejects.toThrow(/non-empty relative path/);
+        await expect(load('./specs/missing.json')).rejects.toThrow(/could not be read/);
+    });
+});
+
+describe('#3016 — file-ref materialization policy (fatal at boot, soft on reload)', () => {
+    it('hands every provider factory a working loadPackageFile anchored to packageRoot', async () => {
+        const { factory, reads } = makeFileReadingProvider();
+        const kernel = await boot(
+            [providerConnector('billing', { providerConfig: { spec: './specs/billing.json' } })],
+            { providerFactory: factory, packageRoot: fixtureRoot },
+        );
+        expect(automationOf(kernel).getRegisteredConnectors()).toContain('billing');
+        expect(reads).toEqual([JSON.stringify({ openapi: '3.0.0' })]);
+        await kernel.shutdown();
+    });
+
+    it('fails boot loudly when the file ref is missing', async () => {
+        const { factory } = makeFileReadingProvider();
+        await expect(
+            boot([providerConnector('billing', { providerConfig: { spec: './specs/missing.json' } })], {
+                providerFactory: factory,
+                packageRoot: fixtureRoot,
+            }),
+        ).rejects.toThrow(/failed to materialize connector instance 'billing'.*could not be read/s);
+    });
+
+    it('fails boot loudly when the file ref escapes the package root', async () => {
+        const { factory } = makeFileReadingProvider();
+        await expect(
+            boot([providerConnector('billing', { providerConfig: { spec: '../outside.json' } })], {
+                providerFactory: factory,
+                packageRoot: fixtureRoot,
+            }),
+        ).rejects.toThrow(/escapes the stack\/package root/);
+    });
+
+    it('reload is soft: a bad file ref skips the entry, keeps the old connector serving', async () => {
+        const { factory } = makeFileReadingProvider();
+        const { engine, reload, kernel } = await bootReloadable(
+            [providerConnector('billing', { providerConfig: { spec: './specs/billing.json' } })],
+            { providerFactory: factory, packageRoot: fixtureRoot },
+        );
+        expect(engine.getRegisteredConnectors()).toContain('billing');
+
+        // A publish that points billing at a missing file must not crash the
+        // server; the previously materialized connector keeps serving.
+        await expect(
+            reload([providerConnector('billing', { providerConfig: { spec: './specs/missing.json' } })]),
+        ).resolves.toBeUndefined();
+        expect(engine.getRegisteredConnectors()).toContain('billing');
         await kernel.shutdown();
     });
 });

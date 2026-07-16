@@ -58,6 +58,39 @@ export const StatusApiConnector = defineConnector({
   },
   auth: { type: 'none' },
 });
+/**
+ * ADR-0096 provider-bound instance, **file-path spec** form (#3016): the OpenAPI
+ * document lives next to this file (`status-openapi.json`) and is referenced by
+ * a path resolved relative to THIS package's root at materialization — reads
+ * are confined to the package root (absolute / `..`-escaping paths are
+ * rejected), and a missing or unparseable document fails boot loudly. The
+ * `openapi` provider factory (ConnectorOpenApiPlugin in objectstack.config.ts)
+ * turns the document's one operation (`getHealth` → `GET /api/v1/health`) into
+ * a dispatchable action against the running server itself, so the materialized
+ * connector is observable with no external dependency. Complements
+ * {@link StatusApiConnector}, which demos the same materialization from the
+ * `rest` provider's inline config.
+ */
+export const StatusOpenApiConnector = defineConnector({
+  name: 'showcase_status_openapi',
+  label: 'Status API (Declarative OpenAPI Instance, File-Path Spec)',
+  type: 'api',
+  description:
+    'Provider-bound declarative connector instance (ADR-0096) whose OpenAPI document is referenced as a ' +
+    'package-relative file path (#3016) and read at boot, confined to the package root. Materialized into a live ' +
+    '`openapi` connector — getHealth dispatches GET /api/v1/health against the running server.',
+  provider: 'openapi',
+  providerConfig: {
+    // Package-relative file ref (#3016) — resolved against the directory that
+    // holds objectstack.config.ts (the CLI passes it as the automation
+    // service's packageRoot). Inline documents and http(s) URLs stay valid.
+    spec: './src/system/connectors/status-openapi.json',
+    // Same self-pointing literal rationale as StatusApiConnector above.
+    baseUrl: 'http://127.0.0.1:3000',
+  },
+  auth: { type: 'none' },
+});
+
 export const ErpCatalogConnector = defineConnector({
   name: 'showcase_erp_catalog',
   label: 'ERP Integration (Catalog Descriptor)',
@@ -110,4 +143,4 @@ export const ErpCatalogConnector = defineConnector({
   enabled: false,
 });
 
-export const allConnectors: Connector[] = [StatusApiConnector, ErpCatalogConnector];
+export const allConnectors: Connector[] = [StatusApiConnector, StatusOpenApiConnector, ErpCatalogConnector];

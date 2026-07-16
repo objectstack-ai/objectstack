@@ -45,7 +45,7 @@ export { SysAutomationRun } from './sys-automation-run.object.js';
 
 // Kernel plugin — seeds all built-in nodes; this is the only plugin needed for
 // a fully-functional automation capability.
-export { AutomationServicePlugin } from './plugin.js';
+export { AutomationServicePlugin, createPackageFileLoader } from './plugin.js';
 export type { AutomationServicePluginOptions } from './plugin.js';
 
 // Run identity (ADR-0049 / #1888). Maps a flow run's effective `runAs` to the

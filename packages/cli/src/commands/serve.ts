@@ -1881,7 +1881,14 @@ export default class Serve extends Command {
           }
           // analytics needs cubes from config, others take no args
           let arg: any;
-          if (spec.configKey === 'analyticsCubes') {
+          if (cap === 'automation') {
+            // #3016 — anchor declarative connector file refs (e.g. the openapi
+            // provider's `providerConfig.spec: './billing-openapi.json'`) to the
+            // project folder (next to objectstack.config.ts), mirroring how the
+            // standalone sqlite default is anchored above. Reads are confined to
+            // this root by the automation service's package file loader.
+            arg = { packageRoot: path.dirname(absolutePath) };
+          } else if (spec.configKey === 'analyticsCubes') {
             const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? [];
             arg = { cubes };
           } else if (cap === 'email') {

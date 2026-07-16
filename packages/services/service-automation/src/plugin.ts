@@ -63,6 +63,62 @@ export interface AutomationServicePluginOptions {
      * hard boot error (an app must not silently run with a dead connector).
      */
     credentialResolver?: CredentialResolver;
+    /**
+     * Root directory of the stack/package whose metadata this kernel serves —
+     * the base that relative file refs in declarative connector entries resolve
+     * against (#3016, e.g. `providerConfig.spec: './billing-openapi.json'` for
+     * `provider: 'openapi'`). The CLI passes the directory containing
+     * `objectstack.config.ts`; embedders pass their stack root. Defaults to
+     * `process.cwd()`. Reads are confined to this root (see
+     * {@link createPackageFileLoader}).
+     */
+    packageRoot?: string;
+}
+
+/**
+ * Build the `loadPackageFile` capability handed to provider factories via
+ * {@link ConnectorProviderContext} (#3016): read a UTF-8 text file resolved
+ * against `packageRoot`, **confined to that root**. Rejects absolute paths and
+ * any path that escapes the root after resolution (`../…`, `a/../../…`), so a
+ * declarative entry can never read outside the stack/package that declared it.
+ * A missing/unreadable file throws — the materializer's reconcile policy makes
+ * that fatal at boot and a skipped entry on reload, like every other ADR-0096
+ * materialization failure.
+ *
+ * Node builtins are imported lazily inside the returned closure so merely
+ * constructing the capability never touches `node:fs`/`node:path` — hosts
+ * without a filesystem only fail if a factory actually dereferences a file ref.
+ */
+export function createPackageFileLoader(packageRoot?: string): (relativePath: string) => Promise<string> {
+    return async (relativePath: string) => {
+        if (typeof relativePath !== 'string' || relativePath.trim().length === 0) {
+            throw new Error('package file ref must be a non-empty relative path.');
+        }
+        const path = await import('node:path');
+        // Windows drive-letter absolutes ('C:\…') are not `isAbsolute` on posix —
+        // reject them explicitly so the guard is platform-independent.
+        if (path.isAbsolute(relativePath) || /^[a-zA-Z]:[\\/]/.test(relativePath)) {
+            throw new Error(
+                `package file ref '${relativePath}' is absolute — file refs must be relative to the declaring stack/package root.`,
+            );
+        }
+        const root = path.resolve(packageRoot ?? process.cwd());
+        const resolved = path.resolve(root, relativePath);
+        const rel = path.relative(root, resolved);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+            throw new Error(
+                `package file ref '${relativePath}' escapes the stack/package root — reads are confined to '${root}'.`,
+            );
+        }
+        const { readFile } = await import('node:fs/promises');
+        try {
+            return await readFile(resolved, 'utf8');
+        } catch (err) {
+            throw new Error(
+                `package file ref '${relativePath}' could not be read (resolved to '${resolved}'): ${(err as Error).message}`,
+            );
+        }
+    };
 }
 
 /**
@@ -624,6 +680,10 @@ export class AutomationServicePlugin implements Plugin {
                 type: typeof entry.type === 'string' ? entry.type : 'api',
                 providerConfig: entry.providerConfig ?? {},
                 auth,
+                // #3016 — lets a factory dereference relative file refs (e.g.
+                // openapi's `providerConfig.spec: './billing-openapi.json'`),
+                // confined to the stack/package root.
+                loadPackageFile: createPackageFileLoader(this.options.packageRoot),
             };
 
             let materialization;

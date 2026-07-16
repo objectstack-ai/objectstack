@@ -52,10 +52,47 @@ describe('openapi provider factory (ADR-0096)', () => {
         await expect(factory(ctx({ providerConfig: {} }))).rejects.toThrow(/providerConfig\.spec/);
     });
 
-    it('rejects a bare file-path spec with a clear message', async () => {
+    // ── File-path specs (#3016 — ADR-0096 follow-up) ────────────────────────
+
+    it('reads a file-path spec through the host loadPackageFile capability', async () => {
+        const requested: string[] = [];
+        const loadPackageFile = async (rel: string) => {
+            requested.push(rel);
+            return JSON.stringify(petstore);
+        };
+        const factory = createOpenApiProviderFactory();
+        const { def, handlers } = await factory(
+            ctx({ providerConfig: { spec: './specs/petstore.json' }, loadPackageFile }),
+        );
+        expect(requested).toEqual(['./specs/petstore.json']);
+        expect(def.actions?.map((a) => a.key)).toEqual(['listPets']);
+        expect(Object.keys(handlers)).toEqual(['listPets']);
+    });
+
+    it('surfaces a loader failure (missing file / traversal rejection) with the connector name', async () => {
+        const loadPackageFile = async (rel: string) => {
+            throw new Error(`package file ref '${rel}' could not be read`);
+        };
+        const factory = createOpenApiProviderFactory();
+        await expect(
+            factory(ctx({ providerConfig: { spec: './missing.json' }, loadPackageFile })),
+        ).rejects.toThrow(/'pets' failed to read providerConfig\.spec '\.\/missing\.json'.*could not be read/s);
+    });
+
+    it('rejects an unparseable file-path spec with a clear message', async () => {
+        const factory = createOpenApiProviderFactory();
+        await expect(
+            factory(ctx({ providerConfig: { spec: './broken.json' }, loadPackageFile: async () => 'not-json{' })),
+        ).rejects.toThrow(/not a parseable.*OpenAPI JSON document/s);
+        await expect(
+            factory(ctx({ providerConfig: { spec: './array.json' }, loadPackageFile: async () => '[1,2]' })),
+        ).rejects.toThrow(/not a parseable.*OpenAPI JSON document/s);
+    });
+
+    it('rejects a file-path spec with a clear message when the host has no package file access', async () => {
         const factory = createOpenApiProviderFactory();
         await expect(
             factory(ctx({ providerConfig: { spec: './petstore.json' } })),
-        ).rejects.toThrow(/not an http\(s\) URL/);
+        ).rejects.toThrow(/no package file access/);
     });
 });

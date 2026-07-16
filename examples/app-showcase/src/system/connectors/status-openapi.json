@@ -1,0 +1,21 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Showcase Status API",
+    "version": "1.0.0",
+    "description": "Minimal OpenAPI document for the showcase's own health probe. Referenced by the StatusOpenApiConnector declarative instance (src/system/connectors/index.ts) as a package-relative file path — the #3016 / ADR-0096 spec form resolved and confined to this package's root at boot."
+  },
+  "servers": [{ "url": "http://127.0.0.1:3000" }],
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Server health probe",
+        "description": "Returns the running server's health status.",
+        "responses": {
+          "200": { "description": "Server is healthy" }
+        }
+      }
+    }
+  }
+}

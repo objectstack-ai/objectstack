@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { defineStack } from '@objectstack/spec';
+import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
 import { ConnectorRestPlugin } from '@objectstack/connector-rest';
 import { ConnectorSlackPlugin } from '@objectstack/connector-slack';
 import {
@@ -102,12 +103,17 @@ export default defineStack({
 
   // Concrete connectors for the `connector_action` node. The baseline engine
   // ships the dispatch node + an empty registry; these plugins populate it.
-  //   • rest  → points at the running server itself, so the REST connector
-  //             flow's call + response are observable on the flow run with no
-  //             external dependency. Override the target with SHOWCASE_SELF_URL.
-  //   • slack → registered so TaskCompletedSlackFlow resolves its connector;
-  //             live posting needs a real bot token (set SLACK_BOT_TOKEN).
+  //   • rest    → points at the running server itself, so the REST connector
+  //               flow's call + response are observable on the flow run with no
+  //               external dependency. Override the target with SHOWCASE_SELF_URL.
+  //   • slack   → registered so TaskCompletedSlackFlow resolves its connector;
+  //               live posting needs a real bot token (set SLACK_BOT_TOKEN).
+  //   • openapi → option-less: contributes only the `openapi` provider factory
+  //               (ADR-0096), which materializes the StatusOpenApiConnector
+  //               declarative instance below — its OpenAPI document is a
+  //               package-relative FILE PATH read at boot (#3016).
   plugins: [
+    new ConnectorOpenApiPlugin(),
     new ConnectorRestPlugin({
       name: 'rest',
       baseUrl: process.env.SHOWCASE_SELF_URL ?? 'http://127.0.0.1:3000',
@@ -191,8 +197,11 @@ export default defineStack({
   // Declarative REST endpoints (object_operation + flow) — the metadata
   // counterpart of the code-mounted recalc endpoint (see src/system/apis/).
   apis: allApis,
-  // Declarative connector CATALOG DESCRIPTORS (#2612) — metadata-only, never
-  // runtime-dispatchable; the live connectors are the plugins above. See
+  // Declarative `connectors:` — both kinds (ADR-0096): provider-bound
+  // INSTANCES (StatusApiConnector via `rest`; StatusOpenApiConnector via
+  // `openapi` with a package-relative file-path spec, #3016) materialized into
+  // live, dispatchable connectors at boot, plus a CATALOG DESCRIPTOR
+  // (ErpCatalogConnector, #2612) that stays metadata-only. See
   // src/system/connectors/ for the full contract.
   connectors: allConnectors,
   hooks: allHooks,
