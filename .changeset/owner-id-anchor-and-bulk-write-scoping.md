@@ -55,6 +55,6 @@ row-level scoping keys off to decide who may update/delete a record.
   now correctly affects zero rows instead of all of them.
 
 Proven end-to-end on the real showcase app
-(`packages/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts`) and pinned
+(`packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts`) and pinned
 in the ADR-0096 authz-conformance ledger (`ownership-anchor-guard`,
 `bulk-write-owner-scoping`).
