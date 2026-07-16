@@ -83,6 +83,25 @@ export const SysOauthAccessToken = ObjectSchema.create({
       description: 'Caller-supplied correlation identifier',
     }),
 
+    authorization_code_id: Field.text({
+      label: 'Authorization Code ID',
+      required: false,
+      maxLength: 255,
+      description: 'ID of the authorization-code grant this token originates from',
+    }),
+
+    resources: Field.textarea({
+      label: 'Resources',
+      required: false,
+      description: 'JSON-serialized list of RFC 8707 resource indicators bound to this token',
+    }),
+
+    requested_user_info_claims: Field.textarea({
+      label: 'Requested UserInfo Claims',
+      required: false,
+      description: 'JSON-serialized list of OIDC claims requested for the userinfo endpoint',
+    }),
+
     scopes: Field.textarea({
       label: 'Scopes',
       required: true,
@@ -99,6 +118,18 @@ export const SysOauthAccessToken = ObjectSchema.create({
       defaultValue: 'NOW()',
       readonly: true,
     }),
+
+    revoked: Field.datetime({
+      label: 'Revoked At',
+      required: false,
+      description: 'Timestamp at which this access token was revoked',
+    }),
+
+    confirmation: Field.textarea({
+      label: 'Confirmation',
+      required: false,
+      description: 'JSON RFC 7800 cnf claim (e.g. DPoP key thumbprint) binding this token to a key',
+    }),
   },
 
   indexes: [
@@ -107,6 +138,7 @@ export const SysOauthAccessToken = ObjectSchema.create({
     { fields: ['session_id'] },
     { fields: ['user_id'] },
     { fields: ['refresh_id'] },
+    { fields: ['authorization_code_id'] },
   ],
 
   enable: {

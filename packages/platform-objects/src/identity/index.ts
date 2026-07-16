@@ -34,6 +34,9 @@ export { SysOauthApplication } from './sys-oauth-application.object.js';
 export { SysOauthAccessToken } from './sys-oauth-access-token.object.js';
 export { SysOauthRefreshToken } from './sys-oauth-refresh-token.object.js';
 export { SysOauthConsent } from './sys-oauth-consent.object.js';
+export { SysOauthResource } from './sys-oauth-resource.object.js';
+export { SysOauthClientResource } from './sys-oauth-client-resource.object.js';
+export { SysOauthClientAssertion } from './sys-oauth-client-assertion.object.js';
 export { SysJwks } from './sys-jwks.object.js';
 
 // ── External SSO (relying-party, @better-auth/sso) ─────────────────

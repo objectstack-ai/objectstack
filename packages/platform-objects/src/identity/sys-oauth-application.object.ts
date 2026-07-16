@@ -364,6 +364,28 @@ export const SysOauthApplication = ObjectSchema.create({
       group: 'Credentials',
     }),
 
+    jwks: Field.textarea({
+      label: 'JWKS',
+      required: false,
+      description: 'Client JSON Web Key Set (for private_key_jwt / signed-request verification)',
+      group: 'Credentials',
+    }),
+
+    jwks_uri: Field.url({
+      label: 'JWKS URI',
+      required: false,
+      description: 'URL of the client JSON Web Key Set',
+      group: 'Credentials',
+    }),
+
+    dpop_bound_access_tokens: Field.boolean({
+      label: 'DPoP-bound Access Tokens',
+      required: false,
+      defaultValue: false,
+      description: 'Require access tokens issued to this client to be DPoP-bound (RFC 9449)',
+      group: 'Credentials',
+    }),
+
     // ── Behaviour flags ──────────────────────────────────────────
     disabled: Field.boolean({
       label: 'Disabled',
@@ -383,6 +405,20 @@ export const SysOauthApplication = ObjectSchema.create({
       label: 'Enable End Session',
       required: false,
       description: 'Allow the client to call the OIDC end-session endpoint',
+      group: 'Behaviour',
+    }),
+
+    backchannel_logout_uri: Field.url({
+      label: 'Back-channel Logout URI',
+      required: false,
+      description: 'OIDC back-channel logout endpoint of the client',
+      group: 'Behaviour',
+    }),
+
+    backchannel_logout_session_required: Field.boolean({
+      label: 'Back-channel Logout Session Required',
+      required: false,
+      description: 'Whether the back-channel logout token must include a sid claim',
       group: 'Behaviour',
     }),
 

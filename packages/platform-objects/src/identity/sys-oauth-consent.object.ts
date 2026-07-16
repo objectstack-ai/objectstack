@@ -60,6 +60,18 @@ export const SysOauthConsent = ObjectSchema.create({
       description: 'Caller-supplied correlation identifier',
     }),
 
+    resources: Field.textarea({
+      label: 'Resources',
+      required: false,
+      description: 'JSON-serialized list of RFC 8707 resource indicators the consent covers',
+    }),
+
+    requested_user_info_claims: Field.textarea({
+      label: 'Requested UserInfo Claims',
+      required: false,
+      description: 'JSON-serialized list of OIDC claims the user consented to expose',
+    }),
+
     scopes: Field.textarea({
       label: 'Scopes',
       required: true,

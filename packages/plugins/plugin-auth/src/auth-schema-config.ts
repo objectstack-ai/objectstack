@@ -374,6 +374,10 @@ export const AUTH_PHONE_NUMBER_USER_FIELDS = {
  * | softwareVersion            | software_version                |
  * | softwareStatement          | software_statement              |
  * | referenceId                | reference_id                    |
+ * | jwksUri                    | jwks_uri                        |
+ * | backchannelLogoutUri       | backchannel_logout_uri          |
+ * | backchannelLogoutSessionRequired | backchannel_logout_session_required |
+ * | dpopBoundAccessTokens      | dpop_bound_access_tokens        |
  */
 export const AUTH_OAUTH_CLIENT_SCHEMA = {
   modelName: SystemObjectName.OAUTH_APPLICATION, // 'sys_oauth_application'
@@ -396,6 +400,10 @@ export const AUTH_OAUTH_CLIENT_SCHEMA = {
     softwareVersion: 'software_version',
     softwareStatement: 'software_statement',
     referenceId: 'reference_id',
+    jwksUri: 'jwks_uri',
+    backchannelLogoutUri: 'backchannel_logout_uri',
+    backchannelLogoutSessionRequired: 'backchannel_logout_session_required',
+    dpopBoundAccessTokens: 'dpop_bound_access_tokens',
   },
 } as const;
 
@@ -416,15 +424,21 @@ export const AUTH_OAUTH_APPLICATION_SCHEMA = AUTH_OAUTH_CLIENT_SCHEMA;
  * **separate** models. `oauthAccessToken` no longer carries a refresh token;
  * see {@link AUTH_OAUTH_REFRESH_TOKEN_SCHEMA} for the companion model.
  *
- * | camelCase (better-auth) | snake_case (ObjectStack) |
- * |:------------------------|:-------------------------|
- * | clientId                | client_id                |
- * | sessionId               | session_id               |
- * | userId                  | user_id                  |
- * | referenceId             | reference_id             |
- * | refreshId               | refresh_id               |
- * | expiresAt               | expires_at               |
- * | createdAt               | created_at               |
+ * | camelCase (better-auth) | snake_case (ObjectStack)     |
+ * |:------------------------|:-----------------------------|
+ * | clientId                | client_id                    |
+ * | sessionId               | session_id                   |
+ * | userId                  | user_id                      |
+ * | referenceId             | reference_id                 |
+ * | authorizationCodeId     | authorization_code_id        |
+ * | requestedUserInfoClaims | requested_user_info_claims   |
+ * | refreshId               | refresh_id                   |
+ * | expiresAt               | expires_at                   |
+ * | createdAt               | created_at                   |
+ *
+ * (`resources`, `revoked`, and `confirmation` are single-word columns —
+ * camelCase equals snake_case, so they need no remap; the columns still
+ * exist on `sys_oauth_access_token`.)
  */
 export const AUTH_OAUTH_ACCESS_TOKEN_SCHEMA = {
   modelName: SystemObjectName.OAUTH_ACCESS_TOKEN, // 'sys_oauth_access_token'
@@ -433,6 +447,8 @@ export const AUTH_OAUTH_ACCESS_TOKEN_SCHEMA = {
     sessionId: 'session_id',
     userId: 'user_id',
     referenceId: 'reference_id',
+    authorizationCodeId: 'authorization_code_id',
+    requestedUserInfoClaims: 'requested_user_info_claims',
     refreshId: 'refresh_id',
     expiresAt: 'expires_at',
     createdAt: 'created_at',
@@ -450,15 +466,23 @@ export const AUTH_OAUTH_ACCESS_TOKEN_SCHEMA = {
  * issuing client. Each access token rotation produces a new refresh-token
  * row.
  *
- * | camelCase (better-auth) | snake_case (ObjectStack) |
- * |:------------------------|:-------------------------|
- * | clientId                | client_id                |
- * | sessionId               | session_id               |
- * | userId                  | user_id                  |
- * | referenceId             | reference_id             |
- * | expiresAt               | expires_at               |
- * | createdAt               | created_at               |
- * | authTime                | auth_time                |
+ * | camelCase (better-auth)  | snake_case (ObjectStack)     |
+ * |:-------------------------|:-----------------------------|
+ * | clientId                 | client_id                    |
+ * | sessionId                | session_id                   |
+ * | userId                   | user_id                      |
+ * | referenceId              | reference_id                 |
+ * | authorizationCodeId      | authorization_code_id        |
+ * | requestedUserInfoClaims  | requested_user_info_claims   |
+ * | expiresAt                | expires_at                   |
+ * | createdAt                | created_at                   |
+ * | rotatedAt                | rotated_at                   |
+ * | rotationReplayResponse   | rotation_replay_response     |
+ * | rotationReplayExpiresAt  | rotation_replay_expires_at   |
+ * | authTime                 | auth_time                    |
+ *
+ * (`resources`, `revoked`, and `confirmation` are single-word columns —
+ * camelCase equals snake_case, so they need no remap.)
  */
 export const AUTH_OAUTH_REFRESH_TOKEN_SCHEMA = {
   modelName: SystemObjectName.OAUTH_REFRESH_TOKEN, // 'sys_oauth_refresh_token'
@@ -467,8 +491,13 @@ export const AUTH_OAUTH_REFRESH_TOKEN_SCHEMA = {
     sessionId: 'session_id',
     userId: 'user_id',
     referenceId: 'reference_id',
+    authorizationCodeId: 'authorization_code_id',
+    requestedUserInfoClaims: 'requested_user_info_claims',
     expiresAt: 'expires_at',
     createdAt: 'created_at',
+    rotatedAt: 'rotated_at',
+    rotationReplayResponse: 'rotation_replay_response',
+    rotationReplayExpiresAt: 'rotation_replay_expires_at',
     authTime: 'auth_time',
   },
 } as const;
@@ -484,13 +513,16 @@ export const AUTH_OAUTH_REFRESH_TOKEN_SCHEMA = {
  * a row implies consent was given for the listed scopes. A new
  * `referenceId` column was added for client-supplied correlation.
  *
- * | camelCase (better-auth) | snake_case (ObjectStack) |
- * |:------------------------|:-------------------------|
- * | clientId                | client_id                |
- * | userId                  | user_id                  |
- * | referenceId             | reference_id             |
- * | createdAt               | created_at               |
- * | updatedAt               | updated_at               |
+ * | camelCase (better-auth) | snake_case (ObjectStack)   |
+ * |:------------------------|:---------------------------|
+ * | clientId                | client_id                  |
+ * | userId                  | user_id                    |
+ * | referenceId             | reference_id               |
+ * | requestedUserInfoClaims | requested_user_info_claims |
+ * | createdAt               | created_at                 |
+ * | updatedAt               | updated_at                 |
+ *
+ * (`resources` is a single-word column — no remap needed.)
  */
 export const AUTH_OAUTH_CONSENT_SCHEMA = {
   modelName: SystemObjectName.OAUTH_CONSENT, // 'sys_oauth_consent'
@@ -498,8 +530,91 @@ export const AUTH_OAUTH_CONSENT_SCHEMA = {
     clientId: 'client_id',
     userId: 'user_id',
     referenceId: 'reference_id',
+    requestedUserInfoClaims: 'requested_user_info_claims',
     createdAt: 'created_at',
     updatedAt: 'updated_at',
+  },
+} as const;
+
+// ---------------------------------------------------------------------------
+// OAuth Provider plugin – oauthResource / oauthClientResource /
+// oauthClientAssertion tables (new in @better-auth/oauth-provider 1.7)
+// ---------------------------------------------------------------------------
+
+/**
+ * `@better-auth/oauth-provider` plugin `oauthResource` model mapping.
+ *
+ * Registry of protected resources (RFC 8707 resource indicators) plus the
+ * per-resource token policy. Used by the MCP OAuth track (`resource=<mcp
+ * url>` audience binding) and any future resource-server registrations.
+ *
+ * | camelCase (better-auth)       | snake_case (ObjectStack)            |
+ * |:------------------------------|:------------------------------------|
+ * | accessTokenTtl                | access_token_ttl                    |
+ * | refreshTokenTtl               | refresh_token_ttl                   |
+ * | signingAlgorithm              | signing_algorithm                   |
+ * | signingKeyId                  | signing_key_id                      |
+ * | allowedScopes                 | allowed_scopes                      |
+ * | customClaims                  | custom_claims                       |
+ * | dpopBoundAccessTokensRequired | dpop_bound_access_tokens_required   |
+ * | policyVersion                 | policy_version                      |
+ * | createdAt                     | created_at                          |
+ * | updatedAt                     | updated_at                          |
+ *
+ * (`identifier`, `name`, `disabled`, and `metadata` are single-word columns —
+ * no remap needed.)
+ */
+export const AUTH_OAUTH_RESOURCE_SCHEMA = {
+  modelName: SystemObjectName.OAUTH_RESOURCE, // 'sys_oauth_resource'
+  fields: {
+    accessTokenTtl: 'access_token_ttl',
+    refreshTokenTtl: 'refresh_token_ttl',
+    signingAlgorithm: 'signing_algorithm',
+    signingKeyId: 'signing_key_id',
+    allowedScopes: 'allowed_scopes',
+    customClaims: 'custom_claims',
+    dpopBoundAccessTokensRequired: 'dpop_bound_access_tokens_required',
+    policyVersion: 'policy_version',
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+  },
+} as const;
+
+/**
+ * `@better-auth/oauth-provider` plugin `oauthClientResource` model mapping.
+ *
+ * Join table granting a registered client access to a registered resource.
+ *
+ * | camelCase (better-auth) | snake_case (ObjectStack) |
+ * |:------------------------|:-------------------------|
+ * | clientId                | client_id                |
+ * | resourceId              | resource_id              |
+ * | createdAt               | created_at               |
+ */
+export const AUTH_OAUTH_CLIENT_RESOURCE_SCHEMA = {
+  modelName: SystemObjectName.OAUTH_CLIENT_RESOURCE, // 'sys_oauth_client_resource'
+  fields: {
+    clientId: 'client_id',
+    resourceId: 'resource_id',
+    createdAt: 'created_at',
+  },
+} as const;
+
+/**
+ * `@better-auth/oauth-provider` plugin `oauthClientAssertion` model mapping.
+ *
+ * Consumed `private_key_jwt` / `client_secret_jwt` assertion JTIs (RFC 7523
+ * replay prevention). The row id IS the consumed jti; `expiresAt` bounds
+ * how long it must be remembered.
+ *
+ * | camelCase (better-auth) | snake_case (ObjectStack) |
+ * |:------------------------|:-------------------------|
+ * | expiresAt               | expires_at               |
+ */
+export const AUTH_OAUTH_CLIENT_ASSERTION_SCHEMA = {
+  modelName: SystemObjectName.OAUTH_CLIENT_ASSERTION, // 'sys_oauth_client_assertion'
+  fields: {
+    expiresAt: 'expires_at',
   },
 } as const;
 
@@ -671,6 +786,9 @@ export function buildOauthProviderPluginSchema() {
     oauthAccessToken: AUTH_OAUTH_ACCESS_TOKEN_SCHEMA,
     oauthRefreshToken: AUTH_OAUTH_REFRESH_TOKEN_SCHEMA,
     oauthConsent: AUTH_OAUTH_CONSENT_SCHEMA,
+    oauthResource: AUTH_OAUTH_RESOURCE_SCHEMA,
+    oauthClientResource: AUTH_OAUTH_CLIENT_RESOURCE_SCHEMA,
+    oauthClientAssertion: AUTH_OAUTH_CLIENT_ASSERTION_SCHEMA,
   };
 }
 

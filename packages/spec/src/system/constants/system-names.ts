@@ -50,6 +50,12 @@ export const SystemObjectName = {
   OAUTH_REFRESH_TOKEN: 'sys_oauth_refresh_token',
   /** Authentication: recorded user consent for a given OAuth client + scopes */
   OAUTH_CONSENT: 'sys_oauth_consent',
+  /** Authentication: registered OAuth protected resource (RFC 8707 resource indicator) */
+  OAUTH_RESOURCE: 'sys_oauth_resource',
+  /** Authentication: client ↔ protected-resource grant (RFC 8707) */
+  OAUTH_CLIENT_RESOURCE: 'sys_oauth_client_resource',
+  /** Authentication: consumed client-assertion JTI (RFC 7523 replay prevention) */
+  OAUTH_CLIENT_ASSERTION: 'sys_oauth_client_assertion',
   /** Authentication: pending device-authorization (RFC 8628) request */
   DEVICE_CODE: 'sys_device_code',
   /** Authentication: JWKS key pair used to sign OIDC ID tokens / JWT access tokens */

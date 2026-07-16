@@ -76,6 +76,25 @@ export const SysOauthRefreshToken = ObjectSchema.create({
       description: 'Caller-supplied correlation identifier',
     }),
 
+    authorization_code_id: Field.text({
+      label: 'Authorization Code ID',
+      required: false,
+      maxLength: 255,
+      description: 'ID of the authorization-code grant this token chain originates from',
+    }),
+
+    resources: Field.textarea({
+      label: 'Resources',
+      required: false,
+      description: 'JSON-serialized list of RFC 8707 resource indicators bound to this token',
+    }),
+
+    requested_user_info_claims: Field.textarea({
+      label: 'Requested UserInfo Claims',
+      required: false,
+      description: 'JSON-serialized list of OIDC claims requested for the userinfo endpoint',
+    }),
+
     scopes: Field.textarea({
       label: 'Scopes',
       required: true,
@@ -99,10 +118,34 @@ export const SysOauthRefreshToken = ObjectSchema.create({
       description: 'Timestamp at which this refresh token was revoked',
     }),
 
+    rotated_at: Field.datetime({
+      label: 'Rotated At',
+      required: false,
+      description: 'Timestamp at which this token was rotated (superseded by a new row)',
+    }),
+
+    rotation_replay_response: Field.textarea({
+      label: 'Rotation Replay Response',
+      required: false,
+      description: 'Cached token response replayed when the old token is re-presented within the reuse interval',
+    }),
+
+    rotation_replay_expires_at: Field.datetime({
+      label: 'Rotation Replay Expires At',
+      required: false,
+      description: 'End of the post-rotation reuse interval during which the replay response is served',
+    }),
+
     auth_time: Field.datetime({
       label: 'Auth Time',
       required: false,
       description: 'When the user originally authenticated for this token chain',
+    }),
+
+    confirmation: Field.textarea({
+      label: 'Confirmation',
+      required: false,
+      description: 'JSON RFC 7800 cnf claim (e.g. DPoP key thumbprint) binding this token to a key',
     }),
   },
 
@@ -111,6 +154,7 @@ export const SysOauthRefreshToken = ObjectSchema.create({
     { fields: ['client_id'] },
     { fields: ['session_id'] },
     { fields: ['user_id'] },
+    { fields: ['authorization_code_id'] },
   ],
 
   enable: {

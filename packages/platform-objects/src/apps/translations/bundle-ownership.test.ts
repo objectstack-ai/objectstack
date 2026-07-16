@@ -22,7 +22,8 @@ const OWNED_OBJECTS = new Set([
   'sys_member', 'sys_invitation', 'sys_team', 'sys_team_member', 'sys_business_unit',
   'sys_business_unit_member', 'sys_api_key', 'sys_two_factor', 'sys_device_code',
   'sys_user_preference', 'sys_oauth_application', 'sys_oauth_access_token',
-  'sys_oauth_refresh_token', 'sys_oauth_consent', 'sys_jwks',
+  'sys_oauth_refresh_token', 'sys_oauth_consent', 'sys_oauth_resource',
+  'sys_oauth_client_resource', 'sys_oauth_client_assertion', 'sys_jwks',
   // audit / messaging-adjacent (still owned here)
   'sys_notification', 'sys_attachment', 'sys_email', 'sys_email_template',
   'sys_saved_report', 'sys_report_schedule', 'sys_job', 'sys_job_run', 'sys_job_queue',

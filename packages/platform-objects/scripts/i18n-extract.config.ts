@@ -47,6 +47,9 @@ import {
   SysOauthAccessToken,
   SysOauthRefreshToken,
   SysOauthConsent,
+  SysOauthResource,
+  SysOauthClientResource,
+  SysOauthClientAssertion,
   SysJwks,
 } from '../src/identity/index.js';
 
@@ -144,6 +147,9 @@ export default defineStack({
     SysOauthAccessToken,
     SysOauthRefreshToken,
     SysOauthConsent,
+    SysOauthResource,
+    SysOauthClientResource,
+    SysOauthClientAssertion,
     SysJwks,
 
     // Security: RBAC moved to @objectstack/plugin-security, sharing to

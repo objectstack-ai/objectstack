@@ -1187,6 +1187,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Subject Type",
         help: "OIDC subject type (e.g. public, pairwise)"
       },
+      jwks: {
+        label: "JWKS",
+        help: "Client JSON Web Key Set (for private_key_jwt / signed-request verification)"
+      },
+      jwks_uri: {
+        label: "JWKS URI",
+        help: "URL of the client JSON Web Key Set"
+      },
+      dpop_bound_access_tokens: {
+        label: "DPoP-bound Access Tokens",
+        help: "Require access tokens issued to this client to be DPoP-bound (RFC 9449)"
+      },
       disabled: {
         label: "Disabled"
       },
@@ -1197,6 +1209,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       enable_end_session: {
         label: "Enable End Session",
         help: "Allow the client to call the OIDC end-session endpoint"
+      },
+      backchannel_logout_uri: {
+        label: "Back-channel Logout URI",
+        help: "OIDC back-channel logout endpoint of the client"
+      },
+      backchannel_logout_session_required: {
+        label: "Back-channel Logout Session Required",
+        help: "Whether the back-channel logout token must include a sid claim"
       },
       software_id: {
         label: "Software ID"
@@ -1312,6 +1332,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Reference ID",
         help: "Caller-supplied correlation identifier"
       },
+      authorization_code_id: {
+        label: "Authorization Code ID",
+        help: "ID of the authorization-code grant this token originates from"
+      },
+      resources: {
+        label: "Resources",
+        help: "JSON-serialized list of RFC 8707 resource indicators bound to this token"
+      },
+      requested_user_info_claims: {
+        label: "Requested UserInfo Claims",
+        help: "JSON-serialized list of OIDC claims requested for the userinfo endpoint"
+      },
       scopes: {
         label: "Scopes",
         help: "JSON-serialized list of scopes granted to this token"
@@ -1321,6 +1353,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Created At"
+      },
+      revoked: {
+        label: "Revoked At",
+        help: "Timestamp at which this access token was revoked"
+      },
+      confirmation: {
+        label: "Confirmation",
+        help: "JSON RFC 7800 cnf claim (e.g. DPoP key thumbprint) binding this token to a key"
       }
     }
   },
@@ -1352,6 +1392,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Reference ID",
         help: "Caller-supplied correlation identifier"
       },
+      authorization_code_id: {
+        label: "Authorization Code ID",
+        help: "ID of the authorization-code grant this token chain originates from"
+      },
+      resources: {
+        label: "Resources",
+        help: "JSON-serialized list of RFC 8707 resource indicators bound to this token"
+      },
+      requested_user_info_claims: {
+        label: "Requested UserInfo Claims",
+        help: "JSON-serialized list of OIDC claims requested for the userinfo endpoint"
+      },
       scopes: {
         label: "Scopes",
         help: "JSON-serialized list of scopes granted to this token"
@@ -1366,9 +1418,25 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Revoked At",
         help: "Timestamp at which this refresh token was revoked"
       },
+      rotated_at: {
+        label: "Rotated At",
+        help: "Timestamp at which this token was rotated (superseded by a new row)"
+      },
+      rotation_replay_response: {
+        label: "Rotation Replay Response",
+        help: "Cached token response replayed when the old token is re-presented within the reuse interval"
+      },
+      rotation_replay_expires_at: {
+        label: "Rotation Replay Expires At",
+        help: "End of the post-rotation reuse interval during which the replay response is served"
+      },
       auth_time: {
         label: "Auth Time",
         help: "When the user originally authenticated for this token chain"
+      },
+      confirmation: {
+        label: "Confirmation",
+        help: "JSON RFC 7800 cnf claim (e.g. DPoP key thumbprint) binding this token to a key"
       }
     }
   },
@@ -1392,6 +1460,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Reference ID",
         help: "Caller-supplied correlation identifier"
       },
+      resources: {
+        label: "Resources",
+        help: "JSON-serialized list of RFC 8707 resource indicators the consent covers"
+      },
+      requested_user_info_claims: {
+        label: "Requested UserInfo Claims",
+        help: "JSON-serialized list of OIDC claims the user consented to expose"
+      },
       scopes: {
         label: "Scopes",
         help: "JSON-serialized list of scopes the user consented to"
@@ -1401,6 +1477,107 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Updated At"
+      }
+    }
+  },
+  sys_oauth_resource: {
+    label: "OAuth Resource",
+    pluralLabel: "OAuth Resources",
+    description: "Registered OAuth protected resources (RFC 8707 resource indicators)",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      identifier: {
+        label: "Identifier",
+        help: "Resource indicator URI presented in the RFC 8707 resource parameter"
+      },
+      name: {
+        label: "Name"
+      },
+      access_token_ttl: {
+        label: "Access Token TTL",
+        help: "Access-token lifetime in seconds for this resource (overrides the server default)"
+      },
+      refresh_token_ttl: {
+        label: "Refresh Token TTL",
+        help: "Refresh-token lifetime in seconds for this resource (overrides the server default)"
+      },
+      signing_algorithm: {
+        label: "Signing Algorithm",
+        help: "JWS algorithm used to sign access tokens for this resource"
+      },
+      signing_key_id: {
+        label: "Signing Key ID",
+        help: "Key id (kid) used to sign access tokens for this resource"
+      },
+      allowed_scopes: {
+        label: "Allowed Scopes",
+        help: "JSON-serialized list of scopes clients may request for this resource"
+      },
+      custom_claims: {
+        label: "Custom Claims",
+        help: "JSON object of extra claims stamped on access tokens for this resource"
+      },
+      dpop_bound_access_tokens_required: {
+        label: "DPoP Required",
+        help: "Require access tokens for this resource to be DPoP-bound (RFC 9449)"
+      },
+      disabled: {
+        label: "Disabled"
+      },
+      policy_version: {
+        label: "Policy Version",
+        help: "Monotonic version of the resource token policy"
+      },
+      metadata: {
+        label: "Metadata",
+        help: "JSON object of additional resource metadata"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    }
+  },
+  sys_oauth_client_resource: {
+    label: "OAuth Client Resource",
+    pluralLabel: "OAuth Client Resources",
+    description: "Grants allowing an OAuth client to request tokens for a protected resource",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      client_id: {
+        label: "Client ID",
+        help: "Foreign key to sys_oauth_application.client_id"
+      },
+      resource_id: {
+        label: "Resource ID",
+        help: "Foreign key to sys_oauth_resource.identifier"
+      },
+      metadata: {
+        label: "Metadata",
+        help: "JSON object of additional grant metadata"
+      },
+      created_at: {
+        label: "Created At"
+      }
+    }
+  },
+  sys_oauth_client_assertion: {
+    label: "OAuth Client Assertion",
+    pluralLabel: "OAuth Client Assertions",
+    description: "Consumed OAuth client-assertion JTIs (RFC 7523 replay prevention)",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      expires_at: {
+        label: "Expires At",
+        help: "Assertion expiry — rows past this instant are safe to prune"
       }
     }
   },
