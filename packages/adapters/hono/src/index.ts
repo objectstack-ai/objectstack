@@ -186,7 +186,9 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       app.use('*', cors({
         origin: origin as any,
         allowMethods: corsOpts.methods || ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'],
-        allowHeaders: corsOpts.allowHeaders || ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Tenant-ID', 'X-Environment-Id'],
+        // Keep in sync with plugin-hono-server's defaultAllowHeaders — `If-Match`
+        // carries the OCC token on cross-origin record PATCHes (objectui#2572).
+        allowHeaders: corsOpts.allowHeaders || ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Tenant-ID', 'X-Environment-Id', 'If-Match'],
         exposeHeaders,
         credentials,
         maxAge,

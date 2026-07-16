@@ -255,6 +255,18 @@ describe('HonoServerPlugin', () => {
             expect(corsConfigCapture.last.allowHeaders).toContain('Authorization');
         });
 
+        it('should allow If-Match by default (OCC token on cross-origin record PATCHes)', async () => {
+            corsConfigCapture.last = undefined;
+
+            const plugin = new HonoServerPlugin();
+            await plugin.init(context as PluginContext);
+
+            // objectui#2572 dogfood find: the record-level inline edit sends the
+            // OCC token as an `If-Match` header; a preflight that doesn't allow
+            // it makes every split-origin save fail with "Failed to fetch".
+            expect(corsConfigCapture.last.allowHeaders).toContain('If-Match');
+        });
+
         it('should merge user-supplied exposeHeaders with set-auth-token default', async () => {
             corsConfigCapture.last = undefined;
 

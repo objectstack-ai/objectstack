@@ -279,7 +279,12 @@ export class HonoServerPlugin implements Plugin {
                 // the better-auth `bearer()` plugin can deliver rotated
                 // session tokens to cross-origin clients (see plugin-auth).
                 // User-supplied exposeHeaders are merged with this default.
-                const defaultAllowHeaders = ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Tenant-ID', 'X-Environment-Id'];
+                // `If-Match` carries the OCC token on record PATCHes (objectui's
+                // record-level inline edit, REST `update` with `ifMatch`) — without
+                // it in the preflight allow-list, every cross-origin save fails in
+                // the browser with "Failed to fetch" (objectui#2572 dogfood find;
+                // same split-origin class as the #2548 Bearer fixes).
+                const defaultAllowHeaders = ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Tenant-ID', 'X-Environment-Id', 'If-Match'];
                 const defaultExposeHeaders = ['set-auth-token'];
                 const allowHeaders = corsOpts.allowHeaders ?? defaultAllowHeaders;
                 const exposeHeaders = Array.from(new Set([
