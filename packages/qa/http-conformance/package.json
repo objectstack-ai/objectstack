@@ -1,12 +1,11 @@
 {
-  "name": "@objectstack/plugin-node-server",
-  "version": "15.0.0",
+  "name": "@objectstack/http-conformance",
+  "version": "0.0.1",
+  "private": true,
   "license": "Apache-2.0",
-  "description": "Thin node:http server adapter for ObjectStack Runtime — the second IHttpServer implementation, proving the transport port is framework-agnostic (ADR-0076 D11 / OQ#10)",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "description": "HTTP transport-port conformance gate (ADR-0076 D11/OQ#10, #2462) — a zero-dependency node:http reference implementation of IHttpServer plus a cross-adapter suite that boots the dispatcher bridge and REST generator on it AND on plugin-hono-server, pinning that the port stays free of framework-isms. Not published; validation instrument, not a product server.",
+  "type": "module",
   "scripts": {
-    "build": "tsup --config ../../../tsup.config.ts",
     "test": "vitest run"
   },
   "dependencies": {
@@ -23,8 +22,8 @@
   },
   "keywords": [
     "objectstack",
-    "plugin",
-    "node",
+    "qa",
+    "conformance",
     "http-server",
     "adapter"
   ],
@@ -32,18 +31,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/objectstack-ai/framework.git",
-    "directory": "packages/plugins/plugin-node-server"
+    "directory": "packages/qa/http-conformance"
   },
   "homepage": "https://objectstack.ai/docs",
-  "bugs": "https://github.com/objectstack-ai/framework/issues",
-  "publishConfig": {
-    "access": "public"
-  },
-  "files": [
-    "dist",
-    "README.md"
-  ],
-  "engines": {
-    "node": ">=18.0.0"
-  }
+  "bugs": "https://github.com/objectstack-ai/framework/issues"
 }

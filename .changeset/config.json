@@ -40,7 +40,6 @@
       "@objectstack/plugin-dev",
       "@objectstack/plugin-email",
       "@objectstack/plugin-hono-server",
-      "@objectstack/plugin-node-server",
       "@objectstack/mcp",
       "@objectstack/plugin-pinyin-search",
       "@objectstack/plugin-reports",
