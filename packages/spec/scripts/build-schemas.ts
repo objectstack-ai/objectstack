@@ -281,11 +281,13 @@ interface SchemaManifest {
 }
 
 let manifest: SchemaManifest | null = null;
-if (fs.existsSync(MANIFEST_PATH)) {
-  try {
-    manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8')) as SchemaManifest;
-  } catch (error) {
-    console.error(`\n❌ Failed to parse ${MANIFEST_PATH}: ${error}`);
+try {
+  manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8')) as SchemaManifest;
+} catch (error) {
+  // A missing manifest just means first run (bootstrap below); anything else
+  // (unreadable, invalid JSON) must fail rather than silently drop the ratchet.
+  if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+    console.error(`\n❌ Failed to read ${MANIFEST_PATH}: ${error}`);
     process.exit(1);
   }
 }
