@@ -26,27 +26,6 @@ curl -b cookies.txt "http://localhost:3000/api/v1/data/<your_object>"
 - `objectstack.config.ts` — environment manifest (objects, API, plugins)
 - `src/objects/` — object definitions (one file per object)
 
-## Connectors (default providers)
-
-The template ships the three generic connector executors — `rest`, `openapi`,
-and `mcp` — in `plugins:`. With them installed, a declarative `connectors:`
-entry that names a `provider` becomes a live, dispatchable connector at boot
-(pure metadata, no plugin code):
-
-```ts
-connectors: [{
-  name: 'billing',
-  provider: 'openapi',
-  providerConfig: { spec: './specs/billing-openapi.json', baseUrl: 'https://billing.example.com' },
-  auth: { type: 'bearer', credentialRef: 'BILLING_API_TOKEN' },  // env var name — never an inline secret
-}]
-```
-
-Remove executors you don't want from `plugins:`. Note: a declarative `mcp`
-instance over a **stdio** transport spawns a local process from metadata and is
-denied by default — opt in with
-`new ConnectorMcpPlugin({ declarativeStdio: ['<trusted-command>'] })`.
-
 ## Verify your changes
 
 After editing any metadata, run:
