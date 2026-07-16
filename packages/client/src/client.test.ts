@@ -1179,3 +1179,28 @@ describe('HTTP error shaping', () => {
         expect(caught.httpStatus).toBe(500);
     });
 });
+
+describe('packages.install', () => {
+    const MANIFEST = { id: 'com.acme.crm', name: 'Acme CRM', version: '1.0.0', type: 'app' };
+
+    it('POSTs the manifest and omits `overwrite` unless requested', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { package: { manifest: MANIFEST } } });
+        await client.packages.install(MANIFEST, { enableOnInstall: true });
+
+        expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/v1/packages', expect.any(Object));
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.manifest).toEqual(MANIFEST);
+        expect(body.enableOnInstall).toBe(true);
+        // Duplicate-id guard semantics: never send `overwrite` implicitly —
+        // the server must keep 409ing on an existing id by default.
+        expect('overwrite' in body).toBe(false);
+    });
+
+    it('passes `overwrite: true` through for intentional upgrade / re-install', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { package: { manifest: MANIFEST } } });
+        await client.packages.install(MANIFEST, { overwrite: true });
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.overwrite).toBe(true);
+    });
+});

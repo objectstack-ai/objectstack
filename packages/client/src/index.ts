@@ -592,8 +592,16 @@ export class ObjectStackClient {
 
     /**
      * Install a new package from its manifest.
+     *
+     * By default the server rejects a manifest whose `id` is already
+     * installed with **409 Conflict** (duplicate-id guard) instead of
+     * silently overwriting the existing package. Intentional upgrade /
+     * re-install flows opt back in with `overwrite: true`.
      */
-    install: async (manifest: any, options?: { settings?: Record<string, any>; enableOnInstall?: boolean }) => {
+    install: async (
+        manifest: any,
+        options?: { settings?: Record<string, any>; enableOnInstall?: boolean; overwrite?: boolean },
+    ) => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}`, {
             method: 'POST',
@@ -601,6 +609,7 @@ export class ObjectStackClient {
                 manifest,
                 settings: options?.settings,
                 enableOnInstall: options?.enableOnInstall,
+                ...(options?.overwrite !== undefined ? { overwrite: options.overwrite } : {}),
             }),
         });
         return this.unwrapResponse<{ package: any; message?: string }>(res);
