@@ -24,3 +24,8 @@ export {
     type ConnectorRestPluginOptions,
     type ConnectorRegistrySurface,
 } from './connector-rest-plugin.js';
+export {
+    createRestProviderFactory,
+    REST_PROVIDER_KEY,
+    type RestProviderDeps,
+} from './rest-provider.js';

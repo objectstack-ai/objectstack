@@ -80,4 +80,75 @@ describe('ConnectorRestPlugin — end to end with the automation engine', () => 
 
         await kernel.shutdown();
     });
+
+    it('materializes a declarative `provider: rest` instance from stack metadata (ADR-0096)', async () => {
+        const { impl, calls } = stubFetch();
+
+        // A provider-bound `connectors:` entry as it sits in the ObjectQL registry.
+        const declared = [
+            {
+                name: 'billing',
+                label: 'Billing API',
+                type: 'api',
+                provider: 'rest',
+                providerConfig: { baseUrl: 'https://billing.example.com' },
+                auth: { type: 'bearer', credentialRef: 'BILLING_TOKEN' },
+            },
+        ];
+
+        const kernel = new LiteKernel();
+        // The plugin, with no baseUrl, contributes ONLY the `rest` provider factory.
+        kernel.use(new AutomationServicePlugin({ credentialResolver: (r) => (r === 'BILLING_TOKEN' ? 'sk-live' : undefined) }));
+        kernel.use(new ConnectorRestPlugin({ fetchImpl: impl }));
+        // A tiny harness that serves the declared connector metadata to the automation service.
+        kernel.use({
+            name: 'test.metadata',
+            type: 'standard',
+            version: '1.0.0',
+            dependencies: [],
+            async init(ctx: any) {
+                ctx.registerService('objectql', {
+                    registry: { listItems: (t: string) => (t === 'connector' ? declared : []) },
+                });
+            },
+            async start() {},
+        } as never);
+
+        await kernel.bootstrap();
+        const engine = kernel.getService<AutomationEngine>('automation');
+
+        // Materialized under the declared name, tagged declarative, and listed.
+        expect(engine.getRegisteredConnectors()).toContain('billing');
+        expect(engine.getConnectorOrigin('billing')).toBe('declarative');
+        expect(engine.getConnectorDescriptors().find((d) => d.name === 'billing')?.actions.map((a) => a.key)).toEqual(['request']);
+
+        engine.registerFlow('call_billing', {
+            name: 'call_billing',
+            label: 'Call Billing',
+            type: 'autolaunched',
+            variables: [{ name: 'call.status', type: 'number', isOutput: true }],
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'call',
+                    type: 'connector_action',
+                    label: 'GET /invoices',
+                    connectorConfig: { connectorId: 'billing', actionId: 'request', input: { path: '/invoices' } },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'call' },
+                { id: 'e2', source: 'call', target: 'end' },
+            ],
+        });
+
+        const result = await engine.execute('call_billing');
+        expect(result.success).toBe(true);
+        // Dispatched to the resolved base URL, with the credentialRef-resolved bearer token.
+        expect(calls[0].url).toBe('https://billing.example.com/invoices');
+        expect((calls[0].init.headers as Record<string, string>)['Authorization']).toBe('Bearer sk-live');
+
+        await kernel.shutdown();
+    });
 });

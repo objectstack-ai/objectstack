@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { CronExpressionInputSchema } from '../shared/expression.zod';
 import { WebhookSchema } from '../automation/webhook.zod';
-import { ConnectorAuthConfigSchema } from '../shared/connector-auth.zod';
+import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.zod';
 
 /**
@@ -578,9 +578,52 @@ export const ConnectorSchema = lazySchema(() => z.object({
   icon: z.string().optional().describe('Icon identifier'),
   
   /**
-   * Authentication configuration
+   * Authentication configuration (runtime shape — carries resolved secrets
+   * inline, supplied by a plugin at `registerConnector`). Optional and defaults
+   * to `{ type: 'none' }` so a declarative provider-bound instance can reference
+   * credentials through {@link auth}/`credentialRef` instead of inlining them
+   * here (ADR-0096). Hand-written / plugin connectors keep setting it as before.
    */
-  authentication: ConnectorAuthConfigSchema.describe('Authentication configuration'),
+  authentication: ConnectorAuthConfigSchema.optional().default({ type: 'none' }).describe(
+    'Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead.',
+  ),
+
+  /**
+   * ADR-0096 — provider key naming the installed **generic executor** that
+   * materializes this declarative entry into a live, dispatchable connector at
+   * boot (`openapi`, `mcp`, `rest`, or any provider a connector plugin
+   * contributes). Presence flips the entry from an inert catalog **descriptor**
+   * (#2612) to an **instance declaration**: the automation service resolves the
+   * matching provider factory at boot and registers the result on the connector
+   * registry. A declared `provider` with no installed factory is a hard boot
+   * error. Omit `provider` to keep the entry a pure descriptor.
+   */
+  provider: z.string().regex(/^[a-z][a-z0-9_]*$/).optional().describe(
+    'Generic-executor key that materializes this declarative entry at boot (e.g. openapi/mcp/rest). Omit for a catalog-only descriptor. Unknown provider ⇒ hard boot error (ADR-0096).',
+  ),
+
+  /**
+   * ADR-0096 — provider-specific configuration, **validated by the provider
+   * factory** (not by this schema): the OpenAPI provider expects `{ spec,
+   * baseUrl? }`, the MCP provider a `{ transport }`, the REST provider a
+   * `{ baseUrl }`. Deliberately untyped here — re-modelling each provider's
+   * inputs in the stack schema (an OpenAPI document, an MCP transport) is exactly
+   * what ADR-0023 rejected. Ignored unless `provider` is set.
+   */
+  providerConfig: z.record(z.string(), z.unknown()).optional().describe(
+    'Provider-specific config validated by the provider factory at boot (e.g. { spec, baseUrl } for openapi). Requires `provider`.',
+  ),
+
+  /**
+   * ADR-0096 — declarative auth for a provider-bound instance: secret-bearing
+   * variants carry a `credentialRef` the automation service resolves through the
+   * secrets/env layer at materialization, never an inline secret (§3). Distinct
+   * from {@link authentication}, which is the runtime shape with the resolved
+   * secret inline. Requires `provider`.
+   */
+  auth: ConnectorInstanceAuthSchema.optional().describe(
+    'Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0096).',
+  ),
 
   /** Zapier-style Capabilities */
   actions: z.array(ConnectorActionSchema).optional(),
@@ -664,3 +707,78 @@ export type ConnectorInput = z.input<typeof ConnectorSchema>;
 export function defineConnector(config: z.input<typeof ConnectorSchema>): Connector {
   return ConnectorSchema.parse(config);
 }
+
+/**
+ * A declarative `connectors:` **stack entry** (ADR-0096) — {@link ConnectorSchema}
+ * plus the cross-field rules that apply only when a connector is *authored inside
+ * a stack*, as opposed to a def a plugin builds at runtime and hands to
+ * `registerConnector`. `stack.zod.ts` validates the `connectors:` array against
+ * this; the base {@link ConnectorSchema} stays a plain object so connector
+ * *subtypes* (github / database / …) can still `.extend()` it.
+ *
+ * All rules key off `provider` — instance declaration vs. catalog descriptor:
+ *  - `providerConfig` / `auth` require a `provider`; on a pure descriptor they
+ *    are meaningless materialization inputs, so they are rejected.
+ *  - A provider-bound instance must NOT inline secrets via `authentication` —
+ *    credentials are references (`auth.credentialRef`), never authored literals (§3).
+ *  - A provider-bound instance must NOT author `actions` / `triggers` — the
+ *    provider derives them from the upstream (OpenAPI document / MCP `tools/list`);
+ *    authoring both the instance and its actions reintroduces drift (§5 non-goals).
+ */
+export const DeclarativeConnectorEntrySchema = lazySchema(() =>
+  ConnectorSchema.superRefine((entry, ctx) => {
+    const isInstance = typeof entry.provider === 'string' && entry.provider.length > 0;
+    if (!isInstance) {
+      if (entry.providerConfig !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['providerConfig'],
+          message: '`providerConfig` requires a `provider` — a connector entry with no provider is a catalog descriptor (ADR-0096).',
+        });
+      }
+      if (entry.auth !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['auth'],
+          message: '`auth` requires a `provider` — declarative instance auth applies only to a provider-bound entry (ADR-0096).',
+        });
+      }
+      return;
+    }
+    // Provider-bound instance declaration.
+    if (entry.authentication && entry.authentication.type !== 'none') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['authentication'],
+        message: `Provider-bound connector instance '${entry.name}' must not inline secrets via \`authentication\`; reference credentials with \`auth: { type, credentialRef }\` instead (ADR-0096 §3).`,
+      });
+    }
+    if (entry.actions && entry.actions.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['actions'],
+        message: `Provider-bound connector instance '${entry.name}' must not author \`actions\` — the '${entry.provider}' provider derives them from the upstream at boot (ADR-0096 §5).`,
+      });
+    }
+    if (entry.triggers && entry.triggers.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['triggers'],
+        message: `Provider-bound connector instance '${entry.name}' must not author \`triggers\` — the '${entry.provider}' provider derives them from the upstream at boot (ADR-0096 §5).`,
+      });
+    }
+  }),
+);
+
+export type DeclarativeConnectorEntry = z.infer<typeof DeclarativeConnectorEntrySchema>;
+
+// Re-export the declarative-instance auth surface (ADR-0096) so consumers reach
+// it through `@objectstack/spec/integration` alongside the connector schema.
+export {
+  ConnectorInstanceAuthSchema,
+  ConnectorInstanceNoAuthSchema,
+  ConnectorInstanceBearerAuthSchema,
+  ConnectorInstanceAPIKeyAuthSchema,
+  ConnectorInstanceBasicAuthSchema,
+} from '../shared/connector-auth.zod';
+export type { ConnectorInstanceAuth, ResolvedConnectorAuth } from '../shared/connector-auth.zod';

@@ -3,26 +3,61 @@
 import { defineConnector, type Connector } from '@objectstack/spec/integration';
 
 /**
- * Declarative `connectors:` — catalog descriptors (#2612).
+ * Declarative `connectors:` — the collection now holds BOTH kinds (ADR-0096):
  *
- * A stack's `connectors:` collection is **descriptor-only**: entries register
- * as metadata (kind 'connector') for discovery, documentation, and future
- * marketplace listing, but they never reach the automation engine's connector
- * registry — `connector_action` cannot dispatch them. Live connectors are the
- * `plugins:` entries in objectstack.config.ts (ConnectorRestPlugin /
- * ConnectorSlackPlugin), which call `engine.registerConnector(def, handlers)`
- * (ADR-0018 §Addendum) and are exercised by the connector flows in
- * src/automation/flows/.
+ * 1. **Provider-bound instance** ({@link StatusApiConnector}) — a live,
+ *    dispatchable connector authored as pure metadata. It names a `provider`
+ *    (`rest`) and the automation service materializes it at boot: it looks up
+ *    the provider factory `@objectstack/connector-rest` contributes, applies
+ *    `providerConfig` + the resolved `auth`, and calls
+ *    `engine.registerConnector(def, handlers)` for you. The result is
+ *    indistinguishable from a hand-written connector — `connector_action`
+ *    dispatches it and `GET /connectors` lists it. {@link
+ *    file://../../automation/flows/index.ts | ShowcaseDeclarativeConnectorPingFlow}
+ *    calls it end-to-end. This is the #2977 / ADR-0096 upgrade of what used to
+ *    be a purely descriptor-only collection.
  *
- * `enabled: false` marks the entry as a deliberate catalog-only descriptor —
- * without it, the automation service's boot audit (rightly) warns that a
- * declared connector with actions has no runtime registration.
+ * 2. **Catalog descriptor** ({@link ErpCatalogConnector}, the #2612 interim
+ *    contract) — an inert entry for discovery / documentation / marketplace
+ *    listing. It has no `provider`, so it never reaches the connector registry;
+ *    `connector_action` cannot dispatch it. `enabled: false` marks it a
+ *    deliberate catalog-only descriptor and suppresses the boot audit warning
+ *    for a declared-with-actions connector that has no runtime registration.
  *
- * Declarative provider-bound connector *instances* — entries a generic
- * executor (connector-openapi / connector-mcp) materializes into dispatchable
- * connectors at boot — are the planned upgrade of this collection, tracked in
- * https://github.com/objectstack-ai/framework/issues/2977 (ADR-0096).
+ * Runtime connectors may also be contributed directly by plugins calling
+ * `engine.registerConnector()` (ADR-0018 §Addendum) — the `rest`/`slack`
+ * `plugins:` entries in objectstack.config.ts, exercised by the connector flows
+ * in src/automation/flows/.
  */
+
+/**
+ * ADR-0096 provider-bound instance — declared as pure metadata, materialized
+ * into a live `rest` connector at boot by ConnectorRestPlugin's provider factory
+ * (which the plugin registers even though, here, it is also configured with a
+ * hand-wired `rest` connector). Points at the running server itself, so
+ * {@link file://../../automation/flows/index.ts | ShowcaseDeclarativeConnectorPingFlow}
+ * can dispatch `GET /api/v1/health` through it with no external dependency and no
+ * credentials. `auth: { type: 'none' }` keeps boot self-contained; a real
+ * upstream would use `auth: { type: 'bearer', credentialRef: '<env var>' }`.
+ */
+export const StatusApiConnector = defineConnector({
+  name: 'showcase_status_api',
+  label: 'Status API (Declarative REST Instance)',
+  type: 'api',
+  description:
+    'Provider-bound declarative connector instance (ADR-0096): authored as metadata, materialized into a live, ' +
+    'dispatchable `rest` connector at boot. Unlike the ERP descriptor below, this one IS callable from a flow ' +
+    'connector_action and appears in GET /connectors.',
+  provider: 'rest',
+  providerConfig: {
+    // Points at the running server itself (the showcase dev port is 3000), so
+    // the dispatch is observable with no external dependency. Kept a literal
+    // because metadata files don't read env — the env-driven `rest` plugin
+    // connector in objectstack.config.ts is the tunable one.
+    baseUrl: 'http://127.0.0.1:3000',
+  },
+  auth: { type: 'none' },
+});
 export const ErpCatalogConnector = defineConnector({
   name: 'showcase_erp_catalog',
   label: 'ERP Integration (Catalog Descriptor)',
@@ -75,4 +110,4 @@ export const ErpCatalogConnector = defineConnector({
   enabled: false,
 });
 
-export const allConnectors: Connector[] = [ErpCatalogConnector];
+export const allConnectors: Connector[] = [StatusApiConnector, ErpCatalogConnector];

@@ -1,13 +1,15 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { Connector } from '@objectstack/spec/integration';
+import type { Connector, ConnectorProviderFactory } from '@objectstack/spec/integration';
 import { createMcpConnector, type McpConnectorOptions } from './mcp-connector.js';
+import { createMcpProviderFactory, MCP_PROVIDER_KEY } from './mcp-provider.js';
 
 /**
  * Minimal surface of the automation engine this plugin depends on — the
- * connector registry from ADR-0018 §Addendum. Kept structural so the plugin
- * needs no runtime dependency on `@objectstack/service-automation`.
+ * connector registry (ADR-0018 §Addendum) plus the provider registry (ADR-0096).
+ * Kept structural so the plugin needs no runtime dependency on
+ * `@objectstack/service-automation`.
  */
 export interface ConnectorRegistrySurface {
     registerConnector(
@@ -18,26 +20,39 @@ export interface ConnectorRegistrySurface {
         >,
     ): void;
     unregisterConnector(name: string): void;
+    registerConnectorProvider(providerKey: string, factory: ConnectorProviderFactory): void;
 }
 
-export interface ConnectorMcpPluginOptions extends McpConnectorOptions {}
+/**
+ * Options for {@link ConnectorMcpPlugin}. All optional (ADR-0096): with no
+ * `transport` the plugin contributes only the `mcp` provider factory — so a
+ * stack can declare `provider: 'mcp'` instances as pure metadata. Supply a
+ * `transport` to ALSO connect one hand-wired MCP server at `start()`.
+ */
+export interface ConnectorMcpPluginOptions extends Partial<McpConnectorOptions> {}
 
 /**
- * ConnectorMcpPlugin — connects to an MCP server, discovers its tools, and
- * registers them as a single connector on the automation engine (ADR-0024).
- * One generic adapter, configured per server (transport + `include`), never
- * per-server code.
+ * ConnectorMcpPlugin — contributes the generic MCP adapter (ADR-0024) in two forms:
  *
- * Lifecycle: on `start()` it connects and builds the connector once; on
- * `stop()` it tears the MCP connection down. If no automation engine is present
- * — or the server is unreachable at boot — the plugin logs and skips: a missing
- * optional connector is not a fatal error (same posture as `ConnectorRestPlugin`).
+ *  1. **Provider factory** (`mcp`, ADR-0096): registered at `init()` so the
+ *     automation service can materialize declarative `provider: 'mcp'`
+ *     `connectors:` entries — connecting to the server and mapping its tools to
+ *     connector actions — at boot.
+ *  2. **Hand-wired instance** (optional, back-compat): when constructed with a
+ *     `transport`, it also connects that one server at `start()` and registers
+ *     the resulting connector.
+ *
+ * Lifecycle: on `start()` a configured instance connects and builds the
+ * connector once; on `destroy()` it tears the MCP connection down. If no
+ * automation engine is present — or the server is unreachable at boot — the
+ * hand-wired path logs and skips: a missing optional connector is not fatal
+ * (unlike a *declarative* provider-bound instance, which fails boot loudly).
  */
 export class ConnectorMcpPlugin implements Plugin {
     name = 'com.objectstack.connector.mcp';
     version = '1.0.0';
     type = 'standard' as const;
-    // Ensure the automation engine (and its connector registry) is started first.
+    // Ensure the automation engine (and its connector/provider registries) exist first.
     dependencies = ['com.objectstack.service-automation'];
 
     private readonly options: ConnectorMcpPluginOptions;
@@ -45,23 +60,28 @@ export class ConnectorMcpPlugin implements Plugin {
     private automation?: ConnectorRegistrySurface;
     private close?: () => Promise<void>;
 
-    constructor(options: ConnectorMcpPluginOptions) {
+    constructor(options: ConnectorMcpPluginOptions = {}) {
         this.options = options;
     }
 
-    async init(_ctx: PluginContext): Promise<void> {
-        // No services to register; the connector is registered in start() once
-        // the automation engine is available and the MCP server has been queried.
+    async init(ctx: PluginContext): Promise<void> {
+        // Contribute the `mcp` provider factory (ADR-0096) before the automation
+        // service materializes declarative instances during its start().
+        const automation = this.tryGetAutomation(ctx);
+        if (automation && typeof automation.registerConnectorProvider === 'function') {
+            automation.registerConnectorProvider(
+                MCP_PROVIDER_KEY,
+                createMcpProviderFactory({ clientFactory: this.options.clientFactory }),
+            );
+            ctx.logger.info("ConnectorMcpPlugin: registered 'mcp' connector provider");
+        }
     }
 
     async start(ctx: PluginContext): Promise<void> {
-        let automation: ConnectorRegistrySurface | undefined;
-        try {
-            automation = ctx.getService<ConnectorRegistrySurface>('automation');
-        } catch {
-            automation = undefined;
-        }
+        // Provider-only usage (no transport) contributes just the factory in init().
+        if (!this.options.transport) return;
 
+        const automation = this.tryGetAutomation(ctx);
         if (!automation || typeof automation.registerConnector !== 'function') {
             ctx.logger.info('ConnectorMcpPlugin: no automation engine — MCP connector not registered');
             return;
@@ -69,7 +89,7 @@ export class ConnectorMcpPlugin implements Plugin {
 
         let bundle;
         try {
-            bundle = await createMcpConnector(this.options);
+            bundle = await createMcpConnector(this.options as McpConnectorOptions);
         } catch (err) {
             // The MCP server is unreachable / failed discovery at boot. Skip the
             // optional connector rather than failing the whole bootstrap.
@@ -99,6 +119,14 @@ export class ConnectorMcpPlugin implements Plugin {
         }
         if (this.close) {
             try { await this.close(); } catch { /* ignore */ }
+        }
+    }
+
+    private tryGetAutomation(ctx: PluginContext): ConnectorRegistrySurface | undefined {
+        try {
+            return ctx.getService<ConnectorRegistrySurface>('automation');
+        } catch {
+            return undefined;
         }
     }
 }

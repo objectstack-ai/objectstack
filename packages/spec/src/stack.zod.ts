@@ -57,7 +57,7 @@ import { DocSchema } from './system/doc.zod';
 import { BookSchema } from './system/book.zod';
 
 // Integration Protocol
-import { ConnectorSchema } from './integration/connector.zod';
+import { DeclarativeConnectorEntrySchema } from './integration/connector.zod';
 
 /**
  * Datasource Mapping Rule Schema
@@ -331,30 +331,35 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   analyticsCubes: z.array(CubeSchema).optional().describe('Analytics Semantic Layer Cubes'),
 
   /**
-   * Integration Protocol
+   * Integration Protocol — connectors are of two kinds (ADR-0096):
    *
-   * ⚠ Descriptor-only contract (#2612): entries here are **catalog
-   * descriptors**, registered as metadata (kind 'connector') for discovery,
-   * documentation, and marketplace listing — they do NOT reach the automation
-   * engine's connector registry and the `connector_action` flow node cannot
-   * dispatch them. Runtime connectors are contributed exclusively by plugins
-   * calling `engine.registerConnector(def, handlers)` (ADR-0018 §Addendum) —
-   * e.g. `@objectstack/connector-rest`, `connector-slack`, `connector-openapi`
-   * (ADR-0023), `connector-mcp` (ADR-0024) in the stack's `plugins:` array.
+   * 1. **Provider-bound instance** (has `provider`): a live, dispatchable
+   *    connector authored as pure metadata. At boot the automation service looks
+   *    up the installed generic executor named by `provider` (`openapi` / `mcp` /
+   *    `rest`, contributed by the matching plugin in `plugins:`), resolves
+   *    `auth.credentialRef` through the secrets/env layer, and registers the
+   *    materialized `{ def, handlers }` on the connector registry — so
+   *    `connector_action` dispatches it and `GET /connectors` lists it, exactly
+   *    like a hand-written connector. A declared `provider` with no installed
+   *    factory is a **hard boot error**.
    *
-   * The automation service audits this at boot: a declared entry with
-   * `actions` and no same-name runtime registration logs a loud warning.
-   * Mark deliberate catalog-only entries with `enabled: false`.
-   * Provider-bound declarative connector *instances* — declarative entries a
-   * generic executor materializes into live connectors at boot — are tracked
-   * in #2977 (ADR-0096).
+   * 2. **Catalog descriptor** (no `provider`, the #2612 interim contract): an
+   *    inert metadata entry for discovery / documentation / marketplace listing.
+   *    It does NOT reach the connector registry; `connector_action` cannot
+   *    dispatch it. The automation service audits these at boot — a descriptor
+   *    with `actions` and no same-name runtime registration logs a loud warning;
+   *    mark a deliberate catalog-only entry with `enabled: false` to silence it.
+   *
+   * Runtime connectors may also be contributed directly by plugins calling
+   * `engine.registerConnector(def, handlers)` (ADR-0018 §Addendum). A
+   * provider-bound instance whose `name` collides with such a plugin-registered
+   * connector is a hard boot error (no silent precedence, ADR-0096 §4).
    */
-  connectors: z.array(ConnectorSchema).optional().describe(
-    'External System Connectors — catalog descriptors only: NOT runtime-dispatchable. ' +
-    'The connector_action registry is populated exclusively by connector plugins in `plugins:` ' +
-    '(connector-rest / connector-slack / connector-openapi / connector-mcp). Declaring a connector ' +
-    'here does not make flows able to call it; set `enabled: false` on deliberate catalog-only ' +
-    'entries. See #2612; declarative provider-bound instances are tracked in #2977 (ADR-0096).',
+  connectors: z.array(DeclarativeConnectorEntrySchema).optional().describe(
+    'External System Connectors. A provider-bound entry (has `provider`: openapi/mcp/rest) is materialized into a ' +
+    'live, dispatchable connector at boot and referenced by flows via `connector_action`; credentials are `auth.credentialRef` ' +
+    'references, never inline secrets. An entry with no `provider` is a catalog descriptor only (NOT dispatchable) — set ' +
+    '`enabled: false` on deliberate descriptors. Unknown provider / unresolvable credentialRef / name conflict ⇒ hard boot error (ADR-0096, #2977).',
   ),
 
   /**

@@ -32,5 +32,12 @@ export {
 } from './openapi-connector.js';
 export {
     registerOpenApiConnector,
+    ConnectorOpenApiPlugin,
+    type ConnectorOpenApiPluginOptions,
     type ConnectorRegistrySurface,
 } from './connector-openapi-plugin.js';
+export {
+    createOpenApiProviderFactory,
+    OPENAPI_PROVIDER_KEY,
+    type OpenApiProviderDeps,
+} from './openapi-provider.js';

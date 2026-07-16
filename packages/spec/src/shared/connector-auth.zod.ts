@@ -70,3 +70,75 @@ export const ConnectorAuthConfigSchema = lazySchema(() => z.discriminatedUnion('
 ]));
 
 export type ConnectorAuthConfig = z.infer<typeof ConnectorAuthConfigSchema>;
+
+/**
+ * The **static** subset of {@link ConnectorAuthConfig} — the open-source auth
+ * tier a generic executor can apply with no token-acquisition flow (`none` /
+ * `api-key` / `basic` / `bearer`). This is the shape a provider factory receives
+ * *after* a declarative instance's {@link ConnectorInstanceAuth} `credentialRef`
+ * has been resolved to its secret at materialization (ADR-0096). OAuth2 —
+ * authorization-code/refresh lifecycle — is the enterprise tier (ADR-0015).
+ */
+export type ResolvedConnectorAuth = Extract<
+  ConnectorAuthConfig,
+  { type: 'none' | 'api-key' | 'basic' | 'bearer' }
+>;
+
+// ============================================================================
+// Declarative connector-instance auth (ADR-0096)
+//
+// Auth for a provider-bound declarative `connectors:` entry. Unlike
+// ConnectorAuthConfigSchema — the runtime shape, which carries the *resolved*
+// secret inline (a plugin passes `{ type: 'bearer', token }`) — this shape
+// carries a `credentialRef` **reference** that the automation service resolves
+// through the secrets/env layer at boot. There is deliberately no field to
+// inline a secret here: stack metadata is authored, versioned, and shipped, so
+// a raw token must never live in it (ADR-0096 §3). OAuth2 is intentionally
+// absent (enterprise tier, ADR-0015).
+// ============================================================================
+
+/** No authentication — the upstream is public. */
+export const ConnectorInstanceNoAuthSchema = lazySchema(() => z.object({
+  type: z.literal('none'),
+}));
+
+/** Bearer-token auth; the token is resolved from `credentialRef` at boot. */
+export const ConnectorInstanceBearerAuthSchema = lazySchema(() => z.object({
+  type: z.literal('bearer'),
+  credentialRef: z.string().min(1).describe(
+    'Secrets-layer reference (e.g. an env-var name in the open tier) resolved to the bearer token at materialization. Never an inline token.',
+  ),
+}));
+
+/** API-key auth; the key is resolved from `credentialRef` at boot. */
+export const ConnectorInstanceAPIKeyAuthSchema = lazySchema(() => z.object({
+  type: z.literal('api-key'),
+  credentialRef: z.string().min(1).describe(
+    'Secrets-layer reference resolved to the API key at materialization. Never an inline key.',
+  ),
+  headerName: z.string().optional().describe('HTTP header carrying the key (default X-API-Key).'),
+  paramName: z.string().optional().describe('Query parameter carrying the key (alternative to header).'),
+}));
+
+/** Basic auth; the password is resolved from `credentialRef` at boot. */
+export const ConnectorInstanceBasicAuthSchema = lazySchema(() => z.object({
+  type: z.literal('basic'),
+  username: z.string().describe('Username (not a secret; safe to keep in metadata).'),
+  credentialRef: z.string().min(1).describe(
+    'Secrets-layer reference resolved to the password at materialization. Never an inline password.',
+  ),
+}));
+
+/**
+ * Declarative connector-instance auth: a discriminated union whose secret-bearing
+ * variants carry a `credentialRef` instead of an inline secret (ADR-0096 §3).
+ * Consumed by the `auth` field on a provider-bound `connectors:` entry.
+ */
+export const ConnectorInstanceAuthSchema = lazySchema(() => z.discriminatedUnion('type', [
+  ConnectorInstanceNoAuthSchema,
+  ConnectorInstanceBearerAuthSchema,
+  ConnectorInstanceAPIKeyAuthSchema,
+  ConnectorInstanceBasicAuthSchema,
+]));
+
+export type ConnectorInstanceAuth = z.infer<typeof ConnectorInstanceAuthSchema>;

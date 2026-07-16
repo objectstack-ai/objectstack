@@ -395,6 +395,57 @@ export const TaskCompletedRestPingFlow = defineFlow({
 });
 
 /**
+ * Declarative Connector Ping — the worked ADR-0096 example: a `connector_action`
+ * dispatching a **provider-bound declarative connector instance**.
+ *
+ * Where {@link TaskCompletedRestPingFlow} targets the `rest` connector a *plugin*
+ * registered (ConnectorRestPlugin, ADR-0018 §Addendum), this flow targets
+ * `showcase_status_api` — a connector declared as pure metadata in
+ * src/system/connectors/ and *materialized* into the registry at boot by the
+ * `rest` generic executor (ADR-0096). Nothing registered it in code: the
+ * `connectors:` entry named `provider: 'rest'`, and the automation service turned
+ * it into a live connector. On task creation the flow issues `GET /api/v1/health`
+ * through it; the call and its `{ status: 'ok' }` response are captured on the
+ * flow run, proving the declarative path dispatches end-to-end.
+ */
+export const ShowcaseDeclarativeConnectorPingFlow = defineFlow({
+  name: 'showcase_declarative_connector_ping',
+  label: 'Declarative Connector Ping (ADR-0096)',
+  description:
+    'Dispatches GET /api/v1/health through showcase_status_api — a provider-bound connector instance materialized from pure metadata at boot.',
+  type: 'autolaunched',
+  nodes: [
+    {
+      id: 'start',
+      type: 'start',
+      label: 'On Task Created',
+      config: {
+        objectName: 'showcase_task',
+        triggerType: 'record-after-create',
+      },
+    },
+    {
+      id: 'ping',
+      type: 'connector_action',
+      label: 'GET /api/v1/health (declarative)',
+      connectorConfig: {
+        connectorId: 'showcase_status_api',
+        actionId: 'request',
+        input: {
+          method: 'GET',
+          path: '/api/v1/health',
+        },
+      },
+    },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'ping' },
+    { id: 'e2', source: 'ping', target: 'end' },
+  ],
+});
+
+/**
  * Task Follow-up Reminder — the worked `wait` (durable timer) example.
  *
  * When a task is created, the flow pauses at a `wait` node for a fixed delay,
@@ -1275,6 +1326,7 @@ export const allFlows = [
   TaskAssignedNotifyFlow,
   ScheduledDigestFlow,
   TaskCompletedRestPingFlow,
+  ShowcaseDeclarativeConnectorPingFlow,
   TaskFollowUpFlow,
   NotifyOwnerSubflow,
   TaskDoneNotifyOwnerFlow,

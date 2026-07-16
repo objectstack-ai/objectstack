@@ -11,6 +11,7 @@ export type {
     ConnectorActionHandler,
     ConnectorActionContext,
     RegisteredConnector,
+    ConnectorOrigin,
     ConnectorDescriptor,
     ConnectorActionDescriptor,
     SuspendedRun,
@@ -18,6 +19,16 @@ export type {
     RunRecord,
     StepLogEntry,
 } from './engine.js';
+
+// Connector provider contract (ADR-0096) — re-exported from @objectstack/spec so
+// hosts/tests can reach it via this package too. Connector plugins should import
+// it directly from `@objectstack/spec/integration` (no coupling to this engine).
+export type {
+    ConnectorProviderFactory,
+    ConnectorProviderContext,
+    ConnectorMaterialization,
+    ConnectorMaterializationHandler,
+} from '@objectstack/spec/integration';
 
 // Durable suspended-run persistence (ADR-0019). The in-memory store is the
 // default; the ObjectQL-backed store persists pauses across process restarts.

@@ -31,3 +31,8 @@ export {
     type ConnectorMcpPluginOptions,
     type ConnectorRegistrySurface,
 } from './connector-mcp-plugin.js';
+export {
+    createMcpProviderFactory,
+    MCP_PROVIDER_KEY,
+    type McpProviderDeps,
+} from './mcp-provider.js';

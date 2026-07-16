@@ -15,6 +15,9 @@
 // Core Connector Protocol
 export * from './connector.zod';
 
+// Connector provider contract (ADR-0096) — declarative instances → live connectors
+export * from './connector-provider';
+
 // Connector Templates
 export * from './connector/saas.zod';
 export * from './connector/database.zod';

@@ -1,6 +1,6 @@
 # ADR-0096: Declarative Connector Instances — Provider-Bound `connectors:` Entries Materialized by Generic Executors
 
-**Status**: Proposed (2026-07-15)
+**Status**: Accepted (2026-07-15) — implemented in framework#2977
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0015](./0015-external-datasource-federation.md) (open mechanism / enterprise lifecycle split), [ADR-0018](./0018-unified-node-action-registry.md) (`connector_action` baseline dispatch + `engine.registerConnector()`), [ADR-0022](./0022-connectors-vs-messaging-channels.md) (Connector = transport/integration mechanism), [ADR-0023](./0023-openapi-to-connector-generator.md) (OpenAPI → Connector generator), [ADR-0024](./0024-mcp-connectors.md) (MCP servers as connectors)
 **Tracking**: framework#2977 (supersedes the interim descriptor-only contract from framework#2612)
@@ -99,3 +99,27 @@ If a provider-bound instance and a plugin-registered connector share a `name`, b
 - Schema evolution on a shipped collection (`provider`, `providerConfig`, `credentialRef`) — additive, so no migration, but the descriptor-only docs shipped with #2612 must be revised when this lands.
 - The secrets-layer dependency makes credential resolution a boot-path concern; environments without a secrets service need a clear degraded story (env-var fallback, open tier).
 - Provider factories add a registration surface to connector plugins (small; mirrors how they already self-register).
+
+---
+
+## Implementation (framework#2977)
+
+| Decision | Where it landed |
+|:---|:---|
+| 1. `provider` / `providerConfig` / `auth` on the entry | `@objectstack/spec` — `integration/connector.zod.ts` (`ConnectorSchema` gains the three fields; `authentication` now defaults to `{ type: 'none' }`); `shared/connector-auth.zod.ts` (`ConnectorInstanceAuthSchema` — the `credentialRef` shapes; `ResolvedConnectorAuth`). Authoring rules (`DeclarativeConnectorEntrySchema`, used by `stack.zod.ts`) reject inline secrets, orphan `providerConfig`/`auth`, and authored `actions`/`triggers` on a provider-bound entry (§5). |
+| 2. Provider factory registry | `@objectstack/spec` — `integration/connector-provider.ts` (`ConnectorProviderFactory` / `ConnectorProviderContext` / `ConnectorMaterialization`, pure types so plugins depend only on the spec). The engine adds `registerConnectorProvider` / `getConnectorProvider` (`service-automation/src/engine.ts`). |
+| 3. Boot materialization + `credentialRef` | `service-automation/src/plugin.ts` — `materializeDeclaredConnectors()` runs in `start()` (a throw there is fatal to bootstrap under both `LiteKernel` and `ObjectKernel`, unlike a swallowed `kernel:ready` hook). `credentialRef` resolves via a `CredentialResolver`; the open-tier default reads env vars. |
+| 4. Conflict rule | `registerConnector` is origin-tagged (`plugin` vs `declarative`); a cross-origin name collision throws instead of silently replacing. |
+| 5. Provider implementations | `connector-rest` (`rest`), `connector-openapi` (`openapi`), `connector-mcp` (`mcp`) each export a `create*ProviderFactory` and register it in the plugin's `init()`. The plugins now take **optional** options: with none they contribute only the provider factory; with instance options they also register a hand-wired connector (back-compat). |
+| 6. Showcase | `examples/app-showcase` — `StatusApiConnector` (`provider: 'rest'`) is materialized at boot and dispatched by `ShowcaseDeclarativeConnectorPingFlow`; `coverage.ts` records it. |
+
+### Open / enterprise line (ADR-0015)
+
+- **Open source:** the `rest` / `openapi` / `mcp` provider factories; **static** auth (`none` / `api-key` / `basic` / `bearer`); `credentialRef` resolved from **environment variables** (`defaultEnvCredentialResolver`) — the degraded-but-honest story for environments with no managed secrets service.
+- **Enterprise:** managed credential **vaulting** and OAuth2 authorization-code/refresh lifecycle (inject a vault-backed `CredentialResolver` via `AutomationServicePluginOptions.credentialResolver` — no change to the materialization path), plus per-tenant connection lifecycle. The open tier deliberately omits OAuth2 from `ConnectorInstanceAuthSchema`.
+
+### Deliberate scope boundaries
+
+- **Boot-time only.** Materialization runs once at boot. Re-materializing a provider-bound instance published at runtime (Studio) is a follow-up; the descriptor audit still re-runs on `metadata:reloaded`.
+- **`providerConfig.spec` (openapi)** accepts an inline document or an http(s) URL; resolving a `./file.json` ref relative to the stack is the stack loader's job, not the connector's.
+- **MCP credentials** ride the transport (ADR-0024); for an http transport a resolved `auth` is folded into the request headers.

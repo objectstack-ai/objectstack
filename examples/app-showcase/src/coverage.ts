@@ -177,9 +177,9 @@ export const STACK_COLLECTION_COVERAGE: Record<string, KindCoverage> = {
   },
   connectors: {
     status: 'demonstrated',
-    files: ['src/system/connectors/index.ts'],
+    files: ['src/system/connectors/index.ts', 'src/automation/flows/index.ts'],
     notes:
-      'Demonstrated per the descriptor-only contract (#2612): declarative connectors: entries are catalog descriptors (registered as metadata, never runtime-dispatchable; enabled:false marks the deliberate catalog entry and silences the boot audit). Live connectors are demonstrated the delivered way — ConnectorRestPlugin/ConnectorSlackPlugin in objectstack.config.ts plugins:, exercised by the connector flows. Declarative provider-bound instances (which would make this collection dispatchable) are tracked in #2977 / ADR-0096.',
+      'Both connector kinds are demonstrated. (1) Provider-bound INSTANCE (ADR-0096 / #2977): StatusApiConnector declares `provider: rest` and is materialized into a live, dispatchable connector at boot by ConnectorRestPlugin\'s provider factory — ShowcaseDeclarativeConnectorPingFlow calls it via connector_action and it appears in GET /connectors. (2) Catalog DESCRIPTOR (#2612): ErpCatalogConnector has no provider, so it stays inert metadata; enabled:false marks the deliberate catalog entry and silences the boot audit. Plugin-registered connectors (ConnectorRestPlugin/ConnectorSlackPlugin in objectstack.config.ts) are also exercised by the connector flows.',
   },
 };
 
