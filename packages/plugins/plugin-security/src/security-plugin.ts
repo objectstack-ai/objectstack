@@ -1038,29 +1038,91 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
-      // 3.5. Auto-inject `owner_id` on insert from the
-      // ExecutionContext. Without this, the row has `owner_id = NULL`
-      // and the default `owner_only_writes` RLS policy hides it from
-      // the very user who just created it.
+      // 3.5. [#3004] `owner_id` — the row-ownership ANCHOR — is SYSTEM-MANAGED
+      // for non-privileged writers. It is deliberately not `readonly` in the
+      // schema (ownership is transferable, see registry.ts applySystemFields),
+      // so the #2948 static-readonly strip never covers it; FLS doesn't gate it
+      // by default; and OWD/RLS owner gates key OFF it — whoever controls the
+      // value controls who may update/delete the row. So the middleware owns
+      // the anchor:
+      //
+      //   • INSERT: an empty `owner_id` is auto-stamped to the acting user
+      //     (without this the row has `owner_id = NULL` and the default
+      //     `owner_only_writes` RLS policy hides it from its own creator).
+      //     Batch rows included. A SUPPLIED owner that is NOT the acting user
+      //     is an ownership FORGE — denied unless the caller holds the
+      //     transfer grant (`allowTransfer`, or `modifyAllRecords` which
+      //     implies it).
+      //   • UPDATE: a supplied `owner_id` is an ownership TRANSFER (or a
+      //     disown, when null) — denied without the transfer grant. The
+      //     single-id no-op echo (a form save sending the unchanged owner
+      //     back) is tolerated by comparing against the pre-image; a bulk
+      //     change-set carrying `owner_id` has no pre-image to compare and
+      //     fails CLOSED.
+      //
+      // System/boot writes carry `isSystem` and short-circuited the whole
+      // middleware above — imports, OAuth provisioning, cron snapshots and
+      // seed claims that legitimately write foreign/NULL owners are unaffected.
+      // Under delegation (ADR-0090 D10) BOTH principals must hold the grant.
       //
       // `organization_id` auto-injection has moved to
-      // `@objectstack/organizations`. Install that plugin for
-      // multi-tenant deployments.
+      // `@objectstack/organizations`; its forge guard is step 3.7 below.
       if (
-        opCtx.operation === 'insert' &&
+        (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
-        typeof opCtx.data === 'object' &&
-        !Array.isArray(opCtx.data) &&
-        !!opCtx.context?.userId
+        typeof opCtx.data === 'object'
       ) {
         const fields = await this.getObjectFieldNames(metadata, opCtx.object, ql);
-        if (fields) {
-          const data = opCtx.data as Record<string, unknown>;
-          if (
-            fields.has('owner_id') &&
-            (data.owner_id == null || data.owner_id === '')
-          ) {
-            data.owner_id = opCtx.context!.userId;
+        if (fields?.has('owner_id')) {
+          const userId = opCtx.context?.userId;
+          const denyOwnerWrite = (action: string) => {
+            throw new PermissionDeniedError(
+              `[Security] Access denied: 'owner_id' on '${opCtx.object}' is system-managed — ` +
+                `${action} requires the transfer grant (allowTransfer or modifyAllRecords)`,
+              { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+            );
+          };
+          // Lazily evaluated: the common path (no owner in the payload) must
+          // not pay for a grant check.
+          const hasTransferGrant = () =>
+            this.permissionEvaluator.checkObjectPermission('transfer', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate }) &&
+            (!delegatorSets || this.permissionEvaluator.checkObjectPermission('transfer', opCtx.object, delegatorSets, { isPrivate: secMeta.isPrivate }));
+
+          if (opCtx.operation === 'insert') {
+            const rows = (Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]) as Record<string, unknown>[];
+            let transferGrant: boolean | null = null;
+            for (const row of rows) {
+              if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+              if (row.owner_id == null || row.owner_id === '') {
+                // Auto-stamp the acting user (previously single-record only —
+                // batch rows were left NULL-owned and invisible to their creator).
+                if (userId) row.owner_id = userId;
+              } else if (userId == null || String(row.owner_id) !== String(userId)) {
+                transferGrant ??= hasTransferGrant();
+                if (!transferGrant) denyOwnerWrite('creating a record owned by another user');
+              }
+            }
+          } else if (!Array.isArray(opCtx.data)) {
+            const data = opCtx.data as Record<string, unknown>;
+            if ('owner_id' in data && data.owner_id !== undefined && !hasTransferGrant()) {
+              // Tolerate the single-id no-op echo; everything else is a
+              // transfer/disown and is denied.
+              const targetId = this.extractSingleId(opCtx);
+              let unchanged = false;
+              if (targetId != null && this.ql) {
+                try {
+                  const pre: any = await this.ql.findOne(opCtx.object, { where: { id: targetId }, context: { isSystem: true } });
+                  unchanged = !!pre && (
+                    pre.owner_id == null
+                      ? data.owner_id == null
+                      : data.owner_id != null && String(pre.owner_id) === String(data.owner_id)
+                  );
+                } catch {
+                  unchanged = false; // fail closed
+                }
+              }
+              if (!unchanged) denyOwnerWrite(`changing record ownership on ${opCtx.operation}`);
+            }
           }
         }
       }

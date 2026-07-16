@@ -599,6 +599,70 @@ describe('ObjectQL Engine', () => {
         });
     });
 
+    describe('Bulk write row-scoping — middleware-injected ast (#2982)', () => {
+        beforeEach(async () => {
+            engine.registerDriver(mockDriver, true);
+            await engine.init();
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: {} } as any);
+            (mockDriver as any).updateMany = vi.fn().mockResolvedValue(2);
+            (mockDriver as any).deleteMany = vi.fn().mockResolvedValue(2);
+        });
+
+        it('seeds opCtx.ast with the caller predicate and hands the middleware-composed where to updateMany', async () => {
+            // Regression: the multi branch used to REBUILD the AST from
+            // `options.where` after the middleware chain ran, so a row-scoping
+            // filter AND-composed onto opCtx.ast (RLS write policies, the
+            // sharing plugin's editable-rows filter) never bound the driver
+            // operation — a member's bulk write touched every matching row.
+            engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+                if (opCtx.operation === 'update' && opCtx.ast) {
+                    opCtx.ast.where = { $and: [opCtx.ast.where, { owner_id: 'u1' }] };
+                }
+                await next();
+            });
+
+            await engine.update(
+                'task',
+                { status: 'done' },
+                { where: { status: 'pending' }, multi: true } as any,
+            );
+
+            expect((mockDriver as any).updateMany).toHaveBeenCalledTimes(1);
+            const [, ast] = (mockDriver as any).updateMany.mock.calls[0];
+            expect(ast.where).toEqual({ $and: [{ status: 'pending' }, { owner_id: 'u1' }] });
+        });
+
+        it('seeds opCtx.ast for multi delete and hands the composed where to deleteMany', async () => {
+            engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+                if (opCtx.operation === 'delete' && opCtx.ast) {
+                    opCtx.ast.where = { $and: [opCtx.ast.where, { owner_id: 'u1' }] };
+                }
+                await next();
+            });
+
+            await engine.delete('task', { where: { status: 'stale' }, multi: true } as any);
+
+            expect((mockDriver as any).deleteMany).toHaveBeenCalledTimes(1);
+            const [, ast] = (mockDriver as any).deleteMany.mock.calls[0];
+            expect(ast.where).toEqual({ $and: [{ status: 'stale' }, { owner_id: 'u1' }] });
+        });
+
+        it('does not seed opCtx.ast for a single-id update (pre-image checks own that path)', async () => {
+            let seenAst: unknown = 'unset';
+            engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+                if (opCtx.operation === 'update') seenAst = opCtx.ast;
+                await next();
+            });
+            vi.mocked(mockDriver.update).mockResolvedValue({ id: 't1' } as any);
+
+            await engine.update('task', { status: 'done' }, { where: { id: 't1' } } as any);
+
+            expect(seenAst).toBeUndefined();
+            expect(mockDriver.update).toHaveBeenCalledTimes(1);
+            expect((mockDriver as any).updateMany).not.toHaveBeenCalled();
+        });
+    });
+
     describe('Expand Related Records', () => {
         beforeEach(async () => {
             engine.registerDriver(mockDriver, true);

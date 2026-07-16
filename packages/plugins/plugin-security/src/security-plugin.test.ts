@@ -180,6 +180,150 @@ describe('SecurityPlugin', () => {
     expect(opCtx.data.owner_id).toBe('u1');
   });
 
+  // -------------------------------------------------------------------------
+  // [#3004] `owner_id` anchor guard — the ownership anchor is system-managed
+  // for non-privileged writers: forging it on insert or transferring it on
+  // update requires the transfer grant (allowTransfer / modifyAllRecords).
+  // -------------------------------------------------------------------------
+  describe('owner_id anchor guard (#3004)', () => {
+    const memberSet: PermissionSet = {
+      name: 'member_default',
+      label: 'Member',
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    } as any;
+    const transferSet: PermissionSet = {
+      name: 'can_transfer',
+      label: 'Transfer',
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowTransfer: true } },
+    } as any;
+    const modifyAllSet: PermissionSet = {
+      name: 'org_admin_like',
+      label: 'Admin',
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, modifyAllRecords: true } },
+    } as any;
+
+    const boot = async (sets: PermissionSet[], findOneImpl?: (query: any) => any) => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: sets, findOneImpl });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      return harness;
+    };
+    const memberCtx = (extra: Record<string, unknown> = {}) =>
+      ({ userId: 'u1', tenantId: 'org-1', positions: [], permissions: [], ...extra });
+
+    it('insert forging another user as owner is denied for a plain member', async () => {
+      const harness = await boot([memberSet]);
+      const opCtx: any = {
+        object: 'task', operation: 'insert', data: { name: 'A', owner_id: 'victim' },
+        context: memberCtx(),
+      };
+      await expect(harness.run(opCtx)).rejects.toThrow(/owner_id.*system-managed/);
+    });
+
+    it('insert with owner_id = self passes without any transfer grant', async () => {
+      const harness = await boot([memberSet]);
+      const opCtx: any = {
+        object: 'task', operation: 'insert', data: { name: 'A', owner_id: 'u1' },
+        context: memberCtx(),
+      };
+      await harness.run(opCtx);
+      expect(opCtx.data.owner_id).toBe('u1');
+    });
+
+    it('insert forging another owner passes with allowTransfer', async () => {
+      const harness = await boot([memberSet, transferSet]);
+      const opCtx: any = {
+        object: 'task', operation: 'insert', data: { name: 'A', owner_id: 'colleague' },
+        context: memberCtx({ permissions: ['can_transfer'] }),
+      };
+      await harness.run(opCtx);
+      expect(opCtx.data.owner_id).toBe('colleague');
+    });
+
+    it('insert forging another owner passes with modifyAllRecords (implies transfer)', async () => {
+      const harness = await boot([memberSet, modifyAllSet]);
+      const opCtx: any = {
+        object: 'task', operation: 'insert', data: { name: 'A', owner_id: 'colleague' },
+        context: memberCtx({ permissions: ['org_admin_like'] }),
+      };
+      await harness.run(opCtx);
+      expect(opCtx.data.owner_id).toBe('colleague');
+    });
+
+    it('batch insert: empty owners are stamped per row, a forged row denies the batch', async () => {
+      const harness = await boot([memberSet]);
+      const stamped: any = {
+        object: 'task', operation: 'insert', data: [{ name: 'a' }, { name: 'b', owner_id: '' }],
+        context: memberCtx(),
+      };
+      await harness.run(stamped);
+      expect(stamped.data.map((r: any) => r.owner_id)).toEqual(['u1', 'u1']);
+
+      const forged: any = {
+        object: 'task', operation: 'insert', data: [{ name: 'a' }, { name: 'b', owner_id: 'victim' }],
+        context: memberCtx(),
+      };
+      await expect(harness.run(forged)).rejects.toThrow(/owner_id.*system-managed/);
+    });
+
+    it('update transferring ownership is denied for a plain member', async () => {
+      const harness = await boot([memberSet], () => ({ id: 't1', owner_id: 'u1' }));
+      const opCtx: any = {
+        object: 'task', operation: 'update', data: { id: 't1', owner_id: 'admin' },
+        context: memberCtx(),
+      };
+      await expect(harness.run(opCtx)).rejects.toThrow(/owner_id.*system-managed/);
+    });
+
+    it('update disowning (owner_id: null) is denied for a plain member', async () => {
+      const harness = await boot([memberSet], () => ({ id: 't1', owner_id: 'u1' }));
+      const opCtx: any = {
+        object: 'task', operation: 'update', data: { id: 't1', owner_id: null },
+        context: memberCtx(),
+      };
+      await expect(harness.run(opCtx)).rejects.toThrow(/owner_id.*system-managed/);
+    });
+
+    it('update echoing the unchanged owner back (form save) is tolerated', async () => {
+      const harness = await boot([memberSet], () => ({ id: 't1', owner_id: 'u1' }));
+      const opCtx: any = {
+        object: 'task', operation: 'update', data: { id: 't1', name: 'renamed', owner_id: 'u1' },
+        context: memberCtx(),
+      };
+      await harness.run(opCtx); // must not throw
+    });
+
+    it('update transferring ownership passes with allowTransfer', async () => {
+      const harness = await boot([memberSet, transferSet], () => ({ id: 't1', owner_id: 'u1' }));
+      const opCtx: any = {
+        object: 'task', operation: 'update', data: { id: 't1', owner_id: 'colleague' },
+        context: memberCtx({ permissions: ['can_transfer'] }),
+      };
+      await harness.run(opCtx);
+      expect(opCtx.data.owner_id).toBe('colleague');
+    });
+
+    it('bulk update carrying owner_id fails closed for a plain member (no pre-image to compare)', async () => {
+      const harness = await boot([memberSet]);
+      const opCtx: any = {
+        object: 'task', operation: 'update', data: { owner_id: 'u1' },
+        options: { where: { status: 'open' }, multi: true },
+        context: memberCtx(),
+      };
+      await expect(harness.run(opCtx)).rejects.toThrow(/owner_id.*system-managed/);
+    });
+
+    it('update without owner_id in the change-set is untouched by the guard', async () => {
+      const harness = await boot([memberSet]);
+      const opCtx: any = {
+        object: 'task', operation: 'update', data: { id: 't1', name: 'renamed' },
+        context: memberCtx(),
+      };
+      await harness.run(opCtx); // must not throw, no pre-image read needed
+    });
+  });
+
   it('without org-scoping plugin — strips tenant_isolation RLS so find applies no tenant where', async () => {
     const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
     const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
