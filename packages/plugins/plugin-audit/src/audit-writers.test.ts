@@ -439,3 +439,105 @@ describe('audit writers — enable.files server-side enforcement (#2727)', () =>
     await expect(fire('beforeInsert', attachmentInsert(undefined))).resolves.toBeUndefined();
   });
 });
+
+describe('audit writers — localized activity summaries (framework#3039)', () => {
+  // Real memory i18n (what the kernel registers as the 'i18n' fallback) loaded
+  // with this plugin's shipped bundle plus an app-contributed object label —
+  // exercises the actual key shapes (`messages.activityCreated`,
+  // `objects.{name}.label`) end to end.
+  async function makeI18n() {
+    const { createMemoryI18n } = await import('@objectstack/core');
+    const { AuditTranslations } = await import('./translations/index.js');
+    const i18n = createMemoryI18n();
+    for (const [locale, data] of Object.entries(AuditTranslations)) {
+      i18n.loadTranslations(locale, data as Record<string, any>);
+    }
+    i18n.loadTranslations('zh-CN', {
+      objects: { person_qualification: { label: '人员资质' } },
+    });
+    return i18n;
+  }
+
+  function setup(
+    locale: string | undefined,
+    i18n?: { t: Function },
+    objectDefs: Record<string, any> = {},
+    schemas: Record<string, string[] | Record<string, any>> = SINGLE_TENANT,
+  ) {
+    const { engine, fire, created } = makeEngine(schemas, objectDefs);
+    let localeCalls = 0;
+    installAuditWriters(engine as any, 'test.audit', {
+      getI18n: () => i18n as any,
+      getLocale: async () => {
+        localeCalls += 1;
+        return locale;
+      },
+    });
+    return { fire, created, localeCalls: () => localeCalls };
+  }
+
+  const insertCtx = (object = 'person_qualification') => ({
+    object,
+    input: { id: 'q-1' },
+    result: { id: 'q-1', name: 'OC-00001' },
+    session: { tenantId: 'org-1', userId: 'user-1' },
+  });
+
+  it('localizes verb + object label to the workspace locale (zh-CN)', async () => {
+    const { fire, created } = setup('zh-CN', await makeI18n());
+
+    await fire('afterInsert', insertCtx());
+    await fire('afterDelete', { ...insertCtx(), result: null, __previous: { id: 'q-1', name: 'OC-00001' } });
+
+    const summaries = created.filter((c) => c.object === 'sys_activity').map((c) => c.row.summary);
+    expect(summaries).toEqual(['创建了 人员资质 "OC-00001"', '删除了 人员资质 "OC-00001"']);
+  });
+
+  it('localizes the generic update fallback', async () => {
+    const { fire, created } = setup('zh-CN', await makeI18n());
+    await fire('afterUpdate', {
+      ...insertCtx(),
+      __previous: { id: 'q-1', name: 'OC-00001', status: 'draft' },
+      result: { id: 'q-1', name: 'OC-00001', status: 'active' },
+    });
+    const activity = created.find((c) => c.object === 'sys_activity');
+    expect(activity!.row.summary).toBe('更新了 人员资质 "OC-00001"');
+  });
+
+  it('falls back to the object def label, then English, when a translation misses', async () => {
+    // Locale resolves but the object has no zh-CN label entry → verb is
+    // localized, label falls back to the authored def label.
+    const { fire, created } = setup(
+      'zh-CN',
+      await makeI18n(),
+      { crm_lead: { label: 'Lead' } },
+      { ...SINGLE_TENANT, crm_lead: ['id', 'name'] },
+    );
+    await fire('afterInsert', { ...insertCtx('crm_lead'), result: { id: 'q-1', name: 'Acme' } });
+    expect(created.find((c) => c.object === 'sys_activity')!.row.summary).toBe('创建了 Lead "Acme"');
+  });
+
+  it('keeps English summaries when no i18n service is resolvable', async () => {
+    const { fire, created } = setup('zh-CN', undefined);
+    await fire('afterInsert', insertCtx());
+    expect(created.find((c) => c.object === 'sys_activity')!.row.summary).toBe(
+      'Created person_qualification "OC-00001"',
+    );
+  });
+
+  it('keeps English summaries without a locale resolver (status quo)', async () => {
+    const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+    installAuditWriters(engine as any, 'test.audit', { getI18n: () => undefined });
+    await fire('afterInsert', insertCtx());
+    expect(created.find((c) => c.object === 'sys_activity')!.row.summary).toBe(
+      'Created person_qualification "OC-00001"',
+    );
+  });
+
+  it('memoizes the locale lookup per tenant/user scope (hot-path guard)', async () => {
+    const { fire, localeCalls } = setup('zh-CN', await makeI18n());
+    await fire('afterInsert', insertCtx());
+    await fire('afterInsert', { ...insertCtx(), result: { id: 'q-2', name: 'OC-00002' } });
+    expect(localeCalls()).toBe(1);
+  });
+});

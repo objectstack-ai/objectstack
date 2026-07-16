@@ -15,10 +15,11 @@ import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { enMessages, zhCNMessages, jaJPMessages, esESMessages } from './messages.js';
 
 export const AuditTranslations: TranslationBundle = {
-  en: { objects: enObjects },
-  'zh-CN': { objects: zhCNObjects },
-  'ja-JP': { objects: jaJPObjects },
-  'es-ES': { objects: esESObjects },
+  en: { objects: enObjects, messages: enMessages },
+  'zh-CN': { objects: zhCNObjects, messages: zhCNMessages },
+  'ja-JP': { objects: jaJPObjects, messages: jaJPMessages },
+  'es-ES': { objects: esESObjects, messages: esESMessages },
 };
