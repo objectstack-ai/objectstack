@@ -115,11 +115,40 @@ jobs:
       # while passing everywhere else — first seen on main @4f8c2d1,
       # reproduced twice on #3037. Matching concurrency to the core count
       # bounds peak memory; the job is CPU-bound anyway.
+      # ── TEMPORARY DIAGNOSTICS for #3071 — remove before merge ────────────
+      # plugin-audit#test dies on the hosted runner with zero captured output
+      # (3× deterministic; passes locally under Node 20/22 with the exact CI
+      # command). Run it ISOLATED first — fresh machine, no turbo grouping,
+      # verbose reporter — so its real output cannot be mangled by the GH log
+      # pipeline under burst. SIGQUIT before the timeout makes Node dump all
+      # thread stacks if it hangs.
+      - name: DIAG 3071 — plugin-audit isolated, verbose (temporary)
+        if: github.event_name == 'pull_request'
+        run: |
+          node --version
+          free -h || true
+          echo "── isolated vitest run ──"
+          timeout -s QUIT 240 pnpm --filter @objectstack/plugin-audit exec vitest run --reporter=verbose --no-file-parallelism; echo "exit=$?"
+        continue-on-error: true
+
       - name: Run affected tests (PR)
         if: github.event_name == 'pull_request'
         env:
           TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
         run: pnpm turbo run test --affected --concurrency=4
+
+      # ── TEMPORARY DIAGNOSTICS for #3071 — remove before merge ────────────
+      # If the turbo step above still kills plugin-audit silently, dmesg shows
+      # whether the kernel OOM-killer fired, and the second isolated re-run
+      # distinguishes "machine state after the full graph" from "fresh".
+      - name: DIAG 3071 — post-turbo dmesg + re-run (temporary)
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          echo "── kernel OOM traces ──"
+          sudo dmesg | grep -iE "oom|killed process|out of memory" | tail -20 || echo "(no OOM traces)"
+          echo "── plugin-audit re-run on post-graph machine ──"
+          timeout -s QUIT 240 pnpm --filter @objectstack/plugin-audit exec vitest run --reporter=verbose --no-file-parallelism; echo "exit=$?"
+        continue-on-error: true
 
       # Push to main: full run, but exclude spec's plain test task — the
       # coverage step below executes the exact same 250-file spec suite once,
