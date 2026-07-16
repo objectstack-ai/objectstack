@@ -41,6 +41,48 @@ export const LeaveRequest = ObjectSchema.create({
 > additionally makes an unset OWD a *build error* (`security-owd-unset` in
 > `os compile`), so the baseline is always an authored decision.
 
+### How `viewAllRecords` / `modifyAllRecords` interact with the OWD
+
+The View All / Modify All super-user bits widen the **sharing axis** to
+org-wide (depth `org`): under `private` they lift the read *and* write owner
+filter, under `public_read` the write one. Under **`public_read_write`** the
+sharing baseline is *already* org-wide read + write, so on this layer the
+bits have nothing left to widen — "granting `viewAllRecords` makes no visible
+difference" is the expected outcome of that OWD choice, not a failed grant.
+If some rows are confidential, the object's OWD should be `private` (or
+`public_read`), with the super-user bits (or shares) doing the widening.
+
+Two things the bits do **not** override, regardless of the OWD:
+
+- **Baseline row-level security.** RLS is a separate, *narrowing* layer. The
+  platform baseline `member_default` ships owner-scoped `update`/`delete`
+  policies (`created_by == current_user.id`, applicability domain
+  `org_member`), so rank-and-file members stay owner-scoped on writes even
+  under `public_read_write`. The super-user bits short-circuit RLS **only
+  where the object's access posture permits it** — `access: { default:
+  'private' }`, `tenancy.enabled: false` (platform-global), or better-auth
+  managed objects (ADR-0066 D2 ①). On an ordinary tenant business object,
+  `modifyAllRecords` does *not* lift those policies
+  (`plugin-security/src/security-plugin.ts` `computeLayeredRlsFilter`).
+  Org admins (`org_admin` / `org_owner`) are outside the `org_member`
+  applicability domain and are not narrowed by the baseline.
+- **The Layer 0 tenant wall** (ADR-0095 D1) — always ANDs on top.
+
+None of this is an enterprise/open-core split: both bits are enforced by the
+open-source `plugin-security`. The only enterprise-resolved axis is the
+**hierarchy depth scopes** (`own_and_reports` / `unit` / `unit_and_below`),
+which fail closed to owner-only without the `@objectstack/security-enterprise`
+resolver (ADR-0057).
+
+**Recipe — "owners edit their own records, supervisors edit all":** bind an
+OR-widening RLS policy to a supervisor position in a permission set, e.g.
+`{ object: '*', operation: 'update', using: 'organization_id ==
+current_user.organization_id', positions: ['supervisor'] }` (policies
+OR-combine within an object, so members keep the owner gate while
+supervisors widen to the org) — or model the object with `access: {
+default: 'private' }` + explicit grants, where `modifyAllRecords` bypasses
+RLS by design.
+
 ## The external dial — `externalSharingModel` (ADR-0090 D11)
 
 Portal/partner scenarios get a second, independent dial with the same enum:

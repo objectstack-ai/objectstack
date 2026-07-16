@@ -31,6 +31,17 @@ ObjectStack's `ObjectPermission` schema defines these boolean flags for object a
 
 <Callout type="tip">
 **Super-user bypass:** When `modifyAllRecords` is set it satisfies write checks (`allowEdit`/`allowDelete`, and the lifecycle class `allowTransfer`/`allowRestore`/`allowPurge`) on any record; `viewAllRecords` (or `modifyAllRecords`) satisfies `allowRead` on any record — both bypass ownership and sharing. See `packages/plugins/plugin-security/src/permission-evaluator.ts`.
+
+The bypass is **posture-gated for row-level security** (ADR-0066 D2 ①): RLS
+policies are short-circuited only on objects whose posture permits it —
+`access: { default: 'private' }`, `tenancy.enabled: false`
+(platform-global), or better-auth-managed. On an ordinary tenant business
+object, authored and baseline RLS still applies (e.g. `member_default`'s
+owner-scoped write policies keep `org_member` holders owner-scoped on
+`update`/`delete` even when another set grants `modifyAllRecords`), and the
+Layer 0 tenant wall always ANDs on top. See
+[Sharing & OWD](/docs/permissions/sharing-rules#how-viewallrecords--modifyallrecords-interact-with-the-owd)
+and `plugin-security/src/security-plugin.ts` (`computeLayeredRlsFilter`).
 </Callout>
 
 <Callout type="warn">
