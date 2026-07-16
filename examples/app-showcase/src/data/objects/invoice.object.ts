@@ -46,6 +46,20 @@ export const Invoice = ObjectSchema.create({
   icon: 'receipt',
   description: 'A customer invoice entered together with its line items.',
 
+  // Per-record row-action gating (objectui#2614) — a PAID invoice is frozen:
+  // its fields already lock via `readonlyWhen: record.status == 'paid'` below,
+  // and here the built-in row buttons follow the same truth instead of
+  // advertising an edit the record will refuse. The two flags demonstrate the
+  // two semantics: Edit stays visible but DISABLED on paid rows (the user sees
+  // the affordance exists and is off), while Delete is HIDDEN outright (a paid
+  // invoice is an accounting record; offering delete would be noise). Draft
+  // and sent invoices keep the full untouched menu — the predicates evaluate
+  // per row against `record.*` on the same CEL engine as everything else.
+  userActions: {
+    edit: { disabledWhen: P`record.status == 'paid'` },
+    delete: { visibleWhen: P`record.status != 'paid'` },
+  },
+
   fields: {
     name: Field.text({ label: 'Invoice Number', required: true, searchable: true, maxLength: 60 }),
     // Forward record-picker config (spec lookup* props). The renderer
