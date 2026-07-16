@@ -721,6 +721,20 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 }
             });
 
+            // Edit a package's manifest (name / description / version). The
+            // handler for this has existed in handlePackages all along, but the
+            // route was never registered, so PATCH /packages/:id 405'd and the
+            // Studio "edit package" form silently failed. `/:id` is a single
+            // segment, so this does not shadow the `/:id/enable|disable` routes.
+            server.patch(`${prefix}/packages/:id`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.handlePackages(`/${req.params.id}`, 'PATCH', req.body, req.query, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+
             server.patch(`${prefix}/packages/:id/enable`, async (req: any, res: any) => {
                 try {
                     const result = await dispatcher.handlePackages(`/${req.params.id}/enable`, 'PATCH', {}, {}, { request: req });

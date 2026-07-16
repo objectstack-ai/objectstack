@@ -73,6 +73,22 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
     expect(routes).toContain('GET /api/v1/ready');
   });
 
+  // Regression: PATCH /packages/:id (edit a package's manifest — name /
+  // description / version) had a handlePackages() branch all along but NO
+  // server.patch() registration, so it 405'd over HTTP and the Studio "edit
+  // package" form silently failed. Same class of bug as /ready above. The
+  // sibling /:id/enable|disable PATCH routes were mounted; the bare /:id was not.
+  it('mounts PATCH /packages/:id so the edit-manifest form reaches dispatch()', async () => {
+    const { server, routes } = makeFakeServer();
+    const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+    await plugin.start?.(makeCtx(server));
+
+    expect(routes).toContain('PATCH /api/v1/packages/:id');
+    // Sanity: the sibling routes that WERE always mounted.
+    expect(routes).toContain('PATCH /api/v1/packages/:id/enable');
+    expect(routes).toContain('POST /api/v1/packages');
+  });
+
   it('also mounts a known existing route (sanity that start() ran)', async () => {
     const { server, routes } = makeFakeServer();
     const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
