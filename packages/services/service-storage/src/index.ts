@@ -12,7 +12,7 @@ export type { FileRecord, UploadSessionRecord } from './metadata-store.js';
 export { registerStorageRoutes } from './storage-routes.js';
 export type { StorageRoutesOptions, FileReadVerdict } from './storage-routes.js';
 export { SystemFile, SystemUploadSession } from './objects/index.js';
-export { installAttachmentLifecycleHooks, createSysFileReapGuard } from './attachment-lifecycle.js';
+export { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard } from './attachment-lifecycle.js';
 export type { AttachmentLifecycleEngine, AttachmentLifecycleLogger } from './attachment-lifecycle.js';
 export { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 export type { AttachmentSharingLike } from './attachment-access-hooks.js';

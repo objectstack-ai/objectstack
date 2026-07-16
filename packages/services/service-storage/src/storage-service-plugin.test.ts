@@ -229,9 +229,9 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
       'beforeDelete',
       'beforeInsert',
     ]);
-    expect(guards).toHaveLength(1);
-    expect(guards[0].object).toBe('sys_file');
-    expect(typeof guards[0].guard).toBe('function');
+    // Two reap guards: sys_file (#2755) + sys_upload_session multipart-abort (#2970).
+    expect(guards.map((g) => g.object).sort()).toEqual(['sys_file', 'sys_upload_session']);
+    expect(guards.every((g) => typeof g.guard === 'function')).toBe(true);
     // Read-visibility middleware registered on sys_attachment (#2970 item 1).
     expect(middlewares).toEqual([{ object: 'sys_attachment' }]);
   });

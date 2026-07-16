@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   installAttachmentLifecycleHooks,
   createSysFileReapGuard,
+  createUploadSessionReapGuard,
   type AttachmentLifecycleEngine,
 } from './attachment-lifecycle.js';
 
@@ -245,5 +246,95 @@ describe('createSysFileReapGuard', () => {
     ]);
 
     expect(confirmed).toEqual([]);
+  });
+});
+
+describe('createUploadSessionReapGuard', () => {
+  /** Swappable-style storage fake: `getInner()` exposes an S3-like inner with
+   * `setUploadKey`; `abortChunkedUpload` is forwarded. */
+  const s3Storage = (abortImpl?: () => Promise<void>) => {
+    const inner = {
+      setUploadKey: vi.fn((_id: string, _key: string) => {}),
+    };
+    return {
+      getInner: () => inner,
+      abortChunkedUpload: vi.fn(abortImpl ?? (async () => {})),
+      _inner: inner,
+    } as any;
+  };
+
+  it('aborts the backend multipart (re-seeding the key) then reaps an abandoned session', async () => {
+    const s = s3Storage();
+    const guard = createUploadSessionReapGuard(() => s, silentLogger());
+
+    const confirmed = await guard('sys_upload_session', [
+      { id: 'u1', backend_upload_id: 'mp-1', key: 'attachments/u1.bin', status: 'in_progress' },
+    ]);
+
+    expect(s._inner.setUploadKey).toHaveBeenCalledWith('mp-1', 'attachments/u1.bin');
+    expect(s.abortChunkedUpload).toHaveBeenCalledWith('mp-1');
+    expect(confirmed).toEqual(['u1']);
+  });
+
+  it('does NOT abort a completed session (its multipart is already an object) — just reaps the row', async () => {
+    const s = s3Storage();
+    const guard = createUploadSessionReapGuard(() => s, silentLogger());
+
+    const confirmed = await guard('sys_upload_session', [
+      { id: 'u2', backend_upload_id: 'mp-2', key: 'attachments/u2.bin', status: 'completed' },
+    ]);
+
+    expect(s.abortChunkedUpload).not.toHaveBeenCalled();
+    expect(confirmed).toEqual(['u2']);
+  });
+
+  it('reaps a session with no backend_upload_id without calling abort', async () => {
+    const s = s3Storage();
+    const guard = createUploadSessionReapGuard(() => s, silentLogger());
+
+    const confirmed = await guard('sys_upload_session', [
+      { id: 'u3', key: 'attachments/u3.bin', status: 'expired' },
+    ]);
+
+    expect(s.abortChunkedUpload).not.toHaveBeenCalled();
+    expect(confirmed).toEqual(['u3']);
+  });
+
+  it('VETOES on abort failure so backend_upload_id survives for the retry', async () => {
+    const s = s3Storage(async () => {
+      throw new Error('S3 abort transient failure');
+    });
+    const logger = silentLogger();
+    const guard = createUploadSessionReapGuard(() => s, logger);
+
+    const confirmed = await guard('sys_upload_session', [
+      { id: 'u4', backend_upload_id: 'mp-4', key: 'attachments/u4.bin', status: 'failed' },
+    ]);
+
+    expect(confirmed).toEqual([]); // kept
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('works with a local-style adapter (no setUploadKey / getInner) — aborts by id', async () => {
+    const local = { abortChunkedUpload: vi.fn(async () => {}) } as any;
+    const guard = createUploadSessionReapGuard(() => local, silentLogger());
+
+    const confirmed = await guard('sys_upload_session', [
+      { id: 'u5', backend_upload_id: 'local-5', key: 'attachments/u5.bin', status: 'expired' },
+    ]);
+
+    expect(local.abortChunkedUpload).toHaveBeenCalledWith('local-5');
+    expect(confirmed).toEqual(['u5']);
+  });
+
+  it('reaps the row when the adapter cannot abort at all', async () => {
+    const noAbort = {} as any;
+    const guard = createUploadSessionReapGuard(() => noAbort, silentLogger());
+
+    const confirmed = await guard('sys_upload_session', [
+      { id: 'u6', backend_upload_id: 'mp-6', key: 'k', status: 'in_progress' },
+    ]);
+
+    expect(confirmed).toEqual(['u6']);
   });
 });

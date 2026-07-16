@@ -476,18 +476,33 @@ describe('attachments permission matrix (#2755)', () => {
       expect(await ql.findOne('sys_file', { where: { id: data.fileId }, context: SYS })).toBeNull();
     });
 
-    it('(item 4) abandoned sys_upload_session rows are reaped past their expiry window', async () => {
-      // Initiate a chunked upload (creates a sys_upload_session) but never
-      // complete it.
+    it('(item 4 + multipart-abort guard) an abandoned chunked upload is reaped AND its uploaded parts are aborted', async () => {
+      // Initiate a chunked upload (creates a sys_upload_session) and upload one
+      // chunk — but never complete it. The chunk lands as a part on disk.
       const init = await stack.api('/storage/upload/chunked', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${memberATok}` },
         body: JSON.stringify({ filename: 'big.bin', mimeType: 'application/octet-stream', totalSize: 10_485_760 }),
       });
       expect(init.status).toBe(200);
-      const { uploadId } = ((await init.json()) as any).data;
+      const { uploadId, resumeToken } = ((await init.json()) as any).data;
       const session = await ql.findOne('sys_upload_session', { where: { id: uploadId }, context: SYS });
       expect(session?.id, 'session row created').toBeTruthy();
+
+      const chunkRes = await stack.api(`/storage/upload/chunked/${uploadId}/chunk/0`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${memberATok}`,
+          'Content-Type': 'application/octet-stream',
+          'x-resume-token': resumeToken,
+        },
+        body: Buffer.from('a partial chunk of bytes'),
+      });
+      expect(chunkRes.status, await chunkRes.clone().text()).toBeLessThan(300);
+
+      // The local adapter stores parts under `<rootDir>/.parts/<uploadId>/`.
+      const partsDir = join(rootDir, '.parts', String(uploadId));
+      await expect(fs.access(partsDir), 'part exists before the sweep').resolves.toBeUndefined();
 
       // Backdate expires_at past the 1d TTL grace.
       await ql.update(
@@ -498,7 +513,9 @@ describe('attachments permission matrix (#2755)', () => {
 
       const report = await lifecycle.sweep();
       expect(report.errors, JSON.stringify(report.errors)).toEqual([]);
+      // Row gone AND the backend multipart parts aborted (dir removed).
       expect(await ql.findOne('sys_upload_session', { where: { id: uploadId }, context: SYS })).toBeNull();
+      await expect(fs.access(partsDir), 'parts aborted by the reap guard').rejects.toThrow();
     });
   });
 });

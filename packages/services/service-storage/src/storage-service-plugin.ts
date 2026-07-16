@@ -16,7 +16,7 @@ import { StorageMetadataStore } from './metadata-store.js';
 import type { FileRecord } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
 import type { FileReadVerdict } from './storage-routes.js';
-import { installAttachmentLifecycleHooks, createSysFileReapGuard } from './attachment-lifecycle.js';
+import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard } from './attachment-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
 // ADR-0052 §3 ownership: `sys_attachment` (a file↔record link) belongs with the
@@ -228,7 +228,13 @@ export class StorageServicePlugin implements Plugin {
               'sys_file',
               createSysFileReapGuard(engine as any, () => this.storage, ctx.logger),
             );
-            ctx.logger.info('StorageServicePlugin: sys_file reap guard registered with the lifecycle service');
+            // Abort the backend multipart upload before an abandoned/terminal
+            // sys_upload_session row is reaped, so its parts don't leak (#2970).
+            lifecycle.registerReapGuard(
+              'sys_upload_session',
+              createUploadSessionReapGuard(() => this.storage, ctx.logger),
+            );
+            ctx.logger.info('StorageServicePlugin: sys_file + sys_upload_session reap guards registered with the lifecycle service');
           }
         } catch {
           // lifecycle service absent (bare kernel) — the sys_file lifecycle

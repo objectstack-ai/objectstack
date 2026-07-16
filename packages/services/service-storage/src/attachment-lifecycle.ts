@@ -259,3 +259,67 @@ export function createSysFileReapGuard(
     return confirmed;
   };
 }
+
+/**
+ * The `sys_upload_session` reap guard (#2970 sub-follow-up). The
+ * LifecycleService reaps abandoned/terminal chunked-upload session ROWS by the
+ * declared TTL (`expires_at`) / retention (terminal statuses); this guard
+ * aborts the underlying BACKEND multipart upload before the row is deleted, so
+ * a session's already-uploaded parts don't leak. On S3 an initiated-but-not-
+ * completed multipart keeps its parts billable and invisible to normal listing
+ * until an explicit AbortMultipartUpload — reaping only the row would strand
+ * them, with `backend_upload_id` (the sole pointer) gone.
+ *
+ *  - `completed`: the multipart was already finalized into a real object —
+ *    nothing to abort (an abort would `NoSuchUpload`-error and wedge the reap).
+ *    Confirm the row.
+ *  - no `backend_upload_id`, or an adapter without `abortChunkedUpload`:
+ *    nothing to abort. Confirm.
+ *  - otherwise (in_progress / failed / expired with a backend upload): abort
+ *    the backend multipart, re-seeding the S3 `uploadId → key` map from the row
+ *    first (a cold sweep lacks the live in-process map; a no-op for adapters
+ *    that don't track keys, e.g. local). Confirm on success; VETO on failure
+ *    so the row — the only pointer to the leaked multipart — is retried.
+ */
+export function createUploadSessionReapGuard(
+  getStorage: () => IStorageService | null | undefined,
+  logger: AttachmentLifecycleLogger,
+): (object: string, rows: Array<Record<string, unknown>>) => Promise<Array<string | number>> {
+  return async (_object, rows) => {
+    const confirmed: Array<string | number> = [];
+    const storage = getStorage();
+    for (const row of rows) {
+      const id = row?.id as string | number | undefined;
+      if (id === undefined || id === null) continue;
+
+      const backendId = typeof row.backend_upload_id === 'string' ? row.backend_upload_id : '';
+      // Nothing to abort → just reap the row: no backend multipart, an already
+      // -completed upload (its parts became an object), or an adapter that
+      // can't abort.
+      if (!backendId || row.status === 'completed' || !storage || typeof storage.abortChunkedUpload !== 'function') {
+        confirmed.push(id);
+        continue;
+      }
+
+      try {
+        // A cold sweep runs long after the live session, so the S3 adapter's
+        // in-process `uploadId → key` map (populated by `setUploadKey` during
+        // upload) is empty — re-seed it from the row so the abort can resolve
+        // the S3 key. `setUploadKey` is S3-specific and not forwarded by the
+        // swappable proxy, so reach the inner adapter; a no-op for `local`.
+        const inner: any = typeof (storage as any).getInner === 'function' ? (storage as any).getInner() : storage;
+        if (typeof row.key === 'string' && row.key && typeof inner?.setUploadKey === 'function') {
+          inner.setUploadKey(backendId, row.key);
+        }
+        await storage.abortChunkedUpload(backendId);
+        confirmed.push(id);
+      } catch (err) {
+        logger.warn(
+          `[storage] reap guard: multipart abort failed for sys_upload_session ${id} (${(err as Error)?.message ?? err}); retrying next sweep`,
+        );
+        // veto — keep the row so `backend_upload_id` survives for the retry.
+      }
+    }
+    return confirmed;
+  };
+}
