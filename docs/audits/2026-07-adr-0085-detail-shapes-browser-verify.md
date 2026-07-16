@@ -15,7 +15,7 @@ objectui#2546 deleted the non-schema-driven `DetailView` monolith branch, so
 `RecordDetailView` now has exactly **one** path: an authored
 `PageSchema(pageType='record')` when assigned, else `buildDefaultPageSchema()`
 synthesis — both rendered through `<SchemaRenderer>`. Unit + DOM suites and the
-served-metadata proof (`packages/dogfood/test/semantic-roles.dogfood.test.ts`)
+served-metadata proof (`packages/qa/dogfood/test/semantic-roles.dogfood.test.ts`)
 cover parse and serialization, but neither renders a page in a browser against a
 live backend. This pass closes that gap for the four shapes the PR called out.
 

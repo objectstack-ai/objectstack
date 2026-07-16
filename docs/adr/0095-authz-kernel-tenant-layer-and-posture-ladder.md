@@ -230,7 +230,7 @@ The chain is strictly serial — `D1 → D2 → D3` (#2920's B1 → B2 → B4) �
 each step lands only behind the snapshot gate:
 
 0. **Gate first.** The existing conformance matrix
-   (`packages/dogfood/test/authz-conformance.matrix.ts`) is integration-layer;
+   (`packages/qa/dogfood/test/authz-conformance.matrix.ts`) is integration-layer;
    before D1 begins, an equivalent `role × object × expected-visible-rows`
    snapshot must run at the **unit layer** (inside `plugin-security`'s test
    suite) so the loop is minutes, not a dogfood boot.
@@ -315,7 +315,7 @@ each step lands only behind the snapshot gate:
   (`tenant_isolation` wildcard policy),
   `packages/core/src/security/resolve-authz-context.ts`,
   `packages/plugins/plugin-security/src/permission-evaluator.ts`,
-  `packages/dogfood/test/authz-conformance.matrix.ts`.
+  `packages/qa/dogfood/test/authz-conformance.matrix.ts`.
 - ADR-0002 (physical isolation), ADR-0066 (precedence rule this ADR makes
   true; superuser bypass gate), ADR-0073 (claim scoped by this ADR),
   ADR-0093 (`tenancy` service consumed by Layer 0).

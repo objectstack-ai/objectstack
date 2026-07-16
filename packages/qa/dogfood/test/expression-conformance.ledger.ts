@@ -44,7 +44,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     dialect: 'cel', mode: 'compile', state: 'enforced', failPolicy: 'fail-closed',
     enforcement: 'plugin-security/rls-compiler.ts → @objectstack/formula compileCelToFilter (legacy SQL bridged); AND-injected by security-plugin computeRlsFilter + service-analytics read-scope-sql',
     covers: ['security/rls.zod.ts:using'],
-    proof: 'packages/dogfood/test/rls-fixture.dogfood.test.ts',
+    proof: 'packages/qa/dogfood/test/rls-fixture.dogfood.test.ts',
   },
   {
     id: 'rls-check',

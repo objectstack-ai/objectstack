@@ -64,7 +64,7 @@
     "lifecycle": {
       "status": "live",
       "evidence": "packages/objectql/src/lifecycle/lifecycle-service.ts",
-      "proof": "packages/dogfood/test/storage-growth.dogfood.test.ts#adr0057-lifecycle-bounded-growth",
+      "proof": "packages/qa/dogfood/test/storage-growth.dogfood.test.ts#adr0057-lifecycle-bounded-growth",
       "note": "ADR-0057 data lifecycle contract. The platform LifecycleService (registered by ObjectQLPlugin, default-on) reaps rows past retention.maxAge / ttl.expireAfter under a system context, bounds rotation-declared telemetry by shards×unit, never hot-deletes archive-declared audit ledgers unarchived, and reclaims driver space (SQLite incremental_vacuum) after each sweep. Non-record classes without a bounding policy are rejected at parse time (LifecycleSchema superRefine)."
     },
     "external": {
@@ -119,7 +119,7 @@
     "sharingModel": {
       "status": "live",
       "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:54",
-      "proof": "packages/dogfood/test/controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent",
+      "proof": "packages/qa/dogfood/test/controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent",
       "note": "ADR-0055 high-risk class (sharing): the `controlled_by_parent` value derives a detail object's access from its master — the security layer injects `masterFK IN (accessible master ids)` on reads and requires master edit-access on by-id writes. The proof asserts a member who cannot read the master can neither read nor by-id-write the detail, and is not over-blocked on a master they own."
     },
     "publicSharing": {

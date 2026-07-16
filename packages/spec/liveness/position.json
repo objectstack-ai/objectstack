@@ -18,7 +18,7 @@
     "delegatable": {
       "status": "live",
       "evidence": "packages/plugins/plugin-security/src/delegated-admin-gate.ts:positionIsDelegatable",
-      "proof": "packages/dogfood/test/delegation-of-duty.dogfood.test.ts#delegation-of-duty",
+      "proof": "packages/qa/dogfood/test/delegation-of-duty.dogfood.test.ts#delegation-of-duty",
       "note": "ADR-0091 D3: gates the self-service delegation branch — a non-admin may delegate this position only when delegatable=true, time-boxed and reasoned (enforced fail-closed in the D12 gate). ADR-0054 high-risk class (delegation): the proof drives a gated delegation write over HTTP and asserts the delegate's grant resolves in-window and dies at valid_until."
     }
   }

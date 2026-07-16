@@ -87,7 +87,7 @@ export default [
   // backward-compat fixture (#2089) and are intentional.
   {
     files: ['examples/**/*.{ts,tsx,mts,cts}', 'packages/apps/**/*.{ts,tsx,mts,cts}'],
-    ignores: ['**/node_modules/**', '**/dist/**', 'packages/downstream-contract/**'],
+    ignores: ['**/node_modules/**', '**/dist/**', 'packages/qa/downstream-contract/**'],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },

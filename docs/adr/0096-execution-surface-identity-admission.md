@@ -271,4 +271,4 @@ Everything else — the D3 signature migration, strict-mode-ON-in-CI per package
 - framework#2980 / #2981 / #2982 — the confirmed-exploitable instances the Evidence sweep surfaced (reports IDOR + scheduled-report RLS bypass; knowledge/RAG retrieval fall-open; bulk-write OWD gap) — fixed independently; this ADR's motivating evidence
 - `packages/plugins/plugin-security/src/security-plugin.ts` — the empty-principal seam (`:626` middleware, `:1689` getReadFilter) (D5's target)
 - `packages/runtime/src/http-dispatcher.ts` — `buildActionEngineFacade` (both facades), `invokeBusinessAction`
-- `packages/dogfood/test/authz-conformance.matrix.ts` — the ADR-0056 D10 matrix D4 extends
+- `packages/qa/dogfood/test/authz-conformance.matrix.ts` — the ADR-0056 D10 matrix D4 extends

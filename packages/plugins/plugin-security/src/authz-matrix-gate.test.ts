@@ -6,7 +6,7 @@
 // expected-visible-rows` snapshot: every cell must match across the Layer 0
 // extraction EXCEPT the four deltas the architect accepted (all W1-class,
 // all toward stronger/correcter isolation — see below). The existing
-// conformance matrix (`packages/dogfood/test/authz-conformance.matrix.ts`)
+// conformance matrix (`packages/qa/dogfood/test/authz-conformance.matrix.ts`)
 // proves this end-to-end through a real app boot (minutes). This file is the
 // UNIT-LAYER equivalent so the loop is seconds: it drives the real
 // SecurityPlugin CRUD middleware with the real seeded permission sets and

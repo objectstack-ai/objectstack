@@ -202,6 +202,6 @@ indirection.
 ## References
 
 ADRs 0020, 0049, 0054, 0056 (D10), 0058 (D7). Issue #1887. Existing instances:
-`packages/dogfood/test/authz-conformance.{matrix,test}.ts`,
-`packages/dogfood/test/expression-conformance.{ledger,test}.ts`. Helper home:
+`packages/qa/dogfood/test/authz-conformance.{matrix,test}.ts`,
+`packages/qa/dogfood/test/expression-conformance.{ledger,test}.ts`. Helper home:
 `packages/verify/`. Target surface: `packages/spec/src/data/validation.zod.ts`.

@@ -190,7 +190,7 @@ function classify(type: string, path: string, status: string, led: any, cat: any
 // must be registered in proof-registry.mts. An orphan tag means a proof was
 // written but never wired into the high-risk-class list — flag it (warning).
 function scanOrphanProofs() {
-  const proofDir = join(repoRoot, 'packages/dogfood/test');
+  const proofDir = join(repoRoot, 'packages/qa/dogfood/test');
   if (!existsSync(proofDir)) return; // spec may be consumed standalone (published)
   const walk = (dir: string): string[] => {
     const out: string[] = [];

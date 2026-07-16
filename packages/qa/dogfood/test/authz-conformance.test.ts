@@ -20,8 +20,8 @@ import { checkLedger } from '@objectstack/verify';
 import { AUTHZ_CONFORMANCE, type AuthzPrimitive } from './authz-conformance.matrix.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// packages/dogfood/test → repo root.
-const REPO_ROOT = join(HERE, '../../..');
+// packages/qa/dogfood/test → repo root.
+const REPO_ROOT = join(HERE, '../../../..');
 
 // ── #2567 ratchet — static enumeration of anonymous-deny HTTP entry points ──
 //

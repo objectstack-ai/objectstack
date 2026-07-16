@@ -16,7 +16,7 @@ import { checkLedger } from '@objectstack/verify';
 import { VALIDATION_SURFACE } from './validation-conformance.ledger.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(HERE, '../../..');
+const REPO_ROOT = join(HERE, '../../../..');
 const VALIDATION_ZOD = join(REPO_ROOT, 'packages/spec/src/data/validation.zod.ts');
 
 /** Re-discover every `validations` union rule type from its discriminator. */

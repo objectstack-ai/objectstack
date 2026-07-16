@@ -13,7 +13,7 @@
     "type": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts",
-      "proof": "packages/dogfood/test/field-zoo-roundtrip.dogfood.test.ts#field-type-roundtrip",
+      "proof": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts#field-type-roundtrip",
       "note": "ADR-0054 high-risk class (field types): the proof writes one record of (almost) every field type over the real HTTP API and asserts each reads back with type fidelity (rating/slider→number, toggle→boolean) — guarding the persistence + read-coercion integration that #2025 fixed."
     },
     "description": {
@@ -88,7 +88,7 @@
     "readonly": {
       "status": "live",
       "evidence": "packages/objectql/src/validation/rule-validator.ts",
-      "proof": "packages/dogfood/test/showcase-static-readonly.dogfood.test.ts#readonly-static-write",
+      "proof": "packages/qa/dogfood/test/showcase-static-readonly.dogfood.test.ts#readonly-static-write",
       "note": "renderer + server write path: stripReadonlyFields drops non-system UPDATE writes to the field (#2948/#3003 — was renderer-only, i.e. false compliance for approval/status columns); INSERT exempt, symmetric with readonlyWhen."
     },
     "hidden": {

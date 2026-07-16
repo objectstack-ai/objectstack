@@ -56,7 +56,7 @@
         "dateGranularity": {
           "status": "live",
           "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:146",
-          "proof": "packages/dogfood/test/analytics-timezone.dogfood.test.ts#analytics-tz-bucketing",
+          "proof": "packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts#analytics-tz-bucketing",
           "note": "ADR-0054 high-risk class (analytics): a time dimension's single granularity auto-buckets at query time (dataset-executor.ts:272-287); the proof asserts the day bucket SHIFTS with the org timezone (2024-03-01T03:00Z buckets to 2024-02-29 in America/Los_Angeles) — guarding the analytics-strategy ↔ in-memory count ↔ REST exec-context integration that #2018 fixed."
         }
       }

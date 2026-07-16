@@ -83,7 +83,7 @@ real client transport), the delivery path MUST gain one of:
 2. **id-only payloads** — the client re-fetches the record under its own authority.
 
 This posture is registered in the authz conformance matrix
-(`packages/dogfood/test/authz-conformance.matrix.ts`, row `realtime-delivery-authz`),
+(`packages/qa/dogfood/test/authz-conformance.matrix.ts`, row `realtime-delivery-authz`),
 and transport **tripwire probes** in `authz-conformance.test.ts` fail CI if a transport
 is wired without upgrading that row with a real enforcement site.
 
