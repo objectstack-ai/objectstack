@@ -302,10 +302,41 @@ Add interactive filter controls that apply to all widgets:
 
 ```typescript
 globalFilters: [
-  { field: 'region', label: 'Region', type: 'select' },
+  { name: 'region', field: 'region', label: 'Region', type: 'select' },
   { field: 'owner', label: 'Sales Rep', type: 'lookup' },
 ]
 ```
+
+Each filter's `name` is its stable identity: the key its value is published
+under as a dashboard-level variable (readable in widget expressions as
+`page.<name>`) and the key widgets reference in `filterBindings`. It defaults
+to `field`; the name `dateRange` is reserved for the built-in date range.
+
+### Per-Widget Filter Bindings
+
+By default a filter applies to its own `field` on every widget (the date
+range defaults to `dateRange.field ?? 'created_at'`). When a widget stores
+the concept under a different field — or should ignore a filter — declare
+`filterBindings` on the widget:
+
+```typescript
+widgets: [
+  // Default binding: dateRange → created_at, region → region.
+  { id: 'invoices_by_status', /* … */ },
+  // This widget's own fields differ — map each filter explicitly.
+  {
+    id: 'accounts_signed',
+    filterBindings: { dateRange: 'signed_at', region: 'sales_region' },
+    /* … */
+  },
+  // Opt out of a filter with `false`.
+  { id: 'total_invoices', filterBindings: { region: false }, /* … */ },
+]
+```
+
+Binding precedence: an explicit `filterBindings` entry (string override or
+`false` opt-out) → the filter's legacy `targetWidgets` allow-list → the
+filter's own `field`.
 
 ## Complete Example
 
