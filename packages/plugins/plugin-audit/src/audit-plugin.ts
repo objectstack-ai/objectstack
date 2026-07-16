@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { resolveLocalizationContext } from '@objectstack/core';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { SysAuditLog, SysActivity, SysComment } from './objects/index.js';
 // `sys_notification` is contributed here but owned by platform-objects; it is
@@ -9,7 +10,7 @@ import { SysAuditLog, SysActivity, SysComment } from './objects/index.js';
 // storage (ADR-0052 §3 ownership: a file↔record link belongs with storage, not
 // the compliance ledger).
 import { SysNotification } from '@objectstack/platform-objects/audit';
-import { installAuditWriters, type MessagingEmitSurface } from './audit-writers.js';
+import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
 
 /**
  * AuditPlugin
@@ -108,7 +109,27 @@ export class AuditPlugin implements Plugin {
           return undefined;
         }
       };
-      installAuditWriters(engine as any, this.name, { getMessaging });
+      // framework#3039 — localize activity summaries to the workspace default
+      // locale (ADR-0053 `localization.locale`). Both seams resolve lazily and
+      // tolerate absence: no i18n / no settings degrades to English summaries.
+      const getI18n = (): AuditI18nSurface | undefined => {
+        try {
+          return ctx.getService<AuditI18nSurface>('i18n');
+        } catch {
+          return undefined;
+        }
+      };
+      const getLocale = async (tenantId?: string, userId?: string): Promise<string | undefined> => {
+        let settings: unknown;
+        try {
+          settings = ctx.getService('settings');
+        } catch {
+          settings = undefined;
+        }
+        const { locale } = await resolveLocalizationContext({ ql: engine, settings, tenantId, userId });
+        return locale;
+      };
+      installAuditWriters(engine as any, this.name, { getMessaging, getI18n, getLocale });
       process.stderr.write('[AuditPlugin] writers installed\n');
       ctx.logger.info('AuditPlugin: audit + activity writers installed');
     });

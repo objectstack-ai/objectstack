@@ -793,6 +793,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "变量",
         helpText: "页面本地状态变量"
       },
+      "variables.name": {
+        label: "名称",
+        helpText: "变量名——在表达式中以 `page.<name>` 访问"
+      },
+      "variables.type": {
+        label: "类型",
+        helpText: "值类型"
+      },
+      "variables.defaultValue": {
+        label: "默认值",
+        helpText: "初始值（默认为对应类型的空值）"
+      },
+      "variables.source": {
+        label: "来源",
+        helpText: "写入该变量的组件（按 id 指定），如 element:record_picker"
+      },
       regions: {
         label: "区域",
         helpText: "布局区域（header、main、sidebar、footer）及其组件"

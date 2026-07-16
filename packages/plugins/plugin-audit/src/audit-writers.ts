@@ -22,6 +22,17 @@ export interface MessagingEmitSurface {
   }): Promise<unknown>;
 }
 
+/**
+ * Minimal structural view of `II18nService.t`. Declared locally (same
+ * rationale as {@link MessagingEmitSurface}) so plugin-audit resolves whatever
+ * object is registered under the `i18n` service without a runtime dependency
+ * on service-i18n. The kernel always registers at least the in-memory
+ * fallback, and `t` returns the key verbatim on a miss.
+ */
+export interface AuditI18nSurface {
+  t(key: string, locale: string, params?: Record<string, unknown>): string;
+}
+
 /** Options for {@link installAuditWriters}. */
 export interface AuditWriterOptions {
   /**
@@ -32,6 +43,19 @@ export interface AuditWriterOptions {
    * matching the `notify` node's degradation.
    */
   getMessaging?(): MessagingEmitSurface | undefined;
+  /**
+   * Lazily resolve the i18n service used to localize activity summaries
+   * (framework#3039): verb templates (`messages.activityCreated` …) and object
+   * display labels (`objects.{name}.label`). Absent → English summaries.
+   */
+  getI18n?(): AuditI18nSurface | undefined;
+  /**
+   * Resolve the workspace default locale (ADR-0053 `localization.locale`) for
+   * the write's tenant/user scope. Called per audited write but memoized here
+   * with a short TTL, so implementations may hit the settings service
+   * directly. Absent → summaries stay English (status quo).
+   */
+  getLocale?(tenantId?: string, userId?: string): Promise<string | undefined>;
 }
 
 /**
@@ -244,6 +268,28 @@ export function installAuditWriters(
   if (!engine || typeof engine.registerHook !== 'function') return;
 
   const getMessaging = opts.getMessaging ?? (() => undefined);
+  const getI18n = opts.getI18n ?? (() => undefined);
+
+  // Workspace locale changes rarely, but writeAudit runs on every CRUD write —
+  // memoize the settings lookup per principal scope with a short TTL so audit
+  // logging doesn't add a settings query to every mutation's hot path.
+  const LOCALE_TTL_MS = 30_000;
+  const localeCache = new Map<string, { value: string | undefined; expires: number }>();
+  const resolveWriteLocale = async (tenantId?: string, userId?: string): Promise<string | undefined> => {
+    if (!opts.getLocale) return undefined;
+    const cacheKey = `${tenantId ?? ''}|${userId ?? ''}`;
+    const now = Date.now();
+    const hit = localeCache.get(cacheKey);
+    if (hit && hit.expires > now) return hit.value;
+    let value: string | undefined;
+    try {
+      value = await opts.getLocale(tenantId, userId);
+    } catch {
+      value = undefined;
+    }
+    localeCache.set(cacheKey, { value, expires: now + LOCALE_TTL_MS });
+    return value;
+  };
 
   // Remove any prior installation so we can safely re-install on hot reload.
   if (typeof engine.unregisterHooksByPackage === 'function') {
@@ -449,19 +495,39 @@ export function installAuditWriters(
     const label = recordLabel(after ?? before, recordId ?? '');
     // Summaries are user-facing (the record Discussion feed and Setup
     // dashboards render them verbatim), so name the object by its display
-    // label ("Semantic Zoo"), not its API name ("showcase_semantic_zoo").
-    // Best-effort: falls back to the API name when the def isn't resolvable.
+    // label ("Semantic Zoo"), not its API name ("showcase_semantic_zoo"), and
+    // localize both the verb template and the object label to the workspace
+    // default locale (ADR-0053, framework#3039). Every step is best-effort:
+    // no locale / no i18n / key miss all degrade to the English literal.
+    const locale = await resolveWriteLocale(tenantId, userId);
+    const translate = (key: string, params?: Record<string, unknown>): string | undefined => {
+      if (!locale) return undefined;
+      const i18n = getI18n();
+      if (!i18n || typeof i18n.t !== 'function') return undefined;
+      try {
+        const value = i18n.t(key, locale, params);
+        // A miss returns the key verbatim (II18nService contract).
+        return typeof value === 'string' && value !== key ? value : undefined;
+      } catch {
+        return undefined;
+      }
+    };
     const objectDef = getObjectDef(ctx.object);
     const objectDisplay =
-      typeof objectDef?.label === 'string' && objectDef.label.length > 0
+      translate(`objects.${ctx.object}.label`) ??
+      (typeof objectDef?.label === 'string' && objectDef.label.length > 0
         ? objectDef.label
-        : ctx.object;
+        : ctx.object);
     let summary: string;
     let activityType: string = activityTypeFor(action);
     if (action === 'create') {
-      summary = `Created ${objectDisplay} "${label}"`;
+      summary =
+        translate('messages.activityCreated', { object: objectDisplay, label }) ??
+        `Created ${objectDisplay} "${label}"`;
     } else if (action === 'delete') {
-      summary = `Deleted ${objectDisplay} "${label}"`;
+      summary =
+        translate('messages.activityDeleted', { object: objectDisplay, label }) ??
+        `Deleted ${objectDisplay} "${label}"`;
     } else {
       // ADR-0052 §5b — declarative activity, precedence: a configured semantic
       // milestone (§5b.2) wins; else a tracked field-change diff ("Stage:
@@ -473,6 +539,7 @@ export function installAuditWriters(
       } else {
         summary =
           renderTrackedChangeSummary(getFieldDefs(ctx.object), oldValue, newValue) ??
+          translate('messages.activityUpdated', { object: objectDisplay, label }) ??
           `Updated ${objectDisplay} "${label}"`;
       }
     }

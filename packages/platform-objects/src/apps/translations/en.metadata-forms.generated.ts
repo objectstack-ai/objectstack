@@ -793,6 +793,22 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Variables",
         helpText: "Local page state variables"
       },
+      "variables.name": {
+        label: "Name",
+        helpText: "Variable name — exposed to expressions as `page.<name>`"
+      },
+      "variables.type": {
+        label: "Type",
+        helpText: "Value type"
+      },
+      "variables.defaultValue": {
+        label: "Default Value",
+        helpText: "Initial value (defaults to a type-appropriate empty value)"
+      },
+      "variables.source": {
+        label: "Source",
+        helpText: "Component (by id) that writes this variable — e.g. an element:record_picker"
+      },
       regions: {
         label: "Regions",
         helpText: "Layout regions (header, main, sidebar, footer) with components"

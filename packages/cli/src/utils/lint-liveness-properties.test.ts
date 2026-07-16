@@ -146,4 +146,41 @@ describe('lintLivenessProperties', () => {
     });
     expect(findings).toEqual([]);
   });
+
+  // ── view (#2998 Track B) ──────────────────────────────────────────────────
+
+  it('warns on dead list-level responsive config (view ledger, list.responsive)', () => {
+    const findings = lintLivenessProperties({
+      views: [{ object: 'task', list: { type: 'grid', responsive: { breakpoint: 'md' } } }],
+    });
+    const f = findings.find((x) => x.message.includes('list.responsive'));
+    expect(f).toBeDefined();
+    expect(f!.where).toBe("view 'task'"); // container binds via `object`, not `name`
+    expect(f!.hint.length).toBeGreaterThan(0);
+  });
+
+  it('warns on form.data and form.defaultSort but not on live form config', () => {
+    const findings = lintLivenessProperties({
+      views: [{
+        object: 'task',
+        form: {
+          type: 'wizard',
+          sections: [{ fields: ['title'] }],
+          data: { provider: 'object', object: 'task' },
+          defaultSort: [{ field: 'created_at' }],
+        },
+      }],
+    });
+    const msgs = paths(findings);
+    expect(msgs.some((m) => m.includes('form.data'))).toBe(true);
+    expect(msgs.some((m) => m.includes('form.defaultSort'))).toBe(true);
+    expect(msgs.some((m) => m.includes('form.sections') || m.includes('form.type'))).toBe(false);
+  });
+
+  it('stays silent on a clean grid view', () => {
+    const findings = lintLivenessProperties({
+      views: [{ object: 'task', list: { type: 'grid', columns: ['title'] } }],
+    });
+    expect(findings).toEqual([]);
+  });
 });

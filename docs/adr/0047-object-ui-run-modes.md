@@ -1,6 +1,6 @@
 # ADR-0047: Two run modes for object UI — data views vs interface pages, user filters, and runtime visualization choice
 
-**Status**: Proposed (2026-06-12) · **Revised 2026-06-19**
+**Status**: Accepted (2026-06-12; revised 2026-06-19) — framework scope implemented (`UserFiltersSchema`/`InterfacePageConfigSchema` + the 2026-07-07 object-list narrowing, reference-integrity diagnostics); the PageView render + Studio panel phases live in objectui.
 
 > **Revision (2026-06-19) — the "iron rule" is superseded.** Validating the
 > Studio config panel against Airtable showed Airtable has no "inherit from a

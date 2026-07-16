@@ -793,6 +793,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "変数",
         helpText: "ページローカル状態変数"
       },
+      "variables.name": {
+        label: "名前",
+        helpText: "変数名 — 式では `page.<name>` として参照できます"
+      },
+      "variables.type": {
+        label: "型",
+        helpText: "値の型"
+      },
+      "variables.defaultValue": {
+        label: "デフォルト値",
+        helpText: "初期値（未指定の場合は型に応じた空の値）"
+      },
+      "variables.source": {
+        label: "ソース",
+        helpText: "この変数に書き込むコンポーネント（id 指定）— 例: element:record_picker"
+      },
       regions: {
         label: "リージョン",
         helpText: "コンポーネントを含むレイアウト領域（header, main, sidebar, footer）"

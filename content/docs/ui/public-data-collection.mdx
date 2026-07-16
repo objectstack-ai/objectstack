@@ -45,6 +45,8 @@ POST /api/v1/forms/contact-us/submit   → INSERT one showcase_inquiry
 
 Only the fields listed in `sections[].fields` are accepted on submit; everything else is stripped server-side. Server-controlled fields (`status`, `source`, owner stamps) are set by a defaults hook, never by the submitter. The submit route derives a narrow `publicFormGrant: { object: 'showcase_inquiry' }` — create + read-back of the row it just made, and nothing else.
 
+System-managed anchors (`owner_id`, `organization_id`, audit columns, `id`) are **never** accepted from a public submission — not even when a section declares them, and not through the zero-sections all-fields fallback. The route filter and the data layer enforce the same set (`PUBLIC_FORM_SERVER_MANAGED_FIELDS` from `@objectstack/spec/security`), so an anonymous visitor cannot forge record ownership or tenant placement regardless of how the form is declared (#3022).
+
 ### 3. Keep the object private once inside
 
 Set `sharingModel: 'private'` on the object so submissions are staff-scoped after creation. The public path only ever **inserts**; it never lists.

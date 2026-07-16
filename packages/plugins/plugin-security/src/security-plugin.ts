@@ -2,7 +2,7 @@
 
 import { Plugin, PluginContext } from '@objectstack/core';
 import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
-import { describeHighPrivilegeBits, describeAnchorForbiddenBits } from '@objectstack/spec/security';
+import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
@@ -20,6 +20,7 @@ import {
   registerPermissionSetProjection,
   reconcilePermissionSetProjection,
 } from './permission-set-projection.js';
+import { registerObjectPostureGate } from './object-posture-gate.js';
 import {
   syncAudienceBindingSuggestions,
   listAudienceBindingSuggestions,
@@ -569,7 +570,39 @@ export class SecurityPlugin implements Plugin {
         const allowed =
           opCtx.object === grantObject &&
           ['insert', 'find', 'findOne', 'count'].includes(opCtx.operation);
-        if (allowed) return next();
+        if (allowed) {
+          // [#3022] The grant bypasses every downstream write gate (FLS 2.5,
+          // owner anchor 3.5, tenant CHECK) — so the system-managed anchors
+          // must be forced HERE, before the write is admitted. An anonymous
+          // submission has no principal to backfill from and no conceivable
+          // transfer authorization, so a supplied `owner_id` /
+          // `organization_id` / audit column is stripped from every row (the
+          // route-side field allow-list is the first net; this is the
+          // data-layer boundary that holds even if a FormView declares — or
+          // a zero-section form falls open to — one of these columns).
+          // Ownership stays NULL for object hooks / the first-admin
+          // bootstrap to assign, exactly like other anonymous-seeded rows.
+          if (opCtx.operation === 'insert' && opCtx.data && typeof opCtx.data === 'object') {
+            const rows = Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data];
+            const stripped = new Set<string>();
+            for (const row of rows) {
+              if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+              for (const field of PUBLIC_FORM_SERVER_MANAGED_FIELDS) {
+                if (Object.prototype.hasOwnProperty.call(row, field)) {
+                  delete (row as Record<string, unknown>)[field];
+                  stripped.add(field);
+                }
+              }
+            }
+            if (stripped.size > 0) {
+              ctx.logger.warn(
+                `[security] public-form insert on '${grantObject}' supplied server-managed ` +
+                  `field(s) [${[...stripped].join(', ')}] — stripped (#3022)`,
+              );
+            }
+          }
+          return next();
+        }
         throw new PermissionDeniedError(
           `[Security] Access denied: public-form grant permits only create/read-back on '${grantObject}', ` +
             `not '${opCtx.operation}' on '${opCtx.object}'`,
@@ -1067,10 +1100,20 @@ export class SecurityPlugin implements Plugin {
       //
       // `organization_id` auto-injection has moved to
       // `@objectstack/organizations`; its forge guard is step 3.7 below.
+      //
+      // [#3023] EXEMPTION — the engine's referential-integrity FK clear. When a
+      // referenced record is deleted, `cascadeDeleteRelations` nulls the FK on
+      // every dependent (owner_id included). That `owner_id = null` is an
+      // integrity-mandated consequence of an already-authorized parent delete,
+      // NOT a user disown, so the transfer guard must not fire and abort the
+      // cascade. The marker rides a server-DERIVED context (never client-built —
+      // same trust model as `__expandRead`), so it cannot be forged from a
+      // request to slip an ordinary ownership write past the guard.
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
-        typeof opCtx.data === 'object'
+        typeof opCtx.data === 'object' &&
+        !opCtx.context?.__referentialFieldClear
       ) {
         const isInsert = opCtx.operation === 'insert';
         const rows = (Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]) as Record<string, unknown>[];
@@ -1153,7 +1196,7 @@ export class SecurityPlugin implements Plugin {
                       // closes the owner-enumeration oracle a system read would
                       // open (a caller who can't read the row gets null → deny,
                       // indistinguishable from a non-owner).
-                      const pre: any = await this.ql.findOne(opCtx.object, { where: { id: targetId }, context: opCtx.context });
+                      const pre = await this.getCallerPreImage(opCtx, targetId);
                       unchanged = !!pre && pre.owner_id != null && String(pre.owner_id) === String(row.owner_id);
                     } catch {
                       unchanged = false; // fail closed
@@ -1215,13 +1258,10 @@ export class SecurityPlugin implements Plugin {
               );
               postImage = null;
             } else if (this.ql) {
-              let pre: any = null;
-              try {
-                pre = await this.ql.findOne(opCtx.object, { where: { id: targetId }, context: opCtx.context });
-              } catch {
-                pre = null;
-              }
-              if (pre && typeof pre === 'object') postImage = { ...(pre as Record<string, unknown>), ...(opCtx.data as Record<string, unknown>) };
+              // Shares the memoized caller pre-image with the step-3.5 owner
+              // echo check — the identical (object, id, caller-context) row.
+              const pre = await this.getCallerPreImage(opCtx, targetId);
+              if (pre) postImage = { ...pre, ...(opCtx.data as Record<string, unknown>) };
             }
           }
           if (postImage && !checkParts.every((f) => matchesFilterCondition(postImage as any, f as any))) {
@@ -1324,9 +1364,10 @@ export class SecurityPlugin implements Plugin {
       // sorting / grouping on it (row presence is the oracle; the objectui
       // /data surface makes URL-driven predicates first-class). Reject such
       // queries outright — silent predicate dropping would change query
-      // semantics unpredictably. MUST run against the CALLER's AST, before
-      // the RLS injection below: RLS policies legitimately reference fields
-      // the caller cannot read (e.g. owner_id).
+      // semantics unpredictably. MUST run against the CALLER's OWN predicate,
+      // before the RLS injection below: RLS / sharing filters legitimately
+      // reference fields the caller cannot read (e.g. owner_id) and must not be
+      // rejected.
       if (opCtx.ast) {
         let guardPerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
         guardPerms = this.foldFieldRequiredPermissions(guardPerms, secMeta.fieldRequiredPermissions, permissionSets);
@@ -1338,7 +1379,22 @@ export class SecurityPlugin implements Plugin {
           guardPerms = intersectFieldMasks(guardPerms, delGuard);
         }
         if (Object.keys(guardPerms).length > 0) {
-          assertReadableQueryFields(opCtx.ast as unknown as Record<string, unknown>, guardPerms, opCtx.object);
+          // [#2982 follow-up] For a bulk WRITE the caller's own predicate is
+          // `opCtx.options.where` (untouched); `opCtx.ast.where` may ALREADY
+          // carry an owner-match that plugin-sharing's write branch composed in
+          // — and plugin-sharing is a SIBLING middleware whose registration
+          // order relative to this one is not guaranteed. Guarding the injected
+          // AST would 403 a legitimate bulk write on an object whose owner_id is
+          // FLS-hidden, purely because a sibling filter mentioned it. Inspect
+          // the caller's own predicate so the guard is independent of middleware
+          // order and never mistakes an injected filter for a probe. Reads keep
+          // guarding the ast: the read seed is the caller's query verbatim and
+          // this middleware runs before its own RLS injection.
+          const guardTarget: Record<string, unknown> =
+            opCtx.operation === 'update' || opCtx.operation === 'delete'
+              ? { where: opCtx.options?.where }
+              : (opCtx.ast as unknown as Record<string, unknown>);
+          assertReadableQueryFields(guardTarget, guardPerms, opCtx.object);
         }
       }
 
@@ -1539,6 +1595,12 @@ export class SecurityPlugin implements Plugin {
               ql, metadata: this.metadata, logger: ctx.logger,
             });
           }
+          // [#3050] OWD posture authoring gate — pre-persistence veto on
+          // runtime-authored `object` bodies: env-tighten-only over packaged
+          // declarations (ADR-0086 D1) + external ≤ internal (ADR-0090 D11).
+          // Feature-detected; protocols predating registerAuthoringGate keep
+          // the legacy (CLI-lint-only) behavior.
+          registerObjectPostureGate(protocol);
           // [ADR-0094 D4] Converge record ↔ metadata: project env overlays
           // onto records (creating missing ones), backfill legacy data-door
           // creations into the metadata store once, and heal drifted records
@@ -2114,9 +2176,7 @@ export class SecurityPlugin implements Plugin {
       return;
     }
 
-    const existing = await this.ql
-      .findOne('sys_permission_set', { where: { id: targetId }, context: { isSystem: true } })
-      .catch(() => null);
+    const existing = await this.readRowById('sys_permission_set', targetId, { isSystem: true });
     if (existing && (existing as Record<string, unknown>).managed_by === 'package') {
       const row = existing as Record<string, unknown>;
       throw new PermissionDeniedError(
@@ -2222,9 +2282,7 @@ export class SecurityPlugin implements Plugin {
       return;
     }
 
-    const existing = await this.ql
-      .findOne(opCtx.object, { where: { id: targetId }, context: { isSystem: true } })
-      .catch(() => null);
+    const existing = await this.readRowById(opCtx.object, targetId, { isSystem: true });
     const existingManagedBy = existing
       ? String((existing as Record<string, unknown>).managed_by ?? '')
       : '';
@@ -2253,6 +2311,40 @@ export class SecurityPlugin implements Plugin {
       return (where as any).id;
     }
     return null;
+  }
+
+  /**
+   * By-id row read with the standard FAIL-CLOSED contract (missing engine,
+   * null id, or a thrown read → `null`), shared by every provenance / pre-image
+   * gate. Centralising the read SHAPE keeps a future change (soft-delete filter,
+   * field projection) from drifting across the ~5 call sites that used to
+   * inline it (#3018 review — Reuse). A `null` return always DENIES downstream;
+   * it never bypasses a gate.
+   */
+  private async readRowById(object: string, id: unknown, context: any): Promise<Record<string, unknown> | null> {
+    if (id == null || typeof this.ql?.findOne !== 'function') return null;
+    try {
+      const row = await this.ql.findOne(object, { where: { id }, context });
+      return row && typeof row === 'object' ? (row as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The single-id write PRE-IMAGE read under the CALLER's context, memoized per
+   * operation. The owner-anchor echo check (step 3.5) and the RLS `check`
+   * post-image (step 3.6) read the IDENTICAL `(object, id, caller-context)` row;
+   * this collapses the two reads into one. Safe: no write to the row happens
+   * between the gates (the driver write runs after the whole middleware pass),
+   * so the pre-image is stable within the operation.
+   */
+  private async getCallerPreImage(opCtx: any, id: unknown): Promise<Record<string, unknown> | null> {
+    if (id == null) return null;
+    if (opCtx.__preImage && opCtx.__preImage.id === id) return opCtx.__preImage.row;
+    const row = await this.readRowById(opCtx.object, id, opCtx.context);
+    opCtx.__preImage = { id, row };
+    return row;
   }
 
   /**
@@ -2555,14 +2647,9 @@ export class SecurityPlugin implements Plugin {
     } else {
       const targetId = this.extractSingleId(opCtx);
       if (targetId == null) return; // bulk write — scoped by the read filter on the AST
-      let row: any = null;
-      try {
-        row = await this.ql.findOne(object, { where: { id: targetId }, context: { isSystem: true } });
-      } catch {
-        row = null;
-      }
+      const row = await this.readRowById(object, targetId, { isSystem: true });
       if (!row) deny('target record not found', targetId);
-      masterId = row[rel!.fk];
+      masterId = row![rel!.fk];
     }
     if (masterId == null) deny('detail record has no master reference');
 

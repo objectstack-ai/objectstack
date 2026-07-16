@@ -369,6 +369,19 @@ describe('SecurityPlugin', () => {
       const opCtx: any = { object: 'task', operation: 'update', data, context: memberCtx() };
       await harness.run(opCtx); // must not throw — owner_id is not an own property
     });
+
+    it('[#3023] an engine referential FK clear (__referentialFieldClear) is exempt — owner_id:null cascade is allowed for a plain member', async () => {
+      // cascadeDeleteRelations nulls owner_id on dependents when the referenced
+      // sys_user is deleted; that integrity write must not be blocked by the
+      // disown guard. The same payload WITHOUT the marker is denied (covered
+      // by the disown test above).
+      const harness = await boot([memberSet], () => ({ id: 't1', owner_id: 'someone' }));
+      const opCtx: any = {
+        object: 'task', operation: 'update', data: { id: 't1', owner_id: null },
+        context: memberCtx({ __referentialFieldClear: true }),
+      };
+      await harness.run(opCtx); // must not throw — engine-internal referential clear
+    });
   });
 
   it('without org-scoping plugin — strips tenant_isolation RLS so find applies no tenant where', async () => {
@@ -428,6 +441,83 @@ describe('SecurityPlugin', () => {
     // No deny sentinel, no organization_id where clause: the read
     // passes through and the catalog row is visible to every tenant.
     expect(opCtx.ast.where).toBeUndefined();
+  });
+
+  // ── publicFormGrant — server-managed anchor stripping (#3022) ───────────
+  // The ADR-0056 Option A grant short-circuits the middleware BEFORE every
+  // write gate (FLS 2.5, owner anchor 3.5, tenant CHECK), so the grant branch
+  // itself must force the system-managed anchors: an anonymous public-form
+  // insert can never forge `owner_id` / `organization_id` / audit columns,
+  // no matter what the route-side field allow-list let through.
+  describe('publicFormGrant — server-managed anchor stripping (#3022)', () => {
+    const anonFormCtx = { publicFormGrant: { object: 'task' }, permissions: ['guest_portal'], anonymous: true };
+
+    const boot = async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      return harness;
+    };
+
+    it('strips forged owner_id / organization_id / audit anchors from an insert', async () => {
+      const harness = await boot();
+      const opCtx: any = {
+        object: 'task', operation: 'insert',
+        data: {
+          name: 'Ada', id: 'rec_forged', owner_id: 'usr_victim', organization_id: 'org_victim',
+          created_by: 'usr_victim', updated_by: 'usr_victim',
+          created_at: '2020-01-01T00:00:00Z', updated_at: '2020-01-01T00:00:00Z',
+        },
+        context: anonFormCtx,
+      };
+      await harness.run(opCtx);
+      // Business fields survive; every server-managed anchor is gone
+      // (ownership stays unset for hooks / first-admin bootstrap to assign).
+      expect(opCtx.data).toEqual({ name: 'Ada' });
+    });
+
+    it('strips anchors from EVERY row of a batch insert', async () => {
+      const harness = await boot();
+      const opCtx: any = {
+        object: 'task', operation: 'insert',
+        data: [
+          { name: 'A', owner_id: 'usr_victim' },
+          { name: 'B', organization_id: 'org_victim' },
+          { name: 'C' },
+        ],
+        context: anonFormCtx,
+      };
+      await harness.run(opCtx);
+      expect(opCtx.data).toEqual([{ name: 'A' }, { name: 'B' }, { name: 'C' }]);
+    });
+
+    it('a clean insert passes through untouched', async () => {
+      const harness = await boot();
+      const opCtx: any = {
+        object: 'task', operation: 'insert',
+        data: { name: 'Ada', email: 'ada@example.com' },
+        context: anonFormCtx,
+      };
+      await harness.run(opCtx);
+      expect(opCtx.data).toEqual({ name: 'Ada', email: 'ada@example.com' });
+    });
+
+    it('the grant still refuses non-granted operations and foreign objects', async () => {
+      const harness = await boot();
+      await expect(
+        harness.run({
+          object: 'task', operation: 'update', data: { owner_id: 'usr_victim' },
+          context: anonFormCtx,
+        }),
+      ).rejects.toThrow(/public-form grant permits only create\/read-back/);
+      await expect(
+        harness.run({
+          object: 'sys_user', operation: 'insert', data: { name: 'x' },
+          context: anonFormCtx,
+        }),
+      ).rejects.toThrow(/public-form grant permits only create\/read-back/);
+    });
   });
 
   // ── Row-level WRITE authorization (pre-image check, #1985) ──────────────
@@ -1131,6 +1221,48 @@ describe('SecurityPlugin', () => {
     await expect(harness.run(opCtx)).rejects.toMatchObject({
       details: { forbiddenFields: ['ssn'] },
     });
+  });
+
+  it('[#2982 follow-up] bulk-write predicate guard inspects the CALLER predicate, not injected owner/RLS filters', async () => {
+    // The anti-oracle guard (2.9) must reject a caller filtering on an
+    // FLS-hidden field, but must NOT reject an owner_id predicate a sibling
+    // middleware (plugin-sharing) composed onto opCtx.ast — otherwise a bulk
+    // write on an object whose owner_id is FLS-hidden 403s purely because the
+    // injected filter mentions it, and the result depends on middleware order.
+    const ownerHiddenSet: PermissionSet = {
+      name: 'member_default',
+      label: 'Member',
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+      fields: { 'task.owner_id': { readable: false, editable: false }, 'task.ssn': { readable: false, editable: false } },
+    } as any;
+    const boot = async () => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: [ownerHiddenSet], objectFields: ['id', 'owner_id', 'name', 'ssn', 'status'] });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      return harness;
+    };
+    const ctx = { userId: 'u1', tenantId: 'org-1', positions: [], permissions: ['member_default'] };
+
+    // Injected owner_id in the AST, but the caller's own predicate is clean → allowed.
+    const injected: any = await boot();
+    const okCtx: any = {
+      object: 'task', operation: 'update', data: { name: 'renamed' },
+      options: { where: { status: 'open' }, multi: true },
+      ast: { where: { $and: [{ status: 'open' }, { owner_id: 'u1' }] } }, // as plugin-sharing would compose
+      context: ctx,
+    };
+    await injected.run(okCtx); // must NOT throw — owner_id is only in the injected filter
+
+    // The caller's OWN predicate references a hidden field → still rejected.
+    const probing: any = await boot();
+    const denyCtx: any = {
+      object: 'task', operation: 'update', data: { name: 'renamed' },
+      options: { where: { ssn: 'guess' }, multi: true },
+      ast: { where: { ssn: 'guess' } },
+      context: ctx,
+    };
+    await expect(probing.run(denyCtx)).rejects.toThrow(/filter oracle|not readable/);
   });
 
   it('FLS write — the record echoed back by an update is masked (no read-leak of hidden fields)', async () => {

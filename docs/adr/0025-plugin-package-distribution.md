@@ -1,6 +1,6 @@
 # ADR-0025: Plugin Package Distribution (Code + Dependencies)
 
-**Status**: Proposed
+**Status**: Proposed — partially implemented (2026-07-16 audit): the `.osplugin` artifact format and `os plugin build`/`sign`/`publish` CLI landed; the install flow (§3.5), `sys_plugin`/`sys_plugin_version`/`sys_plugin_installation` registry (§3.8), and install-time consent remain unimplemented.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package + versioned releases), [ADR-0004](./0004-cloud-multi-kernel.md) (cloud multi-kernel), [ADR-0010](./0010-metadata-protection-model.md) (L1/L2/L3 protection), [ADR-0016](./0016-studio-package-authoring-and-publish.md) (package authoring & publish, local export/import)
 **Consumers**: `@objectstack/core` (kernel, plugin-loader, security), `@objectstack/runtime` (sandbox, marketplace install), `@objectstack/cli`, `@objectstack/spec/system` (ObjectStackManifest), `@objectstack/spec/cloud`, `../objectui` (Studio)

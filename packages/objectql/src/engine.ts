@@ -2631,7 +2631,16 @@ export class ObjectQL implements IDataEngine {
             // hooks and events fire.
             await this.delete(childName, { where: { id: depId }, context } as any);
           } else {
-            await this.update(childName, { id: depId, [fieldName]: null }, { context } as any);
+            // [#3023] Clear the FK as an engine-internal referential-integrity
+            // write, tagged so plugin-security's ownership-anchor guard (#3004)
+            // treats an `owner_id = null` cascade as integrity maintenance, not
+            // a user-initiated disown — otherwise deleting the referenced record
+            // trips the transfer guard and aborts the cascade mid-way. Marker
+            // rides a server-DERIVED context (set here, never from client input
+            // — same trust model as `__expandRead`), so it cannot be forged from
+            // a request to bypass the guard on an ordinary write.
+            const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContext;
+            await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
           }
         }
       }

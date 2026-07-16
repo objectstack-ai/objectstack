@@ -116,3 +116,73 @@ describe('ObjectStackProtocolImplementation.registerMutationProjector (ADR-0094)
     expect(out).toEqual({ success: false, error: 'projection boom' });
   });
 });
+
+// #3050 — the pre-persistence AUTHORING GATE seam (ADR-0094 addendum). The
+// inverse contract of the projector: it runs BEFORE persistence and a throw
+// PROPAGATES (rejecting the write) instead of being swallowed. saveMetaItem
+// invokes it for env writes only, both draft and publish-mode saves; the
+// domain-gate behavior itself (OWD posture) is pinned in plugin-security's
+// object-posture-gate suite.
+describe('ObjectStackProtocolImplementation.registerAuthoringGate (#3050)', () => {
+  const save = (over: Record<string, unknown> = {}) => ({
+    type: 'object', name: 'crm_account', state: 'active' as const, body: { sharingModel: 'private' }, ...over,
+  });
+
+  it('dispatches the registered gate with the body and state', async () => {
+    const p = makeProtocol();
+    const seen: any[] = [];
+    p.registerAuthoringGate('object', (ctx) => { seen.push(ctx); });
+    await (p as any).runAuthoringGate(save({ state: 'draft' }));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      type: 'object', name: 'crm_account', state: 'draft',
+      body: { sharingModel: 'private' }, isArtifactBacked: false,
+    });
+  });
+
+  it('normalizes plural registrations to the singular type', async () => {
+    const p = makeProtocol();
+    const gate = vi.fn();
+    p.registerAuthoringGate('objects', gate);
+    await (p as any).runAuthoringGate(save());
+    expect(gate).toHaveBeenCalledTimes(1);
+  });
+
+  it('a gate throw PROPAGATES with its status/code (the write is rejected)', async () => {
+    const p = makeProtocol();
+    p.registerAuthoringGate('object', () => {
+      const err: any = new Error('[owd_widening_forbidden] no widening');
+      err.code = 'owd_widening_forbidden'; err.status = 403;
+      throw err;
+    });
+    await expect((p as any).runAuthoringGate(save())).rejects.toMatchObject({
+      code: 'owd_widening_forbidden', status: 403,
+    });
+  });
+
+  it('is a no-op for types with no registered gate', async () => {
+    const p = makeProtocol();
+    await expect((p as any).runAuthoringGate(save({ type: 'view' }))).resolves.toBeUndefined();
+  });
+
+  it('resolves isArtifactBacked + declaredBody from the artifact registry', async () => {
+    const declared = { name: 'crm_account', sharingModel: 'private', _packageId: 'crm' };
+    const engine = { registry: { getItem: (_t: string, n: string) => (n === 'crm_account' ? declared : undefined) } };
+    const p = new ObjectStackProtocolImplementation(engine as any);
+    const seen: any[] = [];
+    p.registerAuthoringGate('object', (ctx) => { seen.push(ctx); });
+    await (p as any).runAuthoringGate(save());
+    expect(seen[0].isArtifactBacked).toBe(true);
+    expect(seen[0].declaredBody).toBe(declared);
+  });
+
+  it('a second registration replaces the first (idempotent re-init)', async () => {
+    const p = makeProtocol();
+    const first = vi.fn(); const second = vi.fn();
+    p.registerAuthoringGate('object', first);
+    p.registerAuthoringGate('object', second);
+    await (p as any).runAuthoringGate(save());
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+});

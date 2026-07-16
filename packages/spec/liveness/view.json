@@ -1,0 +1,122 @@
+{
+  "type": "view",
+  "_note": "ViewSchema (object view container: list/form/listViews/formViews). Seeded from docs/audits/2026-06-viewschema-property-liveness.md (objectui consumer cross-reference) and re-verified against objectui@fb35e48 (2026-07-16) — several audit-era DEAD findings have since gone LIVE (submitBehavior, sharing.lockedBy, ViewData providers on the list path) and are classified from the current reads, not the stale audit lines. objectui paths cited as 'objectui: <path>' prose (not resolved against this repo). Sub-sub-key divergences (userActions.buttons, addRecord.mode/formView, tabs[].order) can't be drilled (one level only) — captured in the parent entry's note and tracked in the enforce-or-remove worklist (#2998 Track B / ADR-0049).",
+  "props": {
+    "list": {
+      "children": {
+        "name": { "status": "live", "evidence": "packages/spec/src/ui/view.zod.ts:1432", "note": "view identity — expandViewContainer key; objectui ListView/ViewTabBar." },
+        "label": { "status": "live", "note": "objectui: view switcher tab + toolbar title (ListView.tsx / ViewTabBar)." },
+        "type": { "status": "live", "note": "objectui: ListView.tsx routes grid/kanban/calendar/gantt/gallery/timeline/chart/tree renderers (audit L16)." },
+        "data": { "status": "live", "note": "objectui: ListView.tsx:841-850 fetch effect supports ViewDataSchema provider modes ('value' inline, 'api'; gantt owns api-provided data at :476). Supersedes the 2026-06 audit's 'api/schema dead in list path'. The 'schema' provider remains form/metadata-admin-only — not honored on lists." },
+        "columns": { "status": "live", "note": "objectui: ObjectGrid.tsx / ListView.tsx — legacy + rich column shapes (audit L15)." },
+        "filter": { "status": "live", "note": "objectui: ListView.tsx client-side filter shaping (audit L15); no list-render prop reaches the server query (audit data-flow note)." },
+        "sort": { "status": "live", "note": "objectui: ListView.tsx (audit L15)." },
+        "searchableFields": { "status": "live", "note": "objectui: ListView.tsx (audit L15)." },
+        "filterableFields": { "status": "live", "note": "objectui: ListView.tsx / UserFilters.tsx (audit L15)." },
+        "resizable": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "striped": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "bordered": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "compactToolbar": { "status": "live", "note": "objectui: ListView.tsx:370 + toolbar gating at :1776-1988 (View-settings popover collapse). Post-audit key, verified objectui@fb35e48." },
+        "selection": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "navigation": { "status": "live", "note": "objectui: ObjectView.tsx:987 — activeView.navigation ?? objectDef.navigation resolves the record-detail overlay (mode/size buckets, #2578/#2604, ADR-0085)." },
+        "pagination": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "kanban": { "status": "live", "note": "objectui: KanbanImpl.tsx:682 — field-by-field wired (audit L16)." },
+        "calendar": { "status": "live", "note": "objectui: calendar-view-renderer.tsx:147 (audit L16)." },
+        "gantt": { "status": "live", "note": "objectui: ObjectGantt.tsx:236 (audit L16)." },
+        "gallery": { "status": "live", "note": "objectui: ObjectGallery.tsx:209 (audit L16)." },
+        "timeline": { "status": "live", "note": "objectui: ObjectTimeline.tsx:179 (audit L16)." },
+        "chart": { "status": "live", "note": "objectui: dataset-first branches at ListView.tsx:1460 and ObjectView.tsx:1185 route the post-ADR-0021 shape (dataset/dimensions/values) into ObjectChart, which fetches the dataset definition and runs the semantic-layer query (ObjectChart.tsx:298-325); the legacy xAxisField/yAxisFields translation at ListView.tsx:1476/ObjectView.tsx:1209 is only the back-compat fallback. Supersedes audit L9 (its rec 1 — migrate the chart renderers — has since been implemented); exercised by the showcase task chart view." },
+        "tree": { "status": "live", "note": "objectui: @object-ui/plugin-tree ObjectTree.tsx (spec CHANGELOG: 'Renderer ships in objectui @object-ui/plugin-tree')." },
+        "description": { "status": "live", "note": "objectui: ListView.tsx:1728 renders it under the toolbar (gated by appearance.showDescription)." },
+        "sharing": { "status": "live", "note": "objectui: ListView sharing tooltip incl. lockedBy (ListView.test.tsx:2276 'should display lockedBy in sharing tooltip when set'). Supersedes the audit's 'sharing.lockedBy dead' line." },
+        "rowHeight": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "grouping": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "rowColor": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "hiddenFields": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "fieldOrder": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "rowActions": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "bulkActions": { "status": "live", "note": "objectui: live only via ListView.tsx:1318 remapping to ObjectGrid's real 'batchActions' key — a direct object-grid caller using bulkActions silently no-ops (audit L23 drift; normalize at one boundary per audit rec 3)." },
+        "bulkActionDefs": { "status": "live", "note": "objectui: ListView.tsx:1343 forwards rich defs to ObjectGrid (BulkActionDialog). Post-audit key, verified objectui@fb35e48." },
+        "virtualScroll": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "conditionalFormatting": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "inlineEdit": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "exportOptions": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
+        "userActions": { "status": "live", "note": "objectui: ListView.tsx:374 toolbarFlags (search/sort/filters/density/hide-fields/group/color + addRecordForm). Sub-key userActions.buttons has NO reader (audit L20, re-verified objectui@fb35e48) — dead sub-surface, enforce-or-remove worklist." },
+        "appearance": { "status": "live", "note": "objectui: allowedVisualizations gates the view-type switcher (audit L15); showDescription gates ListView.tsx:1728." },
+        "tabs": { "status": "live", "note": "objectui: TabBar.tsx — icon/visible/pinned/filter wired (audit L15). Sub-key tabs[].order is NOT used for sorting (audit L20) — dead sub-surface." },
+        "addRecord": { "status": "live", "note": "objectui: ListView.tsx:374 (addRecord + userActions.addRecordForm drive the add-record flow). Sub-keys addRecord.mode / addRecord.formView have NO reader (audit L20, re-verified objectui@fb35e48) — dead sub-surface." },
+        "showRecordCount": { "status": "live", "note": "objectui: ListView toolbar (audit L15)." },
+        "allowPrinting": { "status": "live", "note": "objectui: ListView toolbar (audit L15)." },
+        "emptyState": { "status": "live", "evidence": "packages/cli/src/utils/i18n-extract.ts", "note": "objectui: ListView empty-state panel (audit L15); CLI i18n extract emits _views.<view>.emptyState keys (spec CHANGELOG)." },
+        "aria": { "status": "live", "note": "objectui: ListView.tsx:1712-1714 applies aria-label/-describedby/-live." },
+        "responsive": {
+          "status": "dead",
+          "evidence": "no reader in either repo (audit L20; objectui@fb35e48 re-grepped 2026-07-16)",
+          "authorWarn": true,
+          "authorHint": "List-level responsive config does nothing — renderers adapt automatically. Remove the block."
+        },
+        "performance": {
+          "status": "dead",
+          "evidence": "no reader in either repo (audit L20; objectui@fb35e48 re-grepped 2026-07-16)",
+          "authorWarn": true,
+          "authorHint": "List-level performance hints are not consumed — virtualScroll is the wired knob. Remove the block."
+        },
+        "userFilters": { "status": "live", "note": "objectui: UserFilters.tsx — element/fields/tabs/showAllRecords wired (audit L15); object views narrow to ObjectUserFiltersSchema (ADR-0047 amendment, #2679/objectui#2338)." }
+      }
+    },
+    "form": {
+      "children": {
+        "type": { "status": "live", "note": "objectui: ObjectForm.tsx:135-242 variant routing (simple/tabbed/wizard/split/drawer/modal) + SchemaForm.tsx:625 (tabbed). Mainstream RecordFormPage path hardcodes formType:'simple' (audit L12) — variants are fully honored on the plugin-form/showcase and metadata-admin paths only." },
+        "layout": { "status": "live", "note": "objectui: ObjectForm.tsx:826, ModalForm.tsx:468, DrawerForm.tsx:384 (vertical/horizontal)." },
+        "columns": { "status": "live", "note": "objectui: ModalForm.tsx:247-258 / DrawerForm.tsx:478 applyAutoLayout column count." },
+        "title": { "status": "live", "note": "objectui: ModalForm.tsx:662 / DrawerForm.tsx:528 header; ObjectView form adapter (audit L25)." },
+        "description": { "status": "live", "note": "objectui: ModalForm.tsx:662-681 / DrawerForm.tsx:528-558 render it under the title." },
+        "defaultTab": { "status": "live", "note": "objectui: ObjectForm.tsx:185 → tabbed variant." },
+        "tabPosition": { "status": "live", "note": "objectui: ObjectForm.tsx:186 → tabbed variant." },
+        "allowSkip": { "status": "live", "note": "objectui: WizardForm.tsx:397-444 (step navigation gating)." },
+        "showStepIndicator": { "status": "live", "note": "objectui: WizardForm.tsx:438." },
+        "splitDirection": { "status": "live", "note": "objectui: SplitForm.tsx:205." },
+        "splitSize": { "status": "live", "note": "objectui: SplitForm.tsx:206." },
+        "splitResizable": { "status": "live", "note": "objectui: SplitForm.tsx:275." },
+        "drawerSide": { "status": "live", "note": "objectui: DrawerForm.tsx:185." },
+        "drawerWidth": { "status": "live", "note": "objectui: DrawerForm.tsx:377-382 still reads it. DEPRECATED in spec (#2578 → size buckets; a pixel width can't be authored blind) — live-but-deprecated, remove the read when the deprecation completes." },
+        "modalSize": { "status": "live", "note": "objectui: ModalForm.tsx:263." },
+        "data": {
+          "status": "dead",
+          "evidence": "no form-path reader in either repo (objectui@fb35e48 grepped 2026-07-16)",
+          "note": "ViewDataSchema provider modes are honored on the LIST path (ListView.tsx:841) but nothing on the form path reads form.data — form data binding comes from the record route/object context (RecordFormPage / ObjectForm dataSource).",
+          "authorWarn": true,
+          "authorHint": "form.data is not consumed — a form binds to its object/record via the route context. Remove the block (list views do honor data providers)."
+        },
+        "sections": { "status": "live", "note": "objectui: form renderers + spec-bridge form-view.ts:169 (audit L17)." },
+        "groups": { "status": "live", "note": "objectui: legacy alias of sections, normalized at ObjectForm.tsx:90 and spec-bridge form-view.ts:169 (spec.sections ?? spec.groups). Audit L24 drift resolved by alias-at-one-boundary." },
+        "subforms": { "status": "live", "note": "objectui: deriveMasterDetail.ts:338, LineItemsPanel.tsx:45 — master-detail fully wired (audit L17)." },
+        "defaultSort": {
+          "status": "dead",
+          "evidence": "no reader in either repo (audit L20; objectui@fb35e48 re-grepped 2026-07-16)",
+          "authorWarn": true,
+          "authorHint": "defaultSort on a form view sorts nothing — related-list ordering is not read from here. Configure sorting on the related list view instead."
+        },
+        "sharing": { "status": "live", "evidence": "packages/rest/src/rest-server.ts:4384", "note": "Framework-side consumer: public (anonymous) form endpoints opt in via FormView.sharing — /forms/:slug resolves sharing.publicLink across form + formViews (rest-server.ts:1716, :4366-4405) and grants publicFormGrant. Renderer-side the config is not read (audit L20) — the public form is served, not re-parsed client-side." },
+        "submitBehavior": { "status": "live", "note": "objectui: WizardForm.tsx:315-316 + ObjectForm.tsx dispatch thank-you/redirect/continue/next-record; covered by ObjectForm.submitBehavior.test.tsx / WizardForm.successBehavior.test.tsx. Supersedes the 2026-06 audit's DEAD line (L20) — wiring landed with the objectui#2545/#2552 reconciliation." },
+        "buttons": { "status": "experimental", "note": "#2998 Track A — structured action-button config awaiting the ObjectForm read (objectui#2545); the renderer still reads the flat invented showSubmit/submitText keys (ObjectForm.tsx:147-157). Spec .describe() carries the [EXPERIMENTAL — NOT ENFORCED] marker; drop marker + flip to live when the wiring lands." },
+        "defaults": { "status": "experimental", "note": "#2998 Track A — create-mode initial values awaiting the ObjectForm read (objectui#2545); the renderer still reads the flat invented initialValues key (ObjectForm.tsx:364-437). Spec marker as above." },
+        "aria": {
+          "status": "dead",
+          "evidence": "no reader in either repo (objectui@fb35e48 grepped 2026-07-16: no schema.aria read in plugin-form/SchemaForm; only ListView applies aria)",
+          "note": "Benign a11y metadata — not authorWarn'd (README rule 1), but a candidate for wiring alongside the objectui#2545 form pass."
+        }
+      }
+    },
+    "listViews": {
+      "status": "live",
+      "evidence": "packages/spec/src/ui/view.zod.ts:1432",
+      "note": "Named list views. Framework: expandViewContainer flattens container views into per-object view items (collision diagnostics via expandViewContainerWithDiagnostics). objectui: MetadataProvider.tsx:118-146 merges view metadata into objectDef.listViews — the saved-view switcher (ViewTabBar) reads only listViews (ADR-0047 'views' mode). Same inner shape as `list`; per-key classification lives under list.children."
+    },
+    "formViews": {
+      "status": "live",
+      "evidence": "packages/rest/src/rest-server.ts:4384",
+      "note": "Named form views. Framework: public-form slug resolution scans form + every formViews entry (rest-server.ts:4384-4405); expandViewContainer flattens them. objectui: MetadataProvider routes viewKind:'form' items into objectDef.formViews (never into the list switcher). Same inner shape as `form`; per-key classification lives under form.children."
+    }
+  }
+}

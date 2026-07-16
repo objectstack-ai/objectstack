@@ -1,6 +1,6 @@
 # ADR-0062: External Datasource Runtime — connection lifecycle, credentials, visibility & query completeness
 
-**Status**: Proposed — recommended for acceptance; consolidates the runtime gaps surfaced while implementing ADR-0015 federation. Some requirements are already shipped (marked ✅ below); the open decisions are D1–D8 (2026-06-22).
+**Status**: Accepted (2026-06-22) — D1–D8 implemented (`service-datasource` connection service + opt-in-safe gate + fail-closed connect policy; native-SQL declines external per D6; D7 lint in `validate-expressions.ts`).
 
 **Supersedes the runtime portions of**: ADR-0015 §18 addendum (kept as the historical record). ADR-0015 remains the canonical spec/binding decision; this ADR is the canonical *runtime* decision.
 

@@ -136,7 +136,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       ban_user: {
         label: "Ban User",
         confirmText: "Ban this user? They will be signed out and unable to sign in until unbanned.",
-        successMessage: "User banned"
+        successMessage: "User banned",
+        params: {
+          banReason: {
+            label: "Ban Reason"
+          }
+        }
       },
       unban_user: {
         label: "Unban User",
@@ -148,15 +153,46 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       create_user: {
         label: "Create User",
-        successMessage: "User created"
+        successMessage: "User created",
+        params: {
+          phoneNumber: {
+            label: "Phone Number",
+            helpText: "Sign-in phone number (E.164, e.g. +8613800000000). Required when no email is given."
+          },
+          generatePassword: {
+            label: "Generate Temporary Password"
+          },
+          password: {
+            label: "Password (leave empty to generate)"
+          },
+          mustChangePassword: {
+            label: "Require Password Change On First Login"
+          }
+        }
       },
       set_user_password: {
         label: "Set Password",
-        successMessage: "Password updated"
+        successMessage: "Password updated",
+        params: {
+          generatePassword: {
+            label: "Generate Temporary Password"
+          },
+          newPassword: {
+            label: "New Password (leave empty to generate)"
+          },
+          mustChangePassword: {
+            label: "Require Password Change On Next Login"
+          }
+        }
       },
       set_user_role: {
         label: "Set Platform Role",
-        successMessage: "Role updated"
+        successMessage: "Role updated",
+        params: {
+          role: {
+            label: "Platform Role"
+          }
+        }
       },
       impersonate_user: {
         label: "Impersonate User",
@@ -169,11 +205,27 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       change_my_password: {
         label: "Change Password",
-        successMessage: "Password changed"
+        successMessage: "Password changed",
+        params: {
+          currentPassword: {
+            label: "Current Password"
+          },
+          newPassword: {
+            label: "New Password"
+          },
+          revokeOtherSessions: {
+            label: "Sign out other devices"
+          }
+        }
       },
       change_my_email: {
         label: "Change Email",
-        successMessage: "Verification email sent — check the new address to confirm."
+        successMessage: "Verification email sent — check the new address to confirm.",
+        params: {
+          newEmail: {
+            label: "New Email"
+          }
+        }
       },
       resend_verification_email: {
         label: "Resend Verification Email",
@@ -182,21 +234,41 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       delete_my_account: {
         label: "Delete My Account",
         confirmText: "Permanently delete your account? This cannot be undone — all your sessions will be terminated and all data you own will be removed per the configured retention policy.",
-        successMessage: "Account deleted"
+        successMessage: "Account deleted",
+        params: {
+          password: {
+            label: "Current Password"
+          }
+        }
       },
       enable_two_factor: {
         label: "Enable Two-Factor Auth",
-        successMessage: "Two-factor authentication enabled. Scan the QR code or paste the otpauth URI into your authenticator app, then verify a code to complete setup."
+        successMessage: "Two-factor authentication enabled. Scan the QR code or paste the otpauth URI into your authenticator app, then verify a code to complete setup.",
+        params: {
+          password: {
+            label: "Current Password"
+          }
+        }
       },
       disable_two_factor: {
         label: "Disable Two-Factor Auth",
         confirmText: "Turn off two-factor authentication? Your account will be less secure.",
-        successMessage: "Two-factor authentication disabled."
+        successMessage: "Two-factor authentication disabled.",
+        params: {
+          password: {
+            label: "Current Password"
+          }
+        }
       },
       generate_backup_codes: {
         label: "Regenerate Backup Codes",
         confirmText: "Generate a new set of backup codes? Any previously generated codes will stop working.",
-        successMessage: "New backup codes generated — save them somewhere safe."
+        successMessage: "New backup codes generated — save them somewhere safe.",
+        params: {
+          password: {
+            label: "Current Password"
+          }
+        }
       }
     }
   },
@@ -340,7 +412,21 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _actions: {
       link_social: {
-        label: "Link Social Account"
+        label: "Link Social Account",
+        params: {
+          provider: {
+            label: "Provider",
+            options: {
+              google: "Google",
+              github: "GitHub",
+              microsoft: "Microsoft",
+              apple: "Apple",
+              facebook: "Facebook",
+              gitlab: "GitLab",
+              discord: "Discord"
+            }
+          }
+        }
       },
       unlink_account: {
         label: "Unlink Account",
@@ -897,16 +983,31 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _actions: {
       enable_two_factor: {
-        label: "Enable 2FA"
+        label: "Enable 2FA",
+        params: {
+          password: {
+            label: "Current Password"
+          }
+        }
       },
       disable_two_factor: {
         label: "Disable 2FA",
         confirmText: "Disable two-factor authentication on your account?",
-        successMessage: "2FA disabled"
+        successMessage: "2FA disabled",
+        params: {
+          password: {
+            label: "Current Password"
+          }
+        }
       },
       regenerate_backup_codes: {
         label: "Regenerate Backup Codes",
-        confirmText: "Regenerate backup codes? All previous backup codes will stop working immediately."
+        confirmText: "Regenerate backup codes? All previous backup codes will stop working immediately.",
+        params: {
+          password: {
+            label: "Current Password"
+          }
+        }
       }
     }
   },
@@ -1148,7 +1249,25 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "OAuth application enabled"
       },
       create_oauth_application: {
-        label: "Register OAuth Application"
+        label: "Register OAuth Application",
+        params: {
+          name: {
+            label: "Application Name"
+          },
+          redirectURLs: {
+            label: "Redirect URLs",
+            helpText: "One URL per line. Must use https:// in production."
+          },
+          type: {
+            label: "Application Type",
+            options: {
+              web: "Web",
+              native: "Native",
+              "user-agent-based": "User-agent based",
+              public: "Public"
+            }
+          }
+        }
       },
       rotate_client_secret: {
         label: "Rotate Client Secret",
@@ -1301,6 +1420,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       private_key: {
         label: "Private Key",
         help: "JSON-serialized JWK private key (encrypted at rest)"
+      },
+      alg: {
+        label: "Algorithm",
+        help: "JWK signing algorithm, e.g. `EdDSA` (better-auth 1.7+)"
+      },
+      crv: {
+        label: "Curve",
+        help: "JWK curve for EdDSA/EC keys, e.g. `Ed25519` (better-auth 1.7+)"
       },
       created_at: {
         label: "Created At"

@@ -1,6 +1,6 @@
 # ADR-0066: Unified authorization model — capability registry, secure-by-default posture, resource→capability contracts, dual-surface gates
 
-**Status**: Proposed (2026-06-23)
+**Status**: Accepted (2026-06-23) — D1–D5 + refinements ⑤/⑨ implemented (capability registry + `defineCapability` seeding, `access.default` posture with posture-gated superuser bypass, `requiredPermissions` AND-gates on object/field/action, `crudBucketForOperation`, `validateCapabilityReferences` lint); D4's UI half enforced in objectui ActionRunner.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (`readScope`/`writeScope` depth: own/unit/unit_and_below/org), [ADR-0058](./0058-expression-and-predicate-surface.md) (CEL predicate surface used by RLS); relates to cloud ADR-0016 (authz open/paid boundary)
 **Consumers**: `@objectstack/spec` (object/app/permission schemas), `@objectstack/plugin-security` (RLS/FLS compiler + enforcement), `../objectui` (ActionRunner + app/nav gating), `../cloud` (control-plane objects, e.g. `sys_license`)

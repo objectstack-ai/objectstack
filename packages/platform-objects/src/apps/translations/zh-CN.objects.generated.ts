@@ -136,7 +136,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       ban_user: {
         label: "封禁用户",
         confirmText: "要封禁该用户吗？封禁后会立即登出，且在解除封禁前无法再次登录。",
-        successMessage: "用户已封禁"
+        successMessage: "用户已封禁",
+        params: {
+          banReason: {
+            label: "封禁原因"
+          }
+        }
       },
       unban_user: {
         label: "解除封禁",
@@ -148,15 +153,46 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       create_user: {
         label: "创建用户",
-        successMessage: "用户已创建"
+        successMessage: "用户已创建",
+        params: {
+          phoneNumber: {
+            label: "手机号",
+            helpText: "登录手机号（E.164 格式，如 +8613800000000）。未填写邮箱时必填。"
+          },
+          generatePassword: {
+            label: "生成临时密码"
+          },
+          password: {
+            label: "密码（留空则自动生成）"
+          },
+          mustChangePassword: {
+            label: "首次登录时必须修改密码"
+          }
+        }
       },
       set_user_password: {
         label: "设置密码",
-        successMessage: "密码已更新"
+        successMessage: "密码已更新",
+        params: {
+          generatePassword: {
+            label: "生成临时密码"
+          },
+          newPassword: {
+            label: "新密码（留空则自动生成）"
+          },
+          mustChangePassword: {
+            label: "下次登录时必须修改密码"
+          }
+        }
       },
       set_user_role: {
         label: "设置平台角色",
-        successMessage: "角色已更新"
+        successMessage: "角色已更新",
+        params: {
+          role: {
+            label: "平台角色"
+          }
+        }
       },
       impersonate_user: {
         label: "模拟用户",
@@ -169,11 +205,27 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       change_my_password: {
         label: "修改密码",
-        successMessage: "已修改密码"
+        successMessage: "已修改密码",
+        params: {
+          currentPassword: {
+            label: "当前密码"
+          },
+          newPassword: {
+            label: "新密码"
+          },
+          revokeOtherSessions: {
+            label: "登出其他设备"
+          }
+        }
       },
       change_my_email: {
         label: "修改邮箱",
-        successMessage: "已发送验证邮件，请前往新邮箱确认。"
+        successMessage: "已发送验证邮件，请前往新邮箱确认。",
+        params: {
+          newEmail: {
+            label: "新邮箱"
+          }
+        }
       },
       resend_verification_email: {
         label: "重发验证邮件",
@@ -182,21 +234,41 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       delete_my_account: {
         label: "删除我的账号",
         confirmText: "确定要永久删除您的账户吗？此操作无法撤销——您的所有会话都将被终止，并将按照配置的保留策略移除您拥有的所有数据。",
-        successMessage: "已删除账号"
+        successMessage: "已删除账号",
+        params: {
+          password: {
+            label: "当前密码"
+          }
+        }
       },
       enable_two_factor: {
         label: "启用双因素认证",
-        successMessage: "双因素认证已启用。用身份验证器 App 扫描二维码或粘贴 otpauth URI，然后验证一次动态码以完成设置。"
+        successMessage: "双因素认证已启用。用身份验证器 App 扫描二维码或粘贴 otpauth URI，然后验证一次动态码以完成设置。",
+        params: {
+          password: {
+            label: "当前密码"
+          }
+        }
       },
       disable_two_factor: {
         label: "停用双因素认证",
         confirmText: "要关闭双因素认证吗？您的账户安全性将降低。",
-        successMessage: "双因素认证已停用。"
+        successMessage: "双因素认证已停用。",
+        params: {
+          password: {
+            label: "当前密码"
+          }
+        }
       },
       generate_backup_codes: {
         label: "重新生成备用码",
         confirmText: "要生成一组新的备用码吗？之前生成的备用码将全部失效。",
-        successMessage: "新备用码已生成——请妥善保存。"
+        successMessage: "新备用码已生成——请妥善保存。",
+        params: {
+          password: {
+            label: "当前密码"
+          }
+        }
       }
     }
   },
@@ -340,7 +412,21 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _actions: {
       link_social: {
-        label: "关联社交账号"
+        label: "关联社交账号",
+        params: {
+          provider: {
+            label: "服务提供商",
+            options: {
+              google: "Google",
+              github: "GitHub",
+              microsoft: "Microsoft",
+              apple: "Apple",
+              facebook: "Facebook",
+              gitlab: "GitLab",
+              discord: "Discord"
+            }
+          }
+        }
       },
       unlink_account: {
         label: "解除关联",
@@ -897,16 +983,31 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _actions: {
       enable_two_factor: {
-        label: "启用 2FA"
+        label: "启用 2FA",
+        params: {
+          password: {
+            label: "当前密码"
+          }
+        }
       },
       disable_two_factor: {
         label: "停用 2FA",
         confirmText: "要停用你账号上的双因素认证吗？",
-        successMessage: "2FA 已停用"
+        successMessage: "2FA 已停用",
+        params: {
+          password: {
+            label: "当前密码"
+          }
+        }
       },
       regenerate_backup_codes: {
         label: "重新生成备用码",
-        confirmText: "确定要重新生成备份码吗？此前的所有备份码将立即失效。"
+        confirmText: "确定要重新生成备份码吗？此前的所有备份码将立即失效。",
+        params: {
+          password: {
+            label: "当前密码"
+          }
+        }
       }
     }
   },
@@ -1148,7 +1249,25 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "OAuth 应用已启用"
       },
       create_oauth_application: {
-        label: "注册 OAuth 应用"
+        label: "注册 OAuth 应用",
+        params: {
+          name: {
+            label: "应用名称"
+          },
+          redirectURLs: {
+            label: "回调 URL",
+            helpText: "每行一个 URL。生产环境必须使用 https://。"
+          },
+          type: {
+            label: "应用类型",
+            options: {
+              web: "Web",
+              native: "原生应用",
+              "user-agent-based": "基于 User-Agent",
+              public: "公共客户端"
+            }
+          }
+        }
       },
       rotate_client_secret: {
         label: "轮换 Client Secret",
@@ -1301,6 +1420,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       private_key: {
         label: "私钥",
         help: "JWK 私钥的 JSON 序列化内容（静态存储时加密）"
+      },
+      alg: {
+        label: "算法",
+        help: "JWK 签名算法，如 `EdDSA`（better-auth 1.7+）"
+      },
+      crv: {
+        label: "曲线",
+        help: "EdDSA/EC 密钥使用的 JWK 曲线，如 `Ed25519`（better-auth 1.7+）"
       },
       created_at: {
         label: "创建时间"

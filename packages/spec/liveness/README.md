@@ -80,7 +80,7 @@ binding lands one class at a time (ADR-0054 §3), never as a big-bang backfill.
 | Master-detail controlled-by-parent | ✅ enforced | `object.sharingModel` | `controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent` |
 | Flow nodes | ✅ enforced | `flow.nodes.type` | `flow-node.dogfood.test.ts#flow-node-execution` |
 | Analytics dims/measures | ✅ enforced | `dataset.dimensions.dateGranularity` | `analytics-timezone.dogfood.test.ts#analytics-tz-bucketing` |
-| Form layout/section/widget | ⛔ pending | — | none yet (form surface not yet governed) |
+| Form layout/section/widget | ⛔ pending | — | none yet (`view` is governed as of #2998 Track B, so `view.form.*` can carry the binding — the dogfood proof is the missing half) |
 
 To bind a pending class: add its dogfood proof + `@proof:` tag, set `bound: true` and
 its `ledgerBindings` in `proof-registry.mts`, add the `proof` to the ledger entry, and
@@ -166,7 +166,7 @@ The governed set is `GOVERNED` at the top of `check-liveness.mts`. To add a type
    RecordDetailView had been gating the History tab on it the whole time (#2707).
 4. Add the type to `GOVERNED`; confirm the gate is green.
 
-## Current state — 12 governed types
+## Current state — 13 governed types
 
 Counts include drilled `children` entries; regenerate with the snippet below rather
 than hand-editing (this table drifted badly once — field was listed 34/39 while the
@@ -201,8 +201,9 @@ EOF
 | skill | 10 | – | – | – | fully live |
 | dataset | 19 | – | 1 | – | `measures.certified` declared-but-unenforced governance flag |
 | page | 16 | – | – | 1 | fully live + one planned |
+| view | 68 | 2 | 5 | – | list/form drilled via `children` (#2998 Track B); dead = list.{responsive,performance} + form.{data,defaultSort,aria}, all but aria authorWarn'd; exp = form.{buttons,defaults} awaiting objectui#2545; audit-era DEAD lines superseded by re-verification (submitBehavior, sharing.lockedBy, list ViewData providers, and the ADR-0021 chart shape — all live now); level-2 dead residue (userActions.buttons, addRecord.mode/formView, tabs[].order) noted on parents — one drill level only |
 
 The `dead` set across types is the enforce-or-remove worklist (ADR-0049); every
 misleading entry carries `authorWarn` so authors hear about it at compile time.
-Not yet governed (rollout): view, dashboard, app, report, job, datasource,
+Not yet governed (rollout): dashboard, app, report, job, datasource,
 translation, email_template, doc, book, validation, seed.

@@ -1,6 +1,6 @@
 # ADR-0058: The Expression & Predicate Surface — One Authoring Language, Two Backends, and the Pushdown-Compiler Reconciliation (#1887)
 
-**Status**: Proposed (2026-06-21)
+**Status**: Accepted (2026-06-21) — implemented: canonical CEL→Filter compiler (`formula/src/cel-to-filter.ts`), RLS + sharing cutover (`rls-compiler.ts`, `bootstrap-declared-sharing-rules.ts`), `check` enforced on writes, expression-surface conformance ledger CI-gated (`dogfood/test/expression-conformance.ledger.ts`).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (runtime proof), [ADR-0055](./0055-master-detail-controlled-by-parent.md) (RLS reuses pre-resolved membership IN-form; **no compiler subquery**), [ADR-0056](./0056-permission-model-landing-verification.md) (permission-model landing), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (ERP authz core)
 **Consumers**: `@objectstack/formula`, `@objectstack/objectql`, `@objectstack/plugin-security`, `@objectstack/plugin-sharing`, `@objectstack/service-analytics`, `@objectstack/service-automation`, `@objectstack/spec`, `@objectstack/verify`

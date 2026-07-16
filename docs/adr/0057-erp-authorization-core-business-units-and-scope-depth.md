@@ -1,6 +1,6 @@
 # ADR-0057: ERP-Grade Authorization Core — Business-Unit Partitioning, Scope-Depth Grants, and Hierarchy Rollup
 
-**Status**: Proposed (2026-06-21)
+**Status**: Accepted in part (2026-06-21) — D1–D3/D8 implemented (scope-depth enum + evaluator, `sys_business_unit` tree, hierarchy-resolver seam, conformance rows); **D4–D7 superseded by ADR-0090 D3 / ADR-0095**: the `sys_role`/`sys_user_role`/`role_and_subordinates` vocabulary never shipped — the code realizes them as flat `sys_position`/`sys_user_position` with rollup on the BU tree. This ADR's own implementation-status table predates that supersession; read it with the rename applied.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0010](./0010-metadata-protection.md) (metadata protection / object ownership),
 [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove),

@@ -1,6 +1,6 @@
 # ADR-0081: A trusted `kind:'react'` page tier — real React executed in the main tree, gated by a host capability; and renaming `kind:'jsx'` → `kind:'html'`
 
-**Status**: Proposed (2026-06-30)
+**Status**: Accepted (2026-06-30) — framework scope implemented (`html`/`react` page kinds + `jsx` alias, lint split `validate-jsx-pages`/`validate-react-pages`, `OS_PAGE_REACT=off` server toggle); the `@object-ui/react-runtime` executor + `CAP_REACT_PAGES` gate live in objectui.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0080](./0080-ai-authored-ui-jsx-source.md) (AI authors a *constrained* JSX text, parsed-never-executed, into the SDUI tree; the component registry is the contract; capability ≠ contract), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (AI writes metadata via draft-gated `saveMetaItem` — the human-review boundary), [ADR-0077](./0077-authoring-surface-boundary-hook-flow-validation.md) (route by intent; verifiability tier = friction tier; **code is the flagged escape hatch**), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently-inert metadata).
 **Consumers**: `@objectstack/spec` (`packages/spec/src/ui/page.zod.ts` — `kind` gains `'html'` and `'react'`; `'jsx'` kept as a deprecated alias), `@objectstack/lint` (`validate-jsx-pages` — lints `html`/`jsx`, **skips** `react`), `../objectui` `@object-ui/react-runtime` (**new** — the trusted runtime-React executor) + `@object-ui/core` (the host capability gate) + `@object-ui/components` (PageRenderer routing + the full HTML tag set).

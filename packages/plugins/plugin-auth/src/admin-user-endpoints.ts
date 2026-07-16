@@ -197,6 +197,10 @@ export function isLikelyEmail(value: string): boolean {
 /**
  * Resolve the password for a create/set request: an explicit `password` /
  * `newPassword`, or a generated temporary one when `generatePassword` is true.
+ * An explicit non-empty password always wins over `generatePassword` — the
+ * console action dialog defaults `generatePassword: true` and labels the
+ * password input "leave empty to generate", so typing a password is an
+ * unambiguous override, not a conflict.
  * Returns an EndpointResult on validation failure.
  */
 async function resolvePassword(
@@ -206,11 +210,8 @@ async function resolvePassword(
 ): Promise<{ password: string; generated: boolean } | EndpointResult> {
   const explicit = body[explicitKey];
   const generate = body.generatePassword === true;
-  if (generate && explicit !== undefined) {
-    return badRequest(`Provide either ${explicitKey} or generatePassword, not both`);
-  }
-  if (generate) return { password: generateTemporaryPassword(), generated: true };
   if (typeof explicit !== 'string' || explicit.length === 0) {
+    if (generate) return { password: generateTemporaryPassword(), generated: true };
     return badRequest(`${explicitKey} is required (or set generatePassword: true)`);
   }
   try {

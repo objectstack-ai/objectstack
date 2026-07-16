@@ -19,9 +19,11 @@ import { test, expect } from '@playwright/test';
  * semantic-zoo fixtures are objects but not seeded records — each run
  * creates its own rows via the REST API.
  *
- * NOTE: assertions are scoped to what the *pinned* console build supports
- * (.objectui-sha). Group icon/description chrome ships with a later objectui
- * bump — extend the grouped case then.
+ * Assertions are scoped to what the *pinned* console build supports
+ * (.objectui-sha). The fb35e48 bump brought in objectui#2577, so the grouped
+ * case also pins the follow-up UX contract: highlight strip drops the record
+ * title, group icon/description render, and currencyConfig money shows its
+ * symbol.
  */
 
 const APP = process.env.SHOWCASE_APP || 'com.example.showcase';
@@ -85,6 +87,14 @@ test('grouped: fieldGroup sections render and Money starts collapsed', async ({ 
   // record:path renders a desktop + a mobile variant — assert the visible one.
   await expect(page.locator(PATH_STEPPER).first()).toBeVisible();
 
+  // objectui#2577: the record title is the page H1 — it must NOT repeat as a
+  // (truncated) chip in the highlight strip; status/amount still do.
+  const strip = page.locator('section[aria-label="Record highlights"]');
+  await expect(strip).toBeVisible();
+  const stripText = (await strip.innerText()).replace(/\s+/g, ' ');
+  expect(stripText, 'strip repeats the record title').not.toContain('E2E Zoo');
+  expect(stripText).toContain('4,200');
+
   // Declared groups render as titled sections. Their highlighted members
   // (status/amount) are hoisted to the strip; the non-highlighted members
   // (code/budget) keep the groups visible in the body.
@@ -92,10 +102,22 @@ test('grouped: fieldGroup sections render and Money starts collapsed', async ({ 
   await expect(page.getByText('Money', { exact: true })).toBeVisible();
   await expect(page.getByText('ZG-1')).toBeVisible();
 
+  // objectui#2577: fieldGroups[].icon renders as a real (Lucide svg) icon in
+  // the section header — not as literal icon-name text.
+  await expect(
+    page.locator('div:has(> span:text-is("Money")) svg').first(),
+    'Money header icon svg',
+  ).toBeVisible();
+  await expect(page.getByText('banknote', { exact: true })).toHaveCount(0);
+
   // collapse: 'collapsed' — Budget stays hidden until the header is opened.
   await expect(page.getByText('Budget', { exact: true })).toHaveCount(0);
   await page.getByText('Money', { exact: true }).click();
   await expect(page.getByText('Budget', { exact: true })).toBeVisible();
+  // objectui#2577: fieldGroups[].description renders under the expanded
+  // header, and currencyConfig.defaultCurrency drives a real $ symbol.
+  await expect(page.getByText('Financial fields — collapsed by default.')).toBeVisible();
+  await expect(page.getByText('$100,000', { exact: false }).first()).toBeVisible();
 
   expect(errors, 'uncaught page errors on grouped detail').toEqual([]);
 });
@@ -133,6 +155,16 @@ test('ungrouped + related-heavy: flat details and related-list tabs on Contoso',
   // Ungrouped shape: the Details body is flat — no fieldGroup section cards.
   // (Contoso declares no fieldGroups; spot-check a body field label.)
   await expect(page.getByText('Basics', { exact: true })).toHaveCount(0);
+
+  // objectui#2577 + currencyConfig: annual revenue renders with its symbol
+  // in the strip, and the meta footer doesn't dangle "Created by" on the
+  // actor-less seeded row.
+  await expect(page.getByText('$25,000,000', { exact: false }).first()).toBeVisible();
+  const footer = page.locator('[data-testid="record-meta-footer"]');
+  await expect(footer).toBeVisible();
+  const footerText = (await footer.innerText()).replace(/\s+/g, ' ');
+  expect(footerText, 'footer dangles "Created by" without an actor').not.toMatch(/Created by/);
+  expect(footerText).toMatch(/Created/);
 
   // Related lists self-fetch lazily when their tab is shown.
   await invoicesTab.click();

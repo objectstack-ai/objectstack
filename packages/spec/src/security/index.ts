@@ -14,6 +14,7 @@ export * from './permission.zod';
 export * from './permission.form';
 export * from './capabilities';
 export * from './high-privilege';
+export * from './public-form';
 export * from './explain.zod';
 export * from './sharing.zod';
 export * from './territory.zod';

@@ -44,6 +44,8 @@ export type {
 } from './permission-set-projection.js';
 export { cleanupPackagePermissions } from './cleanup-package-permissions.js';
 export type { PackagePermissionCleanupOutcome } from './cleanup-package-permissions.js';
+export { objectPostureGate, registerObjectPostureGate } from './object-posture-gate.js';
+export type { ObjectPostureGateContext } from './object-posture-gate.js';
 export { claimSeedOwnership } from './claim-seed-ownership.js';
 export { normalizeManagedByVocab } from './normalize-managed-by.js';
 export { appDefaultPermissionSetName } from './app-default-permission-set.js';

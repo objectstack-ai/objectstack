@@ -8,6 +8,7 @@ import { isMcpServerEnabled } from '@objectstack/types';
 import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
+import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 
 /**
  * The protocol slice the REST layer actually consumes (ADR-0076 D9 / #2462
@@ -4499,6 +4500,12 @@ export class RestServer {
                                 }
                                 const fields: Record<string, any> = {};
                                 for (const [name, def] of Object.entries(obj.fields)) {
+                                    // [#3022] Server-managed anchors are never
+                                    // renderable/writable on the anonymous form
+                                    // surface — the submit route refuses them, so
+                                    // don't advertise them here (declared or via
+                                    // the zero-sections all-fields expansion).
+                                    if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(name)) continue;
                                     if (allowed.size === 0 || allowed.has(name)) {
                                         fields[name] = def;
                                     }
@@ -4536,6 +4543,11 @@ export class RestServer {
                     const safeForm = (() => {
                         if (!match.form || !Array.isArray(match.form.sections)) return match.form;
                         const allow = (name: string, cfg: any): boolean => {
+                            // [#3022] A declared server-managed anchor (e.g. a
+                            // FormView listing `owner_id`) is a spec mistake —
+                            // drop it from the rendered sections so the form
+                            // never collects a value the submit route refuses.
+                            if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(name)) return false;
                             const def = objectSchema?.fields?.[name];
                             const t = def?.type;
                             // `user` is a lookup specialized to sys_user — same risk as a
@@ -4613,14 +4625,23 @@ export class RestServer {
                             else if (f?.field) allowedFields.add(f.field);
                         }
                     }
+                    // [#3022] System-managed anchors (owner_id, organization_id,
+                    // audit columns, id, …) are NEVER client-suppliable on this
+                    // anonymous surface — not via an explicit section declaration,
+                    // and not via the zero-declared-sections fallback below (which
+                    // otherwise passes the raw body through and previously let a
+                    // visitor forge record ownership). The SecurityPlugin's
+                    // publicFormGrant branch strips the same set at the data layer,
+                    // so this filter and the engine boundary cannot drift.
                     const rawBody = (req.body && typeof req.body === 'object') ? req.body : {};
                     const filteredData: Record<string, unknown> = {};
-                    if (allowedFields.size > 0) {
-                        for (const [k, v] of Object.entries(rawBody)) {
-                            if (allowedFields.has(k)) filteredData[k] = v;
-                        }
-                    } else {
-                        Object.assign(filteredData, rawBody);
+                    for (const [k, v] of Object.entries(rawBody)) {
+                        if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(k)) continue;
+                        // JSON.parse yields `__proto__` as an OWN key; assigning it
+                        // here would REPLACE filteredData's prototype and smuggle
+                        // inherited anchors past every own-property check downstream.
+                        if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+                        if (allowedFields.size === 0 || allowedFields.has(k)) filteredData[k] = v;
                     }
 
                     // ADR-0056 (Option A): authorization DERIVED from the declared
@@ -4692,16 +4713,22 @@ export class RestServer {
                     // `publicPicker` block. Without it the lookup is
                     // considered private — return 403, not 404, so a
                     // misconfigured form is loud rather than silent.
+                    // [#3022] Server-managed anchors are unwritable on this
+                    // surface (the submit route strips them), so a picker on
+                    // one (e.g. a declared `owner_id` + `publicPicker`, which
+                    // would open anonymous sys_user search) is refused outright.
                     let fieldCfg: any = null;
-                    for (const sec of match.form?.sections ?? []) {
-                        for (const f of sec?.fields ?? []) {
-                            const name = typeof f === 'string' ? f : f?.field;
-                            if (name === fieldName) {
-                                fieldCfg = typeof f === 'string' ? {} : f;
-                                break;
+                    if (!PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(fieldName)) {
+                        for (const sec of match.form?.sections ?? []) {
+                            for (const f of sec?.fields ?? []) {
+                                const name = typeof f === 'string' ? f : f?.field;
+                                if (name === fieldName) {
+                                    fieldCfg = typeof f === 'string' ? {} : f;
+                                    break;
+                                }
                             }
+                            if (fieldCfg) break;
                         }
-                        if (fieldCfg) break;
                     }
                     const picker = fieldCfg?.publicPicker;
                     if (!picker) {

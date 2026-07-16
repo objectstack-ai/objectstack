@@ -210,6 +210,11 @@ export const InvoiceLine = ObjectSchema.create({
       min: 0,
       readonlyWhen: P`parent.status == 'paid'`,
     }),
+    // Per-line attachment (objectui#2360): the inline line-item grid renders a
+    // real upload cell for `file` fields — the "attach the receipt to each
+    // expense line" pattern. Exercises upload-in-grid end-to-end (auto-derived
+    // column, compact picker, persistence through the storage service).
+    receipt: Field.file({ label: 'Receipt' }),
     // Amount = Qty × Unit Price. Kept as a *stored* currency column (so the
     // parent Invoice.total summary can roll it up — summary aggregation reads
     // stored columns, not on-read formula fields), but the `expression` makes

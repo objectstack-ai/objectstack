@@ -253,6 +253,13 @@ OS_SEARCH_PINYIN_ENABLED=false os start   # force off (e.g. a zh-locale stack th
 |:---|:---|:---|:---|
 | `OS_SEARCH_PINYIN_ENABLED` | boolean | locale-derived | Pinyin search recall. When unset, the default derives from the stack's configured locales (`i18n.defaultLocale` / `supportedLocales` / `fallbackLocale`): any `zh-*` locale turns it on; an explicit value always wins. Gates both the compile-time `__search` companion column and the `plugin-pinyin-search` populate hooks, so there is no half-state. Off ⇒ no extra column, and `pinyin-pro` is never loaded. |
 
+Coverage includes `sys_user` — the people picker finds users by pinyin with no
+per-object configuration. Rows that predate the switch are backfilled automatically
+on the first boot after it turns on (paged, idempotent); for runtime bulk imports
+that bypassed write hooks, `rebuildSearchCompanion` (from
+`@objectstack/plugin-pinyin-search`) recomputes the column on demand. See
+[Queries → Pinyin recall](/docs/data-modeling/queries#pinyin-recall-chinese-deployments).
+
 ---
 
 ## Marketplace & Metadata

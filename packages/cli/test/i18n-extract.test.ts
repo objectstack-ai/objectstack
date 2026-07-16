@@ -33,6 +33,31 @@ const config: any = {
         active: { label: 'Active', name: 'active' },
         all: { label: 'All' },
       },
+      actions: [
+        {
+          name: 'set_password',
+          label: 'Set Password',
+          params: [
+            { field: 'label' },
+            { field: 'active', label: 'Enabled Override' },
+            {
+              name: 'generatePassword',
+              label: 'Generate Temporary Password',
+              type: 'boolean',
+              helpText: 'Leave checked to auto-generate.',
+            },
+            {
+              name: 'mode',
+              type: 'select',
+              placeholder: 'Pick a mode',
+              options: [
+                { value: 'auto', label: 'Auto' },
+                { value: 'manual', label: 'Manual' },
+              ],
+            },
+          ],
+        },
+      ],
     },
   ],
   actions: [
@@ -43,7 +68,12 @@ const config: any = {
       confirmText: 'Merge?',
       successMessage: 'Merged.',
     },
-    { name: 'export_csv', label: 'Export CSV', successMessage: 'Done.' },
+    {
+      name: 'export_csv',
+      label: 'Export CSV',
+      successMessage: 'Done.',
+      params: [{ name: 'delimiter', label: 'Delimiter' }],
+    },
   ],
   translations: [
     {
@@ -91,6 +121,27 @@ describe('collectExpectedEntries', () => {
     expect(byPath['objects.sys_position.fields.kind.options.internal']).toBe('Internal');
     expect(byPath['objects.sys_position._actions.merge.label']).toBe('Merge');
     expect(byPath['metadataForms.flow.fields.name.label']).toBe('Name');
+  });
+
+  it('emits action param entries (inline + top-level), skipping field-backed labels without overrides', () => {
+    const entries = collectExpectedEntries(config);
+    const byPath = Object.fromEntries(entries.map((e) => [e.path.join('.'), e.sourceValue]));
+    const base = 'objects.sys_position._actions.set_password.params';
+
+    // Field-backed param with no literal override → no label entry (field
+    // translations cover it at runtime).
+    expect(byPath[`${base}.label.label`]).toBeUndefined();
+    // Field-backed param WITH a literal override → entry under the field name.
+    expect(byPath[`${base}.active.label`]).toBe('Enabled Override');
+    // Inline params emit label / helpText / placeholder / options.
+    expect(byPath[`${base}.generatePassword.label`]).toBe('Generate Temporary Password');
+    expect(byPath[`${base}.generatePassword.helpText`]).toBe('Leave checked to auto-generate.');
+    expect(byPath[`${base}.mode.label`]).toBe('mode'); // no label → falls back to name
+    expect(byPath[`${base}.mode.placeholder`]).toBe('Pick a mode');
+    expect(byPath[`${base}.mode.options.auto`]).toBe('Auto');
+    expect(byPath[`${base}.mode.options.manual`]).toBe('Manual');
+    // Top-level (global) actions get the same treatment.
+    expect(byPath['globalActions.export_csv.params.delimiter.label']).toBe('Delimiter');
   });
 });
 

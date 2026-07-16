@@ -180,6 +180,7 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
   { type: 'permission', key: 'permissions' },
   { type: 'hook', key: 'hooks' },
   { type: 'page', key: 'pages' },
+  { type: 'view', key: 'views' },
 ];
 
 /**
@@ -214,7 +215,10 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
     const warnMap = loadWarnMap(dir, type);
     if (warnMap.size === 0) continue;
     for (const item of asArray(stack[key])) {
-      const name = typeof item.name === 'string' ? item.name : `(unnamed ${type})`;
+      // view containers bind via `object`, not `name`
+      const name = typeof item.name === 'string' ? item.name
+        : typeof item.object === 'string' ? item.object
+        : `(unnamed ${type})`;
       checkItem(type, item, `${type} '${name}'`, warnMap, findings);
     }
   }

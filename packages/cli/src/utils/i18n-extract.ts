@@ -25,7 +25,10 @@
  *   objects.<name>._actions.<action>.label
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
+ *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
+ *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   globalActions.<action>.label / .confirmText / .successMessage
+ *   globalActions.<action>.params.<param>.* (same shape as object actions)
  *   apps.<app>.label / .description
  *   apps.<app>.navigation.<id>.label
  *   dashboards.<dash>.label / .description
@@ -147,6 +150,55 @@ function pushEntry(
   out.push({ path, sourceValue, source, ...extra });
 }
 
+/**
+ * Emit `params.<param>.{label,helpText,placeholder}` and
+ * `params.<param>.options.<value>` entries under an action's translation root.
+ * Mirrors the client-side resolver convention (`actionParamText` /
+ * `actionParamOptionLabel` in @object-ui/i18n) and the `params` slot on
+ * `ObjectTranslationDataSchema._actions`.
+ *
+ * Field-backed params (`{ field: 'email' }`) inherit the referenced field's
+ * translated label/help at runtime, so a label entry is emitted only when the
+ * author overrode it with a literal string. Inline params (name-based) always
+ * emit a label — falling back to the param name, matching the dialog render.
+ * Localized-map labels (`{ en, 'zh-CN' }`) are already multilingual and are
+ * skipped.
+ */
+function pushActionParams(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  if (!Array.isArray(action?.params)) return;
+  for (const param of action.params) {
+    if (!param || typeof param !== 'object') continue;
+    const pname = param.name ?? param.field;
+    if (typeof pname !== 'string' || pname.length === 0) continue;
+    const base = [...actionRoot, 'params', pname];
+    const literalLabel = typeof param.label === 'string' ? param.label : undefined;
+    if (param.field) {
+      if (literalLabel) pushEntry(out, [...base, 'label'], literalLabel, kind, { objectName });
+    } else {
+      pushEntry(out, [...base, 'label'], literalLabel ?? pname, kind, { objectName });
+    }
+    if (typeof param.helpText === 'string' && param.helpText.length > 0) {
+      pushEntry(out, [...base, 'helpText'], param.helpText, kind, { objectName });
+    }
+    if (typeof param.placeholder === 'string' && param.placeholder.length > 0) {
+      pushEntry(out, [...base, 'placeholder'], param.placeholder, kind, { objectName });
+    }
+    if (Array.isArray(param.options)) {
+      for (const opt of param.options) {
+        if (opt && typeof opt === 'object' && 'value' in opt && typeof opt.label === 'string') {
+          pushEntry(out, [...base, 'options', String(opt.value)], opt.label, kind, { objectName });
+        }
+      }
+    }
+  }
+}
+
 /** Collect every translatable entry from a normalized stack config. */
 export function collectExpectedEntries(config: any): ExpectedEntry[] {
   const out: ExpectedEntry[] = [];
@@ -233,6 +285,7 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
         if (action.successMessage) {
           pushEntry(out, ['objects', objectName, '_actions', aname, 'successMessage'], action.successMessage, 'action', { objectName });
         }
+        pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
       }
     }
   }
@@ -266,6 +319,7 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
     if (action.successMessage) {
       pushEntry(out, [...root, 'successMessage'], action.successMessage, kind, { objectName });
     }
+    pushActionParams(out, root, action, kind, objectName);
   }
 
   // ── Apps + navigation ────────────────────────────────────────────

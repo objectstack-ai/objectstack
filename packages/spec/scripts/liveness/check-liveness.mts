@@ -53,7 +53,7 @@ const repoRoot = resolve(specRoot, '../..');
 const ledgerRoot = join(specRoot, 'liveness');
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view'];
 
 // ADR-0010 provenance/lock overlay fields — system-stamped, on every type; auto-live.
 const FRAMEWORK_FIELDS = new Set([

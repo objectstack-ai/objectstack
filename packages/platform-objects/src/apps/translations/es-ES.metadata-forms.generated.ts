@@ -793,6 +793,22 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Variables de página",
         helpText: "Variables de estado local de página"
       },
+      "variables.name": {
+        label: "Nombre",
+        helpText: "Nombre de la variable — expuesta en expresiones como `page.<name>`"
+      },
+      "variables.type": {
+        label: "Tipo",
+        helpText: "Tipo de valor"
+      },
+      "variables.defaultValue": {
+        label: "Valor predeterminado",
+        helpText: "Valor inicial (por defecto, un valor vacío según el tipo)"
+      },
+      "variables.source": {
+        label: "Origen",
+        helpText: "Componente (por id) que escribe esta variable — p. ej. un element:record_picker"
+      },
       regions: {
         label: "Regiones",
         helpText: "Regiones de diseño (header, main, sidebar, footer) con componentes"

@@ -1,6 +1,6 @@
 # ADR-0068: Unified user-context contract & built-in identity roles — one `current_user` shape across formula/RLS/client, identities as roles not booleans
 
-**Status**: Proposed (2026-06-24)
+**Status**: Accepted (2026-06-24) — implemented under the position model: `EvalUser` factory + `current_user` mount (`spec/identity/eval-user.zod.ts`, `formula/stdlib.ts`), built-in identity rows seeded (`bootstrap-builtin-positions.ts`), derived `isPlatformAdmin`. Note: this ADR's `roles[]` is realized as `current_user.positions[]` per ADR-0090 D3 / ADR-0095.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (`sys_role` is platform-native, decoupled from better-auth; `ExecutionContext.roles` = union of `sys_member.role` + `sys_user_role.role`), [ADR-0066](./0066-unified-authorization-model.md) (capability/assignment/requirement separation; resources declare a capability, never "who"), [ADR-0058](./0058-expression-and-predicate-surface.md) (CEL predicate surface)
 **Consumers**: `@objectstack/spec` (the `EvalUser` contract), `@objectstack/plugin-security` (`resolve-execution-context`, RLS), `@objectstack/plugin-auth` (`customSession` bridge), `@objectstack/formula` (`buildScope`), `@objectstack/runtime`, `../objectui` (AuthProvider / ExpressionProvider / predicate scope), `../cloud` (control-plane metadata — consumer only)

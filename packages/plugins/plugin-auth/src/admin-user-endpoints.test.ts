@@ -129,14 +129,28 @@ describe('runAdminCreateUser', () => {
     expect(m.createUser).not.toHaveBeenCalled();
   });
 
-  it('rejects when both password and generatePassword are provided', async () => {
+  it('prefers an explicit password over generatePassword (console dialog sends both)', async () => {
     const m = makeDeps();
     const res = await runAdminCreateUser(
       m.deps,
       makeRequest({ email: 'a@b.co', password: 'Explicit1!', generatePassword: true }),
       ACTOR,
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(m.createUser.mock.calls[0][0].body.password).toBe('Explicit1!');
+    // Explicit password → nothing to hand back once; no temporaryPassword leak.
+    expect((res.body.data as any).temporaryPassword).toBeUndefined();
+  });
+
+  it('still generates when generatePassword is true and the password is empty', async () => {
+    const m = makeDeps();
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'a@b.co', password: '', generatePassword: true }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    expect(typeof (res.body.data as any).temporaryPassword).toBe('string');
   });
 
   it('creates a user via better-auth, stamps must_change_password, audits, and returns the temp password once', async () => {

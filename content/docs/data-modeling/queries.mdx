@@ -380,6 +380,17 @@ the expanded filter; `fields` semantics, `searchableFields`, and drivers are unc
 (ADR-0097). Relevance ranking and typo tolerance remain Tier-2 (native FTS) and are not
 part of this.
 
+**Coverage** — every object with a resolvable display/name field gets the companion,
+**including `sys_user`**: the people picker (which sends a plain `$search` against
+`sys_user`) finds users by pinyin with zero per-object or per-field configuration. Users
+created through any write path — sign-up, admin rename, engine writes — are searchable
+immediately.
+
+**Pre-existing rows** are reconciled automatically: the first boot after the switch turns
+on runs a paged, idempotent backfill over every object that carries the companion column.
+For bulk imports that bypassed write hooks at runtime, `rebuildSearchCompanion` (exported
+by `@objectstack/plugin-pinyin-search`) recomputes the column on demand.
+
 ---
 
 ## Window Functions

@@ -799,6 +799,40 @@ export interface MutationProjectionOutcome {
     error?: string;
 }
 
+/**
+ * Pre-persistence authoring gate (ADR-0094 addendum seam; #3050).
+ *
+ * Unlike the post-persist {@link MetadataMutationProjector} (best-effort,
+ * never thrown), an authoring gate runs BEFORE persistence and REJECTS the
+ * write by throwing — it is the seam for domain invariants that must hold on
+ * every runtime-authored body regardless of which HTTP surface produced it
+ * (e.g. plugin-security's OWD posture gate: an environment may only TIGHTEN
+ * a packaged object's `sharingModel`, and `externalSharingModel ≤
+ * sharingModel` per ADR-0090 D11).
+ *
+ * Invoked inside `saveMetaItem` for BOTH draft and publish-mode saves, after
+ * the ADR-0005 overlay/runtime-create authorization and the per-type spec
+ * validation — so `publishMetaItem` promotes an already-gated body and needs
+ * no second gate. Environment writes only: control-plane bootstrap writes
+ * (`environmentId === undefined`) are the package author's own channel and
+ * bypass the gate, mirroring the ADR-0005 gate above.
+ */
+export interface MetadataAuthoringGateContext {
+    /** Singular type name (e.g. `object`). */
+    type: string;
+    name: string;
+    /** Lifecycle the body is being saved into. */
+    state: 'draft' | 'active';
+    organizationId?: string;
+    /** The body being persisted. */
+    body: unknown;
+    /** True when a packaged artifact backs this name — the write is an env overlay of shipped metadata. */
+    isArtifactBacked: boolean;
+    /** The packaged (code-layer) baseline body when {@link isArtifactBacked}; the declaration an overlay customizes. */
+    declaredBody?: unknown;
+}
+export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void | Promise<void>;
+
 export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     private engine: MetadataHostEngine;
     private getServicesRegistry?: () => Map<string, any>;
@@ -847,6 +881,14 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
      */
     private mutationProjectors = new Map<string, MetadataMutationProjector>();
 
+    /**
+     * Pre-persistence authoring gates (#3050). One per type; a second
+     * registration replaces the first (idempotent re-init). Unlike
+     * projectors these THROW to reject the write — see
+     * {@link MetadataAuthoringGate}.
+     */
+    private authoringGates = new Map<string, MetadataAuthoringGate>();
+
     constructor(
         engine: IDataEngine,
         getServicesRegistry?: () => Map<string, any>,
@@ -892,6 +934,49 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
     registerMutationProjector(type: string, projector: MetadataMutationProjector): void {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
         this.mutationProjectors.set(singular, projector);
+    }
+
+    /**
+     * Register the pre-persistence authoring gate for a metadata type
+     * (ADR-0094 addendum seam; #3050). Called by domain plugins at init —
+     * e.g. plugin-security registers the `object` OWD posture gate. The gate
+     * THROWS to reject the write. Singular or plural type names both resolve;
+     * one gate per type, a second registration replaces the first.
+     */
+    registerAuthoringGate(type: string, gate: MetadataAuthoringGate): void {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        this.authoringGates.set(singular, gate);
+    }
+
+    /**
+     * Run the registered authoring gate for an about-to-persist body (#3050).
+     * No-op when no gate is registered for the type. A gate throw PROPAGATES
+     * (with its status/code) — that is the contract: the write is rejected
+     * before persistence. Resolves the artifact-backed flag and the packaged
+     * declaration body (the baseline an overlay customizes) for the gate.
+     */
+    private async runAuthoringGate(evt: {
+        type: string; name: string; state: 'draft' | 'active'; organizationId?: string; body: unknown;
+    }): Promise<void> {
+        const singular = PLURAL_TO_SINGULAR[evt.type] ?? evt.type;
+        const gate = this.authoringGates.get(singular);
+        if (!gate) return;
+        const artifactBacked = this.isArtifactBacked(evt.type, evt.name);
+        let declaredBody: unknown;
+        if (artifactBacked && typeof this.engine.registry?.getItem === 'function') {
+            const alt = PLURAL_TO_SINGULAR[evt.type] ?? SINGULAR_TO_PLURAL[evt.type];
+            declaredBody = this.engine.registry.getItem(evt.type, evt.name)
+                ?? (alt ? this.engine.registry.getItem(alt, evt.name) : undefined);
+        }
+        await gate({
+            type: singular,
+            name: evt.name,
+            state: evt.state,
+            ...(evt.organizationId ? { organizationId: evt.organizationId } : {}),
+            body: evt.body,
+            isArtifactBacked: artifactBacked,
+            ...(declaredBody !== undefined ? { declaredBody } : {}),
+        });
     }
 
     /**
@@ -4008,6 +4093,22 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     throw err;
                 }
             }
+        }
+
+        // Pre-persistence authoring gate (#3050): a domain plugin may veto the
+        // body before it persists (throws propagate to the caller with their
+        // status/code). Runs for BOTH draft and publish-mode saves, so a later
+        // publishMetaItem promotes an already-gated body. Environment writes
+        // only — control-plane bootstrap writes (environmentId undefined) are
+        // the package author's own channel, mirroring the ADR-0005 gate above.
+        if (this.environmentId !== undefined) {
+            await this.runAuthoringGate({
+                type: request.type,
+                name: request.name,
+                state: mode === 'draft' ? 'draft' : 'active',
+                ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+                body: request.item,
+            });
         }
 
         // 1. Update the in-memory registry (runtime cache) ONLY for the

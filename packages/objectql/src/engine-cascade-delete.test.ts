@@ -138,4 +138,38 @@ describe('cascadeDeleteRelations — required FK escalates set_null → restrict
         expect(await engine.findOne('acct', { where: { id: a.id } })).toBeNull();
         expect(await engine.findOne('task', { where: { id: t.id } })).toBeNull();
     });
+
+    it('[#3023] tags the referential set_null write with __referentialFieldClear so the owner guard can exempt it', async () => {
+        // The cascade FK clear is an engine-internal integrity write. It must
+        // carry the server-set marker plugin-security's ownership-anchor guard
+        // keys off — otherwise nulling an owner_id-style FK would trip the
+        // #3004 transfer guard and abort the cascade. A user-driven update must
+        // NOT carry the marker (control).
+        const seen: Array<{ op: string; marker: unknown; where: unknown }> = [];
+        engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+            if (opCtx.operation === 'update') {
+                seen.push({
+                    op: opCtx.operation,
+                    marker: opCtx.context?.__referentialFieldClear,
+                    where: opCtx.data,
+                });
+            }
+            await next();
+        });
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        const n = await engine.insert('note', { body: 'hi', account: a.id });
+
+        // A normal user update — no marker.
+        await engine.update('note', { id: n.id, body: 'edited' }, { context: { userId: 'u1' } } as any);
+        // The cascade set_null when the parent is deleted — marked.
+        await engine.delete('acct', { where: { id: a.id }, context: { userId: 'u1' } } as any);
+
+        const userUpdate = seen.find((s) => (s.where as any)?.body === 'edited');
+        const cascadeClear = seen.find((s) => (s.where as any)?.account === null);
+        expect(userUpdate?.marker, 'user update carries no referential marker').toBeUndefined();
+        expect(cascadeClear?.marker, 'cascade FK clear carries the marker').toBe(true);
+        // And the cascade actually nulled the FK.
+        expect((await engine.findOne('note', { where: { id: n.id } }) as any).account).toBeNull();
+    });
 });

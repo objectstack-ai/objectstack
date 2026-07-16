@@ -136,7 +136,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       ban_user: {
         label: "Bloquear usuario",
         confirmText: "¿Bloquear a este usuario? Cerrará sesión y no podrá volver a iniciarla hasta que se desbloquee.",
-        successMessage: "Usuario bloqueado"
+        successMessage: "Usuario bloqueado",
+        params: {
+          banReason: {
+            label: "Motivo del bloqueo"
+          }
+        }
       },
       unban_user: {
         label: "Desbloquear usuario",
@@ -148,15 +153,46 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       create_user: {
         label: "Crear usuario",
-        successMessage: "Usuario creado"
+        successMessage: "Usuario creado",
+        params: {
+          phoneNumber: {
+            label: "Número de teléfono",
+            helpText: "Número de teléfono para iniciar sesión (E.164, p. ej. +8613800000000). Obligatorio si no se indica un correo."
+          },
+          generatePassword: {
+            label: "Generar contraseña temporal"
+          },
+          password: {
+            label: "Contraseña (dejar en blanco para generarla)"
+          },
+          mustChangePassword: {
+            label: "Exigir cambio de contraseña en el primer inicio de sesión"
+          }
+        }
       },
       set_user_password: {
         label: "Establecer contraseña",
-        successMessage: "Contraseña actualizada"
+        successMessage: "Contraseña actualizada",
+        params: {
+          generatePassword: {
+            label: "Generar contraseña temporal"
+          },
+          newPassword: {
+            label: "Nueva contraseña (dejar en blanco para generarla)"
+          },
+          mustChangePassword: {
+            label: "Exigir cambio de contraseña en el próximo inicio de sesión"
+          }
+        }
       },
       set_user_role: {
         label: "Establecer rol de plataforma",
-        successMessage: "Rol actualizado"
+        successMessage: "Rol actualizado",
+        params: {
+          role: {
+            label: "Rol de plataforma"
+          }
+        }
       },
       impersonate_user: {
         label: "Suplantar usuario",
@@ -169,11 +205,27 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       change_my_password: {
         label: "Cambiar contraseña",
-        successMessage: "Contraseña cambiada"
+        successMessage: "Contraseña cambiada",
+        params: {
+          currentPassword: {
+            label: "Contraseña actual"
+          },
+          newPassword: {
+            label: "Nueva contraseña"
+          },
+          revokeOtherSessions: {
+            label: "Cerrar sesión en los demás dispositivos"
+          }
+        }
       },
       change_my_email: {
         label: "Cambiar correo",
-        successMessage: "Correo de verificación enviado; revisa la nueva dirección para confirmar."
+        successMessage: "Correo de verificación enviado; revisa la nueva dirección para confirmar.",
+        params: {
+          newEmail: {
+            label: "Nuevo correo"
+          }
+        }
       },
       resend_verification_email: {
         label: "Reenviar correo de verificación",
@@ -182,21 +234,41 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       delete_my_account: {
         label: "Eliminar mi cuenta",
         confirmText: "¿Eliminar tu cuenta de forma permanente? Esta acción no se puede deshacer: se cerrarán todas tus sesiones y se eliminarán todos los datos de tu propiedad según la política de retención configurada.",
-        successMessage: "Cuenta eliminada"
+        successMessage: "Cuenta eliminada",
+        params: {
+          password: {
+            label: "Contraseña actual"
+          }
+        }
       },
       enable_two_factor: {
         label: "Habilitar autenticación de dos factores",
-        successMessage: "Autenticación de dos factores habilitada. Escanea el código QR o pega el URI otpauth en tu aplicación de autenticación y verifica un código para completar la configuración."
+        successMessage: "Autenticación de dos factores habilitada. Escanea el código QR o pega el URI otpauth en tu aplicación de autenticación y verifica un código para completar la configuración.",
+        params: {
+          password: {
+            label: "Contraseña actual"
+          }
+        }
       },
       disable_two_factor: {
         label: "Deshabilitar autenticación de dos factores",
         confirmText: "¿Desactivar la autenticación de dos factores? Tu cuenta será menos segura.",
-        successMessage: "Autenticación de dos factores deshabilitada."
+        successMessage: "Autenticación de dos factores deshabilitada.",
+        params: {
+          password: {
+            label: "Contraseña actual"
+          }
+        }
       },
       generate_backup_codes: {
         label: "Regenerar códigos de respaldo",
         confirmText: "¿Generar un nuevo juego de códigos de respaldo? Los códigos generados anteriormente dejarán de funcionar.",
-        successMessage: "Nuevos códigos de respaldo generados; guárdalos en un lugar seguro."
+        successMessage: "Nuevos códigos de respaldo generados; guárdalos en un lugar seguro.",
+        params: {
+          password: {
+            label: "Contraseña actual"
+          }
+        }
       }
     }
   },
@@ -340,7 +412,21 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _actions: {
       link_social: {
-        label: "Vincular cuenta social"
+        label: "Vincular cuenta social",
+        params: {
+          provider: {
+            label: "Proveedor",
+            options: {
+              google: "Google",
+              github: "GitHub",
+              microsoft: "Microsoft",
+              apple: "Apple",
+              facebook: "Facebook",
+              gitlab: "GitLab",
+              discord: "Discord"
+            }
+          }
+        }
       },
       unlink_account: {
         label: "Desvincular cuenta",
@@ -897,16 +983,31 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _actions: {
       enable_two_factor: {
-        label: "Habilitar 2FA"
+        label: "Habilitar 2FA",
+        params: {
+          password: {
+            label: "Contraseña actual"
+          }
+        }
       },
       disable_two_factor: {
         label: "Deshabilitar 2FA",
         confirmText: "¿Deshabilitar la autenticación de doble factor en su cuenta?",
-        successMessage: "2FA deshabilitado"
+        successMessage: "2FA deshabilitado",
+        params: {
+          password: {
+            label: "Contraseña actual"
+          }
+        }
       },
       regenerate_backup_codes: {
         label: "Regenerar códigos de respaldo",
-        confirmText: "¿Regenerar los códigos de respaldo? Todos los códigos de respaldo anteriores dejarán de funcionar de inmediato."
+        confirmText: "¿Regenerar los códigos de respaldo? Todos los códigos de respaldo anteriores dejarán de funcionar de inmediato.",
+        params: {
+          password: {
+            label: "Contraseña actual"
+          }
+        }
       }
     }
   },
@@ -1148,7 +1249,25 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Aplicación OAuth habilitada"
       },
       create_oauth_application: {
-        label: "Registrar aplicación OAuth"
+        label: "Registrar aplicación OAuth",
+        params: {
+          name: {
+            label: "Nombre de la aplicación"
+          },
+          redirectURLs: {
+            label: "URLs de redirección",
+            helpText: "Una URL por línea. Debe usar https:// en producción."
+          },
+          type: {
+            label: "Tipo de aplicación",
+            options: {
+              web: "Web",
+              native: "Nativa",
+              "user-agent-based": "Basada en user-agent",
+              public: "Pública"
+            }
+          }
+        }
       },
       rotate_client_secret: {
         label: "Rotar Client Secret",
@@ -1301,6 +1420,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       private_key: {
         label: "Clave privada",
         help: "Clave privada JWK serializada en JSON (cifrada en reposo)."
+      },
+      alg: {
+        label: "Algoritmo",
+        help: "Algoritmo de firma JWK, p. ej. `EdDSA` (better-auth 1.7+)"
+      },
+      crv: {
+        label: "Curva",
+        help: "Curva JWK para claves EdDSA/EC, p. ej. `Ed25519` (better-auth 1.7+)"
       },
       created_at: {
         label: "Creado el"

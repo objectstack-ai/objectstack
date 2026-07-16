@@ -63,6 +63,28 @@ describe('showcase: web-to-lead public form (ADR-0056 Option A)', () => {
     expect(body.record.source).toBe('web');
   });
 
+  it('a forged owner_id / organization_id never lands on the row (#3022)', async () => {
+    const r = await stack.api('/forms/contact-us/submit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Mallory',
+        email: 'mallory@example.com',
+        message: 'Attach this record to the victim.',
+        owner_id: 'usr_victim',          // ← ownership forge (#3004-class, no credentials)
+        organization_id: 'org_victim',   // ← cross-tenant landing attempt
+        created_by: 'usr_victim',
+      }),
+    });
+    expect(r.status, 'the submit itself still succeeds — the anchors are stripped, not fatal').toBe(201);
+    const body = (await r.json()) as { record: Record<string, unknown> };
+    expect(body.record.name).toBe('Mallory');
+    // The anchors are server-managed on this surface: never the forged values.
+    expect(body.record.owner_id ?? null, 'anonymous submission must not forge ownership').not.toBe('usr_victim');
+    expect(body.record.organization_id ?? null, 'anonymous submission must not land cross-tenant').not.toBe('org_victim');
+    expect(body.record.created_by ?? null).not.toBe('usr_victim');
+  });
+
   it('the public grant is create + read-back ONLY — anonymous cannot list inquiries', async () => {
     const r = await stack.api('/data/showcase_inquiry');
     expect(r.status, 'general anonymous read must NOT be opened by the form grant').not.toBe(200);

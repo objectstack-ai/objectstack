@@ -1,6 +1,6 @@
 # ADR-0049: Spec must not declare security properties the runtime does not enforce (enforce-or-remove gate)
 
-**Status**: Proposed (2026-06-15)
+**Status**: Accepted (2026-06-15) — implemented: fail-closed `DESTRUCTIVE_OPERATIONS` (`permission-evaluator.ts:37,122`), lifecycle bits RBAC-gated, `apiEnabled` enforced (`runtime/src/api-exposure.ts`), `PolicySchema` removed, EXPERIMENTAL tag convention live. Two gate-valid disposition deviations: agent access-control shipped experimental-tagged (not enforced), `flow.runAs` kept + enforced (not removed). `action.disabled` CEL enforcement to confirm in objectui.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay), [ADR-0010](./0010-metadata-protection-model.md) (package provenance), [ADR-0027](./0027-metadata-authoring-lifecycle.md) (authoring lifecycle)
 **Consumers**: `@objectstack/spec` (security/identity schemas), `@objectstack/plugin-security` (`PermissionEvaluator`, `SecurityPlugin`), spec authors, the metadata-property liveness audit follow-ups (#1878 P0 cluster).

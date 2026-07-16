@@ -136,7 +136,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       ban_user: {
         label: "利用停止",
         confirmText: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできなくなります。",
-        successMessage: "ユーザーを利用停止にしました"
+        successMessage: "ユーザーを利用停止にしました",
+        params: {
+          banReason: {
+            label: "利用停止の理由"
+          }
+        }
       },
       unban_user: {
         label: "利用停止を解除",
@@ -148,15 +153,46 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       create_user: {
         label: "ユーザーを作成",
-        successMessage: "ユーザーを作成しました"
+        successMessage: "ユーザーを作成しました",
+        params: {
+          phoneNumber: {
+            label: "電話番号",
+            helpText: "サインイン用の電話番号（E.164 形式、例: +8613800000000）。メールアドレスを指定しない場合は必須です。"
+          },
+          generatePassword: {
+            label: "一時パスワードを生成"
+          },
+          password: {
+            label: "パスワード（空欄の場合は自動生成）"
+          },
+          mustChangePassword: {
+            label: "初回サインイン時にパスワード変更を必須にする"
+          }
+        }
       },
       set_user_password: {
         label: "パスワードを設定",
-        successMessage: "パスワードを更新しました"
+        successMessage: "パスワードを更新しました",
+        params: {
+          generatePassword: {
+            label: "一時パスワードを生成"
+          },
+          newPassword: {
+            label: "新しいパスワード（空欄の場合は自動生成）"
+          },
+          mustChangePassword: {
+            label: "次回サインイン時にパスワード変更を必須にする"
+          }
+        }
       },
       set_user_role: {
         label: "プラットフォームロールを設定",
-        successMessage: "ロールを更新しました"
+        successMessage: "ロールを更新しました",
+        params: {
+          role: {
+            label: "プラットフォームロール"
+          }
+        }
       },
       impersonate_user: {
         label: "代理ログイン",
@@ -169,11 +205,27 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       change_my_password: {
         label: "パスワード変更",
-        successMessage: "パスワードを変更しました"
+        successMessage: "パスワードを変更しました",
+        params: {
+          currentPassword: {
+            label: "現在のパスワード"
+          },
+          newPassword: {
+            label: "新しいパスワード"
+          },
+          revokeOtherSessions: {
+            label: "他のデバイスからサインアウト"
+          }
+        }
       },
       change_my_email: {
         label: "メールアドレス変更",
-        successMessage: "確認メールを送信しました。新しいメールアドレスで確認してください。"
+        successMessage: "確認メールを送信しました。新しいメールアドレスで確認してください。",
+        params: {
+          newEmail: {
+            label: "新しいメールアドレス"
+          }
+        }
       },
       resend_verification_email: {
         label: "確認メールを再送",
@@ -182,21 +234,41 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       delete_my_account: {
         label: "アカウント削除",
         confirmText: "アカウントを完全に削除しますか？この操作は元に戻せません。すべてのセッションが終了され、設定された保持ポリシーに従って所有するすべてのデータが削除されます。",
-        successMessage: "アカウントを削除しました"
+        successMessage: "アカウントを削除しました",
+        params: {
+          password: {
+            label: "現在のパスワード"
+          }
+        }
       },
       enable_two_factor: {
         label: "二要素認証を有効化",
-        successMessage: "二要素認証を有効にしました。認証アプリで QR コードをスキャンするか otpauth URI を貼り付け、コードを検証して設定を完了してください。"
+        successMessage: "二要素認証を有効にしました。認証アプリで QR コードをスキャンするか otpauth URI を貼り付け、コードを検証して設定を完了してください。",
+        params: {
+          password: {
+            label: "現在のパスワード"
+          }
+        }
       },
       disable_two_factor: {
         label: "二要素認証を無効化",
         confirmText: "二要素認証をオフにしますか？アカウントの安全性が低下します。",
-        successMessage: "二要素認証を無効にしました。"
+        successMessage: "二要素認証を無効にしました。",
+        params: {
+          password: {
+            label: "現在のパスワード"
+          }
+        }
       },
       generate_backup_codes: {
         label: "バックアップコードを再生成",
         confirmText: "新しいバックアップコードを生成しますか？以前に生成されたコードはすべて使用できなくなります。",
-        successMessage: "新しいバックアップコードを生成しました。安全な場所に保管してください。"
+        successMessage: "新しいバックアップコードを生成しました。安全な場所に保管してください。",
+        params: {
+          password: {
+            label: "現在のパスワード"
+          }
+        }
       }
     }
   },
@@ -340,7 +412,21 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _actions: {
       link_social: {
-        label: "ソーシャルアカウント連携"
+        label: "ソーシャルアカウント連携",
+        params: {
+          provider: {
+            label: "プロバイダー",
+            options: {
+              google: "Google",
+              github: "GitHub",
+              microsoft: "Microsoft",
+              apple: "Apple",
+              facebook: "Facebook",
+              gitlab: "GitLab",
+              discord: "Discord"
+            }
+          }
+        }
       },
       unlink_account: {
         label: "連携解除",
@@ -897,16 +983,31 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _actions: {
       enable_two_factor: {
-        label: "2FA を有効化"
+        label: "2FA を有効化",
+        params: {
+          password: {
+            label: "現在のパスワード"
+          }
+        }
       },
       disable_two_factor: {
         label: "2FA を無効化",
         confirmText: "アカウントの二要素認証を無効化しますか？",
-        successMessage: "2FA を無効化しました"
+        successMessage: "2FA を無効化しました",
+        params: {
+          password: {
+            label: "現在のパスワード"
+          }
+        }
       },
       regenerate_backup_codes: {
         label: "バックアップコード再生成",
-        confirmText: "バックアップコードを再生成しますか？以前のバックアップコードはすべて直ちに使用できなくなります。"
+        confirmText: "バックアップコードを再生成しますか？以前のバックアップコードはすべて直ちに使用できなくなります。",
+        params: {
+          password: {
+            label: "現在のパスワード"
+          }
+        }
       }
     }
   },
@@ -1148,7 +1249,25 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "OAuthアプリケーションを有効化しました"
       },
       create_oauth_application: {
-        label: "OAuthアプリケーションを登録"
+        label: "OAuthアプリケーションを登録",
+        params: {
+          name: {
+            label: "アプリケーション名"
+          },
+          redirectURLs: {
+            label: "リダイレクト URL",
+            helpText: "1 行につき 1 つの URL。本番環境では https:// が必須です。"
+          },
+          type: {
+            label: "アプリケーションタイプ",
+            options: {
+              web: "Web",
+              native: "ネイティブ",
+              "user-agent-based": "ユーザーエージェント型",
+              public: "パブリック"
+            }
+          }
+        }
       },
       rotate_client_secret: {
         label: "クライアントシークレット更新",
@@ -1301,6 +1420,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       private_key: {
         label: "秘密鍵",
         help: "JSON シリアライズされた JWK 秘密鍵（保存時に暗号化済み）"
+      },
+      alg: {
+        label: "アルゴリズム",
+        help: "JWK 署名アルゴリズム（例: `EdDSA`、better-auth 1.7+）"
+      },
+      crv: {
+        label: "曲線",
+        help: "EdDSA/EC 鍵で使う JWK 曲線（例: `Ed25519`、better-auth 1.7+）"
       },
       created_at: {
         label: "作成日時"
