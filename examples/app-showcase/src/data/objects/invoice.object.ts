@@ -87,6 +87,17 @@ export const Invoice = ObjectSchema.create({
     // invoices; because `showcase_invoice_line` is `controlled_by_parent`, the
     // lines follow automatically (ADR-0055). Mirror of `project.owner`.
     owner: Field.text({ label: 'Owner', maxLength: 200 }),
+    // Region the sale was booked in — the invoice-side target of the Revenue
+    // Pulse dashboard's shared "region" filter (framework#2501): accounts map
+    // the same filter to their own `sales_region` via `filterBindings`.
+    region: Field.select({
+      label: 'Region',
+      options: [
+        { label: 'AMER', value: 'amer', default: true },
+        { label: 'EMEA', value: 'emea' },
+        { label: 'APAC', value: 'apac' },
+      ],
+    }),
     status: Field.select({
       label: 'Status',
       required: true,

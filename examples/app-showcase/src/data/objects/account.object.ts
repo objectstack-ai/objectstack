@@ -74,6 +74,20 @@ export const Account = ObjectSchema.create({
         { label: 'Churned', value: 'churned', color: '#EF4444' },
       ],
     }),
+    // Region + signed date power the Revenue Pulse dashboard's dashboard-level
+    // filters (framework#2501): the shared "region" filter maps to THIS
+    // object's `sales_region` (invoices carry their own `region`), and the
+    // dashboard date range maps to `signed_on` (invoices use `issued_on`) —
+    // the cross-object per-widget `filterBindings` demo.
+    sales_region: Field.select({
+      label: 'Sales Region',
+      options: [
+        { label: 'AMER', value: 'amer', default: true },
+        { label: 'EMEA', value: 'emea' },
+        { label: 'APAC', value: 'apac' },
+      ],
+    }),
+    signed_on: Field.date({ label: 'Customer Since' }),
     // EIN-style tax id — the `format` rule below enforces the NN-NNNNNNN shape
     // with a regex (a deliberately non-trivial pattern, unlike the built-in
     // email/url field validators).

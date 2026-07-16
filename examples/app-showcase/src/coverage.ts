@@ -84,7 +84,12 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
   // ── ui ──
   view: { status: 'demonstrated', files: ['src/ui/views/task.view.ts', 'src/ui/views/project.view.ts'] },
   page: { status: 'demonstrated', files: ['src/ui/pages/index.ts'] },
-  dashboard: { status: 'demonstrated', files: ['src/ui/dashboards/chart-gallery.dashboard.ts'] },
+  dashboard: {
+    status: 'demonstrated',
+    files: ['src/ui/dashboards/chart-gallery.dashboard.ts', 'src/ui/dashboards/revenue-pulse.dashboard.ts'],
+    notes:
+      'revenue-pulse also demonstrates dashboard-level filters (framework#2501): dateRange + globalFilters driving two objects via per-widget filterBindings.',
+  },
   app: { status: 'demonstrated', files: ['src/ui/apps/index.ts'] },
   action: { status: 'demonstrated', files: ['src/ui/actions/index.ts'] },
   report: { status: 'demonstrated', files: ['src/ui/reports/index.ts'] },

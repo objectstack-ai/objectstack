@@ -39,25 +39,30 @@ const accounts = defineSeed(Account, {
     // `status` is required and no default is applied at seed-insert time, so it
     // must be set explicitly or the row is rejected (this is why Accounts was
     // empty). `hq` also exercises the location field.
-    { name: 'Northwind', industry: 'retail', annual_revenue: 8_000_000, website: 'https://northwind.example', status: 'active', hq: { lat: 47.6062, lng: -122.3321 }, tax_id: '91-1144442', billing_email: 'ap@northwind.example' },
-    { name: 'Contoso', industry: 'technology', annual_revenue: 25_000_000, website: 'https://contoso.example', status: 'active', hq: { lat: 37.7749, lng: -122.4194 }, tax_id: '20-3399881', billing_email: 'billing@contoso.example' },
-    { name: 'Fabrikam', industry: 'healthcare', annual_revenue: 12_000_000, website: 'https://fabrikam.example', status: 'prospect', hq: { lat: 40.7128, lng: -74.0060 }, tax_id: '46-7782013', billing_email: 'accounts@fabrikam.example' },
+    // `sales_region` + `signed_on` feed the Revenue Pulse filtered dashboard
+    // (framework#2501): its region filter maps here via filterBindings
+    // (`region → sales_region`) and its date range via `dateRange → signed_on`.
+    // Prospects have no `signed_on` yet — date-scoped account charts exclude
+    // them by design.
+    { name: 'Northwind', industry: 'retail', annual_revenue: 8_000_000, website: 'https://northwind.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(400)`, hq: { lat: 47.6062, lng: -122.3321 }, tax_id: '91-1144442', billing_email: 'ap@northwind.example' },
+    { name: 'Contoso', industry: 'technology', annual_revenue: 25_000_000, website: 'https://contoso.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(700)`, hq: { lat: 37.7749, lng: -122.4194 }, tax_id: '20-3399881', billing_email: 'billing@contoso.example' },
+    { name: 'Fabrikam', industry: 'healthcare', annual_revenue: 12_000_000, website: 'https://fabrikam.example', status: 'prospect', sales_region: 'emea', hq: { lat: 40.7128, lng: -74.0060 }, tax_id: '46-7782013', billing_email: 'accounts@fabrikam.example' },
     // Extra accounts so the record picker has enough volume to exercise search,
     // sorting, pagination and the (non-churned) scoping filter on invoices.
-    { name: 'Initech', industry: 'finance', annual_revenue: 5_400_000, website: 'https://initech.example', status: 'active', hq: { lat: 30.2672, lng: -97.7431 }, tax_id: '74-2233110', billing_email: 'ap@initech.example' },
-    { name: 'Globex', industry: 'technology', annual_revenue: 42_000_000, website: 'https://globex.example', status: 'active', hq: { lat: 34.0522, lng: -118.2437 }, tax_id: '95-8841200', billing_email: 'billing@globex.example' },
-    { name: 'Stark Industries', industry: 'technology', annual_revenue: 180_000_000, website: 'https://stark.example', status: 'active', hq: { lat: 40.7580, lng: -73.9855 }, tax_id: '13-5567421', billing_email: 'ap@stark.example' },
+    { name: 'Initech', industry: 'finance', annual_revenue: 5_400_000, website: 'https://initech.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(300)`, hq: { lat: 30.2672, lng: -97.7431 }, tax_id: '74-2233110', billing_email: 'ap@initech.example' },
+    { name: 'Globex', industry: 'technology', annual_revenue: 42_000_000, website: 'https://globex.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(500)`, hq: { lat: 34.0522, lng: -118.2437 }, tax_id: '95-8841200', billing_email: 'billing@globex.example' },
+    { name: 'Stark Industries', industry: 'technology', annual_revenue: 180_000_000, website: 'https://stark.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(800)`, hq: { lat: 40.7580, lng: -73.9855 }, tax_id: '13-5567421', billing_email: 'ap@stark.example' },
     // CJK-named account so pinyin search recall (#2486) is demonstrable out of
     // the box: with the zh-CN locale configured, `$search=huaning` / `hnkj`
     // must find 华宁科技 in the record picker and list quick-search.
-    { name: '华宁科技', industry: 'technology', annual_revenue: 36_000_000, website: 'https://huaning.example', status: 'active', hq: { lat: 31.2304, lng: 121.4737 }, tax_id: '91-3100001', billing_email: 'billing@huaning.example' },
-    { name: 'Wayne Enterprises', industry: 'finance', annual_revenue: 210_000_000, website: 'https://wayne.example', status: 'active', hq: { lat: 40.7128, lng: -74.0060 }, tax_id: '22-9087733', billing_email: 'billing@wayne.example' },
-    { name: 'Acme Retail', industry: 'retail', annual_revenue: 3_200_000, website: 'https://acme.example', status: 'prospect', hq: { lat: 41.8781, lng: -87.6298 }, tax_id: '36-4471209', billing_email: 'accounts@acme.example' },
-    { name: 'Soylent Foods', industry: 'healthcare', annual_revenue: 9_900_000, website: 'https://soylent.example', status: 'prospect', hq: { lat: 37.3382, lng: -121.8863 }, tax_id: '77-1029384', billing_email: 'ap@soylent.example' },
-    { name: 'Hooli', industry: 'technology', annual_revenue: 96_000_000, website: 'https://hooli.example', status: 'active', hq: { lat: 37.3861, lng: -122.0839 }, tax_id: '45-7781230', billing_email: 'billing@hooli.example' },
-    { name: 'Vandelay Industries', industry: 'finance', annual_revenue: 6_700_000, website: 'https://vandelay.example', status: 'active', hq: { lat: 40.6782, lng: -73.9442 }, tax_id: '11-3344556', billing_email: 'ap@vandelay.example' },
-    { name: 'Umbrella Health', industry: 'healthcare', annual_revenue: 33_000_000, website: 'https://umbrella.example', status: 'churned', hq: { lat: 39.9526, lng: -75.1652 }, tax_id: '88-2200117', churn_reason: 'Switched to in-house platform', billing_email: 'accounts@umbrella.example' },
-    { name: 'Wonka Brands', industry: 'retail', annual_revenue: 14_500_000, website: 'https://wonka.example', status: 'churned', hq: { lat: 41.4993, lng: -81.6944 }, tax_id: '52-7741093', churn_reason: 'Budget cuts', billing_email: 'ap@wonka.example' },
+    { name: '华宁科技', industry: 'technology', annual_revenue: 36_000_000, website: 'https://huaning.example', status: 'active', sales_region: 'apac', signed_on: cel`daysAgo(200)`, hq: { lat: 31.2304, lng: 121.4737 }, tax_id: '91-3100001', billing_email: 'billing@huaning.example' },
+    { name: 'Wayne Enterprises', industry: 'finance', annual_revenue: 210_000_000, website: 'https://wayne.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(900)`, hq: { lat: 40.7128, lng: -74.0060 }, tax_id: '22-9087733', billing_email: 'billing@wayne.example' },
+    { name: 'Acme Retail', industry: 'retail', annual_revenue: 3_200_000, website: 'https://acme.example', status: 'prospect', sales_region: 'amer', hq: { lat: 41.8781, lng: -87.6298 }, tax_id: '36-4471209', billing_email: 'accounts@acme.example' },
+    { name: 'Soylent Foods', industry: 'healthcare', annual_revenue: 9_900_000, website: 'https://soylent.example', status: 'prospect', sales_region: 'emea', hq: { lat: 37.3382, lng: -121.8863 }, tax_id: '77-1029384', billing_email: 'ap@soylent.example' },
+    { name: 'Hooli', industry: 'technology', annual_revenue: 96_000_000, website: 'https://hooli.example', status: 'active', sales_region: 'amer', signed_on: cel`daysAgo(150)`, hq: { lat: 37.3861, lng: -122.0839 }, tax_id: '45-7781230', billing_email: 'billing@hooli.example' },
+    { name: 'Vandelay Industries', industry: 'finance', annual_revenue: 6_700_000, website: 'https://vandelay.example', status: 'active', sales_region: 'emea', signed_on: cel`daysAgo(450)`, hq: { lat: 40.6782, lng: -73.9442 }, tax_id: '11-3344556', billing_email: 'ap@vandelay.example' },
+    { name: 'Umbrella Health', industry: 'healthcare', annual_revenue: 33_000_000, website: 'https://umbrella.example', status: 'churned', sales_region: 'amer', signed_on: cel`daysAgo(600)`, hq: { lat: 39.9526, lng: -75.1652 }, tax_id: '88-2200117', churn_reason: 'Switched to in-house platform', billing_email: 'accounts@umbrella.example' },
+    { name: 'Wonka Brands', industry: 'retail', annual_revenue: 14_500_000, website: 'https://wonka.example', status: 'churned', sales_region: 'emea', signed_on: cel`daysAgo(350)`, hq: { lat: 41.4993, lng: -81.6944 }, tax_id: '52-7741093', churn_reason: 'Budget cuts', billing_email: 'ap@wonka.example' },
   ],
 });
 
@@ -261,10 +266,22 @@ const invoices = defineSeed(Invoice, {
   mode: 'upsert',
   externalId: 'name',
   records: [
-    { name: 'INV-1001', account: 'Northwind', owner: 'ada@example.com', status: 'sent', issued_on: cel`daysAgo(10)`, tax_rate: 8 },
-    { name: 'INV-1002', account: 'Contoso', owner: 'ada@example.com', status: 'draft', tax_rate: 0 },
-    { name: 'INV-1003', account: 'Contoso', owner: 'linus@example.com', status: 'paid', issued_on: cel`daysAgo(30)`, paid_on: cel`daysAgo(2)`, tax_rate: 8 },
-    { name: 'INV-1004', account: 'Fabrikam', owner: 'grace@example.com', status: 'draft', tax_rate: 0 },
+    { name: 'INV-1001', account: 'Northwind', owner: 'ada@example.com', status: 'sent', issued_on: cel`daysAgo(10)`, tax_rate: 8, region: 'amer' },
+    { name: 'INV-1002', account: 'Contoso', owner: 'ada@example.com', status: 'draft', tax_rate: 0, region: 'amer' },
+    { name: 'INV-1003', account: 'Contoso', owner: 'linus@example.com', status: 'paid', issued_on: cel`daysAgo(30)`, paid_on: cel`daysAgo(2)`, tax_rate: 8, region: 'amer' },
+    { name: 'INV-1004', account: 'Fabrikam', owner: 'grace@example.com', status: 'draft', tax_rate: 0, region: 'emea' },
+    // Volume spread across months + regions so the Revenue Pulse filtered
+    // dashboard (framework#2501) shows visible movement when the date range
+    // or region filter changes — not just one bar. `issued_on` spans ~6
+    // months; regions cover AMER / EMEA / APAC.
+    { name: 'INV-1005', account: 'Contoso', owner: 'ada@example.com', status: 'paid', issued_on: cel`daysAgo(45)`, paid_on: cel`daysAgo(40)`, tax_rate: 8, region: 'amer' },
+    { name: 'INV-1006', account: 'Globex', owner: 'linus@example.com', status: 'sent', issued_on: cel`daysAgo(15)`, tax_rate: 8, region: 'amer' },
+    { name: 'INV-1007', account: '华宁科技', owner: 'grace@example.com', status: 'paid', issued_on: cel`daysAgo(60)`, paid_on: cel`daysAgo(50)`, tax_rate: 6, region: 'apac' },
+    { name: 'INV-1008', account: '华宁科技', owner: 'ada@example.com', status: 'sent', issued_on: cel`daysAgo(5)`, tax_rate: 6, region: 'apac' },
+    { name: 'INV-1009', account: 'Vandelay Industries', owner: 'linus@example.com', status: 'paid', issued_on: cel`daysAgo(100)`, paid_on: cel`daysAgo(90)`, tax_rate: 20, region: 'emea' },
+    { name: 'INV-1010', account: 'Fabrikam', owner: 'grace@example.com', status: 'sent', issued_on: cel`daysAgo(75)`, tax_rate: 20, region: 'emea' },
+    { name: 'INV-1011', account: 'Stark Industries', owner: 'ada@example.com', status: 'paid', issued_on: cel`daysAgo(130)`, paid_on: cel`daysAgo(120)`, tax_rate: 8, region: 'amer' },
+    { name: 'INV-1012', account: 'Hooli', owner: 'linus@example.com', status: 'sent', issued_on: cel`daysAgo(170)`, tax_rate: 8, region: 'amer' },
   ],
 });
 
