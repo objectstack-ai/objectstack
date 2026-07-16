@@ -3976,6 +3976,7 @@
     "OwnerSharingRuleSchema (const)",
     "PLATFORM_CAPABILITIES (const)",
     "PLATFORM_CAPABILITY_NAMES (const)",
+    "PUBLIC_FORM_SERVER_MANAGED_FIELDS (const)",
     "PermissionSet (type)",
     "PermissionSetInput (type)",
     "PermissionSetSchema (const)",
