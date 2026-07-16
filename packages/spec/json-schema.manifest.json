@@ -838,6 +838,7 @@
     "data/ReferenceResolution",
     "data/ReferenceResolutionError",
     "data/ReplicationConfig",
+    "data/RowCrudActionOverride",
     "data/SQLDialect",
     "data/SQLDriverConfig",
     "data/SSLConfig",

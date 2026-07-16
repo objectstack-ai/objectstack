@@ -9,7 +9,7 @@ import { ObjectListViewSchema } from '../ui/view.zod';
 /**
  * API Operations Enum
  */
-import { TemplateExpressionInputSchema } from '../shared/expression.zod';
+import { ExpressionInputSchema, TemplateExpressionInputSchema, type Expression, type ExpressionInput } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
@@ -556,6 +556,42 @@ export const ObjectExternalBindingSchema = z.object({
 
 export type ObjectExternalBinding = z.infer<typeof ObjectExternalBindingSchema>;
 
+/**
+ * Object form of a `userActions.edit` / `userActions.delete` override —
+ * extends the plain boolean with **per-record** CEL predicates so the
+ * built-in row Edit/Delete affordances can be hidden or disabled for a
+ * subset of rows (objectstack-ai/objectui#2614).
+ *
+ * Semantics (mirrors custom row actions' `visible` / `disabled`):
+ * - `enabled`      — object-level on/off, same meaning as the bare boolean.
+ *                    Omitted → the `managedBy` bucket default.
+ * - `visibleWhen`  — CEL over `record.*`; evaluates **false** → the row's
+ *                    button is not rendered. Fail-closed (a faulting
+ *                    predicate hides, and warns once).
+ * - `disabledWhen` — CEL over `record.*`; evaluates **true** → the row's
+ *                    button renders greyed / non-clickable. Fail-soft (a
+ *                    faulting predicate leaves the button enabled).
+ *
+ * The predicates are advisory UI gating only — server-side enforcement
+ * stays with permissions / hooks (e.g. `beforeUpdate` rejecting frozen
+ * rows). Evaluation happens on the canonical CEL engine, per row, with the
+ * record bound as `record.*` (and bare fields) — the same machinery custom
+ * actions already use, so authoring is identical.
+ */
+export const RowCrudActionOverrideSchema = z.object({
+  enabled: z.boolean().optional().describe(
+    'Object-level on/off for the generic affordance; same meaning as the bare boolean form. Omitted → managedBy bucket default.',
+  ),
+  visibleWhen: ExpressionInputSchema.optional().describe(
+    'Per-record CEL predicate; false → hide the row button for that record. Fail-closed.',
+  ),
+  disabledWhen: ExpressionInputSchema.optional().describe(
+    'Per-record CEL predicate; true → render the row button disabled for that record. Fail-soft.',
+  ),
+}).strict().describe('Boolean-or-predicates override for a built-in row CRUD affordance.');
+export type RowCrudActionOverride = z.infer<typeof RowCrudActionOverrideSchema>;
+export type RowCrudActionOverrideInput = z.input<typeof RowCrudActionOverrideSchema>;
+
 const ObjectSchemaBase = z.object({
   /** 
    * Identity & Metadata 
@@ -642,8 +678,12 @@ const ObjectSchemaBase = z.object({
   userActions: z.object({
     create: z.boolean().optional().describe('Show generic "New" button.'),
     import: z.boolean().optional().describe('Show CSV import wizard entry.'),
-    edit: z.boolean().optional().describe('Allow inline / form edit of existing rows.'),
-    delete: z.boolean().optional().describe('Show row-level delete + bulk delete.'),
+    edit: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
+      'Allow inline / form edit of existing rows. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
+    ),
+    delete: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
+      'Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
+    ),
     exportCsv: z.boolean().optional().describe('Show CSV export entry.'),
   }).optional().describe('Per-object override of the resolved CRUD affordance matrix.'),
 
@@ -1298,6 +1338,24 @@ export interface CrudAffordances {
   delete: boolean;
   /** CSV / clipboard export. Allowed even on append-only audit tables by default. */
   exportCsv: boolean;
+  /**
+   * Per-record CEL predicates for the built-in row Edit action, present only
+   * when `userActions.edit` used the object form (objectui#2614). Evaluate
+   * per row against `record.*`; see {@link RowCrudActionOverrideSchema}.
+   */
+  editPredicates?: RowCrudPredicates;
+  /** Per-record CEL predicates for the built-in row Delete action. */
+  deletePredicates?: RowCrudPredicates;
+}
+
+/**
+ * Per-record gating predicates carried through {@link resolveCrudAffordances}.
+ * Kept as authored (`string` shorthand or `{ dialect, source }` envelope) —
+ * consumers hand them to the canonical CEL row-predicate evaluator untouched.
+ */
+export interface RowCrudPredicates {
+  visibleWhen?: Expression | ExpressionInput;
+  disabledWhen?: Expression | ExpressionInput;
 }
 
 /**
@@ -1343,13 +1401,41 @@ export function resolveCrudAffordances(
   const bucket = (obj?.managedBy ?? 'platform') as keyof typeof CRUD_AFFORDANCE_DEFAULTS;
   const base = CRUD_AFFORDANCE_DEFAULTS[bucket] ?? CRUD_AFFORDANCE_DEFAULTS.platform;
   const overrides = obj?.userActions ?? {};
-  return {
+  const edit = normalizeRowCrudOverride(overrides.edit, base.edit);
+  const del = normalizeRowCrudOverride(overrides.delete, base.delete);
+  const out: CrudAffordances = {
     create:    overrides.create    ?? base.create,
     import:    overrides.import    ?? base.import,
-    edit:      overrides.edit      ?? base.edit,
-    delete:    overrides.delete    ?? base.delete,
+    edit:      edit.enabled,
+    delete:    del.enabled,
     exportCsv: overrides.exportCsv ?? base.exportCsv,
   };
+  if (edit.predicates) out.editPredicates = edit.predicates;
+  if (del.predicates) out.deletePredicates = del.predicates;
+  return out;
+}
+
+/**
+ * Collapse a `userActions.edit` / `userActions.delete` override — bare
+ * boolean or `{ enabled, visibleWhen, disabledWhen }` object — onto the
+ * bucket default. The predicates pass through as authored; `predicates` is
+ * only set when at least one predicate is present, so the boolean-only path
+ * stays byte-identical to the pre-#2614 result.
+ */
+function normalizeRowCrudOverride(
+  override: boolean | { enabled?: boolean; visibleWhen?: unknown; disabledWhen?: unknown } | null | undefined,
+  base: boolean,
+): { enabled: boolean; predicates?: RowCrudPredicates } {
+  if (override == null) return { enabled: base };
+  if (typeof override === 'boolean') return { enabled: override };
+  const enabled = override.enabled ?? base;
+  const visibleWhen = override.visibleWhen as RowCrudPredicates['visibleWhen'];
+  const disabledWhen = override.disabledWhen as RowCrudPredicates['disabledWhen'];
+  if (visibleWhen == null && disabledWhen == null) return { enabled };
+  const predicates: RowCrudPredicates = {};
+  if (visibleWhen != null) predicates.visibleWhen = visibleWhen;
+  if (disabledWhen != null) predicates.disabledWhen = disabledWhen;
+  return { enabled, predicates };
 }
 
 // =================================================================

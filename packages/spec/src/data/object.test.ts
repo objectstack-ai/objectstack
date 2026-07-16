@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, type ServiceObject } from './object.zod';
+import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, resolveCrudAffordances, type ServiceObject } from './object.zod';
 
 describe('ObjectCapabilities', () => {
   it('should apply default values correctly', () => {
@@ -1340,5 +1340,71 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
         fields: { name: { type: 'text' } },
       }),
     ).toThrow(/removed from @objectstack\/spec after v15\.0/);
+  });
+});
+
+describe('userActions row predicates + resolveCrudAffordances (objectui#2614)', () => {
+  it('accepts the plain boolean form unchanged (back-compat)', () => {
+    const obj = ObjectSchema.parse({
+      name: 'invoice',
+      fields: { name: { type: 'text' } },
+      userActions: { edit: false, delete: true },
+    });
+    const aff = resolveCrudAffordances(obj);
+    expect(aff.edit).toBe(false);
+    expect(aff.delete).toBe(true);
+    expect(aff.editPredicates).toBeUndefined();
+    expect(aff.deletePredicates).toBeUndefined();
+  });
+
+  it('accepts the object form with CEL predicate shorthand strings', () => {
+    const obj = ObjectSchema.parse({
+      name: 'task_version_check_item',
+      fields: { name: { type: 'text' } },
+      userActions: {
+        edit: { disabledWhen: 'record.frozen == true' },
+        delete: { visibleWhen: 'record.frozen != true' },
+      },
+    });
+    // String shorthand normalizes to the canonical CEL envelope.
+    expect((obj.userActions?.edit as any).disabledWhen).toEqual({ dialect: 'cel', source: 'record.frozen == true' });
+    expect((obj.userActions?.delete as any).visibleWhen).toEqual({ dialect: 'cel', source: 'record.frozen != true' });
+  });
+
+  it('resolveCrudAffordances carries predicates through and defaults enabled from the bucket', () => {
+    const aff = resolveCrudAffordances({
+      managedBy: 'platform',
+      userActions: {
+        edit: { disabledWhen: { dialect: 'cel', source: 'record.frozen == true' } },
+        delete: { enabled: false, visibleWhen: { dialect: 'cel', source: 'record.frozen != true' } },
+      },
+    } as never);
+    // No `enabled` on edit → platform bucket default (true) applies.
+    expect(aff.edit).toBe(true);
+    expect(aff.editPredicates?.disabledWhen).toEqual({ dialect: 'cel', source: 'record.frozen == true' });
+    expect(aff.editPredicates?.visibleWhen).toBeUndefined();
+    // Explicit enabled:false wins over the bucket default; predicates still surface.
+    expect(aff.delete).toBe(false);
+    expect(aff.deletePredicates?.visibleWhen).toEqual({ dialect: 'cel', source: 'record.frozen != true' });
+  });
+
+  it('object form without predicates behaves exactly like the boolean form', () => {
+    const aff = resolveCrudAffordances({
+      managedBy: 'config',
+      userActions: { edit: { enabled: true }, delete: {} },
+    } as never);
+    expect(aff.edit).toBe(true);
+    expect(aff.delete).toBe(true); // config bucket default
+    expect(aff.editPredicates).toBeUndefined();
+    expect(aff.deletePredicates).toBeUndefined();
+  });
+
+  it('rejects unknown keys in the object form', () => {
+    const result = ObjectSchema.safeParse({
+      name: 'invoice',
+      fields: { name: { type: 'text' } },
+      userActions: { edit: { hideWhen: 'record.frozen == true' } },
+    });
+    expect(result.success).toBe(false);
   });
 });

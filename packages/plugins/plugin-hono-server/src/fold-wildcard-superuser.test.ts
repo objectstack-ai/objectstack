@@ -90,6 +90,27 @@ describe('clampManagedObjectWrites', () => {
     expect(objects.crm_lead.allowEdit).toBe(true);
   });
 
+  it('treats the #2614 object form by its enabled flag only (predicates are UI gating, not a grant)', () => {
+    const schemas: Record<string, ManagedSchemaLike> = {
+      sys_user: {
+        managedBy: 'better-auth',
+        userActions: { edit: { enabled: true, disabledWhen: 'record.frozen == true' } as never },
+      },
+      sys_account: {
+        managedBy: 'better-auth',
+        // enabled omitted → NOT an explicit opt-in; the clamp stays fail-closed.
+        userActions: { edit: { disabledWhen: 'record.frozen == true' } as never },
+      },
+    };
+    const objects: Record<string, any> = {
+      sys_user: { allowEdit: true },
+      sys_account: { allowEdit: true },
+    };
+    clampManagedObjectWrites(objects, (n) => schemas[n]);
+    expect(objects.sys_user.allowEdit).toBe(true);
+    expect(objects.sys_account.allowEdit).toBe(false);
+  });
+
   it('fold + clamp compose to permission ∩ guard for a platform admin', () => {
     // As produced for a platform admin (admin_full_access '*' modifyAll) who
     // also holds organization_admin (explicit managed denies).

@@ -126,7 +126,19 @@ export function foldWildcardSuperUser(objects: Record<string, any>): void {
 /** Minimal schema shape the managed-write clamp needs. */
 export interface ManagedSchemaLike {
     managedBy?: string;
-    userActions?: { create?: boolean; edit?: boolean; delete?: boolean } | null;
+    userActions?: {
+        create?: boolean;
+        // edit/delete accept the #2614 object form ({ enabled, visibleWhen,
+        // disabledWhen }); only the object-level `enabled` matters here — the
+        // per-record predicates are UI gating, not a permission grant.
+        edit?: boolean | { enabled?: boolean };
+        delete?: boolean | { enabled?: boolean };
+    } | null;
+}
+
+/** True only when a userActions flag (bare boolean or object form) explicitly opts the write in. */
+function isWriteOptedIn(v: boolean | { enabled?: boolean } | undefined | null): boolean {
+    return v === true || (typeof v === 'object' && v !== null && v.enabled === true);
 }
 
 /**
@@ -157,9 +169,9 @@ export function clampManagedObjectWrites(
         const schema = schemaOf(obj);
         if (schema?.managedBy !== 'better-auth') continue;
         const ua = schema.userActions ?? {};
-        if (ua.edit !== true) acc.allowEdit = false;
+        if (!isWriteOptedIn(ua.edit)) acc.allowEdit = false;
         if (ua.create !== true) acc.allowCreate = false;
-        if (ua.delete !== true) acc.allowDelete = false;
+        if (!isWriteOptedIn(ua.delete)) acc.allowDelete = false;
     }
 }
 
