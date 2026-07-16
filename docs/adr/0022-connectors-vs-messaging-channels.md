@@ -1,6 +1,6 @@
 # ADR-0022: Connectors vs Messaging Channels — Where "Push to Slack" Lives
 
-**Status**: Proposed (2026-05-31)
+**Status**: Proposed (2026-05-31) — routing decision recorded; both substrates now exist independently (`connector-slack` built; `service-messaging` notify/outbox/preferences built), but the §3 shared-transport wiring — a Slack `MessagingChannel.send()` delegating to the Slack Connector — is unbuilt (no slack-channel in service-messaging). (2026-07-16 audit)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0012](./0012-notification-platform.md) (Messaging Platform — outbound `notify` on a generalized outbox), [ADR-0013](./0013-bidirectional-messaging.md) (Bidirectional Messaging — Slack first), [ADR-0015](./0015-external-datasource-federation.md) (open mechanism / enterprise lifecycle split), [ADR-0018](./0018-unified-node-action-registry.md) (`connector_action` as baseline generic dispatch)
 **Consumers**: `@objectstack/spec` (`integration/`, future `messaging/`), `@objectstack/services/service-automation` (connector registry), future `@objectstack/service-messaging`, future `@objectstack/plugin-messaging-slack`, `@objectstack/connectors/*`

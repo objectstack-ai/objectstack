@@ -1,6 +1,6 @@
 # ADR-0028: Metadata Naming & Namespace Isolation — Derived Physical Names, Namespace-Scoped Identity, and a Single Kernel Contract
 
-**Status**: Proposed (2026-06-01)
+**Status**: Proposed (2026-06-01) — NOT STARTED (2026-07-16 audit): the target model (namespace as identity dimension, short authored names, derived physical names, `namingMode` dual-read, `sys` reservation, namespaced transport segments) is entirely unbuilt; what exists is the superseded literal-prefix current-state contract (`spec/kernel/namespace-prefix.ts`, self-labelled) plus unrelated ADR-0048 conflict scaffolding.
 **Deciders**: ObjectStack Protocol Architects
 **Supersedes**: the hand-written object-namespace-prefix authoring rule documented in `packages/spec/src/kernel/manifest.zod.ts` (the `namespace` field) and enforced by `validateNamespacePrefix()` in `packages/spec/src/stack.zod.ts` — there is no standalone ADR for that rule today.
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source per type, org overlay), [ADR-0008](./0008-metadata-repository-and-change-log.md) (Repository · ChangeLog · Cache · Registry; `MetaRef = org/type/name`), [ADR-0010](./0010-metadata-protection-model.md) (protection model), [ADR-0019](./0019-app-as-consumer-unit.md) (app as the consumer-installable unit), [ADR-0025](./0025-plugin-package-distribution.md) (package distribution), [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) (**prerequisite** — kernel object ownership; D5/D6 below assume the kernel is properly owned per ADR-0029)

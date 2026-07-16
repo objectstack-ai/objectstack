@@ -1,6 +1,6 @@
 # ADR-0061: Record Search Architecture — metadata-driven `$search` resolution
 
-**Status**: Proposed — recommended for acceptance (2026-06-21). **Tier 1 (`$search` + `object.searchableFields`) has since been implemented & is live; Tier 2 (FTS/relevance) deferred — header pending formal update.**
+**Status**: Proposed — recommended for acceptance (2026-06-21). **Tier 1 (`$search` + `object.searchableFields`) has since been implemented & is live; Tier 2 (FTS/relevance) deferred.** Verified 2026-07-16: Tier 1 claim TRUE (`objectql/src/search-filter.ts` + engine wiring + unit tests, incl. `$searchFields` narrowing and select label-mapping) — but this ADR's own acceptance bar (a `search-conformance` ledger entry + dogfood multi-field HTTP proof, per ADR-0060 closure) is still unmet, so the header stays Proposed until that lands.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: ADR-0045 (additive materialization & visibility gate — search must be visibility-aware), ADR-0049 (enforce-or-remove / no unenforced declaration), ADR-0054 (runtime proof per enforced surface), ADR-0060 (conformance ledger as a platform pattern)
 **Consumers**: spec, objectql, driver-sql, driver-memory, driver-mongodb, rest, objectui (`fields`, `plugin-list`, `app-shell`), verify, dogfood

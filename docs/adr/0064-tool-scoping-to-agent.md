@@ -2,7 +2,7 @@
 
 > **🔶 Cloud-owned — superseded in part by cloud ADR-0025 (2026-06-25).** The in-UI AI runtime and the `ask` / `build` agents described here moved to the **cloud / Enterprise** distribution (`@objectstack/service-ai` → `cloud/packages/service-ai`, closed); the open framework exposes AI only via `@objectstack/mcp` (BYO-AI) and ships no in-product `ask` / `build` chat. Retained as historical design context, now **cloud-owned** — see [`cloud/docs/adr/0025-service-ai-to-cloud-open-mcp-only`](https://github.com/objectstack-ai/cloud/blob/main/docs/adr/0025-service-ai-to-cloud-open-mcp-only.md).
 
-**Status**: Proposed (2026-06-22)
+**Status**: Proposed (2026-06-22) — cloud-owned (2026-07-16 audit): the only framework dependency (`skill.surface`) exists; the tool-resolution scoping, global fall-through removal, and bind-time affinity error live in cloud `service-ai` and are not verifiable in this repo.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0063](./0063-two-kernel-agents-skills-are-the-extension-primitive.md) (two agents bound by surface; skill ↔ agent affinity), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (draft-gated authoring tools)
 **Resolves**: [ADR-0040 §4](./0040-unified-assistant-and-agent-binding.md) ("tools are registry-global; a custom agent can change persona but not constrain capability") — the named follow-up contract.

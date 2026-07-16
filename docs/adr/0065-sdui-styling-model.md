@@ -1,6 +1,6 @@
 # ADR-0065: SDUI styling model — scoped style-objects over arbitrary Tailwind classes
 
-**Status**: Proposed (2026-06-22)
+**Status**: Accepted (2026-06-22) — open-mechanism half implemented: `style`/`responsiveStyles` on the spec UI envelope (`page.zod.ts:97,106`), reference scoped-styles compiler + four-property test (objectui `core/src/styling/scoped-styles.ts(.test)`), token/Tailwind lint (`lint/validate-responsive-styles.ts`). Cloud tier-policy + VLM gate remain the cloud half.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0026](./0026-client-ui-plugin-distribution.md) (client UI distribution), [ADR-0016](./0016-studio-package-authoring-and-publish.md) (package authoring/publish), [ADR-0049](./0049-no-unenforced-security-properties.md) (spec must not promise what the runtime can't deliver)
 **Consumers**: `@objectstack/spec` (UI component envelope), the objectui renderers (`@object-ui/components`), cloud SDUI page authoring, the AI metadata-authoring agents.

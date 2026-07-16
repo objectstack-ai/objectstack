@@ -1,6 +1,6 @@
 # ADR-0037: Live Canvas — draft-overlay live preview while you build
 
-**Status**: Proposed (2026-06-10)
+**Status**: Accepted (2026-06-10) — all four phases implemented: `previewDrafts` reads (`runtime/http-dispatcher.ts`), objectui LiveCanvas/PreviewModeContext/DraftPreviewBar, draft-data preview via `service-analytics/preview-evaluator.ts` (+test), assistantBus back-channel (Phase 4 the least exercised).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (AI authors metadata as DRAFTS; publish is the human gate), [ADR-0021](./0021-analytics-dataset-semantic-layer.md) (datasets as the single analytics form — what dashboards render from), [ADR-0005](./0005-metadata-customization-overlay.md) (the overlay model the draft state lives in)
 **Consumers**: `@objectstack/runtime` + `@objectstack/objectql` (preview data plane — mostly already present), `@objectstack/service-analytics` (Phase 3 draft-data queries), `../objectui` (`data-objectstack` preview client, `app-shell` Live Canvas + assistant bus, view/dashboard renderers), `../cloud` (Build-with-AI entry surface)
