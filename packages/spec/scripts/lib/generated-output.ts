@@ -66,6 +66,18 @@ export function createSink(options: { check: boolean; repoRoot: string }) {
     managed.set(path.resolve(dir), owns);
   }
 
+  /**
+   * Whether this run generated `filePath`. For a generator whose later output
+   * depends on its earlier output — e.g. an index that links only the pages
+   * that got generated — ask this rather than the disk. In write mode the two
+   * agree (the folder was just wiped and rewritten), but under `--check`
+   * nothing is written and the disk still holds the stale tree, so reading it
+   * would make the check diverge from the run it is meant to model.
+   */
+  function wasEmitted(filePath: string): boolean {
+    return emitted.has(path.resolve(filePath));
+  }
+
   function walk(dir: string): string[] {
     if (!fs.existsSync(dir)) return [];
     return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -138,5 +150,5 @@ export function createSink(options: { check: boolean; repoRoot: string }) {
     process.exit(1);
   }
 
-  return { emit, manageDir, flush };
+  return { emit, manageDir, wasEmitted, flush };
 }

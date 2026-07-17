@@ -19,6 +19,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { createSink } from './lib/generated-output';
+
 const SCHEMA_DIR = path.resolve(__dirname, '../json-schema');
 const SRC_DIR = path.resolve(__dirname, '../src');
 // Output directly to references folder (flattened)
@@ -29,102 +31,13 @@ const REPO_ROOT = path.resolve(__dirname, '../../..');
 const CHECK = process.argv.includes('--check');
 
 // ── Output sink ──────────────────────────────────────────────────────────────
-// Every generated file goes through emit(), every wholesale-regenerated folder
-// through manageDir(). Nothing touches the output tree until flush(), so the
-// two modes run byte-for-byte identical generation logic and differ only in the
-// final disposition — write to disk, or compare against it. That shared path is
-// what makes --check trustworthy: it cannot pass on output a real run wouldn't
-// produce, because it *is* the real run minus the writes.
+// Shared with the spec's other generators — see lib/generated-output.ts for why
+// the write and --check paths must be the same code.
 
-/** Absolute path → intended content. */
-const emitted = new Map<string, string>();
-/** Absolute dirs regenerated wholesale — anything on disk here that we didn't
- *  emit is stale, and a real run would delete it. */
-const managedDirs = new Set<string>();
-
-function emit(filePath: string, content: string): void {
-  emitted.set(path.resolve(filePath), content);
-}
-
-function manageDir(dir: string): void {
-  managedDirs.add(path.resolve(dir));
-}
-
-/** Files this run generated, for the read-after-write lookups below. */
-function wasEmitted(filePath: string): boolean {
-  return emitted.has(path.resolve(filePath));
-}
-
-function walk(dir: string): string[] {
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
-    const full = path.join(dir, e.name);
-    return e.isDirectory() ? walk(full) : [full];
-  });
-}
-
-const rel = (p: string) => path.relative(REPO_ROOT, p);
-
-/** Write the emitted tree, or (in --check) report how it differs from disk. */
-function flush(): void {
-  if (!CHECK) {
-    for (const dir of managedDirs) {
-      if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
-    }
-    for (const [file, content] of emitted) {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, content);
-      console.log(`✓ Generated ${rel(file)}`);
-    }
-    console.log(`\n✅ Generated ${emitted.size} files`);
-    return;
-  }
-
-  // A run with no schemas to read emits almost nothing, and "nothing differs"
-  // would read as success — the gate would pass while checking no pages at all.
-  // json-schema/ is gitignored, so this is one forgotten `gen:schema` away on a
-  // fresh checkout. Fail loudly instead of greenly.
-  if (managedDirs.size === 0) {
-    console.error(
-      `\n✗ No JSON schemas found under ${rel(SCHEMA_DIR)} — nothing to check against.\n` +
-        `  Run \`pnpm --filter @objectstack/spec gen:schema\` first (\`check:docs\` does this for you).\n`,
-    );
-    process.exit(1);
-  }
-
-  const changed: string[] = [];
-  const added: string[] = [];
-  for (const [file, content] of emitted) {
-    if (!fs.existsSync(file)) added.push(rel(file));
-    else if (fs.readFileSync(file, 'utf-8') !== content) changed.push(rel(file));
-  }
-  // A managed folder is regenerated in full, so an on-disk file we didn't emit
-  // is one a real run would delete — e.g. the page of a type removed from spec.
-  const stale = [...managedDirs]
-    .flatMap(walk)
-    .filter(f => !wasEmitted(f))
-    .map(rel);
-
-  const drift = [
-    ...added.map(f => `  + ${f} (missing — spec adds it)`),
-    ...changed.map(f => `  ~ ${f} (out of date)`),
-    ...stale.map(f => `  - ${f} (stale — spec no longer defines it)`),
-  ];
-
-  if (drift.length === 0) {
-    console.log(`✅ ${emitted.size} reference files in sync with packages/spec`);
-    return;
-  }
-
-  console.error(
-    `\n✗ content/docs/references/ is out of date with packages/spec:\n\n` +
-      drift.join('\n') +
-      `\n\nThese files are GENERATED — do not hand-edit them. Regenerate and commit:\n\n` +
-      `  pnpm --filter @objectstack/spec gen:schema && pnpm --filter @objectstack/spec gen:docs\n` +
-      `  git add content/docs/references\n`,
-  );
-  process.exit(1);
-}
+const { emit, manageDir, wasEmitted, flush } = createSink({
+  check: CHECK,
+  repoRoot: REPO_ROOT,
+});
 
 // Dynamically discover categories from src directory
 const getCategoryTitle = (dir: string) => {
@@ -524,6 +437,9 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
 
 console.log('Building documentation...');
 
+/** Categories that had schemas to regenerate from — drives the flush() guard. */
+let managedCount = 0;
+
 // 1. Clean existing category folders from DOCS_ROOT — but only when there are
 // JSON schemas to regenerate from. Otherwise we'd silently delete every .mdx
 // file when the upstream `gen:schema` step produced nothing (data loss).
@@ -539,6 +455,7 @@ Object.keys(CATEGORIES).forEach(category => {
     return;
   }
   manageDir(dir);
+  managedCount++;
 });
 
 const generatedFiles: string[] = [];
@@ -661,4 +578,17 @@ const meta = {
 emit(path.join(DOCS_ROOT, 'meta.json'), JSON.stringify(meta, null, 2));
 
 // 4. Disposition: write the tree, or report drift against it.
-flush();
+flush({
+  surface: 'content/docs/references/',
+  regenerate:
+    '  pnpm --filter @objectstack/spec gen:schema && pnpm --filter @objectstack/spec gen:docs\n' +
+    '  git add content/docs/references',
+  // json-schema/ is gitignored, so a fresh checkout that forgot gen:schema has no
+  // input at all: every category is skipped, nothing is managed, and "nothing
+  // differs" would read as success — green while checking no pages. Fail loudly.
+  guard: () =>
+    managedCount === 0
+      ? `No JSON schemas found under ${path.relative(REPO_ROOT, SCHEMA_DIR)} — nothing to check against.\n` +
+        '  Run `pnpm --filter @objectstack/spec gen:schema` first (`check:docs` does this for you).'
+      : null,
+});
