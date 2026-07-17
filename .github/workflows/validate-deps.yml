@@ -8,6 +8,7 @@ on:
       - '.changeset/config.json'
       - 'pnpm-workspace.yaml'
       - 'scripts/check-changeset-fixed.mjs'
+      - 'scripts/check-override-consistency.mjs'
       # Re-run when the workflow itself changes, so edits to these gates are
       # exercised on the PR that introduces them.
       - '.github/workflows/validate-deps.yml'
@@ -58,6 +59,16 @@ jobs:
 
       - name: Verify Changesets "fixed" group covers every public package
         run: node scripts/check-changeset-fixed.mjs
+
+      # pnpm overrides pin what THIS workspace resolves, but they do not ship
+      # with published packages — downstream installs see only the declared
+      # ranges. If an override target isn't reachable from a publishable
+      # package's declared range, we test one dependency graph and publish
+      # another (the 15.1.0 quickstart shipped exactly that: plugin-auth
+      # declared better-auth ^1.6.23 while CI ran the 1.7.0-rc.1 override,
+      # and every fresh project 500'd on auth).
+      - name: Verify overrides are reflected in published manifests
+        run: node scripts/check-override-consistency.mjs
           
       # Fail the workflow if known vulnerabilities are found — enforces
       # security compliance before merging.

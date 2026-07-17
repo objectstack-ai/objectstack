@@ -30,19 +30,26 @@ onlyBuiltDependencies:
 #     @vscode/vsce > cheerio (declares undici ^7.19.0); force the patched
 #     7.28.0 line (stays in the 7.x major cheerio supports). CI audit gate.
 #   - @better-auth/scim: GHSA-j8v8-g9cx-5qf4 (high) — account/provider
-#     takeover. `plugin-auth` depends on ^1.6.23 (the `latest` dist-tag), but
-#     the advisory is patched only in >=1.7.0-beta.4 — there is NO stable
-#     patched release yet. Pin to the newest pre-release (1.7.0-rc.1) to clear
-#     the CI audit gate; revert to a stable `^1.7.x` line the moment one ships.
+#     takeover. The advisory is patched only in >=1.7.0-beta.4 — there is NO
+#     stable patched release yet (npm `latest` is still 1.6.23). Pin to the
+#     newest pre-release (1.7.0-rc.1) to clear the CI audit gate; revert to a
+#     stable `^1.7.x` line the moment one ships.
 #   - @better-auth/oauth-provider: GHSA-p2fr-6hmx-4528 — same better-auth
-#     monorepo and same situation as @better-auth/scim above. `plugin-auth`
-#     depends on ^1.6.23; the fix first ships in the 1.7.0 pre-release line.
-#     Pin to 1.7.0-rc.1. The 1.7 oauth-provider is exercised on the sign-in
-#     path and imports symbols (e.g. CLIENT_ASSERTION_TYPE) that only exist in
-#     @better-auth/core 1.7.x, so the ENTIRE better-auth family must move to
-#     1.7.0-rc.1 together — mixing a 1.7 plugin with 1.6.23 core 500s at
-#     runtime (dogfood sign-in). The full family is pinned below; revert all of
+#     monorepo and same situation as @better-auth/scim above. The fix first
+#     ships in the 1.7.0 pre-release line. Pin to 1.7.0-rc.1. The 1.7
+#     oauth-provider is exercised on the sign-in path and imports symbols
+#     (e.g. CLIENT_ASSERTION_TYPE) that only exist in @better-auth/core 1.7.x,
+#     so the ENTIRE better-auth family must move to 1.7.0-rc.1 together —
+#     mixing a 1.7 plugin with 1.6.23 core throws "Cannot set properties of
+#     undefined (setting 'modelName')" during better-auth init and 500s every
+#     auth endpoint at runtime. The full family is pinned below; revert all of
 #     them to a stable `^1.7.x` line the moment one ships.
+#     IMPORTANT: these overrides do NOT ship with published packages — a
+#     downstream `npx create-objectstack` install resolves plugin-auth's own
+#     declared ranges. plugin-auth therefore pins the same exact 1.7.0-rc.1 in
+#     its dependencies (a `^1.6.23` range there resolved to the broken 1.6.23
+#     mix and 500'd every fresh 15.1.0 project). Keep both in sync — CI
+#     enforces this via scripts/check-override-consistency.mjs.
 #   - uuid: GHSA-w5hq-g745-h8pq (high) — pulled 8.3.2 transitively; the fix
 #     first lands in 11.1.1. Pin to the ^11.1.1 LTS line (uuid `legacy-11`
 #     dist-tag) rather than the latest major to keep the jump conservative.
