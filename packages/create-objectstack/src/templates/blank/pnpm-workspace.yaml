@@ -1,0 +1,23 @@
+# pnpm does not run dependency install scripts unless they are approved here.
+# Without this file a fresh `pnpm install` on pnpm 11 exits 1 with
+# ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard error.
+#
+# Both keys are needed; they are read by different pnpm versions:
+#   allowBuilds             pnpm >= 10.31 and pnpm 11+. pnpm 11 reads ONLY this
+#                           one — onlyBuiltDependencies alone still errors.
+#   onlyBuiltDependencies   pnpm 10.0–10.30, which do not understand allowBuilds.
+#
+# better-sqlite3 is the native sqlite driver (@objectstack/driver-sql's optional
+# dependency); esbuild compiles objectstack.config.ts. Both ship prebuilt
+# binaries, so an unapproved build degrades rather than breaks — but pnpm 11
+# fails the install before it gets that far.
+#
+# npm and yarn ignore this file; it costs them nothing.
+
+onlyBuiltDependencies:
+  - better-sqlite3
+  - esbuild
+
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true

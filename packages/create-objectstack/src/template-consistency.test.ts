@@ -72,6 +72,49 @@ describe('blank template manifest engines.protocol (ADR-0087 D1)', () => {
   });
 });
 
+// pnpm 11 turned an unapproved dependency build script from a warning into a
+// hard error, so the template declaring nothing meant `npx create-objectstack`
+// + `pnpm install` exited 1 for every user on a current pnpm (#3110). Both keys
+// are load-bearing and read by different pnpm versions: pnpm 11 honours only
+// `allowBuilds`, while pnpm 10.0–10.30 understand only `onlyBuiltDependencies`.
+describe('blank template pnpm build approvals (#3110)', () => {
+  const wsPath = path.join(pkgRoot, 'src', 'templates', 'blank', 'pnpm-workspace.yaml');
+  const APPROVED = ['better-sqlite3', 'esbuild'];
+  // Strip comments: the prose below explains these keys and must not satisfy
+  // an assertion that the settings themselves are supposed to satisfy.
+  const settings = fs.existsSync(wsPath)
+    ? fs.readFileSync(wsPath, 'utf8').replace(/^\s*#.*$/gm, '')
+    : '';
+
+  it('ships a pnpm-workspace.yaml', () => {
+    expect(
+      fs.existsSync(wsPath),
+      'without it a fresh `pnpm install` exits 1 on pnpm 11 (ERR_PNPM_IGNORED_BUILDS)',
+    ).toBe(true);
+  });
+
+  it('sets allowBuilds.<pkg> = true, the only key pnpm 11 reads', () => {
+    const block = /^allowBuilds:\n((?:[ \t]+.*\n?)*)/m.exec(settings)?.[1] ?? '';
+    for (const pkg of APPROVED) {
+      expect(
+        new RegExp(`^\\s+${pkg}:\\s*true\\s*$`, 'm').test(block),
+        `allowBuilds must set "${pkg}: true" — pnpm 11 errors on an unapproved build ` +
+          'and ignores onlyBuiltDependencies',
+      ).toBe(true);
+    }
+  });
+
+  it('lists the same packages under onlyBuiltDependencies for pnpm 10.0–10.30', () => {
+    const block = /^onlyBuiltDependencies:\n((?:[ \t]*-.*\n?)*)/m.exec(settings)?.[1] ?? '';
+    for (const pkg of APPROVED) {
+      expect(
+        new RegExp(`^\\s*-\\s*${pkg}\\s*$`, 'm').test(block),
+        `onlyBuiltDependencies must list "${pkg}" — pnpm < 10.31 does not understand allowBuilds`,
+      ).toBe(true);
+    }
+  });
+});
+
 describe('README template table', () => {
   it('lists exactly the templates in the TEMPLATES registry', () => {
     const readme = fs.readFileSync(path.join(pkgRoot, 'README.md'), 'utf8');
