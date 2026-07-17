@@ -32,11 +32,22 @@ const DEFAULT_EXTERNAL_ID_FIELD = 'name';
  *
  * Provides metadata-driven seed data loading with:
  * - Automatic lookup/master_detail reference resolution via externalId
+ *   (in-memory for records seeded this load, DB probe by the target
+ *   dataset's declared externalId otherwise)
  * - Topological dependency ordering (parents before children)
  * - Multi-pass loading for circular references
  * - Dry-run validation mode
  * - Upsert support honoring SeedSchema mode
+ * - Idempotent replay: an upsert/update whose declared fields already match
+ *   the existing row is skipped (no update_at churn, no re-validation) —
+ *   seeds replay on every dev-server boot and package re-publish
  * - Actionable error reporting
+ *
+ * Replay safety invariant: a reference that cannot be resolved is NEVER
+ * written as NULL (or as its raw natural-key string) over an existing row —
+ * resolution failures either leave the column untouched (deferred to pass 2)
+ * or drop the record loudly. See the 15.1.x replay corruption incident:
+ * every restart used to sever one lookup per replayed child record.
  */
 export class SeedLoaderService implements ISeedLoaderService {
   private engine: IDataEngine;
@@ -96,8 +107,18 @@ export class SeedLoaderService implements ISeedLoaderService {
     // 3. Order datasets by topological insert order
     const orderedDatasets = this.orderDatasets(datasets, graph.insertOrder);
 
-    // 4. Build reference lookup map from metadata (field → target object)
-    const refMap = this.buildReferenceMap(graph);
+    // 4. Build reference lookup map from metadata (field → target object).
+    // Reference values are authored against the TARGET dataset's externalId
+    // (e.g. `interview.candidate: 'alice@example.com'` with the candidate
+    // dataset declaring `externalId: 'email'`), so DB-side resolution must
+    // query that same field — not a hardcoded 'name'. First boot masked this:
+    // the in-memory insertedRecords map (keyed by the dataset's externalId)
+    // resolved everything, but on replay any per-record miss fell through to
+    // the DB probe and silently failed. See the replay corruption fix below.
+    const externalIdByObject = new Map<string, string>(
+      request.seeds.map(d => [d.object, d.externalId || DEFAULT_EXTERNAL_ID_FIELD]),
+    );
+    const refMap = this.buildReferenceMap(graph, externalIdByObject);
 
     // 5. Pass 1: Insert/upsert records, resolving references
     const insertedRecords = new Map<string, Map<string, string>>(); // object → externalIdValue → internalId
@@ -351,6 +372,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       }
 
       // Resolve references
+      let unresolvedRefError = false;
       for (const ref of objectRefs) {
         const fieldValue = record[ref.field];
         if (fieldValue === undefined || fieldValue === null) continue;
@@ -382,7 +404,10 @@ export class SeedLoaderService implements ISeedLoaderService {
           allErrors.push(error);
           this.logger.warn(`[SeedLoader] ${error.message}`, { recordIndex: i });
           // Drop the unresolvable value so it never reaches the driver.
-          record[ref.field] = null;
+          // Removing the key (not writing null) matters on the upsert UPDATE
+          // path: an explicit null would overwrite the existing row's valid
+          // reference, silently severing the link on every seed replay.
+          delete record[ref.field];
           continue;
         }
 
@@ -403,8 +428,14 @@ export class SeedLoaderService implements ISeedLoaderService {
             record[ref.field] = dbId;
             referencesResolved++;
           } else if (config.multiPass) {
-            // Defer to pass 2
-            record[ref.field] = null;
+            // Defer to pass 2. REMOVE the field rather than writing null:
+            // on insert a missing column lands NULL anyway (placeholder until
+            // pass 2 back-fills it), but on the upsert UPDATE path an explicit
+            // null would OVERWRITE the existing row's already-correct
+            // reference — every dev-server restart severed one link per
+            // replayed record (NOT NULL columns turned this into a loud
+            // constraint error; nullable ones silently lost the association).
+            delete record[ref.field];
             deferredUpdates.push({
               objectName,
               recordExternalId: String(record[externalId] ?? ''),
@@ -416,7 +447,10 @@ export class SeedLoaderService implements ISeedLoaderService {
             });
             referencesDeferred++;
           } else {
-            // Cannot resolve - record error
+            // Cannot resolve and no pass 2 will run — skip the whole record
+            // (LOUD: counted + reported). Writing it anyway would either
+            // carry the raw natural-key string into the FK column or, on
+            // update, corrupt the existing row.
             const error: ReferenceResolutionError = {
               sourceObject: objectName,
               field: ref.field,
@@ -428,6 +462,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             };
             errors.push(error);
             allErrors.push(error);
+            unresolvedRefError = true;
           }
         } else {
           // Dry-run: attempt resolution, report error if not found
@@ -446,6 +481,14 @@ export class SeedLoaderService implements ISeedLoaderService {
             allErrors.push(error);
           }
         }
+      }
+
+      // A definitively unresolvable reference (no pass 2 to fix it) drops the
+      // record — reported above, counted here. Better a missing seed row than
+      // a written one with a corrupted or unresolved reference.
+      if (unresolvedRefError && !config.dryRun) {
+        errored++;
+        continue;
       }
 
       // Insert/upsert the record
@@ -470,6 +513,14 @@ export class SeedLoaderService implements ISeedLoaderService {
             }
           } catch (err: any) {
             errored++;
+            // Same cascade guard as the batched update path: the row may
+            // already exist (rejected update), so keep its natural-key
+            // mapping alive for downstream reference resolution.
+            const existingId = this.extractId(existingRecords?.get(String(record[externalId] ?? '')));
+            const externalIdValue = String(record[externalId] ?? '');
+            if (externalIdValue && existingId) {
+              insertedRecords.get(objectName)!.set(externalIdValue, existingId);
+            }
             const error = this.buildWriteError(objectName, record, externalId, i, err);
             errors.push(error);
             allErrors.push(error);
@@ -485,12 +536,19 @@ export class SeedLoaderService implements ISeedLoaderService {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
           } else if (decision.action === 'update') {
+            // Register the externalId → id mapping BEFORE attempting the
+            // write: the row exists and its id is known regardless of whether
+            // this update succeeds. A rejected update (e.g. a state_machine
+            // rule vetoing the transition back to the seed value) must not
+            // sever downstream natural-key resolution — that cascade is what
+            // turned one legitimate validation error into NULLed-out child
+            // references on every dev-server restart.
+            if (externalIdValue) {
+              insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
+            }
             try {
               await withTransientRetry(() => this.engine.update(objectName, { ...record, id: decision.id }, opts));
               updated++;
-              if (externalIdValue) {
-                insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
-              }
             } catch (err: any) {
               errored++;
               const error = this.buildWriteError(objectName, record, externalId, i, err);
@@ -570,43 +628,38 @@ export class SeedLoaderService implements ISeedLoaderService {
     value: unknown,
     organizationId?: string,
   ): Promise<string | null> {
-    try {
-      const where: Record<string, unknown> = { [targetField]: value };
-      // Per-tenant replay: when scoping is requested, only consider
-      // rows that belong to the target tenant so cross-tenant rows
-      // never get borrowed as a "resolved" reference (would silently
-      // create a cross-org FK).
-      if (organizationId) where.organization_id = organizationId;
-      const records = await this.engine.find(targetObject, {
-        where,
-        fields: ['id'],
-        limit: 1,
-        context: { isSystem: true },
-      } as any);
-      if (records && records.length > 0) {
-        return String(records[0].id || records[0]._id);
-      }
-      // Fallback: the value may already be the target's internal id rather than
-      // its natural key — a seed that wires a lookup to a real existing record
-      // (e.g. a people field → the current user, whose id is not a UUID/ObjectId
-      // so `looksLikeInternalId` did not short-circuit). Resolving by id lets a
-      // valid id resolve instead of dangling null, with no risk of a false
-      // natural-key match (an id either exists or it does not).
-      if (targetField !== 'id') {
-        const byId: Record<string, unknown> = { id: value };
-        if (organizationId) byId.organization_id = organizationId;
-        const idMatch = await this.engine.find(targetObject, {
-          where: byId,
+    // Probe order: the target dataset's declared externalId (threaded in as
+    // `targetField` via buildReferenceMap), then the historical 'name'
+    // default, then the internal id. Each is exact-match, so extra probes
+    // can only rescue a reference, never mis-resolve one.
+    const probeFields = [targetField];
+    if (targetField !== DEFAULT_EXTERNAL_ID_FIELD) probeFields.push(DEFAULT_EXTERNAL_ID_FIELD);
+    if (targetField !== 'id') probeFields.push('id');
+    for (const probeField of probeFields) {
+      try {
+        const where: Record<string, unknown> = { [probeField]: value };
+        // Per-tenant replay: when scoping is requested, only consider
+        // rows that belong to the target tenant so cross-tenant rows
+        // never get borrowed as a "resolved" reference (would silently
+        // create a cross-org FK).
+        if (organizationId) where.organization_id = organizationId;
+        const records = await this.engine.find(targetObject, {
+          where,
           fields: ['id'],
           limit: 1,
           context: { isSystem: true },
         } as any);
-        if (idMatch && idMatch.length > 0) {
-          return String(idMatch[0].id || idMatch[0]._id);
+        // The 'id' probe covers a seed that wires a lookup to a real existing
+        // record (e.g. a people field → the current user, whose id is not a
+        // UUID/ObjectId so `looksLikeInternalId` did not short-circuit); an id
+        // either exists or it does not, so there is no false-match risk.
+        if (records && records.length > 0) {
+          return String(records[0].id || records[0]._id);
         }
+      } catch {
+        // Target object (or this probe's column) may not exist — try the next
+        // probe rather than aborting resolution outright.
       }
-    } catch {
-      // Target object may not exist yet
     }
     return null;
   }
@@ -720,6 +773,9 @@ export class SeedLoaderService implements ISeedLoaderService {
           return { action: 'skipped' };
         }
         const id = this.extractId(existing);
+        if (this.isNoOpReplay(record, existing)) {
+          return { action: 'skipped', id };
+        }
         await this.engine.update(objectName, { ...record, id }, opts);
         return { action: 'updated', id };
       }
@@ -727,6 +783,9 @@ export class SeedLoaderService implements ISeedLoaderService {
       case 'upsert': {
         if (existing) {
           const id = this.extractId(existing);
+          if (this.isNoOpReplay(record, existing)) {
+            return { action: 'skipped', id };
+          }
           await this.engine.update(objectName, { ...record, id }, opts);
           return { action: 'updated', id };
         } else {
@@ -776,9 +835,15 @@ export class SeedLoaderService implements ISeedLoaderService {
 
     switch (mode) {
       case 'update':
-        return existing ? { action: 'update', id: this.extractId(existing)! } : { action: 'skip' };
+        if (!existing) return { action: 'skip' };
+        return this.isNoOpReplay(record, existing)
+          ? { action: 'skip', id: this.extractId(existing) }
+          : { action: 'update', id: this.extractId(existing)! };
       case 'upsert':
-        return existing ? { action: 'update', id: this.extractId(existing)! } : { action: 'insert' };
+        if (!existing) return { action: 'insert' };
+        return this.isNoOpReplay(record, existing)
+          ? { action: 'skip', id: this.extractId(existing) }
+          : { action: 'update', id: this.extractId(existing)! };
       case 'ignore':
         return existing ? { action: 'skip', id: this.extractId(existing) } : { action: 'insert' };
       case 'insert':
@@ -786,6 +851,55 @@ export class SeedLoaderService implements ISeedLoaderService {
       default:
         return { action: 'insert' };
     }
+  }
+
+  /**
+   * A seed replay (dev-server restart, package re-publish) re-loads the same
+   * records over existing rows. When nothing the seed declares actually
+   * differs, rewriting the row is pure churn: `updated_at` gets bumped every
+   * boot, lifecycle validation re-runs (a state_machine rule can even veto
+   * the no-op), and history tracking logs a phantom edit. Skip those.
+   *
+   * Only fields PRESENT in the seed record are compared (the row's extra
+   * columns — audit fields, values edited at runtime that the seed does not
+   * pin — never block the skip). Comparison is conservative: any doubt
+   * (unparseable dates, type mismatches) reads as "changed", falling back to
+   * the historical update behavior.
+   */
+  private isNoOpReplay(record: Record<string, unknown>, existing: Record<string, unknown>): boolean {
+    for (const [key, value] of Object.entries(record)) {
+      if (key === 'id') continue;
+      if (!this.seedValueEquals(value, existing[key])) return false;
+    }
+    return true;
+  }
+
+  /** Loose equality across driver round-trip representations (see isNoOpReplay). */
+  private seedValueEquals(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (a == null || b == null) return a == null && b == null;
+    // Booleans come back as 0/1 from SQLite.
+    if (typeof a === 'boolean' || typeof b === 'boolean') {
+      const toNum = (v: unknown) => (typeof v === 'boolean' ? Number(v) : Number(String(v)));
+      return toNum(a) === toNum(b);
+    }
+    // Dates come back as driver-formatted strings or epoch numbers.
+    if (a instanceof Date || b instanceof Date) {
+      const toTime = (v: unknown) =>
+        v instanceof Date ? v.getTime() : typeof v === 'number' ? v : Date.parse(String(v));
+      const ta = toTime(a);
+      const tb = toTime(b);
+      return Number.isFinite(ta) && Number.isFinite(tb) && ta === tb;
+    }
+    if (typeof a === 'object' || typeof b === 'object') {
+      try {
+        return JSON.stringify(a) === JSON.stringify(b);
+      } catch {
+        return false;
+      }
+    }
+    // number 5 vs '5' after a driver round-trip.
+    return String(a) === String(b);
   }
 
   /** Builds the same `ReferenceResolutionError` shape a failed write has always reported. */
@@ -940,11 +1054,26 @@ export class SeedLoaderService implements ISeedLoaderService {
     });
   }
 
-  private buildReferenceMap(graph: ObjectDependencyGraph): Map<string, ReferenceResolution[]> {
+  private buildReferenceMap(
+    graph: ObjectDependencyGraph,
+    externalIdByObject?: Map<string, string>,
+  ): Map<string, ReferenceResolution[]> {
     const map = new Map<string, ReferenceResolution[]>();
     for (const node of graph.nodes) {
       if (node.references.length > 0) {
-        map.set(node.object, node.references);
+        // Resolve against the TARGET dataset's declared externalId when this
+        // load carries one (copy-on-write — graph.nodes is part of the public
+        // result and keeps the metadata-level 'name' default). Targets with
+        // no dataset in this load (e.g. a user field → os_user) keep 'name'.
+        const references = externalIdByObject
+          ? node.references.map(ref => {
+              const datasetExternalId = externalIdByObject.get(ref.targetObject);
+              return datasetExternalId && datasetExternalId !== ref.targetField
+                ? { ...ref, targetField: datasetExternalId }
+                : ref;
+            })
+          : node.references;
+        map.set(node.object, references);
       }
     }
     return map;
@@ -957,8 +1086,9 @@ export class SeedLoaderService implements ISeedLoaderService {
   ): Promise<Map<string, any>> {
     const map = new Map<string, any>();
     try {
+      // Full rows (not just id + externalId): the write decision compares the
+      // incoming seed record against the existing row to skip no-op replays.
       const findArgs: Record<string, unknown> = {
-        fields: ['id', externalId],
         context: { isSystem: true },
       };
       // Per-tenant replay: restrict to the target tenant's own rows

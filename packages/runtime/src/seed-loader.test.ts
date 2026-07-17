@@ -457,10 +457,12 @@ describe('SeedLoaderService', () => {
       expect(refError!.message).toContain("account_id: \"Acme Corp\"");
 
       // The object wrapper must NOT reach the driver (it would throw "can only
-      // bind"); the guard drops it to null instead.
+      // bind"); the guard REMOVES the field (an explicit null would overwrite
+      // the existing row's valid reference on the upsert update path).
       const contactInsertCall = (engine.insert as any).mock.calls.find((c: any[]) => c[0] === 'contact');
       if (contactInsertCall) {
-        expect(contactInsertCall[1].account_id).toBeNull();
+        const written = Array.isArray(contactInsertCall[1]) ? contactInsertCall[1][0] : contactInsertCall[1];
+        expect('account_id' in written).toBe(false);
       }
     });
 
