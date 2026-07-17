@@ -28,7 +28,6 @@ export class AuditPlugin implements Plugin {
   dependencies = ['com.objectstack.engine.objectql'];
 
   async init(ctx: PluginContext): Promise<void> {
-    process.stderr.write('[AuditPlugin] init() called\n');
     // Register audit system objects via the manifest service.
     ctx.getService<{ register(m: any): void }>('manifest').register({
       id: 'com.objectstack.audit',
@@ -73,24 +72,18 @@ export class AuditPlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
-    process.stderr.write('[AuditPlugin] start() called, registering kernel:ready hook\n');
     // ObjectQL engine is only resolvable after the kernel is ready.
     ctx.hook('kernel:ready', async () => {
-      process.stderr.write('[AuditPlugin] kernel:ready fired\n');
       let engine: IDataEngine | null = null;
       try {
         engine = ctx.getService<IDataEngine>('objectql');
-        process.stderr.write(`[AuditPlugin] objectql engine = ${engine ? 'OK' : 'null'} registerHook? ${typeof (engine as any)?.registerHook}\n`);
-      } catch (err) {
-        process.stderr.write(`[AuditPlugin] getService(objectql) threw: ${(err as Error).message}\n`);
+      } catch {
         // Fallback alias used in some kernels.
         try {
           engine = ctx.getService<IDataEngine>('data');
-          process.stderr.write(`[AuditPlugin] data engine = ${engine ? 'OK' : 'null'}\n`);
         } catch { /* ignore */ }
       }
       if (!engine) {
-        process.stderr.write('[AuditPlugin] NO ENGINE — bailing\n');
         ctx.logger.warn('AuditPlugin: ObjectQL engine not available — audit writers NOT installed');
         return;
       }
@@ -130,7 +123,6 @@ export class AuditPlugin implements Plugin {
         return locale;
       };
       installAuditWriters(engine as any, this.name, { getMessaging, getI18n, getLocale });
-      process.stderr.write('[AuditPlugin] writers installed\n');
       ctx.logger.info('AuditPlugin: audit + activity writers installed');
     });
   }

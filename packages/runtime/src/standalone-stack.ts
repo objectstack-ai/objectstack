@@ -245,13 +245,6 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         tag: '[StandaloneStack]',
         unwrapEnvelope: true,
     });
-    if (artifactBundle) {
-        const flowsCount = Array.isArray(artifactBundle?.flows) ? artifactBundle.flows.length : 'n/a';
-        // eslint-disable-next-line no-console
-        console.warn(
-            `[StandaloneStack] artifact loaded: path=${artifactPath} keys=${Object.keys(artifactBundle).join(',')} flows=${flowsCount}`,
-        );
-    }
 
     const plugins: any[] = [
         driverPlugin,

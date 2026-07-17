@@ -2360,8 +2360,8 @@ describe('AutomationEngine - flow status enable/disable gate', () => {
         engine.registerFlow('rc_draft', recordChangeFlow('rc_draft')); // status defaults to 'draft'
         engine.registerFlow('rc_active', { ...recordChangeFlow('rc_active'), status: 'active' });
         const states = engine.getFlowRuntimeStates();
-        expect(states.find((s) => s.name === 'rc_draft')).toEqual({ name: 'rc_draft', enabled: true, bound: true });
-        expect(states.find((s) => s.name === 'rc_active')).toEqual({ name: 'rc_active', enabled: true, bound: true });
+        expect(states.find((s) => s.name === 'rc_draft')).toMatchObject({ name: 'rc_draft', enabled: true, bound: true, status: 'draft' });
+        expect(states.find((s) => s.name === 'rc_active')).toMatchObject({ name: 'rc_active', enabled: true, bound: true, status: 'active' });
         expect(engine.getActiveTriggerBindings()).toHaveLength(2);
     });
 
@@ -2371,7 +2371,7 @@ describe('AutomationEngine - flow status enable/disable gate', () => {
         engine.registerFlow('rc_obsolete', { ...recordChangeFlow('rc_obsolete'), status: 'obsolete' });
         expect(engine.getActiveTriggerBindings()).toHaveLength(0);
         expect(engine.getFlowRuntimeStates().find((s) => s.name === 'rc_obsolete'))
-            .toEqual({ name: 'rc_obsolete', enabled: false, bound: false });
+            .toMatchObject({ name: 'rc_obsolete', enabled: false, bound: false, status: 'obsolete' });
     });
 
     it('refuses to execute a disabled (obsolete) flow', async () => {

@@ -195,6 +195,33 @@ export interface ServerReadyOptions {
    * guess the login. Absent when nothing was seeded.
    */
   seededAdmin?: { email: string; password: string };
+  /**
+   * Automation wiring summary (2026-07-17 third-party eval). The boot-quiet
+   * stdout window swallows every info/warn the automation engine logs while
+   * binding flows to triggers, so the banner is the ONE reliable place a
+   * developer can see whether their record-change / schedule flows actually
+   * armed. Collected from the live engine after runtime.start().
+   */
+  automation?: AutomationReadySummary;
+}
+
+export interface AutomationReadySummary {
+  /** Whether the automation service is registered at all. */
+  enabled: boolean;
+  /** Flows declared in the stack config (used when the engine is absent). */
+  declaredFlowCount: number;
+  /** Flows registered in the engine (0 when `enabled` is false). */
+  flowCount: number;
+  /** Flows bound to a trigger. */
+  boundCount: number;
+  /** Registered trigger types (record_change, schedule, api, …). */
+  triggerTypes: string[];
+  /** Enabled flows that declare a trigger but are NOT bound, with the fix. */
+  unbound: Array<{ flowName: string; triggerType: string; reason: string }>;
+  /** Bound record-change flows whose target object is not registered (dead binding). */
+  unknownObject: Array<{ flowName: string; object: string }>;
+  /** Enabled flows whose persisted status is 'draft' (they still fire). */
+  draftCount: number;
 }
 
 export function printServerReady(opts: ServerReadyOptions) {
@@ -228,9 +255,49 @@ export function printServerReady(opts: ServerReadyOptions) {
   if (opts.pluginNames && opts.pluginNames.length > 0) {
     console.log(chalk.dim(`           ${opts.pluginNames.join(', ')}`));
   }
+  if (opts.automation) printAutomationSummary(opts.automation);
   console.log('');
   console.log(chalk.dim('  Press Ctrl+C to stop'));
   console.log('');
+}
+
+/**
+ * One-glance answer to "did my flows actually arm?" — the question the
+ * boot-quiet stdout window otherwise makes unanswerable (the engine's own
+ * bind/registration logs are swallowed during startup).
+ */
+function printAutomationSummary(a: AutomationReadySummary) {
+  if (!a.enabled) {
+    if (a.declaredFlowCount > 0) {
+      console.log(
+        chalk.yellow(
+          `  ⚠ Flows:   ${a.declaredFlowCount} flow(s) declared but the automation engine is not enabled — ` +
+          `they will never run. Add requires: ['automation', 'triggers'] to objectstack.config.ts`,
+        ),
+      );
+    }
+    return;
+  }
+  if (a.flowCount === 0) return;
+
+  const parts = [`${a.flowCount} flow(s)`, `${a.boundCount} bound to triggers`];
+  if (a.triggerTypes.length > 0) parts.push(`(${a.triggerTypes.join(', ')})`);
+  if (a.draftCount > 0) parts.push(`· ${a.draftCount} draft`);
+  console.log(chalk.dim(`  Flows:   ${parts.join(' ')}`));
+
+  for (const u of a.unbound) {
+    console.log(
+      chalk.yellow(`  ⚠ flow '${u.flowName}' declares a '${u.triggerType}' trigger but is NOT bound — ${u.reason}`),
+    );
+  }
+  for (const u of a.unknownObject) {
+    console.log(
+      chalk.yellow(
+        `  ⚠ flow '${u.flowName}' targets unknown object '${u.object}' — bound, but it will never fire ` +
+        `(object names match exactly; check the start node's config.objectName)`,
+      ),
+    );
+  }
 }
 
 export function printMetadataStats(stats: MetadataStats) {

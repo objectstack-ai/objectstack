@@ -19,6 +19,7 @@ import {
   printStep,
   printInfo,
   printServerReady,
+  type AutomationReadySummary,
 } from '../utils/format.js';
 import {
   CONSOLE_PATH,
@@ -2296,6 +2297,17 @@ export default class Serve extends Command {
         if (authSvc?.devSeedResult?.email) seededAdmin = authSvc.devSeedResult;
       } catch { /* auth service not present — nothing to show */ }
 
+      // ── Automation wiring summary (2026-07-17 third-party eval) ─────
+      // Flow registration + trigger binding happen entirely inside the
+      // boot-quiet stdout window above, so the engine's own info/warn logs
+      // never reach the terminal. Collect the live binding state here (after
+      // restore) and surface it in the banner: declared-but-engine-missing,
+      // unbound triggered flows, and bound-but-dead (unknown object) flows.
+      const automationSummary = collectAutomationSummary(
+        kernel,
+        Array.isArray((config as any)?.flows) ? (config as any).flows.length : 0,
+      );
+
       // ── Clean startup summary ──────────────────────────────────────
       printServerReady({
         port,
@@ -2309,6 +2321,7 @@ export default class Serve extends Command {
         databaseUrl: redactDbUrl(resolvedDatabaseUrl),
         multiTenant: resolveMultiOrgEnabled(),
         seededAdmin,
+        automation: automationSummary,
       });
 
       // ── Publish the actually-bound port ────────────────────────────
@@ -2407,4 +2420,72 @@ function describeRegisteredDriver(kernel: any): { label: string; url: string } |
     };
   }
   return null;
+}
+
+/**
+ * Collect the automation wiring facts for the startup banner (2026-07-17
+ * third-party eval: flow registration/binding logs fall inside the boot-quiet
+ * stdout window, so the banner is the one channel a developer reliably sees).
+ *
+ * Every probe is feature-detected so an older `@objectstack/service-automation`
+ * (without `getTriggerBindingAudit` / extended runtime states) degrades to the
+ * plain count line instead of crashing the banner. Returns `undefined` when
+ * there is nothing automation-related to show at all.
+ */
+export function collectAutomationSummary(
+  kernel: any,
+  declaredFlowCount: number,
+): AutomationReadySummary | undefined {
+  let automation: any;
+  try { automation = kernel?.getService?.('automation'); } catch { /* not registered */ }
+
+  if (!automation) {
+    return declaredFlowCount > 0
+      ? {
+          enabled: false,
+          declaredFlowCount,
+          flowCount: 0,
+          boundCount: 0,
+          triggerTypes: [],
+          unbound: [],
+          unknownObject: [],
+          draftCount: 0,
+        }
+      : undefined;
+  }
+
+  let states: Array<{ name: string; enabled: boolean; bound: boolean; status?: string; triggerType?: string; object?: string }> = [];
+  try { states = automation.getFlowRuntimeStates?.() ?? []; } catch { /* older engine */ }
+  if (states.length === 0 && declaredFlowCount === 0) return undefined;
+
+  let triggerTypes: string[] = [];
+  try { triggerTypes = automation.getRegisteredTriggerTypes?.() ?? []; } catch { /* older engine */ }
+
+  let unbound: Array<{ flowName: string; triggerType: string; reason: string }> = [];
+  try { unbound = automation.getTriggerBindingAudit?.() ?? []; } catch { /* older engine */ }
+
+  // Dead bindings: a bound record-change flow whose target object nobody
+  // registered — the hook is filtered to a name that never writes.
+  const unknownObject: Array<{ flowName: string; object: string }> = [];
+  let ql: any;
+  try { ql = kernel?.getService?.('objectql'); } catch { /* absent */ }
+  if (ql && typeof ql.getObject === 'function') {
+    for (const s of states) {
+      if (!s.bound || !s.object || s.triggerType !== 'record_change') continue;
+      let known: unknown;
+      try { known = ql.getObject(s.object); } catch { known = undefined; }
+      if (!known) unknownObject.push({ flowName: s.name, object: s.object });
+    }
+  }
+
+  return {
+    enabled: true,
+    declaredFlowCount,
+    flowCount: states.length,
+    boundCount: states.filter((s) => s.bound).length,
+    triggerTypes,
+    unbound,
+    unknownObject,
+    draftCount: states.filter((s) => s.enabled && (s.status ?? 'draft') === 'draft').length,
+  };
 }

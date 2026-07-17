@@ -795,7 +795,21 @@ export class AutomationEngine implements IAutomationService {
         const trigger = this.triggers.get(resolved.triggerType);
         if (!trigger) return;
         try {
-            trigger.start(resolved.binding, (ctx: AutomationContext) => this.execute(flowName, ctx).then(() => undefined));
+            // A trigger-fired run's result must not vanish (2026-07-17 eval:
+            // a failing record-change flow produced zero output — the failure
+            // lived only in the run-history row). Log failures at ERROR: stderr
+            // survives the CLI's boot-quiet stdout window, and a fired-but-failed
+            // automation is an operational fault. Condition-skipped runs stay
+            // quiet (execute() already debug-logs them — they are high-frequency).
+            trigger.start(resolved.binding, (ctx: AutomationContext) =>
+                this.execute(flowName, ctx).then((result) => {
+                    if (!result.success) {
+                        this.logger.error(
+                            `Trigger-fired run of flow '${flowName}' failed: ${result.error ?? 'unknown error'}`,
+                        );
+                    }
+                }),
+            );
             this.boundFlowTriggers.set(flowName, resolved.triggerType);
             this.logger.info(`Flow '${flowName}' bound to trigger '${resolved.triggerType}'`);
         } catch (err) {
@@ -1129,14 +1143,54 @@ export class AutomationEngine implements IAutomationService {
      * is actually **enabled** (allowed to run) and **bound** (wired to its trigger,
      * so it fires) is engine state. `enabled: false` ⇒ status is obsolete/invalid
      * or a runtime toggle turned it off; `bound: false` on an enabled flow ⇒ it has
-     * no trigger (e.g. a manually-invoked/screen flow).
+     * no trigger (e.g. a manually-invoked/screen flow) or its trigger type has no
+     * registered trigger. `triggerType`/`object` expose the flow's declared
+     * binding so hosts (CLI startup summary, kernel:bootstrapped audit) can say
+     * WHY an unbound flow is unbound; `status` is the persisted deployment status.
      */
-    getFlowRuntimeStates(): Array<{ name: string; enabled: boolean; bound: boolean }> {
-        return [...this.flows.keys()].map((name) => ({
-            name,
-            enabled: this.flowEnabled.get(name) !== false,
-            bound: this.boundFlowTriggers.has(name),
-        }));
+    getFlowRuntimeStates(): Array<{
+        name: string;
+        enabled: boolean;
+        bound: boolean;
+        status?: string;
+        triggerType?: string;
+        object?: string;
+    }> {
+        return [...this.flows.keys()].map((name) => {
+            const resolved = this.resolveTriggerBinding(name);
+            return {
+                name,
+                enabled: this.flowEnabled.get(name) !== false,
+                bound: this.boundFlowTriggers.has(name),
+                status: (this.flows.get(name) as { status?: string } | undefined)?.status,
+                triggerType: resolved?.triggerType,
+                object: resolved?.binding.object,
+            };
+        });
+    }
+
+    /**
+     * Silent-miss audit (2026-07-17 third-party eval): every ENABLED flow that
+     * declares an auto-launch trigger but is not bound to one, with the reason.
+     * Empty when every triggered flow is wired. Hosts surface this after
+     * bootstrap — the automation plugin warns per entry at kernel:bootstrapped,
+     * and the CLI prints it in the startup summary (the boot-quiet stdout
+     * window swallows plain warn/info logs, so the summary is the reliable
+     * channel in `os dev` / `os start`).
+     */
+    getTriggerBindingAudit(): Array<{ flowName: string; triggerType: string; reason: string }> {
+        const audit: Array<{ flowName: string; triggerType: string; reason: string }> = [];
+        for (const name of this.flows.keys()) {
+            if (this.flowEnabled.get(name) === false) continue;
+            if (this.boundFlowTriggers.has(name)) continue;
+            const resolved = this.resolveTriggerBinding(name);
+            if (!resolved) continue; // manual / screen flow — nothing to bind
+            const reason = this.triggers.has(resolved.triggerType)
+                ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
+                : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/api ship in @objectstack/trigger-*)`;
+            audit.push({ flowName: name, triggerType: resolved.triggerType, reason });
+        }
+        return audit;
     }
 
     async listFlows(): Promise<string[]> {

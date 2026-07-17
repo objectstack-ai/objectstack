@@ -116,6 +116,50 @@ describe('RecordChangeTrigger', () => {
         expect(hooks).toHaveLength(0);
     });
 
+    it('warns when the flow targets an object the engine does not know (silent-miss guard)', () => {
+        // 2026-07-17 third-party eval: a flow whose start-node `objectName`
+        // does not match any registered object binds a hook that never fires —
+        // with zero log output at any level. The trigger must surface that
+        // mismatch loudly at bind time when the engine can be probed.
+        const { engine, hooks } = fakeEngine();
+        (engine as RecordChangeDataEngine & { getObject?: (n: string) => unknown }).getObject = (n: string) =>
+            n === 'showcase_task' ? { name: 'showcase_task' } : undefined;
+        const warn = vi.fn();
+        const trigger = new RecordChangeTrigger(engine, { info: () => {}, warn, debug: () => {} });
+
+        trigger.start(binding({ object: 'candidate' /* not registered */ }), async () => {});
+
+        // Still binds (the object may legitimately be registered later on a
+        // metadata reload), but the mismatch is called out.
+        expect(hooks).toHaveLength(1);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0][0])).toMatch(/unknown object 'candidate'/i);
+        expect(String(warn.mock.calls[0][0])).toMatch(/task_assigned_notify/);
+    });
+
+    it('does not warn when the target object is registered', () => {
+        const { engine } = fakeEngine();
+        (engine as RecordChangeDataEngine & { getObject?: (n: string) => unknown }).getObject = (n: string) =>
+            n === 'showcase_task' ? { name: 'showcase_task' } : undefined;
+        const warn = vi.fn();
+        const trigger = new RecordChangeTrigger(engine, { info: () => {}, warn, debug: () => {} });
+
+        trigger.start(binding(), async () => {});
+
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('does not warn when the engine cannot be probed for objects', () => {
+        // Engines without getObject (older cores, bare fakes) — no false alarm.
+        const { engine } = fakeEngine();
+        const warn = vi.fn();
+        const trigger = new RecordChangeTrigger(engine, { info: () => {}, warn, debug: () => {} });
+
+        trigger.start(binding({ object: 'anything' }), async () => {});
+
+        expect(warn).not.toHaveBeenCalled();
+    });
+
     it('fires the callback with a record context built from the hook ctx', async () => {
         const { engine, hooks } = fakeEngine();
         const trigger = new RecordChangeTrigger(engine, silentLogger());

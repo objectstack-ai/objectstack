@@ -158,10 +158,6 @@ export class AppPlugin implements Plugin {
             ? { ...this.bundle.manifest, ...this.bundle }
             : this.bundle;
 
-        console.warn(
-            `[AppPlugin:init] appId=${appId} keys=${Object.keys(servicePayload).join(',')} flows=${Array.isArray((servicePayload as any).flows) ? (servicePayload as any).flows.length : 'n/a'}`,
-        );
-
         // Seed persisted package disable-state into the registry BEFORE the
         // manifest is decomposed, so disabled packages are installed disabled
         // and stay hidden after restart. Honors every later registration path

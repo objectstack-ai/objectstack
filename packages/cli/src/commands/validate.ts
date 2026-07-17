@@ -16,6 +16,7 @@ import { validateJsxPages, validateReactPages, validateReactPageProps, validateP
 import { validateCapabilityReferences } from '@objectstack/lint';
 import { validateVisibilityPredicates } from '@objectstack/lint';
 import { validateSecurityPosture } from '@objectstack/lint';
+import { validateFlowTriggerReadiness } from '@objectstack/lint';
 import {
   printHeader,
   printKV,
@@ -342,6 +343,22 @@ export default class Validate extends Command {
         }
       }
 
+      // 3g. Auto-launched flow trigger wiring (2026-07-17 third-party eval):
+      //     a record-change flow whose start-node objectName matches nothing
+      //     never fires — silently. Also nudges auto-triggered flows to declare
+      //     an explicit deployment status (the schema default is 'draft', and
+      //     draft flows DO still fire — ambiguous intent). Advisory: objects
+      //     may come from other installed packages.
+      if (!flags.json) printStep('Checking flow trigger wiring...');
+      const flowReadinessFindings = validateFlowTriggerReadiness(normalized as Record<string, unknown>);
+      const flowReadinessWarnings = flowReadinessFindings.filter((f) => f.severity === 'warning');
+      if (!flags.json) {
+        for (const w of flowReadinessWarnings.slice(0, 50)) {
+          console.log(chalk.yellow(`  ⚠ ${w.where}: ${w.message}`));
+          console.log(chalk.dim(`      ${w.hint}`));
+        }
+      }
+
       // 3f. [ADR-0090 D7] Security posture — the same gate `os compile`/`os build`
       //     run. Without it here, `os validate` passed a stack (e.g. a custom
       //     object with no explicit sharingModel) that the build then rejected,
@@ -388,7 +405,7 @@ export default class Validate extends Command {
           valid: true,
           manifest: config.manifest,
           stats,
-          warnings: [...exprWarnings, ...widgetWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...securityAdvisories],
+          warnings: [...exprWarnings, ...widgetWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...securityAdvisories],
           conversions: conversionNotices,
           specVersionGap: specGap,
           duration: timer.elapsed(),

@@ -43,6 +43,14 @@ export interface RecordChangeDataEngine {
         options?: { object?: string | string[]; priority?: number; packageId?: string },
     ): void;
     unregisterHooksByPackage?(packageId: string): number;
+    /**
+     * Optional object-existence probe (the ObjectQL engine's `getObject`).
+     * When present, {@link RecordChangeTrigger.start} uses it to call out a
+     * flow whose `objectName` matches no registered object — a hook filtered
+     * to a name nobody writes never fires, with zero output at any layer
+     * (2026-07-17 third-party eval).
+     */
+    getObject?(name: string): unknown;
 }
 
 /** Minimal logger surface (matches core's `ctx.logger`). */
@@ -50,6 +58,12 @@ export interface TriggerLogger {
     info(msg: string, ...args: unknown[]): void;
     warn(msg: string, ...args: unknown[]): void;
     debug?(msg: string, ...args: unknown[]): void;
+    /**
+     * Execution failures log here when available (falling back to `warn`).
+     * ERROR matters operationally: the CLI's boot-quiet window swallows
+     * stdout (debug/info/warn) but stderr (error/fatal) always lands.
+     */
+    error?(msg: string, ...args: unknown[]): void;
 }
 
 const TRIGGER_PREFIX = 'com.objectstack.trigger.record-change';
@@ -109,6 +123,26 @@ export class RecordChangeTrigger implements FlowTrigger {
         // (covers disable→enable cycles and hot reload).
         this.stop(binding.flowName);
 
+        // Silent-miss guard (2026-07-17 third-party eval): a hook filtered to an
+        // object name nobody writes never fires — and nothing anywhere says so.
+        // When the engine can be probed, call the mismatch out at bind time.
+        // Still bind (the object may be registered later by a metadata reload);
+        // this is a diagnosis, not a refusal.
+        if (binding.object && typeof this.engine.getObject === 'function') {
+            let known: unknown;
+            try {
+                known = this.engine.getObject(binding.object);
+            } catch {
+                known = undefined;
+            }
+            if (!known) {
+                this.logger.warn(
+                    `[record-change] flow '${binding.flowName}' targets unknown object '${binding.object}' — the trigger is bound but will never fire. ` +
+                        `Object names match exactly; check the flow start node's config.objectName against the object's registered name.`,
+                );
+            }
+        }
+
         const packageId = `${TRIGGER_PREFIX}:${binding.flowName}`;
 
         const handler = async (ctx: HookContext): Promise<void> => {
@@ -127,8 +161,10 @@ export class RecordChangeTrigger implements FlowTrigger {
                 await callback(automationCtx);
             } catch (err) {
                 // Error isolation: a flow failure must NEVER break the CRUD write
-                // that triggered it. Log and swallow.
-                this.logger.warn(
+                // that triggered it. Log (loudly — ERROR reaches stderr, which
+                // survives the CLI's boot-quiet stdout window) and swallow.
+                const log = this.logger.error?.bind(this.logger) ?? this.logger.warn.bind(this.logger);
+                log(
                     `[record-change] flow '${binding.flowName}' execution failed: ${(err as Error)?.message ?? String(err)}`,
                 );
             }

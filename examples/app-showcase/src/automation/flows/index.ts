@@ -11,6 +11,7 @@ export const TaskCompletedFlow = defineFlow({
   label: 'Notify on Task Completed',
   description: 'Emails the project owner when a task is marked Done.',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -106,6 +107,7 @@ export const TaskAssignedNotifyFlow = defineFlow({
   label: 'Notify Assignee on Task Assignment',
   description: 'Notifies the new assignee (inbox channel) when a task is reassigned.',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -160,6 +162,7 @@ export const BudgetApprovalFlow = defineFlow({
   label: 'Project Budget Approval',
   description: 'Two-step approval for projects above budget thresholds.',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -257,6 +260,7 @@ export const TaskCompletedSlackFlow = defineFlow({
   label: 'Post to Slack on Task Completed',
   description: 'Posts to a Slack channel via the slack connector when a task is marked Done.',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -307,6 +311,7 @@ export const ScheduledDigestFlow = defineFlow({
   label: 'Scheduled Project Digest (interval)',
   description: 'Fires on a fixed interval and posts a digest to an inbox — demonstrates the schedule trigger.',
   type: 'schedule',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -362,6 +367,7 @@ export const TaskCompletedRestPingFlow = defineFlow({
   label: 'REST Ping on Task Completed',
   description: 'Calls the local server health endpoint via the rest connector when a task is marked Done.',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -414,6 +420,7 @@ export const ShowcaseDeclarativeConnectorPingFlow = defineFlow({
   description:
     'Dispatches GET /api/v1/health through showcase_status_api — a provider-bound connector instance materialized from pure metadata at boot.',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -463,6 +470,7 @@ export const ShowcaseMcpConnectorEchoFlow = defineFlow({
     'Dispatches the echo_upper tool of showcase_mcp_tools — a declarative MCP connector instance materialized ' +
     'at boot from the in-repo stdio fixture (scripts/mcp-fixture.mjs).',
   type: 'autolaunched',
+  status: 'active',
   // Surface the tool result on the run output, so the flow run view (and the
   // dogfood proof) can assert the MCP round-trip observably.
   variables: [{ name: 'echo.structuredContent', type: 'json', isOutput: true }],
@@ -514,6 +522,7 @@ export const TaskFollowUpFlow = defineFlow({
   label: 'Task Follow-up Reminder (wait)',
   description: 'Waits a fixed delay after a task is created, then reminds the assignee — demonstrates the durable wait node.',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -604,6 +613,7 @@ export const TaskDoneNotifyOwnerFlow = defineFlow({
   label: 'Task Done → Notify Owner (subflow)',
   description: 'On task completion, invokes the reusable notify-owner subflow — demonstrates subflow reuse.',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -713,6 +723,7 @@ export const ProjectClosureFlow = defineFlow({
   label: 'Project Closure with Sign-off (nested pause)',
   description: 'On project completion, requests sign-off via an approval-inside-subflow, then notifies the owner — demonstrates nested durable pause.',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -830,6 +841,7 @@ export const FanOutNotifyFlow = defineFlow({
   label: 'Fan-out Notify (Parallel)',
   description: 'Notifies owner and watchers concurrently via a parallel block, joining before completion (ADR-0031).',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -902,6 +914,7 @@ export const ResilientSyncFlow = defineFlow({
   label: 'Resilient Sync (Try/Catch/Retry)',
   description: 'Pushes a task to an external system, retrying on failure and recording errors via try/catch (ADR-0031).',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -983,6 +996,7 @@ export const InvoiceDualSignoffFlow = defineFlow({
   label: 'Invoice Dual Sign-off (parallel approval)',
   description: 'On send, requires finance AND legal to both approve via one aggregating approval node — demonstrates parallel approvals without a token tree (ADR-0039 Track A).',
   type: 'autolaunched',
+  status: 'active',
   // The revert-on-reject write is an approval-process outcome, not an act of the
   // submitter — run it as the system principal so it lands regardless of whether
   // the submitter still has edit rights on a "sent" invoice (#1888 runAs enforced).
@@ -1070,6 +1084,7 @@ export const ProjectEscalationFlow = defineFlow({
   label: 'Project Escalation (composite)',
   description: 'On health → red, branches on severity then alerts in parallel and pushes to an incident system with try/catch — demonstrates nested construct composition.',
   type: 'autolaunched',
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -1264,6 +1279,7 @@ export const InboundTaskWebhookFlow = defineFlow({
   label: 'Inbound Task Webhook',
   description: 'Creates a task from an external system via the HMAC-verified inbound hook.',
   type: 'api',
+  status: 'active',
   // An inbound webhook has no authenticated user, so the create must run as the
   // system principal (#1888 runAs is now enforced). Without this it relies on the
   // "no identity → security-skipped" fall-through, which breaks the moment the

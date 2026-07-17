@@ -543,6 +543,38 @@ export class AutomationServicePlugin implements Plugin {
             this.auditDeclaredConnectors(ctx);
         });
 
+        // ── Silent-miss audit: unbound triggered flows (2026-07-17 eval) ──────
+        // kernel:bootstrapped fires strictly after EVERY kernel:ready handler —
+        // i.e. after the protocol flow sync above AND after trigger plugins
+        // (record-change, schedule, api) registered their triggers. Anything
+        // still unbound here stays unbound: say so, per flow, with the fix.
+        // One caveat: plain warn/info goes to stdout, which the CLI swallows
+        // during boot — serve.ts therefore ALSO surfaces this audit in the
+        // startup summary. The warn matters for embedded hosts and tests.
+        ctx.hook('kernel:bootstrapped', async () => {
+            if (!this.engine) return;
+            const audit = this.engine.getTriggerBindingAudit();
+            for (const entry of audit) {
+                ctx.logger.warn(
+                    `[Automation] flow '${entry.flowName}' declares a '${entry.triggerType}' trigger but is NOT bound — it will never auto-launch. ${entry.reason}`,
+                );
+            }
+            const states = this.engine.getFlowRuntimeStates();
+            const drafts = states.filter((s) => s.enabled && (s.status ?? 'draft') === 'draft');
+            if (drafts.length > 0) {
+                ctx.logger.info(
+                    `[Automation] ${drafts.length} flow(s) have status 'draft' (${drafts.map((d) => d.name).join(', ')}) — ` +
+                        `draft flows still fire their triggers; set status: 'active' to make intent explicit, or 'obsolete' to disable.`,
+                );
+            }
+            const bound = states.filter((s) => s.bound).length;
+            if (states.length > 0) {
+                ctx.logger.info(
+                    `[Automation] ${states.length} flow(s) registered, ${bound} bound to triggers, ${audit.length} unbound-but-triggered`,
+                );
+            }
+        });
+
         // ADR-0019 follow-up: re-arm auto-resume timers for runs that were
         // suspended at a timer-`wait` node when the process went down. Must run
         // *after* the flow pull above — resume() needs the flow definitions

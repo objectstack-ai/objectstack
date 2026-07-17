@@ -28,6 +28,15 @@ export type { ExprIssue } from './validate-expressions.js';
 
 export { validateListViewMode, LIST_VIEW_FILTERS_IN_VIEWS_MODE } from './validate-list-view-mode.js';
 export type { ListViewModeFinding, ListViewModeSeverity } from './validate-list-view-mode.js';
+export {
+  validateFlowTriggerReadiness,
+  FLOW_TRIGGER_UNKNOWN_OBJECT,
+  FLOW_DRAFT_STATUS_AMBIGUOUS,
+} from './validate-flow-trigger-readiness.js';
+export type {
+  FlowTriggerReadinessFinding,
+  FlowTriggerReadinessSeverity,
+} from './validate-flow-trigger-readiness.js';
 
 export {
   validateResponsiveStyles,
