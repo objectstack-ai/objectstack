@@ -146,7 +146,14 @@ export class HonoHttpServer implements IHttpServer {
             };
 
             const res = {
-                json: (data: any) => { capturedResponse = c.json(data); },
+                json: (data: any) => {
+                    // `serialize` Server-Timing span — JSON-encoding the body is
+                    // the one adapter-owned cost between "handler done" and
+                    // "bytes on the wire". No-op when perf-tuning is off.
+                    const endSerialize = _perf?.start('serialize', 'Response serialize');
+                    capturedResponse = c.json(data);
+                    endSerialize?.();
+                },
                 send: (data: string | Uint8Array | ArrayBuffer | Buffer) => {
                     if (data instanceof Uint8Array || data instanceof ArrayBuffer || (typeof Buffer !== 'undefined' && Buffer.isBuffer?.(data))) {
                         const body = data instanceof ArrayBuffer ? data : (data as Uint8Array).buffer.slice((data as Uint8Array).byteOffset, (data as Uint8Array).byteOffset + (data as Uint8Array).byteLength);

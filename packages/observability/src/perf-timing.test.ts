@@ -9,6 +9,7 @@ import {
     recordServerTiming,
     startServerTiming,
     measureServerTiming,
+    countServerTiming,
 } from './perf-timing.js';
 
 describe('formatServerTiming', () => {
@@ -102,6 +103,49 @@ describe('PerfTiming', () => {
         expect(t.marks()).toHaveLength(1);
         expect(t.marks()[0].name).toBe('boom');
     });
+
+    describe('count() aggregate', () => {
+        it('folds repeated events into one mark carrying total + count', () => {
+            const t = new PerfTiming();
+            t.count('db', 10, 'queries');
+            t.count('db', 5, 'queries');
+            t.count('db', 3, 'queries');
+            expect(t.marks()).toHaveLength(1);
+            expect(t.toHeader()).toBe('db;dur=18;desc="3 queries"');
+        });
+
+        it('keeps the aggregate at its first-seen position (before a later total)', () => {
+            const t = new PerfTiming();
+            t.count('db', 4, 'queries');
+            t.record('total', 20, 'Total server time');
+            t.count('db', 6, 'queries'); // still folds into the first db mark
+            expect(t.marks().map((m) => m.name)).toEqual(['db', 'total']);
+            expect(t.toHeader()).toBe('db;dur=10;desc="2 queries", total;dur=20;desc="Total server time"');
+        });
+
+        it('tracks independent names separately', () => {
+            const t = new PerfTiming();
+            t.count('db', 10, 'queries');
+            t.count('hooks', 2, 'hooks');
+            t.count('hooks', 3, 'hooks');
+            expect(t.toHeader()).toBe('db;dur=10;desc="1 queries", hooks;dur=5;desc="2 hooks"');
+        });
+
+        it('emits a bare count when no unit is given', () => {
+            const t = new PerfTiming();
+            t.count('x', 1);
+            t.count('x', 1);
+            expect(t.toHeader()).toBe('x;dur=2;desc="2"');
+        });
+
+        it('ignores non-finite / negative durations but still counts the event', () => {
+            const t = new PerfTiming();
+            t.count('db', Number.NaN, 'queries');
+            t.count('db', -5, 'queries');
+            t.count('db', 7, 'queries');
+            expect(t.toHeader()).toBe('db;dur=7;desc="3 queries"');
+        });
+    });
 });
 
 describe('ambient collector', () => {
@@ -113,8 +157,32 @@ describe('ambient collector', () => {
         recordServerTiming('x', 1); // must not throw
         const end = startServerTiming('y');
         end(); // must not throw
+        countServerTiming('db', 1, 'queries'); // must not throw
         const v = await measureServerTiming('z', async () => 7);
         expect(v).toBe(7);
+    });
+
+    it('countServerTiming folds onto the ambient collector', async () => {
+        const t = new PerfTiming();
+        await runWithPerfTiming(t, async () => {
+            countServerTiming('db', 4, 'queries');
+            await new Promise((r) => setTimeout(r, 1));
+            countServerTiming('db', 6, 'queries'); // after an await — same ALS scope
+        });
+        expect(t.toHeader()).toBe('db;dur=10;desc="2 queries"');
+    });
+
+    it('pins the ambient store to a global-registry symbol (shared across module copies)', () => {
+        // The store MUST live on globalThis under Symbol.for so that a second
+        // copy of this module (ESM vs CJS build, or an inlined bundle) shares it
+        // — otherwise cross-layer spans (db/auth/hooks recorded from the SQL
+        // driver / engine) never reach the collector the HTTP server opened.
+        const key = Symbol.for('@objectstack/observability:perf-timing-store');
+        expect((globalThis as Record<symbol, unknown>)[key]).toBeDefined();
+        // And the ambient free functions must read THAT store.
+        const t = new PerfTiming();
+        runWithPerfTiming(t, () => recordServerTiming('shared', 1));
+        expect(t.marks().map((m) => m.name)).toContain('shared');
     });
 
     it('records onto the ambient collector inside runWithPerfTiming', async () => {

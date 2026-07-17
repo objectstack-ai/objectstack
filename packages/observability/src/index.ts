@@ -51,5 +51,6 @@ export {
     recordServerTiming,
     startServerTiming,
     measureServerTiming,
+    countServerTiming,
     type ServerTimingMark,
 } from './perf-timing.js';

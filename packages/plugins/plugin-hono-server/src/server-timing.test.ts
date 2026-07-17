@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { HonoServerPlugin } from './hono-plugin';
+import { countServerTiming } from '@objectstack/observability';
 import type { PluginContext } from '@objectstack/core';
 
 /**
@@ -49,10 +50,27 @@ describe('Server-Timing (perf-tuning) middleware', () => {
         expect(res.status).toBe(200);
         const header = res.headers.get('Server-Timing');
         expect(header).toBeTruthy();
-        // total is always present; the adapter contributes parse + handler.
+        // total is always present; the adapter contributes parse + handler,
+        // and serialize (the /ping handler calls res.json).
         expect(header).toMatch(/(^|, )total;dur=[\d.]+/);
         expect(header).toContain('handler;dur=');
+        expect(header).toContain('serialize;dur=');
         expect(await res.json()).toEqual({ ok: true });
+    });
+
+    it('folds request-scoped aggregate spans (e.g. db query count) into the header', async () => {
+        const { server, app } = await setup({ serverTiming: true });
+        // Simulate the SQL driver recording two per-query timings for this request.
+        server.get('/agg', (_req: any, res: any) => {
+            countServerTiming('db', 4, 'queries');
+            countServerTiming('db', 6, 'queries');
+            return res.json({ ok: true });
+        });
+        const res = await app.request('/agg');
+        const header = res.headers.get('Server-Timing');
+        expect(header).toBeTruthy();
+        // One aggregate member carrying summed duration + event count — not two.
+        expect(header).toContain('db;dur=10;desc="2 queries"');
     });
 
     it('is enabled via OS_SERVER_TIMING=true when the option is unset', async () => {

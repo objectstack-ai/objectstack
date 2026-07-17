@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/observability": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "knex": "^3.3.0",

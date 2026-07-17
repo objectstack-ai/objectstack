@@ -5,6 +5,7 @@ import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 import { isMcpServerEnabled } from '@objectstack/types';
+import { measureServerTiming } from '@objectstack/observability';
 import { CoreServiceName } from '@objectstack/spec/system';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
@@ -221,6 +222,18 @@ export class HttpDispatcher {
             // service not registered — single-environment plugin not in stack
         }
         return undefined;
+    }
+
+    /**
+     * Resolve the per-request identity/session, timed as the `auth`
+     * `Server-Timing` span — the prime suspect for unexplained data-API
+     * overhead (session lookup, org-scope resolution). A no-op wrapper when
+     * perf-tuning is off, so it costs nothing on the normal path.
+     */
+    private timedResolveExecutionContext(
+        opts: Parameters<typeof resolveExecutionContext>[0],
+    ): Promise<ExecutionContext> {
+        return measureServerTiming('auth', () => resolveExecutionContext(opts), 'Identity/session');
     }
 
     private success(data: any, meta?: any) {
@@ -1776,7 +1789,7 @@ export class HttpDispatcher {
         context: HttpProtocolContext,
     ): Promise<ExecutionContext | undefined> {
         try {
-            return await resolveExecutionContext({
+            return await this.timedResolveExecutionContext({
                 getService: (n: string) => this.resolveService(n, context.environmentId),
                 getQl: async () => {
                     const k: any = this.kernel;
@@ -4299,7 +4312,7 @@ export class HttpDispatcher {
         // Resolve once per request; SecurityPlugin middleware reads
         // ctx.userId/roles/permissions/tenantId via opCtx.context.
         try {
-            context.executionContext = await resolveExecutionContext({
+            context.executionContext = await this.timedResolveExecutionContext({
                 getService: (n: string) => this.resolveService(n, context.environmentId),
                 // Resolve ObjectQL from the per-request kernel DIRECTLY. The scoped
                 // `resolveService('objectql', envId)` factory can return a different

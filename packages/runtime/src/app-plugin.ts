@@ -8,6 +8,7 @@ import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IMetadataService, II18nService } from '@objectstack/spec/contracts';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
+import { countServerTiming } from '@objectstack/observability';
 
 /**
  * Optional per-project context attached when AppPlugin is instantiated by the
@@ -122,6 +123,11 @@ export class AppPlugin implements Plugin {
         // Same for the action runner — authored actions register in Phase 2's
         // authored-action re-sync and need the sandbox bridge in place (#2605).
         this.installDefaultActionBodyRunner(ctx);
+        // Feed per-hook execution time into the request-scoped perf collector
+        // so the `Server-Timing` header can split "hook time" from "DB time".
+        // Same boot point as the runners so it is in place before Phase 2 binds
+        // metadata-service hooks; a no-op unless perf-tuning is on.
+        this.installHookMetricsTiming(ctx);
         // Wire the authored-translation sync (#2591) — also BEFORE the empty-env
         // return: an empty env is exactly where a user authors their first
         // Studio translation. Covers whatever `i18n` service this kernel ends
@@ -266,6 +272,47 @@ export class AppPlugin implements Plugin {
             appId: 'runtime-authored',
         }));
         ctx.logger.info('[AppPlugin] Installed default action body runner (runtime-authored actions can execute)');
+    }
+
+    /**
+     * Install an engine-wide {@link HookMetricsRecorder} that folds every
+     * hook's execution time into the request-scoped `Server-Timing` collector
+     * (the `hooks;dur=…;desc="N hooks"` span). This is the framework's ONLY
+     * caller of `setHookMetricsRecorder`, so it owns the engine's recorder;
+     * objectql stays observability-free (the lean `core` tier, ADR-0076) — the
+     * timing lives here in the runtime, which already depends on it.
+     *
+     * `countServerTiming` is a no-op unless a request opened a perf collector
+     * (perf-tuning mode), so this costs nothing when the feature is off. It
+     * composes with any recorder a host wired earlier (chains to it), and is
+     * idempotent across the multiple AppPlugins a multi-app env installs.
+     */
+    private installHookMetricsTiming(ctx: PluginContext): void {
+        let ql: any;
+        try {
+            ql = ctx.getService('objectql');
+        } catch {
+            return; // no engine on this kernel — nothing to wire
+        }
+        if (!ql || typeof ql.setHookMetricsRecorder !== 'function') return;
+        const existing = typeof ql.getHookMetricsRecorder === 'function'
+            ? ql.getHookMetricsRecorder()
+            : undefined;
+        if (existing?.__perfTimingFeed) return; // already installed by a sibling AppPlugin
+        ql.setHookMetricsRecorder({
+            __perfTimingFeed: true,
+            recordExecution(label: any, outcome: any, durationMs: number) {
+                try { existing?.recordExecution?.(label, outcome, durationMs); } catch { /* keep timing isolated */ }
+                countServerTiming('hooks', durationMs, 'hooks');
+            },
+            recordSkip(label: any, reason: any) {
+                try { existing?.recordSkip?.(label, reason); } catch { /* noop */ }
+            },
+            recordRetry(label: any, attempt: number) {
+                try { existing?.recordRetry?.(label, attempt); } catch { /* noop */ }
+            },
+        });
+        ctx.logger.debug('[AppPlugin] Installed hook-metrics Server-Timing feed');
     }
 
     start = async (ctx: PluginContext) => {

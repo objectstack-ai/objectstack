@@ -229,8 +229,14 @@ phases inline, which makes it trivial to see where wall-clock time went on a
 slow request without attaching a profiler.
 
 ```
-Server-Timing: total;dur=18.7;desc="Total server time", parse;dur=0.4;desc="Body parse", handler;dur=17.9;desc="Route handler"
+Server-Timing: parse;dur=0.4;desc="Body parse", auth;dur=42;desc="Identity/session", db;dur=210;desc="6 queries", hooks;dur=18;desc="3 hooks", serialize;dur=7;desc="Response serialize", handler;dur=280;desc="Route handler", total;dur=355;desc="Total server time"
 ```
+
+Reading it: the request spent 42ms resolving identity, 210ms across **6** SQL
+queries (the count is the number to watch — six sequential round-trips is the
+usual culprit behind an inexplicably slow list), 18ms in **3** business hooks,
+and 7ms serializing the response. `db` and `hooks` are aggregates — one member
+carrying the summed duration and the event count, not one member per query.
 
 This is **off by default**: the header discloses internal phase durations,
 which is helpful for profiling but also lets a caller fingerprint the backend.
@@ -251,9 +257,23 @@ OS_SERVER_TIMING=true os serve
 ```
 
 When enabled, every response carries `total` (the whole request, measured by
-an outer middleware) plus any sub-phases the request recorded. The HTTP adapter
-contributes `parse` (request-body parsing) and `handler` (route-handler
-execution) out of the box.
+an outer middleware) plus the sub-phases the request path records out of the
+box:
+
+| Member | Recorded by | Meaning |
+|:---|:---|:---|
+| `total` | Hono server middleware | Whole request, wall-clock. |
+| `parse` | HTTP adapter | Request-body parsing. |
+| `handler` | HTTP adapter | Route-handler execution. |
+| `serialize` | HTTP adapter | Response JSON encoding. |
+| `auth` | Dispatcher | Identity / session resolution — the prime suspect for unexplained data-API overhead. |
+| `db` | SQL driver | Total SQL time across the request; `desc` is the **query count** (folded from knex's per-query events, attributed to the originating request via `AsyncLocalStorage` so it is correct under concurrency). SQL text is never emitted. |
+| `hooks` | ObjectQL engine | Total business-hook execution time; `desc` is the hook count. |
+
+Each phase is recorded through a request-scoped collector that is a no-op when
+the mode is off, so every one of them costs nothing on the normal path. The
+`db` / `hooks` aggregates fold high-frequency events into a single member via
+`countServerTiming` (below) rather than emitting one member per event.
 
 ### Recording your own phases
 
@@ -271,6 +291,16 @@ const rows = await measureServerTiming('db', () => engine.find(query), 'Primary 
 
 `startServerTiming(name)` (returns an `end()` callback) and
 `recordServerTiming(name, dur)` are also available for manual instrumentation.
+For a phase that fires many times per request (per query, per hook), use
+`countServerTiming(name, dur, unit)` — it folds every call into one aggregate
+member `name;dur=<sum>;desc="<count> <unit>"` instead of flooding the header:
+
+```ts
+import { countServerTiming } from '@objectstack/observability';
+
+// each call adds to the running total + count for `db`
+countServerTiming('db', queryMs, 'queries'); // → db;dur=<sum>;desc="<n> queries"
+```
 
 ## Go-live checklist
 

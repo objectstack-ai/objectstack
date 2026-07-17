@@ -24,6 +24,7 @@ import {
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
+import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observability';
 
 /**
  * Default ID length for auto-generated IDs.
@@ -541,6 +542,48 @@ export class SqlDriver implements IDataDriver {
     this.autoMigrate = autoMigrate ?? 'off';
     this.config = knexConfig;
     this.knex = knex(knexConfig);
+    this.installQueryTiming();
+  }
+
+  /**
+   * Per-request SQL query timing (perf-tuning mode). Correlates knex's
+   * `query` → `query-response` / `query-error` events by `__knexQueryUid` and
+   * folds each query's wall time into the ambient request collector's `db`
+   * aggregate — one `Server-Timing` member carrying total DB time **and** a
+   * query count, the number most useful for spotting N sequential round-trips
+   * in DevTools → Network → Timing.
+   *
+   * Attribution is captured at `query` time, which runs inside the initiating
+   * request's `AsyncLocalStorage` scope (knex emits it synchronously from the
+   * runner after connection acquisition, still on the awaited call chain), so
+   * concurrent requests never cross-attribute. When perf-tuning is off,
+   * {@link currentPerfTiming} is `undefined` and the listener returns at once —
+   * nothing is tracked and the map stays empty, so the cost is a single ALS
+   * lookup per query.
+   *
+   * Only durations and a count are recorded — never SQL text — so the header
+   * can be surfaced without leaking query shapes to non-admins.
+   */
+  private installQueryTiming(): void {
+    // uid → { start, collector }, populated only while a collector is active,
+    // and always removed when the query settles (bounded by in-flight queries).
+    const inflight = new Map<string, { t0: number; timing: PerfTiming }>();
+    this.knex.on('query', (q: any) => {
+      const timing = currentPerfTiming();
+      if (!timing) return;
+      const uid = q?.__knexQueryUid;
+      if (typeof uid === 'string') inflight.set(uid, { t0: perfNow(), timing });
+    });
+    const settle = (q: any): void => {
+      const uid = q?.__knexQueryUid;
+      if (typeof uid !== 'string') return;
+      const rec = inflight.get(uid);
+      if (!rec) return;
+      inflight.delete(uid);
+      rec.timing.count('db', perfNow() - rec.t0, 'queries');
+    };
+    this.knex.on('query-response', (_response: any, q: any) => settle(q));
+    this.knex.on('query-error', (_error: any, q: any) => settle(q));
   }
 
   /**

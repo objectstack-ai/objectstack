@@ -17,9 +17,12 @@
  *   2. **Ambient collector.** Run a request inside {@link runWithPerfTiming}
  *      and any framework code on that async call chain records phases via the
  *      free functions ({@link measureServerTiming}, {@link startServerTiming},
- *      {@link recordServerTiming}) without threading the request object
- *      through every layer. When no collector is active the free functions are
- *      cheap no-ops, so call sites pay nothing when the feature is off.
+ *      {@link recordServerTiming}, {@link countServerTiming}) without threading
+ *      the request object through every layer. When no collector is active the
+ *      free functions are cheap no-ops, so call sites pay nothing when the
+ *      feature is off. High-frequency phases (per SQL query, per hook) use
+ *      {@link countServerTiming} to fold into one aggregate mark carrying a
+ *      total duration and an event count.
  *
  * `Server-Timing` exposes internal phase durations to any client, which is a
  * (mild) information-disclosure surface - it helps an attacker profile the
@@ -129,6 +132,12 @@ export function formatServerTiming(marks: readonly ServerTimingMark[]): string {
  */
 export class PerfTiming {
     private readonly _marks: ServerTimingMark[] = [];
+    /**
+     * Live aggregate marks by name (see {@link count}). Lazily created so a
+     * request that never aggregates pays nothing. Each entry points at a mark
+     * already inserted into {@link _marks}, mutated in place as events arrive.
+     */
+    private _aggregates?: Map<string, { mark: ServerTimingMark; count: number; unit?: string }>;
 
     /** Record an already-measured phase. */
     record(name: string, dur: number, desc?: string): void {
@@ -160,6 +169,38 @@ export class PerfTiming {
         }
     }
 
+    /**
+     * Accumulate a repeated sub-phase into a SINGLE aggregate mark. Each call
+     * adds `dur` to the running total for `name` and increments a counter; the
+     * mark serializes as `name;dur=<sum>;desc="<count> <unit>"` (or just the
+     * bare count when no `unit` is given).
+     *
+     * Use this for high-frequency phases — one SQL query, one hook execution —
+     * where recording a distinct mark per event would blow the header out to
+     * hundreds of entries. The single `db;dur=210;desc="6 queries"` member is
+     * both the total DB time and the query count, which is the number most
+     * useful for spotting N sequential round-trips.
+     *
+     * The aggregate mark is inserted into the record stream the first time its
+     * name is seen, so it keeps its natural position relative to explicit marks
+     * (e.g. before the outer `total`, which is recorded last).
+     */
+    count(name: string, dur: number, unit?: string): void {
+        const add = Number.isFinite(dur) && dur > 0 ? dur : 0;
+        const aggregates = (this._aggregates ??= new Map());
+        let entry = aggregates.get(name);
+        if (!entry) {
+            const mark: ServerTimingMark = { name, dur: 0 };
+            entry = { mark, count: 0, unit };
+            aggregates.set(name, entry);
+            this._marks.push(mark);
+        }
+        entry.count += 1;
+        entry.mark.dur += add;
+        if (unit) entry.unit = unit;
+        entry.mark.desc = entry.unit ? `${entry.count} ${entry.unit}` : String(entry.count);
+    }
+
     /** Snapshot of recorded marks, in record order. */
     marks(): readonly ServerTimingMark[] {
         return this._marks;
@@ -173,7 +214,25 @@ export class PerfTiming {
 
 // --- Ambient (request-scoped) collector -------------------------------
 
-const store = new AsyncLocalStorage<PerfTiming>();
+/**
+ * The ambient collector lives in ONE process-wide `AsyncLocalStorage`, pinned
+ * to a global-registry symbol rather than a plain module-level `const`.
+ *
+ * Why: this module is consumed from many packages and can legitimately be
+ * loaded more than once in a single process — the ESM build (`dist/index.js`)
+ * and the CJS build (`dist/index.cjs`) are distinct module instances, and a
+ * bundler may inline yet another copy. A plain `const store` would give each
+ * copy its OWN store, so a request scope opened through one copy (the HTTP
+ * server's `runWithPerfTiming`) would be invisible to code reading the ambient
+ * collector through another copy (the SQL driver, the ObjectQL engine) — the
+ * cross-layer `db` / `auth` / `hooks` spans would silently never record.
+ * `Symbol.for` resolves to the same symbol across every copy, so they all share
+ * the one store.
+ */
+const STORE_KEY = Symbol.for('@objectstack/observability:perf-timing-store');
+const globalStore = globalThis as unknown as Record<symbol, AsyncLocalStorage<PerfTiming> | undefined>;
+const store: AsyncLocalStorage<PerfTiming> =
+    globalStore[STORE_KEY] ?? (globalStore[STORE_KEY] = new AsyncLocalStorage<PerfTiming>());
 
 /** Run `fn` with `timing` as the ambient collector for the async call chain. */
 export function runWithPerfTiming<T>(timing: PerfTiming, fn: () => T): T {
@@ -213,4 +272,14 @@ export async function measureServerTiming<T>(
     const t = store.getStore();
     if (!t) return fn();
     return t.measure(name, fn, desc);
+}
+
+/**
+ * Accumulate a repeated sub-phase (one SQL query, one hook execution) onto the
+ * ambient collector — see {@link PerfTiming.count}. A no-op when no collector is
+ * active, so the hot-path call sites (the SQL driver's query listener, the hook
+ * runner) pay only a single `AsyncLocalStorage` lookup when perf-tuning is off.
+ */
+export function countServerTiming(name: string, dur: number, unit?: string): void {
+    store.getStore()?.count(name, dur, unit);
 }
