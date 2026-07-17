@@ -76,7 +76,7 @@ Options for exporting an ObjectStack flow as BPMN 2.0 XML
 | **version** | `Enum<'2.0' \| '2.0.2'>` | ✅ | Target BPMN specification version |
 | **includeLayout** | `boolean` | ✅ | Include BPMN DI layout data from canvas positions |
 | **includeExtensions** | `boolean` | ✅ | Include ObjectStack extensions in BPMN extensionElements |
-| **customMappings** | `Object[]` | optional | Custom element mappings for export |
+| **customMappings** | `{ bpmnType: string; flowNodeAction: string; bidirectional: boolean; notes?: string }[]` | optional | Custom element mappings for export |
 | **prettyPrint** | `boolean` | ✅ | Pretty-print XML output with indentation |
 | **namespacePrefix** | `string` | ✅ | XML namespace prefix for BPMN elements |
 
@@ -92,7 +92,7 @@ Options for importing BPMN 2.0 XML into an ObjectStack flow
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **unmappedStrategy** | `Enum<'skip' \| 'warn' \| 'error' \| 'comment'>` | ✅ | How to handle unmapped BPMN elements |
-| **customMappings** | `Object[]` | optional | Custom element mappings to override or extend defaults |
+| **customMappings** | `{ bpmnType: string; flowNodeAction: string; bidirectional: boolean; notes?: string }[]` | optional | Custom element mappings to override or extend defaults |
 | **importLayout** | `boolean` | ✅ | Import BPMN DI layout positions into canvas node coordinates |
 | **importDocumentation** | `boolean` | ✅ | Import BPMN documentation elements as node descriptions |
 | **flowName** | `string` | optional | Override flow name (defaults to BPMN process name) |
@@ -110,7 +110,7 @@ Result of a BPMN import/export operation
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Whether the operation completed successfully |
-| **diagnostics** | `Object[]` | ✅ | Diagnostic messages from the operation |
+| **diagnostics** | `{ severity: Enum<'info' \| 'warning' \| 'error'>; message: string; bpmnElementId?: string; nodeId?: string }[]` | ✅ | Diagnostic messages from the operation |
 | **mappedCount** | `integer` | ✅ | Number of elements successfully mapped |
 | **unmappedCount** | `integer` | ✅ | Number of elements that could not be mapped |
 

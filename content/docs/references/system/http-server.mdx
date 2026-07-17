@@ -43,12 +43,12 @@ const result = HttpServerConfig.parse(data);
 | :--- | :--- | :--- | :--- |
 | **port** | `integer` | ✅ | Port number to listen on |
 | **host** | `string` | ✅ | Host address to bind to |
-| **cors** | `Object` | optional | CORS configuration |
+| **cors** | `{ enabled: boolean; origins: string \| string[]; methods?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]; credentials: boolean; … }` | optional | CORS configuration |
 | **requestTimeout** | `integer` | ✅ | Request timeout in milliseconds |
 | **bodyLimit** | `string` | ✅ | Maximum request body size |
 | **compression** | `boolean` | ✅ | Enable response compression |
-| **security** | `Object` | optional | Security configuration |
-| **static** | `Object[]` | optional | Static file serving configuration |
+| **security** | `{ helmet: boolean; rateLimit?: object }` | optional | Security configuration |
+| **static** | `{ path: string; directory: string; cacheControl?: string }[]` | optional | Static file serving configuration |
 | **trustProxy** | `boolean` | ✅ | Trust X-Forwarded-* headers |
 
 
@@ -65,7 +65,7 @@ const result = HttpServerConfig.parse(data);
 | **enabled** | `boolean` | ✅ | Whether middleware is enabled |
 | **order** | `integer` | ✅ | Execution order priority |
 | **config** | `Record<string, any>` | optional | Middleware configuration object |
-| **paths** | `Object` | optional | Path filtering |
+| **paths** | `{ include?: string[]; exclude?: string[] }` | optional | Path filtering |
 
 
 ---
@@ -94,8 +94,8 @@ const result = HttpServerConfig.parse(data);
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method |
 | **path** | `string` | ✅ | URL path pattern |
 | **handler** | `string` | ✅ | Handler identifier or name |
-| **metadata** | `Object` | optional |  |
-| **security** | `Object` | optional |  |
+| **metadata** | `{ summary?: string; description?: string; tags?: string[]; operationId?: string }` | optional |  |
+| **security** | `{ authRequired: boolean; permissions?: string[]; rateLimit?: string }` | optional |  |
 
 
 ---
@@ -154,9 +154,9 @@ const result = HttpServerConfig.parse(data);
 | :--- | :--- | :--- | :--- |
 | **state** | `Enum<'stopped' \| 'starting' \| 'running' \| 'stopping' \| 'error'>` | ✅ | Current server state |
 | **uptime** | `integer` | optional | Server uptime in milliseconds |
-| **server** | `Object` | optional |  |
-| **connections** | `Object` | optional |  |
-| **requests** | `Object` | optional |  |
+| **server** | `{ port: integer; host: string; url?: string }` | optional |  |
+| **connections** | `{ active: integer; total: integer }` | optional |  |
+| **requests** | `{ total: integer; success: integer; errors: integer }` | optional |  |
 
 
 ---

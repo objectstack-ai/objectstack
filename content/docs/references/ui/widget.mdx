@@ -11,9 +11,9 @@ Defines lifecycle callbacks for custom widgets inspired by Web Components and Re
 
 These hooks allow widgets to perform initialization, cleanup, and respond to changes.
 
-@see https://developer.mozilla.org/en-US/docs/Web/API/Web_components
+See also: https://developer.mozilla.org/en-US/docs/Web/API/Web_components
 
-@see https://react.dev/reference/react/Component#component-lifecycle
+See also: https://react.dev/reference/react/Component#component-lifecycle
 
 @example
 
@@ -100,17 +100,17 @@ const result = WidgetEvent.parse(data);
 | **icon** | `string` | optional | Widget icon |
 | **fieldTypes** | `string[]` | optional | Supported field types |
 | **category** | `Enum<'input' \| 'display' \| 'picker' \| 'editor' \| 'custom'>` | ✅ | Widget category |
-| **lifecycle** | `Object` | optional | Lifecycle hooks |
-| **events** | `Object[]` | optional | Custom events |
-| **properties** | `Object[]` | optional | Configuration properties |
-| **implementation** | `Object \| Object \| Object` | optional | Widget implementation source |
-| **dependencies** | `Object[]` | optional | Widget dependencies |
+| **lifecycle** | `{ onMount?: string; onUpdate?: string; onUnmount?: string; onValidate?: string; … }` | optional | Lifecycle hooks |
+| **events** | `{ name: string; label?: string; description?: string; bubbles: boolean; … }[]` | optional | Custom events |
+| **properties** | `{ name: string; label?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'array' \| 'object' \| 'function' \| 'any'>; required: boolean; … }[]` | optional | Configuration properties |
+| **implementation** | `{ type: 'npm'; packageName: string; version: string; exportName?: string } \| { type: 'remote'; url: string; moduleName: string; scope: string } \| { type: 'inline'; code: string }` | optional | Widget implementation source |
+| **dependencies** | `{ name: string; version?: string; url?: string }[]` | optional | Widget dependencies |
 | **screenshots** | `string[]` | optional | Screenshot URLs |
 | **documentation** | `string` | optional | Documentation URL |
 | **license** | `string` | optional | License (SPDX identifier) |
 | **tags** | `string[]` | optional | Tags for categorization |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
-| **performance** | `Object` | optional | Performance optimization settings |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+| **performance** | `{ lazyLoad?: boolean; virtualScroll?: object; cacheStrategy?: Enum<'none' \| 'cache-first' \| 'network-first' \| 'stale-while-revalidate'>; prefetch?: boolean; … }` | optional | Performance optimization settings |
 
 
 ---
@@ -147,7 +147,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'npm'` | ✅ |  |
 | **packageName** | `string` | ✅ | NPM package name |
 | **version** | `string` | ✅ |  |
 | **exportName** | `string` | optional | Named export (default: default) |
@@ -162,7 +162,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'remote'` | ✅ |  |
 | **url** | `string` | ✅ | Remote entry URL (.js) |
 | **moduleName** | `string` | ✅ | Exposed module name |
 | **scope** | `string` | ✅ | Remote scope name |
@@ -177,7 +177,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'inline'` | ✅ |  |
 | **code** | `string` | ✅ | JavaScript code body |
 
 ---

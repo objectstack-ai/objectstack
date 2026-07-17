@@ -67,7 +67,7 @@ const result = Doc.parse(data);
 | **content** | `string` | ✅ | Raw Markdown content (CommonMark + GFM) |
 | **order** | `number` | optional | Sort key within a book group (ADR-0046 §6) |
 | **group** | `string` | optional | Explicit book-group key (ADR-0046 §6); rules usually suffice |
-| **translations** | `Record<string, Object>` | optional | Per-locale `{label?,description?,content}` variants; the base doc is the fallback |
+| **translations** | `Record<string, { label?: string; description?: string; content: string }>` | optional | Per-locale `{label?,description?,content}` variants; the base doc is the fallback |
 
 
 ---

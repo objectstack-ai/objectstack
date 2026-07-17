@@ -39,7 +39,7 @@ const result = BaseEngineOptions.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
 
 
 ---
@@ -52,10 +52,10 @@ Options for DataEngine.aggregate operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
-| **filter** | `Record<string, any> \| [__schema0](./__schema0)` | optional | Data Engine query filter conditions |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **groupBy** | `string[]` | optional |  |
-| **aggregations** | `Object[]` | optional |  |
+| **aggregations** | `{ field: string; method: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; alias?: string }[]` | optional |  |
 
 
 ---
@@ -66,9 +66,9 @@ Options for DataEngine.aggregate operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'aggregate'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `Object` | ✅ |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: string[]; aggregations?: { function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]; … }` | ✅ |  |
 
 
 ---
@@ -79,8 +79,8 @@ Options for DataEngine.aggregate operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
-| **requests** | `Object \| Object \| Object \| Object \| Object \| Object \| Object \| Object \| Object[]` | ✅ |  |
+| **method** | `'batch'` | ✅ |  |
+| **requests** | `{ method: 'find'; object: string; query?: object } \| { method: 'findOne'; object: string; query?: object } \| { method: 'insert'; object: string; data: Record<string, any> \| Record<string, any>[]; options?: object } \| { method: 'update'; object: string; data: Record<string, any>; id?: string \| number; … } \| { method: 'delete'; object: string; id?: string \| number; options?: object } \| { method: 'count'; object: string; query?: object } \| { method: 'aggregate'; object: string; query: object } \| { method: 'execute'; command: any; options?: Record<string, any> } \| { method: 'vectorFind'; object: string; vector: number[]; where?: Record<string, any> \| any; … }[]` | ✅ |  |
 | **transaction** | `boolean` | optional |  |
 
 
@@ -94,8 +94,8 @@ Options for DataEngine.count operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
-| **filter** | `Record<string, any> \| [__schema0](./__schema0)` | optional | Data Engine query filter conditions |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 
 ---
@@ -106,9 +106,9 @@ Options for DataEngine.count operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'count'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `Object` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; filter?: Record<string, any> \| any }` | optional |  |
 
 
 ---
@@ -121,8 +121,8 @@ Options for DataEngine.delete operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
-| **filter** | `Record<string, any> \| [__schema0](./__schema0)` | optional | Data Engine query filter conditions |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **multi** | `boolean` | optional |  |
 
 
@@ -134,10 +134,10 @@ Options for DataEngine.delete operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'delete'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **id** | `string \| number` | optional | ID for single delete, or use where in options |
-| **options** | `Object` | optional |  |
+| **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; filter?: Record<string, any> \| any }` | optional |  |
 
 
 ---
@@ -148,7 +148,7 @@ Options for DataEngine.delete operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'execute'` | ✅ |  |
 | **command** | `any` | ✅ |  |
 | **options** | `Record<string, any>` | optional |  |
 
@@ -171,7 +171,7 @@ Type: `Record<string, any>`
 
 #### Option 2
 
-Reference: [__schema0](./__schema0)
+Reference: any
 
 ---
 
@@ -184,9 +184,9 @@ Reference: [__schema0](./__schema0)
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'findOne'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `Object` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
 
 
 ---
@@ -197,9 +197,9 @@ Reference: [__schema0](./__schema0)
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'find'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `Object` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
 
 
 ---
@@ -212,7 +212,7 @@ Options for DataEngine.insert operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
 | **returning** | `boolean` | optional |  |
 
 
@@ -224,10 +224,10 @@ Options for DataEngine.insert operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'insert'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **data** | `Record<string, any> \| Record<string, any>[]` | ✅ |  |
-| **options** | `Object` | optional | Options for DataEngine.insert operations |
+| **options** | `{ context?: object; returning?: boolean }` | optional | Options for DataEngine.insert operations |
 
 
 ---
@@ -240,10 +240,10 @@ Query options for IDataEngine.find() operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
-| **filter** | `Record<string, any> \| [__schema0](./__schema0)` | optional | Data Engine query filter conditions |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, number \| number> \| Object[]` | optional | Sort order definition |
+| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, '1' \| '-1'> \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
 | **limit** | `integer` | optional |  |
 | **skip** | `integer` | optional |  |
 | **top** | `integer` | optional |  |
@@ -266,9 +266,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'find'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `Object` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
 
 ---
 
@@ -278,9 +278,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'findOne'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `Object` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
 
 ---
 
@@ -290,10 +290,10 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'insert'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **data** | `Record<string, any> \| Record<string, any>[]` | ✅ |  |
-| **options** | `Object` | optional | Options for DataEngine.insert operations |
+| **options** | `{ context?: object; returning?: boolean }` | optional | Options for DataEngine.insert operations |
 
 ---
 
@@ -303,11 +303,11 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'update'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **data** | `Record<string, any>` | ✅ |  |
 | **id** | `string \| number` | optional | ID for single update, or use where in options |
-| **options** | `Object` | optional |  |
+| **options** | `{ context?: object; where?: Record<string, any> \| any; upsert?: boolean; multi?: boolean; … }` | optional |  |
 
 ---
 
@@ -317,10 +317,10 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'delete'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **id** | `string \| number` | optional | ID for single delete, or use where in options |
-| **options** | `Object` | optional |  |
+| **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; filter?: Record<string, any> \| any }` | optional |  |
 
 ---
 
@@ -330,9 +330,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'count'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `Object` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; filter?: Record<string, any> \| any }` | optional |  |
 
 ---
 
@@ -342,9 +342,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'aggregate'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `Object` | ✅ |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: string[]; aggregations?: { function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]; … }` | ✅ |  |
 
 ---
 
@@ -354,8 +354,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
-| **requests** | `Object \| Object \| Object \| Object \| Object \| Object \| Object \| Object \| Object[]` | ✅ |  |
+| **method** | `'batch'` | ✅ |  |
+| **requests** | `{ method: 'find'; object: string; query?: object } \| { method: 'findOne'; object: string; query?: object } \| { method: 'insert'; object: string; data: Record<string, any> \| Record<string, any>[]; options?: object } \| { method: 'update'; object: string; data: Record<string, any>; id?: string \| number; … } \| { method: 'delete'; object: string; id?: string \| number; options?: object } \| { method: 'count'; object: string; query?: object } \| { method: 'aggregate'; object: string; query: object } \| { method: 'execute'; command: any; options?: Record<string, any> } \| { method: 'vectorFind'; object: string; vector: number[]; where?: Record<string, any> \| any; … }[]` | ✅ |  |
 | **transaction** | `boolean` | optional |  |
 
 ---
@@ -366,7 +366,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'execute'` | ✅ |  |
 | **command** | `any` | ✅ |  |
 | **options** | `Record<string, any>` | optional |  |
 
@@ -378,10 +378,10 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'vectorFind'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **vector** | `number[]` | ✅ |  |
-| **where** | `Record<string, any> \| [__schema0](./__schema0)` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
 | **fields** | `string[]` | optional |  |
 | **limit** | `integer` | optional |  |
 | **threshold** | `number` | optional |  |
@@ -407,13 +407,13 @@ Type: `Record<string, Enum<'asc' | 'desc'>>`
 
 #### Option 2
 
-Type: `Record<string, number | number>`
+Type: `Record<string, '1' | '-1'>`
 
 ---
 
 #### Option 3
 
-Type: `Object[]`
+Type: `{ field: string; order: Enum<'asc' | 'desc'> }[]`
 
 ---
 
@@ -428,8 +428,8 @@ Options for DataEngine.update operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
-| **filter** | `Record<string, any> \| [__schema0](./__schema0)` | optional | Data Engine query filter conditions |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **upsert** | `boolean` | optional |  |
 | **multi** | `boolean` | optional |  |
 | **returning** | `boolean` | optional |  |
@@ -443,11 +443,11 @@ Options for DataEngine.update operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'update'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **data** | `Record<string, any>` | ✅ |  |
 | **id** | `string \| number` | optional | ID for single update, or use where in options |
-| **options** | `Object` | optional |  |
+| **options** | `{ context?: object; where?: Record<string, any> \| any; upsert?: boolean; multi?: boolean; … }` | optional |  |
 
 
 ---
@@ -458,10 +458,10 @@ Options for DataEngine.update operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `string` | ✅ |  |
+| **method** | `'vectorFind'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **vector** | `number[]` | ✅ |  |
-| **where** | `Record<string, any> \| [__schema0](./__schema0)` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
 | **fields** | `string[]` | optional |  |
 | **limit** | `integer` | optional |  |
 | **threshold** | `number` | optional |  |
@@ -477,10 +477,10 @@ QueryAST-aligned options for DataEngine.aggregate operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
-| **where** | `Record<string, any> \| [__schema0](./__schema0)` | optional |  |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
 | **groupBy** | `string[]` | optional |  |
-| **aggregations** | `Object[]` | optional |  |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]` | optional |  |
 | **timezone** | `string` | optional |  |
 
 
@@ -494,8 +494,8 @@ QueryAST-aligned options for DataEngine.count operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
-| **where** | `Record<string, any> \| [__schema0](./__schema0)` | optional |  |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
 
 
 ---
@@ -508,8 +508,8 @@ QueryAST-aligned options for DataEngine.delete operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
-| **where** | `Record<string, any> \| [__schema0](./__schema0)` | optional |  |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
 | **multi** | `boolean` | optional |  |
 
 
@@ -523,16 +523,16 @@ QueryAST-aligned query options for IDataEngine.find() operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
-| **where** | `Record<string, any> \| [__schema0](./__schema0)` | optional |  |
-| **fields** | `[__schema1](./__schema1)[]` | optional |  |
-| **orderBy** | `Object[]` | optional |  |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **fields** | `string \| { field: string; fields?: object[]; alias?: string }[]` | optional |  |
+| **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **limit** | `number` | optional |  |
 | **offset** | `number` | optional |  |
 | **top** | `number` | optional |  |
 | **cursor** | `Record<string, any>` | optional |  |
-| **search** | `Object` | optional |  |
-| **expand** | `Record<string, [__schema2](./__schema2)>` | optional |  |
+| **search** | `{ query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional |  |
+| **expand** | `Record<string, { object: string; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; where?: any; search?: object; … }>` | optional |  |
 | **distinct** | `boolean` | optional |  |
 
 
@@ -546,8 +546,8 @@ QueryAST-aligned options for DataEngine.update operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | optional |  |
-| **where** | `Record<string, any> \| [__schema0](./__schema0)` | optional |  |
+| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
 | **upsert** | `boolean` | optional |  |
 | **multi** | `boolean` | optional |  |
 | **returning** | `boolean` | optional |  |

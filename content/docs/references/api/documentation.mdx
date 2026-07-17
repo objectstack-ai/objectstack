@@ -85,7 +85,7 @@ const result = ApiChangelogEntry.parse(data);
 | :--- | :--- | :--- | :--- |
 | **version** | `string` | ✅ | API version |
 | **date** | `string` | ✅ | Release date |
-| **changes** | `Object` | ✅ | Version changes |
+| **changes** | `{ added: string[]; changed: string[]; deprecated: string[]; removed: string[]; … }` | ✅ | Version changes |
 | **migrationGuide** | `string` | optional | Migration guide URL or text |
 
 
@@ -101,19 +101,19 @@ const result = ApiChangelogEntry.parse(data);
 | **title** | `string` | ✅ | Documentation title |
 | **version** | `string` | ✅ | API version |
 | **description** | `string` | optional | API description |
-| **servers** | `Object[]` | ✅ | API server URLs |
-| **ui** | `Object` | optional | Testing UI configuration |
+| **servers** | `{ url: string; description?: string; variables?: Record<string, { default: string; description?: string; enum?: string[] }> }[]` | ✅ | API server URLs |
+| **ui** | `{ type: Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphql-playground' \| 'graphiql' \| 'postman' \| 'custom'>; path: string; theme: Enum<'light' \| 'dark' \| 'auto'>; enableTryItOut: boolean; … }` | optional | Testing UI configuration |
 | **generateOpenApi** | `boolean` | ✅ | Generate OpenAPI 3.0 specification |
 | **generateTestCollections** | `boolean` | ✅ | Generate API test collections |
-| **testCollections** | `Object[]` | ✅ | Predefined test collections |
-| **changelog** | `Object[]` | ✅ | API version changelog |
-| **codeTemplates** | `Object[]` | ✅ | Code generation templates |
+| **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: { name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]; … }[]` | ✅ | Predefined test collections |
+| **changelog** | `{ version: string; date: string; changes: object; migrationGuide?: string }[]` | ✅ | API version changelog |
+| **codeTemplates** | `{ language: string; name: string; template: string; variables?: string[] }[]` | ✅ | Code generation templates |
 | **termsOfService** | `string` | optional | Terms of service URL |
-| **contact** | `Object` | optional | Contact information |
-| **license** | `Object` | optional | API license |
-| **externalDocs** | `Object` | optional | External documentation link |
-| **securitySchemes** | `Record<string, Object>` | optional | Security scheme definitions |
-| **tags** | `Object[]` | optional | Global tag definitions |
+| **contact** | `{ name?: string; url?: string; email?: string }` | optional | Contact information |
+| **license** | `{ name: string; url?: string }` | optional | API license |
+| **externalDocs** | `{ description?: string; url: string }` | optional | External documentation link |
+| **securitySchemes** | `Record<string, { type: Enum<'apiKey' \| 'http' \| 'oauth2' \| 'openIdConnect'>; scheme?: string; bearerFormat?: string; name?: string; … }>` | optional | Security scheme definitions |
+| **tags** | `{ name: string; description?: string; externalDocs?: object }[]` | optional | Global tag definitions |
 
 
 ---
@@ -127,8 +127,8 @@ const result = ApiChangelogEntry.parse(data);
 | **name** | `string` | ✅ | Collection name |
 | **description** | `string` | optional | Collection description |
 | **variables** | `Record<string, any>` | ✅ | Shared variables |
-| **requests** | `Object[]` | ✅ | Test requests in this collection |
-| **folders** | `Object[]` | optional | Request folders for organization |
+| **requests** | `{ name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]` | ✅ | Test requests in this collection |
+| **folders** | `{ name: string; description?: string; requests: { name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[] }[]` | optional | Request folders for organization |
 
 
 ---
@@ -147,7 +147,7 @@ const result = ApiChangelogEntry.parse(data);
 | **queryParams** | `Record<string, string \| number \| boolean>` | ✅ | Query parameters |
 | **body** | `any` | optional | Request body |
 | **variables** | `Record<string, any>` | ✅ | Template variables |
-| **expectedResponse** | `Object` | optional | Expected response for validation |
+| **expectedResponse** | `{ statusCode: integer; body?: any }` | optional | Expected response for validation |
 
 
 ---
@@ -169,7 +169,7 @@ const result = ApiChangelogEntry.parse(data);
 | **syntaxHighlighting** | `boolean` | ✅ | Enable syntax highlighting |
 | **customCssUrl** | `string` | optional | Custom CSS stylesheet URL |
 | **customJsUrl** | `string` | optional | Custom JavaScript URL |
-| **layout** | `Object` | optional | Layout configuration |
+| **layout** | `{ showExtensions: boolean; showCommonExtensions: boolean; deepLinking: boolean; displayOperationId: boolean; … }` | optional | Layout configuration |
 
 
 ---
@@ -211,8 +211,8 @@ const result = ApiChangelogEntry.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **openApiSpec** | `Object` | optional | Generated OpenAPI specification |
-| **testCollections** | `Object[]` | optional | Generated test collections |
+| **openApiSpec** | `{ openapi: string; info: object; servers: { url: string; description?: string; variables?: Record<string, { default: string; description?: string; enum?: string[] }> }[]; paths: Record<string, any>; … }` | optional | Generated OpenAPI specification |
+| **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: { name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]; … }[]` | optional | Generated test collections |
 | **markdown** | `string` | optional | Generated markdown documentation |
 | **html** | `string` | optional | Generated HTML documentation |
 | **generatedAt** | `string` | ✅ | Generation timestamp |
@@ -232,7 +232,7 @@ const result = ApiChangelogEntry.parse(data);
 | **bearerFormat** | `string` | optional | Bearer token format (e.g., JWT) |
 | **name** | `string` | optional | API key parameter name |
 | **in** | `Enum<'header' \| 'query' \| 'cookie'>` | optional | API key location |
-| **flows** | `Object` | optional | OAuth2 flows |
+| **flows** | `{ implicit?: any; password?: any; clientCredentials?: any; authorizationCode?: any }` | optional | OAuth2 flows |
 | **openIdConnectUrl** | `string` | optional | OpenID Connect discovery URL |
 | **description** | `string` | optional | Security scheme description |
 
@@ -247,7 +247,7 @@ const result = ApiChangelogEntry.parse(data);
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | Server base URL |
 | **description** | `string` | optional | Server description |
-| **variables** | `Record<string, Object>` | optional | URL template variables |
+| **variables** | `Record<string, { default: string; description?: string; enum?: string[] }>` | optional | URL template variables |
 
 
 ---
@@ -259,13 +259,13 @@ const result = ApiChangelogEntry.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **openapi** | `string` | ✅ | OpenAPI specification version |
-| **info** | `Object` | ✅ | API metadata |
-| **servers** | `Object[]` | ✅ | API servers |
+| **info** | `{ title: string; version: string; description?: string; termsOfService?: string; … }` | ✅ | API metadata |
+| **servers** | `{ url: string; description?: string; variables?: Record<string, { default: string; description?: string; enum?: string[] }> }[]` | ✅ | API servers |
 | **paths** | `Record<string, any>` | ✅ | API paths and operations |
-| **components** | `Object` | optional | Reusable components |
+| **components** | `{ schemas?: Record<string, any>; responses?: Record<string, any>; parameters?: Record<string, any>; examples?: Record<string, any>; … }` | optional | Reusable components |
 | **security** | `Record<string, string[]>[]` | optional | Global security requirements |
-| **tags** | `Object[]` | optional | Tag definitions |
-| **externalDocs** | `Object` | optional | External documentation |
+| **tags** | `{ name: string; description?: string; externalDocs?: object }[]` | optional | Tag definitions |
+| **externalDocs** | `{ description?: string; url: string }` | optional | External documentation |
 
 
 ---

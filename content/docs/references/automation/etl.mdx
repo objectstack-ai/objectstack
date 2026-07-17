@@ -51,11 +51,11 @@ Supports complex operations: joins, aggregations, filtering, custom SQL.
 
 **When to upgrade:**
 
-- Need full connector lifecycle (auth, webhooks, rate limits) → Use [Enterprise Connector](../integration/connector.zod.ts)
+- Need full connector lifecycle (auth, webhooks, rate limits) → Use [Enterprise Connector](/docs/references/integration/connector)
 
-@see [./sync.zod.ts](./sync.zod.ts) for Level 1 (simple sync)
+See also: `./sync.zod.ts` for Level 1 (simple sync)
 
-@see [../integration/connector.zod.ts](../integration/connector.zod.ts) for Level 3 (enterprise integration)
+See also: [../[integration/connector.zod.ts](/docs/references/integration/connector)](/docs/references/integration/connector) for Level 3 (enterprise integration)
 
 ## Use Cases
 
@@ -83,11 +83,11 @@ Supports complex operations: joins, aggregations, filtering, custom SQL.
 
 - Split monolithic databases into microservices
 
-@see https://airbyte.com/
+See also: https://airbyte.com/
 
-@see https://docs.fivetran.com/
+See also: https://docs.fivetran.com/
 
-@see https://nifi.apache.org/
+See also: https://nifi.apache.org/
 
 @example
 
@@ -187,14 +187,14 @@ const result = ETLDestination.parse(data);
 | **name** | `string` | ✅ | Pipeline identifier (snake_case) |
 | **label** | `string` | optional | Pipeline display name |
 | **description** | `string` | optional | Pipeline description |
-| **source** | `Object` | ✅ | Data source |
-| **destination** | `Object` | ✅ | Data destination |
-| **transformations** | `Object[]` | optional | Transformation pipeline |
+| **source** | `{ type: Enum<'database' \| 'api' \| 'file' \| 'stream' \| 'object' \| 'warehouse' \| 'storage' \| 'spreadsheet'>; connector?: string; config: Record<string, any>; incremental?: object }` | ✅ | Data source |
+| **destination** | `{ type: Enum<'database' \| 'api' \| 'file' \| 'stream' \| 'object' \| 'warehouse' \| 'storage' \| 'spreadsheet'>; connector?: string; config: Record<string, any>; writeMode?: Enum<'append' \| 'overwrite' \| 'upsert' \| 'merge'>; … }` | ✅ | Data destination |
+| **transformations** | `{ name?: string; type: Enum<'map' \| 'filter' \| 'aggregate' \| 'join' \| 'script' \| 'lookup' \| 'split' \| 'merge' \| 'normalize' \| 'deduplicate'>; config: Record<string, any>; continueOnError?: boolean }[]` | optional | Transformation pipeline |
 | **syncMode** | `Enum<'full' \| 'incremental' \| 'cdc'>` | optional | Sync mode |
-| **schedule** | `string \| Object` | optional | Cron schedule expression |
+| **schedule** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron schedule expression |
 | **enabled** | `boolean` | optional | Pipeline enabled status |
-| **retry** | `Object` | optional | Retry configuration |
-| **notifications** | `Object` | optional | Notification settings |
+| **retry** | `{ maxAttempts?: integer; backoffMs?: integer }` | optional | Retry configuration |
+| **notifications** | `{ onSuccess?: string[]; onFailure?: string[] }` | optional | Notification settings |
 | **tags** | `string[]` | optional | Pipeline tags |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |
 
@@ -213,8 +213,8 @@ const result = ETLDestination.parse(data);
 | **startedAt** | `string` | ✅ | Start time |
 | **completedAt** | `string` | optional | Completion time |
 | **durationMs** | `number` | optional | Duration in ms |
-| **stats** | `Object` | optional | Run statistics |
-| **error** | `Object` | optional | Error information |
+| **stats** | `{ recordsRead: integer; recordsWritten: integer; recordsErrored: integer; bytesProcessed: integer }` | optional | Run statistics |
+| **error** | `{ message: string; code?: string; details?: any }` | optional | Error information |
 | **logs** | `string[]` | optional | Execution logs |
 
 
@@ -243,7 +243,7 @@ const result = ETLDestination.parse(data);
 | **type** | `Enum<'database' \| 'api' \| 'file' \| 'stream' \| 'object' \| 'warehouse' \| 'storage' \| 'spreadsheet'>` | ✅ | Source type |
 | **connector** | `string` | optional | Connector ID |
 | **config** | `Record<string, any>` | ✅ | Source configuration |
-| **incremental** | `Object` | optional | Incremental extraction config |
+| **incremental** | `{ enabled: boolean; cursorField: string; cursorValue?: any }` | optional | Incremental extraction config |
 
 
 ---

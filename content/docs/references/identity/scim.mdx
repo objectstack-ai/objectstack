@@ -71,9 +71,9 @@ de-provisioning, and synchronization.
 
 - **Google Workspace**: Google's identity management
 
-@see https://datatracker.ietf.org/doc/html/rfc7643
+See also: https://datatracker.ietf.org/doc/html/rfc7643
 
-@see https://datatracker.ietf.org/doc/html/rfc7644
+See also: https://datatracker.ietf.org/doc/html/rfc7644
 
 <Callout type="info">
 **Source:** `packages/spec/src/identity/scim.zod.ts`
@@ -130,8 +130,8 @@ const result = SCIMAddress.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **schemas** | `string[]` | ✅ | SCIM schema URIs (BulkRequest) |
-| **operations** | `Object[]` | ✅ | Bulk operations to execute (minimum 1) |
+| **schemas** | `'urn:ietf:params:scim:api:messages:2.0:BulkRequest'[]` | ✅ | SCIM schema URIs (BulkRequest) |
+| **operations** | `{ method: Enum<'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; path: string; bulkId?: string; data?: Record<string, any>; … }[]` | ✅ | Bulk operations to execute (minimum 1) |
 | **failOnErrors** | `integer` | optional | Stop processing after this many errors |
 
 
@@ -143,8 +143,8 @@ const result = SCIMAddress.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **schemas** | `string[]` | ✅ | SCIM schema URIs (BulkResponse) |
-| **operations** | `Object[]` | ✅ | Results for each bulk operation |
+| **schemas** | `'urn:ietf:params:scim:api:messages:2.0:BulkResponse'[]` | ✅ | SCIM schema URIs (BulkResponse) |
+| **operations** | `{ method: Enum<'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; bulkId?: string; location?: string; status: string; … }[]` | ✅ | Results for each bulk operation |
 
 
 ---
@@ -189,7 +189,7 @@ const result = SCIMAddress.parse(data);
 | **organization** | `string` | optional | Organization |
 | **division** | `string` | optional | Division |
 | **department** | `string` | optional | Department |
-| **manager** | `Object` | optional | Manager reference |
+| **manager** | `{ value: string; $ref?: string; displayName?: string }` | optional | Manager reference |
 
 
 ---
@@ -218,8 +218,8 @@ const result = SCIMAddress.parse(data);
 | **id** | `string` | optional | Unique resource identifier |
 | **externalId** | `string` | optional | External identifier from client system |
 | **displayName** | `string` | ✅ | Group display name (REQUIRED) |
-| **members** | `Object[]` | optional | Group members |
-| **meta** | `Object` | optional | Resource metadata |
+| **members** | `{ value: string; $ref?: string; type?: Enum<'User' \| 'Group'>; display?: string }[]` | optional | Group members |
+| **meta** | `{ resourceType?: string; created?: string; lastModified?: string; location?: string; … }` | optional | Resource metadata |
 
 
 ---
@@ -246,7 +246,7 @@ const result = SCIMAddress.parse(data);
 | :--- | :--- | :--- | :--- |
 | **schemas** | `string[]` | ✅ | SCIM schema URIs |
 | **totalResults** | `integer` | ✅ | Total results count |
-| **Resources** | `Object \| Object \| Record<string, any>[]` | ✅ | Resources array (Users, Groups, or custom resources) |
+| **Resources** | `{ schemas: string[]; id?: string; externalId?: string; userName: string; … } \| { schemas: string[]; id?: string; externalId?: string; displayName: string; … } \| Record<string, any>[]` | ✅ | Resources array (Users, Groups, or custom resources) |
 | **startIndex** | `integer` | optional | Start index (1-based) |
 | **itemsPerPage** | `integer` | optional | Items per page |
 
@@ -318,7 +318,7 @@ const result = SCIMAddress.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **schemas** | `string[]` | ✅ | SCIM schema URIs |
-| **Operations** | `Object[]` | ✅ | Patch operations |
+| **Operations** | `{ op: Enum<'add' \| 'remove' \| 'replace'>; path?: string; value?: any }[]` | ✅ | Patch operations |
 
 
 ---
@@ -347,7 +347,7 @@ const result = SCIMAddress.parse(data);
 | **id** | `string` | optional | Unique resource identifier |
 | **externalId** | `string` | optional | External identifier from client system |
 | **userName** | `string` | ✅ | Unique username (REQUIRED) |
-| **name** | `Object` | optional | Structured name components |
+| **name** | `{ formatted?: string; familyName?: string; givenName?: string; middleName?: string; … }` | optional | Structured name components |
 | **displayName** | `string` | optional | Display name for UI |
 | **nickName** | `string` | optional | Nickname |
 | **profileUrl** | `string` | optional | Profile page URL |
@@ -358,17 +358,17 @@ const result = SCIMAddress.parse(data);
 | **timezone** | `string` | optional | Timezone |
 | **active** | `boolean` | ✅ | Account active status |
 | **password** | `string` | optional | Password (write-only) |
-| **emails** | `Object[]` | optional | Email addresses |
-| **phoneNumbers** | `Object[]` | optional | Phone numbers |
-| **ims** | `Object[]` | optional | IM addresses |
-| **photos** | `Object[]` | optional | Photo URLs |
-| **addresses** | `Object[]` | optional | Physical addresses |
-| **groups** | `Object[]` | optional | Group memberships |
-| **entitlements** | `Object[]` | optional | Entitlements |
-| **roles** | `Object[]` | optional | Roles |
-| **x509Certificates** | `Object[]` | optional | X509 certificates |
-| **meta** | `Object` | optional | Resource metadata |
-| **urn:ietf:params:scim:schemas:extension:enterprise:2.0:User** | `Object` | optional | Enterprise user attributes |
+| **emails** | `{ value: string; type?: Enum<'work' \| 'home' \| 'other'>; display?: string; primary: boolean }[]` | optional | Email addresses |
+| **phoneNumbers** | `{ value: string; type?: Enum<'work' \| 'home' \| 'mobile' \| 'fax' \| 'pager' \| 'other'>; display?: string; primary: boolean }[]` | optional | Phone numbers |
+| **ims** | `{ value: string; type?: string; primary?: boolean }[]` | optional | IM addresses |
+| **photos** | `{ value: string; type?: Enum<'photo' \| 'thumbnail'>; primary?: boolean }[]` | optional | Photo URLs |
+| **addresses** | `{ formatted?: string; streetAddress?: string; locality?: string; region?: string; … }[]` | optional | Physical addresses |
+| **groups** | `{ value: string; $ref?: string; display?: string; type?: Enum<'direct' \| 'indirect'> }[]` | optional | Group memberships |
+| **entitlements** | `{ value: string; type?: string; primary?: boolean }[]` | optional | Entitlements |
+| **roles** | `{ value: string; type?: string; primary?: boolean }[]` | optional | Roles |
+| **x509Certificates** | `{ value: string; type?: string; primary?: boolean }[]` | optional | X509 certificates |
+| **meta** | `{ resourceType?: string; created?: string; lastModified?: string; location?: string; … }` | optional | Resource metadata |
+| **urn:ietf:params:scim:schemas:extension:enterprise:2.0:User** | `{ employeeNumber?: string; costCenter?: string; organization?: string; division?: string; … }` | optional | Enterprise user attributes |
 
 
 ---

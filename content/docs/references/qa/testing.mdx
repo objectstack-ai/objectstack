@@ -106,10 +106,10 @@ A complete test scenario with setup, execution steps, and teardown
 | **name** | `string` | ✅ | Scenario name for test reports |
 | **description** | `string` | optional | Detailed description of the test scenario |
 | **tags** | `string[]` | optional | Tags for filtering and categorization (e.g. "critical", "regression", "crm") |
-| **setup** | `Object[]` | optional | Steps to run before main test (preconditions) |
-| **steps** | `Object[]` | ✅ | Main test sequence to execute |
-| **teardown** | `Object[]` | optional | Steps to cleanup after test execution |
-| **requires** | `Object` | optional | Environment requirements for this scenario |
+| **setup** | `{ name: string; description?: string; action: object; assertions?: { field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'error'>; expectedValue: any }[]; … }[]` | optional | Steps to run before main test (preconditions) |
+| **steps** | `{ name: string; description?: string; action: object; assertions?: { field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'error'>; expectedValue: any }[]; … }[]` | ✅ | Main test sequence to execute |
+| **teardown** | `{ name: string; description?: string; action: object; assertions?: { field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'error'>; expectedValue: any }[]; … }[]` | optional | Steps to cleanup after test execution |
+| **requires** | `{ params?: string[]; plugins?: string[] }` | optional | Environment requirements for this scenario |
 
 
 ---
@@ -124,8 +124,8 @@ A single step in a test scenario, consisting of an action and optional assertion
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Step name for identification in test reports |
 | **description** | `string` | optional | Human-readable description of what this step tests |
-| **action** | `Object` | ✅ | The action to execute in this step |
-| **assertions** | `Object[]` | optional | Assertions to validate after the action completes |
+| **action** | `{ type: Enum<'create_record' \| 'update_record' \| 'delete_record' \| 'read_record' \| 'query_records' \| 'api_call' \| 'run_script' \| 'wait'>; target: string; payload?: Record<string, any>; user?: string }` | ✅ | The action to execute in this step |
+| **assertions** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'error'>; expectedValue: any }[]` | optional | Assertions to validate after the action completes |
 | **capture** | `Record<string, string>` | optional | Map result fields to context variables: `{ "newId": "body.id" }` |
 
 
@@ -140,7 +140,7 @@ A collection of test scenarios grouped into a test suite
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Test suite name |
-| **scenarios** | `Object[]` | ✅ | List of test scenarios in this suite |
+| **scenarios** | `{ id: string; name: string; description?: string; tags?: string[]; … }[]` | ✅ | List of test scenarios in this suite |
 
 
 ---

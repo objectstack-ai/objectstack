@@ -74,22 +74,22 @@ const result = AIKnowledge.parse(data);
 | **avatar** | `string` | optional |  |
 | **role** | `string` | ✅ | The persona/role (e.g. "Senior Support Engineer") |
 | **instructions** | `string` | ✅ | System Prompt / Prime Directives |
-| **model** | `Object` | optional |  |
-| **lifecycle** | `Object` | optional | State machine defining the agent conversation follow and constraints |
+| **model** | `{ provider: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature: number; maxTokens?: number; … }` | optional |  |
+| **lifecycle** | `{ id: string; description?: string; contextSchema?: Record<string, any>; initial: string; … }` | optional | State machine defining the agent conversation follow and constraints |
 | **surface** | `Enum<'ask' \| 'build'>` | ✅ | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
 | **skills** | `string[]` | optional | Skill names to attach (Agent→Skill→Tool architecture) |
-| **tools** | `Object[]` | optional | Direct tool references (legacy fallback) |
-| **knowledge** | `Object` | optional | RAG access |
+| **tools** | `{ type: Enum<'action' \| 'flow' \| 'query' \| 'vector_search'>; name: string; description?: string }[]` | optional | Direct tool references (legacy fallback) |
+| **knowledge** | `{ topics: string[]; indexes: string[] }` | optional | RAG access |
 | **active** | `boolean` | ✅ |  |
 | **access** | `string[]` | optional | Who can chat with this agent |
 | **permissions** | `string[]` | optional | Required permission-set capabilities |
 | **tenantId** | `string` | optional | Tenant/Organization ID |
 | **visibility** | `Enum<'global' \| 'organization' \| 'private'>` | ✅ | [EXPERIMENTAL — NOT ENFORCED, #1901] Intended listing scope. No runtime consumer yet; use access/permissions for real gating. |
-| **planning** | `Object` | optional | Autonomous reasoning and planning configuration |
-| **memory** | `Object` | optional | Agent memory management |
-| **guardrails** | `Object` | optional | Safety guardrails for the agent |
-| **structuredOutput** | `Object` | optional | Structured output format and validation configuration |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this agent. |
+| **planning** | `{ strategy: Enum<'react' \| 'plan_and_execute' \| 'reflexion' \| 'tree_of_thought'>; maxIterations: integer; allowReplan: boolean }` | optional | Autonomous reasoning and planning configuration |
+| **memory** | `{ longTerm?: object; reflectionInterval?: integer }` | optional | Agent memory management |
+| **guardrails** | `{ maxTokensPerInvocation?: integer; maxExecutionTimeSec?: integer; blockedTopics?: string[] }` | optional | Safety guardrails for the agent |
+| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>; schema?: Record<string, any>; strict: boolean; retryOnValidationFailure: boolean; … }` | optional | Structured output format and validation configuration |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this agent. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |

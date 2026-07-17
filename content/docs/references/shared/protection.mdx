@@ -15,7 +15,7 @@ tenant's Studio) is allowed to mutate. Internally this is what
 
 gets translated into the `_lock` / `_lockReason` / `_lockDocsUrl`
 
-private envelope (`kernel/metadata-protection.zod.ts`) that the
+private envelope (`[kernel/metadata-protection.zod.ts](/docs/references/kernel/metadata-protection)`) that the
 
 protocol layer enforces.
 
@@ -63,7 +63,7 @@ docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
 
 The loader (`metadata/plugin.ts` + `objectql/registry.ts`) calls
 
-[applyProtection](applyProtection) to translate this block into the private
+`applyProtection` to translate this block into the private
 
 `_lock` envelope at registration time. Authors should NEVER set
 
@@ -75,7 +75,7 @@ See also:
 
 - ADR-0010 §3.7 — Future work → now implemented.
 
-- `kernel/metadata-protection.zod.ts` — the runtime envelope.
+- `[kernel/metadata-protection.zod.ts](/docs/references/kernel/metadata-protection)` — the runtime envelope.
 
 <Callout type="info">
 **Source:** `packages/spec/src/shared/protection.zod.ts`

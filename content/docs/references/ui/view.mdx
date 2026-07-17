@@ -7,7 +7,7 @@ description: View protocol schemas
 
 HTTP Method Enum & HTTP Request Schema
 
-Migrated to shared/http.zod.ts. Re-exported here for backward compatibility.
+Migrated to [shared/http.zod.ts](/docs/references/shared/http). Re-exported here for backward compatibility.
 
 <Callout type="info">
 **Source:** `packages/spec/src/ui/view.zod.ts`
@@ -110,7 +110,7 @@ Aggregation function for column footer summary
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name (snake_case) |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>` | optional | Field type (auto-infers widget if omitted) |
-| **options** | `Object[]` | optional | Options for select/multiselect/radio/checkboxes fields |
+| **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
 | **maxLength** | `number` | optional | Maximum character length (for text/textarea/email/url/phone) |
 | **minLength** | `number` | optional | Minimum character length |
@@ -130,11 +130,11 @@ Aggregation function for column footer summary
 | **span** | `Enum<'auto' \| 'full'>` | optional | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': whole row at any column count. Prefer this over the absolute `colSpan`. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
-| **fields** | `[#](./#)[]` | optional | Sub-fields for composite/repeater/record types |
-| **keyField** | `Object` | optional | Key column config for record-typed fields |
+| **fields** | `[FormField](#formfield)[]` | optional | Sub-fields for composite/repeater/record types |
+| **keyField** | `{ field?: string; label?: string; placeholder?: string; helpText?: string; … }` | optional | Key column config for record-typed fields |
 | **dependsOn** | `string` | optional | Parent field name for cascading |
-| **visibleWhen** | `string \| Object` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). e.g. P`record.priority == 'urgent'` |
-| **visibleOn** | `string \| Object` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). e.g. P`record.priority == 'urgent'` |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
 | **disclosure** | `Enum<'inline' \| 'popover'>` | optional | Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure). |
 
 
@@ -151,10 +151,10 @@ Aggregation function for column footer summary
 | **description** | `string` | optional | Optional description rendered under the section header. |
 | **collapsible** | `boolean` | optional |  |
 | **collapsed** | `boolean` | optional |  |
-| **visibleWhen** | `string \| Object` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). |
-| **visibleOn** | `string \| Object` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
-| **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| number \| number \| number \| number` | optional |  |
-| **fields** | `string \| [__schema0](./__schema0)[]` | ✅ |  |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
+| **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| '1' \| '2' \| '3' \| '4'` | optional |  |
+| **fields** | `string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; options?: { label: string; value: string; color?: string; default?: boolean; … }[]; reference?: string; … }[]` | ✅ |  |
 
 
 ---
@@ -180,16 +180,16 @@ Aggregation function for column footer summary
 | **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
 | **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
-| **data** | `Object \| Object \| Object \| Object` | optional | Data source configuration (defaults to "object" provider) |
-| **sections** | `Object[]` | optional |  |
-| **groups** | `Object[]` | optional |  |
-| **subforms** | `Object[]` | optional | Inline master-detail child collections |
-| **defaultSort** | `Object[]` | optional | Default sort order for related list views within this form |
-| **sharing** | `Object` | optional | Public sharing configuration for this form |
-| **submitBehavior** | `Object \| Object \| Object \| Object` | optional | Post-submit behavior |
-| **buttons** | `Object` | optional | [EXPERIMENTAL — NOT ENFORCED, #2998] Form action-button visibility & labels. Renderer wiring pending in ObjectUI (objectui#2545). |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **sections** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional |  |
+| **groups** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional |  |
+| **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
+| **defaultSort** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Default sort order for related list views within this form |
+| **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
+| **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior |
+| **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | [EXPERIMENTAL — NOT ENFORCED, #2998] Form action-button visibility & labels. Renderer wiring pending in ObjectUI (objectui#2545). |
 | **defaults** | `Record<string, any>` | optional | [EXPERIMENTAL — NOT ENFORCED, #2998] Initial field values for create-mode forms (spec home for ObjectUI `initialValues`). Renderer wiring pending (objectui#2545). |
-| **aria** | `Object` | optional | ARIA accessibility attributes for the form view |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the form view |
 
 
 ---
@@ -232,8 +232,8 @@ Gallery/card view configuration
 | **assigneeField** | `string` | optional | Resource field to bucket load by (resource view) |
 | **effortField** | `string` | optional | Per-task load units (resource view; default 1) |
 | **capacity** | `number` | optional | Per-resource capacity ceiling; loads above this flag overload |
-| **tooltipFields** | `string \| Object[]` | optional | Fields to surface in the hover tooltip, in display order |
-| **quickFilters** | `Object[]` | optional | Multi-select filter dropdowns rendered above the chart |
+| **tooltipFields** | `string \| { field: string; label?: string }[]` | optional | Fields to surface in the hover tooltip, in display order |
+| **quickFilters** | `{ field: string; label?: string; options?: string \| { value: string \| number; label?: string }[] }[]` | optional | Multi-select filter dropdowns rendered above the chart |
 | **autoZoomToFilter** | `boolean` | optional | When true (default), filtering zooms the range to the filtered tasks |
 
 
@@ -247,7 +247,7 @@ Gallery/card view configuration
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Record field / dot-path the dimension filters on |
 | **label** | `string` | optional | Trigger label (falls back to the field label) |
-| **options** | `string \| Object[]` | optional | Explicit option override for fixed enums |
+| **options** | `string \| { value: string \| number; label?: string }[]` | optional | Explicit option override for fixed enums |
 
 
 ---
@@ -260,7 +260,7 @@ Record grouping configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `Object[]` | ✅ | Fields to group by (supports up to 3 levels) |
+| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by (supports up to 3 levels) |
 
 
 ---
@@ -339,51 +339,51 @@ List chart view configuration
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string` | optional | Display label (plain string; i18n keys are auto-generated by the framework) |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional |  |
-| **data** | `Object \| Object \| Object \| Object` | optional | Data source configuration (defaults to "object" provider) |
-| **columns** | `string[] \| Object[]` | ✅ | Fields to display as columns |
-| **filter** | `Object[]` | optional | Filter criteria (JSON Rules) |
-| **sort** | `string \| Object[]` | optional |  |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `string[] \| { field: string; label?: string; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
+| **filter** | `{ field: string; operator: string; value?: string \| number \| boolean \| null \| string \| number[] }[]` | optional | Filter criteria (JSON Rules) |
+| **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
-| **userFilters** | `Object` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: { field: string; label?: string; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: { value: string \| number \| boolean; label: string; color?: string }[]; … }[]; tabs?: { name: string; label?: string; icon?: string; view?: string; … }[]; showAllRecords?: boolean }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **striped** | `boolean` | optional | Striped row styling |
 | **bordered** | `boolean` | optional | Show borders |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
-| **selection** | `Object` | optional | Row selection configuration |
-| **navigation** | `Object` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
-| **pagination** | `Object` | optional | Pagination configuration |
-| **kanban** | `Object` | optional |  |
-| **calendar** | `Object` | optional |  |
+| **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
+| **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional |  |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional |  |
 | **gantt** | `Record<string, any>` | optional |  |
-| **gallery** | `Object` | optional | Gallery/card view configuration |
-| **timeline** | `Object` | optional | Timeline view configuration |
-| **chart** | `Object` | optional | List chart view configuration |
+| **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
+| **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **tree** | `Record<string, any>` | optional |  |
 | **description** | `string` | optional | View description for documentation/tooltips |
-| **sharing** | `Object` | optional | View sharing and access configuration |
+| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `Object` | optional | Group records by one or more fields |
-| **rowColor** | `Object` | optional | Color rows based on field value |
+| **grouping** | `{ fields: { field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[] }` | optional | Group records by one or more fields |
+| **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
 | **rowActions** | `string[]` | optional | Actions available for individual row items |
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `Record<string, any>[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog) |
 | **virtualScroll** | `boolean` | optional | Enable virtual scrolling for large datasets |
-| **conditionalFormatting** | `Object[]` | optional | Conditional formatting rules for list rows |
+| **conditionalFormatting** | `{ condition: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
 | **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'pdf' \| 'json'>[]` | optional | Available export format options |
-| **userActions** | `Object` | optional | User action toggles for the view toolbar |
-| **appearance** | `Object` | optional | Appearance and visualization configuration |
-| **tabs** | `Object[]` | optional | Tab definitions for multi-tab view interface |
-| **addRecord** | `Object` | optional | Add record entry point configuration |
+| **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; rowHeight?: boolean; … }` | optional | User action toggles for the view toolbar |
+| **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
+| **tabs** | `{ name: string; label?: string; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
-| **emptyState** | `Object` | optional | Empty state configuration when no records found |
-| **aria** | `Object` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `Object` | optional | Responsive layout configuration |
-| **performance** | `Object` | optional | Performance optimization settings |
+| **emptyState** | `{ title?: string; message?: string; icon?: string }` | optional | Empty state configuration when no records found |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
+| **responsive** | `{ breakpoint?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>; hiddenOn?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>[]; columns?: object; order?: object }` | optional | Responsive layout configuration |
+| **performance** | `{ lazyLoad?: boolean; virtualScroll?: object; cacheStrategy?: Enum<'none' \| 'cache-first' \| 'network-first' \| 'stale-while-revalidate'>; prefetch?: boolean; … }` | optional | Performance optimization settings |
 
 
 ---
@@ -428,51 +428,51 @@ List chart view configuration
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string` | optional | Display label (plain string; i18n keys are auto-generated by the framework) |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional |  |
-| **data** | `Object \| Object \| Object \| Object` | optional | Data source configuration (defaults to "object" provider) |
-| **columns** | `string[] \| Object[]` | ✅ | Fields to display as columns |
-| **filter** | `Object[]` | optional | Filter criteria (JSON Rules) |
-| **sort** | `string \| Object[]` | optional |  |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `string[] \| { field: string; label?: string; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
+| **filter** | `{ field: string; operator: string; value?: string \| number \| boolean \| null \| string \| number[] }[]` | optional | Filter criteria (JSON Rules) |
+| **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **striped** | `boolean` | optional | Striped row styling |
 | **bordered** | `boolean` | optional | Show borders |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
-| **selection** | `Object` | optional | Row selection configuration |
-| **navigation** | `Object` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
-| **pagination** | `Object` | optional | Pagination configuration |
-| **kanban** | `Object` | optional |  |
-| **calendar** | `Object` | optional |  |
+| **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
+| **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional |  |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional |  |
 | **gantt** | `Record<string, any>` | optional |  |
-| **gallery** | `Object` | optional | Gallery/card view configuration |
-| **timeline** | `Object` | optional | Timeline view configuration |
-| **chart** | `Object` | optional | List chart view configuration |
+| **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
+| **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **tree** | `Record<string, any>` | optional |  |
 | **description** | `string` | optional | View description for documentation/tooltips |
-| **sharing** | `Object` | optional | View sharing and access configuration |
+| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `Object` | optional | Group records by one or more fields |
-| **rowColor** | `Object` | optional | Color rows based on field value |
+| **grouping** | `{ fields: { field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[] }` | optional | Group records by one or more fields |
+| **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
 | **rowActions** | `string[]` | optional | Actions available for individual row items |
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `Record<string, any>[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog) |
 | **virtualScroll** | `boolean` | optional | Enable virtual scrolling for large datasets |
-| **conditionalFormatting** | `Object[]` | optional | Conditional formatting rules for list rows |
+| **conditionalFormatting** | `{ condition: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
 | **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'pdf' \| 'json'>[]` | optional | Available export format options |
-| **userActions** | `Object` | optional | User action toggles for the view toolbar |
-| **appearance** | `Object` | optional | Appearance and visualization configuration |
-| **tabs** | `Object[]` | optional | Tab definitions for multi-tab view interface |
-| **addRecord** | `Object` | optional | Add record entry point configuration |
+| **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; rowHeight?: boolean; … }` | optional | User action toggles for the view toolbar |
+| **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
+| **tabs** | `{ name: string; label?: string; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
-| **emptyState** | `Object` | optional | Empty state configuration when no records found |
-| **aria** | `Object` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `Object` | optional | Responsive layout configuration |
-| **performance** | `Object` | optional | Performance optimization settings |
-| **userFilters** | `Object` | optional |  |
+| **emptyState** | `{ title?: string; message?: string; icon?: string }` | optional | Empty state configuration when no records found |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
+| **responsive** | `{ breakpoint?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>; hiddenOn?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>[]; columns?: object; order?: object }` | optional | Responsive layout configuration |
+| **performance** | `{ lazyLoad?: boolean; virtualScroll?: object; cacheStrategy?: Enum<'none' \| 'cache-first' \| 'network-first' \| 'stale-while-revalidate'>; prefetch?: boolean; … }` | optional | Performance optimization settings |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: { field: string; label?: string; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: { value: string \| number \| boolean; label: string; color?: string }[]; … }[] }` | optional |  |
 
 
 ---
@@ -484,7 +484,7 @@ List chart view configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **element** | `Enum<'dropdown' \| 'toggle'>` | ✅ | Filter control style on object views: "dropdown" (per-field value chips). "toggle" is deprecated. "tabs" is page-only — use `listViews` for named presets. |
-| **fields** | `Object[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
+| **fields** | `{ field: string; label?: string; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: { value: string \| number \| boolean; label: string; color?: string }[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
 
 
 ---
@@ -603,7 +603,7 @@ Quick-filter field configuration
 | **field** | `string` | ✅ | Field name on the source object (must exist — checked by reference diagnostics) |
 | **label** | `string` | optional | Display label override (defaults to the field label) |
 | **type** | `Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>` | optional | Filter control type. Omit to infer from the field definition |
-| **options** | `Object[]` | optional | Static options. Omit to derive from the field definition (select options / lookup records) |
+| **options** | `{ value: string \| number \| boolean; label: string; color?: string }[]` | optional | Static options. Omit to derive from the field definition (select options / lookup records) |
 | **showCount** | `boolean` | optional | Show per-option record counts |
 | **defaultValues** | `string \| number \| boolean[]` | optional | Pre-selected values when the view loads |
 
@@ -619,8 +619,8 @@ End-user quick-filter configuration (Airtable "User filters" parity)
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **element** | `Enum<'dropdown' \| 'tabs' \| 'toggle'>` | ✅ | Filter control style: "dropdown" (per-field value selectors) or "tabs" (named presets). "toggle" is deprecated. |
-| **fields** | `Object[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
-| **tabs** | `Object[]` | optional | Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema |
+| **fields** | `{ field: string; label?: string; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: { value: string \| number \| boolean; label: string; color?: string }[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
+| **tabs** | `{ name: string; label?: string; icon?: string; view?: string; … }[]` | optional | Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema |
 | **showAllRecords** | `boolean` | optional | Show an "All records" tab before the presets (tabs element) |
 
 
@@ -632,11 +632,11 @@ End-user quick-filter configuration (Airtable "User filters" parity)
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **list** | `Object` | optional |  |
-| **form** | `Object` | optional |  |
-| **listViews** | `Record<string, Object>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
-| **formViews** | `Record<string, Object>` | optional | Additional named form views |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this view. |
+| **list** | `{ name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }` | optional |  |
+| **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }` | optional |  |
+| **listViews** | `Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
+| **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -660,7 +660,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `string` | ✅ |  |
+| **provider** | `'object'` | ✅ |  |
 | **object** | `string` | ✅ | Target object name |
 
 ---
@@ -671,9 +671,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `string` | ✅ |  |
-| **read** | `Object` | optional | Configuration for fetching data |
-| **write** | `Object` | optional | Configuration for submitting data (for forms/editable tables) |
+| **provider** | `'api'` | ✅ |  |
+| **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
+| **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ---
 
@@ -683,7 +683,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `string` | ✅ |  |
+| **provider** | `'value'` | ✅ |  |
 | **items** | `any[]` | ✅ | Static data array |
 
 ---
@@ -694,7 +694,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `string` | ✅ |  |
+| **provider** | `'schema'` | ✅ |  |
 | **schemaId** | `string` | ✅ | Schema identifier — typically the metadata type name |
 | **schema** | `Record<string, any>` | optional | Inline JSON Schema (Draft 2020-12). Optional when schemaId is resolvable. |
 
@@ -730,8 +730,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **viewKind** | `string` | ✅ |  |
-| **config** | `Object` | ✅ | List-family view configuration. |
+| **viewKind** | `'list'` | ✅ |  |
+| **config** | `{ name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }` | ✅ | List-family view configuration. |
 | **name** | `string` | ✅ | Globally-unique view id, `<object>.<viewKey>`. |
 | **object** | `string` | ✅ | Bound object name — the foreign key used to aggregate views. |
 | **label** | `string` | optional | Display label (supports i18n). |
@@ -740,7 +740,7 @@ This schema accepts one of the following structures:
 | **scope** | `Enum<'package' \| 'shared' \| 'personal'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
 | **owner** | `string` | optional | Owner user id — set when `scope` is `personal`. |
 | **hidden** | `boolean` | optional | Hidden from the switcher (per-user / per-org declutter). |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this view. |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -757,8 +757,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **viewKind** | `string` | ✅ |  |
-| **config** | `Object` | ✅ | Form view configuration. |
+| **viewKind** | `'form'` | ✅ |  |
+| **config** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }` | ✅ | Form view configuration. |
 | **name** | `string` | ✅ | Globally-unique view id, `<object>.<viewKey>`. |
 | **object** | `string` | ✅ | Bound object name — the foreign key used to aggregate views. |
 | **label** | `string` | optional | Display label (supports i18n). |
@@ -767,7 +767,7 @@ This schema accepts one of the following structures:
 | **scope** | `Enum<'package' \| 'shared' \| 'personal'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
 | **owner** | `string` | optional | Owner user id — set when `scope` is `personal`. |
 | **hidden** | `boolean` | optional | Hidden from the switcher (per-user / per-org declutter). |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this view. |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -835,7 +835,7 @@ Tab configuration for multi-tab view interface
 | **label** | `string` | optional | Display label |
 | **icon** | `string` | optional | Tab icon name |
 | **view** | `string` | optional | Referenced list view name from listViews |
-| **filter** | `Object[]` | optional | Tab-specific filter criteria |
+| **filter** | `{ field: string; operator: string; value?: string \| number \| boolean \| null \| string \| number[] }[]` | optional | Tab-specific filter criteria |
 | **order** | `integer` | optional | Tab display order |
 | **pinned** | `boolean` | ✅ | Pin tab (cannot be removed by users) |
 | **isDefault** | `boolean` | ✅ | Set as the default active tab |

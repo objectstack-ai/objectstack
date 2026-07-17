@@ -86,7 +86,7 @@ const result = Address.parse(data);
 | :--- | :--- | :--- | :--- |
 | **uniqueness** | `boolean` | ✅ | Enforce unique values across all records |
 | **completeness** | `number` | ✅ | Minimum ratio of non-null values (0-1, default: 0 = no requirement) |
-| **accuracy** | `Object` | optional | Accuracy validation configuration |
+| **accuracy** | `{ source: string; threshold: number }` | optional | Accuracy validation configuration |
 
 
 ---
@@ -114,7 +114,7 @@ const result = Address.parse(data);
 | **scale** | `number` | optional | Decimal places |
 | **min** | `number` | optional | Minimum value |
 | **max** | `number` | optional | Maximum value |
-| **options** | `Object[]` | optional | Static options for select/multiselect |
+| **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Static options for select/multiselect |
 | **reference** | `string` | optional | Target object name (snake_case) for lookup/master_detail fields. Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. |
 | **referenceFilters** | `string[]` | optional | Filters applied to lookup dialogs (e.g. "active = true") |
 | **deleteBehavior** | `Enum<'set_null' \| 'cascade' \| 'restrict'>` | optional | What happens if referenced record is deleted |
@@ -122,32 +122,32 @@ const result = Address.parse(data);
 | **inlineTitle** | `string` | optional | Title for the inline master-detail grid |
 | **inlineColumns** | `any[]` | optional | Explicit columns for the inline grid (derived from the child object when omitted) |
 | **inlineAmountField** | `string` | optional | Numeric child field summed for the inline grid total |
-| **relatedList** | `boolean \| string` | optional | Show this child collection as a related list on the parent's detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown (stacked under the shared "Related" tab); 'primary' = core relationship, promoted to its own tab. Prominence intent, not a layout switch (ADR-0085). |
+| **relatedList** | `boolean \| 'primary'` | optional | Show this child collection as a related list on the parent's detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown (stacked under the shared "Related" tab); 'primary' = core relationship, promoted to its own tab. Prominence intent, not a layout switch (ADR-0085). |
 | **relatedListTitle** | `string` | optional | Title for the detail-page related list |
 | **relatedListColumns** | `any[]` | optional | Explicit columns for the detail-page related list (derived from the child object when omitted) |
 | **displayField** | `string` | optional | Field shown as each candidate's label in the picker/popover (defaults to the referenced object's name/title). |
 | **descriptionField** | `string` | optional | Secondary field shown under the label in the quick-select popover. |
-| **lookupColumns** | `string \| Object[]` | optional | Explicit columns for the record-picker table; auto-derived from the referenced object when omitted. |
+| **lookupColumns** | `string \| { field: string; label?: string; width?: string; type?: string }[]` | optional | Explicit columns for the record-picker table; auto-derived from the referenced object when omitted. |
 | **lookupPageSize** | `integer` | optional | Rows per page in the record-picker dialog (default 10). |
-| **lookupFilters** | `Object[]` | optional | Base filters restricting which records are selectable (e.g. only active). Structured, picker-honoured form of referenceFilters. |
-| **dependsOn** | `string \| Object[]` | optional | Declares that this field's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; `{field,param}` when the remote filter key differs — the `{field,param}` form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent. |
+| **lookupFilters** | `{ field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'lt' \| 'gte' \| 'lte' \| 'contains' \| 'in' \| 'notIn'>; value: any }[]` | optional | Base filters restricting which records are selectable (e.g. only active). Structured, picker-honoured form of referenceFilters. |
+| **dependsOn** | `string \| { field: string; param?: string }[]` | optional | Declares that this field's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; `{field,param}` when the remote filter key differs — the `{field,param}` form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent. |
 | **allowCreate** | `boolean` | optional | Allow inline quick-create from the record picker: when no match exists the user can create a record from the typed text (optimistic dataSource.create with the display field). Best for simple objects whose only required field is the display field. |
-| **expression** | `string \| Object` | optional | Formula expression (CEL). e.g. F`record.amount * 0.1` |
+| **expression** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Formula expression (CEL). e.g. F`record.amount * 0.1` |
 | **returnType** | `Enum<'number' \| 'text' \| 'boolean' \| 'date'>` | optional | Inferred value type of a formula field (number/text/boolean/date) |
-| **summaryOperations** | `Object` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
+| **summaryOperations** | `{ object: string; field: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string }` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
 | **language** | `string` | optional | Programming language for syntax highlighting (e.g., javascript, python, sql) |
 | **step** | `number` | optional | Step increment for slider (default: 1) |
-| **currencyConfig** | `Object` | optional | Configuration for currency field type |
+| **currencyConfig** | `{ precision?: integer; currencyMode?: Enum<'dynamic' \| 'fixed'>; defaultCurrency?: string }` | optional | Configuration for currency field type |
 | **dimensions** | `integer` | optional | Vector dimensionality (e.g., 1536 for OpenAI embeddings) |
-| **vectorConfig** | `Object` | optional | Configuration for vector field type (AI/ML embeddings) |
-| **fileAttachmentConfig** | `Object` | optional | Configuration for file and attachment field types |
+| **vectorConfig** | `{ dimensions: integer; distanceMetric?: Enum<'cosine' \| 'euclidean' \| 'dotProduct' \| 'manhattan'>; normalized?: boolean; indexed?: boolean; … }` | optional | Configuration for vector field type (AI/ML embeddings) |
+| **fileAttachmentConfig** | `{ minSize?: number; maxSize?: number; allowedTypes?: string[]; blockedTypes?: string[]; … }` | optional | Configuration for file and attachment field types |
 | **trackHistory** | `boolean` | optional | Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field. |
 | **dependencies** | `string[]` | optional | Array of field names that this field depends on (for formulas, visibility rules, etc.) |
 | **group** | `string` | optional | Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system") |
-| **visibleWhen** | `string \| Object` | optional | Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'` |
-| **readonlyWhen** | `string \| Object` | optional | Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'` |
-| **requiredWhen** | `string \| Object` | optional | Predicate (CEL) — field is required when TRUE. Canonical name for `conditionalRequired`. |
-| **conditionalRequired** | `string \| Object` | optional | Predicate (CEL) — field is required when TRUE. Alias of `requiredWhen`. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'` |
+| **readonlyWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'` |
+| **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is required when TRUE. Canonical name for `conditionalRequired`. |
+| **conditionalRequired** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is required when TRUE. Alias of `requiredWhen`. |
 | **widget** | `string` | optional | Form widget override — names a registered field component (resolved as `field:<widget>`) to render this field instead of the `type` default. Degrades to the `type` renderer when unregistered. e.g. "object-ref", "filter-condition", "recipient-picker". |
 | **hidden** | `boolean` | optional | Hidden from default UI |
 | **readonly** | `boolean` | optional | Read-only — never editable in forms, AND server-enforced on UPDATE: a non-system write to this field is silently dropped from the payload (#2948/#3003; symmetric with `readonlyWhen`). INSERT may still seed it (defaultValue, import). |
@@ -238,7 +238,7 @@ const result = Address.parse(data);
 | **storageProvider** | `string` | optional | Object storage provider name (references ObjectStorageConfig) |
 | **storageBucket** | `string` | optional | Target bucket name |
 | **storagePrefix** | `string` | optional | Storage path prefix (e.g., "uploads/documents/") |
-| **imageValidation** | `Object` | optional | Image-specific validation rules |
+| **imageValidation** | `{ minWidth?: number; maxWidth?: number; minHeight?: number; maxHeight?: number; … }` | optional | Image-specific validation rules |
 | **allowMultiple** | `boolean` | ✅ | Allow multiple file uploads (overrides field.multiple) |
 | **allowReplace** | `boolean` | ✅ | Allow replacing existing files |
 | **allowDelete** | `boolean` | ✅ | Allow deleting uploaded files |
@@ -277,7 +277,7 @@ const result = Address.parse(data);
 | **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
 | **color** | `string` | optional | Color code for badges/charts |
 | **default** | `boolean` | optional | Is default option |
-| **visibleWhen** | `string \| Object` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as field visibleWhen (record + current_user). e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as field visibleWhen (record + current_user). e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
 
 
 ---

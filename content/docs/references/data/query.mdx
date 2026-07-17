@@ -51,7 +51,7 @@ const result = AggregationFunction.parse(data);
 | **field** | `string` | optional | Field to aggregate (optional for COUNT(*)) |
 | **alias** | `string` | ✅ | Result column alias |
 | **distinct** | `boolean` | optional | Apply DISTINCT before aggregation |
-| **filter** | `[__schema0](./__schema0)` | optional | Filter/Condition to apply to the aggregation (FILTER WHERE clause) |
+| **filter** | `any` | optional | Filter/Condition to apply to the aggregation (FILTER WHERE clause) |
 
 
 ---
@@ -88,7 +88,7 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ |  |
-| **fields** | `[#](./#)[]` | optional |  |
+| **fields** | `[FieldNode](#fieldnode)[]` | optional |  |
 | **alias** | `string` | optional |  |
 
 ---
@@ -151,8 +151,8 @@ Type: `string`
 | **strategy** | `Enum<'auto' \| 'database' \| 'hash' \| 'loop'>` | optional | Execution strategy hint |
 | **object** | `string` | ✅ | Object/table to join |
 | **alias** | `string` | optional | Table alias |
-| **on** | `[__schema0](./__schema0)` | ✅ | Join condition |
-| **subquery** | `[__schema1](./__schema1)` | optional | Subquery instead of object |
+| **on** | `any` | ✅ | Join condition |
+| **subquery** | `{ object: string; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; where?: any; search?: object; … }` | optional | Subquery instead of object |
 
 
 ---
@@ -188,21 +188,21 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name (e.g. account) |
-| **fields** | `[__schema0](./__schema0)[]` | optional | Fields to retrieve |
-| **where** | `[__schema1](./__schema1)` | optional | Filtering criteria (WHERE) |
-| **search** | `Object` | optional | Full-text search configuration ($search parameter) |
-| **orderBy** | `Object[]` | optional | Sorting instructions (ORDER BY) |
+| **fields** | `string \| { field: string; fields?: object[]; alias?: string }[]` | optional | Fields to retrieve |
+| **where** | `any` | optional | Filtering criteria (WHERE) |
+| **search** | `{ query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search configuration ($search parameter) |
+| **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
 | **top** | `number` | optional | Alias for limit (OData compatibility) |
 | **cursor** | `Record<string, any>` | optional | Cursor for keyset pagination |
-| **joins** | `Object[]` | optional | Explicit Table Joins |
-| **aggregations** | `Object[]` | optional | Aggregation functions |
-| **groupBy** | `string \| Object[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
-| **having** | `[__schema1](./__schema1)` | optional | HAVING clause for aggregation filtering |
-| **windowFunctions** | `Object[]` | optional | Window functions with OVER clause |
+| **joins** | `{ type: Enum<'inner' \| 'left' \| 'right' \| 'full'>; strategy?: Enum<'auto' \| 'database' \| 'hash' \| 'loop'>; object: string; alias?: string; … }[]` | optional | Explicit Table Joins |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]` | optional | Aggregation functions |
+| **groupBy** | `string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string }[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
+| **having** | `any` | optional | HAVING clause for aggregation filtering |
+| **windowFunctions** | `{ function: Enum<'row_number' \| 'rank' \| 'dense_rank' \| 'percent_rank' \| 'lag' \| 'lead' \| 'first_value' \| 'last_value' \| 'sum' \| 'avg' \| 'count' \| 'min' \| 'max'>; field?: string; alias: string; over: object }[]` | optional | Window functions with OVER clause |
 | **distinct** | `boolean` | optional | SELECT DISTINCT flag |
-| **expand** | `Record<string, [#](./#)>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
+| **expand** | `Record<string, [Query](#query)>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
 
 
 ---
@@ -249,7 +249,7 @@ Type: `string`
 | **function** | `Enum<'row_number' \| 'rank' \| 'dense_rank' \| 'percent_rank' \| 'lag' \| 'lead' \| 'first_value' \| 'last_value' \| 'sum' \| 'avg' \| 'count' \| 'min' \| 'max'>` | ✅ | Window function name |
 | **field** | `string` | optional | Field to operate on (for aggregate window functions) |
 | **alias** | `string` | ✅ | Result column alias |
-| **over** | `Object` | ✅ | Window specification (OVER clause) |
+| **over** | `{ partitionBy?: string[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; frame?: object }` | ✅ | Window specification (OVER clause) |
 
 
 ---
@@ -261,8 +261,8 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **partitionBy** | `string[]` | optional | PARTITION BY fields |
-| **orderBy** | `Object[]` | optional | ORDER BY specification |
-| **frame** | `Object` | optional | Window frame specification |
+| **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | ORDER BY specification |
+| **frame** | `{ type?: Enum<'rows' \| 'range'>; start?: string; end?: string }` | optional | Window frame specification |
 
 
 ---

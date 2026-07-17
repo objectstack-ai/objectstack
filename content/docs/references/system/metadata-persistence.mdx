@@ -108,7 +108,7 @@ const result = MetadataCollectionInfo.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **records** | `Object[]` | ✅ |  |
+| **records** | `{ id: string; name: string; type: string; version: number; … }[]` | ✅ |  |
 | **total** | `integer` | ✅ |  |
 | **hasMore** | `boolean` | ✅ |  |
 
@@ -193,7 +193,7 @@ const result = MetadataCollectionInfo.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **data** | `any` | ✅ |  |
-| **stats** | `Object` | optional |  |
+| **stats** | `{ path?: string; size?: number; mtime?: string; hash?: string; … }` | optional |  |
 | **format** | `Enum<'json' \| 'yaml' \| 'yml' \| 'ts' \| 'js' \| 'typescript' \| 'javascript'>` | optional |  |
 | **source** | `string` | optional |  |
 | **fromCache** | `boolean` | optional |  |
@@ -217,7 +217,7 @@ const result = MetadataCollectionInfo.parse(data);
 | **supportsWatch** | `boolean` | optional |  |
 | **supportsWrite** | `boolean` | optional |  |
 | **supportsCache** | `boolean` | optional |  |
-| **capabilities** | `Object` | ✅ |  |
+| **capabilities** | `{ read: boolean; write: boolean; watch: boolean; list: boolean }` | ✅ |  |
 
 
 ---
@@ -286,7 +286,7 @@ const result = MetadataCollectionInfo.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ |  |
 | **path** | `string` | optional |  |
-| **stats** | `Object` | optional |  |
+| **stats** | `{ path?: string; size?: number; mtime?: string; hash?: string; … }` | optional |  |
 | **etag** | `string` | optional |  |
 | **size** | `number` | optional |  |
 | **saveTime** | `number` | optional |  |
@@ -356,7 +356,7 @@ const result = MetadataCollectionInfo.parse(data);
 | **type** | `Enum<'add' \| 'change' \| 'unlink' \| 'added' \| 'changed' \| 'deleted'>` | ✅ |  |
 | **path** | `string` | ✅ |  |
 | **name** | `string` | optional |  |
-| **stats** | `Object` | optional |  |
+| **stats** | `{ path?: string; size?: number; mtime?: string; hash?: string; … }` | optional |  |
 | **metadataType** | `string` | optional |  |
 | **data** | `any` | optional |  |
 | **timestamp** | `string` | optional |  |
@@ -375,7 +375,7 @@ const result = MetadataCollectionInfo.parse(data);
 | **version** | `integer` | ✅ | New version number after publish |
 | **publishedAt** | `string` | ✅ | Publish timestamp |
 | **itemsPublished** | `integer` | ✅ | Total metadata items published |
-| **validationErrors** | `Object[]` | optional | Validation errors if publish failed |
+| **validationErrors** | `{ type: string; name: string; message: string }[]` | optional | Validation errors if publish failed |
 
 
 ---

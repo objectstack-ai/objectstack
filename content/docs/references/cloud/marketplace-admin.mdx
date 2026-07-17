@@ -190,7 +190,7 @@ const result = CuratedCollection.parse(data);
 | **submissionId** | `string` | ✅ | Submission being reviewed |
 | **reviewerId** | `string` | ✅ | Platform reviewer ID |
 | **decision** | `Enum<'approved' \| 'rejected' \| 'changes-requested'>` | optional | Final decision |
-| **criteria** | `Object[]` | optional | Review checklist results |
+| **criteria** | `{ id: string; category: Enum<'security' \| 'performance' \| 'quality' \| 'ux' \| 'documentation' \| 'policy' \| 'compatibility'>; description: string; required: boolean; … }[]` | optional | Review checklist results |
 | **rejectionReasons** | `Enum<'security-vulnerability' \| 'policy-violation' \| 'quality-below-standard' \| 'misleading-metadata' \| 'incompatible' \| 'duplicate' \| 'insufficient-documentation' \| 'other'>[]` | optional |  |
 | **feedback** | `string` | optional | Detailed review feedback (Markdown) |
 | **internalNotes** | `string` | optional | Internal reviewer notes |

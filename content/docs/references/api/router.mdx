@@ -66,9 +66,9 @@ const result = RouteCategory.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **basePath** | `string` | ✅ | Global API prefix |
-| **mounts** | `Object` | ✅ |  |
-| **cors** | `Object` | optional |  |
-| **staticMounts** | `Object[]` | optional |  |
+| **mounts** | `{ data: string; metadata: string; auth: string; automation: string; … }` | ✅ |  |
+| **cors** | `{ enabled: boolean; origins: string \| string[]; methods?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]; credentials: boolean; … }` | optional |  |
+| **staticMounts** | `{ path: string; directory: string; cacheControl?: string }[]` | optional |  |
 
 
 ---

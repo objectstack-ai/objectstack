@@ -71,7 +71,7 @@ const result = ExternalDataSource.parse(data);
 | **name** | `string` | ✅ | Data source name |
 | **type** | `Enum<'odata' \| 'rest-api' \| 'graphql' \| 'custom'>` | ✅ | Protocol type |
 | **endpoint** | `string` | ✅ | API endpoint URL |
-| **authentication** | `Object` | ✅ | Authentication |
+| **authentication** | `{ type: Enum<'oauth2' \| 'api-key' \| 'basic' \| 'none'>; config: Record<string, any> }` | ✅ | Authentication |
 
 
 ---
@@ -84,7 +84,7 @@ const result = ExternalDataSource.parse(data);
 | :--- | :--- | :--- | :--- |
 | **source** | `string` | ✅ | Source field name |
 | **target** | `string` | ✅ | Target field name |
-| **transform** | `Object \| Object \| Object \| Object \| Object` | optional | Transformation to apply |
+| **transform** | `{ type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }` | optional | Transformation to apply |
 | **defaultValue** | `any` | optional | Default if source is null/undefined |
 | **type** | `string` | optional | Field type |
 | **readonly** | `boolean` | optional | Read-only field |
@@ -99,15 +99,15 @@ const result = ExternalDataSource.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **fieldName** | `string` | ✅ | Field name |
-| **dataSource** | `Object` | ✅ | External data source |
-| **query** | `Object` | ✅ | Query configuration |
-| **fieldMappings** | `Object[]` | ✅ | Field mappings |
-| **caching** | `Object` | optional | Caching configuration |
-| **fallback** | `Object` | optional | Fallback configuration |
-| **rateLimit** | `Object` | optional | Rate limiting |
-| **retry** | `Object` | optional | Retry configuration with exponential backoff |
-| **transform** | `Object` | optional | Request/response transformation pipeline |
-| **pagination** | `Object` | optional | Pagination configuration for external data |
+| **dataSource** | `{ id: string; name: string; type: Enum<'odata' \| 'rest-api' \| 'graphql' \| 'custom'>; endpoint: string; … }` | ✅ | External data source |
+| **query** | `{ endpoint: string; method?: Enum<'GET' \| 'POST'>; parameters?: Record<string, any> }` | ✅ | Query configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | ✅ | Field mappings |
+| **caching** | `{ enabled?: boolean; ttl?: number; strategy?: Enum<'lru' \| 'lfu' \| 'ttl'> }` | optional | Caching configuration |
+| **fallback** | `{ enabled?: boolean; defaultValue?: any; showError?: boolean }` | optional | Fallback configuration |
+| **rateLimit** | `{ requestsPerSecond: number; burstSize?: number }` | optional | Rate limiting |
+| **retry** | `{ maxRetries?: number; initialDelayMs?: number; maxDelayMs?: number; backoffMultiplier?: number; … }` | optional | Retry configuration with exponential backoff |
+| **transform** | `{ request?: object; response?: object }` | optional | Request/response transformation pipeline |
+| **pagination** | `{ type?: Enum<'offset' \| 'cursor' \| 'page'>; pageSize?: number; maxPages?: number }` | optional | Pagination configuration for external data |
 
 
 ---

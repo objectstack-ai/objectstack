@@ -54,7 +54,7 @@ const result = AccessControlConfig.parse(data);
 | **exposeHeaders** | `string[]` | optional | CORS exposed headers |
 | **maxAge** | `number` | optional | CORS preflight cache duration in seconds |
 | **corsEnabled** | `boolean` | ✅ | Enable CORS configuration |
-| **publicAccess** | `Object` | optional | Public access control |
+| **publicAccess** | `{ allowPublicRead: boolean; allowPublicWrite: boolean; allowPublicList: boolean }` | optional | Public access control |
 | **allowedIps** | `string[]` | optional | Allowed IP addresses/CIDR blocks |
 | **blockedIps** | `string[]` | optional | Blocked IP addresses/CIDR blocks |
 
@@ -75,10 +75,10 @@ const result = AccessControlConfig.parse(data);
 | **endpoint** | `string` | optional | Custom endpoint URL (for S3-compatible providers) |
 | **pathStyle** | `boolean` | ✅ | Use path-style URLs (for S3-compatible providers) |
 | **versioning** | `boolean` | ✅ | Enable object versioning |
-| **encryption** | `Object` | optional | Server-side encryption configuration |
-| **accessControl** | `Object` | optional | Access control configuration |
-| **lifecyclePolicy** | `Object` | optional | Lifecycle policy configuration |
-| **multipartConfig** | `Object` | optional | Multipart upload configuration |
+| **encryption** | `{ enabled: boolean; algorithm: Enum<'AES256' \| 'aws:kms' \| 'azure:kms' \| 'gcp:kms'>; kmsKeyId?: string }` | optional | Server-side encryption configuration |
+| **accessControl** | `{ acl: Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| 'bucket_owner_read' \| 'bucket_owner_full_control'>; allowedOrigins?: string[]; allowedMethods?: Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]; allowedHeaders?: string[]; … }` | optional | Access control configuration |
+| **lifecyclePolicy** | `{ enabled: boolean; rules: { id: string; enabled: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[] }` | optional | Lifecycle policy configuration |
+| **multipartConfig** | `{ enabled: boolean; partSize: number; maxParts: number; threshold: number; … }` | optional | Multipart upload configuration |
 | **tags** | `Record<string, string>` | optional | Bucket tags for organization |
 | **description** | `string` | optional | Bucket description |
 | **enabled** | `boolean` | ✅ | Enable this bucket |
@@ -123,7 +123,7 @@ Lifecycle policy action type
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable lifecycle policies |
-| **rules** | `Object[]` | ✅ | Lifecycle rules |
+| **rules** | `{ id: string; enabled: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[]` | ✅ | Lifecycle rules |
 
 
 ---
@@ -178,7 +178,7 @@ Lifecycle policy action type
 | **lastModified** | `string` | optional | Last modification timestamp |
 | **versionId** | `string` | optional | Object version identifier |
 | **storageClass** | `Enum<'standard' \| 'intelligent' \| 'infrequent_access' \| 'glacier' \| 'deep_archive'>` | optional | Storage class/tier |
-| **encryption** | `Object` | optional | Server-side encryption configuration |
+| **encryption** | `{ algorithm: string; keyId?: string }` | optional | Server-side encryption configuration |
 | **custom** | `Record<string, string>` | optional | Custom user-defined metadata |
 
 
@@ -194,8 +194,8 @@ Lifecycle policy action type
 | **label** | `string` | ✅ | Display label |
 | **provider** | `Enum<'s3' \| 'azure_blob' \| 'gcs' \| 'minio' \| 'r2' \| 'spaces' \| 'wasabi' \| 'backblaze' \| 'local'>` | ✅ | Primary storage provider |
 | **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'session' \| 'temp' \| 'cache' \| 'data' \| 'logs' \| 'config' \| 'public'>` | ✅ | Storage scope |
-| **connection** | `Object` | ✅ | Connection credentials |
-| **buckets** | `Object[]` | ✅ | Configured buckets |
+| **connection** | `{ accessKeyId?: string; secretAccessKey?: string; sessionToken?: string; accountName?: string; … }` | ✅ | Connection credentials |
+| **buckets** | `{ name: string; label: string; bucketName: string; region?: string; … }[]` | ✅ | Configured buckets |
 | **defaultBucket** | `string` | optional | Default bucket name for operations |
 | **location** | `string` | optional | Root path (local) or base location |
 | **quota** | `integer` | optional | Max size in bytes |

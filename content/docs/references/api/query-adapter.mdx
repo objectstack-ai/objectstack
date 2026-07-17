@@ -9,7 +9,7 @@ API Query DSL Adapter Protocol
 
 Defines mapping rules between the internal unified query DSL
 
-(defined in `data/query.zod.ts`) and external API protocol formats:
+(defined in `[data/query.zod.ts](/docs/references/data/query)`) and external API protocol formats:
 
 REST, GraphQL, and OData.
 
@@ -17,13 +17,13 @@ This enables ObjectStack to expose a single internal query representation
 
 while supporting multiple API standards for external consumers.
 
-@see data/query.zod.ts - Unified internal query DSL
+See also: [data/query.zod.ts](/docs/references/data/query) - Unified internal query DSL
 
-@see api/rest-server.zod.ts - REST API configuration
+See also: [api/rest-server.zod.ts](/docs/references/api/rest-server) - REST API configuration
 
-@see api/graphql.zod.ts - GraphQL API configuration
+See also: [api/graphql.zod.ts](/docs/references/api/graphql) - GraphQL API configuration
 
-@see api/odata.zod.ts - OData API configuration
+See also: [api/odata.zod.ts](/docs/references/api/odata) - OData API configuration
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/query-adapter.zod.ts`
@@ -49,8 +49,8 @@ const result = GraphQLQueryAdapter.parse(data);
 | :--- | :--- | :--- | :--- |
 | **filterArgName** | `string` | ✅ | GraphQL filter argument name |
 | **filterStyle** | `Enum<'nested' \| 'flat' \| 'array'>` | ✅ | GraphQL filter nesting style |
-| **pagination** | `Object` | optional | Pagination argument name mappings |
-| **sorting** | `Object` | optional | Sort argument mapping |
+| **pagination** | `{ limitArg: string; offsetArg: string; firstArg: string; afterArg: string }` | optional | Pagination argument name mappings |
+| **sorting** | `{ argName: string; format: Enum<'enum' \| 'array'> }` | optional | Sort argument mapping |
 
 
 ---
@@ -64,7 +64,7 @@ const result = GraphQLQueryAdapter.parse(data);
 | **version** | `Enum<'v2' \| 'v4'>` | ✅ | OData version |
 | **usePrefix** | `boolean` | ✅ | Use $ prefix for system query options ($filter vs filter) |
 | **stringFunctions** | `Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| 'concat' \| 'substring' \| 'length'>[]` | optional | Supported OData string functions |
-| **expand** | `Object` | optional | $expand configuration |
+| **expand** | `{ enabled: boolean; maxDepth: integer }` | optional | $expand configuration |
 
 
 ---
@@ -89,10 +89,10 @@ const result = GraphQLQueryAdapter.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **operatorMappings** | `Object[]` | optional | Custom operator mappings |
-| **rest** | `Object` | optional | REST query adapter configuration |
-| **graphql** | `Object` | optional | GraphQL query adapter configuration |
-| **odata** | `Object` | optional | OData query adapter configuration |
+| **operatorMappings** | `{ operator: string; rest?: string; graphql?: string; odata?: string }[]` | optional | Custom operator mappings |
+| **rest** | `{ filterStyle: Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>; pagination?: object; sorting?: object; fieldsParam: string }` | optional | REST query adapter configuration |
+| **graphql** | `{ filterArgName: string; filterStyle: Enum<'nested' \| 'flat' \| 'array'>; pagination?: object; sorting?: object }` | optional | GraphQL query adapter configuration |
+| **odata** | `{ version: Enum<'v2' \| 'v4'>; usePrefix: boolean; stringFunctions?: Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| 'concat' \| 'substring' \| 'length'>[]; expand?: object }` | optional | OData query adapter configuration |
 
 
 ---
@@ -115,8 +115,8 @@ const result = GraphQLQueryAdapter.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **filterStyle** | `Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>` | ✅ | REST filter parameter encoding style |
-| **pagination** | `Object` | optional | Pagination parameter name mappings |
-| **sorting** | `Object` | optional | Sort parameter mapping |
+| **pagination** | `{ limitParam: string; offsetParam: string; cursorParam: string; pageParam: string }` | optional | Pagination parameter name mappings |
+| **sorting** | `{ param: string; format: Enum<'comma' \| 'array' \| 'pipe'> }` | optional | Sort parameter mapping |
 | **fieldsParam** | `string` | ✅ | Field selection parameter name |
 
 

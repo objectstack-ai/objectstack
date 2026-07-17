@@ -13,7 +13,7 @@ Inspired by Zapier, n8n, and Workato connector architectures.
 
 ## When to use Trigger Registry vs. Integration Connector?
 
-**Use `automation/trigger-registry.zod.ts` when:**
+**Use `[automation/trigger-registry.zod.ts](/docs/references/automation/trigger-registry)` when:**
 
 - Building simple automation triggers (e.g., "when Slack message received, create task")
 
@@ -25,7 +25,7 @@ Inspired by Zapier, n8n, and Workato connector architectures.
 
 - Webhook-based or polling triggers for automation workflows
 
-**Use `integration/connector.zod.ts` when:**
+**Use `[integration/connector.zod.ts](/docs/references/integration/connector)` when:**
 
 - Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)
 
@@ -63,11 +63,11 @@ Inspired by Zapier, n8n, and Workato connector architectures.
 
 - Simple API calls to third-party services
 
-@see https://zapier.com/developer/documentation/v2/
+See also: https://zapier.com/developer/documentation/v2/
 
-@see https://docs.n8n.io/integrations/creating-nodes/
+See also: https://docs.n8n.io/integrations/creating-nodes/
 
-@see ../../integration/connector.zod.ts for enterprise connectors
+See also: ../../[integration/connector.zod.ts](/docs/references/integration/connector) for enterprise connectors
 
 @example
 
@@ -127,7 +127,7 @@ const result = AuthField.parse(data);
 | **description** | `string` | optional | Field description |
 | **required** | `boolean` | ✅ | Required field |
 | **default** | `string` | optional | Default value |
-| **options** | `Object[]` | optional | Select field options |
+| **options** | `{ label: string; value: string }[]` | optional | Select field options |
 | **placeholder** | `string` | optional | Placeholder text |
 
 
@@ -140,9 +140,9 @@ const result = AuthField.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'none' \| 'apiKey' \| 'basic' \| 'bearer' \| 'oauth1' \| 'oauth2' \| 'custom'>` | ✅ | Authentication type |
-| **fields** | `Object[]` | optional | Authentication fields |
-| **oauth2** | `Object` | optional | OAuth 2.0 configuration |
-| **test** | `Object` | optional | Authentication test configuration |
+| **fields** | `{ name: string; label: string; type: Enum<'text' \| 'password' \| 'url' \| 'select'>; description?: string; … }[]` | optional | Authentication fields |
+| **oauth2** | `{ authorizationUrl: string; tokenUrl: string; scopes?: string[]; clientIdField: string; … }` | optional | OAuth 2.0 configuration |
+| **test** | `{ url?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE'> }` | optional | Authentication test configuration |
 
 
 ---
@@ -215,7 +215,7 @@ const result = AuthField.parse(data);
 | **name** | `string` | ✅ | Operation name |
 | **description** | `string` | optional | Operation description |
 | **type** | `Enum<'read' \| 'write' \| 'delete' \| 'search' \| 'trigger' \| 'action'>` | ✅ | Operation type |
-| **inputSchema** | `Object[]` | optional | Input parameters |
+| **inputSchema** | `{ name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'array' \| 'object' \| 'date' \| 'file'>; … }[]` | optional | Input parameters |
 | **outputSchema** | `Record<string, any>` | optional | Output schema |
 | **sampleOutput** | `any` | optional | Sample output |
 | **supportsPagination** | `boolean` | ✅ | Supports pagination |

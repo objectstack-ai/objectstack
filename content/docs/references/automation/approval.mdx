@@ -66,11 +66,11 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **approvers** | `Object[]` | ✅ | Allowed approvers for this node |
+| **approvers** | `{ type: Enum<'user' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue'>; value?: string }[]` | ✅ | Allowed approvers for this node |
 | **behavior** | `Enum<'first_response' \| 'unanimous'>` | ✅ | How to combine multiple approvers |
 | **lockRecord** | `boolean` | ✅ | Lock the record from editing while pending |
 | **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
-| **escalation** | `Object` | optional | Per-node SLA escalation |
+| **escalation** | `{ enabled: boolean; timeoutHours: number; action: Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>; escalateTo?: string; … }` | optional | Per-node SLA escalation |
 | **maxRevisions** | `integer` | ✅ | Max send-backs for revision before auto-reject (0 = send-back disabled) |
 
 

@@ -39,7 +39,7 @@ routed through this schema — they stay driver-native because their security
 
 posture and portability story differ.
 
-@see content/docs/concepts/north-star.mdx §8 "No private expression DSL"
+See also: content/docs/concepts/north-star.mdx §8 "No private expression DSL"
 
 <Callout type="info">
 **Source:** `packages/spec/src/shared/expression.zod.ts`
@@ -78,7 +78,7 @@ Type: `string`
 | **dialect** | `Enum<'cel' \| 'js' \| 'cron' \| 'template'>` | ✅ |  |
 | **source** | `string` | optional |  |
 | **ast** | `any` | optional |  |
-| **meta** | `Object` | optional |  |
+| **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
 
 ---
 
@@ -94,7 +94,7 @@ Type: `string`
 | **dialect** | `Enum<'cel' \| 'js' \| 'cron' \| 'template'>` | ✅ |  |
 | **source** | `string` | optional |  |
 | **ast** | `any` | optional |  |
-| **meta** | `Object` | optional |  |
+| **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
 
 
 ---
@@ -132,7 +132,7 @@ Type: `string`
 | **dialect** | `Enum<'cel' \| 'js' \| 'cron' \| 'template'>` | ✅ |  |
 | **source** | `string` | optional |  |
 | **ast** | `any` | optional |  |
-| **meta** | `Object` | optional |  |
+| **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
 
 ---
 
@@ -160,7 +160,7 @@ Type: `string`
 | **dialect** | `Enum<'cel' \| 'js' \| 'cron' \| 'template'>` | ✅ |  |
 | **source** | `string` | optional |  |
 | **ast** | `any` | optional |  |
-| **meta** | `Object` | optional |  |
+| **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
 
 
 ---
@@ -186,7 +186,7 @@ Type: `string`
 | **dialect** | `Enum<'cel' \| 'js' \| 'cron' \| 'template'>` | ✅ |  |
 | **source** | `string` | optional |  |
 | **ast** | `any` | optional |  |
-| **meta** | `Object` | optional |  |
+| **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
 
 ---
 
@@ -214,7 +214,7 @@ Type: `string`
 | **dialect** | `Enum<'cel' \| 'js' \| 'cron' \| 'template'>` | ✅ |  |
 | **source** | `string` | optional |  |
 | **ast** | `any` | optional |  |
-| **meta** | `Object` | optional |  |
+| **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
 
 ---
 

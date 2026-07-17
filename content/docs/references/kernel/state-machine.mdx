@@ -30,7 +30,7 @@ const result = Event.parse(data);
 | **id** | `string` | optional | Unique event identifier |
 | **name** | `string` | ✅ | Event name (lowercase with dots, e.g., user.created, order.paid) |
 | **payload** | `any` | ✅ | Event payload schema |
-| **metadata** | `Object` | ✅ | Event metadata |
+| **metadata** | `{ source: string; timestamp: string; userId?: string; tenantId?: string; … }` | ✅ | Event metadata |
 
 
 ---

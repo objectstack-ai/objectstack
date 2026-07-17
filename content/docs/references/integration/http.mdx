@@ -32,7 +32,7 @@ const result = RateLimitConfig.parse(data);
 | **windowSeconds** | `number` | ✅ | Time window in seconds |
 | **burstCapacity** | `number` | optional | Burst capacity |
 | **respectUpstreamLimits** | `boolean` | ✅ | Respect external rate limit headers |
-| **rateLimitHeaders** | `Object` | optional | Custom rate limit headers |
+| **rateLimitHeaders** | `{ remaining: string; limit: string; reset: string }` | optional | Custom rate limit headers |
 
 
 ---

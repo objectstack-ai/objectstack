@@ -94,11 +94,11 @@ const result = BatchProgress.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Queue name (snake_case) |
 | **concurrency** | `integer` | ✅ | Max concurrent task executions |
-| **rateLimit** | `Object` | optional | Rate limit configuration |
-| **defaultRetryPolicy** | `Object` | optional | Default retry policy for tasks |
+| **rateLimit** | `{ max: integer; duration: integer }` | optional | Rate limit configuration |
+| **defaultRetryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer; … }` | optional | Default retry policy for tasks |
 | **deadLetterQueue** | `string` | optional | Dead letter queue name |
 | **priority** | `integer` | ✅ | Queue priority (lower = higher priority) |
-| **autoScale** | `Object` | optional | Auto-scaling configuration |
+| **autoScale** | `{ enabled: boolean; minWorkers: integer; maxWorkers: integer; scaleUpThreshold: integer; … }` | optional | Auto-scaling configuration |
 
 
 ---
@@ -114,12 +114,12 @@ const result = BatchProgress.parse(data);
 | **payload** | `any` | ✅ | Task payload data |
 | **queue** | `string` | ✅ | Queue name |
 | **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | ✅ | Task priority level |
-| **retryPolicy** | `Object` | optional | Retry policy configuration |
+| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer; … }` | optional | Retry policy configuration |
 | **timeoutMs** | `integer` | optional | Task timeout in milliseconds |
 | **scheduledAt** | `string` | optional | ISO 8601 datetime to execute task |
 | **attempts** | `integer` | ✅ | Number of execution attempts |
 | **status** | `Enum<'pending' \| 'queued' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'timeout' \| 'dead'>` | ✅ | Current task status |
-| **metadata** | `Object` | optional | Task metadata |
+| **metadata** | `{ createdAt?: string; updatedAt?: string; createdBy?: string; tags?: string[] }` | optional | Task metadata |
 
 
 ---
@@ -133,7 +133,7 @@ const result = BatchProgress.parse(data);
 | **taskId** | `string` | ✅ | Task identifier |
 | **status** | `Enum<'pending' \| 'queued' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'timeout' \| 'dead'>` | ✅ | Execution status |
 | **result** | `any` | optional | Execution result data |
-| **error** | `Object` | optional | Error details if failed |
+| **error** | `{ message: string; stack?: string; code?: string }` | optional | Error details if failed |
 | **durationMs** | `integer` | optional | Execution duration in milliseconds |
 | **startedAt** | `string` | ✅ | When execution started |
 | **completedAt** | `string` | optional | When execution completed |
@@ -200,7 +200,7 @@ const result = BatchProgress.parse(data);
 | **active** | `integer` | ✅ | Currently active tasks |
 | **avgExecutionMs** | `number` | optional | Average execution time in milliseconds |
 | **uptimeMs** | `integer` | ✅ | Worker uptime in milliseconds |
-| **queues** | `Record<string, Object>` | optional | Per-queue statistics |
+| **queues** | `Record<string, { pending: integer; active: integer; completed: integer; failed: integer }>` | optional | Per-queue statistics |
 
 
 ---

@@ -34,8 +34,8 @@ Drag and drop interaction configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable drag and drop |
-| **dragItem** | `Object` | optional | Configuration for draggable item |
-| **dropZone** | `Object` | optional | Configuration for drop target |
+| **dragItem** | `{ type: string; label?: string; handle: Enum<'element' \| 'handle' \| 'grip_icon'>; constraint?: object; … }` | optional | Configuration for draggable item |
+| **dropZone** | `{ label?: string; accept: string[]; maxItems?: number; highlightOnDragOver: boolean; … }` | optional | Configuration for drop target |
 | **sortable** | `boolean` | ✅ | Enable sortable list behavior |
 | **autoScroll** | `boolean` | ✅ | Auto-scroll during drag near edges |
 | **touchDelay** | `number` | ✅ | Delay in ms before drag starts on touch devices |
@@ -82,7 +82,7 @@ Draggable item configuration
 | **type** | `string` | ✅ | Drag item type identifier for matching with drop zones |
 | **label** | `string` | optional | Accessible label describing the draggable item |
 | **handle** | `Enum<'element' \| 'handle' \| 'grip_icon'>` | ✅ | How to initiate drag |
-| **constraint** | `Object` | optional | Drag movement constraints |
+| **constraint** | `{ axis: Enum<'x' \| 'y' \| 'both'>; bounds: Enum<'parent' \| 'viewport' \| 'none'>; grid?: any[] }` | optional | Drag movement constraints |
 | **preview** | `Enum<'element' \| 'custom' \| 'none'>` | ✅ | Drag preview type |
 | **disabled** | `boolean` | ✅ | Disable dragging |
 | **ariaLabel** | `string` | optional | Accessible label for screen readers (WAI-ARIA aria-label) |

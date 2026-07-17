@@ -77,11 +77,11 @@ Studio Flow Builder configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **snap** | `Object` | ✅ | Canvas snap-to-grid settings |
-| **zoom** | `Object` | ✅ | Canvas zoom settings |
+| **snap** | `{ enabled: boolean; gridSize: integer; showGrid: boolean }` | ✅ | Canvas snap-to-grid settings |
+| **zoom** | `{ min: number; max: number; default: number; step: number }` | ✅ | Canvas zoom settings |
 | **layoutAlgorithm** | `Enum<'dagre' \| 'elk' \| 'force' \| 'manual'>` | ✅ | Default auto-layout algorithm |
 | **layoutDirection** | `Enum<'TB' \| 'BT' \| 'LR' \| 'RL'>` | ✅ | Default auto-layout direction |
-| **nodeDescriptors** | `Object[]` | optional | Custom node render descriptors (merged with built-in defaults) |
+| **nodeDescriptors** | `{ action: string; shape: Enum<'rounded_rect' \| 'circle' \| 'diamond' \| 'parallelogram' \| 'hexagon' \| 'diamond_thick' \| 'attached_circle' \| 'screen_rect'>; icon: string; defaultLabel: string; … }[]` | optional | Custom node render descriptors (merged with built-in defaults) |
 | **showMinimap** | `boolean` | ✅ | Show minimap panel |
 | **showPropertyPanel** | `boolean` | ✅ | Show property panel |
 | **showPalette** | `boolean` | ✅ | Show node palette sidebar |
@@ -104,7 +104,7 @@ Canvas layout and visual data for a flow edge
 | **style** | `Enum<'solid' \| 'dashed' \| 'dotted' \| 'bold' \| 'back'>` | ✅ | Line style |
 | **color** | `string` | ✅ | Edge line color |
 | **labelPosition** | `number` | ✅ | Position of the condition label along the edge |
-| **waypoints** | `Object[]` | optional | Manual waypoints for edge routing |
+| **waypoints** | `{ x: number; y: number }[]` | optional | Manual waypoints for edge routing |
 | **animated** | `boolean` | ✅ | Show animated flow indicator |
 
 

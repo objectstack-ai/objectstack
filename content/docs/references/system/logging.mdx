@@ -78,7 +78,7 @@ External service destination configuration
 | :--- | :--- | :--- | :--- |
 | **endpoint** | `string` | optional |  |
 | **region** | `string` | optional |  |
-| **credentials** | `Object` | optional |  |
+| **credentials** | `{ accessKeyId?: string; secretAccessKey?: string; apiKey?: string; environmentId?: string }` | optional |  |
 | **logGroup** | `string` | optional |  |
 | **logStream** | `string` | optional |  |
 | **index** | `string` | optional |  |
@@ -96,7 +96,7 @@ File destination configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **path** | `string` | ✅ | Log file path |
-| **rotation** | `Object` | optional |  |
+| **rotation** | `{ maxSize: string; maxFiles: integer; compress: boolean; interval?: Enum<'hourly' \| 'daily' \| 'weekly' \| 'monthly'> }` | optional |  |
 | **encoding** | `string` | ✅ |  |
 | **append** | `boolean` | ✅ |  |
 
@@ -114,9 +114,9 @@ HTTP destination configuration
 | **url** | `string` | ✅ | HTTP endpoint URL |
 | **method** | `Enum<'POST' \| 'PUT'>` | ✅ |  |
 | **headers** | `Record<string, string>` | optional |  |
-| **auth** | `Object` | optional |  |
-| **batch** | `Object` | optional |  |
-| **retry** | `Object` | optional |  |
+| **auth** | `{ type: Enum<'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
+| **batch** | `{ maxSize: integer; flushInterval: integer }` | optional |  |
+| **retry** | `{ maxAttempts: integer; initialDelay: integer; backoffMultiplier: number }` | optional |  |
 | **timeout** | `integer` | ✅ |  |
 
 
@@ -134,10 +134,10 @@ Log destination configuration
 | **type** | `Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| 'azure_monitor' \| 'datadog' \| 'splunk' \| 'loki' \| 'http' \| 'kafka' \| 'redis' \| 'custom'>` | ✅ | Destination type |
 | **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | ✅ | Extended log severity level |
 | **enabled** | `boolean` | ✅ |  |
-| **console** | `Object` | optional | Console destination configuration |
-| **file** | `Object` | optional | File destination configuration |
-| **http** | `Object` | optional | HTTP destination configuration |
-| **externalService** | `Object` | optional | External service destination configuration |
+| **console** | `{ stream: Enum<'stdout' \| 'stderr'>; colors: boolean; prettyPrint: boolean }` | optional | Console destination configuration |
+| **file** | `{ path: string; rotation?: object; encoding: string; append: boolean }` | optional | File destination configuration |
+| **http** | `{ url: string; method: Enum<'POST' \| 'PUT'>; headers?: Record<string, string>; auth?: object; … }` | optional | HTTP destination configuration |
+| **externalService** | `{ endpoint?: string; region?: string; credentials?: object; logGroup?: string; … }` | optional | External service destination configuration |
 | **format** | `Enum<'json' \| 'text' \| 'pretty'>` | ✅ |  |
 | **filterId** | `string` | optional | Filter function identifier |
 
@@ -181,7 +181,7 @@ Log enrichment configuration
 | **addHostname** | `boolean` | ✅ |  |
 | **addProcessId** | `boolean` | ✅ |  |
 | **addEnvironment** | `boolean` | ✅ |  |
-| **addTimestampFormats** | `Object` | optional |  |
+| **addTimestampFormats** | `{ unix: boolean; iso: boolean }` | optional |  |
 | **addCaller** | `boolean` | ✅ |  |
 | **addCorrelationIds** | `boolean` | ✅ |  |
 
@@ -248,7 +248,7 @@ Log severity level
 | **redact** | `string[]` | ✅ | Keys to redact from log context |
 | **sourceLocation** | `boolean` | ✅ | Include file and line number |
 | **file** | `string` | optional | Path to log file |
-| **rotation** | `Object` | optional |  |
+| **rotation** | `{ maxSize: string; maxFiles: number }` | optional |  |
 
 
 ---
@@ -265,14 +265,14 @@ Logging configuration
 | **label** | `string` | ✅ | Display label |
 | **enabled** | `boolean` | ✅ |  |
 | **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | ✅ | Extended log severity level |
-| **default** | `Object` | optional | Default logger configuration |
-| **loggers** | `Record<string, Object>` | optional | Named logger configurations |
-| **destinations** | `Object[]` | ✅ | Log destinations |
-| **enrichment** | `Object` | optional | Log enrichment configuration |
+| **default** | `{ name?: string; level: Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>; format: Enum<'json' \| 'text' \| 'pretty'>; redact: string[]; … }` | optional | Default logger configuration |
+| **loggers** | `Record<string, { name?: string; level: Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>; format: Enum<'json' \| 'text' \| 'pretty'>; redact: string[]; … }>` | optional | Named logger configurations |
+| **destinations** | `{ name: string; type: Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| 'azure_monitor' \| 'datadog' \| 'splunk' \| 'loki' \| 'http' \| 'kafka' \| 'redis' \| 'custom'>; level: Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>; enabled: boolean; … }[]` | ✅ | Log destinations |
+| **enrichment** | `{ staticFields?: Record<string, any>; dynamicEnrichers?: string[]; addHostname: boolean; addProcessId: boolean; … }` | optional | Log enrichment configuration |
 | **redact** | `string[]` | ✅ | Fields to redact |
-| **sampling** | `Object` | optional |  |
-| **buffer** | `Object` | optional |  |
-| **performance** | `Object` | optional |  |
+| **sampling** | `{ enabled: boolean; rate: number; rateByLevel?: Record<string, number> }` | optional |  |
+| **buffer** | `{ enabled: boolean; size: integer; flushInterval: integer; flushOnShutdown: boolean }` | optional |  |
+| **performance** | `{ async: boolean; workers: integer }` | optional |  |
 
 
 ---
@@ -289,13 +289,13 @@ Structured log entry
 | **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | ✅ | Log severity level |
 | **message** | `string` | ✅ | Log message |
 | **context** | `Record<string, any>` | optional | Structured context |
-| **error** | `Object` | optional | Error details |
-| **trace** | `Object` | optional | Distributed tracing context |
-| **source** | `Object` | optional | Source information |
-| **host** | `Object` | optional | Host information |
+| **error** | `{ name?: string; message?: string; stack?: string; code?: string; … }` | optional | Error details |
+| **trace** | `{ traceId: string; spanId: string; parentSpanId?: string; traceFlags?: integer }` | optional | Distributed tracing context |
+| **source** | `{ service?: string; component?: string; file?: string; line?: integer; … }` | optional | Source information |
+| **host** | `{ hostname?: string; pid?: integer; ip?: string }` | optional | Host information |
 | **environment** | `string` | optional | Environment (e.g., production, staging) |
-| **user** | `Object` | optional | User context |
-| **request** | `Object` | optional | Request context |
+| **user** | `{ id?: string; username?: string; email?: string }` | optional | User context |
+| **request** | `{ id?: string; method?: string; path?: string; userAgent?: string; … }` | optional | Request context |
 | **labels** | `Record<string, string>` | optional | Custom labels |
 | **metadata** | `Record<string, any>` | optional | Additional metadata |
 

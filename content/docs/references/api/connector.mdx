@@ -57,8 +57,8 @@ const result = ErrorCategory.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable webhook support |
-| **events** | `Object[]` | ✅ | Registered webhook events |
-| **deliveryConfig** | `Object` | ✅ | Webhook delivery configuration |
+| **events** | `{ name: string; description: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; payloadSchema: string; … }[]` | ✅ | Registered webhook events |
+| **deliveryConfig** | `{ maxRetries: integer; retryIntervalMs: integer; timeoutMs: integer; signatureHeader: string }` | ✅ | Webhook delivery configuration |
 | **registrationEndpoint** | `string` | ✅ | URL path for webhook registration |
 
 

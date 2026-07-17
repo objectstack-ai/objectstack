@@ -35,7 +35,7 @@ Advanced / low-level Better-Auth options
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **crossSubDomainCookies** | `Object` | optional | Share auth cookies across subdomains (critical for *.example.com multi-tenant) |
+| **crossSubDomainCookies** | `{ enabled: boolean; additionalCookies?: string[]; domain?: string }` | optional | Share auth cookies across subdomains (critical for *.example.com multi-tenant) |
 | **useSecureCookies** | `boolean` | optional | Force Secure flag on cookies |
 | **disableCSRFCheck** | `boolean` | optional | ⚠ Disable CSRF check — security risk, use with caution |
 | **cookiePrefix** | `string` | optional | Prefix for auth cookie names |
@@ -53,17 +53,17 @@ Advanced / low-level Better-Auth options
 | **baseUrl** | `string` | optional | Base URL for auth routes |
 | **uiBasePath** | `string` | ✅ | Basename where the auth UI (Console) is mounted (default `/_console`) |
 | **databaseUrl** | `string` | optional | Database connection string |
-| **providers** | `Object[]` | optional |  |
-| **plugins** | `Object` | optional |  |
-| **session** | `Object` | optional |  |
+| **providers** | `{ id: string; clientId: string; clientSecret: string; scope?: string[] }[]` | optional |  |
+| **plugins** | `{ organization: boolean; twoFactor: boolean; passkeys: boolean; passwordRejectBreached: boolean; … }` | optional |  |
+| **session** | `{ expiresIn: number; updateAge: number }` | optional |  |
 | **trustedOrigins** | `string[]` | optional | Trusted origins for CSRF protection. Supports wildcards (e.g. "https://*.example.com"). The baseUrl origin is always trusted implicitly. |
 | **socialProviders** | `Record<string, Record<string, any>>` | optional | Social/OAuth provider map forwarded to better-auth socialProviders. Keys are provider ids (google, github, apple, …). |
-| **oidcProviders** | `Object[]` | optional | List of OIDC/OAuth2 providers for enterprise SSO. Product or enterprise packages can pass this directly or contribute it through auth:configure. |
-| **emailAndPassword** | `Object` | optional | Email and password authentication options forwarded to better-auth |
-| **emailVerification** | `Object` | optional | Email verification options forwarded to better-auth |
-| **advanced** | `Object` | optional | Advanced / low-level Better-Auth options |
+| **oidcProviders** | `{ providerId: string; name?: string; discoveryUrl?: string; issuer?: string; … }[]` | optional | List of OIDC/OAuth2 providers for enterprise SSO. Product or enterprise packages can pass this directly or contribute it through auth:configure. |
+| **emailAndPassword** | `{ enabled: boolean; disableSignUp?: boolean; requireEmailVerification?: boolean; minPasswordLength?: number; … }` | optional | Email and password authentication options forwarded to better-auth |
+| **emailVerification** | `{ sendOnSignUp?: boolean; sendOnSignIn?: boolean; autoSignInAfterVerification?: boolean; expiresIn?: number }` | optional | Email verification options forwarded to better-auth |
+| **advanced** | `{ crossSubDomainCookies?: object; useSecureCookies?: boolean; disableCSRFCheck?: boolean; cookiePrefix?: string }` | optional | Advanced / low-level Better-Auth options |
 | **ssoOnlyMode** | `boolean` | optional | SSO-only login: hide the local password form + self-registration (the break-glass password endpoint stays enabled) |
-| **mutualTls** | `Object` | optional | Mutual TLS (mTLS) configuration |
+| **mutualTls** | `{ enabled: boolean; clientCertRequired: boolean; trustedCAs: string[]; crlUrl?: string; … }` | optional | Mutual TLS (mTLS) configuration |
 
 
 ---
@@ -152,7 +152,7 @@ Email verification options forwarded to better-auth
 | **certificateValidation** | `Enum<'strict' \| 'relaxed' \| 'none'>` | ✅ | Certificate validation strictness level |
 | **allowedCNs** | `string[]` | optional | Allowed Common Names (CN) on client certificates |
 | **allowedOUs** | `string[]` | optional | Allowed Organizational Units (OU) on client certificates |
-| **pinning** | `Object` | optional | Certificate pinning configuration |
+| **pinning** | `{ enabled: boolean; pins: string[] }` | optional | Certificate pinning configuration |
 
 
 ---

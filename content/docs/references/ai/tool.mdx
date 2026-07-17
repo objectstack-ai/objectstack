@@ -42,7 +42,7 @@ const result = Tool.parse(data);
 | **permissions** | `string[]` | optional | Required permission-set capabilities |
 | **active** | `boolean` | ✅ | Whether the tool is enabled |
 | **builtIn** | `boolean` | ✅ | Platform built-in tool flag |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this tool. |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this tool. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |

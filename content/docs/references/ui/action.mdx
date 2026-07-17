@@ -72,9 +72,9 @@ const result = Action.parse(data);
 | **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Action functionality type |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
-| **body** | `Object \| Object` | optional | Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. |
+| **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'crypto.hash' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. |
 | **execute** | `string` | optional | @deprecated — Use target instead. Auto-migrated to target during parsing. |
-| **params** | `Object[]` | optional | Input parameters required from user |
+| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string; … }[]` | optional | Input parameters required from user |
 | **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent) |
 | **order** | `number` | optional | Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order. |
 | **confirmText** | `string` | optional | Confirmation message before execution |
@@ -82,24 +82,24 @@ const result = Action.parse(data);
 | **errorMessage** | `string` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional | Refresh view after execution |
 | **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. |
-| **resultDialog** | `Object` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). |
+| **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). |
 | **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| 'phoneNumberOtp'>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |
-| **disabled** | `boolean \| string \| Object` | optional | Boolean or predicate (CEL) — action is disabled when TRUE. |
+| **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Boolean or predicate (CEL) — action is disabled when TRUE. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capabilities required to invoke this action (server-enforced 403 + UI hide/disable). |
 | **shortcut** | `string` | optional | Keyboard shortcut to trigger this action (e.g., "Ctrl+S") |
 | **bulkEnabled** | `boolean` | optional | Whether this action can be applied to multiple selected records |
-| **ai** | `Object` | optional | AI exposure (opt-in). Set ai.exposed=true + ai.description to make this callable by agents. |
+| **ai** | `{ exposed?: boolean; description?: string; category?: Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>; paramHints?: Record<string, { description?: string; enum?: string \| number[]; examples?: any[] }>; … }` | optional | AI exposure (opt-in). Set ai.exposed=true + ai.description to make this callable by agents. |
 | **recordIdParam** | `string` | optional | Body key to inject the row id into when running from a list_item context. |
 | **recordIdField** | `string` | optional | Row field whose value seeds recordIdParam. Defaults to "id". |
-| **bodyShape** | `string \| Object` | optional | Body wrapping: flat (default) or `{ wrap: key }` to nest user-collected params under a key. |
+| **bodyShape** | `'flat' \| { wrap: string }` | optional | Body wrapping: flat (default) or `{ wrap: key }` to nest user-collected params under a key. |
 | **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
 | **bodyExtra** | `Record<string, any>` | optional | Constant body fields merged into the API request (applied last; overrides user params). |
 | **mode** | `Enum<'create' \| 'edit' \| 'delete' \| 'custom'>` | optional | Semantic mode of the action. |
 | **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
 | **newTabUrl** | `string` | optional | Direct new-tab URL template (`{recordId}` placeholder). When set with opensInNewTab, the renderer navigates the pre-opened tab here immediately — no action POST. The endpoint must enforce auth itself. |
 | **timeout** | `number` | optional | Maximum execution time in milliseconds for the action |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -113,7 +113,7 @@ const result = Action.parse(data);
 | **exposed** | `boolean` | ✅ | Expose this action to AI agents. Requires `description` when true. |
 | **description** | `string` | optional | LLM-facing description (≥40 chars). Required when exposed. |
 | **category** | `Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>` | optional | Tool category override (defaults to "action"). |
-| **paramHints** | `Record<string, Object>` | optional | Per-parameter AI hints keyed by param name. |
+| **paramHints** | `Record<string, { description?: string; enum?: string \| number[]; examples?: any[] }>` | optional | Per-parameter AI hints keyed by param name. |
 | **outputSchema** | `Record<string, any>` | optional | JSON Schema for the action return value. |
 | **requiresConfirmation** | `boolean` | optional | Override HITL confirmation for AI invocations. |
 
@@ -147,12 +147,12 @@ const result = Action.parse(data);
 | **label** | `string` | optional | Display label (plain string; i18n keys are auto-generated by the framework) |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>` | optional |  |
 | **required** | `boolean` | optional |  |
-| **options** | `Object[]` | optional |  |
+| **options** | `{ label: string; value: string }[]` | optional |  |
 | **placeholder** | `string` | optional |  |
 | **helpText** | `string` | optional |  |
 | **defaultValue** | `any` | optional |  |
 | **defaultFromRow** | `boolean` | optional |  |
-| **visible** | `string \| Object` | optional | Param visibility predicate (CEL); omits the param when false. |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
 | **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| 'phoneNumberOtp'>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
 
 

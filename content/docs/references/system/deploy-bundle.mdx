@@ -63,7 +63,7 @@ Deploy bundle containing all metadata for deployment
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `Object` | ✅ | Deployment manifest |
+| **manifest** | `{ version: string; checksum?: string; objects: string[]; views: string[]; … }` | ✅ | Deployment manifest |
 | **objects** | `Record<string, any>[]` | ✅ | Object definitions |
 | **views** | `Record<string, any>[]` | ✅ | View definitions |
 | **flows** | `Record<string, any>[]` | ✅ | Flow definitions |
@@ -81,8 +81,8 @@ Schema diff between current and desired state
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **changes** | `Object[]` | ✅ | List of schema changes |
-| **summary** | `Object` | ✅ | Change summary counts |
+| **changes** | `{ entityType: Enum<'object' \| 'field' \| 'index' \| 'view' \| 'flow' \| 'permission'>; entityName: string; parentEntity?: string; changeType: Enum<'added' \| 'modified' \| 'removed'>; … }[]` | ✅ | List of schema changes |
+| **summary** | `{ added: integer; modified: integer; removed: integer }` | ✅ | Change summary counts |
 | **hasBreakingChanges** | `boolean` | ✅ | Whether diff contains breaking changes |
 
 
@@ -149,7 +149,7 @@ Bundle validation result
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **valid** | `boolean` | ✅ | Whether the bundle is valid |
-| **issues** | `Object[]` | ✅ | Validation issues |
+| **issues** | `{ severity: Enum<'error' \| 'warning' \| 'info'>; path: string; message: string; code?: string }[]` | ✅ | Validation issues |
 | **errorCount** | `integer` | ✅ | Number of errors |
 | **warningCount** | `integer` | ✅ | Number of warnings |
 
@@ -164,7 +164,7 @@ Ordered migration plan
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **statements** | `Object[]` | ✅ | Ordered DDL statements |
+| **statements** | `{ sql: string; reversible: boolean; rollbackSql?: string; order: integer }[]` | ✅ | Ordered DDL statements |
 | **dialect** | `string` | ✅ | Target SQL dialect |
 | **reversible** | `boolean` | ✅ | Whether the plan can be fully rolled back |
 | **estimatedDurationMs** | `integer` | optional | Estimated execution time |

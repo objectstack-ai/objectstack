@@ -54,9 +54,9 @@ const result = ModelCapability.parse(data);
 | **name** | `string` | ✅ | Model display name |
 | **version** | `string` | ✅ | Model version (e.g., "gpt-4-turbo-2024-04-09") |
 | **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'google' \| 'cohere' \| 'huggingface' \| 'local' \| 'custom'>` | ✅ |  |
-| **capabilities** | `Object` | ✅ |  |
-| **limits** | `Object` | ✅ |  |
-| **pricing** | `Object` | optional |  |
+| **capabilities** | `{ textGeneration: boolean; textEmbedding: boolean; imageGeneration: boolean; imageUnderstanding: boolean; … }` | ✅ |  |
+| **limits** | `{ maxTokens: integer; contextWindow: integer; maxOutputTokens?: integer; rateLimit?: object }` | ✅ |  |
+| **pricing** | `{ currency: string; inputCostPer1kTokens?: number; outputCostPer1kTokens?: number; embeddingCostPer1kTokens?: number }` | optional |  |
 | **endpoint** | `string` | optional | Custom API endpoint |
 | **apiKey** | `string` | optional | API key (Warning: Prefer secretRef) |
 | **secretRef** | `string` | optional | Reference to stored secret (e.g. system:openai_api_key) |
@@ -78,7 +78,7 @@ const result = ModelCapability.parse(data);
 | **maxTokens** | `integer` | ✅ | Maximum tokens per request |
 | **contextWindow** | `integer` | ✅ | Context window size |
 | **maxOutputTokens** | `integer` | optional | Maximum output tokens |
-| **rateLimit** | `Object` | optional |  |
+| **rateLimit** | `{ requestsPerMinute?: integer; tokensPerMinute?: integer }` | optional |  |
 
 
 ---
@@ -120,8 +120,8 @@ const result = ModelCapability.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Registry name |
-| **models** | `Record<string, Object>` | ✅ | Model entries by ID |
-| **promptTemplates** | `Record<string, Object>` | optional | Prompt templates by name |
+| **models** | `Record<string, { model: object; status?: Enum<'active' \| 'deprecated' \| 'experimental' \| 'disabled'>; priority?: integer; fallbackModels?: string[]; … }>` | ✅ | Model entries by ID |
+| **promptTemplates** | `Record<string, { id: string; name: string; label: string; system?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }>` | optional | Prompt templates by name |
 | **defaultModel** | `string` | optional | Default model ID |
 | **enableAutoFallback** | `boolean` | optional | Auto-fallback on errors |
 
@@ -134,11 +134,11 @@ const result = ModelCapability.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **model** | `Object` | ✅ |  |
+| **model** | `{ id: string; name: string; version: string; provider: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'google' \| 'cohere' \| 'huggingface' \| 'local' \| 'custom'>; … }` | ✅ |  |
 | **status** | `Enum<'active' \| 'deprecated' \| 'experimental' \| 'disabled'>` | ✅ |  |
 | **priority** | `integer` | ✅ | Priority for model selection |
 | **fallbackModels** | `string[]` | optional | Fallback model IDs |
-| **healthCheck** | `Object` | optional |  |
+| **healthCheck** | `{ enabled: boolean; intervalSeconds: integer; lastChecked?: string; status: Enum<'healthy' \| 'unhealthy' \| 'unknown'> }` | optional |  |
 
 
 ---
@@ -168,10 +168,10 @@ const result = ModelCapability.parse(data);
 | **id** | `string` | ✅ | Unique template identifier |
 | **name** | `string` | ✅ | Template name (snake_case) |
 | **label** | `string` | ✅ | Display name |
-| **system** | `string \| Object` | optional | System prompt — supports `{{var}`} interpolation |
-| **user** | `string \| Object` | ✅ | User prompt template — supports `{{var}`} interpolation |
+| **system** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | System prompt — supports `{{var}`} interpolation |
+| **user** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | User prompt template — supports `{{var}`} interpolation |
 | **assistant** | `string` | optional | Assistant message prefix |
-| **variables** | `Object[]` | optional | Template variables |
+| **variables** | `{ name: string; type?: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required?: boolean; defaultValue?: any; … }[]` | optional | Template variables |
 | **modelId** | `string` | optional | Recommended model ID |
 | **temperature** | `number` | optional |  |
 | **maxTokens** | `number` | optional |  |
@@ -183,7 +183,7 @@ const result = ModelCapability.parse(data);
 | **description** | `string` | optional |  |
 | **category** | `string` | optional | Template category (e.g., "code_generation", "support") |
 | **tags** | `string[]` | optional |  |
-| **examples** | `Object[]` | optional |  |
+| **examples** | `{ input: Record<string, any>; output: string }[]` | optional |  |
 
 
 ---
@@ -199,7 +199,7 @@ const result = ModelCapability.parse(data);
 | **required** | `boolean` | ✅ |  |
 | **defaultValue** | `any` | optional |  |
 | **description** | `string` | optional |  |
-| **validation** | `Object` | optional |  |
+| **validation** | `{ minLength?: number; maxLength?: number; pattern?: string; enum?: any[] }` | optional |  |
 
 
 ---

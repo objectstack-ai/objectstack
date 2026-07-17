@@ -11,7 +11,7 @@ Defines schemas for security awareness and training management including
 
 course definitions, completion tracking, and organizational training plans.
 
-@see https://www.iso.org/standard/27001
+See also: https://www.iso.org/standard/27001
 
 @category Security
 
@@ -93,7 +93,7 @@ Organizational training plan per ISO 27001:2022 A.6.3
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable training management |
-| **courses** | `Object[]` | ✅ | Training courses |
+| **courses** | `{ id: string; title: string; description: string; category: Enum<'security_awareness' \| 'data_protection' \| 'incident_response' \| 'access_control' \| 'phishing_awareness' \| 'compliance' \| 'secure_development' \| 'physical_security' \| 'business_continuity' \| 'other'>; … }[]` | ✅ | Training courses |
 | **recertificationIntervalDays** | `number` | ✅ | Default recertification interval in days |
 | **trackCompletion** | `boolean` | ✅ | Track training completion for compliance |
 | **gracePeriodDays** | `number` | ✅ | Grace period in days after certification expiry |

@@ -33,18 +33,18 @@ Object-first application translation bundle for a single locale
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **_meta** | `Object` | optional | Bundle-level metadata (locale, bidi direction) |
+| **_meta** | `{ locale?: string; direction?: Enum<'ltr' \| 'rtl'> }` | optional | Bundle-level metadata (locale, bidi direction) |
 | **namespace** | `string` | optional | Namespace for plugin isolation to avoid translation key collisions |
-| **o** | `Record<string, Object>` | optional | Object-first translations keyed by object name |
+| **o** | `Record<string, { label: string; pluralLabel?: string; description?: string; helpText?: string; … }>` | optional | Object-first translations keyed by object name |
 | **_globalOptions** | `Record<string, Record<string, string>>` | optional | Global picklist option translations keyed by option set name |
-| **app** | `Record<string, Object>` | optional | App translations keyed by app name |
+| **app** | `Record<string, { label: string; description?: string }>` | optional | App translations keyed by app name |
 | **nav** | `Record<string, string>` | optional | Navigation item translations keyed by nav item name |
-| **dashboard** | `Record<string, Object>` | optional | Dashboard translations keyed by dashboard name |
-| **reports** | `Record<string, Object>` | optional | Report translations keyed by report name |
-| **pages** | `Record<string, Object>` | optional | Page translations keyed by page name |
+| **dashboard** | `Record<string, { label?: string; description?: string }>` | optional | Dashboard translations keyed by dashboard name |
+| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **pages** | `Record<string, { title?: string; description?: string }>` | optional | Page translations keyed by page name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID (supports ICU MessageFormat) |
 | **validationMessages** | `Record<string, string>` | optional | Validation error message translations keyed by rule name (supports ICU MessageFormat) |
-| **notifications** | `Record<string, Object>` | optional | Global notification translations keyed by notification name |
+| **notifications** | `Record<string, { title?: string; body?: string }>` | optional | Global notification translations keyed by notification name |
 | **errors** | `Record<string, string>` | optional | Global error message translations keyed by error code |
 
 
@@ -108,10 +108,10 @@ Translation data for a single object
 | **label** | `string` | ✅ | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, Object>` | optional | Field-level translations |
-| **_views** | `Record<string, Object>` | optional | View translations keyed by view name |
-| **_actions** | `Record<string, Object>` | optional | Action translations keyed by action name |
-| **_sections** | `Record<string, Object>` | optional | Section translations keyed by section name |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object }>` | optional | View translations keyed by view name |
+| **_actions** | `Record<string, { label?: string; confirmText?: string; successMessage?: string; params?: Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }> }>` | optional | Action translations keyed by action name |
+| **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 
 
 ---
@@ -128,12 +128,12 @@ Object-first aggregated translation node
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **helpText** | `string` | optional | Translated help text for the object |
-| **fields** | `Record<string, Object>` | optional | Field translations keyed by field name |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field translations keyed by field name |
 | **_options** | `Record<string, Record<string, string>>` | optional | Object-scoped picklist option translations keyed by field name |
-| **_views** | `Record<string, Object>` | optional | View translations keyed by view name |
-| **_sections** | `Record<string, Object>` | optional | Section translations keyed by section name |
-| **_actions** | `Record<string, Object>` | optional | Action translations keyed by action name |
-| **_notifications** | `Record<string, Object>` | optional | Notification translations keyed by notification name |
+| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object }>` | optional | View translations keyed by view name |
+| **_sections** | `Record<string, { label?: string }>` | optional | Section translations keyed by section name |
+| **_actions** | `Record<string, { label?: string; confirmMessage?: string; params?: Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }> }>` | optional | Action translations keyed by action name |
+| **_notifications** | `Record<string, { title?: string; body?: string }>` | optional | Notification translations keyed by notification name |
 | **_errors** | `Record<string, string>` | optional | Error message translations keyed by error code |
 
 
@@ -177,8 +177,8 @@ Aggregated translation coverage result
 | **redundantKeys** | `integer` | ✅ | Number of redundant translations |
 | **staleKeys** | `integer` | ✅ | Number of stale translations |
 | **coveragePercent** | `number` | ✅ | Translation coverage percentage |
-| **items** | `Object[]` | ✅ | Detailed diff items |
-| **breakdown** | `Object[]` | optional | Per-group coverage breakdown |
+| **items** | `{ key: string; status: Enum<'missing' \| 'redundant' \| 'stale'>; objectName?: string; locale: string; … }[]` | ✅ | Detailed diff items |
+| **breakdown** | `{ group: string; totalKeys: integer; translatedKeys: integer; coveragePercent: number }[]` | optional | Per-group coverage breakdown |
 
 
 ---
@@ -191,15 +191,15 @@ Translation data for objects, apps, and UI messages
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objects** | `Record<string, Object>` | optional | Object translations keyed by object name |
-| **apps** | `Record<string, Object>` | optional | App translations keyed by app name |
+| **objects** | `Record<string, { label: string; pluralLabel?: string; description?: string; fields?: Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>; … }>` | optional | Object translations keyed by object name |
+| **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, { label: string }> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **validationMessages** | `Record<string, string>` | optional | Translatable validation error messages keyed by rule name (e.g., `{"discount_limit": "折扣不能超过40%"}`) |
-| **globalActions** | `Record<string, Object>` | optional | Global action translations keyed by action name |
-| **dashboards** | `Record<string, Object>` | optional | Dashboard translations keyed by dashboard name |
-| **settings** | `Record<string, Object>` | optional | Settings manifest translations keyed by namespace |
-| **metadataForms** | `Record<string, Object>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
-| **settingsCommon** | `Object` | optional | Cross-namespace Settings UI strings |
+| **globalActions** | `Record<string, { label?: string; confirmText?: string; successMessage?: string; params?: Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }> }>` | optional | Global action translations keyed by action name |
+| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, { label?: string }>; widgets?: Record<string, { title?: string; description?: string }> }>` | optional | Dashboard translations keyed by dashboard name |
+| **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, { title?: string; description?: string }>; keys?: Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>; … }>` | optional | Settings manifest translations keyed by namespace |
+| **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, { label?: string; description?: string }>; fields?: Record<string, { label?: string; helpText?: string; placeholder?: string }> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
+| **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 
 
 ---

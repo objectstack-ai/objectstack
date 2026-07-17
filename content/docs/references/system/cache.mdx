@@ -13,7 +13,7 @@ Supports Memory, Redis, Memcached, and CDN.
 
 ## Caching in ObjectStack
 
-**Application Cache (`system/cache.zod.ts`) - This File**
+**Application Cache (`[system/cache.zod.ts](/docs/references/system/cache)`) - This File**
 
 - **Purpose**: Cache computed data, query results, aggregations
 
@@ -25,7 +25,7 @@ Supports Memory, Redis, Memcached, and CDN.
 
 - **Scope**: Application layer, server-side data storage
 
-**HTTP Cache (`api/http-cache.zod.ts`)**
+**HTTP Cache (`[api/http-cache.zod.ts](/docs/references/api/http-cache)`)**
 
 - **Purpose**: Cache API responses at HTTP protocol level
 
@@ -37,7 +37,7 @@ Supports Memory, Redis, Memcached, and CDN.
 
 - **Scope**: HTTP layer, client-server communication
 
-@see ../../api/http-cache.zod.ts for HTTP-level caching
+See also: ../../[api/http-cache.zod.ts](/docs/references/api/http-cache) for HTTP-level caching
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/cache.zod.ts`
@@ -63,9 +63,9 @@ Cache avalanche/stampede prevention configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **jitterTtl** | `Object` | optional | TTL jitter to prevent simultaneous expiration |
-| **circuitBreaker** | `Object` | optional | Circuit breaker for backend protection |
-| **lockout** | `Object` | optional | Lock-based stampede prevention |
+| **jitterTtl** | `{ enabled: boolean; maxJitterSeconds: number }` | optional | TTL jitter to prevent simultaneous expiration |
+| **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeout: number }` | optional | Circuit breaker for backend protection |
+| **lockout** | `{ enabled: boolean; lockTimeoutMs: number }` | optional | Lock-based stampede prevention |
 
 
 ---
@@ -79,8 +79,8 @@ Top-level application cache configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable application-level caching |
-| **tiers** | `Object[]` | ✅ | Ordered cache tier hierarchy |
-| **invalidation** | `Object[]` | ✅ | Cache invalidation rules |
+| **tiers** | `{ name: string; type: Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>; maxSize?: number; ttl: number; … }[]` | ✅ | Ordered cache tier hierarchy |
+| **invalidation** | `{ trigger: Enum<'create' \| 'update' \| 'delete' \| 'manual'>; scope: Enum<'key' \| 'pattern' \| 'tag' \| 'all'>; pattern?: string; tags?: string[] }[]` | ✅ | Cache invalidation rules |
 | **prefetch** | `boolean` | ✅ | Enable cache prefetching |
 | **compression** | `boolean` | ✅ | Enable data compression in cache |
 | **encryption** | `boolean` | ✅ | Enable encryption for cached data |
@@ -161,7 +161,7 @@ Cache warmup strategy
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional | Enable cache warmup |
 | **strategy** | `Enum<'eager' \| 'lazy' \| 'scheduled'>` | optional | Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron) |
-| **schedule** | `string \| Object` | optional | Cron expression for scheduled warmup |
+| **schedule** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled warmup |
 | **patterns** | `string[]` | optional | Key patterns to warm up (e.g., "user:*", "config:*") |
 | **concurrency** | `number` | optional | Maximum concurrent warmup operations |
 
@@ -177,14 +177,14 @@ Distributed cache configuration with consistency and avalanche prevention
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional | Enable application-level caching |
-| **tiers** | `Object[]` | ✅ | Ordered cache tier hierarchy |
-| **invalidation** | `Object[]` | ✅ | Cache invalidation rules |
+| **tiers** | `{ name: string; type: Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>; maxSize?: number; ttl?: number; … }[]` | ✅ | Ordered cache tier hierarchy |
+| **invalidation** | `{ trigger: Enum<'create' \| 'update' \| 'delete' \| 'manual'>; scope: Enum<'key' \| 'pattern' \| 'tag' \| 'all'>; pattern?: string; tags?: string[] }[]` | ✅ | Cache invalidation rules |
 | **prefetch** | `boolean` | optional | Enable cache prefetching |
 | **compression** | `boolean` | optional | Enable data compression in cache |
 | **encryption** | `boolean` | optional | Enable encryption for cached data |
 | **consistency** | `Enum<'write_through' \| 'write_behind' \| 'write_around' \| 'refresh_ahead'>` | optional | Distributed cache consistency strategy |
-| **avalanchePrevention** | `Object` | optional | Cache avalanche and stampede prevention |
-| **warmup** | `Object` | optional | Cache warmup strategy |
+| **avalanchePrevention** | `{ jitterTtl?: object; circuitBreaker?: object; lockout?: object }` | optional | Cache avalanche and stampede prevention |
+| **warmup** | `{ enabled?: boolean; strategy?: Enum<'eager' \| 'lazy' \| 'scheduled'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; patterns?: string[]; … }` | optional | Cache warmup strategy |
 
 
 ---

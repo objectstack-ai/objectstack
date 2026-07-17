@@ -34,7 +34,7 @@ const result = FeatureFlag.parse(data);
 | **description** | `string` | optional |  |
 | **enabled** | `boolean` | optional | Is globally enabled |
 | **strategy** | `Enum<'boolean' \| 'percentage' \| 'user_list' \| 'group' \| 'custom'>` | optional |  |
-| **conditions** | `Object` | optional |  |
+| **conditions** | `{ percentage?: number; users?: string[]; groups?: string[]; expression?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }` | optional |  |
 | **environment** | `Enum<'dev' \| 'staging' \| 'prod' \| 'all'>` | optional | Environment validity |
 | **expiresAt** | `string` | optional | Feature flag expiration date |
 

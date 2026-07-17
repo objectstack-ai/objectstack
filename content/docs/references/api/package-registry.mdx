@@ -42,7 +42,7 @@ Disable package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `Object` | ✅ | Disabled package details |
+| **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Disabled package details |
 | **message** | `string` | optional | Disable status message |
 
 
@@ -69,7 +69,7 @@ Enable package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `Object` | ✅ | Enabled package details |
+| **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Enabled package details |
 | **message** | `string` | optional | Enable status message |
 
 
@@ -96,7 +96,7 @@ Get package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `Object` | ✅ | Package details |
+| **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Package details |
 
 
 ---
@@ -109,7 +109,7 @@ Install package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `Object` | ✅ | Package manifest to install |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
 | **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
@@ -125,9 +125,9 @@ Install package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `Object` | ✅ | Installed package details |
+| **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Installed package details |
 | **message** | `string` | optional | Installation status message |
-| **dependencyResolution** | `Object` | optional | Dependency resolution result from install analysis |
+| **dependencyResolution** | `{ dependencies: { packageId: string; requiredRange: string; resolvedVersion?: string; installedVersion?: string; … }[]; canProceed: boolean; requiredActions: { type: Enum<'install' \| 'upgrade' \| 'confirm_conflict'>; packageId: string; description: string }[]; installOrder: string[]; … }` | optional | Dependency resolution result from install analysis |
 
 
 ---
@@ -155,7 +155,7 @@ List packages response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **packages** | `Object[]` | ✅ | List of installed packages |
+| **packages** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }[]` | ✅ | List of installed packages |
 | **total** | `number` | ✅ | Total package count |
 
 

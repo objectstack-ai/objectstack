@@ -56,13 +56,13 @@ const result = EmailTemplateDefinition.parse(data);
 | **subject** | `string` | ✅ | Subject template |
 | **bodyHtml** | `string` | ✅ | HTML body template |
 | **bodyText** | `string` | optional | Plain-text body template (auto-derived from HTML when omitted) |
-| **variables** | `Object[]` | ✅ |  |
-| **fromOverride** | `Object` | optional |  |
+| **variables** | `{ name: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'url' \| 'user' \| 'record'>; required: boolean; description?: string }[]` | ✅ |  |
+| **fromOverride** | `{ name?: string; address: string }` | optional |  |
 | **replyTo** | `string` | optional |  |
 | **active** | `boolean` | ✅ |  |
 | **isSystem** | `boolean` | ✅ |  |
 | **description** | `string` | optional |  |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this email template. |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this email template. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |

@@ -67,10 +67,10 @@ const result = ApiMethod.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **class** | `Enum<'record' \| 'audit' \| 'telemetry' \| 'transient' \| 'event'>` | ✅ | Persistence contract: record (business truth, permanent) \| audit (compliance ledger) \| telemetry (high-freq log) \| transient (ephemeral state) \| event (bus messages). |
-| **retention** | `Object` | optional | Age-based retention window enforced by the LifecycleService Reaper. |
-| **ttl** | `Object` | optional | Per-row TTL auto-expiry (transient/event classes). |
-| **storage** | `Object` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
-| **archive** | `Object` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
+| **retention** | `{ maxAge: string; onlyWhen?: Record<string, string \| number \| boolean \| { $in: string \| number[] }> }` | optional | Age-based retention window enforced by the LifecycleService Reaper. |
+| **ttl** | `{ field: string; expireAfter: string }` | optional | Per-row TTL auto-expiry (transient/event classes). |
+| **storage** | `{ strategy: 'rotation'; shards: integer; unit: Enum<'day' \| 'week' \| 'month'> }` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
+| **archive** | `{ after: string; to: string; keep?: string }` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
 | **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
 
 
@@ -105,37 +105,37 @@ const result = ApiMethod.parse(data);
 | **isSystem** | `boolean` | optional | Is system object (protected from deletion) |
 | **abstract** | `boolean` | optional | Is abstract base object (cannot be instantiated) |
 | **managedBy** | `Enum<'platform' \| 'config' \| 'system' \| 'append-only' \| 'better-auth'>` | optional | Lifecycle bucket — platform (user CRUD) \| config (admin authored) \| system (engine-managed) \| append-only (audit) \| better-auth (identity). UI clients honour the resolved affordance matrix. |
-| **userActions** | `Object` | optional | Per-object override of the resolved CRUD affordance matrix. |
-| **systemFields** | `boolean \| Object` | optional | Opt out of, or selectively disable, registry-level system-field auto-injection. |
+| **userActions** | `{ create?: boolean; import?: boolean; edit?: boolean \| { enabled?: boolean; visibleWhen?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; disabledWhen?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }; delete?: boolean \| { enabled?: boolean; visibleWhen?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; disabledWhen?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }; … }` | optional | Per-object override of the resolved CRUD affordance matrix. |
+| **systemFields** | `'false' \| { tenant?: boolean; owner?: boolean; audit?: boolean }` | optional | Opt out of, or selectively disable, registry-level system-field auto-injection. |
 | **datasource** | `string` | optional | Target Datasource ID. "default" is the primary DB. |
-| **external** | `Object` | optional | Remote table binding for federated (external) objects. |
-| **fields** | `Record<string, Object>` | ✅ | Field definitions map. Keys must be snake_case identifiers. |
-| **indexes** | `Object[]` | optional | Database performance indexes |
-| **fieldGroups** | `Object[]` | optional | Ordered list of field groups (array order = display order). See ObjectFieldGroupSchema. |
-| **tenancy** | `Object` | optional | Multi-tenancy configuration for SaaS applications |
-| **access** | `Object` | optional | [ADR-0066 D2] Object exposure posture (public-by-default vs private secure-by-default). |
-| **requiredPermissions** | `string[] \| Object` | optional | [ADR-0066 D3/⑤] Capabilities required to access this object (AND-gate) — `string[]` gates all CRUD, or a `{read,create,update,delete}` map gates per operation. |
-| **softDelete** | `Object` | optional | Soft delete (trash/recycle bin) configuration |
-| **versioning** | `Object` | optional | Record versioning and history tracking configuration |
-| **lifecycle** | `Object` | optional | Data lifecycle contract (ADR-0057): class + retention/ttl/rotation/archive policies enforced by the platform LifecycleService. |
-| **validations** | `[__schema0](./__schema0)[]` | optional | Object-level validation rules |
-| **activityMilestones** | `Object[]` | optional | Declarative semantic activity milestones — emit a templated timeline row when a field transitions into a value, no hook code (ADR-0052 §5b.2). |
+| **external** | `{ remoteName?: string; remoteSchema?: string; writable?: boolean; columnMap?: Record<string, string>; … }` | optional | Remote table binding for federated (external) objects. |
+| **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers. |
+| **indexes** | `{ name?: string; fields: string[]; type?: Enum<'btree' \| 'hash' \| 'gin' \| 'gist' \| 'fulltext'>; unique?: boolean; … }[]` | optional | Database performance indexes |
+| **fieldGroups** | `{ key: string; label: string; icon?: string; description?: string; … }[]` | optional | Ordered list of field groups (array order = display order). See ObjectFieldGroupSchema. |
+| **tenancy** | `{ enabled: boolean; tenantField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
+| **access** | `{ default?: Enum<'public' \| 'private'> }` | optional | [ADR-0066 D2] Object exposure posture (public-by-default vs private secure-by-default). |
+| **requiredPermissions** | `string[] \| { read?: string[]; create?: string[]; update?: string[]; delete?: string[] }` | optional | [ADR-0066 D3/⑤] Capabilities required to access this object (AND-gate) — `string[]` gates all CRUD, or a `{read,create,update,delete}` map gates per operation. |
+| **softDelete** | `{ enabled: boolean; field?: string; cascadeDelete?: boolean }` | optional | Soft delete (trash/recycle bin) configuration |
+| **versioning** | `{ enabled: boolean; strategy: Enum<'snapshot' \| 'delta' \| 'event-sourcing'>; retentionDays?: number; versionField?: string }` | optional | Record versioning and history tracking configuration |
+| **lifecycle** | `{ class: Enum<'record' \| 'audit' \| 'telemetry' \| 'transient' \| 'event'>; retention?: object; ttl?: object; storage?: object; … }` | optional | Data lifecycle contract (ADR-0057): class + retention/ttl/rotation/archive policies enforced by the platform LifecycleService. |
+| **validations** | `any[]` | optional | Object-level validation rules |
+| **activityMilestones** | `{ field: string; value: string; summary: string; type?: string }[]` | optional | Declarative semantic activity milestones — emit a templated timeline row when a field transitions into a value, no hook code (ADR-0052 §5b.2). |
 | **nameField** | `string` | optional | [ADR-0079] Canonical primary title field — the stored field used as the record display name (e.g. "name", "title"). Pairs with recordName. |
 | **displayNameField** | `string` | optional | [DEPRECATED → nameField] Field to use as the record display name (e.g., "name", "title"). Accepted as an alias for nameField. |
-| **recordName** | `Object` | optional | Record name generation configuration (Salesforce pattern) |
-| **titleFormat** | `string \| Object` | optional | [DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField, a composite to a formula field designated as nameField. |
+| **recordName** | `{ type: Enum<'text' \| 'autonumber'>; displayFormat?: string; startNumber?: integer }` | optional | Record name generation configuration (Salesforce pattern) |
+| **titleFormat** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField, a composite to a formula field designated as nameField. |
 | **highlightFields** | `string[]` | optional | [ADR-0085] Ordered most-important fields; first entry wins where only one fits. Drives default columns, cards, previews, detail highlight strip. Renamed from compactLayout. |
-| **stageField** | `string \| boolean` | optional | [ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed. |
-| **listViews** | `Record<string, Object>` | optional | Built-in named list views (segmented tabs) shipped with the object schema — "views" mode, dropdown userFilters allowed, no page-only tabs (ADR-0047) |
+| **stageField** | `string \| 'false'` | optional | [ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed. |
+| **listViews** | `Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>` | optional | Built-in named list views (segmented tabs) shipped with the object schema — "views" mode, dropdown userFilters allowed, no page-only tabs (ADR-0047) |
 | **searchableFields** | `string[]` | optional | Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields. |
-| **search** | `Object` | optional | Search engine configuration |
-| **enable** | `Object` | optional | Enabled system features modules |
+| **search** | `{ fields: string[]; displayFields?: string[]; filters?: string[] }` | optional | Search engine configuration |
+| **enable** | `{ trackHistory?: boolean; searchable?: boolean; apiEnabled?: boolean; apiMethods?: Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| 'aggregate' \| 'history' \| 'search' \| 'restore' \| 'purge' \| 'import' \| 'export'>[]; … }` | optional | Enabled system features modules |
 | **sharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | Org-Wide Default record visibility (OWD) for INTERNAL users. Canonical four only (legacy aliases removed, ADR-0090 D4): private (owner-only) \| public_read (everyone reads, owner writes) \| public_read_write (everyone reads+writes) \| controlled_by_parent (derived from the master record). A CUSTOM object that omits this resolves to private at runtime (ADR-0090 D1). |
 | **externalSharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | [ADR-0090 D11] OWD for external (portal/partner) principals. Defaults to private; must be &lt;= sharingModel in openness. |
-| **publicSharing** | `Object` | optional | Public share-link policy (Notion/Figma-style link sharing) |
+| **publicSharing** | `{ enabled?: boolean; allowedAudiences?: Enum<'public' \| 'link_only' \| 'signed_in' \| 'email'>[]; allowedPermissions?: Enum<'view' \| 'comment' \| 'edit'>[]; maxExpiryDays?: integer; … }` | optional | Public share-link policy (Notion/Figma-style link sharing) |
 | **keyPrefix** | `string` | optional | Short prefix for record IDs (e.g., "001" for Account) |
-| **actions** | `Object[]` | optional | Actions associated with this object (auto-populated from top-level actions via objectName) |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this object. |
+| **actions** | `{ name: string; label: string; objectName?: string; icon?: string; … }[]` | optional | Actions associated with this object (auto-populated from top-level actions via objectName) |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this object. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -185,12 +185,12 @@ const result = ApiMethod.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **extend** | `string` | ✅ | Target object name (FQN) to extend |
-| **fields** | `Record<string, Object>` | optional | Fields to add/override |
+| **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; description?: string; … }>` | optional | Fields to add/override |
 | **label** | `string` | optional | Override label for the extended object |
 | **pluralLabel** | `string` | optional | Override plural label for the extended object |
 | **description** | `string` | optional | Override description for the extended object |
-| **validations** | `[__schema0](./__schema0)[]` | optional | Additional validation rules to merge into the target object |
-| **indexes** | `Object[]` | optional | Additional indexes to merge into the target object |
+| **validations** | `any[]` | optional | Additional validation rules to merge into the target object |
+| **indexes** | `{ name?: string; fields: string[]; type?: Enum<'btree' \| 'hash' \| 'gin' \| 'gist' \| 'fulltext'>; unique?: boolean; … }[]` | optional | Additional indexes to merge into the target object |
 | **priority** | `integer` | optional | Merge priority (higher = applied later) |
 
 
@@ -293,8 +293,8 @@ Boolean-or-predicates override for a built-in row CRUD affordance.
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional | Object-level on/off for the generic affordance; same meaning as the bare boolean form. Omitted → managedBy bucket default. |
-| **visibleWhen** | `string \| Object` | optional | Per-record CEL predicate; false → hide the row button for that record. Fail-closed. |
-| **disabledWhen** | `string \| Object` | optional | Per-record CEL predicate; true → render the row button disabled for that record. Fail-soft. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-record CEL predicate; false → hide the row button for that record. Fail-closed. |
+| **disabledWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-record CEL predicate; true → render the row button disabled for that record. Fail-soft. |
 
 
 ---

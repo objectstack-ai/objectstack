@@ -40,7 +40,7 @@ Notification instance definition
 | **icon** | `string` | optional | Icon name override |
 | **duration** | `number` | optional | Auto-dismiss duration in ms, omit for persistent |
 | **dismissible** | `boolean` | ✅ | Allow user to dismiss the notification |
-| **actions** | `Object[]` | optional | Action buttons |
+| **actions** | `{ label: string; action: string; variant: Enum<'primary' \| 'secondary' \| 'link'> }[]` | optional | Action buttons |
 | **position** | `Enum<'top_left' \| 'top_center' \| 'top_right' \| 'bottom_left' \| 'bottom_center' \| 'bottom_right'>` | optional | Override default position |
 | **ariaLabel** | `string` | optional | Accessible label for screen readers (WAI-ARIA aria-label) |
 | **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |

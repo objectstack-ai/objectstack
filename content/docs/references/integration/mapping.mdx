@@ -29,7 +29,7 @@ const result = FieldMapping.parse(data);
 | :--- | :--- | :--- | :--- |
 | **source** | `string` | ✅ | Source field name |
 | **target** | `string` | ✅ | Target field name |
-| **transform** | `Object \| Object \| Object \| Object \| Object` | optional | Transformation to apply |
+| **transform** | `{ type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }` | optional | Transformation to apply |
 | **defaultValue** | `any` | optional | Default if source is null/undefined |
 | **dataType** | `Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>` | optional | Target data type |
 | **required** | `boolean` | optional | Field is required |

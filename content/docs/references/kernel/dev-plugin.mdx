@@ -70,9 +70,9 @@ const result = DevFixtureConfig.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **preset** | `Enum<'minimal' \| 'standard' \| 'full'>` | ✅ | Base configuration preset |
-| **services** | `Record<string, Object>` | optional | Per-service dev overrides keyed by service name |
-| **fixtures** | `Object` | optional | Fixture data loading configuration |
-| **tools** | `Object` | optional | Developer tooling settings |
+| **services** | `Record<string, { enabled: boolean; strategy: Enum<'mock' \| 'memory' \| 'stub' \| 'passthrough'>; config?: Record<string, any> }>` | optional | Per-service dev overrides keyed by service name |
+| **fixtures** | `{ enabled: boolean; paths?: string[]; resetBeforeLoad: boolean; envFilter?: string[] }` | optional | Fixture data loading configuration |
+| **tools** | `{ hotReload: boolean; requestInspector: boolean; dbExplorer: boolean; verboseLogging: boolean; … }` | optional | Developer tooling settings |
 | **port** | `integer` | ✅ | Port for the dev-tools dashboard |
 | **open** | `boolean` | ✅ | Auto-open dev dashboard in browser |
 | **seedAdminUser** | `boolean` | ✅ | Create a default admin user for development |

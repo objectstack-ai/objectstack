@@ -43,11 +43,11 @@ const result = DatabaseLevelIsolationStrategy.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strategy** | `string` | ✅ | Database-level isolation strategy |
-| **database** | `Object` | optional | Database configuration |
-| **connectionPool** | `Object` | optional | Connection pool configuration |
-| **backup** | `Object` | optional | Backup configuration |
-| **encryption** | `Object` | optional | Encryption configuration |
+| **strategy** | `'isolated_db'` | ✅ | Database-level isolation strategy |
+| **database** | `{ namingPattern: string; serverStrategy: Enum<'shared' \| 'sharded' \| 'dedicated'>; separateCredentials: boolean; autoCreateDatabase: boolean }` | optional | Database configuration |
+| **connectionPool** | `{ poolSize: integer; maxActivePools: integer; idleTimeout: integer; usePooler: boolean }` | optional | Connection pool configuration |
+| **backup** | `{ strategy: Enum<'individual' \| 'consolidated' \| 'on_demand'>; frequencyHours: integer; retentionDays: integer }` | optional | Backup configuration |
+| **encryption** | `{ perTenantKeys: boolean; algorithm: string; keyManagement?: Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'> }` | optional | Encryption configuration |
 
 
 ---
@@ -71,10 +71,10 @@ Database provider for tenant data
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strategy** | `string` | ✅ | Schema-level isolation strategy |
-| **schema** | `Object` | optional | Schema configuration |
-| **migrations** | `Object` | optional | Migration configuration |
-| **performance** | `Object` | optional | Performance settings |
+| **strategy** | `'isolated_schema'` | ✅ | Schema-level isolation strategy |
+| **schema** | `{ namingPattern: string; includePublicSchema: boolean; sharedSchema: string; autoCreateSchema: boolean }` | optional | Schema configuration |
+| **migrations** | `{ strategy: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent: integer; rollbackOnError: boolean }` | optional | Migration configuration |
+| **performance** | `{ poolPerSchema: boolean; schemaCacheTTL: integer }` | optional | Performance settings |
 
 
 ---
@@ -102,9 +102,9 @@ Quota enforcement check result
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strategy** | `string` | ✅ | Row-level isolation strategy |
-| **database** | `Object` | optional | Database configuration |
-| **performance** | `Object` | optional | Performance settings |
+| **strategy** | `'shared_schema'` | ✅ | Row-level isolation strategy |
+| **database** | `{ enableRLS: boolean; contextMethod: Enum<'session_variable' \| 'search_path' \| 'application_name'>; contextVariable: string; applicationValidation: boolean }` | optional | Database configuration |
+| **performance** | `{ usePartialIndexes: boolean; usePartitioning: boolean; poolSizePerTenant?: integer }` | optional | Performance settings |
 
 
 ---
@@ -119,11 +119,11 @@ Quota enforcement check result
 | **name** | `string` | ✅ | Tenant display name |
 | **isolationLevel** | `Enum<'shared_schema' \| 'isolated_schema' \| 'isolated_db'>` | ✅ |  |
 | **databaseProvider** | `Enum<'turso' \| 'postgres' \| 'memory'>` | optional | Database provider |
-| **connectionConfig** | `Object` | optional | Database connection config |
+| **connectionConfig** | `{ url: string; authToken?: string; group?: string }` | optional | Database connection config |
 | **provisioningStatus** | `Enum<'provisioning' \| 'active' \| 'suspended' \| 'failed' \| 'destroying'>` | optional | Current provisioning lifecycle status |
 | **plan** | `Enum<'free' \| 'pro' \| 'enterprise'>` | optional | Subscription plan |
 | **customizations** | `Record<string, any>` | optional | Custom configuration values |
-| **quotas** | `Object` | optional |  |
+| **quotas** | `{ maxUsers?: integer; maxStorage?: integer; apiRateLimit?: integer; maxObjects?: integer; … }` | optional |  |
 
 
 ---
@@ -155,9 +155,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strategy** | `string` | ✅ | Row-level isolation strategy |
-| **database** | `Object` | optional | Database configuration |
-| **performance** | `Object` | optional | Performance settings |
+| **strategy** | `'shared_schema'` | ✅ | Row-level isolation strategy |
+| **database** | `{ enableRLS: boolean; contextMethod: Enum<'session_variable' \| 'search_path' \| 'application_name'>; contextVariable: string; applicationValidation: boolean }` | optional | Database configuration |
+| **performance** | `{ usePartialIndexes: boolean; usePartitioning: boolean; poolSizePerTenant?: integer }` | optional | Performance settings |
 
 ---
 
@@ -167,10 +167,10 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strategy** | `string` | ✅ | Schema-level isolation strategy |
-| **schema** | `Object` | optional | Schema configuration |
-| **migrations** | `Object` | optional | Migration configuration |
-| **performance** | `Object` | optional | Performance settings |
+| **strategy** | `'isolated_schema'` | ✅ | Schema-level isolation strategy |
+| **schema** | `{ namingPattern: string; includePublicSchema: boolean; sharedSchema: string; autoCreateSchema: boolean }` | optional | Schema configuration |
+| **migrations** | `{ strategy: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent: integer; rollbackOnError: boolean }` | optional | Migration configuration |
+| **performance** | `{ poolPerSchema: boolean; schemaCacheTTL: integer }` | optional | Performance settings |
 
 ---
 
@@ -180,11 +180,11 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strategy** | `string` | ✅ | Database-level isolation strategy |
-| **database** | `Object` | optional | Database configuration |
-| **connectionPool** | `Object` | optional | Connection pool configuration |
-| **backup** | `Object` | optional | Backup configuration |
-| **encryption** | `Object` | optional | Encryption configuration |
+| **strategy** | `'isolated_db'` | ✅ | Database-level isolation strategy |
+| **database** | `{ namingPattern: string; serverStrategy: Enum<'shared' \| 'sharded' \| 'dedicated'>; separateCredentials: boolean; autoCreateDatabase: boolean }` | optional | Database configuration |
+| **connectionPool** | `{ poolSize: integer; maxActivePools: integer; idleTimeout: integer; usePooler: boolean }` | optional | Connection pool configuration |
+| **backup** | `{ strategy: Enum<'individual' \| 'consolidated' \| 'on_demand'>; frequencyHours: integer; retentionDays: integer }` | optional | Backup configuration |
+| **encryption** | `{ perTenantKeys: boolean; algorithm: string; keyManagement?: Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'> }` | optional | Encryption configuration |
 
 ---
 
@@ -225,9 +225,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **encryption** | `Object` | optional | Encryption requirements |
-| **accessControl** | `Object` | optional | Access control requirements |
-| **compliance** | `Object` | optional | Compliance requirements |
+| **encryption** | `{ atRest: boolean; inTransit: boolean; fieldLevel: boolean }` | optional | Encryption requirements |
+| **accessControl** | `{ requireMFA: boolean; requireSSO: boolean; ipWhitelist?: string[]; sessionTimeout: integer }` | optional | Access control requirements |
+| **compliance** | `{ standards?: Enum<'sox' \| 'hipaa' \| 'gdpr' \| 'pci_dss' \| 'iso_27001' \| 'fedramp'>[]; requireAuditLog: boolean; auditRetentionDays: integer; dataResidency?: object }` | optional | Compliance requirements |
 
 
 ---

@@ -13,7 +13,7 @@ The structured-output target an AI agent emits for a *high-level* goal
 
 list. It is a **simplified proposal shape** — deliberately lighter than the
 
-full [ObjectSchema](ObjectSchema) / [ViewSchema](ViewSchema) / [DashboardSchema](DashboardSchema).
+full `ObjectSchema` / `ViewSchema` / `DashboardSchema`.
 
 The `apply_blueprint` tool expands each entry into a proper metadata body
 
@@ -52,7 +52,7 @@ const result = BlueprintApp.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string` | optional | App display label |
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
-| **nav** | `Object[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
 
 
 ---
@@ -65,7 +65,7 @@ const result = BlueprintApp.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Dashboard machine name (snake_case) |
 | **label** | `string` | optional | Human-readable dashboard label |
-| **widgets** | `Object[]` | optional | Widgets to place on the dashboard |
+| **widgets** | `{ id: string; title?: string; object?: string; chart?: Enum<'metric' \| 'bar' \| 'line' \| 'pie' \| 'table'>; … }[]` | optional | Widgets to place on the dashboard |
 
 
 ---
@@ -81,7 +81,7 @@ const result = BlueprintApp.parse(data);
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>` | ✅ | Field data type |
 | **required** | `boolean` | optional | Whether the field is required |
 | **reference** | `string` | optional | Target object name for lookup / master_detail relationship fields |
-| **options** | `Object[]` | optional | Choices for select / multiselect / radio fields |
+| **options** | `{ label: string; value: string }[]` | optional | Choices for select / multiselect / radio fields |
 
 
 ---
@@ -109,7 +109,7 @@ const result = BlueprintApp.parse(data);
 | **name** | `string` | ✅ | Object machine name (snake_case) |
 | **label** | `string` | optional | Human-readable singular label |
 | **description** | `string` | optional | What this object represents |
-| **fields** | `Object[]` | ✅ | Fields to create on the object |
+| **fields** | `{ name: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; required?: boolean; … }[]` | ✅ | Fields to create on the object |
 | **nameField** | `string` | optional | The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079). Set it to the object's text label field (e.g. "product_name"). For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "`{order_no}` · `{customer}`"). Omitting it lets the platform auto-pick a text field, but declaring it is strongly preferred. |
 
 
@@ -165,11 +165,11 @@ const result = BlueprintApp.parse(data);
 | **summary** | `string` | ✅ | One-line description of the proposed solution |
 | **assumptions** | `string[]` | ✅ | Design assumptions made from the underspecified goal |
 | **questions** | `string[]` | optional | At most 1-2 structure-deciding questions to confirm before building |
-| **objects** | `Object[]` | ✅ | Objects (tables) to create |
-| **views** | `Object[]` | optional | Views to create |
-| **dashboards** | `Object[]` | optional | Dashboards to create |
-| **app** | `Object` | optional | The navigation shell (app) that surfaces the created objects/dashboards to end users |
-| **seedData** | `Object[]` | optional | Suggested seed data (reported, not auto-applied in Phase C) |
+| **objects** | `{ name: string; label?: string; description?: string; fields: { name: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; required?: boolean; … }[]; … }[]` | ✅ | Objects (tables) to create |
+| **views** | `{ object: string; name: string; label?: string; type: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>; … }[]` | optional | Views to create |
+| **dashboards** | `{ name: string; label?: string; widgets?: { id: string; title?: string; object?: string; chart?: Enum<'metric' \| 'bar' \| 'line' \| 'pie' \| 'table'>; … }[] }[]` | optional | Dashboards to create |
+| **app** | `{ name: string; label?: string; icon?: string; nav?: { type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string }[] }` | optional | The navigation shell (app) that surfaces the created objects/dashboards to end users |
+| **seedData** | `{ object: string; records: Record<string, any>[] }[]` | optional | Suggested seed data (reported, not auto-applied in Phase C) |
 
 
 ---
@@ -183,10 +183,10 @@ const result = BlueprintApp.parse(data);
 | **summary** | `string` | ✅ | One-line description of the proposed solution |
 | **assumptions** | `string[]` | ✅ | Design assumptions made from the underspecified goal |
 | **questions** | `string[] \| null` | ✅ | At most 1-2 structure-deciding questions to confirm before building, or null |
-| **objects** | `Object[]` | ✅ | Objects (tables) to create |
-| **views** | `Object[] \| null` | ✅ | Views to create, or null |
-| **dashboards** | `Object[] \| null` | ✅ | Dashboards to create, or null |
-| **app** | `Object \| null` | ✅ | The navigation shell (app) that surfaces the created objects/dashboards, or null |
+| **objects** | `{ name: string; label: string \| null; description: string \| null; fields: { name: string; label: string \| null; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; required: boolean \| null; … }[] }[]` | ✅ | Objects (tables) to create |
+| **views** | `{ object: string; name: string; label: string \| null; type: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'> \| null; … }[] \| null` | ✅ | Views to create, or null |
+| **dashboards** | `{ name: string; label: string \| null; widgets: { id: string; title: string \| null; object: string \| null; chart: Enum<'metric' \| 'bar' \| 'line' \| 'pie' \| 'table'> \| null; … }[] \| null }[] \| null` | ✅ | Dashboards to create, or null |
+| **app** | `{ name: string; label: string \| null; icon: string \| null; nav: { type: Enum<'object' \| 'dashboard'>; target: string; label: string \| null; icon: string \| null }[] \| null } \| null` | ✅ | The navigation shell (app) that surfaces the created objects/dashboards, or null |
 
 
 ---

@@ -55,19 +55,19 @@ const result = Manifest.parse(data);
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional | Deployment scope: cloud \| system \| project |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
-| **permissions** | `string[] \| Object` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |
 | **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
 | **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
-| **configuration** | `Object` | optional | Plugin configuration settings |
-| **contributes** | `Object` | optional | Platform contributions |
-| **data** | `Object[]` | optional | Initial seed data (prefer top-level data field) |
-| **capabilities** | `Object` | optional | Plugin capability declarations for interoperability |
+| **configuration** | `{ title?: string; properties: Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'array' \| 'object'>; default?: any; description?: string; required?: boolean; … }> }` | optional | Plugin configuration settings |
+| **contributes** | `{ kinds?: { id: string; globs: string[]; description?: string }[]; events?: string[]; menus?: Record<string, { id: string; label: string; command?: string }[]>; themes?: { id: string; label: string; path: string }[]; … }` | optional | Platform contributions |
+| **data** | `{ object: string; externalId?: string; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
+| **capabilities** | `{ implements?: { protocol: object; conformance?: Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>; implementedFeatures?: string[]; features?: { name: string; enabled?: boolean; description?: string; sinceVersion?: string; … }[]; … }[]; provides?: { id: string; name: string; description?: string; version: object; … }[]; requires?: { pluginId: string; version: string; optional?: boolean; reason?: string; … }[]; extensionPoints?: { id: string; name: string; description?: string; type: Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>; … }[]; … }` | optional | Plugin capability declarations for interoperability |
 | **extensions** | `Record<string, any>` | optional | Extension points and contributions |
-| **navigationContributions** | `Object[]` | optional | Navigation items this package contributes into apps owned by other packages |
-| **loading** | `Object` | optional | Plugin loading and runtime behavior configuration |
-| **engine** | `Object` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
-| **engines** | `Object` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
+| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … }[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
+| **loading** | `{ strategy?: Enum<'eager' \| 'lazy' \| 'parallel' \| 'deferred' \| 'on-demand'>; preload?: object; codeSplitting?: object; dynamicImport?: object; … }` | optional | Plugin loading and runtime behavior configuration |
+| **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
+| **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier (ADR-0025 §3.6) |
 | **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |

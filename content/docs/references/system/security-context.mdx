@@ -27,7 +27,7 @@ audit visibility, and all security operations are correlated in a single
 
 governance context.
 
-@see https://www.iso.org/standard/27001
+See also: https://www.iso.org/standard/27001
 
 @category Security
 
@@ -156,11 +156,11 @@ Unified security context governance configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable unified security context governance |
-| **complianceAuditRequirements** | `Object[]` | optional | Compliance-driven audit event requirements |
-| **complianceEncryptionRequirements** | `Object[]` | optional | Compliance-driven encryption requirements by data classification |
-| **maskingVisibility** | `Object[]` | optional | Masking visibility rules per data classification |
-| **dataClassifications** | `Object[]` | optional | Data classification policies for unified security enforcement |
-| **eventCorrelation** | `Object` | optional | Cross-subsystem security event correlation settings |
+| **complianceAuditRequirements** | `{ framework: Enum<'gdpr' \| 'hipaa' \| 'sox' \| 'pci_dss' \| 'ccpa' \| 'iso27001'>; requiredEvents: string[]; retentionDays: number; alertOnMissing: boolean }[]` | optional | Compliance-driven audit event requirements |
+| **complianceEncryptionRequirements** | `{ framework: Enum<'gdpr' \| 'hipaa' \| 'sox' \| 'pci_dss' \| 'ccpa' \| 'iso27001'>; dataClassifications: Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>[]; minimumAlgorithm: Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>; keyRotationMaxDays: number }[]` | optional | Compliance-driven encryption requirements by data classification |
+| **maskingVisibility** | `{ dataClassification: Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>; defaultMasked: boolean; unmaskRoles?: string[]; auditUnmask: boolean; … }[]` | optional | Masking visibility rules per data classification |
+| **dataClassifications** | `{ classification: Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>; requireEncryption: boolean; requireMasking: boolean; requireAudit: boolean; … }[]` | optional | Data classification policies for unified security enforcement |
+| **eventCorrelation** | `{ enabled: boolean; correlationId: boolean; linkAuthToAudit: boolean; linkEncryptionToAudit: boolean; … }` | optional | Cross-subsystem security event correlation settings |
 | **enforceOnWrite** | `boolean` | ✅ | Enforce encryption and masking requirements on data write operations |
 | **enforceOnRead** | `boolean` | ✅ | Enforce masking and audit requirements on data read operations |
 | **failOpen** | `boolean` | ✅ | When false (default), deny access if security context cannot be evaluated |

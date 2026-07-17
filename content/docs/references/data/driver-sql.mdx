@@ -64,14 +64,14 @@ const result = DataTypeMapping.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Driver instance name |
-| **type** | `string` | ✅ | Driver type must be "sql" |
-| **capabilities** | `Object` | ✅ | Driver capability flags |
+| **type** | `'sql'` | ✅ | Driver type must be "sql" |
+| **capabilities** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | ✅ | Driver capability flags |
 | **connectionString** | `string` | optional | Database connection string (driver-specific format) |
-| **poolConfig** | `Object` | optional | Connection pool configuration |
+| **poolConfig** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool configuration |
 | **dialect** | `Enum<'postgresql' \| 'mysql' \| 'sqlite' \| 'mssql' \| 'oracle' \| 'mariadb'>` | ✅ | SQL database dialect |
-| **dataTypeMapping** | `Object` | ✅ | SQL data type mapping configuration |
+| **dataTypeMapping** | `{ text: string; number: string; boolean: string; date: string; … }` | ✅ | SQL data type mapping configuration |
 | **ssl** | `boolean` | ✅ | Enable SSL/TLS connection |
-| **sslConfig** | `Object` | optional | SSL/TLS configuration (required when ssl is true) |
+| **sslConfig** | `{ rejectUnauthorized: boolean; ca?: string; cert?: string; key?: string }` | optional | SSL/TLS configuration (required when ssl is true) |
 
 
 ---

@@ -61,7 +61,7 @@ Register a new package in the Control Plane
 | **license** | `string` | optional |  |
 | **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | optional | Package publisher provenance tier |
 | **isStarter** | `boolean` | optional |  |
-| **translations** | `Record<string, Object>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
+| **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
 | **createdBy** | `string` | ✅ | User ID creating the package |
 
 
@@ -87,7 +87,7 @@ Register a new package in the Control Plane
 | **license** | `string` | optional | SPDX license identifier (e.g. MIT, Apache-2.0) |
 | **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | ✅ | Package publisher provenance tier |
 | **isStarter** | `boolean` | ✅ | If true, surfaces in the Create Project blueprint picker as a starter template |
-| **translations** | `Record<string, Object>` | optional | Locale-keyed overrides for display_name / description / readme |
+| **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides for display_name / description / readme |
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |
 | **updatedAt** | `string` | ✅ | Last update timestamp (ISO-8601) |
 | **createdBy** | `string` | ✅ | User ID that created the package |
@@ -167,7 +167,7 @@ Update mutable package metadata
 | **license** | `string` | optional |  |
 | **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | optional | Package publisher provenance tier |
 | **isStarter** | `boolean` | optional |  |
-| **translations** | `Record<string, Object>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
+| **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
 
 
 ---

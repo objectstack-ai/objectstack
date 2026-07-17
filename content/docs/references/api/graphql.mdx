@@ -55,9 +55,9 @@ GraphQL provides:
 
 - GraphQL playground
 
-@see https://graphql.org/
+See also: https://graphql.org/
 
-@see https://spec.graphql.org/
+See also: https://spec.graphql.org/
 
 @example GraphQL Query
 
@@ -142,10 +142,10 @@ const result = FederationEntity.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **typeName** | `string` | ✅ | GraphQL type name for this entity |
-| **keys** | `Object[]` | ✅ | Entity key definitions |
-| **externalFields** | `Object[]` | optional | Fields owned by other subgraphs |
-| **requires** | `Object[]` | optional | Required external fields for computed fields |
-| **provides** | `Object[]` | optional | Fields provided during resolution |
+| **keys** | `{ fields: string; resolvable: boolean }[]` | ✅ | Entity key definitions |
+| **externalFields** | `{ field: string; ownerSubgraph?: string }[]` | optional | Fields owned by other subgraphs |
+| **requires** | `{ field: string; fields: string }[]` | optional | Required external fields for computed fields |
+| **provides** | `{ field: string; fields: string }[]` | optional | Fields provided during resolution |
 | **owner** | `boolean` | ✅ | Whether this subgraph is the owner of this entity |
 
 
@@ -183,11 +183,11 @@ const result = FederationEntity.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable GraphQL Federation gateway mode |
 | **version** | `Enum<'v1' \| 'v2'>` | ✅ | Federation specification version |
-| **subgraphs** | `Object[]` | ✅ | Subgraph configurations |
-| **serviceDiscovery** | `Object` | optional | Service discovery configuration |
-| **queryPlanning** | `Object` | optional | Query planning configuration |
-| **composition** | `Object` | optional | Schema composition configuration |
-| **errorHandling** | `Object` | optional | Error handling configuration |
+| **subgraphs** | `{ name: string; url: string; schemaSource: Enum<'introspection' \| 'file' \| 'registry'>; schemaPath?: string; … }[]` | ✅ | Subgraph configurations |
+| **serviceDiscovery** | `{ type: Enum<'static' \| 'dns' \| 'consul' \| 'kubernetes'>; pollIntervalMs?: integer; namespace?: string }` | optional | Service discovery configuration |
+| **queryPlanning** | `{ strategy: Enum<'parallel' \| 'sequential' \| 'adaptive'>; maxDepth?: integer; dryRun: boolean }` | optional | Query planning configuration |
+| **composition** | `{ conflictResolution: Enum<'error' \| 'first_wins' \| 'last_wins'>; validate: boolean }` | optional | Schema composition configuration |
+| **errorHandling** | `{ includeSubgraphName: boolean; partialErrors: Enum<'propagate' \| 'nullify' \| 'reject'> }` | optional | Error handling configuration |
 
 
 ---
@@ -224,11 +224,11 @@ const result = FederationEntity.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional | Enable GraphQL API |
 | **path** | `string` | optional | GraphQL endpoint path |
-| **playground** | `Object` | optional | GraphQL Playground configuration |
-| **schema** | `Object` | optional | Schema generation configuration |
-| **dataLoaders** | `Object[]` | optional | DataLoader configurations |
-| **security** | `Object` | optional | Security configuration |
-| **federation** | `Object` | optional | GraphQL Federation gateway configuration |
+| **playground** | `{ enabled?: boolean; path?: string }` | optional | GraphQL Playground configuration |
+| **schema** | `{ autoGenerateTypes?: boolean; types?: { name: string; object: string; description?: string; fields?: object; … }[]; queries?: { name: string; object: string; type: Enum<'get' \| 'list' \| 'search'>; description?: string; … }[]; mutations?: { name: string; object: string; type: Enum<'create' \| 'update' \| 'delete' \| 'upsert' \| 'custom'>; description?: string; … }[]; … }` | optional | Schema generation configuration |
+| **dataLoaders** | `{ name: string; source: string; batchFunction: object; cache?: object; … }[]` | optional | DataLoader configurations |
+| **security** | `{ depthLimit?: object; complexity?: object; rateLimit?: object; persistedQueries?: object }` | optional | Security configuration |
+| **federation** | `{ enabled?: boolean; version?: Enum<'v1' \| 'v2'>; subgraphs: { name: string; url: string; schemaSource?: Enum<'introspection' \| 'file' \| 'registry'>; schemaPath?: string; … }[]; serviceDiscovery?: object; … }` | optional | GraphQL Federation gateway configuration |
 
 
 ---
@@ -241,9 +241,9 @@ const result = FederationEntity.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | DataLoader name |
 | **source** | `string` | ✅ | Source object or datasource |
-| **batchFunction** | `Object` | ✅ | Batch function configuration |
-| **cache** | `Object` | optional | DataLoader caching |
-| **options** | `Object` | optional | DataLoader options |
+| **batchFunction** | `{ type: Enum<'findByIds' \| 'query' \| 'script' \| 'custom'>; keyField?: string; query?: string; script?: string; … }` | ✅ | Batch function configuration |
+| **cache** | `{ enabled: boolean; keyFn?: string }` | optional | DataLoader caching |
+| **options** | `{ batch: boolean; cache: boolean; maxCacheSize?: integer }` | optional | DataLoader options |
 
 
 ---
@@ -257,9 +257,9 @@ const result = FederationEntity.parse(data);
 | **name** | `string` | ✅ | Directive name (camelCase) |
 | **description** | `string` | optional | Directive description |
 | **locations** | `Enum<'QUERY' \| 'MUTATION' \| 'SUBSCRIPTION' \| 'FIELD' \| 'FRAGMENT_DEFINITION' \| 'FRAGMENT_SPREAD' \| 'INLINE_FRAGMENT' \| 'VARIABLE_DEFINITION' \| 'SCHEMA' \| 'SCALAR' \| 'OBJECT' \| 'FIELD_DEFINITION' \| 'ARGUMENT_DEFINITION' \| 'INTERFACE' \| 'UNION' \| 'ENUM' \| 'ENUM_VALUE' \| 'INPUT_OBJECT' \| 'INPUT_FIELD_DEFINITION'>[]` | ✅ | Directive locations |
-| **args** | `Record<string, Object>` | optional | Directive arguments |
+| **args** | `Record<string, { type: string; description?: string; defaultValue?: any }>` | optional | Directive arguments |
 | **repeatable** | `boolean` | ✅ | Can be applied multiple times |
-| **implementation** | `Object` | optional | Directive implementation |
+| **implementation** | `{ type: Enum<'auth' \| 'validation' \| 'transform' \| 'cache' \| 'deprecation' \| 'custom'>; handler?: string }` | optional | Directive implementation |
 
 
 ---
@@ -301,12 +301,12 @@ const result = FederationEntity.parse(data);
 | **object** | `string` | ✅ | Source ObjectQL object name |
 | **type** | `Enum<'create' \| 'update' \| 'delete' \| 'upsert' \| 'custom'>` | ✅ | Mutation type |
 | **description** | `string` | optional | Mutation description |
-| **input** | `Object` | optional | Input configuration |
-| **output** | `Object` | optional | Output configuration |
-| **transaction** | `Object` | optional | Transaction configuration |
+| **input** | `{ typeName?: string; fields?: object; validation?: object }` | optional | Input configuration |
+| **output** | `{ type: Enum<'object' \| 'payload' \| 'boolean' \| 'custom'>; includeEnvelope: boolean; customType?: string }` | optional | Output configuration |
+| **transaction** | `{ enabled: boolean; isolationLevel?: Enum<'read_uncommitted' \| 'read_committed' \| 'repeatable_read' \| 'serializable'> }` | optional | Transaction configuration |
 | **authRequired** | `boolean` | ✅ | Require authentication |
 | **permissions** | `string[]` | optional | Required permissions |
-| **hooks** | `Object` | optional | Lifecycle hooks |
+| **hooks** | `{ before?: string[]; after?: string[] }` | optional | Lifecycle hooks |
 
 
 ---
@@ -319,10 +319,10 @@ const result = FederationEntity.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable persisted queries |
 | **mode** | `Enum<'optional' \| 'required'>` | ✅ | Persisted query mode (optional: allow both, required: only persisted) |
-| **store** | `Object` | optional | Query store configuration |
-| **apq** | `Object` | optional | Automatic Persisted Queries configuration |
-| **allowlist** | `Object` | optional | Query allow list configuration |
-| **security** | `Object` | optional | Security configuration |
+| **store** | `{ type: Enum<'memory' \| 'redis' \| 'database' \| 'file'>; connection?: string; ttl?: integer }` | optional | Query store configuration |
+| **apq** | `{ enabled: boolean; hashAlgorithm: Enum<'sha256' \| 'sha1' \| 'md5'>; cache?: object }` | optional | Automatic Persisted Queries configuration |
+| **allowlist** | `{ enabled: boolean; queries?: { id: string; operation?: string; query?: string }[]; source?: string }` | optional | Query allow list configuration |
+| **security** | `{ maxQuerySize?: integer; rejectIntrospection: boolean }` | optional | Security configuration |
 
 
 ---
@@ -336,7 +336,7 @@ const result = FederationEntity.parse(data);
 | **enabled** | `boolean` | ✅ | Enable query complexity limiting |
 | **maxComplexity** | `integer` | ✅ | Maximum query complexity |
 | **defaultFieldComplexity** | `integer` | ✅ | Default complexity per field |
-| **fieldComplexity** | `Record<string, integer \| Object>` | optional | Per-field complexity configuration |
+| **fieldComplexity** | `Record<string, integer \| { base: integer; multiplier?: string; calculator?: string }>` | optional | Per-field complexity configuration |
 | **listMultiplier** | `number` | ✅ | Multiplier for list fields |
 | **onComplexityExceeded** | `Enum<'reject' \| 'log' \| 'warn'>` | ✅ | Action when complexity exceeded |
 | **errorMessage** | `string` | optional | Custom error message for complexity violations |
@@ -354,14 +354,14 @@ const result = FederationEntity.parse(data);
 | **object** | `string` | ✅ | Source ObjectQL object name |
 | **type** | `Enum<'get' \| 'list' \| 'search'>` | ✅ | Query type |
 | **description** | `string` | optional | Query description |
-| **args** | `Record<string, Object>` | optional | Query arguments |
-| **filtering** | `Object` | optional | Filtering capabilities |
-| **sorting** | `Object` | optional | Sorting capabilities |
-| **pagination** | `Object` | optional | Pagination configuration |
-| **fields** | `Object` | optional | Field selection configuration |
+| **args** | `Record<string, { type: string; description?: string; defaultValue?: any }>` | optional | Query arguments |
+| **filtering** | `{ enabled?: boolean; fields?: string[]; operators?: Enum<'eq' \| 'ne' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'in' \| 'notIn' \| 'contains' \| 'startsWith' \| 'endsWith' \| 'isNull' \| 'isNotNull'>[] }` | optional | Filtering capabilities |
+| **sorting** | `{ enabled?: boolean; fields?: string[]; defaultSort?: object }` | optional | Sorting capabilities |
+| **pagination** | `{ enabled?: boolean; type?: Enum<'offset' \| 'cursor' \| 'relay'>; defaultLimit?: integer; maxLimit?: integer; … }` | optional | Pagination configuration |
+| **fields** | `{ required?: string[]; selectable?: string[] }` | optional | Field selection configuration |
 | **authRequired** | `boolean` | optional | Require authentication |
 | **permissions** | `string[]` | optional | Required permissions |
-| **cache** | `Object` | optional | Query caching |
+| **cache** | `{ enabled?: boolean; ttl?: integer; key?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }` | optional | Query caching |
 
 
 ---
@@ -389,10 +389,10 @@ const result = FederationEntity.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable rate limiting |
 | **strategy** | `Enum<'token_bucket' \| 'fixed_window' \| 'sliding_window' \| 'cost_based'>` | ✅ | Rate limiting strategy |
-| **global** | `Object` | optional | Global rate limits |
-| **perUser** | `Object` | optional | Per-user rate limits |
-| **costBased** | `Object` | optional | Cost-based rate limiting |
-| **operations** | `Record<string, Object>` | optional | Per-operation rate limits |
+| **global** | `{ maxRequests: integer; windowMs: integer }` | optional | Global rate limits |
+| **perUser** | `{ maxRequests: integer; windowMs: integer }` | optional | Per-user rate limits |
+| **costBased** | `{ enabled: boolean; maxCost: integer; windowMs: integer; useComplexityAsCost: boolean }` | optional | Cost-based rate limiting |
+| **operations** | `Record<string, { maxRequests: integer; windowMs: integer }>` | optional | Per-operation rate limits |
 | **onLimitExceeded** | `Enum<'reject' \| 'queue' \| 'log'>` | ✅ | Action when rate limit exceeded |
 | **errorMessage** | `string` | optional | Custom error message for rate limit violations |
 | **includeHeaders** | `boolean` | ✅ | Include rate limit headers in response |
@@ -408,8 +408,8 @@ const result = FederationEntity.parse(data);
 | :--- | :--- | :--- | :--- |
 | **path** | `string` | ✅ | Resolver path (Type.field) |
 | **type** | `Enum<'datasource' \| 'computed' \| 'script' \| 'proxy'>` | ✅ | Resolver implementation type |
-| **implementation** | `Object` | optional | Implementation configuration |
-| **cache** | `Object` | optional | Resolver caching |
+| **implementation** | `{ datasource?: string; query?: string; expression?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; dependencies?: string[]; … }` | optional | Implementation configuration |
+| **cache** | `{ enabled?: boolean; ttl?: integer; keyArgs?: string[] }` | optional | Resolver caching |
 
 
 ---
@@ -453,11 +453,11 @@ const result = FederationEntity.parse(data);
 | **object** | `string` | ✅ | Source ObjectQL object name |
 | **events** | `Enum<'created' \| 'updated' \| 'deleted' \| 'custom'>[]` | ✅ | Events to subscribe to |
 | **description** | `string` | optional | Subscription description |
-| **filter** | `Object` | optional | Subscription filtering |
-| **payload** | `Object` | optional | Payload configuration |
+| **filter** | `{ enabled: boolean; fields?: string[] }` | optional | Subscription filtering |
+| **payload** | `{ includeEntity: boolean; includePreviousValues: boolean; includeMeta: boolean }` | optional | Payload configuration |
 | **authRequired** | `boolean` | ✅ | Require authentication |
 | **permissions** | `string[]` | optional | Required permissions |
-| **rateLimit** | `Object` | optional | Subscription rate limiting |
+| **rateLimit** | `{ enabled: boolean; maxSubscriptionsPerUser: integer; throttleMs?: integer }` | optional | Subscription rate limiting |
 
 
 ---
@@ -471,10 +471,10 @@ const result = FederationEntity.parse(data);
 | **name** | `string` | ✅ | GraphQL type name (PascalCase recommended) |
 | **object** | `string` | ✅ | Source ObjectQL object name |
 | **description** | `string` | optional | Type description |
-| **fields** | `Object` | optional | Field configuration |
+| **fields** | `{ include?: string[]; exclude?: string[]; mappings?: Record<string, { graphqlName?: string; graphqlType?: string; description?: string; deprecationReason?: string; … }> }` | optional | Field configuration |
 | **interfaces** | `string[]` | optional | GraphQL interface names |
 | **isInterface** | `boolean` | ✅ | Define as GraphQL interface |
-| **directives** | `Object[]` | optional | GraphQL directives |
+| **directives** | `{ name: string; args?: Record<string, any> }[]` | optional | GraphQL directives |
 
 
 ---
@@ -489,8 +489,8 @@ const result = FederationEntity.parse(data);
 | **url** | `string` | ✅ | Subgraph endpoint URL |
 | **schemaSource** | `Enum<'introspection' \| 'file' \| 'registry'>` | ✅ | How to obtain the subgraph schema |
 | **schemaPath** | `string` | optional | Path to schema file (SDL format) |
-| **entities** | `Object[]` | optional | Entity definitions for this subgraph |
-| **healthCheck** | `Object` | optional | Subgraph health check configuration |
+| **entities** | `{ typeName: string; keys: { fields: string; resolvable: boolean }[]; externalFields?: { field: string; ownerSubgraph?: string }[]; requires?: { field: string; fields: string }[]; … }[]` | optional | Entity definitions for this subgraph |
+| **healthCheck** | `{ enabled: boolean; path: string; intervalMs: integer }` | optional | Subgraph health check configuration |
 | **forwardHeaders** | `string[]` | optional | HTTP headers to forward to this subgraph |
 
 

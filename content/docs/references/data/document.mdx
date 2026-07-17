@@ -64,10 +64,10 @@ const result = Document.parse(data);
 | **fileSize** | `number` | ✅ | File size in bytes |
 | **category** | `string` | optional | Document category |
 | **tags** | `string[]` | optional | Document tags |
-| **versioning** | `Object` | optional | Version control |
-| **template** | `Object` | optional | Document template |
-| **eSignature** | `Object` | optional | E-signature config |
-| **access** | `Object` | optional | Access control |
+| **versioning** | `{ enabled: boolean; versions: { versionNumber: number; createdAt: number; createdBy: string; size: number; … }[]; majorVersion: number; minorVersion: number }` | optional | Version control |
+| **template** | `{ id: string; name: string; description?: string; fileUrl: string; … }` | optional | Document template |
+| **eSignature** | `{ provider: Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>; enabled: boolean; signers: { email: string; name: string; role: string; order: number }[]; expirationDays: number; … }` | optional | E-signature config |
+| **access** | `{ isPublic: boolean; sharedWith?: string[]; expiresAt?: number }` | optional | Access control |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |
 
 
@@ -84,7 +84,7 @@ const result = Document.parse(data);
 | **description** | `string` | optional | Template description |
 | **fileUrl** | `string` | ✅ | Template file URL |
 | **fileType** | `string` | ✅ | File MIME type |
-| **placeholders** | `Object[]` | ✅ | Template placeholders |
+| **placeholders** | `{ key: string; label: string; type: Enum<'text' \| 'number' \| 'date' \| 'image'>; required: boolean }[]` | ✅ | Template placeholders |
 
 
 ---
@@ -114,7 +114,7 @@ const result = Document.parse(data);
 | :--- | :--- | :--- | :--- |
 | **provider** | `Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>` | ✅ | E-signature provider |
 | **enabled** | `boolean` | ✅ | E-signature enabled |
-| **signers** | `Object[]` | ✅ | Document signers |
+| **signers** | `{ email: string; name: string; role: string; order: number }[]` | ✅ | Document signers |
 | **expirationDays** | `number` | ✅ | Expiration days |
 | **reminderDays** | `number` | ✅ | Reminder interval days |
 

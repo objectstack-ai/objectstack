@@ -11,7 +11,7 @@ Returns the live action/node registry — the platform's built-in actions plus
 
 any plugin-contributed ones — backing the designer palette and flow
 
-validation. Each entry is a canonical [ActionDescriptorSchema](ActionDescriptorSchema).
+validation. Each entry is a canonical `ActionDescriptorSchema`.
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/protocol.zod.ts`
@@ -48,7 +48,7 @@ const result = AiInsightsRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **insights** | `Object[]` | ✅ | Generated insights |
+| **insights** | `{ type: string; title: string; description: string; confidence?: number; … }[]` | ✅ | Generated insights |
 
 
 ---
@@ -100,7 +100,7 @@ const result = AiInsightsRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **suggestions** | `Object[]` | ✅ | Suggested values |
+| **suggestions** | `{ value: any; label: string; confidence?: number; reason?: string }[]` | ✅ | Suggested values |
 
 
 ---
@@ -111,7 +111,7 @@ const result = AiInsightsRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **actions** | `Object[]` | ✅ | Registered action descriptors (built-in + plugin) |
+| **actions** | `{ type: string; version: string; name: string; description?: string; … }[]` | ✅ | Registered action descriptors (built-in + plugin) |
 | **total** | `integer` | ✅ | Number of descriptors returned (after any filters) |
 
 
@@ -149,7 +149,7 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
-| **request** | `Object` | ✅ | Batch operation request |
+| **request** | `{ operation: Enum<'create' \| 'update' \| 'upsert' \| 'delete'>; records: { id?: string; data?: Record<string, any>; externalId?: string }[]; options?: object }` | ✅ | Batch operation request |
 
 
 ---
@@ -161,13 +161,13 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | optional | Operation type that was performed |
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `Object[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; details?: any; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---
@@ -255,7 +255,7 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name (snake_case) |
-| **data** | `Object` | ✅ | View definition to create |
+| **data** | `{ list?: object; form?: object; listViews?: Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>; formViews?: Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>; … }` | ✅ | View definition to create |
 
 
 ---
@@ -268,7 +268,7 @@ const result = AiInsightsRequest.parse(data);
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
 | **viewId** | `string` | ✅ | Created view identifier |
-| **view** | `Object` | ✅ | Created view definition |
+| **view** | `{ list?: object; form?: object; listViews?: Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>; formViews?: Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>; … }` | ✅ | Created view definition |
 
 
 ---
@@ -307,7 +307,7 @@ const result = AiInsightsRequest.parse(data);
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
 | **ids** | `string[]` | ✅ | Array of record IDs to delete |
-| **options** | `Object` | optional | Delete options |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Delete options |
 
 
 ---
@@ -319,13 +319,13 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | optional | Operation type that was performed |
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `Object[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; details?: any; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---
@@ -387,7 +387,7 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | The unique machine name of the object to query (e.g. "account"). |
-| **query** | `[__schema0](./__schema0)` | optional | Structured query definition (filter, sort, select, pagination). |
+| **query** | `{ object: string; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; where?: any; search?: object; … }` | optional | Structured query definition (filter, sort, select, pagination). |
 
 
 ---
@@ -453,11 +453,11 @@ const result = AiInsightsRequest.parse(data);
 | **name** | `string` | optional |  |
 | **version** | `string` | ✅ |  |
 | **environment** | `Enum<'production' \| 'sandbox' \| 'development'>` | optional |  |
-| **routes** | `Object` | optional |  |
-| **locale** | `Object` | optional |  |
-| **services** | `Record<string, Object>` | optional | Per-service availability map keyed by CoreServiceName |
-| **capabilities** | `Record<string, Object>` | optional | Hierarchical capability descriptors for frontend intelligent adaptation |
-| **schemaDiscovery** | `Object` | optional | Schema discovery endpoints for API toolchain integration |
+| **routes** | `{ data: string; metadata: string; discovery?: string; ui?: string; … }` | optional |  |
+| **locale** | `{ default: string; supported: string[]; timezone: string }` | optional |  |
+| **services** | `Record<string, { enabled: boolean; status: Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>; handlerReady?: boolean; route?: string; … }>` | optional | Per-service availability map keyed by CoreServiceName |
+| **capabilities** | `Record<string, { enabled: boolean; features?: Record<string, boolean>; description?: string }>` | optional | Hierarchical capability descriptors for frontend intelligent adaptation |
+| **schemaDiscovery** | `{ openapi?: string; graphql?: string; jsonSchema?: string }` | optional | Schema discovery endpoints for API toolchain integration |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
 | **apiName** | `string` | optional | API name (deprecated — use name) |
 
@@ -480,7 +480,7 @@ const result = AiInsightsRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objects** | `Record<string, Object>` | ✅ | Effective object permissions keyed by object name |
+| **objects** | `Record<string, { allowCreate: boolean; allowRead: boolean; allowEdit: boolean; allowDelete: boolean; … }>` | ✅ | Effective object permissions keyed by object name |
 | **systemPermissions** | `string[]` | ✅ | Effective system-level permissions |
 
 
@@ -506,7 +506,7 @@ const result = AiInsightsRequest.parse(data);
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
 | **locale** | `string` | ✅ | Locale code |
-| **labels** | `Record<string, Object>` | ✅ | Field labels keyed by field name |
+| **labels** | `Record<string, { label: string; help?: string; options?: Record<string, string> }>` | ✅ | Field labels keyed by field name |
 
 
 ---
@@ -527,7 +527,7 @@ const result = AiInsightsRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **locales** | `Object[]` | ✅ | Available locales |
+| **locales** | `{ code: string; label: string; isDefault: boolean }[]` | ✅ | Available locales |
 
 
 ---
@@ -540,7 +540,7 @@ const result = AiInsightsRequest.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name |
 | **name** | `string` | ✅ | Item name |
-| **cacheRequest** | `Object` | optional | Cache validation parameters |
+| **cacheRequest** | `{ ifNoneMatch?: string; ifModifiedSince?: string; cacheControl?: object }` | optional | Cache validation parameters |
 | **locale** | `string` | optional | Resolved response locale. Folded into the ETag so a language switch never returns a stale-locale 304 — metadata is translated *after* the cache validator check (issue #1319). |
 
 
@@ -553,9 +553,9 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **data** | `any` | optional | Metadata payload (omitted for 304 Not Modified) |
-| **etag** | `Object` | optional | ETag for this resource version |
+| **etag** | `{ value: string; weak: boolean }` | optional | ETag for this resource version |
 | **lastModified** | `string` | optional | Last modification timestamp |
-| **cacheControl** | `Object` | optional | Cache control directives |
+| **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Cache control directives |
 | **notModified** | `boolean` | ✅ | True if resource has not been modified (304 response) |
 | **version** | `string` | optional | Metadata version identifier |
 
@@ -629,7 +629,7 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **types** | `string[]` | ✅ | Available metadata type names (e.g., "object", "plugin", "view") |
-| **entries** | `Object[]` | optional | Enriched per-type registry entries (Phase 3a) |
+| **entries** | `{ type: string; label: string; description?: string; filePatterns: string[]; … }[]` | optional | Enriched per-type registry entries (Phase 3a) |
 
 
 ---
@@ -650,7 +650,7 @@ const result = AiInsightsRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **preferences** | `Object` | ✅ | Current notification preferences |
+| **preferences** | `{ email: boolean; push: boolean; inApp: boolean; digest: Enum<'none' \| 'daily' \| 'weekly'>; … }` | ✅ | Current notification preferences |
 
 
 ---
@@ -673,8 +673,8 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
-| **permissions** | `Object` | ✅ | Object-level permissions |
-| **fieldPermissions** | `Record<string, Object>` | optional | Field-level permissions keyed by field name |
+| **permissions** | `{ allowCreate: boolean; allowRead: boolean; allowEdit: boolean; allowDelete: boolean; … }` | ✅ | Object-level permissions |
+| **fieldPermissions** | `Record<string, { readable: boolean; editable: boolean }>` | optional | Field-level permissions keyed by field name |
 
 
 ---
@@ -697,7 +697,7 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **channel** | `string` | ✅ | Channel name |
-| **members** | `Object[]` | ✅ | Active members and their presence state |
+| **members** | `{ userId: string; status: Enum<'online' \| 'away' \| 'busy' \| 'offline'>; lastSeen: string; metadata?: Record<string, any> }[]` | ✅ | Active members and their presence state |
 
 
 ---
@@ -722,7 +722,7 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **locale** | `string` | ✅ | Locale code |
-| **translations** | `Object` | ✅ | Translation data |
+| **translations** | `{ objects?: Record<string, { label: string; pluralLabel?: string; description?: string; fields?: Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>; … }>; apps?: Record<string, { label: string; description?: string; navigation?: Record<string, { label: string }> }>; messages?: Record<string, string>; validationMessages?: Record<string, string>; … }` | ✅ | Translation data |
 
 
 ---
@@ -745,11 +745,11 @@ const result = AiInsightsRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **list** | `Object` | optional |  |
-| **form** | `Object` | optional |  |
-| **listViews** | `Record<string, Object>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
-| **formViews** | `Record<string, Object>` | optional | Additional named form views |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this view. |
+| **list** | `{ name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }` | optional |  |
+| **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }` | optional |  |
+| **listViews** | `Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
+| **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -780,7 +780,7 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
-| **view** | `Object` | ✅ | View definition |
+| **view** | `{ list?: object; form?: object; listViews?: Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>; formViews?: Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>; … }` | ✅ | View definition |
 
 
 ---
@@ -803,7 +803,7 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
-| **workflows** | `Object[]` | ✅ | Active state-machine workflows for this object |
+| **workflows** | `{ id: string; description?: string; contextSchema?: Record<string, any>; initial: string; … }[]` | ✅ | Active state-machine workflows for this object |
 
 
 ---
@@ -828,7 +828,7 @@ const result = AiInsightsRequest.parse(data);
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
 | **recordId** | `string` | ✅ | Record ID |
-| **state** | `Object` | ✅ | Current workflow state and available transitions |
+| **state** | `{ currentState: string; availableTransitions: { name: string; targetState: string; label?: string; requiresApproval: boolean }[]; history?: { fromState: string; toState: string; action: string; userId: string; … }[] }` | ✅ | Current workflow state and available transitions |
 
 
 ---
@@ -874,7 +874,7 @@ const result = AiInsightsRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **notifications** | `Object[]` | ✅ | List of notifications |
+| **notifications** | `{ id: string; type: string; title: string; body: string; … }[]` | ✅ | List of notifications |
 | **unreadCount** | `number` | ✅ | Total number of unread notifications |
 | **cursor** | `string` | optional | Next page cursor |
 
@@ -900,7 +900,7 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
-| **views** | `Object[]` | ✅ | Array of view definitions |
+| **views** | `{ list?: object; form?: object; listViews?: Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>; formViews?: Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>; … }[]` | ✅ | Array of view definitions |
 
 
 ---
@@ -960,7 +960,7 @@ const result = AiInsightsRequest.parse(data);
 | **push** | `boolean` | ✅ | Receive push notifications |
 | **inApp** | `boolean` | ✅ | Receive in-app notifications |
 | **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | ✅ | Email digest frequency |
-| **channels** | `Record<string, Object>` | optional | Per-channel notification preferences |
+| **channels** | `Record<string, { enabled: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
 
 
 ---
@@ -1118,7 +1118,7 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **channel** | `string` | ✅ | Channel to set presence in |
-| **state** | `Object` | ✅ | Presence state to set |
+| **state** | `{ userId: string; status: Enum<'online' \| 'away' \| 'busy' \| 'offline'>; lastSeen: string; metadata?: Record<string, any> }` | ✅ | Presence state to set |
 
 
 ---
@@ -1190,8 +1190,8 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
-| **records** | `Object[]` | ✅ | Array of updates |
-| **options** | `Object` | optional | Update options |
+| **records** | `{ id: string; data: Record<string, any> }[]` | ✅ | Array of updates |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Update options |
 
 
 ---
@@ -1203,13 +1203,13 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | optional | Operation type that was performed |
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `Object[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; details?: any; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---
@@ -1220,7 +1220,7 @@ const result = AiInsightsRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **preferences** | `Object` | ✅ | Preferences to update |
+| **preferences** | `{ email?: boolean; push?: boolean; inApp?: boolean; digest?: Enum<'none' \| 'daily' \| 'weekly'>; … }` | ✅ | Preferences to update |
 
 
 ---
@@ -1231,7 +1231,7 @@ const result = AiInsightsRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **preferences** | `Object` | ✅ | Updated notification preferences |
+| **preferences** | `{ email: boolean; push: boolean; inApp: boolean; digest: Enum<'none' \| 'daily' \| 'weekly'>; … }` | ✅ | Updated notification preferences |
 
 
 ---
@@ -1244,7 +1244,7 @@ const result = AiInsightsRequest.parse(data);
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name (snake_case) |
 | **viewId** | `string` | ✅ | View identifier |
-| **data** | `Object` | ✅ | Partial view data to update |
+| **data** | `{ list?: object; form?: object; listViews?: Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>; formViews?: Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>; … }` | ✅ | Partial view data to update |
 
 
 ---
@@ -1257,7 +1257,7 @@ const result = AiInsightsRequest.parse(data);
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
 | **viewId** | `string` | ✅ | Updated view identifier |
-| **view** | `Object` | ✅ | Updated view definition |
+| **view** | `{ list?: object; form?: object; listViews?: Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>; formViews?: Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>; … }` | ✅ | Updated view definition |
 
 
 ---
@@ -1269,8 +1269,8 @@ const result = AiInsightsRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **currentState** | `string` | ✅ | Current workflow state name |
-| **availableTransitions** | `Object[]` | ✅ | Available transitions from current state |
-| **history** | `Object[]` | optional | State transition history |
+| **availableTransitions** | `{ name: string; targetState: string; label?: string; requiresApproval: boolean }[]` | ✅ | Available transitions from current state |
+| **history** | `{ fromState: string; toState: string; action: string; userId: string; … }[]` | optional | State transition history |
 
 
 ---
@@ -1299,7 +1299,7 @@ const result = AiInsightsRequest.parse(data);
 | **object** | `string` | ✅ | Object name |
 | **recordId** | `string` | ✅ | Record ID |
 | **success** | `boolean` | ✅ | Whether the transition succeeded |
-| **state** | `Object` | ✅ | New workflow state after transition |
+| **state** | `{ currentState: string; availableTransitions: { name: string; targetState: string; label?: string; requiresApproval: boolean }[]; history?: { fromState: string; toState: string; action: string; userId: string; … }[] }` | ✅ | New workflow state after transition |
 
 
 ---

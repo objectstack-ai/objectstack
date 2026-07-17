@@ -32,16 +32,16 @@ const result = Dashboard.parse(data);
 | **name** | `string` | ✅ | Dashboard unique name |
 | **label** | `string` | ✅ | Dashboard label |
 | **description** | `string` | optional | Dashboard description |
-| **header** | `Object` | optional | Dashboard header configuration |
-| **widgets** | `Object[]` | ✅ | Widgets to display |
+| **header** | `{ showTitle: boolean; showDescription: boolean; actions?: { label: string; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api'>; icon?: string }[] }` | optional | Dashboard header configuration |
+| **widgets** | `{ id: string; title?: string; description?: string; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; … }[]` | ✅ | Widgets to display |
 | **columns** | `integer` | optional | Number of grid columns (default 12) |
 | **gap** | `integer` | optional | Grid gap in Tailwind spacing units |
 | **refreshInterval** | `number` | optional | Auto-refresh interval in seconds |
-| **dateRange** | `Object` | optional | Global dashboard date range filter configuration |
-| **globalFilters** | `Object[]` | optional | Global filters that apply to all widgets in the dashboard |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
-| **performance** | `Object` | optional | Performance optimization settings |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this dashboard. |
+| **dateRange** | `{ field?: string; defaultRange: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| 'this_quarter' \| 'last_quarter' \| 'this_year' \| 'last_year' \| 'last_7_days' \| 'last_30_days' \| 'last_90_days' \| 'custom'>; allowCustomRange: boolean }` | optional | Global dashboard date range filter configuration |
+| **globalFilters** | `{ name?: string; field: string; label?: string; type?: Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+| **performance** | `{ lazyLoad?: boolean; virtualScroll?: object; cacheStrategy?: Enum<'none' \| 'cache-first' \| 'network-first' \| 'stale-while-revalidate'>; prefetch?: boolean; … }` | optional | Performance optimization settings |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this dashboard. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -63,7 +63,7 @@ Dashboard header configuration
 | :--- | :--- | :--- | :--- |
 | **showTitle** | `boolean` | ✅ | Show dashboard title in header |
 | **showDescription** | `boolean` | ✅ | Show dashboard description in header |
-| **actions** | `Object[]` | optional | Header action buttons |
+| **actions** | `{ label: string; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api'>; icon?: string }[]` | optional | Header action buttons |
 
 
 ---
@@ -94,24 +94,24 @@ Dashboard header action
 | **title** | `string` | optional | Widget title |
 | **description** | `string` | optional | Widget description text below the header |
 | **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | ✅ | Visualization type |
-| **chartConfig** | `Object` | optional | Chart visualization configuration |
+| **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; title?: string; subtitle?: string; description?: string; … }` | optional | Chart visualization configuration |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
 | **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
 | **requiresService** | `string` | optional | Hide the widget unless the named kernel service is registered |
 | **actionUrl** | `string` | optional | URL or target for the widget action button |
 | **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api'>` | optional | Type of action for the widget action button |
 | **actionIcon** | `string` | optional | Icon identifier for the widget action button |
-| **filter** | `[__schema0](./__schema0)` | optional | Presentation-scope filter (runtimeFilter) |
-| **compareTo** | `string \| string \| Object` | optional | Period-over-period comparison window |
+| **filter** | `any` | optional | Presentation-scope filter (runtimeFilter) |
+| **compareTo** | `'previousPeriod' \| 'previousYear' \| { offset: string }` | optional | Period-over-period comparison window |
 | **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
 | **dimensions** | `string[]` | optional | Dimension names — X/group/split |
 | **values** | `string[]` | ✅ | Measure names — Y (at least one) |
-| **layout** | `Object` | optional | Grid layout position (auto-flowed when omitted) |
+| **layout** | `{ x: number; y: number; w: number; h: number }` | optional | Grid layout position (auto-flowed when omitted) |
 | **options** | `any` | optional | Widget specific configuration |
-| **filterBindings** | `Record<string, string \| boolean>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out |
+| **filterBindings** | `Record<string, string \| 'false'>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out |
 | **suppressWarnings** | `string[]` | optional | Build diagnostic rule ids suppressed on this widget |
-| **responsive** | `Object` | optional | Responsive layout configuration |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **responsive** | `{ breakpoint?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>; hiddenOn?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>[]; columns?: object; order?: object }` | optional | Responsive layout configuration |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -126,8 +126,8 @@ Dashboard header action
 | **field** | `string` | ✅ | Field name to filter on |
 | **label** | `string` | optional | Display label for the filter |
 | **type** | `Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>` | optional | Filter input type |
-| **options** | `Object[]` | optional | Static filter options |
-| **optionsFrom** | `Object` | optional | Dynamic filter options from object |
+| **options** | `{ value: string \| number \| boolean; label: string }[]` | optional | Static filter options |
+| **optionsFrom** | `{ object: string; valueField: string; labelField: string; filter?: any }` | optional | Dynamic filter options from object |
 | **defaultValue** | `string \| number \| boolean` | optional | Default filter value |
 | **scope** | `Enum<'dashboard' \| 'widget'>` | ✅ | Filter application scope |
 | **targetWidgets** | `string[]` | optional | Widget IDs to apply this filter to |
@@ -146,7 +146,7 @@ Dynamic filter options from object
 | **object** | `string` | ✅ | Source object name |
 | **valueField** | `string` | ✅ | Field to use as option value |
 | **labelField** | `string` | ✅ | Field to use as option label |
-| **filter** | `[__schema0](./__schema0)` | optional | Filter to apply to source object |
+| **filter** | `any` | optional | Filter to apply to source object |
 
 
 ---

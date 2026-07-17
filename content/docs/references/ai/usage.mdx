@@ -54,7 +54,7 @@ const result = AIUsageRecord.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **model** | `string` | ✅ |  |
-| **usage** | `Object` | ✅ |  |
+| **usage** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer }` | ✅ |  |
 | **costUsd** | `number` | ✅ | Computed cost in USD |
 | **latencyMs** | `number` | optional |  |
 | **timestamp** | `string` | optional |  |

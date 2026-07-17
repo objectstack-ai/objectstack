@@ -215,12 +215,12 @@ const result = ActionContribution.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **metadataViewers** | `Object[]` | ✅ |  |
-| **sidebarGroups** | `Object[]` | ✅ |  |
-| **actions** | `Object[]` | ✅ |  |
-| **metadataIcons** | `Object[]` | ✅ |  |
-| **panels** | `Object[]` | ✅ |  |
-| **commands** | `Object[]` | ✅ |  |
+| **metadataViewers** | `{ id: string; metadataTypes: string[]; label: string; priority: number; … }[]` | ✅ |  |
+| **sidebarGroups** | `{ key: string; label: string; icon?: string; metadataTypes: string[]; … }[]` | ✅ |  |
+| **actions** | `{ id: string; label: string; icon?: string; location: Enum<'toolbar' \| 'contextMenu' \| 'commandPalette'>; … }[]` | ✅ |  |
+| **metadataIcons** | `{ metadataType: string; label: string; icon: string }[]` | ✅ |  |
+| **panels** | `{ id: string; label: string; icon?: string; location: Enum<'bottom' \| 'right' \| 'modal'> }[]` | ✅ |  |
+| **commands** | `{ id: string; label: string; shortcut?: string; icon?: string }[]` | ✅ |  |
 
 
 ---
@@ -236,7 +236,7 @@ const result = ActionContribution.parse(data);
 | **version** | `string` | ✅ | Plugin version |
 | **description** | `string` | optional | Plugin description |
 | **author** | `string` | optional | Author |
-| **contributes** | `Object` | ✅ |  |
+| **contributes** | `{ metadataViewers: { id: string; metadataTypes: string[]; label: string; priority: number; … }[]; sidebarGroups: { key: string; label: string; icon?: string; metadataTypes: string[]; … }[]; actions: { id: string; label: string; icon?: string; location: Enum<'toolbar' \| 'contextMenu' \| 'commandPalette'>; … }[]; metadataIcons: { metadataType: string; label: string; icon: string }[]; … }` | ✅ |  |
 | **activationEvents** | `string[]` | ✅ |  |
 
 

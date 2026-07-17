@@ -41,8 +41,8 @@ const result = Webhook.parse(data);
 | **body** | `any` | optional | Request body payload (if not using default record data) |
 | **payloadFields** | `string[]` | optional | Fields to include. Empty = All |
 | **includeSession** | `boolean` | ✅ | Include user session info |
-| **authentication** | `Object` | optional | Authentication configuration |
-| **retryPolicy** | `Object` | optional | Retry policy configuration |
+| **authentication** | `{ type: Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>; credentials?: Record<string, string> }` | optional | Authentication configuration |
+| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'exponential' \| 'linear' \| 'fixed'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Retry policy configuration |
 | **timeoutMs** | `integer` | ✅ | Request timeout in milliseconds |
 | **secret** | `string` | optional | Signing secret for HMAC signature verification |
 | **isActive** | `boolean` | ✅ | Whether webhook is active |
@@ -61,7 +61,7 @@ const result = Webhook.parse(data);
 | **name** | `string` | ✅ | Webhook receiver unique name (lowercase snake_case) |
 | **path** | `string` | ✅ | URL Path (e.g. /webhooks/stripe) |
 | **verificationType** | `Enum<'none' \| 'header_token' \| 'hmac' \| 'ip_whitelist'>` | ✅ |  |
-| **verificationParams** | `Object` | optional |  |
+| **verificationParams** | `{ header?: string; secret?: string; ips?: string[] }` | optional |  |
 | **action** | `Enum<'trigger_flow' \| 'script' \| 'upsert_record'>` | ✅ |  |
 | **target** | `string` | ✅ | Flow ID or Script name |
 

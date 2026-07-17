@@ -28,8 +28,8 @@ const result = DeadLetterQueueEntry.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique entry identifier |
-| **event** | `Object` | ✅ | Original event |
-| **error** | `Object` | ✅ | Failure details |
+| **event** | `{ id?: string; name: string; payload: any; metadata: object }` | ✅ | Original event |
+| **error** | `{ message: string; stack?: string; code?: string }` | ✅ | Failure details |
 | **retries** | `integer` | ✅ | Number of retry attempts |
 | **firstFailedAt** | `string` | ✅ | When event first failed |
 | **lastFailedAt** | `string` | ✅ | When event last failed |
@@ -44,15 +44,15 @@ const result = DeadLetterQueueEntry.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **persistence** | `Object` | optional | Event persistence configuration |
-| **queue** | `Object` | optional | Event queue configuration |
-| **eventSourcing** | `Object` | optional | Event sourcing configuration |
-| **replay** | `Object` | optional | Event replay configuration |
-| **webhooks** | `Object[]` | optional | Webhook configurations |
-| **messageQueue** | `Object` | optional | Message queue integration |
-| **realtime** | `Object` | optional | Real-time notification configuration |
-| **eventTypes** | `Object[]` | optional | Event type definitions |
-| **handlers** | `Object[]` | optional | Global event handlers |
+| **persistence** | `{ enabled: boolean; retention: integer; filter?: any; storage: Enum<'database' \| 'file' \| 's3' \| 'custom'> }` | optional | Event persistence configuration |
+| **queue** | `{ name: string; concurrency: integer; retryPolicy?: object; deadLetterQueue?: string; … }` | optional | Event queue configuration |
+| **eventSourcing** | `{ enabled: boolean; snapshotInterval: integer; snapshotRetention: integer; retention: integer; … }` | optional | Event sourcing configuration |
+| **replay** | `{ enabled: boolean }` | optional | Event replay configuration |
+| **webhooks** | `{ id?: string; eventPattern: string; url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>; … }[]` | optional | Webhook configurations |
+| **messageQueue** | `{ provider: Enum<'kafka' \| 'rabbitmq' \| 'aws-sqs' \| 'redis-pubsub' \| 'google-pubsub' \| 'azure-service-bus'>; topic: string; eventPattern: string; partitionKey?: string; … }` | optional | Message queue integration |
+| **realtime** | `{ enabled: boolean; protocol: Enum<'websocket' \| 'sse' \| 'long-polling'>; eventPattern: string; userFilter: boolean; … }` | optional | Real-time notification configuration |
+| **eventTypes** | `{ name: string; version: string; schema?: any; description?: string; … }[]` | optional | Event type definitions |
+| **handlers** | `{ id?: string; eventName: string; handler: any; priority: integer; … }[]` | optional | Global event handlers |
 
 
 ---
@@ -68,7 +68,7 @@ const result = DeadLetterQueueEntry.parse(data);
 | **handler** | `any` | ✅ | Handler function |
 | **priority** | `integer` | ✅ | Execution priority (lower numbers execute first) |
 | **async** | `boolean` | ✅ | Execute in background (true) or block (false) |
-| **retry** | `Object` | optional | Retry policy for failed handlers |
+| **retry** | `{ maxRetries: integer; backoffMs: integer; backoffMultiplier: number }` | optional | Retry policy for failed handlers |
 | **timeoutMs** | `integer` | optional | Handler timeout in milliseconds |
 | **filter** | `any` | optional | Optional filter to determine if handler should execute |
 
@@ -82,9 +82,9 @@ const result = DeadLetterQueueEntry.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique log entry identifier |
-| **event** | `Object` | ✅ | The event |
+| **event** | `{ id?: string; name: string; payload: any; metadata: object }` | ✅ | The event |
 | **status** | `Enum<'pending' \| 'processing' \| 'completed' \| 'failed'>` | ✅ | Processing status |
-| **handlersExecuted** | `Object[]` | optional | Handlers that processed this event |
+| **handlersExecuted** | `{ handlerId: string; status: Enum<'success' \| 'failed' \| 'timeout'>; durationMs?: integer; error?: string }[]` | optional | Handlers that processed this event |
 | **receivedAt** | `string` | ✅ | When event was received |
 | **processedAt** | `string` | optional | When event was processed |
 | **totalDurationMs** | `integer` | optional | Total processing time |
@@ -124,7 +124,7 @@ const result = DeadLetterQueueEntry.parse(data);
 | **correlationId** | `string` | optional | Correlation ID for event tracing |
 | **causationId** | `string` | optional | ID of the event that caused this event |
 | **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | ✅ | Event priority |
-| **cluster** | `Object` | optional | Per-emit cluster routing & delivery options. See cluster-semantics.mdx §4. |
+| **cluster** | `{ scope: Enum<'local' \| 'cluster' \| 'tenant'>; deliverySemantics?: Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>; partitionKey?: string }` | optional | Per-emit cluster routing & delivery options. See cluster-semantics.mdx §4. |
 
 
 ---
@@ -164,7 +164,7 @@ const result = DeadLetterQueueEntry.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Event queue name |
 | **concurrency** | `integer` | ✅ | Max concurrent event handlers |
-| **retryPolicy** | `Object` | optional | Default retry policy for events |
+| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Default retry policy for events |
 | **deadLetterQueue** | `string` | optional | Dead letter queue name for failed events |
 | **priorityEnabled** | `boolean` | ✅ | Process events based on priority |
 
@@ -211,7 +211,7 @@ const result = DeadLetterQueueEntry.parse(data);
 | **snapshotRetention** | `integer` | ✅ | Number of snapshots to retain |
 | **retention** | `integer` | ✅ | Days to retain events |
 | **aggregateTypes** | `string[]` | optional | Aggregate types to enable event sourcing for |
-| **storage** | `Object` | optional | Event store configuration |
+| **storage** | `{ type: Enum<'database' \| 'file' \| 's3' \| 'eventstore'>; options?: Record<string, any> }` | optional | Event store configuration |
 
 
 ---
@@ -243,8 +243,8 @@ const result = DeadLetterQueueEntry.parse(data);
 | **url** | `string` | ✅ | Webhook endpoint URL |
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>` | ✅ | HTTP method |
 | **headers** | `Record<string, string>` | optional | HTTP headers |
-| **authentication** | `Object` | optional | Authentication configuration |
-| **retryPolicy** | `Object` | optional | Retry policy |
+| **authentication** | `{ type: Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>; credentials?: Record<string, string> }` | optional | Authentication configuration |
+| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Retry policy |
 | **timeoutMs** | `integer` | ✅ | Request timeout in milliseconds |
 | **transform** | `any` | optional | Transform event before sending |
 | **enabled** | `boolean` | ✅ | Whether webhook is enabled |
@@ -263,8 +263,8 @@ const result = DeadLetterQueueEntry.parse(data);
 | **eventPattern** | `string` | ✅ | Event pattern to broadcast |
 | **userFilter** | `boolean` | ✅ | Filter events by user |
 | **tenantFilter** | `boolean` | ✅ | Filter events by tenant |
-| **channels** | `Object[]` | optional | Named channels for event broadcasting |
-| **rateLimit** | `Object` | optional | Rate limiting configuration |
+| **channels** | `{ name: string; eventPattern: string; filter?: any }[]` | optional | Named channels for event broadcasting |
+| **rateLimit** | `{ maxEventsPerSecond: integer; windowMs: integer }` | optional | Rate limiting configuration |
 
 
 ---

@@ -34,7 +34,7 @@ const result = FieldMapping.parse(data);
 | **source** | `string \| string[]` | ✅ | Source column header(s) |
 | **target** | `string \| string[]` | ✅ | Target object field(s) |
 | **transform** | `Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>` | ✅ |  |
-| **params** | `Object` | optional |  |
+| **params** | `{ value?: any; object?: string; fromField?: string; toField?: string; … }` | optional |  |
 
 
 ---
@@ -49,10 +49,10 @@ const result = FieldMapping.parse(data);
 | **label** | `string` | optional |  |
 | **sourceFormat** | `Enum<'csv' \| 'json' \| 'xml' \| 'sql'>` | ✅ |  |
 | **targetObject** | `string` | ✅ | Target Object Name |
-| **fieldMapping** | `Object[]` | ✅ |  |
+| **fieldMapping** | `{ source: string \| string[]; target: string \| string[]; transform: Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>; params?: object }[]` | ✅ |  |
 | **mode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ |  |
 | **upsertKey** | `string[]` | optional | Fields to match for upsert (e.g. email) |
-| **extractQuery** | `[__schema0](./__schema0)` | optional | Query to run for export only |
+| **extractQuery** | `{ object: string; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; where?: any; search?: object; … }` | optional | Query to run for export only |
 | **errorPolicy** | `Enum<'skip' \| 'abort' \| 'retry'>` | ✅ |  |
 | **batchSize** | `number` | ✅ |  |
 

@@ -33,7 +33,7 @@ marker; the body is the edges *between* them in the main graph), or
 
 We adopt **(B)**. Each container holds its body as a self-contained
 
-[FlowRegionSchema](FlowRegionSchema) (`config.body` for `loop`, `config.branches[]` for
+`FlowRegionSchema` (`config.body` for `loop`, `config.branches[]` for
 
 `parallel`, `config.try`/`config.catch` for `try_catch`). The reasons:
 
@@ -63,11 +63,11 @@ legacy behavior — the constructs are **additive**, activated only when the
 
 nested structure is present.
 
-The canonical construct type ids are [LOOP_NODE_TYPE](LOOP_NODE_TYPE) (`loop`,
+The canonical construct type ids are `LOOP_NODE_TYPE` (`loop`,
 
-pre-existing), [PARALLEL_NODE_TYPE](PARALLEL_NODE_TYPE) (`parallel`), and
+pre-existing), `PARALLEL_NODE_TYPE` (`parallel`), and
 
-[TRY_CATCH_NODE_TYPE](TRY_CATCH_NODE_TYPE) (`try_catch`). These are distinct from the BPMN
+`TRY_CATCH_NODE_TYPE` (`try_catch`). These are distinct from the BPMN
 
 interop node types (`parallel_gateway` / `join_gateway` / `boundary_event`),
 
@@ -95,8 +95,8 @@ const result = FlowRegion.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **nodes** | `Object[]` | ✅ | Region body nodes (single-entry/single-exit sub-graph) |
-| **edges** | `Object[]` | optional | Region body edges |
+| **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Region body nodes (single-entry/single-exit sub-graph) |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[]` | optional | Region body edges |
 
 
 ---
@@ -111,7 +111,7 @@ const result = FlowRegion.parse(data);
 | **iteratorVariable** | `string` | optional | Loop variable holding the current item |
 | **indexVariable** | `string` | optional | Optional loop variable holding the current index |
 | **maxIterations** | `integer` | optional | Hard cap on iterations (clamped to the engine ceiling) |
-| **body** | `Object` | optional | Loop body region (omit for legacy flat-graph loops) |
+| **body** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | optional | Loop body region (omit for legacy flat-graph loops) |
 
 
 ---
@@ -123,8 +123,8 @@ const result = FlowRegion.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Branch label |
-| **nodes** | `Object[]` | ✅ | Branch body nodes |
-| **edges** | `Object[]` | optional | Branch body edges |
+| **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Branch body nodes |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[]` | optional | Branch body edges |
 
 
 ---
@@ -135,7 +135,7 @@ const result = FlowRegion.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **branches** | `Object[]` | ✅ | Branch regions executed concurrently; implicit join at block end |
+| **branches** | `{ name?: string; nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }[]` | ✅ | Branch regions executed concurrently; implicit join at block end |
 
 
 ---
@@ -146,10 +146,10 @@ const result = FlowRegion.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **try** | `Object` | ✅ | Protected region |
-| **catch** | `Object` | optional | Handler region run when the try region fails |
+| **try** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | ✅ | Protected region |
+| **catch** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | optional | Handler region run when the try region fails |
 | **errorVariable** | `string` | optional | Variable holding the caught error in the catch region |
-| **retry** | `Object` | optional | Optional retry policy for the try region |
+| **retry** | `{ maxRetries?: integer; retryDelayMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Optional retry policy for the try region |
 
 
 ---

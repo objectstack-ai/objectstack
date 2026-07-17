@@ -37,11 +37,11 @@ const result = HookContext.parse(data);
 | **input** | `Record<string, any>` | ✅ | Mutable input parameters |
 | **result** | `any` | optional | Operation result (After hooks only) |
 | **previous** | `Record<string, any>` | optional | Record state before operation |
-| **session** | `Object` | optional | Current session context |
+| **session** | `{ userId?: string; tenantId?: string; roles?: string[]; accessToken?: string; … }` | optional | Current session context |
 | **transaction** | `any` | optional | Database transaction handle |
 | **ql** | `any` | ✅ | ObjectQL Engine Reference |
 | **api** | `any` | optional | Cross-object data access (ScopedContext) |
-| **user** | `Object` | optional | Current user info shortcut |
+| **user** | `{ id?: string; name?: string; email?: string }` | optional | Current user info shortcut |
 
 
 ---

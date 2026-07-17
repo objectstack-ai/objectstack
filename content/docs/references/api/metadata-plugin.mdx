@@ -27,7 +27,7 @@ const result = MetadataBulkRegisterRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **items** | `Object[]` | ✅ | Items to register |
+| **items** | `{ type: string; name: string; data: Record<string, any> }[]` | ✅ | Items to register |
 | **continueOnError** | `boolean` | ✅ | Continue on individual failure |
 | **validate** | `boolean` | ✅ | Validate before registering |
 

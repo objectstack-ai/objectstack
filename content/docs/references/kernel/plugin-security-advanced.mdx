@@ -45,12 +45,12 @@ const result = KernelSecurityPolicy.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **csp** | `Object` | optional |  |
-| **cors** | `Object` | optional |  |
-| **rateLimit** | `Object` | optional |  |
-| **authentication** | `Object` | optional |  |
-| **encryption** | `Object` | optional |  |
-| **auditLog** | `Object` | optional |  |
+| **csp** | `{ directives?: Record<string, string[]>; reportOnly: boolean }` | optional |  |
+| **cors** | `{ allowedOrigins: string[]; allowedMethods: string[]; allowedHeaders: string[]; allowCredentials: boolean; … }` | optional |  |
+| **rateLimit** | `{ enabled: boolean; maxRequests: integer; windowMs: integer; strategy: Enum<'fixed' \| 'sliding' \| 'token-bucket'> }` | optional |  |
+| **authentication** | `{ required: boolean; methods: Enum<'jwt' \| 'oauth2' \| 'api-key' \| 'session' \| 'certificate'>[]; tokenExpiration?: integer }` | optional |  |
+| **encryption** | `{ dataAtRest: boolean; dataInTransit: boolean; algorithm?: string; minKeyLength?: integer }` | optional |  |
+| **auditLog** | `{ enabled: boolean; events?: string[]; retention?: integer }` | optional |  |
 
 
 ---
@@ -62,13 +62,13 @@ const result = KernelSecurityPolicy.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **timestamp** | `string` | ✅ |  |
-| **scanner** | `Object` | ✅ |  |
+| **scanner** | `{ name: string; version: string }` | ✅ |  |
 | **status** | `Enum<'passed' \| 'failed' \| 'warning'>` | ✅ |  |
-| **vulnerabilities** | `Object[]` | optional |  |
-| **codeIssues** | `Object[]` | optional |  |
-| **dependencyVulnerabilities** | `Object[]` | optional |  |
-| **licenseCompliance** | `Object` | optional |  |
-| **summary** | `Object` | ✅ |  |
+| **vulnerabilities** | `{ cve?: string; id: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>; category?: string; … }[]` | optional |  |
+| **codeIssues** | `{ severity: Enum<'error' \| 'warning' \| 'info'>; type: string; file: string; line?: integer; … }[]` | optional |  |
+| **dependencyVulnerabilities** | `{ package: string; version: string; vulnerability: object }[]` | optional |  |
+| **licenseCompliance** | `{ status: Enum<'compliant' \| 'non-compliant' \| 'unknown'>; issues?: { package: string; license: string; reason: string }[] }` | optional |  |
+| **summary** | `{ totalVulnerabilities: integer; criticalCount: integer; highCount: integer; mediumCount: integer; … }` | ✅ |  |
 
 
 ---
@@ -146,7 +146,7 @@ Scope of permission application
 | **resource** | `Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| 'ui.report' \| 'system.config' \| 'system.plugin' \| 'system.api' \| 'system.service' \| 'storage.file' \| 'storage.database' \| 'network.http' \| 'network.websocket' \| 'process.spawn' \| 'process.env'>` | ✅ | Type of resource being accessed |
 | **actions** | `Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| 'share' \| 'export' \| 'import' \| 'admin'>[]` | ✅ |  |
 | **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>` | optional | Scope of permission application |
-| **filter** | `Object` | optional |  |
+| **filter** | `{ resourceIds?: string[]; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; fields?: string[] }` | optional |  |
 | **description** | `string` | ✅ |  |
 | **required** | `boolean` | optional |  |
 | **justification** | `string` | optional | Why this permission is needed |
@@ -160,8 +160,8 @@ Scope of permission application
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **permissions** | `Object[]` | ✅ |  |
-| **groups** | `Object[]` | optional |  |
+| **permissions** | `{ id: string; resource: Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| 'ui.report' \| 'system.config' \| 'system.plugin' \| 'system.api' \| 'system.service' \| 'storage.file' \| 'storage.database' \| 'network.http' \| 'network.websocket' \| 'process.spawn' \| 'process.env'>; actions: Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| 'share' \| 'export' \| 'import' \| 'admin'>[]; scope?: Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>; … }[]` | ✅ |  |
+| **groups** | `{ name: string; description: string; permissions: string[] }[]` | optional |  |
 | **defaultGrant** | `Enum<'prompt' \| 'allow' \| 'deny' \| 'inherit'>` | optional |  |
 
 
@@ -175,15 +175,15 @@ Scope of permission application
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ |  |
 | **trustLevel** | `Enum<'verified' \| 'trusted' \| 'community' \| 'untrusted' \| 'blocked'>` | ✅ | Trust level of the plugin |
-| **permissions** | `Object` | ✅ |  |
-| **sandbox** | `Object` | ✅ |  |
-| **policy** | `Object` | optional |  |
-| **scanResults** | `Object[]` | optional |  |
-| **vulnerabilities** | `Object[]` | optional |  |
-| **codeSigning** | `Object` | optional |  |
-| **certifications** | `Object[]` | optional |  |
-| **securityContact** | `Object` | optional |  |
-| **vulnerabilityDisclosure** | `Object` | optional |  |
+| **permissions** | `{ permissions: { id: string; resource: Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| 'ui.report' \| 'system.config' \| 'system.plugin' \| 'system.api' \| 'system.service' \| 'storage.file' \| 'storage.database' \| 'network.http' \| 'network.websocket' \| 'process.spawn' \| 'process.env'>; actions: Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| 'share' \| 'export' \| 'import' \| 'admin'>[]; scope?: Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>; … }[]; groups?: { name: string; description: string; permissions: string[] }[]; defaultGrant?: Enum<'prompt' \| 'allow' \| 'deny' \| 'inherit'> }` | ✅ |  |
+| **sandbox** | `{ enabled?: boolean; level?: Enum<'none' \| 'minimal' \| 'standard' \| 'strict' \| 'paranoid'>; runtime?: object; filesystem?: object; … }` | ✅ |  |
+| **policy** | `{ csp?: object; cors?: object; rateLimit?: object; authentication?: object; … }` | optional |  |
+| **scanResults** | `{ timestamp: string; scanner: object; status: Enum<'passed' \| 'failed' \| 'warning'>; vulnerabilities?: { cve?: string; id: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>; category?: string; … }[]; … }[]` | optional |  |
+| **vulnerabilities** | `{ cve?: string; id: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>; category?: string; … }[]` | optional |  |
+| **codeSigning** | `{ signed: boolean; signature?: string; certificate?: string; algorithm?: string; … }` | optional |  |
+| **certifications** | `{ name: string; issuer: string; issuedDate: string; expiryDate?: string; … }[]` | optional |  |
+| **securityContact** | `{ email?: string; url?: string; pgpKey?: string }` | optional |  |
+| **vulnerabilityDisclosure** | `{ policyUrl?: string; responseTime?: integer; bugBounty?: boolean }` | optional |  |
 
 
 ---
@@ -236,8 +236,8 @@ Type of resource being accessed
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **engine** | `Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>` | ✅ | Execution environment engine |
-| **engineConfig** | `Object` | optional |  |
-| **resourceLimits** | `Object` | optional |  |
+| **engineConfig** | `{ wasm?: object; container?: object; v8Isolate?: object }` | optional |  |
+| **resourceLimits** | `{ maxMemory?: integer; maxCpu?: number; timeout?: integer }` | optional |  |
 
 
 ---
@@ -250,13 +250,13 @@ Type of resource being accessed
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ |  |
 | **level** | `Enum<'none' \| 'minimal' \| 'standard' \| 'strict' \| 'paranoid'>` | ✅ |  |
-| **runtime** | `Object` | optional | Execution environment and isolation settings |
-| **filesystem** | `Object` | optional |  |
-| **network** | `Object` | optional |  |
-| **process** | `Object` | optional |  |
-| **memory** | `Object` | optional |  |
-| **cpu** | `Object` | optional |  |
-| **environment** | `Object` | optional |  |
+| **runtime** | `{ engine: Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>; engineConfig?: object; resourceLimits?: object }` | optional | Execution environment and isolation settings |
+| **filesystem** | `{ mode: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedPaths?: string[]; deniedPaths?: string[]; maxFileSize?: integer }` | optional |  |
+| **network** | `{ mode: Enum<'none' \| 'local' \| 'restricted' \| 'full'>; allowedHosts?: string[]; deniedHosts?: string[]; allowedPorts?: number[]; … }` | optional |  |
+| **process** | `{ allowSpawn: boolean; allowedCommands?: string[]; timeout?: integer }` | optional |  |
+| **memory** | `{ maxHeap?: integer; maxStack?: integer }` | optional |  |
+| **cpu** | `{ maxCpuPercent?: number; maxThreads?: integer }` | optional |  |
+| **environment** | `{ mode: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedVars?: string[]; deniedVars?: string[] }` | optional |  |
 
 
 ---

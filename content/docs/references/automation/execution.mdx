@@ -106,8 +106,8 @@ const result = Checkpoint.parse(data);
 | **flowName** | `string` | ✅ | Machine name of the executed flow |
 | **flowVersion** | `integer` | optional | Version of the flow that was executed |
 | **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying'>` | ✅ | Current execution status |
-| **trigger** | `Object` | ✅ | What triggered this execution |
-| **steps** | `Object[]` | ✅ | Ordered list of executed steps |
+| **trigger** | `{ type: string; recordId?: string; object?: string; userId?: string; … }` | ✅ | What triggered this execution |
+| **steps** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Ordered list of executed steps |
 | **variables** | `Record<string, any>` | optional | Final state of flow variables |
 | **startedAt** | `string` | ✅ | Execution start timestamp |
 | **completedAt** | `string` | optional | Execution completion timestamp |
@@ -149,7 +149,7 @@ const result = Checkpoint.parse(data);
 | **durationMs** | `integer` | optional | Step execution duration in milliseconds |
 | **input** | `Record<string, any>` | optional | Input data passed to the node |
 | **output** | `Record<string, any>` | optional | Output data produced by the node |
-| **error** | `Object` | optional | Error details if step failed |
+| **error** | `{ code: string; message: string; stack?: string }` | optional | Error details if step failed |
 | **retryAttempt** | `integer` | optional | Retry attempt number (0 = first try) |
 | **parentNodeId** | `string` | optional | Enclosing structured-region container node ID (loop/parallel/try_catch) |
 | **iteration** | `integer` | optional | Zero-based loop iteration or parallel branch index of the enclosing region |
@@ -166,7 +166,7 @@ const result = Checkpoint.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Schedule instance ID |
 | **flowName** | `string` | ✅ | Flow machine name |
-| **cronExpression** | `string \| Object` | ✅ | Cron expression — cron`0 9 * * MON-FRI` |
+| **cronExpression** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 9 * * MON-FRI` |
 | **timezone** | `string` | optional | IANA timezone for cron evaluation |
 | **status** | `Enum<'active' \| 'paused' \| 'disabled' \| 'expired'>` | optional | Current schedule status |
 | **nextRunAt** | `string` | optional | Next scheduled execution timestamp |

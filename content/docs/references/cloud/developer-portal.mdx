@@ -93,7 +93,7 @@ const result = AnalyticsTimeRange.parse(data);
 | **category** | `string` | ✅ | Marketplace category |
 | **tags** | `string[]` | optional |  |
 | **iconUrl** | `string` | optional |  |
-| **screenshots** | `Object[]` | optional |  |
+| **screenshots** | `{ url: string; caption?: string }[]` | optional |  |
 | **documentationUrl** | `string` | optional |  |
 | **supportUrl** | `string` | optional |  |
 | **repositoryUrl** | `string` | optional |  |
@@ -154,9 +154,9 @@ const result = AnalyticsTimeRange.parse(data);
 | :--- | :--- | :--- | :--- |
 | **listingId** | `string` | ✅ |  |
 | **timeRange** | `Enum<'last_7d' \| 'last_30d' \| 'last_90d' \| 'last_365d' \| 'all_time'>` | ✅ |  |
-| **summary** | `Object` | ✅ |  |
-| **timeSeries** | `Record<string, Object[]>` | optional | Time series keyed by metric name |
-| **ratingDistribution** | `Object` | optional |  |
+| **summary** | `{ totalInstalls: integer; activeInstalls: integer; totalUninstalls: integer; averageRating?: number; … }` | ✅ |  |
+| **timeSeries** | `Record<string, { date: string; value: number }[]>` | optional | Time series keyed by metric name |
+| **ratingDistribution** | `{ 1: integer; 2: integer; 3: integer; 4: integer; … }` | optional |  |
 
 
 ---
@@ -198,7 +198,7 @@ const result = AnalyticsTimeRange.parse(data);
 | **category** | `string` | optional |  |
 | **tags** | `string[]` | optional |  |
 | **iconUrl** | `string` | optional |  |
-| **screenshots** | `Object[]` | optional |  |
+| **screenshots** | `{ url: string; caption?: string }[]` | optional |  |
 | **documentationUrl** | `string` | optional |  |
 | **supportUrl** | `string` | optional |  |
 | **repositoryUrl** | `string` | optional |  |
@@ -217,7 +217,7 @@ const result = AnalyticsTimeRange.parse(data);
 | **version** | `string` | ✅ | Semver version (e.g., 2.1.0-beta.1) |
 | **channel** | `Enum<'alpha' \| 'beta' \| 'rc' \| 'stable'>` | ✅ |  |
 | **releaseNotes** | `string` | optional | Release notes (Markdown) |
-| **changelog** | `Object[]` | optional | Structured changelog entries |
+| **changelog** | `{ type: Enum<'added' \| 'changed' \| 'fixed' \| 'removed' \| 'deprecated' \| 'security'>; description: string }[]` | optional | Structured changelog entries |
 | **minPlatformVersion** | `string` | optional |  |
 | **artifactUrl** | `string` | optional | Built package artifact URL |
 | **artifactChecksum** | `string` | optional | SHA-256 checksum |

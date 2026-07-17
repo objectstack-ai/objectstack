@@ -59,7 +59,7 @@ const result = ResolvedSettingValue.parse(data);
 | **source** | `Enum<'env' \| 'global' \| 'tenant' \| 'user' \| 'default'>` | ✅ | Resolution source |
 | **locked** | `boolean` | ✅ | Cannot be overridden from UI |
 | **lockedReason** | `string` | optional | Reason for the lock (UI tooltip) |
-| **cascadeChain** | `Object[]` | optional | Full cascade trace (env → global → tenant → user → default) |
+| **cascadeChain** | `{ scope: Enum<'env' \| 'global' \| 'tenant' \| 'user' \| 'default'>; value: any; locked?: boolean; lockedReason?: string; … }[]` | optional | Full cascade trace (env → global → tenant → user → default) |
 
 
 ---
@@ -95,8 +95,8 @@ const result = ResolvedSettingValue.parse(data);
 | **writePermission** | `string` | optional | Permission required to write |
 | **category** | `string` | optional | Settings hub category |
 | **order** | `number` | optional | Display order |
-| **specifiers** | `Object[]` | ✅ | Page contents (ordered) |
-| **visible** | `string \| Object` | optional | Whole-manifest visibility |
+| **specifiers** | `{ type: Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| 'password' \| 'email' \| 'url' \| 'phone' \| 'number' \| 'toggle' \| 'select' \| 'radio' \| 'multiselect' \| 'slider' \| 'color' \| 'json' \| 'action_button'>; id?: string; key?: string; label: string; … }[]` | ✅ | Page contents (ordered) |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Whole-manifest visibility |
 | **featureFlag** | `string` | optional | Gate manifest visibility on a feature flag |
 | **beta** | `boolean` | optional | Show a Beta chip on the page |
 
@@ -109,8 +109,8 @@ const result = ResolvedSettingValue.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `Object` | ✅ |  |
-| **values** | `Record<string, Object>` | ✅ | Effective values keyed by specifier.key |
+| **manifest** | `{ namespace: string; version?: integer; label: string; icon?: string; … }` | ✅ |  |
+| **values** | `Record<string, { value: any; source: Enum<'env' \| 'global' \| 'tenant' \| 'user' \| 'default'>; locked: boolean; lockedReason?: string; … }>` | ✅ | Effective values keyed by specifier.key |
 
 
 ---
@@ -128,7 +128,7 @@ const result = ResolvedSettingValue.parse(data);
 | **description** | `string` | optional | Help text |
 | **icon** | `string` | optional | Icon name (Lucide) |
 | **default** | `any` | optional | Default value |
-| **visible** | `string \| Object` | optional | Visibility expression |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility expression |
 | **required** | `boolean` | optional | Required field |
 | **encrypted** | `boolean` | optional | Encrypt value at rest (forced true for password) |
 | **scope** | `Enum<'global' \| 'tenant' \| 'user'>` | optional | Override manifest scope for this key |
@@ -138,7 +138,7 @@ const result = ResolvedSettingValue.parse(data);
 | **writePermission** | `string` | optional | Permission required to write this specifier |
 | **deprecated** | `boolean` | optional | Mark deprecated |
 | **replacedBy** | `string` | optional | Replacement key (used when deprecated=true) |
-| **options** | `Object[]` | optional | Options for select/radio/multiselect |
+| **options** | `{ value: string \| number \| boolean; label: string; description?: string; icon?: string }[]` | optional | Options for select/radio/multiselect |
 | **min** | `number` | optional |  |
 | **max** | `number` | optional |  |
 | **step** | `number` | optional |  |
@@ -146,7 +146,7 @@ const result = ResolvedSettingValue.parse(data);
 | **maxLength** | `integer` | optional |  |
 | **pattern** | `string` | optional | Regex pattern (text only) |
 | **rows** | `integer` | optional |  |
-| **handler** | `Object \| Object \| Object` | optional | Action handler (action_button) |
+| **handler** | `{ kind: 'http'; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>; url: string; body?: Record<string, any>; … } \| { kind: 'action'; name: string; params?: Record<string, any>; confirmText?: string } \| { kind: 'navigate'; url: string; target?: Enum<'_self' \| '_blank'> }` | optional | Action handler (action_button) |
 | **childNamespace** | `string` | optional | Sub-namespace (child_pane) |
 | **bannerText** | `string` | optional | Markdown body (info_banner) |
 | **bannerSeverity** | `Enum<'info' \| 'success' \| 'warning' \| 'error'>` | optional |  |
@@ -166,7 +166,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **kind** | `string` | ✅ |  |
+| **kind** | `'http'` | ✅ |  |
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>` | ✅ |  |
 | **url** | `string` | ✅ | Endpoint URL; supports $`{...}` interpolation |
 | **body** | `Record<string, any>` | optional | Optional JSON body; supports $`{...}` interpolation |
@@ -180,7 +180,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **kind** | `string` | ✅ |  |
+| **kind** | `'action'` | ✅ |  |
 | **name** | `string` | ✅ | Registered action machine name |
 | **params** | `Record<string, any>` | optional |  |
 | **confirmText** | `string` | optional | Display label (plain string; i18n keys are auto-generated by the framework) |
@@ -193,7 +193,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **kind** | `string` | ✅ |  |
+| **kind** | `'navigate'` | ✅ |  |
 | **url** | `string` | ✅ | Target URL or in-app route |
 | **target** | `Enum<'_self' \| '_blank'>` | ✅ |  |
 

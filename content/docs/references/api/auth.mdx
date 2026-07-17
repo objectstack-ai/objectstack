@@ -102,9 +102,9 @@ const result = AuthProvider.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ session: object; user: object; token?: string }` | ✅ |  |
 
 
 ---
@@ -138,9 +138,9 @@ const result = AuthProvider.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ id: string; email: string; emailVerified: boolean; name: string; … }` | ✅ |  |
 
 
 ---

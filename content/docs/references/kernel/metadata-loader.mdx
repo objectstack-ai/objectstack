@@ -51,12 +51,12 @@ const result = MetadataFallbackStrategy.parse(data);
 | **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | ✅ | Fallback strategy when datasource is unavailable |
 | **rootDir** | `string` | optional | Root directory path |
 | **formats** | `Enum<'json' \| 'yaml' \| 'typescript' \| 'javascript'>[]` | ✅ | Enabled formats |
-| **cache** | `Object` | optional | Cache settings |
+| **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
 | **watch** | `boolean` | ✅ | Enable file watching |
-| **watchOptions** | `Object` | optional | File watcher options |
-| **validation** | `Object` | optional | Validation settings |
+| **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |
+| **validation** | `{ strict: boolean; throwOnError: boolean }` | optional | Validation settings |
 | **loaderOptions** | `Record<string, any>` | optional | Loader-specific configuration |
-| **persistence** | `Object` | optional | Persistence write gates |
+| **persistence** | `{ writable: boolean; overlayWritable: boolean }` | optional | Persistence write gates |
 
 
 ---

@@ -64,11 +64,11 @@ const result = FeedActor.parse(data);
 | **type** | `Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'>` | ✅ | Activity type |
 | **object** | `string` | ✅ | Object name (e.g., "account") |
 | **recordId** | `string` | ✅ | Record ID this feed item belongs to |
-| **actor** | `Object` | ✅ | Who performed this action |
+| **actor** | `{ type: Enum<'user' \| 'system' \| 'service' \| 'automation'>; id: string; name?: string; avatarUrl?: string; … }` | ✅ | Who performed this action |
 | **body** | `string` | optional | Rich text body (Markdown supported) |
-| **mentions** | `Object[]` | optional | Mentioned users/teams/records |
-| **changes** | `Object[]` | optional | Field-level changes |
-| **reactions** | `Object[]` | optional | Emoji reactions on this item |
+| **mentions** | `{ type: Enum<'user' \| 'team' \| 'record'>; id: string; name: string; offset: integer; … }[]` | optional | Mentioned users/teams/records |
+| **changes** | `{ field: string; fieldLabel?: string; oldValue?: any; newValue?: any; … }[]` | optional | Field-level changes |
+| **reactions** | `{ emoji: string; userIds: string[]; count: integer }[]` | optional | Emoji reactions on this item |
 | **parentId** | `string` | optional | Parent feed item ID for threaded replies |
 | **replyCount** | `integer` | ✅ | Number of replies |
 | **pinned** | `boolean` | ✅ | Whether the feed item is pinned to the top of the timeline |

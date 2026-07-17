@@ -67,7 +67,7 @@ a generic executor (connector-openapi / connector-mcp) materializes at
 
 boot are tracked in #2977 (ADR-0097).
 
-Authentication is now imported from the canonical auth/config.zod.ts.
+Authentication is now imported from the canonical `auth/config.zod.ts`.
 
 ## When to Use This Layer
 
@@ -95,17 +95,17 @@ Authentication is now imported from the canonical auth/config.zod.ts.
 
 **When to downgrade:**
 
-- Simple field sync → Use [Simple Sync](../automation/sync.zod.ts)
+- Simple field sync → Use [Simple Sync](/docs/references/automation/sync)
 
-- Data transformation only → Use [ETL Pipeline](../automation/etl.zod.ts)
+- Data transformation only → Use [ETL Pipeline](/docs/references/automation/etl)
 
-@see [../automation/sync.zod.ts](../automation/sync.zod.ts) for Level 1 (simple sync)
+See also: [../[automation/sync.zod.ts](/docs/references/automation/sync)](/docs/references/automation/sync) for Level 1 (simple sync)
 
-@see [../automation/etl.zod.ts](../automation/etl.zod.ts) for Level 2 (data engineering)
+See also: [../[automation/etl.zod.ts](/docs/references/automation/etl)](/docs/references/automation/etl) for Level 2 (data engineering)
 
 ## When to use Integration Connector vs. Trigger Registry?
 
-**Use `integration/connector.zod.ts` when:**
+**Use `[integration/connector.zod.ts](/docs/references/integration/connector)` when:**
 
 - Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)
 
@@ -119,7 +119,7 @@ Authentication is now imported from the canonical auth/config.zod.ts.
 
 - Need comprehensive retry strategies and error handling
 
-**Use `automation/trigger-registry.zod.ts` when:**
+**Use `[automation/trigger-registry.zod.ts](/docs/references/automation/trigger-registry)` when:**
 
 - Building simple automation triggers (e.g., "when Slack message received, create task")
 
@@ -129,7 +129,7 @@ Authentication is now imported from the canonical auth/config.zod.ts.
 
 - Quick setup with minimal configuration
 
-@see ../../automation/trigger-registry.zod.ts for lightweight automation triggers
+See also: ../../[automation/trigger-registry.zod.ts](/docs/references/automation/trigger-registry) for lightweight automation triggers
 
 <Callout type="info">
 **Source:** `packages/spec/src/integration/connector.zod.ts`
@@ -176,23 +176,23 @@ Circuit breaker configuration
 | **type** | `Enum<'saas' \| 'database' \| 'file_storage' \| 'message_queue' \| 'api' \| 'custom'>` | ✅ | Connector type |
 | **description** | `string` | optional | Connector description |
 | **icon** | `string` | optional | Icon identifier |
-| **authentication** | `Object \| Object \| Object \| Object \| Object` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
 | **provider** | `string` | optional | Generic-executor key that materializes this declarative entry at boot (e.g. openapi/mcp/rest). Omit for a catalog-only descriptor. Unknown provider ⇒ hard boot error (ADR-0097). |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
-| **auth** | `Object \| Object \| Object \| Object` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
-| **actions** | `Object[]` | optional |  |
-| **triggers** | `Object[]` | optional |  |
-| **syncConfig** | `Object` | optional | Data sync configuration |
-| **fieldMappings** | `Object[]` | optional | Field mapping rules |
-| **webhooks** | `Object[]` | optional | Webhook configurations |
-| **rateLimitConfig** | `Object` | optional | Rate limiting configuration |
-| **retryConfig** | `Object` | optional | Retry configuration |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
+| **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
+| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional |  |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Field mapping rules |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'undelete' \| 'api'>[]; … }[]` | optional | Webhook configurations |
+| **rateLimitConfig** | `{ strategy?: Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>; maxRequests: number; windowSeconds: number; burstCapacity?: number; … }` | optional | Rate limiting configuration |
+| **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
 | **requestTimeoutMs** | `number` | optional | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
 | **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `Object` | optional | Error mapping configuration |
-| **health** | `Object` | optional | Health and resilience configuration |
+| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 
 
@@ -221,8 +221,8 @@ Connector health configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **healthCheck** | `Object` | optional | Health check configuration |
-| **circuitBreaker** | `Object` | optional | Circuit breaker configuration |
+| **healthCheck** | `{ enabled: boolean; intervalMs: number; timeoutMs: number; endpoint?: string; … }` | optional | Health check configuration |
+| **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeoutMs: number; halfOpenMaxRequests: number; … }` | optional | Circuit breaker configuration |
 
 
 ---
@@ -280,7 +280,7 @@ Connector type
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional | Synchronization strategy |
 | **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional | Sync direction |
-| **schedule** | `string \| Object` | optional | Cron expression for scheduled sync — cron`0 */15 * * *` |
+| **schedule** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled sync — cron`0 */15 * * *` |
 | **realtimeSync** | `boolean` | optional | Enable real-time sync |
 | **timestampField** | `string` | optional | Field to track last modification time |
 | **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional | Conflict resolution strategy |
@@ -302,23 +302,23 @@ Connector type
 | **type** | `Enum<'saas' \| 'database' \| 'file_storage' \| 'message_queue' \| 'api' \| 'custom'>` | ✅ | Connector type |
 | **description** | `string` | optional | Connector description |
 | **icon** | `string` | optional | Icon identifier |
-| **authentication** | `Object \| Object \| Object \| Object \| Object` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
 | **provider** | `string` | optional | Generic-executor key that materializes this declarative entry at boot (e.g. openapi/mcp/rest). Omit for a catalog-only descriptor. Unknown provider ⇒ hard boot error (ADR-0097). |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
-| **auth** | `Object \| Object \| Object \| Object` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
-| **actions** | `Object[]` | optional |  |
-| **triggers** | `Object[]` | optional |  |
-| **syncConfig** | `Object` | optional | Data sync configuration |
-| **fieldMappings** | `Object[]` | optional | Field mapping rules |
-| **webhooks** | `Object[]` | optional | Webhook configurations |
-| **rateLimitConfig** | `Object` | optional | Rate limiting configuration |
-| **retryConfig** | `Object` | optional | Retry configuration |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
+| **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
+| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional |  |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Field mapping rules |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'undelete' \| 'api'>[]; … }[]` | optional | Webhook configurations |
+| **rateLimitConfig** | `{ strategy?: Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>; maxRequests: number; windowSeconds: number; burstCapacity?: number; … }` | optional | Rate limiting configuration |
+| **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
 | **requestTimeoutMs** | `number` | optional | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
 | **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `Object` | optional | Error mapping configuration |
-| **health** | `Object` | optional | Health and resilience configuration |
+| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 
 
@@ -350,7 +350,7 @@ Error mapping configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **rules** | `Object[]` | ✅ | Error mapping rules |
+| **rules** | `{ sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]` | ✅ | Error mapping rules |
 | **defaultCategory** | `Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>` | ✅ | Default category for unmapped errors |
 | **unmappedBehavior** | `Enum<'passthrough' \| 'generic_error' \| 'throw'>` | ✅ | What to do with unmapped errors |
 | **logUnmapped** | `boolean` | ✅ | Log unmapped errors |
@@ -473,8 +473,8 @@ Synchronization strategy
 | **body** | `any` | optional | Request body payload (if not using default record data) |
 | **payloadFields** | `string[]` | optional | Fields to include. Empty = All |
 | **includeSession** | `boolean` | ✅ | Include user session info |
-| **authentication** | `Object` | optional | Authentication configuration |
-| **retryPolicy** | `Object` | optional | Retry policy configuration |
+| **authentication** | `{ type: Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>; credentials?: Record<string, string> }` | optional | Authentication configuration |
+| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'exponential' \| 'linear' \| 'fixed'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Retry policy configuration |
 | **timeoutMs** | `integer` | ✅ | Request timeout in milliseconds |
 | **secret** | `string` | optional | Signing secret for HMAC signature verification |
 | **isActive** | `boolean` | ✅ | Whether webhook is active |

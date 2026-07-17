@@ -58,7 +58,7 @@ const result = ExecutionContext.parse(data);
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
 | **audience** | `Enum<'internal' \| 'external'>` | optional |  |
 | **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
-| **onBehalfOf** | `Object` | optional |  |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
 | **permissions** | `string[]` | ✅ |  |
 | **systemPermissions** | `string[]` | optional |  |
 | **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |

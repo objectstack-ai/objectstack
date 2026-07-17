@@ -144,7 +144,7 @@ Upgrade package request
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Package ID to upgrade |
 | **targetVersion** | `string` | optional | Target version (defaults to latest) |
-| **manifest** | `Object` | optional | New manifest (if installing from local) |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | optional | New manifest (if installing from local) |
 | **createSnapshot** | `boolean` | optional | Whether to create a pre-upgrade backup snapshot |
 | **mergeStrategy** | `Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>` | optional | How to handle customer customizations |
 | **dryRun** | `boolean` | optional | Preview upgrade without making changes |
@@ -163,9 +163,9 @@ Upgrade package response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Whether the upgrade succeeded |
 | **phase** | `Enum<'pending' \| 'analyzing' \| 'snapshot' \| 'executing' \| 'migrating' \| 'validating' \| 'completed' \| 'failed' \| 'rolling-back' \| 'rolled-back'>` | ✅ | Current upgrade phase |
-| **plan** | `Object` | optional | Upgrade plan |
+| **plan** | `{ packageId: string; fromVersion: string; toVersion: string; impactLevel: Enum<'none' \| 'low' \| 'medium' \| 'high' \| 'critical'>; … }` | optional | Upgrade plan |
 | **snapshotId** | `string` | optional | Snapshot ID for rollback |
-| **conflicts** | `Object[]` | optional | Unresolved merge conflicts |
+| **conflicts** | `{ path: string; baseValue: any; incomingValue: any; customValue: any }[]` | optional | Unresolved merge conflicts |
 | **errorMessage** | `string` | optional | Error message if upgrade failed |
 | **message** | `string` | optional | Human-readable status message |
 
@@ -204,11 +204,11 @@ Upgrade analysis plan generated before execution
 | **fromVersion** | `string` | ✅ | Currently installed version |
 | **toVersion** | `string` | ✅ | Target upgrade version |
 | **impactLevel** | `Enum<'none' \| 'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Severity assessment from none (seamless) to critical (breaking changes) |
-| **changes** | `Object[]` | ✅ | All metadata changes |
+| **changes** | `{ type: string; name: string; changeType: Enum<'added' \| 'modified' \| 'removed' \| 'renamed'>; hasConflict: boolean; … }[]` | ✅ | All metadata changes |
 | **affectedCustomizations** | `integer` | ✅ | Count of customizations that may be affected |
 | **requiresMigration** | `boolean` | ✅ | Whether data migration scripts are needed |
 | **migrationScripts** | `string[]` | optional | Paths to migration scripts |
-| **dependencyUpgrades** | `Object[]` | optional | Dependent packages that also need upgrading |
+| **dependencyUpgrades** | `{ packageId: string; fromVersion: string; toVersion: string }[]` | optional | Dependent packages that also need upgrading |
 | **estimatedDuration** | `integer` | optional | Estimated upgrade duration in seconds |
 | **summary** | `string` | optional | Human-readable upgrade summary |
 
@@ -228,8 +228,8 @@ Pre-upgrade state snapshot for rollback capability
 | **fromVersion** | `string` | ✅ | Version before upgrade |
 | **toVersion** | `string` | ✅ | Target upgrade version |
 | **tenantId** | `string` | optional | Tenant identifier |
-| **previousManifest** | `Object` | ✅ | Complete manifest of the previous package version |
-| **metadataSnapshot** | `Object[]` | ✅ | Snapshot of all package metadata |
+| **previousManifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Complete manifest of the previous package version |
+| **metadataSnapshot** | `{ type: string; name: string; metadata: Record<string, any> }[]` | ✅ | Snapshot of all package metadata |
 | **customizationSnapshot** | `Record<string, any>[]` | optional | Snapshot of customer customizations |
 | **createdAt** | `string` | ✅ | Snapshot creation timestamp |
 | **expiresAt** | `string` | optional | Snapshot expiry timestamp |

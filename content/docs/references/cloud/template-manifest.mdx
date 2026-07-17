@@ -48,12 +48,12 @@ objectstack.manifest.json — template / package source descriptor
 | **license** | `string` | optional |  |
 | **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | optional | Package publisher provenance tier |
 | **isStarter** | `boolean` | optional |  |
-| **translations** | `Record<string, Object>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
+| **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
 | **name** | `string` | ✅ | CLI slug (kebab-case, no namespace prefix) |
 | **specVersion** | `string` | ✅ | Compatible @objectstack/spec semver range |
 | **skills** | `string[]` | optional | Skill ids exercised by this template (for docs / picker) |
-| **preview** | `Object` | optional |  |
-| **scaffold** | `Object` | optional |  |
+| **preview** | `{ screenshots?: string[]; demoUrl?: string }` | optional |  |
+| **scaffold** | `{ variables?: Record<string, any>; postInstall?: string[] }` | optional |  |
 | **readmePath** | `string` | optional | Path (relative to manifest) to long-form README |
 
 

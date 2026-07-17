@@ -136,9 +136,9 @@ const result = CustomizationOrigin.parse(data);
 | **success** | `boolean` | ✅ | Whether merge completed without unresolved conflicts |
 | **mergedMetadata** | `Record<string, any>` | optional | Merged metadata result |
 | **updatedOverlay** | `Record<string, any>` | optional | Updated overlay after merge |
-| **conflicts** | `Object[]` | optional | Unresolved merge conflicts |
-| **autoResolved** | `Object[]` | optional | Summary of auto-resolved changes |
-| **stats** | `Object` | optional |  |
+| **conflicts** | `{ path: string; baseValue: any; incomingValue: any; customValue: any; … }[]` | optional | Unresolved merge conflicts |
+| **autoResolved** | `{ path: string; resolution: string; description?: string }[]` | optional | Summary of auto-resolved changes |
+| **stats** | `{ totalFields: integer; unchanged: integer; autoResolved: integer; conflicts: integer }` | optional |  |
 
 
 ---
@@ -172,7 +172,7 @@ const result = CustomizationOrigin.parse(data);
 | **tenantId** | `string` | optional | Tenant identifier |
 | **owner** | `string` | optional | Owner user ID for user-scope overlays |
 | **patch** | `Record<string, any>` | ✅ | JSON Merge Patch payload (changed fields only) |
-| **changes** | `Object[]` | optional | Field-level change tracking for conflict detection |
+| **changes** | `{ path: string; originalValue?: any; currentValue: any; changedBy?: string; … }[]` | optional | Field-level change tracking for conflict detection |
 | **active** | `boolean` | ✅ | Whether this overlay is active |
 | **createdAt** | `string` | optional |  |
 | **createdBy** | `string` | optional |  |

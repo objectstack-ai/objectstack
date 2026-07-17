@@ -75,7 +75,7 @@ const result = ScopeConfig.parse(data);
 | **scope** | `Enum<'singleton' \| 'transient' \| 'scoped'>` | ✅ | Service scope type |
 | **factoryType** | `Enum<'sync' \| 'async'>` | ✅ | Whether factory is synchronous or asynchronous |
 | **singleton** | `boolean` | ✅ | Whether to cache the factory result (singleton pattern) |
-| **cluster** | `Object` | optional | Cluster scope & leader strategy for this service. |
+| **cluster** | `{ clusterScope: Enum<'node' \| 'cluster'>; leaderStrategy?: Enum<'leader-elected' \| 'partitioned' \| 'idempotent-broadcast'>; clusterId?: string }` | optional | Cluster scope & leader strategy for this service. |
 
 
 ---
@@ -91,7 +91,7 @@ const result = ScopeConfig.parse(data);
 | **type** | `string` | optional | Service type or interface name |
 | **registeredAt** | `integer` | optional | Unix timestamp in milliseconds when service was registered |
 | **metadata** | `Record<string, any>` | optional | Additional service-specific metadata |
-| **cluster** | `Object` | optional | Cluster scope & leader strategy. See cluster-semantics.mdx §5. |
+| **cluster** | `{ clusterScope: Enum<'node' \| 'cluster'>; leaderStrategy?: Enum<'leader-elected' \| 'partitioned' \| 'idempotent-broadcast'>; clusterId?: string }` | optional | Cluster scope & leader strategy. See cluster-semantics.mdx §5. |
 
 
 ---

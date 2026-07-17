@@ -39,14 +39,14 @@ const result = AuthEndpoint.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **signInEmail** | `Object` | ✅ |  |
-| **signUpEmail** | `Object` | ✅ |  |
-| **signOut** | `Object` | ✅ |  |
-| **getSession** | `Object` | ✅ |  |
-| **forgetPassword** | `Object` | ✅ |  |
-| **resetPassword** | `Object` | ✅ |  |
-| **sendVerificationEmail** | `Object` | ✅ |  |
-| **verifyEmail** | `Object` | ✅ |  |
+| **signInEmail** | `{ method: 'POST'; path: '/sign-in/email'; description: 'Sign in with email and password' }` | ✅ |  |
+| **signUpEmail** | `{ method: 'POST'; path: '/sign-up/email'; description: 'Register new user with email and password' }` | ✅ |  |
+| **signOut** | `{ method: 'POST'; path: '/sign-out'; description: 'Sign out current user' }` | ✅ |  |
+| **getSession** | `{ method: 'GET'; path: '/get-session'; description: 'Get current user session' }` | ✅ |  |
+| **forgetPassword** | `{ method: 'POST'; path: '/forget-password'; description: 'Request password reset email' }` | ✅ |  |
+| **resetPassword** | `{ method: 'POST'; path: '/reset-password'; description: 'Reset password with token' }` | ✅ |  |
+| **sendVerificationEmail** | `{ method: 'POST'; path: '/send-verification-email'; description: 'Send email verification link' }` | ✅ |  |
+| **verifyEmail** | `{ method: 'GET'; path: '/verify-email'; description: 'Verify email with token' }` | ✅ |  |
 
 
 ---
@@ -108,7 +108,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **status** | `string` | ✅ |  |
+| **status** | `'pending'` | ✅ |  |
 
 ---
 
@@ -118,9 +118,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **status** | `string` | ✅ |  |
+| **status** | `'approved'` | ✅ |  |
 | **token** | `string` | ✅ | Bearer token to store in credentials file |
-| **user** | `Object` | ✅ |  |
+| **user** | `{ id: string; email: string; name?: string }` | ✅ |  |
 
 ---
 
@@ -130,7 +130,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **status** | `string` | ✅ |  |
+| **status** | `'expired'` | ✅ |  |
 
 ---
 
@@ -156,9 +156,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **emailPassword** | `Object` | ✅ | Email/password authentication config |
-| **socialProviders** | `Object[]` | ✅ | Available social/OAuth providers |
-| **features** | `Object` | ✅ | Enabled authentication features |
+| **emailPassword** | `{ enabled: boolean; disableSignUp?: boolean; requireEmailVerification?: boolean }` | ✅ | Email/password authentication config |
+| **socialProviders** | `{ id: string; name: string; enabled: boolean; type: Enum<'social' \| 'oidc'> }[]` | ✅ | Available social/OAuth providers |
+| **features** | `{ twoFactor: boolean; passkeys: boolean; magicLink: boolean; organization: boolean; … }` | ✅ | Enabled authentication features |
 
 
 ---

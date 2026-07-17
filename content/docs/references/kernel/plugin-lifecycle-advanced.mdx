@@ -43,12 +43,12 @@ const result = AdvancedPluginLifecycleConfig.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **health** | `Object` | optional |  |
-| **hotReload** | `Object` | optional |  |
-| **degradation** | `Object` | optional |  |
-| **updates** | `Object` | optional |  |
-| **resources** | `Object` | optional |  |
-| **observability** | `Object` | optional |  |
+| **health** | `{ interval: integer; timeout: integer; failureThreshold: integer; successThreshold: integer; … }` | optional |  |
+| **hotReload** | `{ enabled: boolean; watchPatterns?: string[]; debounceDelay: integer; preserveState: boolean; … }` | optional |  |
+| **degradation** | `{ enabled: boolean; fallbackMode: Enum<'minimal' \| 'cached' \| 'readonly' \| 'offline' \| 'disabled'>; criticalDependencies?: string[]; optionalDependencies?: string[]; … }` | optional |  |
+| **updates** | `{ mode: Enum<'manual' \| 'automatic' \| 'scheduled' \| 'rolling'>; autoUpdateConstraints?: object; schedule?: object; rollback?: object; … }` | optional |  |
+| **resources** | `{ maxMemory?: integer; maxCpu?: number; maxConnections?: integer; timeout?: integer }` | optional |  |
+| **observability** | `{ enableMetrics: boolean; enableTracing: boolean; enableProfiling: boolean; metricsInterval: integer }` | optional |  |
 
 
 ---
@@ -63,8 +63,8 @@ const result = AdvancedPluginLifecycleConfig.parse(data);
 | **endpoints** | `string[]` | optional | Backend connection endpoints |
 | **keyPrefix** | `string` | optional | Prefix for all keys (e.g., "plugin:my-plugin:") |
 | **ttl** | `integer` | optional | State expiration time in seconds |
-| **auth** | `Object` | optional |  |
-| **replication** | `Object` | optional |  |
+| **auth** | `{ username?: string; password?: string; token?: string; certificate?: string }` | optional |  |
+| **replication** | `{ enabled: boolean; minReplicas: integer }` | optional |  |
 | **customConfig** | `Record<string, any>` | optional | Provider-specific configuration |
 
 
@@ -80,8 +80,8 @@ const result = AdvancedPluginLifecycleConfig.parse(data);
 | **fallbackMode** | `Enum<'minimal' \| 'cached' \| 'readonly' \| 'offline' \| 'disabled'>` | ✅ |  |
 | **criticalDependencies** | `string[]` | optional | Plugin IDs that are required for operation |
 | **optionalDependencies** | `string[]` | optional | Plugin IDs that are nice to have but not required |
-| **degradedFeatures** | `Object[]` | optional |  |
-| **autoRecovery** | `Object` | optional |  |
+| **degradedFeatures** | `{ feature: string; enabled: boolean; reason?: string }[]` | optional |  |
+| **autoRecovery** | `{ enabled: boolean; retryInterval: integer; maxAttempts: integer }` | optional |  |
 
 
 ---
@@ -97,7 +97,7 @@ const result = AdvancedPluginLifecycleConfig.parse(data);
 | **debounceDelay** | `integer` | ✅ | Wait time after change detection before reload |
 | **preserveState** | `boolean` | ✅ | Keep plugin state across reloads |
 | **stateStrategy** | `Enum<'memory' \| 'disk' \| 'distributed' \| 'none'>` | ✅ | How to preserve state during reload |
-| **distributedConfig** | `Object` | optional | Configuration for distributed state management |
+| **distributedConfig** | `{ provider: Enum<'redis' \| 'etcd' \| 'custom'>; endpoints?: string[]; keyPrefix?: string; ttl?: integer; … }` | optional | Configuration for distributed state management |
 | **shutdownTimeout** | `integer` | ✅ | Maximum time to wait for graceful shutdown |
 | **beforeReload** | `string[]` | optional | Hook names to call before reload |
 | **afterReload** | `string[]` | optional | Hook names to call after reload |
@@ -132,9 +132,9 @@ const result = AdvancedPluginLifecycleConfig.parse(data);
 | **status** | `Enum<'healthy' \| 'degraded' \| 'unhealthy' \| 'failed' \| 'recovering' \| 'unknown'>` | ✅ | Current health status of the plugin |
 | **timestamp** | `string` | ✅ |  |
 | **message** | `string` | optional |  |
-| **metrics** | `Object` | optional |  |
-| **checks** | `Object[]` | optional |  |
-| **dependencies** | `Object[]` | optional |  |
+| **metrics** | `{ uptime?: number; memoryUsage?: number; cpuUsage?: number; activeConnections?: number; … }` | optional |  |
+| **checks** | `{ name: string; status: Enum<'passed' \| 'failed' \| 'warning'>; message?: string; data?: Record<string, any> }[]` | optional |  |
+| **dependencies** | `{ pluginId: string; status: Enum<'healthy' \| 'degraded' \| 'unhealthy' \| 'failed' \| 'recovering' \| 'unknown'>; message?: string }[]` | optional |  |
 
 
 ---
@@ -165,7 +165,7 @@ Current health status of the plugin
 | **version** | `string` | ✅ |  |
 | **timestamp** | `string` | ✅ |  |
 | **state** | `Record<string, any>` | ✅ |  |
-| **metadata** | `Object` | optional |  |
+| **metadata** | `{ checksum?: string; compressed: boolean; encryption?: string }` | optional |  |
 
 
 ---
@@ -177,10 +177,10 @@ Current health status of the plugin
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'manual' \| 'automatic' \| 'scheduled' \| 'rolling'>` | ✅ |  |
-| **autoUpdateConstraints** | `Object` | optional |  |
-| **schedule** | `Object` | optional |  |
-| **rollback** | `Object` | optional |  |
-| **validation** | `Object` | optional |  |
+| **autoUpdateConstraints** | `{ major: boolean; minor: boolean; patch: boolean }` | optional |  |
+| **schedule** | `{ cron?: string; timezone: string; maintenanceWindow: integer }` | optional |  |
+| **rollback** | `{ enabled: boolean; automatic: boolean; keepVersions: integer; timeout: integer }` | optional |  |
+| **validation** | `{ checkCompatibility: boolean; runTests: boolean; testSuite?: string }` | optional |  |
 
 
 ---

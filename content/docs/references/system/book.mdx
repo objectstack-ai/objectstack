@@ -60,12 +60,12 @@ const result = Book.parse(data);
 | **name** | `string` | ✅ | Book name (namespace prefix recommended, like every metadata name) |
 | **label** | `string` | optional | Display title |
 | **description** | `string` | optional |  |
-| **translations** | `Record<string, Object>` | optional |  |
+| **translations** | `Record<string, { label?: string; description?: string }>` | optional |  |
 | **slug** | `string` | optional | Portal URL segment; defaults to name sans prefix |
 | **icon** | `string` | optional |  |
 | **order** | `number` | optional | Orders books within the portal |
-| **audience** | `string \| string \| Object` | optional | Access audience; defaults to 'org' (inherits package grant) |
-| **groups** | `Object[]` | ✅ | The spine: ordered sections. Two levels total. |
+| **audience** | `'org' \| 'public' \| { permissionSet: string }` | optional | Access audience; defaults to 'org' (inherits package grant) |
+| **groups** | `{ key: string; label: string; translations?: Record<string, { label: string }>; order?: number; … }[]` | ✅ | The spine: ordered sections. Two levels total. |
 
 
 ---
@@ -78,13 +78,13 @@ This schema accepts one of the following structures:
 
 #### Option 1
 
-Type: `string`
+Type: `'org'`
 
 ---
 
 #### Option 2
 
-Type: `string`
+Type: `'public'`
 
 ---
 
@@ -109,11 +109,11 @@ Type: `string`
 | :--- | :--- | :--- | :--- |
 | **key** | `string` | ✅ | Stable group key (used by overrides, deep links, explicit `doc.group`) |
 | **label** | `string` | ✅ | Section title — first-class, i18n-homed |
-| **translations** | `Record<string, Object>` | optional | Per-locale label variants |
+| **translations** | `Record<string, { label: string }>` | optional | Per-locale label variants |
 | **order** | `number` | optional | Order of THIS group within the book |
-| **include** | `string \| Object` | optional | Rule that derives membership (glob or tag) |
+| **include** | `string \| { tag: string }` | optional | Rule that derives membership (glob or tag) |
 | **package** | `string` | optional | Scope the rule to a package id (default: the book package; cross-package via ADR-0048) |
-| **pages** | `string \| Object[]` | optional | OPTIONAL explicit override — hand-pin a curated order; wins over `include` |
+| **pages** | `string \| { doc?: string; href?: string; label?: string; badge?: string; … }[]` | optional | OPTIONAL explicit override — hand-pin a curated order; wins over `include` |
 
 
 ---

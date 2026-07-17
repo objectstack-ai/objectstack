@@ -65,11 +65,11 @@ Top-level message queue configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `Enum<'kafka' \| 'rabbitmq' \| 'aws-sqs' \| 'redis-pubsub' \| 'google-pubsub' \| 'azure-service-bus'>` | ✅ | Message queue backend provider |
-| **topics** | `Object[]` | ✅ | List of topic configurations |
-| **consumers** | `Object[]` | optional | Consumer group configurations |
-| **deadLetterQueue** | `Object` | optional | Dead letter queue for failed messages |
+| **topics** | `{ name: string; partitions: number; replicationFactor: number; retentionMs?: number; … }[]` | ✅ | List of topic configurations |
+| **consumers** | `{ groupId: string; autoOffsetReset: Enum<'earliest' \| 'latest'>; enableAutoCommit: boolean; maxPollRecords: number }[]` | optional | Consumer group configurations |
+| **deadLetterQueue** | `{ enabled: boolean; maxRetries: number; queueName: string }` | optional | Dead letter queue for failed messages |
 | **ssl** | `boolean` | ✅ | Enable SSL/TLS for broker connections |
-| **sasl** | `Object` | optional | SASL authentication configuration |
+| **sasl** | `{ mechanism: Enum<'plain' \| 'scram-sha-256' \| 'scram-sha-512'>; username: string; password: string }` | optional | SASL authentication configuration |
 
 
 ---

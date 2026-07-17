@@ -36,9 +36,9 @@ Per-gesture configuration
 | **type** | `Enum<'swipe' \| 'pinch' \| 'long_press' \| 'double_tap' \| 'drag' \| 'rotate' \| 'pan'>` | ✅ | Gesture type to configure |
 | **label** | `string` | optional | Descriptive label for the gesture action |
 | **enabled** | `boolean` | ✅ | Whether this gesture is active |
-| **swipe** | `Object` | optional | Swipe gesture settings (when type is swipe) |
-| **pinch** | `Object` | optional | Pinch gesture settings (when type is pinch) |
-| **longPress** | `Object` | optional | Long press settings (when type is long_press) |
+| **swipe** | `{ direction: Enum<'up' \| 'down' \| 'left' \| 'right'>[]; threshold?: number; velocity?: number }` | optional | Swipe gesture settings (when type is swipe) |
+| **pinch** | `{ minScale?: number; maxScale?: number }` | optional | Pinch gesture settings (when type is pinch) |
+| **longPress** | `{ duration: number; moveTolerance?: number }` | optional | Long press settings (when type is long_press) |
 
 
 ---
@@ -123,8 +123,8 @@ Touch and gesture interaction configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **gestures** | `Object[]` | optional | Configured gesture recognizers |
-| **touchTarget** | `Object` | optional | Touch target sizing and hit area |
+| **gestures** | `{ type: Enum<'swipe' \| 'pinch' \| 'long_press' \| 'double_tap' \| 'drag' \| 'rotate' \| 'pan'>; label?: string; enabled: boolean; swipe?: object; … }[]` | optional | Configured gesture recognizers |
+| **touchTarget** | `{ minWidth: number; minHeight: number; padding?: number; hitSlop?: object }` | optional | Touch target sizing and hit area |
 | **hapticFeedback** | `boolean` | optional | Enable haptic feedback on touch interactions |
 | **ariaLabel** | `string` | optional | Accessible label for screen readers (WAI-ARIA aria-label) |
 | **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
@@ -144,7 +144,7 @@ Touch target sizing configuration (WCAG accessible)
 | **minWidth** | `number` | ✅ | Minimum touch target width in pixels (WCAG 2.5.5: 44px) |
 | **minHeight** | `number` | ✅ | Minimum touch target height in pixels (WCAG 2.5.5: 44px) |
 | **padding** | `number` | optional | Additional padding around touch target in pixels |
-| **hitSlop** | `Object` | optional | Invisible hit area extension beyond the visible bounds |
+| **hitSlop** | `{ top?: number; right?: number; bottom?: number; left?: number }` | optional | Invisible hit area extension beyond the visible bounds |
 
 
 ---

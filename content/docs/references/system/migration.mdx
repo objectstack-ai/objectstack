@@ -29,10 +29,10 @@ Add a new field to an existing object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'add_field'` | ✅ |  |
 | **objectName** | `string` | ✅ | Target object name |
 | **fieldName** | `string` | ✅ | Name of the field to add |
-| **field** | `Object` | ✅ | Full field definition to add |
+| **field** | `{ name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; description?: string; … }` | ✅ | Full field definition to add |
 
 
 ---
@@ -50,9 +50,9 @@ A versioned set of atomic schema migration operations
 | **description** | `string` | optional | Detailed description of what this migration does |
 | **author** | `string` | optional | Author who created this migration |
 | **createdAt** | `string` | optional | ISO 8601 timestamp when the migration was created |
-| **dependencies** | `Object[]` | optional | Migrations that must run before this one |
-| **operations** | `Object \| Object \| Object \| Object \| Object \| Object \| Object[]` | ✅ | Ordered list of atomic migration operations |
-| **rollback** | `Object \| Object \| Object \| Object \| Object \| Object \| Object[]` | optional | Operations to reverse this migration |
+| **dependencies** | `{ migrationId: string; package?: string }[]` | optional | Migrations that must run before this one |
+| **operations** | `{ type: 'add_field'; objectName: string; fieldName: string; field: object } \| { type: 'modify_field'; objectName: string; fieldName: string; changes: Record<string, any> } \| { type: 'remove_field'; objectName: string; fieldName: string } \| { type: 'create_object'; object: object } \| { type: 'rename_object'; oldName: string; newName: string } \| { type: 'delete_object'; objectName: string } \| { type: 'execute_sql'; sql: string; description?: string }[]` | ✅ | Ordered list of atomic migration operations |
+| **rollback** | `{ type: 'add_field'; objectName: string; fieldName: string; field: object } \| { type: 'modify_field'; objectName: string; fieldName: string; changes: Record<string, any> } \| { type: 'remove_field'; objectName: string; fieldName: string } \| { type: 'create_object'; object: object } \| { type: 'rename_object'; oldName: string; newName: string } \| { type: 'delete_object'; objectName: string } \| { type: 'execute_sql'; sql: string; description?: string }[]` | optional | Operations to reverse this migration |
 
 
 ---
@@ -65,8 +65,8 @@ Create a new object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
-| **object** | `Object` | ✅ | Full object definition to create |
+| **type** | `'create_object'` | ✅ |  |
+| **object** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }` | ✅ | Full object definition to create |
 
 
 ---
@@ -79,7 +79,7 @@ Delete an existing object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'delete_object'` | ✅ |  |
 | **objectName** | `string` | ✅ | Name of the object to delete |
 
 
@@ -93,7 +93,7 @@ Execute a raw SQL statement
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'execute_sql'` | ✅ |  |
 | **sql** | `string` | ✅ | Raw SQL statement to execute |
 | **description** | `string` | optional | Human-readable description of the SQL |
 
@@ -130,10 +130,10 @@ Add a new field to an existing object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'add_field'` | ✅ |  |
 | **objectName** | `string` | ✅ | Target object name |
 | **fieldName** | `string` | ✅ | Name of the field to add |
-| **field** | `Object` | ✅ | Full field definition to add |
+| **field** | `{ name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; description?: string; … }` | ✅ | Full field definition to add |
 
 ---
 
@@ -147,7 +147,7 @@ Modify properties of an existing field
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'modify_field'` | ✅ |  |
 | **objectName** | `string` | ✅ | Target object name |
 | **fieldName** | `string` | ✅ | Name of the field to modify |
 | **changes** | `Record<string, any>` | ✅ | Partial field definition updates |
@@ -164,7 +164,7 @@ Remove a field from an existing object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'remove_field'` | ✅ |  |
 | **objectName** | `string` | ✅ | Target object name |
 | **fieldName** | `string` | ✅ | Name of the field to remove |
 
@@ -180,8 +180,8 @@ Create a new object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
-| **object** | `Object` | ✅ | Full object definition to create |
+| **type** | `'create_object'` | ✅ |  |
+| **object** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }` | ✅ | Full object definition to create |
 
 ---
 
@@ -195,7 +195,7 @@ Rename an existing object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'rename_object'` | ✅ |  |
 | **oldName** | `string` | ✅ | Current object name |
 | **newName** | `string` | ✅ | New object name |
 
@@ -211,7 +211,7 @@ Delete an existing object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'delete_object'` | ✅ |  |
 | **objectName** | `string` | ✅ | Name of the object to delete |
 
 ---
@@ -226,7 +226,7 @@ Execute a raw SQL statement
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'execute_sql'` | ✅ |  |
 | **sql** | `string` | ✅ | Raw SQL statement to execute |
 | **description** | `string` | optional | Human-readable description of the SQL |
 
@@ -243,7 +243,7 @@ Modify properties of an existing field
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'modify_field'` | ✅ |  |
 | **objectName** | `string` | ✅ | Target object name |
 | **fieldName** | `string` | ✅ | Name of the field to modify |
 | **changes** | `Record<string, any>` | ✅ | Partial field definition updates |
@@ -259,7 +259,7 @@ Remove a field from an existing object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'remove_field'` | ✅ |  |
 | **objectName** | `string` | ✅ | Target object name |
 | **fieldName** | `string` | ✅ | Name of the field to remove |
 
@@ -274,7 +274,7 @@ Rename an existing object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'rename_object'` | ✅ |  |
 | **oldName** | `string` | ✅ | Current object name |
 | **newName** | `string` | ✅ | New object name |
 

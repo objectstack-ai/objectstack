@@ -39,7 +39,7 @@ const result = PluginInstallConfig.parse(data);
 | **version** | `string` | optional | Defaults to latest |
 | **config** | `Record<string, any>` | optional |  |
 | **autoUpdate** | `boolean` | optional |  |
-| **options** | `Object` | optional |  |
+| **options** | `{ skipDependencies?: boolean; force?: boolean; target?: Enum<'system' \| 'space' \| 'user'> }` | optional |  |
 
 
 ---
@@ -53,8 +53,8 @@ const result = PluginInstallConfig.parse(data);
 | **testCoverage** | `number` | optional |  |
 | **documentationScore** | `number` | optional |  |
 | **codeQuality** | `number` | optional |  |
-| **securityScan** | `Object` | optional |  |
-| **conformanceTests** | `Object[]` | optional |  |
+| **securityScan** | `{ lastScanDate?: string; vulnerabilities?: object; passed: boolean }` | optional |  |
+| **conformanceTests** | `{ protocolId: string; passed: boolean; totalTests: integer; passedTests: integer; … }[]` | optional |  |
 
 
 ---
@@ -72,21 +72,21 @@ const result = PluginInstallConfig.parse(data);
 | **readme** | `string` | optional |  |
 | **category** | `Enum<'data' \| 'integration' \| 'ui' \| 'analytics' \| 'security' \| 'automation' \| 'ai' \| 'utility' \| 'driver' \| 'gateway' \| 'adapter'>` | optional |  |
 | **tags** | `string[]` | optional |  |
-| **vendor** | `Object` | ✅ |  |
-| **capabilities** | `Object` | optional |  |
-| **compatibility** | `Object` | optional |  |
-| **links** | `Object` | optional |  |
-| **media** | `Object` | optional |  |
-| **quality** | `Object` | optional |  |
-| **statistics** | `Object` | optional |  |
+| **vendor** | `{ id: string; name: string; website?: string; email?: string; … }` | ✅ |  |
+| **capabilities** | `{ implements?: { protocol: object; conformance: Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>; implementedFeatures?: string[]; features?: { name: string; enabled: boolean; description?: string; sinceVersion?: string; … }[]; … }[]; provides?: { id: string; name: string; description?: string; version: object; … }[]; requires?: { pluginId: string; version: string; optional: boolean; reason?: string; … }[]; extensionPoints?: { id: string; name: string; description?: string; type: Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>; … }[]; … }` | optional |  |
+| **compatibility** | `{ minObjectStackVersion?: string; maxObjectStackVersion?: string; nodeVersion?: string; platforms?: Enum<'linux' \| 'darwin' \| 'win32' \| 'browser'>[] }` | optional |  |
+| **links** | `{ homepage?: string; repository?: string; documentation?: string; bugs?: string; … }` | optional |  |
+| **media** | `{ icon?: string; logo?: string; screenshots?: string[]; video?: string }` | optional |  |
+| **quality** | `{ testCoverage?: number; documentationScore?: number; codeQuality?: number; securityScan?: object; … }` | optional |  |
+| **statistics** | `{ downloads: integer; downloadsLastMonth: integer; activeInstallations: integer; ratings?: object; … }` | optional |  |
 | **license** | `string` | optional | SPDX license identifier |
-| **pricing** | `Object` | optional |  |
+| **pricing** | `{ model: Enum<'free' \| 'freemium' \| 'paid' \| 'enterprise'>; price?: number; currency?: string; billingPeriod?: Enum<'one-time' \| 'monthly' \| 'yearly'> }` | optional |  |
 | **publishedAt** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |
 | **deprecated** | `boolean` | ✅ |  |
 | **deprecationMessage** | `string` | optional |  |
 | **replacedBy** | `string` | optional | Plugin ID that replaces this one |
-| **flags** | `Object` | optional |  |
+| **flags** | `{ experimental: boolean; beta: boolean; featured: boolean; verified: boolean }` | optional |  |
 
 
 ---
@@ -121,7 +121,7 @@ const result = PluginInstallConfig.parse(data);
 | **downloads** | `integer` | ✅ |  |
 | **downloadsLastMonth** | `integer` | ✅ |  |
 | **activeInstallations** | `integer` | ✅ |  |
-| **ratings** | `Object` | optional |  |
+| **ratings** | `{ average: number; count: integer; distribution?: object }` | optional |  |
 | **stars** | `integer` | optional |  |
 | **dependents** | `integer` | ✅ |  |
 

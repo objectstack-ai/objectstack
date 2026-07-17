@@ -32,8 +32,8 @@ const result = AggregationPipeline.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **collection** | `string` | ✅ | Collection/table name |
-| **stages** | `Object[]` | ✅ | Aggregation pipeline stages |
-| **options** | `Object` | optional | Query options |
+| **stages** | `{ operator: string; options: Record<string, any> }[]` | ✅ | Aggregation pipeline stages |
+| **options** | `{ consistency?: Enum<'all' \| 'quorum' \| 'one' \| 'local_quorum' \| 'each_quorum' \| 'eventual'>; readFromSecondary?: boolean; projection?: Record<string, '0' \| '1'>; timeout?: integer; … }` | optional | Query options |
 
 
 ---
@@ -122,16 +122,16 @@ const result = AggregationPipeline.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Driver instance name |
-| **type** | `string` | ✅ | Driver type must be "nosql" |
-| **capabilities** | `Object` | ✅ | Driver capability flags |
+| **type** | `'nosql'` | ✅ | Driver type must be "nosql" |
+| **capabilities** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | ✅ | Driver capability flags |
 | **connectionString** | `string` | optional | Database connection string (driver-specific format) |
-| **poolConfig** | `Object` | optional | Connection pool configuration |
+| **poolConfig** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool configuration |
 | **databaseType** | `Enum<'mongodb' \| 'couchdb' \| 'dynamodb' \| 'cassandra' \| 'redis' \| 'elasticsearch' \| 'neo4j' \| 'orientdb'>` | ✅ | Specific NoSQL database type |
-| **dataTypeMapping** | `Object` | ✅ | NoSQL data type mapping configuration |
+| **dataTypeMapping** | `{ text: string; number: string; boolean: string; date: string; … }` | ✅ | NoSQL data type mapping configuration |
 | **consistency** | `Enum<'all' \| 'quorum' \| 'one' \| 'local_quorum' \| 'each_quorum' \| 'eventual'>` | optional | Consistency level for operations |
-| **replication** | `Object` | optional | Replication configuration |
-| **sharding** | `Object` | optional | Sharding configuration |
-| **schemaValidation** | `Object` | optional | Document schema validation |
+| **replication** | `{ enabled: boolean; replicaSetName?: string; replicas?: integer; readPreference?: Enum<'primary' \| 'primaryPreferred' \| 'secondary' \| 'secondaryPreferred' \| 'nearest'>; … }` | optional | Replication configuration |
+| **sharding** | `{ enabled: boolean; shardKey?: string; shardingStrategy?: Enum<'hash' \| 'range' \| 'zone'>; numShards?: integer }` | optional | Sharding configuration |
+| **schemaValidation** | `{ enabled: boolean; validationLevel?: Enum<'strict' \| 'moderate' \| 'off'>; validationAction?: Enum<'error' \| 'warn'>; jsonSchema?: Record<string, any> }` | optional | Document schema validation |
 | **region** | `string` | optional | AWS region (for managed NoSQL services) |
 | **accessKeyId** | `string` | optional | AWS access key ID |
 | **secretAccessKey** | `string` | optional | AWS secret access key |
@@ -150,7 +150,7 @@ const result = AggregationPipeline.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Index name |
 | **type** | `Enum<'single' \| 'compound' \| 'unique' \| 'text' \| 'geospatial' \| 'hashed' \| 'ttl' \| 'sparse'>` | ✅ | Index type |
-| **fields** | `Object[]` | ✅ | Fields to index |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc' \| 'text' \| '2dsphere'> }[]` | ✅ | Fields to index |
 | **unique** | `boolean` | ✅ | Enforce uniqueness |
 | **sparse** | `boolean` | ✅ | Sparse index |
 | **expireAfterSeconds** | `integer` | optional | TTL in seconds |
@@ -203,7 +203,7 @@ const result = AggregationPipeline.parse(data);
 | :--- | :--- | :--- | :--- |
 | **consistency** | `Enum<'all' \| 'quorum' \| 'one' \| 'local_quorum' \| 'each_quorum' \| 'eventual'>` | optional | Consistency level override |
 | **readFromSecondary** | `boolean` | optional | Allow reading from secondary replicas |
-| **projection** | `Record<string, number \| number>` | optional | Field projection |
+| **projection** | `Record<string, '0' \| '1'>` | optional | Field projection |
 | **timeout** | `integer` | optional | Query timeout (ms) |
 | **useCursor** | `boolean` | optional | Use cursor instead of loading all results |
 | **batchSize** | `integer` | optional | Cursor batch size |

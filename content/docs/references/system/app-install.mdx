@@ -50,7 +50,7 @@ App compatibility check result
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **compatible** | `boolean` | ✅ | Whether the app is compatible |
-| **issues** | `Object[]` | ✅ | Compatibility issues |
+| **issues** | `{ severity: Enum<'error' \| 'warning'>; message: string; category: Enum<'kernel_version' \| 'object_conflict' \| 'dependency_missing' \| 'quota_exceeded'> }[]` | ✅ | Compatibility issues |
 
 
 ---

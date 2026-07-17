@@ -51,13 +51,13 @@ For complex transformations (joins, aggregates, custom SQL), use ETL Pipeline (L
 
 - Need multi-source joins → Use [ETL Pipeline](./etl.zod.ts)
 
-- Need complex authentication/webhooks → Use [Enterprise Connector](../integration/connector.zod.ts)
+- Need complex authentication/webhooks → Use [Enterprise Connector](/docs/references/integration/connector)
 
 - Need aggregations or data warehousing → Use [ETL Pipeline](./etl.zod.ts)
 
-@see [./etl.zod.ts](./etl.zod.ts) for Level 2 (data engineering)
+See also: `./etl.zod.ts` for Level 2 (data engineering)
 
-@see [../integration/connector.zod.ts](../integration/connector.zod.ts) for Level 3 (enterprise integration)
+See also: [../[integration/connector.zod.ts](/docs/references/integration/connector)](/docs/references/integration/connector) for Level 3 (enterprise integration)
 
 ## Use Cases
 
@@ -85,11 +85,11 @@ For complex transformations (joins, aggregates, custom SQL), use ETL Pipeline (L
 
 - Business intelligence
 
-@see https://help.salesforce.com/s/articleView?id=sf.platform_connect_about.htm
+See also: https://help.salesforce.com/s/articleView?id=sf.platform_connect_about.htm
 
-@see https://segment.com/docs/connections/sync/
+See also: https://segment.com/docs/connections/sync/
 
-@see https://www.getcensus.com/
+See also: https://www.getcensus.com/
 
 @example
 
@@ -160,7 +160,7 @@ const result = DataDestinationConfig.parse(data);
 | **object** | `string` | optional | ObjectStack object name |
 | **connectorInstanceId** | `string` | optional | Connector instance ID |
 | **operation** | `Enum<'insert' \| 'update' \| 'upsert' \| 'delete' \| 'sync'>` | ✅ | Sync operation |
-| **mapping** | `Record<string, string> \| Object[]` | optional | Field mappings |
+| **mapping** | `Record<string, string> \| { source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any }[]` | optional | Field mappings |
 | **externalResource** | `string` | optional | External resource ID |
 | **matchKey** | `string[]` | optional | Match key fields |
 
@@ -205,8 +205,8 @@ const result = DataDestinationConfig.parse(data);
 | **startedAt** | `string` | ✅ | Start time |
 | **completedAt** | `string` | optional | Completion time |
 | **durationMs** | `number` | optional | Duration in ms |
-| **stats** | `Object` | optional | Execution statistics |
-| **errors** | `Object[]` | optional | Errors |
+| **stats** | `{ recordsProcessed: integer; recordsInserted: integer; recordsUpdated: integer; recordsDeleted: integer; … }` | optional | Execution statistics |
+| **errors** | `{ recordId?: string; field?: string; message: string; code?: string }[]` | optional | Errors |
 | **logs** | `string[]` | optional | Execution logs |
 
 

@@ -67,8 +67,8 @@ Plugin metadata for validation
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **valid** | `boolean` | ✅ | Whether the plugin passed validation |
-| **errors** | `Object[]` | optional | Validation errors |
-| **warnings** | `Object[]` | optional | Validation warnings |
+| **errors** | `{ field: string; message: string; code?: string }[]` | optional | Validation errors |
+| **warnings** | `{ field: string; message: string; code?: string }[]` | optional | Validation warnings |
 
 
 ---

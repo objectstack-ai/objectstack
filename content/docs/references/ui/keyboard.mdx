@@ -36,7 +36,7 @@ Focus and tab navigation management
 | **tabOrder** | `Enum<'auto' \| 'manual'>` | ✅ | Tab order strategy: auto (DOM order) or manual (explicit tabIndex) |
 | **skipLinks** | `boolean` | ✅ | Provide skip-to-content navigation links |
 | **focusVisible** | `boolean` | ✅ | Show visible focus indicators for keyboard users |
-| **focusTrap** | `Object` | optional | Focus trap settings |
+| **focusTrap** | `{ enabled: boolean; initialFocus?: string; returnFocus: boolean; escapeDeactivates: boolean }` | optional | Focus trap settings |
 | **arrowNavigation** | `boolean` | ✅ | Enable arrow key navigation between focusable items |
 
 
@@ -66,8 +66,8 @@ Keyboard navigation and shortcut configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **shortcuts** | `Object[]` | optional | Registered keyboard shortcuts |
-| **focusManagement** | `Object` | optional | Focus and tab order management |
+| **shortcuts** | `{ key: string; action: string; description?: string; scope: Enum<'global' \| 'view' \| 'form' \| 'modal' \| 'list'> }[]` | optional | Registered keyboard shortcuts |
+| **focusManagement** | `{ tabOrder: Enum<'auto' \| 'manual'>; skipLinks: boolean; focusVisible: boolean; focusTrap?: object; … }` | optional | Focus and tab order management |
 | **rovingTabindex** | `boolean` | ✅ | Enable roving tabindex pattern for composite widgets |
 | **ariaLabel** | `string` | optional | Accessible label for screen readers (WAI-ARIA aria-label) |
 | **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |

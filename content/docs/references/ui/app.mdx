@@ -54,12 +54,12 @@ const result = ActionNavItem.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
-| **actionDef** | `Object` | ✅ | Action definition to execute when clicked |
+| **type** | `'action'` | ✅ |  |
+| **actionDef** | `{ actionName: string; params?: Record<string, any> }` | ✅ | Action definition to execute when clicked |
 
 
 ---
@@ -75,23 +75,23 @@ const result = ActionNavItem.parse(data);
 | **version** | `string` | optional | App version |
 | **description** | `string` | optional | App description |
 | **icon** | `string` | optional | App icon used in the App Launcher |
-| **branding** | `Object` | optional | App-specific branding |
+| **branding** | `{ primaryColor?: string; logo?: string; favicon?: string }` | optional | App-specific branding |
 | **active** | `boolean` | optional | Whether the app is enabled |
 | **isDefault** | `boolean` | optional | Is default app |
 | **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead |
-| **navigation** | `[__schema0](./__schema0)[]` | optional | Full navigation tree for the app sidebar |
-| **areas** | `Object[]` | optional | Navigation areas for partitioning navigation by business domain |
-| **contextSelectors** | `Object[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
+| **navigation** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … }[]` | optional | Full navigation tree for the app sidebar |
+| **areas** | `{ id: string; label: string; icon?: string; order?: number; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
+| **contextSelectors** | `{ id: string; label: string; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
 | **homePageId** | `string` | optional | ID of the navigation item to serve as landing page |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this app |
 | **objects** | `any[]` | optional | Objects belonging to this app |
 | **apis** | `any[]` | optional | Custom APIs belonging to this app |
-| **sharing** | `Object` | optional | Public sharing configuration |
-| **embed** | `Object` | optional | Iframe embedding configuration |
-| **mobileNavigation** | `Object` | optional | Mobile-specific navigation configuration |
+| **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration |
+| **embed** | `{ enabled?: boolean; allowedOrigins?: string[]; width?: string; height?: string; … }` | optional | Iframe embedding configuration |
+| **mobileNavigation** | `{ mode?: Enum<'drawer' \| 'bottom_nav' \| 'hamburger'>; bottomNavItems?: string[] }` | optional | Mobile-specific navigation configuration |
 | **defaultAgent** | `string` | optional | Name of the default AI agent for this app (used by the ambient chat endpoint) |
-| **aria** | `Object` | optional | ARIA accessibility attributes for the application |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this app. |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the application |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this app. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -125,7 +125,7 @@ const result = ActionNavItem.parse(data);
 | **id** | `string` | ✅ | Selector id; selected value is exposed as the nav template var `{<id>}` |
 | **label** | `string` | ✅ | Dropdown label |
 | **icon** | `string` | optional | Icon name |
-| **optionsSource** | `Object` | ✅ | Option data source |
+| **optionsSource** | `{ endpoint: string; valueKey: string; labelKey: string; filter?: { key: string; op: Enum<'eq' \| 'ne' \| 'in' \| 'nin'>; value: string \| string[] }[] }` | ✅ | Option data source |
 | **includeAll** | `boolean` | ✅ | Prepend an "All" option that clears the scope |
 | **allValue** | `string` | ✅ | Template value when "All" is selected (empty = no filter) |
 | **persist** | `Enum<'query' \| 'session' \| 'none'>` | ✅ | Persist selection via URL query, sessionStorage, or not at all |
@@ -145,11 +145,11 @@ const result = ActionNavItem.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'component'` | ✅ |  |
 | **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
 | **params** | `Record<string, any>` | optional | Props passed to the component |
 
@@ -167,11 +167,11 @@ const result = ActionNavItem.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'dashboard'` | ✅ |  |
 | **dashboardName** | `string` | ✅ | Target dashboard name |
 
 
@@ -188,11 +188,11 @@ const result = ActionNavItem.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'group'` | ✅ |  |
 | **expanded** | `boolean` | optional | Default expansion state in sidebar |
 
 
@@ -209,9 +209,9 @@ const result = ActionNavItem.parse(data);
 | **icon** | `string` | optional | Area icon name |
 | **order** | `number` | optional | Sort order among areas (lower = first) |
 | **description** | `string` | optional | Area description |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL) for this area. |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) for this area. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this area |
-| **navigation** | `[__schema0](./__schema0)[]` | ✅ | Navigation items within this area |
+| **navigation** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … }[]` | ✅ | Navigation items within this area |
 
 
 ---
@@ -227,7 +227,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **app** | `string` | ✅ | Target app name to contribute navigation into (e.g. "setup") |
 | **group** | `string` | optional | Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level |
 | **priority** | `integer` | optional | Merge priority within the target group — lower applied first (matches object extender priority) |
-| **items** | `[__schema0](./__schema0)[]` | ✅ | Navigation items contributed into the target app/group |
+| **items** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … }[]` | ✅ | Navigation items contributed into the target app/group |
 
 
 ---
@@ -251,17 +251,17 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'object'` | ✅ |  |
 | **objectName** | `string` | ✅ | Target object name |
 | **viewName** | `string` | optional | Default list view to open. Defaults to "all". Ignored when `recordId` is set. |
 | **recordId** | `string` | optional | Navigate directly to this record id instead of the list view. Supports template vars: `{current_user_id}`, `{current_org_id}`. |
 | **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
 | **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
-| **children** | `[#](./#)[]` | optional | Child navigation items (e.g. specific views) |
+| **children** | `[NavigationItem](#navigationitem)[]` | optional | Child navigation items (e.g. specific views) |
 
 ---
 
@@ -278,11 +278,11 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'dashboard'` | ✅ |  |
 | **dashboardName** | `string` | ✅ | Target dashboard name |
 
 ---
@@ -300,11 +300,11 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'page'` | ✅ |  |
 | **pageName** | `string` | ✅ | Target custom page component name |
 | **params** | `Record<string, any>` | optional | Parameters passed to the page context |
 
@@ -323,11 +323,11 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'url'` | ✅ |  |
 | **url** | `string` | ✅ | Target external URL |
 | **target** | `Enum<'_self' \| '_blank'>` | optional | Link target window |
 
@@ -346,11 +346,11 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'report'` | ✅ |  |
 | **reportName** | `string` | ✅ | Target report name |
 
 ---
@@ -368,12 +368,12 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
-| **actionDef** | `Object` | ✅ | Action definition to execute when clicked |
+| **type** | `'action'` | ✅ |  |
+| **actionDef** | `{ actionName: string; params?: Record<string, any> }` | ✅ | Action definition to execute when clicked |
 
 ---
 
@@ -390,11 +390,11 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'component'` | ✅ |  |
 | **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
 | **params** | `Record<string, any>` | optional | Props passed to the component |
 
@@ -413,13 +413,13 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'group'` | ✅ |  |
 | **expanded** | `boolean` | optional | Default expansion state in sidebar |
-| **children** | `[#](./#)[]` | ✅ | Child navigation items |
+| **children** | `[NavigationItem](#navigationitem)[]` | ✅ | Child navigation items |
 
 ---
 
@@ -437,11 +437,11 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'object'` | ✅ |  |
 | **objectName** | `string` | ✅ | Target object name |
 | **viewName** | `string` | optional | Default list view to open. Defaults to "all". Ignored when `recordId` is set. |
 | **recordId** | `string` | optional | Navigate directly to this record id instead of the list view. Supports template vars: `{current_user_id}`, `{current_org_id}`. |
@@ -462,11 +462,11 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'page'` | ✅ |  |
 | **pageName** | `string` | ✅ | Target custom page component name |
 | **params** | `Record<string, any>` | optional | Parameters passed to the page context |
 
@@ -484,11 +484,11 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'report'` | ✅ |  |
 | **reportName** | `string` | ✅ | Target report name |
 
 
@@ -505,11 +505,11 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
-| **visible** | `string \| Object` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
-| **type** | `string` | ✅ |  |
+| **type** | `'url'` | ✅ |  |
 | **url** | `string` | ✅ | Target external URL |
 | **target** | `Enum<'_self' \| '_blank'>` | optional | Link target window |
 

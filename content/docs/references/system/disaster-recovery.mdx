@@ -58,11 +58,11 @@ Backup configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional | Backup strategy |
-| **schedule** | `string \| Object` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
-| **retention** | `Object` | ✅ | Backup retention policy |
-| **destination** | `Object` | ✅ | Backup storage destination |
-| **encryption** | `Object` | optional | Backup encryption settings |
-| **compression** | `Object` | optional | Backup compression settings |
+| **schedule** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
+| **retention** | `{ days: number; minCopies?: number; maxCopies?: number }` | ✅ | Backup retention policy |
+| **destination** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>; bucket?: string; path?: string; region?: string }` | ✅ | Backup storage destination |
+| **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>; keyId?: string }` | optional | Backup encryption settings |
+| **compression** | `{ enabled?: boolean; algorithm?: Enum<'gzip' \| 'zstd' \| 'lz4' \| 'snappy'> }` | optional | Backup compression settings |
 | **verifyAfterBackup** | `boolean` | optional | Verify backup integrity after creation |
 
 
@@ -105,14 +105,14 @@ Complete disaster recovery plan configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional | Enable disaster recovery plan |
-| **rpo** | `Object` | ✅ | Recovery Point Objective |
-| **rto** | `Object` | ✅ | Recovery Time Objective |
-| **backup** | `Object` | ✅ | Backup configuration |
-| **failover** | `Object` | optional | Multi-region failover configuration |
-| **replication** | `Object` | optional | Data replication settings |
-| **testing** | `Object` | optional | Automated disaster recovery testing |
+| **rpo** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Point Objective |
+| **rto** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Time Objective |
+| **backup** | `{ strategy?: Enum<'full' \| 'incremental' \| 'differential'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; retention: object; destination: object; … }` | ✅ | Backup configuration |
+| **failover** | `{ mode?: Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>; autoFailover?: boolean; healthCheckInterval?: number; failureThreshold?: number; … }` | optional | Multi-region failover configuration |
+| **replication** | `{ mode?: Enum<'synchronous' \| 'asynchronous' \| 'semi_synchronous'>; maxLagSeconds?: number; includeObjects?: string[]; excludeObjects?: string[] }` | optional | Data replication settings |
+| **testing** | `{ enabled?: boolean; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; notificationChannel?: string }` | optional | Automated disaster recovery testing |
 | **runbookUrl** | `string` | optional | URL to disaster recovery runbook/playbook |
-| **contacts** | `Object[]` | optional | Emergency contact list for DR incidents |
+| **contacts** | `{ name: string; role: string; email?: string; phone?: string }[]` | optional | Emergency contact list for DR incidents |
 
 
 ---
@@ -129,8 +129,8 @@ Failover configuration
 | **autoFailover** | `boolean` | ✅ | Enable automatic failover |
 | **healthCheckInterval** | `number` | ✅ | Health check interval in seconds |
 | **failureThreshold** | `number` | ✅ | Consecutive failures before failover |
-| **regions** | `Object[]` | ✅ | Multi-region configuration (minimum 2 regions) |
-| **dns** | `Object` | optional | DNS failover settings |
+| **regions** | `{ name: string; role: Enum<'primary' \| 'secondary' \| 'witness'>; endpoint?: string; priority?: number }[]` | ✅ | Multi-region configuration (minimum 2 regions) |
+| **dns** | `{ ttl: number; provider?: Enum<'route53' \| 'cloudflare' \| 'azure_dns' \| 'custom'> }` | optional | DNS failover settings |
 
 
 ---

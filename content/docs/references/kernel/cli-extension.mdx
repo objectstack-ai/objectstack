@@ -136,7 +136,7 @@ oclif plugin configuration section
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **commands** | `Object` | optional | Command discovery configuration |
+| **commands** | `{ strategy?: Enum<'pattern' \| 'explicit' \| 'single'>; target?: string; glob?: string }` | optional | Command discovery configuration |
 | **topicSeparator** | `string` | optional | Character separating topic and command names |
 
 

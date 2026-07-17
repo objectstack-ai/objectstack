@@ -37,9 +37,9 @@ const result = CriteriaSharingRule.parse(data);
 | **object** | `string` | ✅ | Target Object Name |
 | **active** | `boolean` | optional |  |
 | **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | optional |  |
-| **sharedWith** | `Object` | ✅ | The recipient of the shared access |
-| **type** | `string` | ✅ |  |
-| **condition** | `string \| Object` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
+| **sharedWith** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | The recipient of the shared access |
+| **type** | `'criteria'` | ✅ |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
 
 
 ---
@@ -68,9 +68,9 @@ const result = CriteriaSharingRule.parse(data);
 | **object** | `string` | ✅ | Target Object Name |
 | **active** | `boolean` | ✅ |  |
 | **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | ✅ |  |
-| **sharedWith** | `Object` | ✅ | The recipient of the shared access |
-| **type** | `string` | ✅ |  |
-| **ownedBy** | `Object` | ✅ | Source group/position whose records are being shared |
+| **sharedWith** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | The recipient of the shared access |
+| **type** | `'owner'` | ✅ |  |
+| **ownedBy** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | Source group/position whose records are being shared |
 
 
 ---
@@ -119,9 +119,9 @@ This schema accepts one of the following structures:
 | **object** | `string` | ✅ | Target Object Name |
 | **active** | `boolean` | optional |  |
 | **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | optional |  |
-| **sharedWith** | `Object` | ✅ | The recipient of the shared access |
-| **type** | `string` | ✅ |  |
-| **condition** | `string \| Object` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
+| **sharedWith** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | The recipient of the shared access |
+| **type** | `'criteria'` | ✅ |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
 
 ---
 
@@ -139,9 +139,9 @@ This schema accepts one of the following structures:
 | **object** | `string` | ✅ | Target Object Name |
 | **active** | `boolean` | optional |  |
 | **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | optional |  |
-| **sharedWith** | `Object` | ✅ | The recipient of the shared access |
-| **type** | `string` | ✅ |  |
-| **ownedBy** | `Object` | ✅ | Source group/position whose records are being shared |
+| **sharedWith** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | The recipient of the shared access |
+| **type** | `'owner'` | ✅ |  |
+| **ownedBy** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | Source group/position whose records are being shared |
 
 ---
 

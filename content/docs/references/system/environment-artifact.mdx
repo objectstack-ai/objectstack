@@ -27,9 +27,9 @@ and `checksum`.
 
 credentials, environment identity, secrets. Injected at runtime.
 
-See [content/docs/concepts/north-star.mdx](content/docs/concepts/north-star.mdx) §6.3 for the runtime-inputs
+See `content/docs/concepts/north-star.mdx` §6.3 for the runtime-inputs
 
-boundary, and [ROADMAP.md](ROADMAP.md) M1 for the milestone definition.
+boundary, and `ROADMAP.md` M1 for the milestone definition.
 
 ## Storage / Distribution
 
@@ -65,16 +65,16 @@ ObjectStack Environment Artifact envelope (v0)
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **schemaVersion** | `string` | ✅ | Environment artifact envelope schema version |
+| **schemaVersion** | `'0.1'` | ✅ | Environment artifact envelope schema version |
 | **environmentId** | `string` | ✅ | Environment identifier (control-plane scoped) |
 | **commitId** | `string` | ✅ | Content-addressable revision id |
-| **checksum** | `Object` | ✅ | Artifact integrity checksum |
+| **checksum** | `{ algorithm: Enum<'sha256' \| 'sha384' \| 'sha512'>; value: string }` | ✅ | Artifact integrity checksum |
 | **builtAt** | `string` | optional | ISO-8601 timestamp of when the artifact was built |
 | **builtWith** | `string` | optional | Build tool identifier |
 | **metadata** | `Record<string, any>` | ✅ | Compiled environment metadata grouped by category |
-| **functions** | `Object[]` | ✅ | Inlined function code packaged with the artifact |
-| **manifest** | `Object` | ✅ | Plugin/driver requirements baked into the artifact |
-| **payloadRef** | `Object` | optional | Out-of-band payload reference (reserved for future use) |
+| **functions** | `{ name: string; language: Enum<'javascript' \| 'typescript'>; code: string; source?: object; … }[]` | ✅ | Inlined function code packaged with the artifact |
+| **manifest** | `{ plugins?: { id: string; version?: string }[]; drivers?: { id: string; version?: string }[]; engine?: object }` | ✅ | Plugin/driver requirements baked into the artifact |
+| **payloadRef** | `{ url: string; expiresAt?: string; checksum: object }` | optional | Out-of-band payload reference (reserved for future use) |
 
 
 ---
@@ -104,7 +104,7 @@ A single inlined function
 | **name** | `string` | ✅ | Function machine name (snake_case) |
 | **language** | `Enum<'javascript' \| 'typescript'>` | ✅ | Source language of the function code |
 | **code** | `string` | ✅ | Inlined function source |
-| **source** | `Object` | optional | Source-map metadata for the function |
+| **source** | `{ path?: string; exportName?: string }` | optional | Source-map metadata for the function |
 | **hash** | `string` | optional | Hex SHA-256 of the inlined code |
 
 
@@ -143,9 +143,9 @@ Plugin/driver requirements baked into the artifact
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **plugins** | `Object[]` | optional |  |
-| **drivers** | `Object[]` | optional |  |
-| **engine** | `Object` | optional |  |
+| **plugins** | `{ id: string; version?: string }[]` | optional |  |
+| **drivers** | `{ id: string; version?: string }[]` | optional |  |
+| **engine** | `{ objectstack: string }` | optional |  |
 
 
 ---
@@ -193,7 +193,7 @@ Out-of-band payload reference (reserved for future use)
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | Signed URL pointing at the artifact payload |
 | **expiresAt** | `string` | optional | ISO-8601 expiry timestamp |
-| **checksum** | `Object` | ✅ | Checksum of the referenced payload |
+| **checksum** | `{ algorithm: Enum<'sha256' \| 'sha384' \| 'sha512'>; value: string }` | ✅ | Checksum of the referenced payload |
 
 
 ---

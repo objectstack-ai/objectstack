@@ -31,8 +31,8 @@ const result = Animation.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **duration** | `Object` | optional |  |
-| **timing** | `Object` | optional |  |
+| **duration** | `{ fast?: string; base?: string; slow?: string }` | optional |  |
+| **timing** | `{ linear?: string; ease?: string; ease_in?: string; ease_out?: string; … }` | optional |  |
 
 
 ---
@@ -160,22 +160,22 @@ const result = Animation.parse(data);
 | **label** | `string` | ✅ | Human-readable theme name |
 | **description** | `string` | optional | Theme description |
 | **mode** | `Enum<'light' \| 'dark' \| 'auto'>` | ✅ | Theme mode (light, dark, or auto) |
-| **colors** | `Object` | ✅ | Color palette configuration |
-| **typography** | `Object` | optional | Typography settings |
-| **spacing** | `Object` | optional | Spacing scale |
-| **borderRadius** | `Object` | optional | Border radius scale |
-| **shadows** | `Object` | optional | Box shadow effects |
-| **breakpoints** | `Object` | optional | Responsive breakpoints |
-| **animation** | `Object` | optional | Animation settings |
-| **zIndex** | `Object` | optional | Z-index scale for layering |
+| **colors** | `{ primary: string; secondary?: string; accent?: string; success?: string; … }` | ✅ | Color palette configuration |
+| **typography** | `{ fontFamily?: object; fontSize?: object; fontWeight?: object; lineHeight?: object; … }` | optional | Typography settings |
+| **spacing** | `{ 0?: string; 1?: string; 2?: string; 3?: string; … }` | optional | Spacing scale |
+| **borderRadius** | `{ none?: string; sm?: string; base?: string; md?: string; … }` | optional | Border radius scale |
+| **shadows** | `{ none?: string; sm?: string; base?: string; md?: string; … }` | optional | Box shadow effects |
+| **breakpoints** | `{ xs?: string; sm?: string; md?: string; lg?: string; … }` | optional | Responsive breakpoints |
+| **animation** | `{ duration?: object; timing?: object }` | optional | Animation settings |
+| **zIndex** | `{ base?: number; dropdown?: number; sticky?: number; fixed?: number; … }` | optional | Z-index scale for layering |
 | **customVars** | `Record<string, string>` | optional | Custom CSS variables (key-value pairs) |
-| **logo** | `Object` | optional | Logo assets |
+| **logo** | `{ light?: string; dark?: string; favicon?: string }` | optional | Logo assets |
 | **extends** | `string` | optional | Base theme to extend from |
 | **density** | `Enum<'compact' \| 'regular' \| 'spacious'>` | optional | Display density: compact, regular, or spacious |
 | **wcagContrast** | `Enum<'AA' \| 'AAA'>` | optional | WCAG color contrast level (AA or AAA) |
 | **rtl** | `boolean` | optional | Enable right-to-left layout direction |
-| **touchTarget** | `Object` | optional | Touch target sizing defaults |
-| **keyboardNavigation** | `Object` | optional | Keyboard focus management settings |
+| **touchTarget** | `{ minWidth: number; minHeight: number; padding?: number; hitSlop?: object }` | optional | Touch target sizing defaults |
+| **keyboardNavigation** | `{ tabOrder: Enum<'auto' \| 'manual'>; skipLinks: boolean; focusVisible: boolean; focusTrap?: object; … }` | optional | Keyboard focus management settings |
 
 
 ---
@@ -197,11 +197,11 @@ const result = Animation.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fontFamily** | `Object` | optional |  |
-| **fontSize** | `Object` | optional |  |
-| **fontWeight** | `Object` | optional |  |
-| **lineHeight** | `Object` | optional |  |
-| **letterSpacing** | `Object` | optional |  |
+| **fontFamily** | `{ base?: string; heading?: string; mono?: string }` | optional |  |
+| **fontSize** | `{ xs?: string; sm?: string; base?: string; lg?: string; … }` | optional |  |
+| **fontWeight** | `{ light?: number; normal?: number; medium?: number; semibold?: number; … }` | optional |  |
+| **lineHeight** | `{ tight?: string; normal?: string; relaxed?: string; loose?: string }` | optional |  |
+| **letterSpacing** | `{ tighter?: string; tight?: string; normal?: string; wide?: string; … }` | optional |  |
 
 
 ---

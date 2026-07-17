@@ -54,13 +54,13 @@ const result = Flow.parse(data);
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional | Deployment status |
 | **template** | `boolean` | optional | Is logic template (Subflow) |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
-| **variables** | `Object[]` | optional | Flow variables |
-| **nodes** | `Object[]` | ✅ | Flow nodes |
-| **edges** | `Object[]` | ✅ | Flow connections |
+| **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean }[]` | optional | Flow variables |
+| **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[]` | ✅ | Flow connections |
 | **active** | `boolean` | optional | Is active (Deprecated: use status) |
 | **runAs** | `Enum<'system' \| 'user'>` | optional | Execution identity for the run: system = elevated (bypasses RLS), user = the triggering user (RLS-respecting). A schedule-triggered run has no trigger user, so under user it runs UNSCOPED (elevated) — declare system to make that explicit. |
-| **errorHandling** | `Object` | optional | Flow-level error handling configuration |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this flow. |
+| **errorHandling** | `{ strategy?: Enum<'fail' \| 'retry' \| 'continue'>; maxRetries?: integer; retryDelayMs?: integer; backoffMultiplier?: number; … }` | optional | Flow-level error handling configuration |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this flow. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -81,7 +81,7 @@ const result = Flow.parse(data);
 | **id** | `string` | ✅ | Edge unique ID |
 | **source** | `string` | ✅ | Source Node ID |
 | **target** | `string` | ✅ | Target Node ID |
-| **condition** | `string \| Object` | optional | Predicate (CEL) returning boolean used for branching. |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) returning boolean used for branching. |
 | **type** | `Enum<'default' \| 'fault' \| 'conditional' \| 'back'>` | optional | Connection type: default (normal flow), fault (error path), conditional (expression-guarded), or back (ADR-0044 declared back-edge — traversed normally at run time, but excluded from DAG cycle validation so a revise/rework loop can re-enter an earlier node) |
 | **label** | `string` | optional | Label on the connector |
 | **isDefault** | `boolean` | optional | Marks this edge as the default path when no other conditions match |
@@ -99,13 +99,13 @@ const result = Flow.parse(data);
 | **type** | `string` | ✅ | Action type — a built-in FlowNodeAction id or a plugin-registered node type. Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. |
 | **label** | `string` | ✅ | Node label |
 | **config** | `Record<string, any>` | optional | Node configuration |
-| **connectorConfig** | `Object` | optional |  |
-| **position** | `Object` | optional |  |
+| **connectorConfig** | `{ connectorId: string; actionId: string; input: Record<string, any> }` | optional |  |
+| **position** | `{ x: number; y: number }` | optional |  |
 | **timeoutMs** | `integer` | optional | Maximum execution time for this node in milliseconds |
-| **inputSchema** | `Record<string, Object>` | optional | Input parameter schema for this node |
-| **outputSchema** | `Record<string, Object>` | optional | Output schema declaration for this node |
-| **waitEventConfig** | `Object` | optional | Configuration for wait node event resumption |
-| **boundaryConfig** | `Object` | optional | Configuration for boundary events attached to host nodes |
+| **inputSchema** | `Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required: boolean; description?: string }>` | optional | Input parameter schema for this node |
+| **outputSchema** | `Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; description?: string }>` | optional | Output schema declaration for this node |
+| **waitEventConfig** | `{ eventType: Enum<'timer' \| 'signal' \| 'webhook' \| 'manual' \| 'condition'>; timerDuration?: string; signalName?: string; timeoutMs?: integer; … }` | optional | Configuration for wait node event resumption |
+| **boundaryConfig** | `{ attachedToNodeId: string; eventType: Enum<'error' \| 'timer' \| 'signal' \| 'cancel'>; interrupting: boolean; errorCode?: string; … }` | optional | Configuration for boundary events attached to host nodes |
 
 
 ---
@@ -160,7 +160,7 @@ const result = Flow.parse(data);
 | :--- | :--- | :--- | :--- |
 | **flowName** | `string` | ✅ | Flow machine name |
 | **version** | `integer` | ✅ | Version number |
-| **definition** | `Object` | ✅ | Complete flow definition snapshot |
+| **definition** | `{ name: string; label: string; description?: string; successMessage?: string; … }` | ✅ | Complete flow definition snapshot |
 | **createdAt** | `string` | ✅ | When this version was created |
 | **createdBy** | `string` | optional | User who created this version |
 | **changeNote** | `string` | optional | Description of what changed in this version |

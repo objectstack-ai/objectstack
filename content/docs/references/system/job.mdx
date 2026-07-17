@@ -31,8 +31,8 @@ const result = CronSchedule.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
-| **expression** | `string \| Object` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
+| **type** | `'cron'` | ✅ |  |
+| **expression** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
 | **timezone** | `string` | optional | Timezone for cron execution (e.g., "America/New_York") |
 
 
@@ -44,7 +44,7 @@ const result = CronSchedule.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'interval'` | ✅ |  |
 | **intervalMs** | `integer` | ✅ | Interval in milliseconds |
 
 
@@ -60,9 +60,9 @@ const result = CronSchedule.parse(data);
 | **name** | `string` | ✅ | Job name (snake_case) |
 | **label** | `string` | optional | Human-readable label |
 | **description** | `string` | optional | Job description / purpose |
-| **schedule** | `Object \| Object \| Object` | ✅ | Job schedule configuration |
+| **schedule** | `{ type: 'cron'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string } \| { type: 'interval'; intervalMs: integer } \| { type: 'once'; at: string }` | ✅ | Job schedule configuration |
 | **handler** | `string` | ✅ | Handler function name (must match a key in `defineStack({ functions })`) |
-| **retryPolicy** | `Object` | optional | Retry policy configuration |
+| **retryPolicy** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number }` | optional | Retry policy configuration |
 | **timeout** | `integer` | optional | Timeout in milliseconds |
 | **enabled** | `boolean` | optional | Whether the job is enabled |
 
@@ -103,7 +103,7 @@ const result = CronSchedule.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'once'` | ✅ |  |
 | **at** | `string` | ✅ | ISO 8601 datetime when to execute |
 
 
@@ -136,8 +136,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
-| **expression** | `string \| Object` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
+| **type** | `'cron'` | ✅ |  |
+| **expression** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
 | **timezone** | `string` | optional | Timezone for cron execution (e.g., "America/New_York") |
 
 ---
@@ -150,7 +150,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'interval'` | ✅ |  |
 | **intervalMs** | `integer` | ✅ | Interval in milliseconds |
 
 ---
@@ -163,7 +163,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'once'` | ✅ |  |
 | **at** | `string` | ✅ | ISO 8601 datetime when to execute |
 
 ---

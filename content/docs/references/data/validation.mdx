@@ -132,10 +132,10 @@ const result = ConditionalValidation.parse(data);
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
-| **when** | `string \| Object` | ✅ | Predicate (CEL). e.g. P`record.type == 'enterprise'` |
-| **then** | `Object \| Object \| Object \| Object \| Object \| [#](./#)` | ✅ | Validation rule to apply when condition is true |
-| **otherwise** | `Object \| Object \| Object \| Object \| Object \| [#](./#)` | optional | Validation rule to apply when condition is false |
+| **type** | `'conditional'` | ✅ |  |
+| **when** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.type == 'enterprise'` |
+| **then** | `{ name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| [ConditionalValidation](#conditionalvalidation)` | ✅ | Validation rule to apply when condition is true |
+| **otherwise** | `{ name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| [ConditionalValidation](#conditionalvalidation)` | optional | Validation rule to apply when condition is false |
 
 
 ---
@@ -155,8 +155,8 @@ const result = ConditionalValidation.parse(data);
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
-| **condition** | `string \| Object` | ✅ | Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date` |
+| **type** | `'cross_field'` | ✅ |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date` |
 | **fields** | `string[]` | ✅ | Fields involved in the validation |
 
 
@@ -177,7 +177,7 @@ const result = ConditionalValidation.parse(data);
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
+| **type** | `'format'` | ✅ |  |
 | **field** | `string` | ✅ |  |
 | **regex** | `string` | optional |  |
 | **format** | `Enum<'email' \| 'url' \| 'phone' \| 'json'>` | optional |  |
@@ -200,7 +200,7 @@ const result = ConditionalValidation.parse(data);
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
+| **type** | `'json_schema'` | ✅ |  |
 | **field** | `string` | ✅ | JSON field to validate |
 | **schema** | `Record<string, any>` | ✅ | JSON Schema object definition |
 
@@ -222,8 +222,8 @@ const result = ConditionalValidation.parse(data);
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
-| **condition** | `string \| Object` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0` |
+| **type** | `'script'` | ✅ |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0` |
 
 
 ---
@@ -243,7 +243,7 @@ const result = ConditionalValidation.parse(data);
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
+| **type** | `'state_machine'` | ✅ |  |
 | **field** | `string` | ✅ | State field (e.g. status) |
 | **transitions** | `Record<string, string[]>` | ✅ | Map of `{ OldState: [AllowedNewStates] }` |
 
@@ -273,8 +273,8 @@ This schema accepts one of the following structures:
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
-| **condition** | `string \| Object` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0` |
+| **type** | `'script'` | ✅ |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0` |
 
 ---
 
@@ -295,7 +295,7 @@ This schema accepts one of the following structures:
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
+| **type** | `'state_machine'` | ✅ |  |
 | **field** | `string` | ✅ | State field (e.g. status) |
 | **transitions** | `Record<string, string[]>` | ✅ | Map of `{ OldState: [AllowedNewStates] }` |
 
@@ -318,7 +318,7 @@ This schema accepts one of the following structures:
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
+| **type** | `'format'` | ✅ |  |
 | **field** | `string` | ✅ |  |
 | **regex** | `string` | optional |  |
 | **format** | `Enum<'email' \| 'url' \| 'phone' \| 'json'>` | optional |  |
@@ -342,8 +342,8 @@ This schema accepts one of the following structures:
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
-| **condition** | `string \| Object` | ✅ | Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date` |
+| **type** | `'cross_field'` | ✅ |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date` |
 | **fields** | `string[]` | ✅ | Fields involved in the validation |
 
 ---
@@ -365,7 +365,7 @@ This schema accepts one of the following structures:
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
+| **type** | `'json_schema'` | ✅ |  |
 | **field** | `string` | ✅ | JSON field to validate |
 | **schema** | `Record<string, any>` | ✅ | JSON Schema object definition |
 
@@ -388,10 +388,10 @@ This schema accepts one of the following structures:
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
-| **type** | `string` | ✅ |  |
-| **when** | `string \| Object` | ✅ | Predicate (CEL). e.g. P`record.type == 'enterprise'` |
-| **then** | `[#](./#)` | ✅ | Validation rule to apply when condition is true |
-| **otherwise** | `[#](./#)` | optional | Validation rule to apply when condition is false |
+| **type** | `'conditional'` | ✅ |  |
+| **when** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.type == 'enterprise'` |
+| **then** | `[ValidationRule](#validationrule)` | ✅ | Validation rule to apply when condition is true |
+| **otherwise** | `[ValidationRule](#validationrule)` | optional | Validation rule to apply when condition is false |
 
 ---
 

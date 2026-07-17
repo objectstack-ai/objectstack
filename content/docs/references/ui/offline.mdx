@@ -78,8 +78,8 @@ Offline support configuration
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable offline support |
 | **strategy** | `Enum<'cache_first' \| 'network_first' \| 'stale_while_revalidate' \| 'network_only' \| 'cache_only'>` | ✅ | Default offline fetch strategy |
-| **cache** | `Object` | optional | Cache settings for offline data |
-| **sync** | `Object` | optional | Sync settings for offline mutations |
+| **cache** | `{ maxSize?: number; ttl?: number; persistStorage: Enum<'indexeddb' \| 'localstorage' \| 'sqlite'>; evictionPolicy: Enum<'lru' \| 'lfu' \| 'fifo'> }` | optional | Cache settings for offline data |
+| **sync** | `{ strategy: Enum<'cache_first' \| 'network_first' \| 'stale_while_revalidate' \| 'network_only' \| 'cache_only'>; conflictResolution: Enum<'client_wins' \| 'server_wins' \| 'manual' \| 'last_write_wins'>; retryInterval?: number; maxRetries?: number; … }` | optional | Sync settings for offline mutations |
 | **offlineIndicator** | `boolean` | ✅ | Show a visual indicator when offline |
 | **offlineMessage** | `string` | optional | Customizable offline status message shown to users |
 | **queueMaxSize** | `number` | optional | Maximum number of queued offline mutations |

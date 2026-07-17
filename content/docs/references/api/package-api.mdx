@@ -65,9 +65,9 @@ Get installed package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Installed package details |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Installed package details |
 
 
 ---
@@ -97,9 +97,9 @@ List installed packages response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ packages: { manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 
 ---
@@ -133,11 +133,11 @@ Install package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `Object` | ✅ | Package manifest to install |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
 | **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
-| **artifactRef** | `Object` | optional | Artifact reference for marketplace installation |
+| **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for marketplace installation |
 
 
 ---
@@ -151,9 +151,9 @@ Install package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ package: object; dependencyResolution?: object; namespaceConflicts?: { type: 'namespace_conflict'; requestedNamespace: string; conflictingPackageId: string; conflictingPackageName: string; … }[]; message?: string }` | ✅ |  |
 
 
 ---
@@ -193,9 +193,9 @@ Rollback package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ success: boolean; restoredVersion?: string; message?: string }` | ✅ |  |
 
 
 ---
@@ -210,7 +210,7 @@ Upgrade package request
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Package ID to upgrade |
 | **targetVersion** | `string` | optional | Target version (defaults to latest) |
-| **manifest** | `Object` | optional | New manifest for the target version |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | optional | New manifest for the target version |
 | **createSnapshot** | `boolean` | optional | Whether to create a pre-upgrade backup snapshot |
 | **mergeStrategy** | `Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>` | optional | How to handle customer customizations |
 | **dryRun** | `boolean` | optional | Preview upgrade without making changes |
@@ -228,9 +228,9 @@ Upgrade package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ success: boolean; phase: string; plan?: object; snapshotId?: string; … }` | ✅ |  |
 
 
 ---
@@ -243,7 +243,7 @@ Resolve dependencies request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `Object` | ✅ | Package manifest to resolve dependencies for |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to resolve dependencies for |
 | **platformVersion** | `string` | optional | Current platform version for compatibility filtering |
 
 
@@ -258,9 +258,9 @@ Resolve dependencies response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Dependency resolution result with topological sort |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ dependencies: { packageId: string; requiredRange: string; resolvedVersion?: string; installedVersion?: string; … }[]; canProceed: boolean; requiredActions: { type: Enum<'install' \| 'upgrade' \| 'confirm_conflict'>; packageId: string; description: string }[]; installOrder: string[]; … }` | ✅ | Dependency resolution result with topological sort |
 
 
 ---
@@ -285,9 +285,9 @@ Uninstall package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ packageId: string; success: boolean; message?: string }` | ✅ |  |
 
 
 ---
@@ -300,7 +300,7 @@ Upload artifact request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **artifact** | `Object` | ✅ | Package artifact metadata |
+| **artifact** | `{ formatVersion: string; packageId: string; version: string; format: Enum<'tgz' \| 'zip'>; … }` | ✅ | Package artifact metadata |
 | **sha256** | `string` | optional | SHA256 checksum of the uploaded file |
 | **token** | `string` | optional | Publisher authentication token |
 | **releaseNotes** | `string` | optional | Release notes for this version |
@@ -317,9 +317,9 @@ Upload artifact response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ success: boolean; artifactRef?: object; submissionId?: string; message?: string }` | ✅ |  |
 
 
 ---

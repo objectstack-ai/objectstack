@@ -165,10 +165,10 @@ Package artifact structure and metadata
 | **size** | `integer` | optional | Total artifact file size in bytes |
 | **builtAt** | `string` | ✅ | ISO 8601 timestamp of when the artifact was built |
 | **builtWith** | `string` | optional | Build tool identifier (e.g. "os-cli@3.2.0") |
-| **files** | `Object[]` | optional | List of files contained in the artifact |
+| **files** | `{ path: string; size: integer; category?: Enum<'objects' \| 'views' \| 'pages' \| 'flows' \| 'dashboards' \| 'permissions' \| 'agents' \| 'reports' \| 'actions' \| 'translations' \| 'themes' \| 'datasets' \| 'apis' \| 'triggers' \| 'workflows'> }[]` | optional | List of files contained in the artifact |
 | **metadataCategories** | `Enum<'objects' \| 'views' \| 'pages' \| 'flows' \| 'dashboards' \| 'permissions' \| 'agents' \| 'reports' \| 'actions' \| 'translations' \| 'themes' \| 'datasets' \| 'apis' \| 'triggers' \| 'workflows'>[]` | optional | Metadata categories included in this artifact |
-| **checksums** | `Object` | optional | SHA256 checksums for artifact integrity verification |
-| **signature** | `Object` | optional | Digital signature for artifact authenticity verification |
+| **checksums** | `{ algorithm: Enum<'sha256' \| 'sha384' \| 'sha512'>; files: Record<string, string> }` | optional | SHA256 checksums for artifact integrity verification |
+| **signature** | `{ algorithm: Enum<'RSA-SHA256' \| 'RSA-SHA384' \| 'RSA-SHA512' \| 'ECDSA-SHA256'>; publicKeyRef: string; signature: string; signedAt?: string; … }` | optional | Digital signature for artifact authenticity verification |
 
 
 ---

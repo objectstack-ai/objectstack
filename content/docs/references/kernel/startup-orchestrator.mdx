@@ -54,8 +54,8 @@ const result = HealthStatus.parse(data);
 | **plugin** | `Record<string, any>` | ✅ | Plugin metadata |
 | **success** | `boolean` | ✅ | Whether the plugin started successfully |
 | **duration** | `number` | ✅ | Time taken to start the plugin in milliseconds |
-| **error** | `Object` | optional | Serializable error representation if startup failed |
-| **health** | `Object` | optional | Health status after startup if health check was enabled |
+| **error** | `{ name: string; message: string; stack?: string; code?: string }` | optional | Serializable error representation if startup failed |
+| **health** | `{ healthy: boolean; timestamp: integer; details?: Record<string, any>; message?: string }` | optional | Health status after startup if health check was enabled |
 
 
 ---
@@ -81,7 +81,7 @@ const result = HealthStatus.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **results** | `Object[]` | ✅ | Startup results for each plugin |
+| **results** | `{ plugin: object; success: boolean; duration: number; error?: object; … }[]` | ✅ | Startup results for each plugin |
 | **totalDuration** | `number` | ✅ | Total time taken for all plugins in milliseconds |
 | **allSuccessful** | `boolean` | ✅ | Whether all plugins started successfully |
 | **rolledBack** | `string[]` | optional | Names of plugins that were rolled back |

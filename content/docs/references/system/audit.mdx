@@ -51,16 +51,16 @@ const result = AuditConfig.parse(data);
 | **eventTypes** | `Enum<'data.create' \| 'data.read' \| 'data.update' \| 'data.delete' \| 'data.export' \| 'data.import' \| 'data.bulk_update' \| 'data.bulk_delete' \| 'auth.login' \| 'auth.login_failed' \| 'auth.logout' \| 'auth.session_created' \| 'auth.session_expired' \| 'auth.password_reset' \| 'auth.password_changed' \| 'auth.email_verified' \| 'auth.mfa_enabled' \| 'auth.mfa_disabled' \| 'auth.account_locked' \| 'auth.account_unlocked' \| 'authz.permission_granted' \| 'authz.permission_revoked' \| 'authz.role_assigned' \| 'authz.role_removed' \| 'authz.role_created' \| 'authz.role_updated' \| 'authz.role_deleted' \| 'authz.policy_created' \| 'authz.policy_updated' \| 'authz.policy_deleted' \| 'system.config_changed' \| 'system.plugin_installed' \| 'system.plugin_uninstalled' \| 'system.backup_created' \| 'system.backup_restored' \| 'system.integration_added' \| 'system.integration_removed' \| 'security.access_denied' \| 'security.suspicious_activity' \| 'security.data_breach' \| 'security.api_key_created' \| 'security.api_key_revoked'>[]` | optional | Event types to audit |
 | **excludeEventTypes** | `Enum<'data.create' \| 'data.read' \| 'data.update' \| 'data.delete' \| 'data.export' \| 'data.import' \| 'data.bulk_update' \| 'data.bulk_delete' \| 'auth.login' \| 'auth.login_failed' \| 'auth.logout' \| 'auth.session_created' \| 'auth.session_expired' \| 'auth.password_reset' \| 'auth.password_changed' \| 'auth.email_verified' \| 'auth.mfa_enabled' \| 'auth.mfa_disabled' \| 'auth.account_locked' \| 'auth.account_unlocked' \| 'authz.permission_granted' \| 'authz.permission_revoked' \| 'authz.role_assigned' \| 'authz.role_removed' \| 'authz.role_created' \| 'authz.role_updated' \| 'authz.role_deleted' \| 'authz.policy_created' \| 'authz.policy_updated' \| 'authz.policy_deleted' \| 'system.config_changed' \| 'system.plugin_installed' \| 'system.plugin_uninstalled' \| 'system.backup_created' \| 'system.backup_restored' \| 'system.integration_added' \| 'system.integration_removed' \| 'security.access_denied' \| 'security.suspicious_activity' \| 'security.data_breach' \| 'security.api_key_created' \| 'security.api_key_revoked'>[]` | optional | Event types to exclude |
 | **minimumSeverity** | `Enum<'debug' \| 'info' \| 'notice' \| 'warning' \| 'error' \| 'critical' \| 'alert' \| 'emergency'>` | optional | Minimum severity level |
-| **storage** | `Object` | ✅ | Storage configuration |
-| **retentionPolicy** | `Object` | optional | Retention policy |
-| **suspiciousActivityRules** | `Object[]` | optional | Suspicious activity rules |
+| **storage** | `{ type: Enum<'database' \| 'elasticsearch' \| 'mongodb' \| 'clickhouse' \| 's3' \| 'gcs' \| 'azure_blob' \| 'custom'>; connectionString?: string; config?: Record<string, any>; bufferEnabled?: boolean; … }` | ✅ | Storage configuration |
+| **retentionPolicy** | `{ retentionDays?: integer; archiveAfterRetention?: boolean; archiveStorage?: object; customRetention?: Record<string, integer>; … }` | optional | Retention policy |
+| **suspiciousActivityRules** | `{ id: string; name: string; description?: string; enabled?: boolean; … }[]` | optional | Suspicious activity rules |
 | **includeSensitiveData** | `boolean` | optional | Include sensitive data |
 | **redactFields** | `string[]` | optional | Fields to redact |
 | **logReads** | `boolean` | optional | Log read operations |
 | **readSamplingRate** | `number` | optional | Read sampling rate |
 | **logSystemEvents** | `boolean` | optional | Log system events |
-| **customHandlers** | `Object[]` | optional | Custom event handler references |
-| **compliance** | `Object` | optional | Compliance configuration |
+| **customHandlers** | `{ eventType: Enum<'data.create' \| 'data.read' \| 'data.update' \| 'data.delete' \| 'data.export' \| 'data.import' \| 'data.bulk_update' \| 'data.bulk_delete' \| 'auth.login' \| 'auth.login_failed' \| 'auth.logout' \| 'auth.session_created' \| 'auth.session_expired' \| 'auth.password_reset' \| 'auth.password_changed' \| 'auth.email_verified' \| 'auth.mfa_enabled' \| 'auth.mfa_disabled' \| 'auth.account_locked' \| 'auth.account_unlocked' \| 'authz.permission_granted' \| 'authz.permission_revoked' \| 'authz.role_assigned' \| 'authz.role_removed' \| 'authz.role_created' \| 'authz.role_updated' \| 'authz.role_deleted' \| 'authz.policy_created' \| 'authz.policy_updated' \| 'authz.policy_deleted' \| 'system.config_changed' \| 'system.plugin_installed' \| 'system.plugin_uninstalled' \| 'system.backup_created' \| 'system.backup_restored' \| 'system.integration_added' \| 'system.integration_removed' \| 'security.access_denied' \| 'security.suspicious_activity' \| 'security.data_breach' \| 'security.api_key_created' \| 'security.api_key_revoked'>; handlerId: string }[]` | optional | Custom event handler references |
+| **compliance** | `{ standards?: Enum<'sox' \| 'hipaa' \| 'gdpr' \| 'pci_dss' \| 'iso_27001' \| 'fedramp'>[]; immutableLogs?: boolean; requireSigning?: boolean; signingKey?: string }` | optional | Compliance configuration |
 
 
 ---
@@ -75,16 +75,16 @@ const result = AuditConfig.parse(data);
 | **eventType** | `Enum<'data.create' \| 'data.read' \| 'data.update' \| 'data.delete' \| 'data.export' \| 'data.import' \| 'data.bulk_update' \| 'data.bulk_delete' \| 'auth.login' \| 'auth.login_failed' \| 'auth.logout' \| 'auth.session_created' \| 'auth.session_expired' \| 'auth.password_reset' \| 'auth.password_changed' \| 'auth.email_verified' \| 'auth.mfa_enabled' \| 'auth.mfa_disabled' \| 'auth.account_locked' \| 'auth.account_unlocked' \| 'authz.permission_granted' \| 'authz.permission_revoked' \| 'authz.role_assigned' \| 'authz.role_removed' \| 'authz.role_created' \| 'authz.role_updated' \| 'authz.role_deleted' \| 'authz.policy_created' \| 'authz.policy_updated' \| 'authz.policy_deleted' \| 'system.config_changed' \| 'system.plugin_installed' \| 'system.plugin_uninstalled' \| 'system.backup_created' \| 'system.backup_restored' \| 'system.integration_added' \| 'system.integration_removed' \| 'security.access_denied' \| 'security.suspicious_activity' \| 'security.data_breach' \| 'security.api_key_created' \| 'security.api_key_revoked'>` | ✅ | Event type |
 | **severity** | `Enum<'debug' \| 'info' \| 'notice' \| 'warning' \| 'error' \| 'critical' \| 'alert' \| 'emergency'>` | ✅ | Event severity |
 | **timestamp** | `string` | ✅ | Event timestamp |
-| **actor** | `Object` | ✅ | Event actor |
-| **target** | `Object` | optional | Event target |
+| **actor** | `{ type: Enum<'user' \| 'system' \| 'service' \| 'api_client' \| 'integration'>; id: string; name?: string; email?: string; … }` | ✅ | Event actor |
+| **target** | `{ type: string; id: string; name?: string; metadata?: Record<string, any> }` | optional | Event target |
 | **description** | `string` | ✅ | Event description |
-| **changes** | `Object[]` | optional | List of changes |
+| **changes** | `{ field: string; oldValue?: any; newValue?: any }[]` | optional | List of changes |
 | **result** | `Enum<'success' \| 'failure' \| 'partial'>` | ✅ | Action result |
 | **errorMessage** | `string` | optional | Error message |
 | **tenantId** | `string` | optional | Tenant identifier |
 | **requestId** | `string` | optional | Request ID for tracing |
 | **metadata** | `Record<string, any>` | optional | Additional metadata |
-| **location** | `Object` | optional | Geographic location |
+| **location** | `{ country?: string; region?: string; city?: string }` | optional | Geographic location |
 
 
 ---
@@ -128,7 +128,7 @@ const result = AuditConfig.parse(data);
 | **severities** | `Enum<'debug' \| 'info' \| 'notice' \| 'warning' \| 'error' \| 'critical' \| 'alert' \| 'emergency'>[]` | optional | Severity levels to include |
 | **actorId** | `string` | optional | Actor identifier |
 | **tenantId** | `string` | optional | Tenant identifier |
-| **timeRange** | `Object` | optional | Time range filter |
+| **timeRange** | `{ from: string; to: string }` | optional | Time range filter |
 | **result** | `Enum<'success' \| 'failure' \| 'partial'>` | optional | Result status |
 | **searchQuery** | `string` | optional | Search query |
 | **customFilters** | `Record<string, any>` | optional | Custom filters |
@@ -224,7 +224,7 @@ const result = AuditConfig.parse(data);
 | :--- | :--- | :--- | :--- |
 | **retentionDays** | `integer` | ✅ | Retention period in days |
 | **archiveAfterRetention** | `boolean` | ✅ | Archive logs after retention period |
-| **archiveStorage** | `Object` | optional | Archive storage configuration |
+| **archiveStorage** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'filesystem'>; endpoint?: string; bucket?: string; path?: string; … }` | optional | Archive storage configuration |
 | **customRetention** | `Record<string, integer>` | optional | Custom retention by event type |
 | **minimumRetentionDays** | `integer` | optional | Minimum retention for compliance |
 
@@ -259,10 +259,10 @@ const result = AuditConfig.parse(data);
 | **description** | `string` | optional | Rule description |
 | **enabled** | `boolean` | optional | Rule enabled status |
 | **eventTypes** | `Enum<'data.create' \| 'data.read' \| 'data.update' \| 'data.delete' \| 'data.export' \| 'data.import' \| 'data.bulk_update' \| 'data.bulk_delete' \| 'auth.login' \| 'auth.login_failed' \| 'auth.logout' \| 'auth.session_created' \| 'auth.session_expired' \| 'auth.password_reset' \| 'auth.password_changed' \| 'auth.email_verified' \| 'auth.mfa_enabled' \| 'auth.mfa_disabled' \| 'auth.account_locked' \| 'auth.account_unlocked' \| 'authz.permission_granted' \| 'authz.permission_revoked' \| 'authz.role_assigned' \| 'authz.role_removed' \| 'authz.role_created' \| 'authz.role_updated' \| 'authz.role_deleted' \| 'authz.policy_created' \| 'authz.policy_updated' \| 'authz.policy_deleted' \| 'system.config_changed' \| 'system.plugin_installed' \| 'system.plugin_uninstalled' \| 'system.backup_created' \| 'system.backup_restored' \| 'system.integration_added' \| 'system.integration_removed' \| 'security.access_denied' \| 'security.suspicious_activity' \| 'security.data_breach' \| 'security.api_key_created' \| 'security.api_key_revoked'>[]` | ✅ | Event types to monitor |
-| **condition** | `Object \| string \| Object` | ✅ | Detection condition — structured threshold or CEL predicate |
+| **condition** | `{ threshold: integer; windowSeconds: integer; groupBy?: string[]; filters?: Record<string, any> } \| string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Detection condition — structured threshold or CEL predicate |
 | **actions** | `Enum<'alert' \| 'lock_account' \| 'block_ip' \| 'require_mfa' \| 'log_critical' \| 'webhook'>[]` | ✅ | Actions to take |
 | **alertSeverity** | `Enum<'debug' \| 'info' \| 'notice' \| 'warning' \| 'error' \| 'critical' \| 'alert' \| 'emergency'>` | optional | Alert severity |
-| **notifications** | `Object` | optional | Notification configuration |
+| **notifications** | `{ email?: string[]; slack?: string; webhook?: string }` | optional | Notification configuration |
 
 
 ---

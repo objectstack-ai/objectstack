@@ -82,9 +82,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ reactions: { emoji: string; userIds: string[]; count: integer }[] }` | ✅ |  |
 
 
 ---
@@ -98,8 +98,8 @@ const result = AddReactionRequest.parse(data);
 | **id** | `string` | ✅ | Changelog entry ID |
 | **object** | `string` | ✅ | Object name |
 | **recordId** | `string` | ✅ | Record ID |
-| **actor** | `Object` | ✅ | Who made the change |
-| **changes** | `Object[]` | ✅ | Field-level changes |
+| **actor** | `{ type: Enum<'user' \| 'system' \| 'service' \| 'automation'>; id: string; name?: string }` | ✅ | Who made the change |
+| **changes** | `{ field: string; fieldLabel?: string; oldValue?: any; newValue?: any; … }[]` | ✅ | Field-level changes |
 | **timestamp** | `string` | ✅ | When the change occurred |
 | **source** | `string` | optional | Change source (e.g., "API", "UI", "automation") |
 
@@ -116,7 +116,7 @@ const result = AddReactionRequest.parse(data);
 | **recordId** | `string` | ✅ | Record ID |
 | **type** | `Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'>` | ✅ | Type of feed item to create |
 | **body** | `string` | optional | Rich text body (Markdown supported) |
-| **mentions** | `Object[]` | optional | Mentioned users, teams, or records |
+| **mentions** | `{ type: Enum<'user' \| 'team' \| 'record'>; id: string; name: string; offset: integer; … }[]` | optional | Mentioned users, teams, or records |
 | **parentId** | `string` | optional | Parent feed item ID for threaded replies |
 | **visibility** | `Enum<'public' \| 'internal' \| 'private'>` | ✅ | Visibility: public, internal, or private |
 
@@ -130,9 +130,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | The created feed item |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ id: string; type: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'>; object: string; recordId: string; … }` | ✅ | The created feed item |
 
 
 ---
@@ -157,9 +157,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ feedId: string }` | ✅ |  |
 
 
 ---
@@ -260,9 +260,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ entries: { id: string; object: string; recordId: string; actor: object; … }[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 
 ---
@@ -289,9 +289,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ items: { id: string; type: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'>; object: string; recordId: string; … }[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 
 ---
@@ -316,9 +316,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ feedId: string; pinned: boolean; pinnedAt: string }` | ✅ |  |
 
 
 ---
@@ -344,9 +344,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ reactions: { emoji: string; userIds: string[]; count: integer }[] }` | ✅ |  |
 
 
 ---
@@ -380,9 +380,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ items: { id: string; type: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'>; object: string; recordId: string; … }[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 
 ---
@@ -407,9 +407,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ feedId: string; starred: boolean; starredAt: string }` | ✅ |  |
 
 
 ---
@@ -435,9 +435,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | The created or updated subscription |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ object: string; recordId: string; userId: string; events: Enum<'comment' \| 'mention' \| 'field_change' \| 'task' \| 'approval' \| 'all'>[]; … }` | ✅ | The created or updated subscription |
 
 
 ---
@@ -462,9 +462,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ feedId: string; pinned: boolean }` | ✅ |  |
 
 
 ---
@@ -489,9 +489,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ feedId: string; starred: boolean }` | ✅ |  |
 
 
 ---
@@ -503,9 +503,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ object: string; recordId: string; unsubscribed: boolean }` | ✅ |  |
 
 
 ---
@@ -520,7 +520,7 @@ const result = AddReactionRequest.parse(data);
 | **recordId** | `string` | ✅ | Record ID |
 | **feedId** | `string` | ✅ | Feed item ID |
 | **body** | `string` | optional | Updated rich text body |
-| **mentions** | `Object[]` | optional | Updated mentions |
+| **mentions** | `{ type: Enum<'user' \| 'team' \| 'record'>; id: string; name: string; offset: integer; … }[]` | optional | Updated mentions |
 | **visibility** | `Enum<'public' \| 'internal' \| 'private'>` | optional | Updated visibility |
 
 
@@ -533,9 +533,9 @@ const result = AddReactionRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | The updated feed item |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ id: string; type: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'>; object: string; recordId: string; … }` | ✅ | The updated feed item |
 
 
 ---

@@ -45,7 +45,7 @@ const result = MetadataCollectionInfo.parse(data);
 | :--- | :--- | :--- | :--- |
 | **output** | `string` | ✅ | Output file path |
 | **format** | `Enum<'json' \| 'yaml' \| 'typescript' \| 'javascript'>` | optional | Export format |
-| **filter** | `string \| Object` | optional | Filter items to export (CEL) |
+| **filter** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Filter items to export (CEL) |
 | **includeStats** | `boolean` | optional | Include metadata statistics |
 | **compress** | `boolean` | optional | Compress output (gzip) |
 | **prettify** | `boolean` | optional | Pretty print output |
@@ -91,7 +91,7 @@ const result = MetadataCollectionInfo.parse(data);
 | **ifModifiedSince** | `string` | optional | Only load if modified after this date |
 | **validate** | `boolean` | optional | Validate against schema |
 | **useCache** | `boolean` | optional | Enable caching |
-| **filter** | `string \| Object` | optional | Filter predicate (CEL) |
+| **filter** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Filter predicate (CEL) |
 | **limit** | `integer` | optional | Maximum items to load |
 | **recursive** | `boolean` | optional | Search subdirectories |
 
@@ -108,7 +108,7 @@ const result = MetadataCollectionInfo.parse(data);
 | **fromCache** | `boolean` | ✅ | Loaded from cache |
 | **notModified** | `boolean` | ✅ | Not modified since last request |
 | **etag** | `string` | optional | Entity tag |
-| **stats** | `Object` | optional | Metadata statistics |
+| **stats** | `{ size: integer; modifiedAt: string; etag: string; format: Enum<'json' \| 'yaml' \| 'typescript' \| 'javascript'>; … }` | optional | Metadata statistics |
 | **loadTime** | `number` | optional | Load duration in ms |
 
 
@@ -122,7 +122,7 @@ const result = MetadataCollectionInfo.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Loader identifier |
 | **protocol** | `Enum<'file:' \| 'http:' \| 's3:' \| 'datasource:' \| 'memory:'>` | ✅ | Protocol identifier |
-| **capabilities** | `Object` | ✅ | Loader capabilities |
+| **capabilities** | `{ read: boolean; write: boolean; watch: boolean; list: boolean }` | ✅ | Loader capabilities |
 | **supportedFormats** | `Enum<'json' \| 'yaml' \| 'typescript' \| 'javascript'>[]` | ✅ | Supported formats |
 | **supportsWatch** | `boolean` | ✅ | Supports file watching |
 | **supportsWrite** | `boolean` | ✅ | Supports write operations |

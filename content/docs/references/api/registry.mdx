@@ -99,9 +99,9 @@ const result = ApiDiscoveryQuery.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **apis** | `Object[]` | ✅ | Matching API entries |
+| **apis** | `{ id: string; name: string; type: Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]` | ✅ | Matching API entries |
 | **total** | `integer` | ✅ | Total matching APIs |
-| **filters** | `Object` | optional | Applied query filters |
+| **filters** | `{ type?: Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; tags?: string[]; status?: Enum<'active' \| 'deprecated' \| 'experimental' \| 'beta'>; pluginSource?: string; … }` | optional | Applied query filters |
 
 
 ---
@@ -119,16 +119,16 @@ const result = ApiDiscoveryQuery.parse(data);
 | **description** | `string` | optional | Detailed endpoint description |
 | **operationId** | `string` | optional | Unique operation identifier |
 | **tags** | `string[]` | ✅ | Tags for categorization |
-| **parameters** | `Object[]` | ✅ | Endpoint parameters |
-| **requestBody** | `Object` | optional | Request body specification |
-| **responses** | `Object[]` | ✅ | Possible responses |
-| **rateLimit** | `Object` | optional | Endpoint specific rate limiting |
+| **parameters** | `{ name: string; in: Enum<'path' \| 'query' \| 'header' \| 'body' \| 'cookie'>; description?: string; required: boolean; … }[]` | ✅ | Endpoint parameters |
+| **requestBody** | `{ description?: string; required: boolean; contentType: string; schema?: any; … }` | optional | Request body specification |
+| **responses** | `{ statusCode: integer \| Enum<'2xx' \| '3xx' \| '4xx' \| '5xx'>; description: string; contentType: string; schema?: any \| { $ref: object }; … }[]` | ✅ | Possible responses |
+| **rateLimit** | `{ enabled: boolean; windowMs: integer; maxRequests: integer }` | optional | Endpoint specific rate limiting |
 | **security** | `Record<string, string[]>[]` | optional | Security requirements (e.g. [`{"bearerAuth": []}`]) |
 | **requiredPermissions** | `string[]` | ✅ | Required RBAC permissions (e.g., "customer.read", "manage_users") |
 | **priority** | `integer` | ✅ | Route priority for conflict resolution (0-1000, higher = more important) |
 | **protocolConfig** | `Record<string, any>` | optional | Protocol-specific configuration for custom protocols (gRPC, tRPC, etc.) |
 | **deprecated** | `boolean` | ✅ | Whether endpoint is deprecated |
-| **externalDocs** | `Object` | optional | External documentation link |
+| **externalDocs** | `{ description?: string; url: string }` | optional | External documentation link |
 
 
 ---
@@ -158,7 +158,7 @@ const result = ApiDiscoveryQuery.parse(data);
 | **in** | `Enum<'path' \| 'query' \| 'header' \| 'body' \| 'cookie'>` | ✅ | Parameter location |
 | **description** | `string` | optional | Parameter description |
 | **required** | `boolean` | ✅ | Whether parameter is required |
-| **schema** | `Object \| Object` | ✅ | Parameter schema definition |
+| **schema** | `{ type: Enum<'string' \| 'number' \| 'integer' \| 'boolean' \| 'array' \| 'object'>; format?: string; enum?: any[]; default?: any; … } \| { $ref: object }` | ✅ | Parameter schema definition |
 | **example** | `any` | optional | Example value |
 
 
@@ -190,11 +190,11 @@ const result = ApiDiscoveryQuery.parse(data);
 | :--- | :--- | :--- | :--- |
 | **version** | `string` | ✅ | Registry version |
 | **conflictResolution** | `Enum<'error' \| 'priority' \| 'first-wins' \| 'last-wins'>` | ✅ | Strategy for handling route conflicts |
-| **apis** | `Object[]` | ✅ | All registered APIs |
+| **apis** | `{ id: string; name: string; type: Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]` | ✅ | All registered APIs |
 | **totalApis** | `integer` | ✅ | Total number of registered APIs |
 | **totalEndpoints** | `integer` | ✅ | Total number of endpoints |
-| **byType** | `Record<string, Object[]>` | optional | APIs grouped by protocol type |
-| **byStatus** | `Record<string, Object[]>` | optional | APIs grouped by status |
+| **byType** | `Record<string, { id: string; name: string; type: Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]>` | optional | APIs grouped by protocol type |
+| **byStatus** | `Record<string, { id: string; name: string; type: Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]>` | optional | APIs grouped by status |
 | **updatedAt** | `string` | optional | Last registry update time |
 
 
@@ -212,12 +212,12 @@ const result = ApiDiscoveryQuery.parse(data);
 | **version** | `string` | ✅ | API version (e.g., v1, 2024-01) |
 | **basePath** | `string` | ✅ | Base URL path for this API |
 | **description** | `string` | optional | API description |
-| **endpoints** | `Object[]` | ✅ | Registered endpoints |
+| **endpoints** | `{ id: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; summary?: string; … }[]` | ✅ | Registered endpoints |
 | **config** | `Record<string, any>` | optional | Protocol-specific configuration |
-| **metadata** | `Object` | optional | Additional metadata |
+| **metadata** | `{ owner?: string; status: Enum<'active' \| 'deprecated' \| 'experimental' \| 'beta'>; tags: string[]; pluginSource?: string; … }` | optional | Additional metadata |
 | **termsOfService** | `string` | optional | Terms of service URL |
-| **contact** | `Object` | optional | Contact information |
-| **license** | `Object` | optional | License information |
+| **contact** | `{ name?: string; url?: string; email?: string }` | optional | Contact information |
+| **license** | `{ name: string; url?: string }` | optional | License information |
 
 
 ---
@@ -231,8 +231,8 @@ const result = ApiDiscoveryQuery.parse(data);
 | **statusCode** | `integer \| Enum<'2xx' \| '3xx' \| '4xx' \| '5xx'>` | ✅ | HTTP status code |
 | **description** | `string` | ✅ | Response description |
 | **contentType** | `string` | ✅ | Response content type |
-| **schema** | `any \| Object` | optional | Response body schema |
-| **headers** | `Record<string, Object>` | optional | Response headers |
+| **schema** | `any \| { $ref: object }` | optional | Response body schema |
+| **headers** | `Record<string, { description?: string; schema: any }>` | optional | Response headers |
 | **example** | `any` | optional | Example response |
 
 
@@ -307,7 +307,7 @@ Dynamic ObjectQL reference
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **$ref** | `Object` | ✅ | Dynamic reference to ObjectQL object |
+| **$ref** | `{ objectId: string; includeFields?: string[]; excludeFields?: string[]; includeRelated?: string[] }` | ✅ | Dynamic reference to ObjectQL object |
 
 ---
 

@@ -27,7 +27,7 @@ const result = ConnectorInstanceAPIKeyAuth.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'api-key'` | ✅ |  |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the API key at materialization. Never an inline key. |
 | **headerName** | `string` | optional | HTTP header carrying the key (default X-API-Key). |
 | **paramName** | `string` | optional | Query parameter carrying the key (alternative to header). |
@@ -49,7 +49,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'none'` | ✅ |  |
 
 ---
 
@@ -61,7 +61,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'bearer'` | ✅ |  |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference (e.g. an env-var name in the open tier) resolved to the bearer token at materialization. Never an inline token. |
 
 ---
@@ -74,7 +74,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'api-key'` | ✅ |  |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the API key at materialization. Never an inline key. |
 | **headerName** | `string` | optional | HTTP header carrying the key (default X-API-Key). |
 | **paramName** | `string` | optional | Query parameter carrying the key (alternative to header). |
@@ -89,7 +89,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'basic'` | ✅ |  |
 | **username** | `string` | ✅ | Username (not a secret; safe to keep in metadata). |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the password at materialization. Never an inline password. |
 
@@ -104,7 +104,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'basic'` | ✅ |  |
 | **username** | `string` | ✅ | Username (not a secret; safe to keep in metadata). |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the password at materialization. Never an inline password. |
 
@@ -117,7 +117,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'bearer'` | ✅ |  |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference (e.g. an env-var name in the open tier) resolved to the bearer token at materialization. Never an inline token. |
 
 
@@ -129,7 +129,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'none'` | ✅ |  |
 
 
 ---

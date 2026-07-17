@@ -63,9 +63,9 @@ Complete dependency resolution result
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **dependencies** | `Object[]` | ✅ | Resolution result for each dependency |
+| **dependencies** | `{ packageId: string; requiredRange: string; resolvedVersion?: string; installedVersion?: string; … }[]` | ✅ | Resolution result for each dependency |
 | **canProceed** | `boolean` | ✅ | Whether installation can proceed |
-| **requiredActions** | `Object[]` | ✅ | Actions required before proceeding |
+| **requiredActions** | `{ type: Enum<'install' \| 'upgrade' \| 'confirm_conflict'>; packageId: string; description: string }[]` | ✅ | Actions required before proceeding |
 | **installOrder** | `string[]` | ✅ | Topologically sorted package IDs for installation |
 | **circularDependencies** | `string[][]` | optional | Circular dependency chains detected (e.g. [["A", "B", "A"]]) |
 

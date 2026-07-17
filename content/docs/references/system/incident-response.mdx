@@ -13,7 +13,7 @@ incident classification, severity grading, response procedures,
 
 and notification matrices.
 
-@see https://www.iso.org/standard/27001
+See also: https://www.iso.org/standard/27001
 
 @category Security
 
@@ -53,7 +53,7 @@ Security incident record per ISO 27001:2022 A.5.24–A.5.28
 | **resolvedAt** | `number` | optional | Resolution timestamp |
 | **affectedSystems** | `string[]` | ✅ | Affected systems |
 | **affectedDataClassifications** | `Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>[]` | optional | Affected data classifications |
-| **responsePhases** | `Object[]` | optional | Incident response phases |
+| **responsePhases** | `{ phase: Enum<'identification' \| 'containment' \| 'eradication' \| 'recovery' \| 'lessons_learned'>; description: string; assignedTo: string; targetHours: number; … }[]` | optional | Incident response phases |
 | **rootCause** | `string` | optional | Root cause analysis |
 | **correctiveActions** | `string[]` | optional | Corrective actions taken or planned |
 | **lessonsLearned** | `string` | optional | Lessons learned from the incident |
@@ -90,7 +90,7 @@ Incident notification matrix with escalation policies
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **rules** | `Object[]` | ✅ | Notification rules by severity level |
+| **rules** | `{ severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; channels: Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]; recipients: string[]; withinMinutes: number; … }[]` | ✅ | Notification rules by severity level |
 | **escalationTimeoutMinutes** | `number` | ✅ | Auto-escalation timeout in minutes |
 | **escalationChain** | `string[]` | ✅ | Ordered escalation chain of roles |
 
@@ -142,7 +142,7 @@ Organization-level incident response policy per ISO 27001:2022
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable incident response management |
-| **notificationMatrix** | `Object` | ✅ | Notification and escalation matrix |
+| **notificationMatrix** | `{ rules: { severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; channels: Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]; recipients: string[]; withinMinutes: number; … }[]; escalationTimeoutMinutes: number; escalationChain: string[] }` | ✅ | Notification and escalation matrix |
 | **defaultResponseTeam** | `string` | ✅ | Default incident response team or role |
 | **triageDeadlineHours** | `number` | ✅ | Maximum hours to begin triage after detection |
 | **requirePostIncidentReview** | `boolean` | ✅ | Require post-incident review for all incidents |

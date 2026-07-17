@@ -36,7 +36,7 @@ const result = AckMessage.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'ack'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **ackMessageId** | `string` | ✅ | ID of the message being acknowledged |
 | **success** | `boolean` | ✅ | Whether the operation was successful |
@@ -52,9 +52,9 @@ const result = AckMessage.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'cursor'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **cursor** | `Object` | ✅ | Cursor position |
+| **cursor** | `{ userId: string; sessionId: string; documentId: string; position?: object; … }` | ✅ | Cursor position |
 
 
 ---
@@ -68,8 +68,8 @@ const result = AckMessage.parse(data);
 | **userId** | `string` | ✅ | User identifier |
 | **sessionId** | `string` | ✅ | Session identifier |
 | **documentId** | `string` | ✅ | Document identifier being edited |
-| **position** | `Object` | optional | Cursor position in document |
-| **selection** | `Object` | optional | Selection range (if text is selected) |
+| **position** | `{ line: integer; column: integer }` | optional | Cursor position in document |
+| **selection** | `{ start: object; end: object }` | optional | Selection range (if text is selected) |
 | **color** | `string` | optional | Cursor color for visual representation |
 | **userName** | `string` | optional | Display name of user |
 | **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
@@ -100,9 +100,9 @@ const result = AckMessage.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'edit'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **operation** | `Object` | ✅ | Edit operation |
+| **operation** | `{ operationId: string; documentId: string; userId: string; sessionId: string; … }` | ✅ | Edit operation |
 
 
 ---
@@ -118,8 +118,8 @@ const result = AckMessage.parse(data);
 | **userId** | `string` | ✅ | User who performed the edit |
 | **sessionId** | `string` | ✅ | Session identifier |
 | **type** | `Enum<'insert' \| 'delete' \| 'replace'>` | ✅ | Type of edit operation |
-| **position** | `Object` | ✅ | Starting position of the operation |
-| **endPosition** | `Object` | optional | Ending position (for delete/replace operations) |
+| **position** | `{ line: integer; column: integer }` | ✅ | Starting position of the operation |
+| **endPosition** | `{ line: integer; column: integer }` | optional | Ending position (for delete/replace operations) |
 | **content** | `string` | optional | Content to insert/replace |
 | **version** | `integer` | ✅ | Document version before this operation |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when operation was created |
@@ -146,7 +146,7 @@ const result = AckMessage.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'error'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **code** | `string` | ✅ | Error code |
 | **message** | `string` | ✅ | Error message |
@@ -161,10 +161,10 @@ const result = AckMessage.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **conditions** | `Object[]` | optional | Array of filter conditions |
-| **and** | `[#](./#)[]` | optional | AND logical combination of filters |
-| **or** | `[#](./#)[]` | optional | OR logical combination of filters |
-| **not** | `[#](./#)` | optional | NOT logical negation of filter |
+| **conditions** | `{ field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'in' \| 'nin' \| 'contains' \| 'startsWith' \| 'endsWith' \| 'exists' \| 'regex'>; value?: any }[]` | optional | Array of filter conditions |
+| **and** | `[EventFilter](#eventfilter)[]` | optional | AND logical combination of filters |
+| **or** | `[EventFilter](#eventfilter)[]` | optional | OR logical combination of filters |
+| **not** | `[EventFilter](#eventfilter)` | optional | NOT logical negation of filter |
 
 
 ---
@@ -189,7 +189,7 @@ const result = AckMessage.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'event'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **subscriptionId** | `string` | ✅ | Subscription ID this event belongs to |
 | **eventName** | `string` | ✅ | Event name |
@@ -212,7 +212,7 @@ const result = AckMessage.parse(data);
 | **subscriptionId** | `string` | ✅ | Unique subscription identifier |
 | **events** | `string[]` | ✅ | Event patterns to subscribe to (supports wildcards, e.g., "record.*", "user.created") |
 | **objects** | `string[]` | optional | Object names to filter events by (e.g., ["account", "contact"]) |
-| **filters** | `[__schema0](./__schema0)` | optional | Advanced filter conditions for event payloads |
+| **filters** | `{ conditions?: { field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'in' \| 'nin' \| 'contains' \| 'startsWith' \| 'endsWith' \| 'exists' \| 'regex'>; value?: any }[]; and?: object[]; or?: object[]; not?: object }` | optional | Advanced filter conditions for event payloads |
 | **channels** | `string[]` | optional | Channel names for scoped subscriptions |
 
 
@@ -246,7 +246,7 @@ const result = AckMessage.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'ping'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 
 
@@ -259,7 +259,7 @@ const result = AckMessage.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'pong'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **pingMessageId** | `string` | optional | ID of ping message being responded to |
 
@@ -273,9 +273,9 @@ const result = AckMessage.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'presence'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **presence** | `Object` | ✅ | Presence state |
+| **presence** | `{ userId: string; sessionId: string; status: Enum<'online' \| 'away' \| 'busy' \| 'offline'>; lastSeen: string; … }` | ✅ | Presence state |
 
 
 ---
@@ -322,7 +322,7 @@ const result = AckMessage.parse(data);
 | **recordId** | `string` | ✅ | Record identifier being edited |
 | **fieldName** | `string` | ✅ | Field name being edited |
 | **position** | `number` | ✅ | Cursor position (character offset from start) |
-| **selection** | `Object` | optional | Text selection range (if text is selected) |
+| **selection** | `{ start: number; end: number }` | optional | Text selection range (if text is selected) |
 
 
 ---
@@ -349,9 +349,9 @@ const result = AckMessage.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'subscribe'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **subscription** | `Object` | ✅ | Subscription configuration |
+| **subscription** | `{ subscriptionId: string; events: string[]; objects?: string[]; filters?: { conditions?: { field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'in' \| 'nin' \| 'contains' \| 'startsWith' \| 'endsWith' \| 'exists' \| 'regex'>; value?: any }[]; and?: object[]; or?: object[]; not?: object }; … }` | ✅ | Subscription configuration |
 
 
 ---
@@ -363,9 +363,9 @@ const result = AckMessage.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'unsubscribe'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **request** | `Object` | ✅ | Unsubscribe request |
+| **request** | `{ subscriptionId: string }` | ✅ | Unsubscribe request |
 
 
 ---
@@ -428,9 +428,9 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'subscribe'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **subscription** | `Object` | ✅ | Subscription configuration |
+| **subscription** | `{ subscriptionId: string; events: string[]; objects?: string[]; filters?: { conditions?: { field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'in' \| 'nin' \| 'contains' \| 'startsWith' \| 'endsWith' \| 'exists' \| 'regex'>; value?: any }[]; and?: object[]; or?: object[]; not?: object }; … }` | ✅ | Subscription configuration |
 
 ---
 
@@ -443,9 +443,9 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'unsubscribe'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **request** | `Object` | ✅ | Unsubscribe request |
+| **request** | `{ subscriptionId: string }` | ✅ | Unsubscribe request |
 
 ---
 
@@ -458,7 +458,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'event'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **subscriptionId** | `string` | ✅ | Subscription ID this event belongs to |
 | **eventName** | `string` | ✅ | Event name |
@@ -477,9 +477,9 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'presence'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **presence** | `Object` | ✅ | Presence state |
+| **presence** | `{ userId: string; sessionId: string; status: Enum<'online' \| 'away' \| 'busy' \| 'offline'>; lastSeen: string; … }` | ✅ | Presence state |
 
 ---
 
@@ -492,9 +492,9 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'cursor'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **cursor** | `Object` | ✅ | Cursor position |
+| **cursor** | `{ userId: string; sessionId: string; documentId: string; position?: object; … }` | ✅ | Cursor position |
 
 ---
 
@@ -507,9 +507,9 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'edit'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **operation** | `Object` | ✅ | Edit operation |
+| **operation** | `{ operationId: string; documentId: string; userId: string; sessionId: string; … }` | ✅ | Edit operation |
 
 ---
 
@@ -522,7 +522,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'ack'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **ackMessageId** | `string` | ✅ | ID of the message being acknowledged |
 | **success** | `boolean` | ✅ | Whether the operation was successful |
@@ -539,7 +539,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'error'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **code** | `string` | ✅ | Error code |
 | **message** | `string` | ✅ | Error message |
@@ -556,7 +556,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'ping'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 
 ---
@@ -570,7 +570,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **messageId** | `string` | ✅ | Unique message identifier |
-| **type** | `string` | ✅ |  |
+| **type** | `'pong'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **pingMessageId** | `string` | optional | ID of ping message being responded to |
 

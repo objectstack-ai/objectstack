@@ -55,7 +55,7 @@ const result = BatchEndpointsConfig.parse(data);
 | :--- | :--- | :--- | :--- |
 | **maxBatchSize** | `integer` | ✅ | Maximum records per batch operation |
 | **enableBatchEndpoint** | `boolean` | ✅ | Enable POST /data/:object/batch endpoint |
-| **operations** | `Object` | optional | Enable/disable specific batch operations |
+| **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean; upsertMany: boolean }` | optional | Enable/disable specific batch operations |
 | **defaultAtomic** | `boolean` | ✅ | Default atomic/transaction mode for batch operations |
 
 
@@ -95,8 +95,8 @@ const result = BatchEndpointsConfig.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **operations** | `Object` | optional | Enable/disable operations |
-| **patterns** | `Record<string, Object>` | optional | Custom URL patterns for operations |
+| **operations** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | optional | Enable/disable operations |
+| **patterns** | `Record<string, { method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; summary?: string; description?: string }>` | optional | Custom URL patterns for operations |
 | **dataPrefix** | `string` | ✅ | URL prefix for data endpoints |
 | **objectParamStyle** | `Enum<'path' \| 'query'>` | ✅ | How object name is passed (path param or query param) |
 
@@ -122,10 +122,10 @@ const result = BatchEndpointsConfig.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **endpoints** | `Object[]` | ✅ | All generated endpoints |
+| **endpoints** | `{ id: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; object: string; … }[]` | ✅ | All generated endpoints |
 | **total** | `integer` | ✅ | Total number of endpoints |
-| **byObject** | `Record<string, Object[]>` | optional | Endpoints grouped by object |
-| **byOperation** | `Record<string, Object[]>` | optional | Endpoints grouped by operation |
+| **byObject** | `Record<string, { id: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; object: string; … }[]>` | optional | Endpoints grouped by object |
+| **byOperation** | `Record<string, { id: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; object: string; … }[]>` | optional | Endpoints grouped by operation |
 
 
 ---
@@ -142,7 +142,7 @@ const result = BatchEndpointsConfig.parse(data);
 | **object** | `string` | ✅ | Object name (snake_case) |
 | **operation** | `Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'list'> \| string` | ✅ | Operation type |
 | **handler** | `string` | ✅ | Handler function identifier |
-| **metadata** | `Object` | optional |  |
+| **metadata** | `{ summary?: string; description?: string; tags?: string[]; deprecated?: boolean }` | optional |  |
 
 
 ---
@@ -156,7 +156,7 @@ const result = BatchEndpointsConfig.parse(data);
 | **prefix** | `string` | ✅ | URL prefix for metadata endpoints |
 | **enableCache** | `boolean` | ✅ | Enable HTTP cache headers (ETag, Last-Modified) |
 | **cacheTtl** | `integer` | ✅ | Cache TTL in seconds |
-| **endpoints** | `Object` | optional | Enable/disable specific endpoints |
+| **endpoints** | `{ types: boolean; items: boolean; item: boolean; schema: boolean }` | optional | Enable/disable specific endpoints |
 
 
 ---
@@ -167,8 +167,8 @@ const result = BatchEndpointsConfig.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **webhooks** | `Record<string, Object>` | optional | OpenAPI 3.1 webhooks (top-level webhook definitions) |
-| **callbacks** | `Record<string, Object[]>` | optional | OpenAPI 3.1 callbacks (async response definitions) |
+| **webhooks** | `Record<string, { name: string; description: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; payloadSchema: string; … }>` | optional | OpenAPI 3.1 webhooks (top-level webhook definitions) |
+| **callbacks** | `Record<string, { name: string; expression: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; url: string }[]>` | optional | OpenAPI 3.1 callbacks (async response definitions) |
 | **jsonSchemaDialect** | `string` | ✅ | JSON Schema dialect for schema definitions |
 | **pathItemReferences** | `boolean` | ✅ | Allow $ref in path items (OpenAPI 3.1 feature) |
 
@@ -193,8 +193,8 @@ const result = BatchEndpointsConfig.parse(data);
 | **enableProjectScoping** | `boolean` | ✅ | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | ✅ | Project ID resolution strategy |
 | **requireAuth** | `boolean` | ✅ | Reject anonymous requests on ALL HTTP surfaces that reach object data (REST /data, /meta, GraphQL, raw-hono /data) with HTTP 401 (secure-by-default; set false to serve them publicly) |
-| **documentation** | `Object` | optional | OpenAPI/Swagger documentation config |
-| **responseFormat** | `Object` | optional | Response format options |
+| **documentation** | `{ enabled: boolean; title: string; description?: string; version?: string; … }` | optional | OpenAPI/Swagger documentation config |
+| **responseFormat** | `{ envelope: boolean; includeMetadata: boolean; includePagination: boolean }` | optional | Response format options |
 
 
 ---
@@ -205,12 +205,12 @@ const result = BatchEndpointsConfig.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **api** | `Object` | optional | REST API configuration |
-| **crud** | `Object` | optional | CRUD endpoints configuration |
-| **metadata** | `Object` | optional | Metadata endpoints configuration |
-| **batch** | `Object` | optional | Batch endpoints configuration |
-| **routes** | `Object` | optional | Route generation configuration |
-| **openApi31** | `Object` | optional | OpenAPI 3.1 extensions configuration |
+| **api** | `{ version: string; basePath: string; apiPath?: string; enableCrud: boolean; … }` | optional | REST API configuration |
+| **crud** | `{ operations?: object; patterns?: Record<string, { method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; summary?: string; description?: string }>; dataPrefix: string; objectParamStyle: Enum<'path' \| 'query'> }` | optional | CRUD endpoints configuration |
+| **metadata** | `{ prefix: string; enableCache: boolean; cacheTtl: integer; endpoints?: object }` | optional | Metadata endpoints configuration |
+| **batch** | `{ maxBatchSize: integer; enableBatchEndpoint: boolean; operations?: object; defaultAtomic: boolean }` | optional | Batch endpoints configuration |
+| **routes** | `{ includeObjects?: string[]; excludeObjects?: string[]; nameTransform: Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>; overrides?: Record<string, { enabled?: boolean; basePath?: string; operations?: Record<string, boolean> }> }` | optional | Route generation configuration |
+| **openApi31** | `{ webhooks?: Record<string, { name: string; description: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; payloadSchema: string; … }>; callbacks?: Record<string, { name: string; expression: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; url: string }[]>; jsonSchemaDialect: string; pathItemReferences: boolean }` | optional | OpenAPI 3.1 extensions configuration |
 
 
 ---
@@ -224,7 +224,7 @@ const result = BatchEndpointsConfig.parse(data);
 | **includeObjects** | `string[]` | optional | Specific objects to generate routes for (empty = all) |
 | **excludeObjects** | `string[]` | optional | Objects to exclude from route generation |
 | **nameTransform** | `Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>` | ✅ | Transform object names in URLs |
-| **overrides** | `Record<string, Object>` | optional | Per-object route customization |
+| **overrides** | `Record<string, { enabled?: boolean; basePath?: string; operations?: Record<string, boolean> }>` | optional | Per-object route customization |
 
 
 ---

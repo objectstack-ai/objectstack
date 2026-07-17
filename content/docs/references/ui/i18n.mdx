@@ -99,8 +99,8 @@ Locale configuration
 | **code** | `string` | ✅ | BCP 47 language code (e.g., "en-US", "zh-CN") |
 | **fallbackChain** | `string[]` | optional | Fallback language codes in priority order (e.g., ["zh-TW", "en"]) |
 | **direction** | `Enum<'ltr' \| 'rtl'>` | ✅ | Text direction: left-to-right or right-to-left |
-| **numberFormat** | `Object` | optional | Default number formatting rules |
-| **dateFormat** | `Object` | optional | Default date/time formatting rules |
+| **numberFormat** | `{ style: Enum<'decimal' \| 'currency' \| 'percent' \| 'unit'>; currency?: string; unit?: string; minimumFractionDigits?: number; … }` | optional | Default number formatting rules |
+| **dateFormat** | `{ dateStyle?: Enum<'full' \| 'long' \| 'medium' \| 'short'>; timeStyle?: Enum<'full' \| 'long' \| 'medium' \| 'short'>; timeZone?: string; hour12?: boolean }` | optional | Default date/time formatting rules |
 
 
 ---

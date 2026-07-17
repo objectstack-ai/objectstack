@@ -36,7 +36,7 @@ const result = ChangeImpact.parse(data);
 | **level** | `Enum<'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Impact level |
 | **affectedSystems** | `string[]` | ✅ | Affected systems |
 | **affectedUsers** | `number` | optional | Affected user count |
-| **downtime** | `Object` | optional | Downtime information |
+| **downtime** | `{ required: boolean; durationMinutes?: number }` | optional | Downtime information |
 
 
 ---
@@ -67,13 +67,13 @@ const result = ChangeImpact.parse(data);
 | **status** | `Enum<'draft' \| 'submitted' \| 'in-review' \| 'approved' \| 'scheduled' \| 'in-progress' \| 'completed' \| 'failed' \| 'rolled-back' \| 'cancelled'>` | ✅ | Change status |
 | **requestedBy** | `string` | ✅ | Requester user ID |
 | **requestedAt** | `number` | ✅ | Request timestamp |
-| **impact** | `Object` | ✅ | Impact assessment |
-| **implementation** | `Object` | ✅ | Implementation plan |
-| **rollbackPlan** | `Object` | ✅ | Rollback plan |
-| **schedule** | `Object` | optional | Schedule |
-| **securityImpact** | `Object` | optional | Security impact assessment per ISO 27001:2022 A.8.32 |
-| **approval** | `Object` | optional | Approval workflow |
-| **attachments** | `Object[]` | optional | Attachments |
+| **impact** | `{ level: Enum<'low' \| 'medium' \| 'high' \| 'critical'>; affectedSystems: string[]; affectedUsers?: number; downtime?: object }` | ✅ | Impact assessment |
+| **implementation** | `{ description: string; steps: { order: number; description: string; estimatedMinutes: number }[]; testing?: string }` | ✅ | Implementation plan |
+| **rollbackPlan** | `{ description: string; steps: { order: number; description: string; estimatedMinutes: number }[]; testProcedure?: string }` | ✅ | Rollback plan |
+| **schedule** | `{ plannedStart: number; plannedEnd: number; actualStart?: number; actualEnd?: number }` | optional | Schedule |
+| **securityImpact** | `{ assessed: boolean; riskLevel?: Enum<'none' \| 'low' \| 'medium' \| 'high' \| 'critical'>; affectedDataClassifications?: Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>[]; requiresSecurityApproval: boolean; … }` | optional | Security impact assessment per ISO 27001:2022 A.8.32 |
+| **approval** | `{ required: boolean; approvers: { userId: string; approvedAt?: number; comments?: string }[] }` | optional | Approval workflow |
+| **attachments** | `{ name: string; url: string }[]` | optional | Attachments |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
 
 
@@ -116,7 +116,7 @@ const result = ChangeImpact.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **description** | `string` | ✅ | Rollback description |
-| **steps** | `Object[]` | ✅ | Rollback steps |
+| **steps** | `{ order: number; description: string; estimatedMinutes: number }[]` | ✅ | Rollback steps |
 | **testProcedure** | `string` | optional | Test procedure |
 
 

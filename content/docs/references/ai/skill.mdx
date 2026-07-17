@@ -40,10 +40,10 @@ const result = Skill.parse(data);
 | **instructions** | `string` | optional | LLM instructions when skill is active |
 | **tools** | `string[]` | ✅ | Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) |
 | **triggerPhrases** | `string[]` | optional | Phrases that activate this skill |
-| **triggerConditions** | `Object[]` | optional | Programmatic activation conditions |
+| **triggerConditions** | `{ field: string; operator: Enum<'eq' \| 'neq' \| 'in' \| 'not_in' \| 'contains'>; value: string \| string[] }[]` | optional | Programmatic activation conditions |
 | **permissions** | `string[]` | optional | Required permissions or roles |
 | **active** | `boolean` | ✅ | Whether the skill is enabled |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this skill. |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this skill. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |

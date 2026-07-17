@@ -115,7 +115,7 @@ Plugin lifecycle phase
 | :--- | :--- | :--- | :--- |
 | **pluginName** | `string` | ✅ | Name of the plugin |
 | **timestamp** | `integer` | ✅ | Unix timestamp in milliseconds when event occurred |
-| **error** | `Object` | ✅ | Serializable error representation |
+| **error** | `{ name: string; message: string; stack?: string; code?: string }` | ✅ | Serializable error representation |
 | **phase** | `Enum<'init' \| 'start' \| 'destroy'>` | ✅ | Lifecycle phase where error occurred |
 | **errorMessage** | `string` | optional | Error message |
 | **errorStack** | `string` | optional | Error stack trace |

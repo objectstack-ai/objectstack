@@ -230,8 +230,8 @@ Public exposure of this environment artifacts (private | unlisted | public).
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **environment** | `Object` | ✅ | Provisioned environment (includes database addressing) |
-| **credential** | `Object` | ✅ | Freshly-minted credential for the environment DB |
+| **environment** | `{ id: string; organizationId: string; displayName: string; isDefault: boolean; … }` | ✅ | Provisioned environment (includes database addressing) |
+| **credential** | `{ id: string; environmentId: string; secretCiphertext: string; encryptionKeyId: string; … }` | ✅ | Freshly-minted credential for the environment DB |
 | **durationMs** | `number` | ✅ | Total provisioning duration in milliseconds |
 | **warnings** | `string[]` | optional | Non-fatal warnings emitted during provisioning |
 
@@ -261,7 +261,7 @@ Public exposure of this environment artifacts (private | unlisted | public).
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **defaultEnvironment** | `Object` | ✅ | Default environment that was created |
+| **defaultEnvironment** | `{ environment: object; credential: object; durationMs: number; warnings?: string[] }` | ✅ | Default environment that was created |
 | **durationMs** | `number` | ✅ | Total bootstrap duration in milliseconds |
 | **warnings** | `string[]` | optional | Non-fatal warnings |
 

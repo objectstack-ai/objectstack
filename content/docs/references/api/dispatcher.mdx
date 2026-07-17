@@ -51,7 +51,7 @@ const result = DispatcherConfig.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **routes** | `Object[]` | ✅ | Route-to-service mappings |
+| **routes** | `{ prefix: string; service: Enum<'metadata' \| 'data' \| 'auth' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| 'automation' \| 'graphql' \| 'analytics' \| 'realtime' \| 'job' \| 'notification' \| 'ai' \| 'i18n' \| 'ui' \| 'workflow'>; authRequired: boolean; criticality: Enum<'required' \| 'core' \| 'optional'>; … }[]` | ✅ | Route-to-service mappings |
 | **fallback** | `Enum<'404' \| 'proxy' \| 'custom'>` | ✅ | Behavior when no route matches |
 | **proxyTarget** | `string` | optional | Proxy target URL when fallback is "proxy" |
 
@@ -78,8 +78,8 @@ const result = DispatcherConfig.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ |  |
-| **error** | `Object` | ✅ |  |
+| **success** | `'false'` | ✅ |  |
+| **error** | `{ code: integer; message: string; type?: Enum<'ROUTE_NOT_FOUND' \| 'METHOD_NOT_ALLOWED' \| 'NOT_IMPLEMENTED' \| 'SERVICE_UNAVAILABLE'>; route?: string; … }` | ✅ |  |
 
 
 ---

@@ -105,8 +105,8 @@ Type: `string`
 | **description** | `string` | optional |  |
 | **contextSchema** | `Record<string, any>` | optional | Zod Schema for the machine context/memory |
 | **initial** | `string` | ✅ | Initial State ID |
-| **states** | `Record<string, [__schema0](./__schema0)>` | ✅ | State Nodes |
-| **on** | `Record<string, string \| Object \| Object[]>` | optional |  |
+| **states** | `Record<string, { type: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: string \| { type: string; params?: Record<string, any> }[]; exit?: string \| { type: string; params?: Record<string, any> }[]; on?: Record<string, string \| { target?: string; cond?: string \| { type: string; params?: Record<string, any> }; actions?: string \| { type: string; params?: Record<string, any> }[]; description?: string } \| { target?: string; cond?: string \| { type: string; params?: Record<string, any> }; actions?: string \| { type: string; params?: Record<string, any> }[]; description?: string }[]>; … }>` | ✅ | State Nodes |
+| **on** | `Record<string, string \| { target?: string; cond?: string \| { type: string; params?: Record<string, any> }; actions?: string \| { type: string; params?: Record<string, any> }[]; description?: string } \| { target?: string; cond?: string \| { type: string; params?: Record<string, any> }; actions?: string \| { type: string; params?: Record<string, any> }[]; description?: string }[]>` | optional |  |
 
 
 ---
@@ -118,13 +118,13 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>` | ✅ |  |
-| **entry** | `string \| Object[]` | optional | Actions to run when entering this state |
-| **exit** | `string \| Object[]` | optional | Actions to run when leaving this state |
-| **on** | `Record<string, string \| Object \| Object[]>` | optional | Map of Event Type -> Transition Definition |
-| **always** | `Object[]` | optional |  |
+| **entry** | `string \| { type: string; params?: Record<string, any> }[]` | optional | Actions to run when entering this state |
+| **exit** | `string \| { type: string; params?: Record<string, any> }[]` | optional | Actions to run when leaving this state |
+| **on** | `Record<string, string \| { target?: string; cond?: string \| { type: string; params?: Record<string, any> }; actions?: string \| { type: string; params?: Record<string, any> }[]; description?: string } \| { target?: string; cond?: string \| { type: string; params?: Record<string, any> }; actions?: string \| { type: string; params?: Record<string, any> }[]; description?: string }[]>` | optional | Map of Event Type -> Transition Definition |
+| **always** | `{ target?: string; cond?: string \| { type: string; params?: Record<string, any> }; actions?: string \| { type: string; params?: Record<string, any> }[]; description?: string }[]` | optional |  |
 | **initial** | `string` | optional | Initial child state (if compound) |
-| **states** | `Record<string, [#](./#)>` | optional |  |
-| **meta** | `Object` | optional |  |
+| **states** | `Record<string, [StateNode](#statenode)>` | optional |  |
+| **meta** | `{ label?: string; description?: string; color?: string; aiInstructions?: string }` | optional |  |
 
 
 ---
@@ -136,8 +136,8 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **target** | `string` | optional | Target State ID |
-| **cond** | `string \| Object` | optional | Condition (Guard) required to take this path |
-| **actions** | `string \| Object[]` | optional | Actions to execute during transition |
+| **cond** | `string \| { type: string; params?: Record<string, any> }` | optional | Condition (Guard) required to take this path |
+| **actions** | `string \| { type: string; params?: Record<string, any> }[]` | optional | Actions to execute during transition |
 | **description** | `string` | optional | Human readable description of this rule |
 
 

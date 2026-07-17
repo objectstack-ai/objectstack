@@ -84,7 +84,7 @@ Performance optimization configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **lazyLoad** | `boolean` | optional | Enable lazy loading (defer rendering until visible) |
-| **virtualScroll** | `Object` | optional | Virtual scrolling configuration |
+| **virtualScroll** | `{ enabled: boolean; itemHeight?: number; overscan?: number }` | optional | Virtual scrolling configuration |
 | **cacheStrategy** | `Enum<'none' \| 'cache-first' \| 'network-first' \| 'stale-while-revalidate'>` | optional | Client-side data caching strategy |
 | **prefetch** | `boolean` | optional | Prefetch data before component is visible |
 | **pageSize** | `number` | optional | Number of items per page for pagination |
@@ -103,8 +103,8 @@ Responsive layout configuration
 | :--- | :--- | :--- | :--- |
 | **breakpoint** | `Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>` | optional | Minimum breakpoint for visibility |
 | **hiddenOn** | `Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>[]` | optional | Hide on these breakpoints |
-| **columns** | `Object` | optional | Grid columns per breakpoint |
-| **order** | `Object` | optional | Display order per breakpoint |
+| **columns** | `{ xs?: number; sm?: number; md?: number; lg?: number; … }` | optional | Grid columns per breakpoint |
+| **order** | `{ xs?: number; sm?: number; md?: number; lg?: number; … }` | optional | Display order per breakpoint |
 
 
 ---

@@ -53,7 +53,7 @@ const result = EnhancedApiError.parse(data);
 | **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
 | **retryAfter** | `number` | optional | Seconds to wait before retrying |
 | **details** | `any` | optional | Additional error context |
-| **fieldErrors** | `Object[]` | optional | Field-specific validation errors |
+| **fieldErrors** | `{ field: string; code: Enum<'validation_error' \| 'invalid_field' \| 'missing_required_field' \| 'invalid_format' \| 'value_too_long' \| 'value_too_short' \| 'value_out_of_range' \| 'invalid_reference' \| 'duplicate_value' \| 'invalid_query' \| 'invalid_filter' \| 'invalid_sort' \| 'max_records_exceeded' \| 'unauthenticated' \| 'invalid_credentials' \| 'expired_token' \| 'invalid_token' \| 'session_expired' \| 'mfa_required' \| 'email_not_verified' \| 'permission_denied' \| 'insufficient_privileges' \| 'field_not_accessible' \| 'record_not_accessible' \| 'license_required' \| 'ip_restricted' \| 'time_restricted' \| 'resource_not_found' \| 'object_not_found' \| 'record_not_found' \| 'field_not_found' \| 'endpoint_not_found' \| 'resource_conflict' \| 'concurrent_modification' \| 'delete_restricted' \| 'duplicate_record' \| 'lock_conflict' \| 'rate_limit_exceeded' \| 'quota_exceeded' \| 'concurrent_limit_exceeded' \| 'internal_error' \| 'database_error' \| 'timeout' \| 'service_unavailable' \| 'not_implemented' \| 'external_service_error' \| 'integration_error' \| 'webhook_delivery_failed' \| 'batch_partial_failure' \| 'batch_complete_failure' \| 'transaction_failed'>; message: string; value?: any; … }[]` | optional | Field-specific validation errors |
 | **timestamp** | `string` | optional | When the error occurred |
 | **requestId** | `string` | optional | Request ID for tracking |
 | **traceId** | `string` | optional | Distributed trace ID |
@@ -69,9 +69,9 @@ const result = EnhancedApiError.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ | Always false for error responses |
-| **error** | `Object` | ✅ | Error details |
-| **meta** | `Object` | optional | Response metadata |
+| **success** | `'false'` | ✅ | Always false for error responses |
+| **error** | `{ code: Enum<'validation_error' \| 'invalid_field' \| 'missing_required_field' \| 'invalid_format' \| 'value_too_long' \| 'value_too_short' \| 'value_out_of_range' \| 'invalid_reference' \| 'duplicate_value' \| 'invalid_query' \| 'invalid_filter' \| 'invalid_sort' \| 'max_records_exceeded' \| 'unauthenticated' \| 'invalid_credentials' \| 'expired_token' \| 'invalid_token' \| 'session_expired' \| 'mfa_required' \| 'email_not_verified' \| 'permission_denied' \| 'insufficient_privileges' \| 'field_not_accessible' \| 'record_not_accessible' \| 'license_required' \| 'ip_restricted' \| 'time_restricted' \| 'resource_not_found' \| 'object_not_found' \| 'record_not_found' \| 'field_not_found' \| 'endpoint_not_found' \| 'resource_conflict' \| 'concurrent_modification' \| 'delete_restricted' \| 'duplicate_record' \| 'lock_conflict' \| 'rate_limit_exceeded' \| 'quota_exceeded' \| 'concurrent_limit_exceeded' \| 'internal_error' \| 'database_error' \| 'timeout' \| 'service_unavailable' \| 'not_implemented' \| 'external_service_error' \| 'integration_error' \| 'webhook_delivery_failed' \| 'batch_partial_failure' \| 'batch_complete_failure' \| 'transaction_failed'>; message: string; category?: Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>; httpStatus?: number; … }` | ✅ | Error details |
+| **meta** | `{ timestamp?: string; requestId?: string; traceId?: string }` | optional | Response metadata |
 
 
 ---

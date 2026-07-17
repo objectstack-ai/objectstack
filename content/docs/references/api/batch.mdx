@@ -47,7 +47,7 @@ const result = BatchConfig.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable batch operations |
 | **maxRecordsPerBatch** | `integer` | ✅ | Maximum records per batch |
-| **defaultOptions** | `Object` | optional | Default batch options |
+| **defaultOptions** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Default batch options |
 
 
 ---
@@ -60,7 +60,7 @@ const result = BatchConfig.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Record ID if operation succeeded |
 | **success** | `boolean` | ✅ | Whether this record was processed successfully |
-| **errors** | `Object[]` | optional | Array of errors if operation failed |
+| **errors** | `{ code: string; message: string; category?: string; details?: any; … }[]` | optional | Array of errors if operation failed |
 | **data** | `Record<string, any>` | optional | Full record data (if returnRecords=true) |
 | **index** | `number` | optional | Index of the record in the request array |
 
@@ -113,8 +113,8 @@ const result = BatchConfig.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | ✅ | Type of batch operation |
-| **records** | `Object[]` | ✅ | Array of records to process (max 200 per batch) |
-| **options** | `Object` | optional | Batch operation options |
+| **records** | `{ id?: string; data?: Record<string, any>; externalId?: string }[]` | ✅ | Array of records to process (max 200 per batch) |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Batch operation options |
 
 
 ---
@@ -126,13 +126,13 @@ const result = BatchConfig.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | optional | Operation type that was performed |
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `Object[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; details?: any; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---
@@ -144,7 +144,7 @@ const result = BatchConfig.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **ids** | `string[]` | ✅ | Array of record IDs to delete (max 200) |
-| **options** | `Object` | optional | Delete options |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Delete options |
 
 
 ---
@@ -155,8 +155,8 @@ const result = BatchConfig.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **records** | `Object[]` | ✅ | Array of records to update (max 200 per batch) |
-| **options** | `Object` | optional | Update options |
+| **records** | `{ id?: string; data?: Record<string, any>; externalId?: string }[]` | ✅ | Array of records to update (max 200 per batch) |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Update options |
 
 
 ---

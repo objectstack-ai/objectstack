@@ -11,7 +11,7 @@ Defines schemas for supplier information security management including
 
 risk assessment, security requirements, monitoring, and change control.
 
-@see https://www.iso.org/standard/27001
+See also: https://www.iso.org/standard/27001
 
 @category Security
 
@@ -71,12 +71,12 @@ Supplier security assessment record per ISO 27001:2022 A.5.19–A.5.21
 | **assessedBy** | `string` | ✅ | Assessor user ID or team |
 | **assessedAt** | `number` | ✅ | Assessment timestamp |
 | **validUntil** | `number` | ✅ | Assessment validity expiry timestamp |
-| **requirements** | `Object[]` | ✅ | Security requirements and their compliance status |
+| **requirements** | `{ id: string; description: string; controlReference?: string; mandatory: boolean; … }[]` | ✅ | Security requirements and their compliance status |
 | **overallCompliant** | `boolean` | ✅ | Whether supplier meets all mandatory requirements |
 | **dataClassificationsShared** | `Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>[]` | optional | Data classifications shared with supplier |
 | **servicesProvided** | `string[]` | optional | Services provided by this supplier |
 | **certifications** | `string[]` | optional | Supplier certifications (e.g., ISO 27001, SOC 2) |
-| **remediationItems** | `Object[]` | optional | Remediation items for non-compliant requirements |
+| **remediationItems** | `{ requirementId: string; action: string; deadline: number; status: Enum<'pending' \| 'in_progress' \| 'completed'> }[]` | optional | Remediation items for non-compliant requirements |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs |
 
 

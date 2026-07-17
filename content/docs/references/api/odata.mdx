@@ -55,9 +55,9 @@ OData v4 provides standardized URL conventions for querying data including:
 
 - Data virtualization
 
-@see https://www.odata.org/documentation/
+See also: https://www.odata.org/documentation/
 
-@see https://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part2-url-conventions.html
+See also: https://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part2-url-conventions.html
 
 @example OData Query
 
@@ -129,7 +129,7 @@ const result = ODataConfig.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable OData API |
 | **path** | `string` | ✅ | OData endpoint path |
-| **metadata** | `Object` | optional | OData metadata configuration |
+| **metadata** | `{ namespace: string; entityTypes: { name: string; key: string[]; properties: { name: string; type: string; nullable: boolean }[]; navigationProperties?: { name: string; type: string; partner?: string }[] }[]; entitySets: { name: string; entityType: string }[] }` | optional | OData metadata configuration |
 
 
 ---
@@ -140,7 +140,7 @@ const result = ODataConfig.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **error** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; target?: string; details?: { code: string; message: string; target?: string }[]; … }` | ✅ |  |
 
 
 ---
@@ -209,8 +209,8 @@ const result = ODataConfig.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **namespace** | `string` | ✅ | Service namespace |
-| **entityTypes** | `Object[]` | ✅ | Entity types |
-| **entitySets** | `Object[]` | ✅ | Entity sets |
+| **entityTypes** | `{ name: string; key: string[]; properties: { name: string; type: string; nullable: boolean }[]; navigationProperties?: { name: string; type: string; partner?: string }[] }[]` | ✅ | Entity types |
+| **entitySets** | `{ name: string; entityType: string }[]` | ✅ | Entity sets |
 
 
 ---

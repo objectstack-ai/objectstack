@@ -59,7 +59,7 @@ Level of protocol conformance
 | **name** | `string` | ✅ |  |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>` | ✅ |  |
-| **contract** | `Object` | optional |  |
+| **contract** | `{ input?: string; output?: string; signature?: string }` | optional |  |
 | **cardinality** | `Enum<'single' \| 'multiple'>` | ✅ | Whether multiple extensions can register to this point |
 
 
@@ -71,10 +71,10 @@ Level of protocol conformance
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **protocol** | `Object` | ✅ |  |
+| **protocol** | `{ id: string; label: string; version: object; specification?: string; … }` | ✅ |  |
 | **conformance** | `Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>` | ✅ | Level of protocol conformance |
 | **implementedFeatures** | `string[]` | optional | List of implemented feature names |
-| **features** | `Object[]` | optional |  |
+| **features** | `{ name: string; enabled: boolean; description?: string; sinceVersion?: string; … }[]` | optional |  |
 | **metadata** | `Record<string, any>` | optional |  |
 | **certified** | `boolean` | ✅ | Has passed official conformance tests |
 | **certificationDate** | `string` | optional |  |
@@ -88,11 +88,11 @@ Level of protocol conformance
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **implements** | `Object[]` | optional | List of protocols this plugin conforms to |
-| **provides** | `Object[]` | optional | Services/APIs this plugin offers to others |
-| **requires** | `Object[]` | optional | Required plugins and their capabilities |
-| **extensionPoints** | `Object[]` | optional | Points where other plugins can extend this plugin |
-| **extensions** | `Object[]` | optional | Extensions contributed to other plugins |
+| **implements** | `{ protocol: object; conformance: Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>; implementedFeatures?: string[]; features?: { name: string; enabled: boolean; description?: string; sinceVersion?: string; … }[]; … }[]` | optional | List of protocols this plugin conforms to |
+| **provides** | `{ id: string; name: string; description?: string; version: object; … }[]` | optional | Services/APIs this plugin offers to others |
+| **requires** | `{ pluginId: string; version: string; optional: boolean; reason?: string; … }[]` | optional | Required plugins and their capabilities |
+| **extensionPoints** | `{ id: string; name: string; description?: string; type: Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>; … }[]` | optional | Points where other plugins can extend this plugin |
+| **extensions** | `{ targetPluginId: string; extensionPointId: string; implementation: string; priority: integer }[]` | optional | Extensions contributed to other plugins |
 
 
 ---
@@ -121,9 +121,9 @@ Level of protocol conformance
 | **id** | `string` | ✅ | Unique interface identifier |
 | **name** | `string` | ✅ |  |
 | **description** | `string` | optional |  |
-| **version** | `Object` | ✅ | Semantic version of the protocol |
-| **methods** | `Object[]` | ✅ |  |
-| **events** | `Object[]` | optional |  |
+| **version** | `{ major: integer; minor: integer; patch: integer }` | ✅ | Semantic version of the protocol |
+| **methods** | `{ name: string; description?: string; parameters?: { name: string; type: string; required: boolean; description?: string }[]; returnType?: string; … }[]` | ✅ |  |
+| **events** | `{ name: string; description?: string; payload?: string }[]` | optional |  |
 | **stability** | `Enum<'stable' \| 'beta' \| 'alpha' \| 'experimental'>` | ✅ |  |
 
 
@@ -152,7 +152,7 @@ Level of protocol conformance
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique protocol identifier (e.g., com.objectstack.protocol.storage.v1) |
 | **label** | `string` | ✅ |  |
-| **version** | `Object` | ✅ | Semantic version of the protocol |
+| **version** | `{ major: integer; minor: integer; patch: integer }` | ✅ | Semantic version of the protocol |
 | **specification** | `string` | optional | URL or path to protocol specification |
 | **description** | `string` | optional |  |
 

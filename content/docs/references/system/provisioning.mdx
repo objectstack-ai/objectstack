@@ -101,7 +101,7 @@ Tenant provisioning result
 | **status** | `Enum<'provisioning' \| 'active' \| 'suspended' \| 'failed' \| 'destroying'>` | ✅ | Tenant provisioning lifecycle status |
 | **region** | `Enum<'us-east' \| 'us-west' \| 'eu-west' \| 'eu-central' \| 'ap-southeast' \| 'ap-northeast'>` | ✅ | Available deployment region |
 | **plan** | `Enum<'free' \| 'pro' \| 'enterprise'>` | ✅ | Tenant subscription plan |
-| **steps** | `Object[]` | ✅ | Pipeline step statuses |
+| **steps** | `{ name: string; status: Enum<'pending' \| 'running' \| 'completed' \| 'failed' \| 'skipped'>; startedAt?: string; completedAt?: string; … }[]` | ✅ | Pipeline step statuses |
 | **totalDurationMs** | `integer` | optional | Total provisioning duration |
 | **provisionedAt** | `string` | optional | Provisioning completion time |
 | **error** | `string` | optional | Error message on failure |

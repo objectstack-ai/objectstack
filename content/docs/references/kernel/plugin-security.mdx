@@ -49,10 +49,10 @@ Complete dependency graph for a package and its transitive dependencies
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **root** | `Object` | ✅ | Root package of the dependency graph |
-| **nodes** | `Object[]` | ✅ | All resolved package nodes in the dependency graph |
-| **edges** | `Object[]` | ✅ | Directed edges representing dependency relationships |
-| **stats** | `Object` | ✅ | Summary statistics for the dependency graph |
+| **root** | `{ id: string; version: string }` | ✅ | Root package of the dependency graph |
+| **nodes** | `{ id: string; version: string; dependencies: { name: string; versionConstraint: string; type: Enum<'required' \| 'optional' \| 'peer' \| 'dev'>; resolvedVersion?: string }[]; depth: integer; … }[]` | ✅ | All resolved package nodes in the dependency graph |
+| **edges** | `{ from: string; to: string; constraint: string }[]` | ✅ | Directed edges representing dependency relationships |
+| **stats** | `{ totalDependencies: integer; directDependencies: integer; maxDepth: integer }` | ✅ | Summary statistics for the dependency graph |
 
 
 ---
@@ -67,10 +67,10 @@ A node in the dependency graph representing a resolved package
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier of the package |
 | **version** | `string` | ✅ | Resolved version of the package |
-| **dependencies** | `Object[]` | ✅ | Dependencies required by this package |
+| **dependencies** | `{ name: string; versionConstraint: string; type: Enum<'required' \| 'optional' \| 'peer' \| 'dev'>; resolvedVersion?: string }[]` | ✅ | Dependencies required by this package |
 | **depth** | `integer` | ✅ | Depth level in the dependency tree (0 = root) |
 | **isDirect** | `boolean` | ✅ | Whether this is a direct (top-level) dependency |
-| **metadata** | `Object` | optional | Additional metadata about the package |
+| **metadata** | `{ name: string; description?: string; license?: string; homepage?: string }` | optional | Additional metadata about the package |
 
 
 ---
@@ -100,8 +100,8 @@ A detected conflict between dependency version requirements
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **package** | `string` | ✅ | Name of the package with conflicting version requirements |
-| **conflicts** | `Object[]` | ✅ | List of conflicting version requirements |
-| **resolution** | `Object` | optional | Suggested resolution for the conflict |
+| **conflicts** | `{ version: string; requestedBy: string[]; constraint: string }[]` | ✅ | List of conflicting version requirements |
+| **resolution** | `{ strategy: Enum<'pick-highest' \| 'pick-lowest' \| 'manual'>; version?: string; reason?: string }` | optional | Suggested resolution for the conflict |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | Severity level of the dependency conflict |
 
 
@@ -116,9 +116,9 @@ Result of a dependency resolution process
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **status** | `Enum<'success' \| 'conflict' \| 'error'>` | ✅ | Overall status of the dependency resolution |
-| **graph** | `Object` | optional | Resolved dependency graph if resolution succeeded |
-| **conflicts** | `Object[]` | ✅ | List of dependency conflicts detected during resolution |
-| **errors** | `Object[]` | ✅ | Errors encountered during dependency resolution |
+| **graph** | `{ root: object; nodes: { id: string; version: string; dependencies: { name: string; versionConstraint: string; type: Enum<'required' \| 'optional' \| 'peer' \| 'dev'>; resolvedVersion?: string }[]; depth: integer; … }[]; edges: { from: string; to: string; constraint: string }[]; stats: object }` | optional | Resolved dependency graph if resolution succeeded |
+| **conflicts** | `{ package: string; conflicts: { version: string; requestedBy: string[]; constraint: string }[]; resolution?: object; severity: Enum<'error' \| 'warning' \| 'info'> }[]` | ✅ | List of dependency conflicts detected during resolution |
+| **errors** | `{ package: string; error: string }[]` | ✅ | Errors encountered during dependency resolution |
 | **installOrder** | `string[]` | ✅ | Topologically sorted list of package IDs for installation |
 | **resolvedIn** | `integer` | optional | Time taken to resolve dependencies in milliseconds |
 
@@ -135,10 +135,10 @@ Verifiable provenance and chain of custody for a plugin artifact
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ | Unique identifier of the plugin |
 | **version** | `string` | ✅ | Version of the plugin artifact |
-| **build** | `Object` | ✅ | Build provenance information |
-| **artifacts** | `Object[]` | ✅ | List of build artifacts with integrity hashes |
-| **signatures** | `Object[]` | ✅ | Cryptographic signatures for the plugin artifact |
-| **attestations** | `Object[]` | ✅ | Verification attestations for the plugin |
+| **build** | `{ timestamp: string; environment?: object; source?: object; builder?: object }` | ✅ | Build provenance information |
+| **artifacts** | `{ filename: string; sha256: string; size: integer }[]` | ✅ | List of build artifacts with integrity hashes |
+| **signatures** | `{ algorithm: Enum<'rsa' \| 'ecdsa' \| 'ed25519'>; publicKey: string; signature: string; signedBy: string; … }[]` | ✅ | Cryptographic signatures for the plugin artifact |
+| **attestations** | `{ type: Enum<'code-review' \| 'security-scan' \| 'test-results' \| 'ci-build'>; status: Enum<'passed' \| 'failed'>; url?: string; timestamp: string }[]` | ✅ | Verification attestations for the plugin |
 
 
 ---
@@ -153,7 +153,7 @@ Trust score and verification status for a plugin
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ | Unique identifier of the plugin |
 | **score** | `number` | ✅ | Overall trust score from 0 to 100 |
-| **components** | `Object` | ✅ | Individual score components contributing to the overall trust score |
+| **components** | `{ vendorReputation: number; securityScore: number; codeQuality: number; communityScore: number; … }` | ✅ | Individual score components contributing to the overall trust score |
 | **level** | `Enum<'verified' \| 'trusted' \| 'neutral' \| 'untrusted' \| 'blocked'>` | ✅ | Computed trust level based on the overall score |
 | **badges** | `Enum<'official' \| 'verified-vendor' \| 'security-scanned' \| 'code-signed' \| 'open-source' \| 'popular'>[]` | ✅ | Verification badges earned by the plugin |
 | **updatedAt** | `string` | ✅ | ISO 8601 timestamp when the trust score was last updated |
@@ -171,10 +171,10 @@ Software Bill of Materials for a plugin
 | :--- | :--- | :--- | :--- |
 | **format** | `Enum<'spdx' \| 'cyclonedx'>` | ✅ | SBOM standard format used |
 | **version** | `string` | ✅ | Version of the SBOM specification |
-| **plugin** | `Object` | ✅ | Metadata about the plugin this SBOM describes |
-| **components** | `Object[]` | ✅ | List of software components included in the plugin |
+| **plugin** | `{ id: string; version: string; name: string }` | ✅ | Metadata about the plugin this SBOM describes |
+| **components** | `{ name: string; version: string; purl?: string; license?: string; … }[]` | ✅ | List of software components included in the plugin |
 | **generatedAt** | `string` | ✅ | ISO 8601 timestamp when the SBOM was generated |
-| **generator** | `Object` | optional | Tool used to generate this SBOM |
+| **generator** | `{ name: string; version: string }` | optional | Tool used to generate this SBOM |
 
 
 ---
@@ -191,9 +191,9 @@ A single entry in a Software Bill of Materials
 | **version** | `string` | ✅ | Version of the software component |
 | **purl** | `string` | optional | Package URL identifier |
 | **license** | `string` | optional | SPDX license identifier of the component |
-| **hashes** | `Object` | optional | Cryptographic hashes for integrity verification |
-| **supplier** | `Object` | optional | Supplier information for the component |
-| **externalRefs** | `Object[]` | ✅ | External references related to the component |
+| **hashes** | `{ sha256?: string; sha512?: string }` | optional | Cryptographic hashes for integrity verification |
+| **supplier** | `{ name: string; url?: string }` | optional | Supplier information for the component |
+| **externalRefs** | `{ type: Enum<'website' \| 'repository' \| 'documentation' \| 'issue-tracker'>; url: string }[]` | ✅ | External references related to the component |
 
 
 ---
@@ -208,12 +208,12 @@ Security policy governing plugin scanning and enforcement
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for the security policy |
 | **name** | `string` | ✅ | Human-readable name of the security policy |
-| **autoScan** | `Object` | ✅ | Automatic security scanning configuration |
-| **thresholds** | `Object` | ✅ | Vulnerability count thresholds for policy enforcement |
+| **autoScan** | `{ enabled: boolean; frequency: Enum<'on-publish' \| 'daily' \| 'weekly' \| 'monthly'> }` | ✅ | Automatic security scanning configuration |
+| **thresholds** | `{ maxCritical: integer; maxHigh: integer; maxMedium: integer }` | ✅ | Vulnerability count thresholds for policy enforcement |
 | **allowedLicenses** | `string[]` | ✅ | List of SPDX license identifiers that are permitted |
 | **prohibitedLicenses** | `string[]` | ✅ | List of SPDX license identifiers that are prohibited |
-| **codeSigning** | `Object` | optional | Code signing requirements for plugin artifacts |
-| **sandbox** | `Object` | optional | Sandbox restrictions for plugin execution |
+| **codeSigning** | `{ required: boolean; allowedSigners: string[] }` | optional | Code signing requirements for plugin artifacts |
+| **sandbox** | `{ networkAccess: Enum<'none' \| 'localhost' \| 'allowlist' \| 'all'>; allowedDestinations: string[]; filesystemAccess: Enum<'none' \| 'read-only' \| 'temp-only' \| 'full'>; maxMemoryMB?: integer; … }` | optional | Sandbox restrictions for plugin execution |
 
 
 ---
@@ -227,14 +227,14 @@ Result of a security scan performed on a plugin
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **scanId** | `string` | ✅ | Unique identifier for this security scan |
-| **plugin** | `Object` | ✅ | Plugin that was scanned |
+| **plugin** | `{ id: string; version: string }` | ✅ | Plugin that was scanned |
 | **scannedAt** | `string` | ✅ | ISO 8601 timestamp when the scan was performed |
-| **scanner** | `Object` | ✅ | Information about the scanner tool used |
+| **scanner** | `{ name: string; version: string }` | ✅ | Information about the scanner tool used |
 | **status** | `Enum<'passed' \| 'failed' \| 'warning'>` | ✅ | Overall result status of the security scan |
-| **vulnerabilities** | `Object[]` | ✅ | List of vulnerabilities discovered during the scan |
-| **summary** | `Object` | ✅ | Summary counts of vulnerabilities by severity |
-| **licenseIssues** | `Object[]` | ✅ | License compliance issues found during the scan |
-| **codeQuality** | `Object` | optional | Code quality analysis results |
+| **vulnerabilities** | `{ cve?: string; id: string; title: string; description: string; … }[]` | ✅ | List of vulnerabilities discovered during the scan |
+| **summary** | `{ critical: integer; high: integer; medium: integer; low: integer; … }` | ✅ | Summary counts of vulnerabilities by severity |
+| **licenseIssues** | `{ package: string; license: string; reason: string; severity: Enum<'error' \| 'warning' \| 'info'> }[]` | ✅ | License compliance issues found during the scan |
+| **codeQuality** | `{ score?: number; issues: { type: Enum<'security' \| 'quality' \| 'style'>; severity: Enum<'error' \| 'warning' \| 'info'>; message: string; file?: string; … }[] }` | optional | Code quality analysis results |
 | **nextScanAt** | `string` | optional | ISO 8601 timestamp for the next scheduled scan |
 
 
@@ -254,10 +254,10 @@ A known security vulnerability in a package dependency
 | **description** | `string` | ✅ | Detailed description of the vulnerability |
 | **severity** | `Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>` | ✅ | Severity level of this vulnerability |
 | **cvss** | `number` | optional | CVSS score ranging from 0 to 10 |
-| **package** | `Object` | ✅ | Affected package information |
+| **package** | `{ name: string; version: string; ecosystem?: string }` | ✅ | Affected package information |
 | **vulnerableVersions** | `string` | ✅ | Semver range of vulnerable versions |
 | **patchedVersions** | `string` | optional | Semver range of patched versions |
-| **references** | `Object[]` | ✅ | External references related to the vulnerability |
+| **references** | `{ type: Enum<'advisory' \| 'article' \| 'report' \| 'web'>; url: string }[]` | ✅ | External references related to the vulnerability |
 | **cwe** | `string[]` | ✅ | CWE identifiers associated with this vulnerability |
 | **publishedAt** | `string` | optional | ISO 8601 date when the vulnerability was published |
 | **mitigation** | `string` | optional | Recommended steps to mitigate the vulnerability |

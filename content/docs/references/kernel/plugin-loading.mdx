@@ -61,7 +61,7 @@ Plugin caching configuration
 | **ttl** | `integer` | optional | Time to live in seconds (0 = infinite) |
 | **maxSize** | `integer` | optional | Max cache size in MB |
 | **invalidateOn** | `Enum<'version-change' \| 'dependency-change' \| 'manual' \| 'error'>[]` | optional |  |
-| **compression** | `Object` | optional |  |
+| **compression** | `{ enabled: boolean; algorithm: Enum<'gzip' \| 'brotli' \| 'deflate'> }` | optional |  |
 
 
 ---
@@ -78,7 +78,7 @@ Plugin code splitting configuration
 | **strategy** | `Enum<'route' \| 'feature' \| 'size' \| 'custom'>` | ✅ |  |
 | **chunkNaming** | `Enum<'hashed' \| 'named' \| 'sequential'>` | ✅ |  |
 | **maxChunkSize** | `integer` | optional | Max chunk size in KB |
-| **sharedDependencies** | `Object` | optional |  |
+| **sharedDependencies** | `{ enabled: boolean; minChunks: integer }` | optional |  |
 
 
 ---
@@ -92,8 +92,8 @@ Plugin dependency resolution configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'strict' \| 'compatible' \| 'latest' \| 'pinned'>` | ✅ |  |
-| **peerDependencies** | `Object` | optional |  |
-| **optionalDependencies** | `Object` | optional |  |
+| **peerDependencies** | `{ resolve: boolean; onMissing: Enum<'error' \| 'warn' \| 'ignore'>; onMismatch: Enum<'error' \| 'warn' \| 'ignore'> }` | optional |  |
+| **optionalDependencies** | `{ load: boolean; onFailure: Enum<'warn' \| 'ignore'> }` | optional |  |
 | **conflictResolution** | `Enum<'fail' \| 'latest' \| 'oldest' \| 'manual'>` | ✅ |  |
 | **circularDependencies** | `Enum<'error' \| 'warn' \| 'allow'>` | ✅ |  |
 
@@ -114,7 +114,7 @@ Plugin dynamic import configuration
 | **preload** | `boolean` | ✅ | Preload module in parallel with parent |
 | **webpackChunkName** | `string` | optional | Custom chunk name for webpack |
 | **timeout** | `integer` | ✅ | Dynamic import timeout (ms) |
-| **retry** | `Object` | optional |  |
+| **retry** | `{ enabled: boolean; maxAttempts: integer; backoffMs: integer }` | optional |  |
 
 
 ---
@@ -134,9 +134,9 @@ Plugin hot reload configuration
 | **ignorePatterns** | `string[]` | optional | Glob patterns for files to ignore |
 | **debounceMs** | `integer` | ✅ |  |
 | **preserveState** | `boolean` | ✅ |  |
-| **stateSerialization** | `Object` | optional |  |
-| **hooks** | `Object` | optional |  |
-| **productionSafety** | `Object` | optional |  |
+| **stateSerialization** | `{ enabled: boolean; handler?: string }` | optional |  |
+| **hooks** | `{ beforeReload?: string; afterReload?: string; onError?: string }` | optional |  |
+| **productionSafety** | `{ healthValidation: boolean; rollbackOnFailure: boolean; healthTimeout: integer; drainConnections: boolean; … }` | optional |  |
 
 
 ---
@@ -153,7 +153,7 @@ Plugin initialization configuration
 | **timeout** | `integer` | ✅ |  |
 | **priority** | `integer` | ✅ |  |
 | **critical** | `boolean` | ✅ | If true, kernel bootstrap fails if plugin fails |
-| **retry** | `Object` | optional |  |
+| **retry** | `{ enabled: boolean; maxAttempts: integer; backoffMs: integer }` | optional |  |
 | **healthCheckInterval** | `integer` | optional | Health check interval in ms (0 = disabled) |
 
 
@@ -168,15 +168,15 @@ Complete plugin loading configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'eager' \| 'lazy' \| 'parallel' \| 'deferred' \| 'on-demand'>` | ✅ | Plugin loading strategy |
-| **preload** | `Object` | optional | Plugin preloading configuration |
-| **codeSplitting** | `Object` | optional | Plugin code splitting configuration |
-| **dynamicImport** | `Object` | optional | Plugin dynamic import configuration |
-| **initialization** | `Object` | optional | Plugin initialization configuration |
-| **dependencyResolution** | `Object` | optional | Plugin dependency resolution configuration |
-| **hotReload** | `Object` | optional | Plugin hot reload configuration |
-| **caching** | `Object` | optional | Plugin caching configuration |
-| **sandboxing** | `Object` | optional | Plugin sandboxing configuration |
-| **monitoring** | `Object` | optional | Plugin performance monitoring configuration |
+| **preload** | `{ enabled: boolean; priority: integer; resources?: Enum<'metadata' \| 'dependencies' \| 'assets' \| 'code' \| 'services'>[]; conditions?: object }` | optional | Plugin preloading configuration |
+| **codeSplitting** | `{ enabled: boolean; strategy: Enum<'route' \| 'feature' \| 'size' \| 'custom'>; chunkNaming: Enum<'hashed' \| 'named' \| 'sequential'>; maxChunkSize?: integer; … }` | optional | Plugin code splitting configuration |
+| **dynamicImport** | `{ enabled: boolean; mode: Enum<'async' \| 'sync' \| 'eager' \| 'lazy'>; prefetch: boolean; preload: boolean; … }` | optional | Plugin dynamic import configuration |
+| **initialization** | `{ mode: Enum<'sync' \| 'async' \| 'parallel' \| 'sequential'>; timeout: integer; priority: integer; critical: boolean; … }` | optional | Plugin initialization configuration |
+| **dependencyResolution** | `{ strategy: Enum<'strict' \| 'compatible' \| 'latest' \| 'pinned'>; peerDependencies?: object; optionalDependencies?: object; conflictResolution: Enum<'fail' \| 'latest' \| 'oldest' \| 'manual'>; … }` | optional | Plugin dependency resolution configuration |
+| **hotReload** | `{ enabled: boolean; environment: Enum<'development' \| 'staging' \| 'production'>; strategy: Enum<'full' \| 'partial' \| 'state-preserve'>; watchPatterns?: string[]; … }` | optional | Plugin hot reload configuration |
+| **caching** | `{ enabled: boolean; storage: Enum<'memory' \| 'disk' \| 'indexeddb' \| 'hybrid'>; keyStrategy: Enum<'version' \| 'hash' \| 'timestamp'>; ttl?: integer; … }` | optional | Plugin caching configuration |
+| **sandboxing** | `{ enabled: boolean; scope: Enum<'automation-only' \| 'untrusted-only' \| 'all-plugins'>; isolationLevel: Enum<'none' \| 'process' \| 'vm' \| 'iframe' \| 'web-worker'>; allowedCapabilities?: string[]; … }` | optional | Plugin sandboxing configuration |
+| **monitoring** | `{ enabled: boolean; metrics?: Enum<'load-time' \| 'init-time' \| 'memory-usage' \| 'cpu-usage' \| 'api-calls' \| 'error-rate' \| 'cache-hit-rate'>[]; samplingRate: number; reportingInterval: integer; … }` | optional | Plugin performance monitoring configuration |
 
 
 ---
@@ -194,7 +194,7 @@ Plugin loading lifecycle event
 | **timestamp** | `integer` | ✅ |  |
 | **durationMs** | `integer` | optional |  |
 | **metadata** | `Record<string, any>` | optional |  |
-| **error** | `Object` | optional |  |
+| **error** | `{ message: string; code?: string; stack?: string }` | optional |  |
 
 
 ---
@@ -245,7 +245,7 @@ Plugin performance monitoring configuration
 | **metrics** | `Enum<'load-time' \| 'init-time' \| 'memory-usage' \| 'cpu-usage' \| 'api-calls' \| 'error-rate' \| 'cache-hit-rate'>[]` | optional |  |
 | **samplingRate** | `number` | ✅ |  |
 | **reportingInterval** | `integer` | ✅ |  |
-| **budgets** | `Object` | optional |  |
+| **budgets** | `{ maxLoadTimeMs?: integer; maxInitTimeMs?: integer; maxMemoryMB?: integer }` | optional |  |
 | **onBudgetViolation** | `Enum<'warn' \| 'error' \| 'ignore'>` | ✅ |  |
 
 
@@ -262,7 +262,7 @@ Plugin preloading configuration
 | **enabled** | `boolean` | ✅ |  |
 | **priority** | `integer` | ✅ |  |
 | **resources** | `Enum<'metadata' \| 'dependencies' \| 'assets' \| 'code' \| 'services'>[]` | optional |  |
-| **conditions** | `Object` | optional |  |
+| **conditions** | `{ routes?: string[]; roles?: string[]; deviceType?: Enum<'desktop' \| 'mobile' \| 'tablet'>[]; minNetworkSpeed?: Enum<'slow-2g' \| '2g' \| '3g' \| '4g'> }` | optional |  |
 
 
 ---
@@ -279,9 +279,9 @@ Plugin sandboxing configuration
 | **scope** | `Enum<'automation-only' \| 'untrusted-only' \| 'all-plugins'>` | ✅ | Which plugins are subject to isolation |
 | **isolationLevel** | `Enum<'none' \| 'process' \| 'vm' \| 'iframe' \| 'web-worker'>` | ✅ |  |
 | **allowedCapabilities** | `string[]` | optional | List of allowed capability IDs |
-| **resourceQuotas** | `Object` | optional |  |
-| **permissions** | `Object` | optional |  |
-| **ipc** | `Object` | optional |  |
+| **resourceQuotas** | `{ maxMemoryMB?: integer; maxCpuTimeMs?: integer; maxFileDescriptors?: integer; maxNetworkKBps?: integer }` | optional |  |
+| **permissions** | `{ allowedAPIs?: string[]; allowedPaths?: string[]; allowedEndpoints?: string[]; allowedEnvVars?: string[] }` | optional |  |
+| **ipc** | `{ enabled: boolean; transport: Enum<'message-port' \| 'unix-socket' \| 'tcp' \| 'memory'>; maxMessageSize: integer; timeout: integer; … }` | optional |  |
 
 
 ---

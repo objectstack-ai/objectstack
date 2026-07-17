@@ -77,9 +77,9 @@ const result = DriverCapabilities.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Driver instance name |
 | **type** | `Enum<'sql' \| 'nosql' \| 'cache' \| 'search' \| 'graph' \| 'timeseries'>` | ✅ | Driver type category |
-| **capabilities** | `Object` | ✅ | Driver capability flags |
+| **capabilities** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | ✅ | Driver capability flags |
 | **connectionString** | `string` | optional | Database connection string (driver-specific format) |
-| **poolConfig** | `Object` | optional | Connection pool configuration |
+| **poolConfig** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool configuration |
 
 
 ---

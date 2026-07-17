@@ -45,9 +45,9 @@ const result = AnalyticsEndpoint.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ cubes: { name: string; title?: string; description?: string; sql: string; … }[] }` | ✅ |  |
 
 
 ---
@@ -58,7 +58,7 @@ const result = AnalyticsEndpoint.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **query** | `Object` | ✅ | The analytic query definition |
+| **query** | `{ cube?: string; measures: string[]; dimensions?: string[]; where?: any; … }` | ✅ | The analytic query definition |
 | **cube** | `string` | ✅ | Target cube name |
 | **format** | `Enum<'json' \| 'csv' \| 'xlsx'>` | ✅ | Response format |
 
@@ -72,9 +72,9 @@ const result = AnalyticsEndpoint.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ rows: Record<string, any>[]; fields: { name: string; type: string }[]; sql?: string }` | ✅ |  |
 
 
 ---
@@ -86,9 +86,9 @@ const result = AnalyticsEndpoint.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ sql: string; params: any[] }` | ✅ |  |
 
 
 ---

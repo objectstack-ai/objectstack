@@ -89,33 +89,33 @@ Message acknowledgment mode
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Unique connector identifier |
 | **label** | `string` | ✅ | Display label |
-| **type** | `string` | ✅ |  |
+| **type** | `'database'` | ✅ |  |
 | **description** | `string` | optional | Connector description |
 | **icon** | `string` | optional | Icon identifier |
-| **authentication** | `Object \| Object \| Object \| Object \| Object` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
 | **provider** | `Enum<'postgresql' \| 'mysql' \| 'mariadb' \| 'mssql' \| 'oracle' \| 'mongodb' \| 'redis' \| 'cassandra' \| 'snowflake' \| 'bigquery' \| 'redshift' \| 'custom'>` | ✅ | Database provider type |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
-| **auth** | `Object \| Object \| Object \| Object` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
-| **actions** | `Object[]` | optional |  |
-| **triggers** | `Object[]` | optional |  |
-| **syncConfig** | `Object` | optional | Data sync configuration |
-| **fieldMappings** | `Object[]` | optional | Field mapping rules |
-| **webhooks** | `Object[]` | optional | Webhook configurations |
-| **rateLimitConfig** | `Object` | optional | Rate limiting configuration |
-| **retryConfig** | `Object` | optional | Retry configuration |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
+| **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
+| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional |  |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Field mapping rules |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'undelete' \| 'api'>[]; … }[]` | optional | Webhook configurations |
+| **rateLimitConfig** | `{ strategy?: Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>; maxRequests: number; windowSeconds: number; burstCapacity?: number; … }` | optional | Rate limiting configuration |
+| **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
 | **requestTimeoutMs** | `number` | optional | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
 | **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `Object` | optional | Error mapping configuration |
-| **health** | `Object` | optional | Health and resilience configuration |
+| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
-| **connectionConfig** | `Object` | ✅ | Database connection configuration |
-| **poolConfig** | `Object` | optional | Connection pool configuration |
-| **sslConfig** | `Object` | optional | SSL/TLS configuration |
-| **tables** | `Object[]` | ✅ | Tables to sync |
-| **cdcConfig** | `Object` | optional | CDC configuration |
-| **readReplicaConfig** | `Object` | optional | Read replica configuration |
+| **connectionConfig** | `{ host: string; port: number; database: string; username: string; … }` | ✅ | Database connection configuration |
+| **poolConfig** | `{ min?: number; max?: number; idleTimeoutMs?: number; connectionTimeoutMs?: number; … }` | optional | Connection pool configuration |
+| **sslConfig** | `{ enabled?: boolean; rejectUnauthorized?: boolean; ca?: string; cert?: string; … }` | optional | SSL/TLS configuration |
+| **tables** | `{ name: string; label: string; schema?: string; tableName: string; … }[]` | ✅ | Tables to sync |
+| **cdcConfig** | `{ enabled?: boolean; method: Enum<'log_based' \| 'trigger_based' \| 'query_based' \| 'custom'>; slotName?: string; publicationName?: string; … }` | optional | CDC configuration |
+| **readReplicaConfig** | `{ enabled?: boolean; hosts: { host: string; port: number; weight?: number }[] }` | optional | Read replica configuration |
 | **queryTimeoutMs** | `number` | optional | Query timeout in ms |
 | **enableQueryLogging** | `boolean` | optional | Enable SQL query logging |
 
@@ -151,7 +151,7 @@ Message acknowledgment mode
 | **tableName** | `string` | ✅ | Actual table name in database |
 | **primaryKey** | `string` | ✅ | Primary key column |
 | **enabled** | `boolean` | optional | Enable sync for this table |
-| **fieldMappings** | `Object[]` | optional | Table-specific field mappings |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Table-specific field mappings |
 | **whereClause** | `string` | optional | SQL WHERE clause for filtering |
 
 
@@ -181,7 +181,7 @@ Message delivery guarantee
 | **enablePreview** | `boolean` | ✅ | Enable preview deployments |
 | **previewComments** | `boolean` | ✅ | Post preview URLs in PR comments |
 | **productionProtection** | `boolean` | ✅ | Require approval for production deployments |
-| **deployHooks** | `Object[]` | optional | Deploy hooks |
+| **deployHooks** | `{ name: string; url: string; branch?: string }[]` | optional | Deploy hooks |
 
 
 ---
@@ -208,7 +208,7 @@ Message delivery guarantee
 | :--- | :--- | :--- | :--- |
 | **domain** | `string` | ✅ | Domain name (e.g., app.example.com) |
 | **httpsRedirect** | `boolean` | ✅ | Redirect HTTP to HTTPS |
-| **customCertificate** | `Object` | optional | Custom SSL certificate |
+| **customCertificate** | `{ cert: string; key: string; ca?: string }` | optional | Custom SSL certificate |
 | **gitBranch** | `string` | optional | Git branch to deploy to this domain |
 
 
@@ -296,35 +296,35 @@ File access pattern
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Unique connector identifier |
 | **label** | `string` | ✅ | Display label |
-| **type** | `string` | ✅ |  |
+| **type** | `'file_storage'` | ✅ |  |
 | **description** | `string` | optional | Connector description |
 | **icon** | `string` | optional | Icon identifier |
-| **authentication** | `Object \| Object \| Object \| Object \| Object` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
 | **provider** | `Enum<'s3' \| 'azure_blob' \| 'gcs' \| 'dropbox' \| 'box' \| 'onedrive' \| 'google_drive' \| 'sharepoint' \| 'ftp' \| 'local' \| 'custom'>` | ✅ | File storage provider type |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
-| **auth** | `Object \| Object \| Object \| Object` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
-| **actions** | `Object[]` | optional |  |
-| **triggers** | `Object[]` | optional |  |
-| **syncConfig** | `Object` | optional | Data sync configuration |
-| **fieldMappings** | `Object[]` | optional | Field mapping rules |
-| **webhooks** | `Object[]` | optional | Webhook configurations |
-| **rateLimitConfig** | `Object` | optional | Rate limiting configuration |
-| **retryConfig** | `Object` | optional | Retry configuration |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
+| **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
+| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional |  |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Field mapping rules |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'undelete' \| 'api'>[]; … }[]` | optional | Webhook configurations |
+| **rateLimitConfig** | `{ strategy?: Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>; maxRequests: number; windowSeconds: number; burstCapacity?: number; … }` | optional | Rate limiting configuration |
+| **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
 | **requestTimeoutMs** | `number` | optional | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
 | **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `Object` | optional | Error mapping configuration |
-| **health** | `Object` | optional | Health and resilience configuration |
+| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
-| **storageConfig** | `Object` | optional | Storage configuration |
-| **buckets** | `Object[]` | ✅ | Buckets/containers to sync |
-| **metadataConfig** | `Object` | optional | Metadata extraction configuration |
-| **multipartConfig** | `Object` | optional | Multipart upload configuration |
-| **versioningConfig** | `Object` | optional | File versioning configuration |
-| **encryption** | `Object` | optional | Encryption configuration |
-| **lifecyclePolicy** | `Object` | optional | Lifecycle policy |
-| **contentProcessing** | `Object` | optional | Content processing configuration |
+| **storageConfig** | `{ endpoint?: string; region?: string; pathStyle?: boolean }` | optional | Storage configuration |
+| **buckets** | `{ name: string; label: string; bucketName: string; region?: string; … }[]` | ✅ | Buckets/containers to sync |
+| **metadataConfig** | `{ extractMetadata?: boolean; metadataFields?: Enum<'content_type' \| 'file_size' \| 'last_modified' \| 'etag' \| 'checksum' \| 'creator' \| 'created_at' \| 'custom'>[]; customMetadata?: Record<string, string> }` | optional | Metadata extraction configuration |
+| **multipartConfig** | `{ enabled?: boolean; partSize?: number; maxConcurrentParts?: number; threshold?: number }` | optional | Multipart upload configuration |
+| **versioningConfig** | `{ enabled?: boolean; maxVersions?: number; retentionDays?: number }` | optional | File versioning configuration |
+| **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES256' \| 'aws:kms' \| 'custom'>; kmsKeyId?: string }` | optional | Encryption configuration |
+| **lifecyclePolicy** | `{ enabled?: boolean; deleteAfterDays?: number; archiveAfterDays?: number }` | optional | Lifecycle policy |
+| **contentProcessing** | `{ extractText?: boolean; generateThumbnails?: boolean; thumbnailSizes?: { width: number; height: number }[]; virusScan?: boolean }` | optional | Content processing configuration |
 | **bufferSize** | `number` | optional | Buffer size in bytes |
 | **transferAcceleration** | `boolean` | optional | Enable transfer acceleration |
 
@@ -404,34 +404,34 @@ File storage provider type
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Unique connector identifier |
 | **label** | `string` | ✅ | Display label |
-| **type** | `string` | ✅ |  |
+| **type** | `'saas'` | ✅ |  |
 | **description** | `string` | optional | Connector description |
 | **icon** | `string` | optional | Icon identifier |
-| **authentication** | `Object \| Object \| Object \| Object \| Object` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
 | **provider** | `Enum<'github' \| 'github_enterprise'>` | ✅ | GitHub provider |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
-| **auth** | `Object \| Object \| Object \| Object` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
-| **actions** | `Object[]` | optional |  |
-| **triggers** | `Object[]` | optional |  |
-| **syncConfig** | `Object` | optional | Data sync configuration |
-| **fieldMappings** | `Object[]` | optional | Field mapping rules |
-| **webhooks** | `Object[]` | optional | Webhook configurations |
-| **rateLimitConfig** | `Object` | optional | Rate limiting configuration |
-| **retryConfig** | `Object` | optional | Retry configuration |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
+| **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
+| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional |  |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Field mapping rules |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'undelete' \| 'api'>[]; … }[]` | optional | Webhook configurations |
+| **rateLimitConfig** | `{ strategy?: Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>; maxRequests: number; windowSeconds: number; burstCapacity?: number; … }` | optional | Rate limiting configuration |
+| **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
 | **requestTimeoutMs** | `number` | optional | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
 | **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `Object` | optional | Error mapping configuration |
-| **health** | `Object` | optional | Health and resilience configuration |
+| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 | **baseUrl** | `string` | optional | GitHub API base URL |
-| **repositories** | `Object[]` | ✅ | Repositories to manage |
-| **commitConfig** | `Object` | optional | Commit configuration |
-| **pullRequestConfig** | `Object` | optional | Pull request configuration |
-| **workflows** | `Object[]` | optional | GitHub Actions workflows |
-| **releaseConfig** | `Object` | optional | Release configuration |
-| **issueTracking** | `Object` | optional | Issue tracking configuration |
+| **repositories** | `{ owner: string; name: string; defaultBranch?: string; autoMerge?: boolean; … }[]` | ✅ | Repositories to manage |
+| **commitConfig** | `{ authorName?: string; authorEmail?: string; signCommits?: boolean; messageTemplate?: string; … }` | optional | Commit configuration |
+| **pullRequestConfig** | `{ titleTemplate?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; bodyTemplate?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; defaultReviewers?: string[]; defaultAssignees?: string[]; … }` | optional | Pull request configuration |
+| **workflows** | `{ name: string; path: string; enabled?: boolean; triggers?: Enum<'push' \| 'pull_request' \| 'release' \| 'schedule' \| 'workflow_dispatch' \| 'repository_dispatch'>[]; … }[]` | optional | GitHub Actions workflows |
+| **releaseConfig** | `{ tagPattern?: string; semanticVersioning?: boolean; autoReleaseNotes?: boolean; releaseNameTemplate?: string; … }` | optional | Release configuration |
+| **issueTracking** | `{ enabled?: boolean; defaultLabels?: string[]; templatePaths?: string[]; autoAssign?: boolean; … }` | optional | Issue tracking configuration |
 | **enableWebhooks** | `boolean` | optional | Enable GitHub webhooks |
 | **webhookEvents** | `Enum<'push' \| 'pull_request' \| 'issues' \| 'issue_comment' \| 'release' \| 'workflow_run' \| 'deployment' \| 'deployment_status' \| 'check_run' \| 'check_suite' \| 'status'>[]` | optional | Webhook events to subscribe to |
 
@@ -448,7 +448,7 @@ File storage provider type
 | **defaultLabels** | `string[]` | optional | Default issue labels |
 | **templatePaths** | `string[]` | optional | Issue template paths |
 | **autoAssign** | `boolean` | ✅ | Auto-assign issues |
-| **autoCloseStale** | `Object` | optional | Auto-close stale issues configuration |
+| **autoCloseStale** | `{ enabled: boolean; daysBeforeStale: integer; daysBeforeClose: integer; staleLabel: string }` | optional | Auto-close stale issues configuration |
 
 
 ---
@@ -471,8 +471,8 @@ GitHub provider type
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **titleTemplate** | `string \| Object` | optional | PR title template — supports `{{var}`} interpolation |
-| **bodyTemplate** | `string \| Object` | optional | PR body template — supports `{{var}`} interpolation |
+| **titleTemplate** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | PR title template — supports `{{var}`} interpolation |
+| **bodyTemplate** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | PR body template — supports `{{var}`} interpolation |
 | **defaultReviewers** | `string[]` | optional | Default reviewers (usernames) |
 | **defaultAssignees** | `string[]` | optional | Default assignees (usernames) |
 | **defaultLabels** | `string[]` | optional | Default labels |
@@ -508,7 +508,7 @@ GitHub provider type
 | **name** | `string` | ✅ | Repository name |
 | **defaultBranch** | `string` | ✅ | Default branch name |
 | **autoMerge** | `boolean` | ✅ | Enable auto-merge for pull requests |
-| **branchProtection** | `Object` | optional | Branch protection configuration |
+| **branchProtection** | `{ requiredReviewers: integer; requireStatusChecks: boolean; enforceAdmins: boolean; allowForcePushes: boolean; … }` | optional | Branch protection configuration |
 | **topics** | `string[]` | optional | Repository topics |
 
 
@@ -537,33 +537,33 @@ GitHub provider type
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Unique connector identifier |
 | **label** | `string` | ✅ | Display label |
-| **type** | `string` | ✅ |  |
+| **type** | `'message_queue'` | ✅ |  |
 | **description** | `string` | optional | Connector description |
 | **icon** | `string` | optional | Icon identifier |
-| **authentication** | `Object \| Object \| Object \| Object \| Object` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
 | **provider** | `Enum<'rabbitmq' \| 'kafka' \| 'redis_pubsub' \| 'redis_streams' \| 'aws_sqs' \| 'aws_sns' \| 'google_pubsub' \| 'azure_service_bus' \| 'azure_event_hubs' \| 'nats' \| 'pulsar' \| 'activemq' \| 'custom'>` | ✅ | Message queue provider type |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
-| **auth** | `Object \| Object \| Object \| Object` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
-| **actions** | `Object[]` | optional |  |
-| **triggers** | `Object[]` | optional |  |
-| **syncConfig** | `Object` | optional | Data sync configuration |
-| **fieldMappings** | `Object[]` | optional | Field mapping rules |
-| **webhooks** | `Object[]` | optional | Webhook configurations |
-| **rateLimitConfig** | `Object` | optional | Rate limiting configuration |
-| **retryConfig** | `Object` | optional | Retry configuration |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
+| **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
+| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional |  |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Field mapping rules |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'undelete' \| 'api'>[]; … }[]` | optional | Webhook configurations |
+| **rateLimitConfig** | `{ strategy?: Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>; maxRequests: number; windowSeconds: number; burstCapacity?: number; … }` | optional | Rate limiting configuration |
+| **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
 | **requestTimeoutMs** | `number` | optional | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
 | **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `Object` | optional | Error mapping configuration |
-| **health** | `Object` | optional | Health and resilience configuration |
+| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
-| **brokerConfig** | `Object` | ✅ | Broker connection configuration |
-| **topics** | `Object[]` | ✅ | Topics/queues to sync |
+| **brokerConfig** | `{ brokers: string[]; clientId?: string; connectionTimeoutMs?: number; requestTimeoutMs?: number }` | ✅ | Broker connection configuration |
+| **topics** | `{ name: string; label: string; topicName: string; enabled?: boolean; … }[]` | ✅ | Topics/queues to sync |
 | **deliveryGuarantee** | `Enum<'at_most_once' \| 'at_least_once' \| 'exactly_once'>` | optional | Message delivery guarantee |
-| **sslConfig** | `Object` | optional | SSL/TLS configuration |
-| **saslConfig** | `Object` | optional | SASL authentication configuration |
-| **schemaRegistry** | `Object` | optional | Schema registry configuration |
+| **sslConfig** | `{ enabled?: boolean; rejectUnauthorized?: boolean; ca?: string; cert?: string; … }` | optional | SSL/TLS configuration |
+| **saslConfig** | `{ mechanism: Enum<'plain' \| 'scram-sha-256' \| 'scram-sha-512' \| 'aws'>; username?: string; password?: string }` | optional | SASL authentication configuration |
+| **schemaRegistry** | `{ url: string; auth?: object }` | optional | Schema registry configuration |
 | **preserveOrder** | `boolean` | optional | Preserve message ordering |
 | **enableMetrics** | `boolean` | optional | Enable message queue metrics |
 | **enableTracing** | `boolean` | optional | Enable distributed tracing |
@@ -598,33 +598,33 @@ GitHub provider type
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Unique connector identifier |
 | **label** | `string` | ✅ | Display label |
-| **type** | `string` | ✅ |  |
+| **type** | `'saas'` | ✅ |  |
 | **description** | `string` | optional | Connector description |
 | **icon** | `string` | optional | Icon identifier |
-| **authentication** | `Object \| Object \| Object \| Object \| Object` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
 | **provider** | `Enum<'salesforce' \| 'hubspot' \| 'stripe' \| 'shopify' \| 'zendesk' \| 'intercom' \| 'mailchimp' \| 'slack' \| 'microsoft_dynamics' \| 'servicenow' \| 'netsuite' \| 'custom'>` | ✅ | SaaS provider type |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
-| **auth** | `Object \| Object \| Object \| Object` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
-| **actions** | `Object[]` | optional |  |
-| **triggers** | `Object[]` | optional |  |
-| **syncConfig** | `Object` | optional | Data sync configuration |
-| **fieldMappings** | `Object[]` | optional | Field mapping rules |
-| **webhooks** | `Object[]` | optional | Webhook configurations |
-| **rateLimitConfig** | `Object` | optional | Rate limiting configuration |
-| **retryConfig** | `Object` | optional | Retry configuration |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
+| **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
+| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional |  |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Field mapping rules |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'undelete' \| 'api'>[]; … }[]` | optional | Webhook configurations |
+| **rateLimitConfig** | `{ strategy?: Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>; maxRequests: number; windowSeconds: number; burstCapacity?: number; … }` | optional | Rate limiting configuration |
+| **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
 | **requestTimeoutMs** | `number` | optional | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
 | **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `Object` | optional | Error mapping configuration |
-| **health** | `Object` | optional | Health and resilience configuration |
+| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 | **baseUrl** | `string` | ✅ | API base URL |
-| **apiVersion** | `Object` | optional | API version configuration |
-| **objectTypes** | `Object[]` | ✅ | Syncable object types |
-| **oauthSettings** | `Object` | optional | OAuth-specific configuration |
-| **paginationConfig** | `Object` | optional | Pagination configuration |
-| **sandboxConfig** | `Object` | optional | Sandbox environment configuration |
+| **apiVersion** | `{ version: string; isDefault?: boolean; deprecationDate?: string; sunsetDate?: string }` | optional | API version configuration |
+| **objectTypes** | `{ name: string; label: string; apiName: string; enabled?: boolean; … }[]` | ✅ | Syncable object types |
+| **oauthSettings** | `{ scopes: string[]; refreshTokenUrl?: string; revokeTokenUrl?: string; autoRefresh?: boolean }` | optional | OAuth-specific configuration |
+| **paginationConfig** | `{ type?: Enum<'cursor' \| 'offset' \| 'page'>; defaultPageSize?: number; maxPageSize?: number }` | optional | Pagination configuration |
+| **sandboxConfig** | `{ enabled?: boolean; baseUrl?: string }` | optional | Sandbox environment configuration |
 | **customHeaders** | `Record<string, string>` | optional | Custom HTTP headers for all requests |
 
 
@@ -643,7 +643,7 @@ GitHub provider type
 | **supportsCreate** | `boolean` | optional | Supports record creation |
 | **supportsUpdate** | `boolean` | optional | Supports record updates |
 | **supportsDelete** | `boolean` | optional | Supports record deletion |
-| **fieldMappings** | `Object[]` | optional | Object-specific field mappings |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Object-specific field mappings |
 
 
 ---
@@ -698,7 +698,7 @@ SaaS provider type
 | **enabled** | `boolean` | ✅ | Enable sync for this bucket |
 | **prefix** | `string` | optional | Prefix/path within bucket |
 | **accessPattern** | `Enum<'public_read' \| 'private' \| 'authenticated_read' \| 'bucket_owner_read' \| 'bucket_owner_full'>` | optional | Access pattern |
-| **fileFilters** | `Object` | optional | File filter configuration |
+| **fileFilters** | `{ includePatterns?: string[]; excludePatterns?: string[]; minFileSize?: number; maxFileSize?: number; … }` | optional | File filter configuration |
 
 
 ---
@@ -717,11 +717,11 @@ SaaS provider type
 | **messageFormat** | `Enum<'json' \| 'xml' \| 'protobuf' \| 'avro' \| 'text' \| 'binary'>` | ✅ | Message format/serialization |
 | **partitions** | `number` | optional | Number of partitions (for Kafka) |
 | **replicationFactor** | `number` | optional | Replication factor (for Kafka) |
-| **consumerConfig** | `Object` | optional | Consumer-specific configuration |
-| **producerConfig** | `Object` | optional | Producer-specific configuration |
-| **dlqConfig** | `Object` | optional | Dead letter queue configuration |
+| **consumerConfig** | `{ enabled: boolean; consumerGroup?: string; concurrency: number; prefetchCount: number; … }` | optional | Consumer-specific configuration |
+| **producerConfig** | `{ enabled: boolean; acks: Enum<'0' \| '1' \| 'all'>; compressionType: Enum<'none' \| 'gzip' \| 'snappy' \| 'lz4' \| 'zstd'>; batchSize: number; … }` | optional | Producer-specific configuration |
+| **dlqConfig** | `{ enabled: boolean; queueName: string; maxRetries: number; retryDelayMs: number }` | optional | Dead letter queue configuration |
 | **routingKey** | `string` | optional | Routing key pattern |
-| **messageFilter** | `Object` | optional | Message filter criteria |
+| **messageFilter** | `{ headers?: Record<string, string>; attributes?: Record<string, any> }` | optional | Message filter criteria |
 
 
 ---
@@ -734,31 +734,31 @@ SaaS provider type
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Unique connector identifier |
 | **label** | `string` | ✅ | Display label |
-| **type** | `string` | ✅ |  |
+| **type** | `'saas'` | ✅ |  |
 | **description** | `string` | optional | Connector description |
 | **icon** | `string` | optional | Icon identifier |
-| **authentication** | `Object \| Object \| Object \| Object \| Object` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
 | **provider** | `Enum<'vercel'>` | ✅ | Vercel provider |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
-| **auth** | `Object \| Object \| Object \| Object` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
-| **actions** | `Object[]` | optional |  |
-| **triggers** | `Object[]` | optional |  |
-| **syncConfig** | `Object` | optional | Data sync configuration |
-| **fieldMappings** | `Object[]` | optional | Field mapping rules |
-| **webhooks** | `Object[]` | optional | Webhook configurations |
-| **rateLimitConfig** | `Object` | optional | Rate limiting configuration |
-| **retryConfig** | `Object` | optional | Retry configuration |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
+| **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
+| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional |  |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Field mapping rules |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'undelete' \| 'api'>[]; … }[]` | optional | Webhook configurations |
+| **rateLimitConfig** | `{ strategy?: Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>; maxRequests: number; windowSeconds: number; burstCapacity?: number; … }` | optional | Rate limiting configuration |
+| **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
 | **requestTimeoutMs** | `number` | optional | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
 | **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `Object` | optional | Error mapping configuration |
-| **health** | `Object` | optional | Health and resilience configuration |
+| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 | **baseUrl** | `string` | optional | Vercel API base URL |
-| **team** | `Object` | optional | Vercel team configuration |
-| **projects** | `Object[]` | ✅ | Vercel projects |
-| **monitoring** | `Object` | optional | Monitoring configuration |
+| **team** | `{ teamId?: string; teamName?: string }` | optional | Vercel team configuration |
+| **projects** | `{ name: string; framework?: Enum<'nextjs' \| 'react' \| 'vue' \| 'nuxtjs' \| 'gatsby' \| 'remix' \| 'astro' \| 'sveltekit' \| 'solid' \| 'angular' \| 'static' \| 'other'>; gitRepository?: object; buildConfig?: object; … }[]` | ✅ | Vercel projects |
+| **monitoring** | `{ enableWebAnalytics?: boolean; enableSpeedInsights?: boolean; logDrains?: { name: string; url: string; headers?: Record<string, string>; sources?: Enum<'static' \| 'lambda' \| 'edge'>[] }[] }` | optional | Monitoring configuration |
 | **enableWebhooks** | `boolean` | optional | Enable Vercel webhooks |
 | **webhookEvents** | `Enum<'deployment.created' \| 'deployment.succeeded' \| 'deployment.failed' \| 'deployment.ready' \| 'deployment.error' \| 'deployment.canceled' \| 'deployment-checks-completed' \| 'deployment-prepared' \| 'project.created' \| 'project.removed'>[]` | optional | Webhook events to subscribe to |
 
@@ -795,7 +795,7 @@ Frontend framework
 | :--- | :--- | :--- | :--- |
 | **enableWebAnalytics** | `boolean` | ✅ | Enable Vercel Web Analytics |
 | **enableSpeedInsights** | `boolean` | ✅ | Enable Vercel Speed Insights |
-| **logDrains** | `Object[]` | optional | Log drains configuration |
+| **logDrains** | `{ name: string; url: string; headers?: Record<string, string>; sources?: Enum<'static' \| 'lambda' \| 'edge'>[] }[]` | optional | Log drains configuration |
 
 
 ---
@@ -808,12 +808,12 @@ Frontend framework
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Vercel project name |
 | **framework** | `Enum<'nextjs' \| 'react' \| 'vue' \| 'nuxtjs' \| 'gatsby' \| 'remix' \| 'astro' \| 'sveltekit' \| 'solid' \| 'angular' \| 'static' \| 'other'>` | optional | Frontend framework |
-| **gitRepository** | `Object` | optional | Git repository configuration |
-| **buildConfig** | `Object` | optional | Build configuration |
-| **deploymentConfig** | `Object` | optional | Deployment configuration |
-| **domains** | `Object[]` | optional | Custom domains |
-| **environmentVariables** | `Object[]` | optional | Environment variables |
-| **edgeFunctions** | `Object[]` | optional | Edge functions |
+| **gitRepository** | `{ type: Enum<'github' \| 'gitlab' \| 'bitbucket'>; repo: string; productionBranch: string; autoDeployProduction: boolean; … }` | optional | Git repository configuration |
+| **buildConfig** | `{ buildCommand?: string; outputDirectory?: string; installCommand?: string; devCommand?: string; … }` | optional | Build configuration |
+| **deploymentConfig** | `{ autoDeployment: boolean; regions?: Enum<'iad1' \| 'sfo1' \| 'gru1' \| 'lhr1' \| 'fra1' \| 'sin1' \| 'syd1' \| 'hnd1' \| 'icn1'>[]; enablePreview: boolean; previewComments: boolean; … }` | optional | Deployment configuration |
+| **domains** | `{ domain: string; httpsRedirect: boolean; customCertificate?: object; gitBranch?: string }[]` | optional | Custom domains |
+| **environmentVariables** | `{ key: string; value: string; target: Enum<'production' \| 'preview' \| 'development'>[]; isSecret: boolean; … }[]` | optional | Environment variables |
+| **edgeFunctions** | `{ name: string; path: string; regions?: string[]; memoryLimit: integer; … }[]` | optional | Edge functions |
 | **rootDirectory** | `string` | optional | Root directory (for monorepos) |
 
 

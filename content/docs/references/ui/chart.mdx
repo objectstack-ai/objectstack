@@ -73,16 +73,16 @@ const result = ChartAnnotation.parse(data);
 | **title** | `string` | optional | Chart title |
 | **subtitle** | `string` | optional | Chart subtitle |
 | **description** | `string` | optional | Accessibility description |
-| **xAxis** | `Object` | optional | X-Axis configuration |
-| **yAxis** | `Object[]` | optional | Y-Axis configuration (support dual axis) |
-| **series** | `Object[]` | optional | Defined series configuration |
+| **xAxis** | `{ field: string; title?: string; format?: string; min?: number; … }` | optional | X-Axis configuration |
+| **yAxis** | `{ field: string; title?: string; format?: string; min?: number; … }[]` | optional | Y-Axis configuration (support dual axis) |
+| **series** | `{ name: string; label?: string; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; color?: string; … }[]` | optional | Defined series configuration |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
 | **height** | `number` | optional | Fixed height in pixels |
 | **showLegend** | `boolean` | ✅ | Display legend |
 | **showDataLabels** | `boolean` | ✅ | Display data labels |
-| **annotations** | `Object[]` | optional |  |
-| **interaction** | `Object` | optional |  |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional |  |
+| **interaction** | `{ tooltips: boolean; zoom: boolean; brush: boolean; clickAction?: string }` | optional |  |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---

@@ -57,7 +57,7 @@ L1 expression body — pure formula, no IO
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **language** | `string` | ✅ |  |
+| **language** | `'expression'` | ✅ |  |
 | **source** | `string` | ✅ | Formula expression source |
 
 
@@ -79,7 +79,7 @@ L1 expression body — pure formula, no IO
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **language** | `string` | ✅ |  |
+| **language** | `'expression'` | ✅ |  |
 | **source** | `string` | ✅ | Formula expression source |
 
 ---
@@ -92,7 +92,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **language** | `string` | ✅ |  |
+| **language** | `'js'` | ✅ |  |
 | **source** | `string` | ✅ | Function body source |
 | **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'crypto.hash' \| 'log'>[]` | ✅ | Granted capability tokens |
 | **timeoutMs** | `integer` | optional | Per-invocation timeout (ms) |
@@ -125,7 +125,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **language** | `string` | ✅ |  |
+| **language** | `'js'` | ✅ |  |
 | **source** | `string` | ✅ | Function body source |
 | **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'crypto.hash' \| 'log'>[]` | ✅ | Granted capability tokens |
 | **timeoutMs** | `integer` | optional | Per-invocation timeout (ms) |

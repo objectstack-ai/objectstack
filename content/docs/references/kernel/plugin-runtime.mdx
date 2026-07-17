@@ -56,8 +56,8 @@ Request to dynamically load a plugin at runtime
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ | Unique plugin identifier |
-| **source** | `Object` | ✅ | Plugin source location for dynamic resolution |
-| **activationEvents** | `Object[]` | optional | Lazy activation triggers; if omitted plugin starts immediately |
+| **source** | `{ type: Enum<'npm' \| 'local' \| 'url' \| 'registry' \| 'git'>; location: string; version?: string; integrity?: string }` | ✅ | Plugin source location for dynamic resolution |
+| **activationEvents** | `{ type: Enum<'onCommand' \| 'onRoute' \| 'onObject' \| 'onEvent' \| 'onService' \| 'onSchedule' \| 'onStartup'>; pattern: string }[]` | optional | Lazy activation triggers; if omitted plugin starts immediately |
 | **config** | `Record<string, any>` | optional | Runtime configuration overrides |
 | **priority** | `integer` | ✅ | Loading priority (lower is higher) |
 | **sandbox** | `boolean` | ✅ | Run in an isolated sandbox |
@@ -76,7 +76,7 @@ Dynamic plugin loading subsystem configuration
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable runtime load/unload of plugins |
 | **maxDynamicPlugins** | `integer` | ✅ | Upper limit on runtime-loaded plugins |
-| **discovery** | `Object` | optional | Runtime plugin discovery configuration |
+| **discovery** | `{ enabled: boolean; sources: { type: Enum<'registry' \| 'npm' \| 'directory' \| 'url'>; endpoint: string; pollInterval: integer; filter?: object }[]; autoLoad: boolean; requireApproval: boolean }` | optional | Runtime plugin discovery configuration |
 | **defaultSandbox** | `boolean` | ✅ | Sandbox dynamically loaded plugins by default |
 | **allowedSources** | `Enum<'npm' \| 'local' \| 'url' \| 'registry' \| 'git'>[]` | optional | Restrict which source types are permitted |
 | **requireIntegrity** | `boolean` | ✅ | Require integrity hash verification for remote sources |
@@ -113,7 +113,7 @@ Result of a dynamic plugin operation
 | **pluginId** | `string` | ✅ |  |
 | **durationMs** | `integer` | optional |  |
 | **version** | `string` | optional |  |
-| **error** | `Object` | optional |  |
+| **error** | `{ code: string; message: string; details?: Record<string, any> }` | optional |  |
 | **warnings** | `string[]` | optional |  |
 
 
@@ -145,7 +145,7 @@ Runtime plugin discovery configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ |  |
-| **sources** | `Object[]` | ✅ |  |
+| **sources** | `{ type: Enum<'registry' \| 'npm' \| 'directory' \| 'url'>; endpoint: string; pollInterval: integer; filter?: object }[]` | ✅ |  |
 | **autoLoad** | `boolean` | ✅ | Automatically load newly discovered plugins |
 | **requireApproval** | `boolean` | ✅ | Require admin approval before loading discovered plugins |
 
@@ -163,7 +163,7 @@ Source for runtime plugin discovery
 | **type** | `Enum<'registry' \| 'npm' \| 'directory' \| 'url'>` | ✅ | Discovery source type |
 | **endpoint** | `string` | ✅ | Registry URL, directory path, or manifest URL |
 | **pollInterval** | `integer` | ✅ | How often to re-scan for new plugins (0 = manual) |
-| **filter** | `Object` | optional |  |
+| **filter** | `{ tags?: string[]; vendors?: string[]; minTrustLevel?: Enum<'verified' \| 'trusted' \| 'community' \| 'untrusted'> }` | optional |  |
 
 
 ---

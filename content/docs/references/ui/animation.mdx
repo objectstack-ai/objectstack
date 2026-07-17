@@ -51,9 +51,9 @@ Component-level animation configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Descriptive label for this animation configuration |
-| **enter** | `Object` | optional | Enter/mount animation |
-| **exit** | `Object` | optional | Exit/unmount animation |
-| **hover** | `Object` | optional | Hover state animation |
+| **enter** | `{ preset?: Enum<'fade' \| 'slide_up' \| 'slide_down' \| 'slide_left' \| 'slide_right' \| 'scale' \| 'rotate' \| 'flip' \| 'none'>; duration?: number; easing?: Enum<'linear' \| 'ease' \| 'ease_in' \| 'ease_out' \| 'ease_in_out' \| 'spring'>; delay?: number; … }` | optional | Enter/mount animation |
+| **exit** | `{ preset?: Enum<'fade' \| 'slide_up' \| 'slide_down' \| 'slide_left' \| 'slide_right' \| 'scale' \| 'rotate' \| 'flip' \| 'none'>; duration?: number; easing?: Enum<'linear' \| 'ease' \| 'ease_in' \| 'ease_out' \| 'ease_in_out' \| 'spring'>; delay?: number; … }` | optional | Exit/unmount animation |
+| **hover** | `{ preset?: Enum<'fade' \| 'slide_up' \| 'slide_down' \| 'slide_left' \| 'slide_right' \| 'scale' \| 'rotate' \| 'flip' \| 'none'>; duration?: number; easing?: Enum<'linear' \| 'ease' \| 'ease_in' \| 'ease_out' \| 'ease_in_out' \| 'spring'>; delay?: number; … }` | optional | Hover state animation |
 | **trigger** | `Enum<'on_mount' \| 'on_unmount' \| 'on_hover' \| 'on_focus' \| 'on_click' \| 'on_scroll' \| 'on_visible'>` | optional | When to trigger the animation |
 | **reducedMotion** | `Enum<'respect' \| 'disable' \| 'alternative'>` | ✅ | Accessibility: how to handle prefers-reduced-motion |
 | **ariaLabel** | `string` | optional | Accessible label for screen readers (WAI-ARIA aria-label) |
@@ -88,9 +88,9 @@ Top-level motion and animation design configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Descriptive label for the motion configuration |
-| **defaultTransition** | `Object` | optional | Default transition applied to all animations |
-| **pageTransitions** | `Object` | optional | Page navigation transition settings |
-| **componentAnimations** | `Record<string, Object>` | optional | Component name to animation configuration mapping |
+| **defaultTransition** | `{ preset?: Enum<'fade' \| 'slide_up' \| 'slide_down' \| 'slide_left' \| 'slide_right' \| 'scale' \| 'rotate' \| 'flip' \| 'none'>; duration?: number; easing?: Enum<'linear' \| 'ease' \| 'ease_in' \| 'ease_out' \| 'ease_in_out' \| 'spring'>; delay?: number; … }` | optional | Default transition applied to all animations |
+| **pageTransitions** | `{ type: Enum<'fade' \| 'slide_up' \| 'slide_down' \| 'slide_left' \| 'slide_right' \| 'scale' \| 'rotate' \| 'flip' \| 'none'>; duration: number; easing: Enum<'linear' \| 'ease' \| 'ease_in' \| 'ease_out' \| 'ease_in_out' \| 'spring'>; crossFade: boolean }` | optional | Page navigation transition settings |
+| **componentAnimations** | `Record<string, { label?: string; enter?: object; exit?: object; hover?: object; … }>` | optional | Component name to animation configuration mapping |
 | **reducedMotion** | `boolean` | ✅ | When true, respect prefers-reduced-motion and suppress animations globally |
 | **enabled** | `boolean` | ✅ | Enable or disable all animations globally |
 

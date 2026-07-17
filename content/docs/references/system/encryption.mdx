@@ -48,7 +48,7 @@ Field-level encryption configuration
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable field-level encryption |
 | **algorithm** | `Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>` | ✅ | Encryption algorithm |
-| **keyManagement** | `Object` | ✅ | Key management configuration |
+| **keyManagement** | `{ provider: Enum<'local' \| 'aws-kms' \| 'azure-key-vault' \| 'gcp-kms' \| 'hashicorp-vault'>; keyId?: string; rotationPolicy?: object }` | ✅ | Key management configuration |
 | **scope** | `Enum<'field' \| 'record' \| 'table' \| 'database'>` | ✅ | Encryption scope level |
 | **deterministicEncryption** | `boolean` | ✅ | Allows equality queries on encrypted data |
 | **searchableEncryption** | `boolean` | ✅ | Allows search on encrypted data |
@@ -65,7 +65,7 @@ Per-field encryption assignment
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **fieldName** | `string` | ✅ | Name of the field to encrypt |
-| **encryptionConfig** | `Object` | ✅ | Encryption settings for this field |
+| **encryptionConfig** | `{ enabled: boolean; algorithm: Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>; keyManagement: object; scope: Enum<'field' \| 'record' \| 'table' \| 'database'>; … }` | ✅ | Encryption settings for this field |
 | **indexable** | `boolean` | ✅ | Allow indexing on encrypted field |
 
 

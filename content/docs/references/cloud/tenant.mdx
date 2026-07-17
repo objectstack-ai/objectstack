@@ -90,7 +90,7 @@ const result = PackageInstallation.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **tenant** | `Object` | ✅ | Provisioned tenant database |
+| **tenant** | `{ id: string; organizationId: string; databaseName: string; databaseUrl: string; … }` | ✅ | Provisioned tenant database |
 | **durationMs** | `number` | ✅ | Provisioning duration in milliseconds |
 | **warnings** | `string[]` | optional | Provisioning warnings |
 

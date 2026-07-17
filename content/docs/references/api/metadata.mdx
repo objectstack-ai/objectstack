@@ -66,9 +66,9 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Full App Configuration |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ name: string; label: string; version?: string; description?: string; … }` | ✅ | Full App Configuration |
 
 
 ---
@@ -80,9 +80,9 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object[]` | ✅ | List of available concepts (Objects, Apps, Flows) |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ name: string; label: string; icon?: string; description?: string }[]` | ✅ | List of available concepts (Objects, Apps, Flows) |
 
 
 ---
@@ -94,9 +94,9 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Bulk operation result |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ total: integer; succeeded: integer; failed: integer; errors?: { type: string; name: string; error: string }[] }` | ✅ | Bulk operation result |
 
 
 ---
@@ -107,7 +107,7 @@ const result = AppDefinitionResponse.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **items** | `Object[]` | ✅ | Items to unregister |
+| **items** | `{ type: string; name: string }[]` | ✅ | Items to unregister |
 
 
 ---
@@ -119,9 +119,9 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ type: string; name: string }` | ✅ |  |
 
 
 ---
@@ -133,9 +133,9 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object[]` | ✅ | Items this item depends on |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ sourceType: string; sourceName: string; targetType: string; targetName: string; … }[]` | ✅ | Items this item depends on |
 
 
 ---
@@ -147,9 +147,9 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object[]` | ✅ | Items that depend on this item |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ sourceType: string; sourceName: string; targetType: string; targetName: string; … }[]` | ✅ | Items that depend on this item |
 
 
 ---
@@ -161,8 +161,8 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>` | optional | Effective metadata with all overlays applied |
 
 
@@ -175,9 +175,9 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ exists: boolean }` | ✅ |  |
 
 
 ---
@@ -202,8 +202,8 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `any` | ✅ | Exported metadata bundle |
 
 
@@ -230,9 +230,9 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Import result |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ total: integer; imported: integer; skipped: integer; failed: integer; … }` | ✅ | Import result |
 
 
 ---
@@ -244,9 +244,9 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Metadata item |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ type: string; name: string; definition: Record<string, any> }` | ✅ | Metadata item |
 
 
 ---
@@ -258,8 +258,8 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>[]` | ✅ | Array of metadata definitions |
 
 
@@ -272,8 +272,8 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `string[]` | ✅ | Array of metadata item names |
 
 
@@ -286,9 +286,9 @@ const result = AppDefinitionResponse.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | optional | Overlay definition, undefined if none |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ id: string; baseType: string; baseName: string; packageId?: string; … }` | optional | Overlay definition, undefined if none |
 
 
 ---
@@ -310,7 +310,7 @@ Overlay to save
 | **tenantId** | `string` | optional | Tenant identifier |
 | **owner** | `string` | optional | Owner user ID for user-scope overlays |
 | **patch** | `Record<string, any>` | ✅ | JSON Merge Patch payload (changed fields only) |
-| **changes** | `Object[]` | optional | Field-level change tracking for conflict detection |
+| **changes** | `{ path: string; originalValue?: any; currentValue: any; changedBy?: string; … }[]` | optional | Field-level change tracking for conflict detection |
 | **active** | `boolean` | ✅ | Whether this overlay is active |
 | **createdAt** | `string` | optional |  |
 | **createdBy** | `string` | optional |  |
@@ -350,9 +350,9 @@ Metadata query with filtering, sorting, and pagination
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Paginated query result |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ items: { type: string; name: string; namespace?: string; label?: string; … }[]; total: integer; page: integer; pageSize: integer }` | ✅ | Paginated query result |
 
 
 ---
@@ -378,9 +378,9 @@ Metadata query with filtering, sorting, and pagination
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | optional | Type info |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ type: string; label: string; description?: string; filePatterns: string[]; … }` | optional | Type info |
 
 
 ---
@@ -392,8 +392,8 @@ Metadata query with filtering, sorting, and pagination
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `string[]` | ✅ | Registered metadata type identifiers |
 
 
@@ -418,9 +418,9 @@ Metadata query with filtering, sorting, and pagination
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Validation result |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ valid: boolean; errors?: { path: string; message: string; code?: string }[]; warnings?: { path: string; message: string }[] }` | ✅ | Validation result |
 
 
 ---
@@ -432,9 +432,9 @@ Metadata query with filtering, sorting, and pagination
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Full Object Schema |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }` | ✅ | Full Object Schema |
 
 
 ---

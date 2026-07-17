@@ -73,11 +73,11 @@ const result = AppDiscoveryRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **featured** | `Object[]` | optional |  |
-| **recommended** | `Object[]` | optional |  |
-| **trending** | `Object[]` | optional |  |
-| **newArrivals** | `Object[]` | optional |  |
-| **collections** | `Object[]` | optional |  |
+| **featured** | `{ listingId: string; name: string; tagline?: string; iconUrl?: string; … }[]` | optional |  |
+| **recommended** | `{ listingId: string; name: string; tagline?: string; iconUrl?: string; … }[]` | optional |  |
+| **trending** | `{ listingId: string; name: string; tagline?: string; iconUrl?: string; … }[]` | optional |  |
+| **newArrivals** | `{ listingId: string; name: string; tagline?: string; iconUrl?: string; … }[]` | optional |  |
+| **collections** | `{ id: string; name: string; description?: string; coverImageUrl?: string; … }[]` | optional |  |
 
 
 ---
@@ -147,7 +147,7 @@ const result = AppDiscoveryRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **items** | `Object[]` | ✅ |  |
+| **items** | `{ listingId: string; packageId: string; name: string; iconUrl?: string; … }[]` | ✅ |  |
 | **total** | `integer` | ✅ |  |
 | **page** | `integer` | ✅ |  |
 | **pageSize** | `integer` | ✅ |  |
@@ -176,11 +176,11 @@ const result = AppDiscoveryRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **items** | `Object[]` | ✅ |  |
+| **items** | `{ id: string; listingId: string; userId: string; displayName?: string; … }[]` | ✅ |  |
 | **total** | `integer` | ✅ |  |
 | **page** | `integer` | ✅ |  |
 | **pageSize** | `integer` | ✅ |  |
-| **ratingSummary** | `Object` | optional |  |
+| **ratingSummary** | `{ averageRating: number; totalRatings: integer; distribution: object }` | optional |  |
 
 
 ---
@@ -273,7 +273,7 @@ const result = AppDiscoveryRequest.parse(data);
 | **appVersion** | `string` | optional | App version being reviewed |
 | **moderationStatus** | `Enum<'pending' \| 'approved' \| 'flagged' \| 'rejected'>` | ✅ |  |
 | **helpfulCount** | `integer` | ✅ |  |
-| **publisherResponse** | `Object` | optional | Publisher response to review |
+| **publisherResponse** | `{ body: string; respondedAt: string }` | optional | Publisher response to review |
 | **submittedAt** | `string` | ✅ |  |
 | **updatedAt** | `string` | optional |  |
 

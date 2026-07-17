@@ -34,10 +34,10 @@ const result = Connector.parse(data);
 | **icon** | `string` | optional | Connector icon |
 | **category** | `Enum<'crm' \| 'payment' \| 'communication' \| 'storage' \| 'analytics' \| 'database' \| 'marketing' \| 'accounting' \| 'hr' \| 'productivity' \| 'ecommerce' \| 'support' \| 'devtools' \| 'social' \| 'other'>` | ✅ | Connector category |
 | **baseUrl** | `string` | optional | API base URL |
-| **authentication** | `Object` | ✅ | Authentication config |
-| **operations** | `Object[]` | optional | Connector operations |
-| **triggers** | `Object[]` | optional | Connector triggers |
-| **rateLimit** | `Object` | optional | Rate limiting |
+| **authentication** | `{ type: Enum<'none' \| 'apiKey' \| 'basic' \| 'bearer' \| 'oauth1' \| 'oauth2' \| 'custom'>; fields?: { name: string; label: string; type: Enum<'text' \| 'password' \| 'url' \| 'select'>; description?: string; … }[]; oauth2?: object; test?: object }` | ✅ | Authentication config |
+| **operations** | `{ id: string; name: string; description?: string; type: Enum<'read' \| 'write' \| 'delete' \| 'search' \| 'trigger' \| 'action'>; … }[]` | optional | Connector operations |
+| **triggers** | `{ id: string; name: string; description?: string; type: Enum<'webhook' \| 'polling' \| 'stream'>; … }[]` | optional | Connector triggers |
+| **rateLimit** | `{ requestsPerSecond?: number; requestsPerMinute?: number; requestsPerHour?: number }` | optional | Rate limiting |
 | **author** | `string` | optional | Connector author |
 | **documentation** | `string` | optional | Documentation URL |
 | **homepage** | `string` | optional | Homepage URL |
@@ -75,20 +75,20 @@ const result = Connector.parse(data);
 | **name** | `string` | ✅ | Sync configuration name (snake_case) |
 | **label** | `string` | optional | Sync display name |
 | **description** | `string` | optional | Sync description |
-| **source** | `Object` | ✅ | Data source |
-| **destination** | `Object` | ✅ | Data destination |
+| **source** | `{ object?: string; filters?: any; fields?: string[]; connectorInstanceId?: string; … }` | ✅ | Data source |
+| **destination** | `{ object?: string; connectorInstanceId?: string; operation: Enum<'insert' \| 'update' \| 'upsert' \| 'delete' \| 'sync'>; mapping?: Record<string, string> \| { source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any }[]; … }` | ✅ | Data destination |
 | **direction** | `Enum<'push' \| 'pull' \| 'bidirectional'>` | optional | Sync direction |
 | **syncMode** | `Enum<'full' \| 'incremental' \| 'realtime'>` | optional | Sync mode |
 | **conflictResolution** | `Enum<'source_wins' \| 'destination_wins' \| 'latest_wins' \| 'manual' \| 'merge'>` | optional | Conflict resolution |
-| **schedule** | `string \| Object` | optional | Cron schedule |
+| **schedule** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron schedule |
 | **enabled** | `boolean` | optional | Sync enabled |
 | **changeTrackingField** | `string` | optional | Field for change tracking |
 | **batchSize** | `integer` | optional | Batch size for processing |
-| **retry** | `Object` | optional | Retry configuration |
-| **validation** | `Object` | optional | Validation rules |
-| **errorHandling** | `Object` | optional | Error handling |
-| **optimization** | `Object` | optional | Performance optimization |
-| **audit** | `Object` | optional | Audit configuration |
+| **retry** | `{ maxAttempts?: integer; backoffMs?: integer }` | optional | Retry configuration |
+| **validation** | `{ required?: string[]; unique?: string[]; custom?: { name: string; condition: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; message: string }[] }` | optional | Validation rules |
+| **errorHandling** | `{ onValidationError?: Enum<'skip' \| 'fail' \| 'log'>; onSyncError?: Enum<'skip' \| 'fail' \| 'retry'>; notifyOnError?: string[] }` | optional | Error handling |
+| **optimization** | `{ parallelBatches?: boolean; cacheEnabled?: boolean; compressionEnabled?: boolean }` | optional | Performance optimization |
+| **audit** | `{ logLevel?: Enum<'none' \| 'error' \| 'warn' \| 'info' \| 'debug'>; retainLogsForDays?: integer; trackChanges?: boolean }` | optional | Audit configuration |
 | **tags** | `string[]` | optional | Sync tags |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |
 

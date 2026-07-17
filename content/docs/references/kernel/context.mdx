@@ -39,7 +39,7 @@ const result = KernelContext.parse(data);
 | **workspaceRoot** | `string` | optional | Workspace root if different from cwd |
 | **startTime** | `integer` | ✅ | Boot timestamp (ms) |
 | **features** | `Record<string, boolean>` | ✅ | Global feature toggles |
-| **previewMode** | `Object` | optional | Preview/demo mode configuration (used when mode is "preview") |
+| **previewMode** | `{ autoLogin: boolean; simulatedRole: Enum<'admin' \| 'user' \| 'viewer'>; simulatedUserName: string; readOnly: boolean; … }` | optional | Preview/demo mode configuration (used when mode is "preview") |
 
 
 ---
@@ -91,12 +91,12 @@ Tenant-aware kernel runtime context
 | **workspaceRoot** | `string` | optional | Workspace root if different from cwd |
 | **startTime** | `integer` | ✅ | Boot timestamp (ms) |
 | **features** | `Record<string, boolean>` | ✅ | Global feature toggles |
-| **previewMode** | `Object` | optional | Preview/demo mode configuration (used when mode is "preview") |
+| **previewMode** | `{ autoLogin: boolean; simulatedRole: Enum<'admin' \| 'user' \| 'viewer'>; simulatedUserName: string; readOnly: boolean; … }` | optional | Preview/demo mode configuration (used when mode is "preview") |
 | **tenantId** | `string` | ✅ | Resolved tenant identifier |
 | **tenantPlan** | `Enum<'free' \| 'pro' \| 'enterprise'>` | ✅ | Tenant subscription plan |
 | **tenantRegion** | `string` | optional | Tenant deployment region |
 | **tenantDbUrl** | `string` | ✅ | Tenant database connection URL |
-| **tenantQuotas** | `Object` | optional | Tenant resource quotas |
+| **tenantQuotas** | `{ maxUsers?: integer; maxStorage?: integer; apiRateLimit?: integer; maxObjects?: integer; … }` | optional | Tenant resource quotas |
 
 
 ---

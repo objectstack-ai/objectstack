@@ -71,8 +71,8 @@ const result = AccessMatrix.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **version** | `number` | ✅ |  |
-| **entries** | `Object[]` | ✅ |  |
+| **version** | `'1'` | ✅ |  |
+| **entries** | `{ permissionSet: string; object: string; create: boolean; read: boolean; … }[]` | ✅ |  |
 
 
 ---
@@ -121,10 +121,10 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **allowed** | `boolean` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge'>` | ✅ |  |
-| **principal** | `Object` | ✅ |  |
-| **layers** | `Object[]` | ✅ |  |
+| **principal** | `{ userId: string \| null; positions: string[]; permissionSets: string[]; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>; … }` | ✅ |  |
+| **layers** | `{ layer: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| 'fls' \| 'owd_baseline' \| 'depth' \| 'sharing' \| 'vama_bypass' \| 'rls'>; kernelTier?: Enum<'layer_0_tenant' \| 'layer_1_business'>; verdict: Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>; detail: string; … }[]` | ✅ |  |
 | **readFilter** | `any` | optional |  |
-| **record** | `Object` | optional | Row-level verdict for the specific record; set only for record-grained requests. |
+| **record** | `{ recordId: string; visible: boolean; decidedBy?: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| 'fls' \| 'owd_baseline' \| 'depth' \| 'sharing' \| 'vama_bypass' \| 'rls'> }` | optional | Row-level verdict for the specific record; set only for record-grained requests. |
 
 
 ---
@@ -139,8 +139,8 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **kernelTier** | `Enum<'layer_0_tenant' \| 'layer_1_business'>` | optional | ADR-0095 kernel layer: layer_0_tenant = the always-first org wall; layer_1_business = business RLS/sharing/ownership. |
 | **verdict** | `Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>` | ✅ |  |
 | **detail** | `string` | ✅ |  |
-| **contributors** | `Object[]` | ✅ |  |
-| **record** | `Object` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
+| **contributors** | `{ kind: Enum<'permission_set' \| 'position' \| 'system'>; name: string; via?: string; state?: Enum<'active' \| 'expired'> }[]` | ✅ |  |
+| **record** | `{ outcome: Enum<'admitted' \| 'excluded' \| 'not_evaluated'>; rowFilter?: any; matchesRecord?: boolean; rules: { kind: Enum<'tenant_filter' \| 'owd_baseline' \| 'ownership' \| 'record_share' \| 'sharing_rule' \| 'team' \| 'territory' \| 'rls_policy'>; name: string; grants?: Enum<'read' \| 'edit' \| 'full'>; via?: string; … }[]; … }` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
 
 
 ---
@@ -185,7 +185,7 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **outcome** | `Enum<'admitted' \| 'excluded' \| 'not_evaluated'>` | ✅ | This layer's row-level outcome for the record: admitted, excluded, or not_evaluated (skipped/not row-scoped). |
 | **rowFilter** | `any` | optional | The effective row predicate this layer contributed for the record set (null = unrestricted, __deny_all__ = zero rows). |
 | **matchesRecord** | `boolean` | optional | Whether the specific record satisfies rowFilter — the judgement behind outcome. |
-| **rules** | `Object[]` | ✅ | Concrete rules, shares, or policies this layer evaluated against the record, in evaluation order. |
+| **rules** | `{ kind: Enum<'tenant_filter' \| 'owd_baseline' \| 'ownership' \| 'record_share' \| 'sharing_rule' \| 'team' \| 'territory' \| 'rls_policy'>; name: string; grants?: Enum<'read' \| 'edit' \| 'full'>; via?: string; … }[]` | ✅ | Concrete rules, shares, or policies this layer evaluated against the record, in evaluation order. |
 | **detail** | `string` | optional | Human-readable, record-specific explanation of this layer's outcome. |
 
 

@@ -44,9 +44,9 @@ OpenTelemetry compatibility configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **sdkVersion** | `string` | optional | OTel SDK version |
-| **exporter** | `Object` | ✅ | Exporter configuration |
-| **resource** | `Object` | ✅ | Resource attributes |
-| **instrumentation** | `Object` | optional |  |
+| **exporter** | `{ type: Enum<'otlp_http' \| 'otlp_grpc' \| 'jaeger' \| 'zipkin' \| 'console' \| 'datadog' \| 'honeycomb' \| 'lightstep' \| 'newrelic' \| 'custom'>; endpoint?: string; protocol?: string; headers?: Record<string, string>; … }` | ✅ | Exporter configuration |
+| **resource** | `{ serviceName: string; serviceVersion?: string; serviceInstanceId?: string; serviceNamespace?: string; … }` | ✅ | Resource attributes |
+| **instrumentation** | `{ autoInstrumentation: boolean; libraries?: string[]; disabledLibraries?: string[] }` | optional |  |
 | **semanticConventionsVersion** | `string` | optional | Semantic conventions version |
 
 
@@ -111,18 +111,18 @@ OpenTelemetry span
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | ✅ | Trace context |
+| **context** | `{ traceId: string; spanId: string; traceFlags: integer; traceState?: object; … }` | ✅ | Trace context |
 | **name** | `string` | ✅ | Span name |
 | **kind** | `Enum<'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'>` | ✅ | Span kind |
 | **startTime** | `string` | ✅ | Span start time |
 | **endTime** | `string` | optional | Span end time |
 | **duration** | `number` | optional | Duration in milliseconds |
-| **status** | `Object` | optional |  |
+| **status** | `{ code: Enum<'unset' \| 'ok' \| 'error'>; message?: string }` | optional |  |
 | **attributes** | `Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]>` | ✅ | Span attributes |
-| **events** | `Object[]` | ✅ |  |
-| **links** | `Object[]` | ✅ |  |
+| **events** | `{ name: string; timestamp: string; attributes?: Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]> }[]` | ✅ |  |
+| **links** | `{ context: object; attributes?: Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]> }[]` | ✅ |  |
 | **resource** | `Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]>` | optional | Resource attributes |
-| **instrumentationLibrary** | `Object` | optional |  |
+| **instrumentationLibrary** | `{ name: string; version?: string }` | optional |  |
 
 
 ---
@@ -215,7 +215,7 @@ Span link
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `Object` | ✅ | Linked trace context |
+| **context** | `{ traceId: string; spanId: string; traceFlags: integer; traceState?: object; … }` | ✅ | Linked trace context |
 | **attributes** | `Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]>` | optional | Link attributes |
 
 
@@ -245,7 +245,7 @@ Trace context (W3C Trace Context)
 | **traceId** | `string` | ✅ | Trace ID (32 hex chars) |
 | **spanId** | `string` | ✅ | Span ID (16 hex chars) |
 | **traceFlags** | `integer` | ✅ | Trace flags bitmap |
-| **traceState** | `Object` | optional | Trace state |
+| **traceState** | `{ entries: Record<string, string> }` | optional | Trace state |
 | **parentSpanId** | `string` | optional | Parent span ID (16 hex chars) |
 | **sampled** | `boolean` | ✅ |  |
 | **remote** | `boolean` | ✅ |  |
@@ -264,8 +264,8 @@ Trace context propagation
 | **formats** | `Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]` | ✅ |  |
 | **extract** | `boolean` | ✅ |  |
 | **inject** | `boolean` | ✅ |  |
-| **headers** | `Object` | optional |  |
-| **baggage** | `Object` | optional |  |
+| **headers** | `{ traceId?: string; spanId?: string; traceFlags?: string; traceState?: string }` | optional |  |
+| **baggage** | `{ enabled: boolean; maxSize: integer; allowedKeys?: string[] }` | optional |  |
 
 
 ---
@@ -301,9 +301,9 @@ Trace sampling configuration
 | **type** | `Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| 'probability' \| 'composite' \| 'custom'>` | ✅ | Sampling strategy |
 | **ratio** | `number` | optional | Sample ratio (0-1) |
 | **rateLimit** | `number` | optional | Traces per second |
-| **parentBased** | `Object` | optional |  |
-| **composite** | `Object[]` | optional |  |
-| **rules** | `Object[]` | optional |  |
+| **parentBased** | `{ whenParentSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| 'probability' \| 'composite' \| 'custom'>; whenParentNotSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| 'probability' \| 'composite' \| 'custom'>; root?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| 'probability' \| 'composite' \| 'custom'>; rootRatio?: number }` | optional |  |
+| **composite** | `{ strategy: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| 'probability' \| 'composite' \| 'custom'>; ratio?: number; condition?: Record<string, any> \| string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }[]` | optional |  |
+| **rules** | `{ name: string; match?: object; decision: Enum<'drop' \| 'record_only' \| 'record_and_sample'>; rate?: number }[]` | optional |  |
 | **customSamplerId** | `string` | optional | Custom sampler identifier |
 
 
@@ -333,13 +333,13 @@ Tracing configuration
 | **name** | `string` | ✅ | Configuration name (snake_case, max 64 chars) |
 | **label** | `string` | ✅ | Display label |
 | **enabled** | `boolean` | optional |  |
-| **sampling** | `Object` | optional | Trace sampling configuration |
-| **propagation** | `Object` | optional | Trace context propagation |
-| **openTelemetry** | `Object` | optional | OpenTelemetry compatibility configuration |
-| **spanLimits** | `Object` | optional |  |
+| **sampling** | `{ type: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| 'probability' \| 'composite' \| 'custom'>; ratio?: number; rateLimit?: number; parentBased?: object; … }` | optional | Trace sampling configuration |
+| **propagation** | `{ formats?: Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]; extract?: boolean; inject?: boolean; headers?: object; … }` | optional | Trace context propagation |
+| **openTelemetry** | `{ sdkVersion?: string; exporter: object; resource: object; instrumentation?: object; … }` | optional | OpenTelemetry compatibility configuration |
+| **spanLimits** | `{ maxAttributes?: integer; maxEvents?: integer; maxLinks?: integer; maxAttributeValueLength?: integer }` | optional |  |
 | **traceIdGenerator** | `Enum<'random' \| 'uuid' \| 'custom'>` | optional |  |
 | **customTraceIdGeneratorId** | `string` | optional | Custom generator identifier |
-| **performance** | `Object` | optional |  |
+| **performance** | `{ asyncExport?: boolean; exportInterval?: integer }` | optional |  |
 
 
 ---

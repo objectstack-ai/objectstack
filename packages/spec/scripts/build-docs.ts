@@ -185,44 +185,131 @@ function scanCategories() {
 
 scanCategories();
 
+/**
+ * Context a page needs to turn a `$ref` into a link that actually resolves.
+ *
+ * Pages are named after the *zod file* (`data/object.mdx`) while refs name a
+ * *schema* (`Field`), so a ref can only be linked by looking the schema name up
+ * in the maps built by scanCategories(). Anonymous refs (`__schemaN`, emitted
+ * when Zod hoists a reused inline schema into `$defs`) have no page at all and
+ * are rendered structurally instead.
+ */
+interface TypeContext {
+  /** `$defs` of the document being rendered — for resolving local refs. */
+  defs: Record<string, any>;
+  /** The schema whose section is being rendered — target of a self `$ref` (`"#"`). */
+  currentSchema: string;
+  /**
+   * Anonymous refs already being expanded on this branch. Schemas are cyclic
+   * (a node contains nodes), so inlining without this recurses forever.
+   */
+  expanding?: Set<string>;
+}
+
+const refName = (ref: string): string => ref.split('/').pop() || ref;
+const isAnonymousRef = (name: string) => /^__schema\d+$/.test(name);
+
+/** A page-local anchor, matching how fumadocs slugs the `## SchemaName` heading. */
+const anchorFor = (schemaName: string) => `#${schemaName.toLowerCase()}`;
+
+/**
+ * Resolve a schema name to its page. Returns null when the schema isn't one we
+ * generate a page for — callers then render the type without a link rather than
+ * emitting a 404.
+ */
+function schemaHref(name: string): string | null {
+  const category = schemaCategoryMap.get(name);
+  const zodFile = schemaZodFileMap.get(name);
+  if (!category || !zodFile) return null;
+  return `/docs/references/${category}/${zodFile}${anchorFor(name)}`;
+}
+
 // Helpers to format types
-function formatType(prop: any): string {
+function formatType(prop: any, ctx?: TypeContext): string {
   if (!prop) return 'any';
-  
+
   if (prop.$ref) {
-    const ref = prop.$ref.split('/').pop();
-    return `[${ref}](./${ref})`;
+    // Self-reference: link to the current section rather than a bare `#`.
+    if (prop.$ref === '#') {
+      return ctx ? `[${ctx.currentSchema}](${anchorFor(ctx.currentSchema)})` : 'object';
+    }
+
+    const name = refName(prop.$ref);
+
+    // Zod-hoisted inline schema: no page exists. Render its shape instead.
+    if (isAnonymousRef(name)) {
+      const target = ctx?.defs?.[name];
+      if (!target) return 'object';
+      // Cycle guard: these schemas are recursive (a node contains nodes).
+      if (ctx!.expanding?.has(name)) return 'object';
+      const expanding = new Set(ctx!.expanding ?? []);
+      expanding.add(name);
+      return formatType({ ...target, $ref: undefined }, { ...ctx!, expanding });
+    }
+
+    const href = schemaHref(name);
+    return href ? `[${name}](${href})` : name;
   }
-  
+
   if (prop.type === 'array') {
-    return `${formatType(prop.items)}[]`;
+    return `${formatType(prop.items, ctx)}[]`;
   }
-  
+
   if (prop.enum) {
     return `Enum<${prop.enum.map((e: any) => `'${e}'`).join(' | ')}>`;
   }
-  
+
+  if (prop.const !== undefined) {
+    return `'${prop.const}'`;
+  }
+
   if (prop.anyOf || prop.oneOf) {
     const variants = prop.anyOf || prop.oneOf;
-    return variants.map(formatType).join(' | ');
+    return variants.map((v: any) => formatType(v, ctx)).join(' | ');
   }
 
   if (prop.type === 'object' && prop.additionalProperties) {
-    return `Record<string, ${formatType(prop.additionalProperties)}>`;
+    return `Record<string, ${formatType(prop.additionalProperties, ctx)}>`;
   }
 
   if (prop.type === 'object' && !prop.properties && !prop.additionalProperties) {
     return 'object';
   }
 
-  // Handle inline objects slightly better by just calling them 'Object'
-  if (prop.type === 'object') return 'Object';
+  // Inline object: show its shape one level deep instead of an opaque `Object`.
+  if (prop.type === 'object' && prop.properties) {
+    const keys = Object.keys(prop.properties);
+    const shown = keys.slice(0, 4).map(k => {
+      const child = prop.properties[k];
+      const optional = (prop.required || []).includes(k) ? '' : '?';
+      // Depth-limited: nested objects stay opaque so a table cell can't explode.
+      const childType = child?.type === 'object' && child.properties
+        ? 'object'
+        : formatType(child, ctx);
+      return `${k}${optional}: ${childType}`;
+    });
+    if (keys.length > shown.length) shown.push('…');
+    return `{ ${shown.join('; ')} }`;
+  }
 
   if (Array.isArray(prop.type)) {
     return prop.type.join(' | ');
   }
 
   return prop.type || 'any';
+}
+
+/**
+ * Rewrite a source path referenced from JSDoc (`../automation/sync.zod.ts`) to
+ * the docs route that renders it. Without this the generated page links to a
+ * path that only exists in the repo, i.e. a 404 on the site.
+ */
+function sourcePathToDocsRoute(target: string): string | null {
+  const m = target.match(/(?:^|\/)([\w-]+)\/([\w.-]+)\.zod\.ts$/);
+  if (!m) return null;
+  const [, category, zodFile] = m;
+  if (!CATEGORIES[category]) return null;
+  return `/docs/references/${category}/${zodFile}`;
 }
 
 // Extract file-level JSDoc description from source
@@ -233,9 +320,20 @@ function getFileDescription(content: string): string {
       .split('\n')
       .map(line => line.replace(/^\s*\*\s?/, '').trim())
       .filter(line => line)
+      // A bare `@see <path>` tag renders as noise — turn it into prose.
+      .map(line => line.replace(/^@see\s+/, 'See also: '))
       .join('\n\n')
-      .replace(/\{@link\s+([^|]+?)\s*\|\s*([^}]+?)\s*\}/g, '[$2]($1)') // {@link url | text} -> [text](url)
-      .replace(/\{@link\s+([^}]+?)\s*\}/g, '[$1]($1)') // {@link url} -> [url](url)
+      .replace(/\{@link\s+([^|]+?)\s*\|\s*([^}]+?)\s*\}/g, (_m, target: string, text: string) =>
+        `[${text.trim()}](${sourcePathToDocsRoute(target.trim()) ?? target.trim()})`)
+      .replace(/\{@link\s+([^}]+?)\s*\}/g, (_m, target: string) => {
+        const route = sourcePathToDocsRoute(target.trim());
+        return route ? `[${target.trim()}](${route})` : `\`${target.trim()}\``;
+      })
+      // Same for a bare source path left in prose by `See also:` above.
+      .replace(/(?<!\()\b((?:\.\.\/)?[\w-]+\/[\w.-]+\.zod\.ts)\b(?!\))/g, (m0, p: string) => {
+        const route = sourcePathToDocsRoute(p);
+        return route ? `[${p}](${route})` : `\`${p}\``;
+      })
       .replace(/file:\/\//g, '') // Remove file:// protocol
       .replace(/\{/g, '\\{').replace(/\}/g, '\\}') // Escape { } for MDX
   }
@@ -311,12 +409,19 @@ function generateMarkdown(schemaName: string, schema: any, category: string, zod
     md += `${escapeMdxDescription(mainDef.description)}\n\n`;
   }
 
+  const typeCtx: TypeContext = { defs, currentSchema: schemaName };
+
   const renderProperties = (props: any, required: Set<string> = new Set()) => {
       let t = `### Properties\n\n`;
       t += `| Property | Type | Required | Description |\n`;
       t += `| :--- | :--- | :--- | :--- |\n`;
       for (const [key, prop] of Object.entries(props) as [string, any][]) {
-          const typeStr = formatType(prop).replace(/\|/g, '\\|');
+          // Backslashes first, then pipes — same order as `desc` below, and for
+          // the same reason: escaping pipes first lets a literal backslash in
+          // the input pair with the escape and free the pipe again.
+          const typeStr = formatType(prop, typeCtx)
+            .replace(/\\/g, '\\\\')
+            .replace(/\|/g, '\\|');
           const isReq = required.has(key) ? '✅' : 'optional';
           // Escape for the GFM table cell last: backslashes first (so an existing
           // `\|` in a description can't decay into an escaped backslash + live
@@ -354,10 +459,9 @@ function generateMarkdown(schemaName: string, schema: any, category: string, zod
          } else if (variant.enum) {
               md += `Allowed Values: ${variant.enum.map((e:string) => `\`${e}\``).join(', ')}\n\n`;
          } else if (variant.$ref) {
-              const refName = variant.$ref.split('/').pop();
-              md += `Reference: [${refName}](./${refName})\n\n`;
+              md += `Reference: ${formatType(variant, typeCtx)}\n\n`;
          } else {
-             md += `Type: \`${formatType(variant)}\`\n\n`;
+             md += `Type: \`${formatType(variant, typeCtx)}\`\n\n`;
          }
          md += `---\n\n`; 
      });

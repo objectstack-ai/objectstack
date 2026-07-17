@@ -173,10 +173,10 @@ const result = ErrorHandlingConfig.parse(data);
 | **includeInternal** | `boolean` | ✅ | Include internal endpoints in documentation |
 | **generateSchemas** | `boolean` | ✅ | Auto-generate schemas from Zod definitions |
 | **includeExamples** | `boolean` | ✅ | Include request/response examples |
-| **servers** | `Object[]` | optional | Server URLs for API |
-| **contact** | `Object` | optional | API contact information |
-| **license** | `Object` | optional | API license information |
-| **securitySchemes** | `Record<string, Object>` | optional | Security scheme definitions |
+| **servers** | `{ url: string; description?: string }[]` | optional | Server URLs for API |
+| **contact** | `{ name?: string; url?: string; email?: string }` | optional | API contact information |
+| **license** | `{ name: string; url?: string }` | optional | API license information |
+| **securitySchemes** | `Record<string, { type: Enum<'apiKey' \| 'http' \| 'oauth2' \| 'openIdConnect'>; scheme?: string; bearerFormat?: string }>` | optional | Security scheme definitions |
 
 
 ---
@@ -253,14 +253,14 @@ const result = ErrorHandlingConfig.parse(data);
 | **enabled** | `boolean` | ✅ | Enable REST API plugin |
 | **basePath** | `string` | ✅ | Base path for all API routes |
 | **version** | `string` | ✅ | API version identifier |
-| **routes** | `Object[]` | ✅ | Route registrations |
-| **validation** | `Object` | optional | Request validation configuration |
-| **responseEnvelope** | `Object` | optional | Response envelope configuration |
-| **errorHandling** | `Object` | optional | Error handling configuration |
-| **openApi** | `Object` | optional | OpenAPI documentation configuration |
-| **globalMiddleware** | `Object[]` | optional | Global middleware stack |
-| **cors** | `Object` | optional | CORS configuration |
-| **performance** | `Object` | optional | Performance optimization settings |
+| **routes** | `{ prefix: string; service: string; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| 'automation' \| 'workflow' \| 'ui' \| 'realtime' \| 'notification' \| 'ai' \| 'i18n'>; methods?: string[]; … }[]` | ✅ | Route registrations |
+| **validation** | `{ enabled: boolean; mode: Enum<'strict' \| 'permissive' \| 'strip'>; validateBody: boolean; validateQuery: boolean; … }` | optional | Request validation configuration |
+| **responseEnvelope** | `{ enabled: boolean; includeMetadata: boolean; includeTimestamp: boolean; includeRequestId: boolean; … }` | optional | Response envelope configuration |
+| **errorHandling** | `{ enabled: boolean; includeStackTrace: boolean; logErrors: boolean; exposeInternalErrors: boolean; … }` | optional | Error handling configuration |
+| **openApi** | `{ enabled: boolean; version: Enum<'3.0.0' \| '3.0.1' \| '3.0.2' \| '3.0.3' \| '3.1.0'>; title: string; description?: string; … }` | optional | OpenAPI documentation configuration |
+| **globalMiddleware** | `{ name: string; type: Enum<'authentication' \| 'authorization' \| 'logging' \| 'validation' \| 'transformation' \| 'error' \| 'custom'>; enabled: boolean; order: integer; … }[]` | optional | Global middleware stack |
+| **cors** | `{ enabled: boolean; origins?: string[]; methods?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]; credentials: boolean }` | optional | CORS configuration |
+| **performance** | `{ enableCompression: boolean; enableETag: boolean; enableCaching: boolean; defaultCacheTtl: integer }` | optional | Performance optimization settings |
 
 
 ---
@@ -296,10 +296,10 @@ const result = ErrorHandlingConfig.parse(data);
 | **service** | `string` | ✅ | Core service name (metadata, data, auth, etc.) |
 | **category** | `Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| 'automation' \| 'workflow' \| 'ui' \| 'realtime' \| 'notification' \| 'ai' \| 'i18n'>` | ✅ | Primary category for this route group |
 | **methods** | `string[]` | optional | Protocol method names implemented |
-| **endpoints** | `Object[]` | optional | Endpoint definitions |
-| **middleware** | `Object[]` | optional | Middleware stack for this route group |
+| **endpoints** | `{ method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; handler: string; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| 'automation' \| 'workflow' \| 'ui' \| 'realtime' \| 'notification' \| 'ai' \| 'i18n'>; … }[]` | optional | Endpoint definitions |
+| **middleware** | `{ name: string; type: Enum<'authentication' \| 'authorization' \| 'logging' \| 'validation' \| 'transformation' \| 'error' \| 'custom'>; enabled: boolean; order: integer; … }[]` | optional | Middleware stack for this route group |
 | **authRequired** | `boolean` | ✅ | Whether authentication is required by default |
-| **documentation** | `Object` | optional | Documentation metadata for this route group |
+| **documentation** | `{ title?: string; description?: string; tags?: string[] }` | optional | Documentation metadata for this route group |
 
 
 ---
@@ -328,8 +328,8 @@ const result = ErrorHandlingConfig.parse(data);
 | :--- | :--- | :--- | :--- |
 | **timestamp** | `string` | ✅ | ISO 8601 timestamp |
 | **adapter** | `string` | ✅ | Adapter name (e.g. "hono", "express", "nextjs") |
-| **summary** | `Object` | ✅ |  |
-| **entries** | `Object[]` | ✅ | Per-endpoint coverage entries |
+| **summary** | `{ total: integer; implemented: integer; stub: integer; planned: integer }` | ✅ |  |
+| **entries** | `{ path: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| 'automation' \| 'workflow' \| 'ui' \| 'realtime' \| 'notification' \| 'ai' \| 'i18n'>; handlerStatus: Enum<'implemented' \| 'stub' \| 'planned'>; … }[]` | ✅ | Per-endpoint coverage entries |
 
 
 ---

@@ -79,7 +79,7 @@ Compatibility level between versions
 | **from** | `string` | ✅ | Version being upgraded from |
 | **to** | `string` | ✅ | Version being upgraded to |
 | **compatibility** | `Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| 'breaking-changes' \| 'incompatible'>` | ✅ | Compatibility level between versions |
-| **breakingChanges** | `Object[]` | optional |  |
+| **breakingChanges** | `{ introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| 'dependency-changed' \| 'configuration-changed' \| 'protocol-changed'>; description: string; migrationGuide?: string; … }[]` | optional |  |
 | **migrationRequired** | `boolean` | ✅ |  |
 | **migrationComplexity** | `Enum<'trivial' \| 'simple' \| 'moderate' \| 'complex' \| 'major'>` | optional |  |
 | **estimatedMigrationTime** | `number` | optional |  |
@@ -96,9 +96,9 @@ Compatibility level between versions
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'version-mismatch' \| 'missing-dependency' \| 'circular-dependency' \| 'incompatible-versions' \| 'conflicting-interfaces'>` | ✅ |  |
-| **plugins** | `Object[]` | ✅ |  |
+| **plugins** | `{ pluginId: string; version: string; requirement?: string }[]` | ✅ |  |
 | **description** | `string` | ✅ |  |
-| **resolutions** | `Object[]` | optional |  |
+| **resolutions** | `{ strategy: Enum<'upgrade' \| 'downgrade' \| 'replace' \| 'disable' \| 'manual'>; description: string; automaticResolution: boolean; riskLevel: Enum<'low' \| 'medium' \| 'high'> }[]` | optional |  |
 | **severity** | `Enum<'critical' \| 'error' \| 'warning' \| 'info'>` | ✅ |  |
 
 
@@ -129,8 +129,8 @@ Compatibility level between versions
 | **enabled** | `boolean` | optional |  |
 | **maxConcurrentVersions** | `integer` | optional | How many versions can run at the same time |
 | **selectionStrategy** | `Enum<'latest' \| 'stable' \| 'compatible' \| 'pinned' \| 'canary' \| 'custom'>` | optional |  |
-| **routing** | `Object[]` | optional |  |
-| **rollout** | `Object` | optional |  |
+| **routing** | `{ condition: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; version: string; priority?: integer }[]` | optional |  |
+| **rollout** | `{ enabled?: boolean; strategy: Enum<'percentage' \| 'blue-green' \| 'canary'>; percentage?: number; duration?: integer }` | optional |  |
 
 
 ---
@@ -143,8 +143,8 @@ Compatibility level between versions
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ |  |
 | **currentVersion** | `string` | ✅ |  |
-| **compatibilityMatrix** | `Object[]` | ✅ |  |
-| **supportedVersions** | `Object[]` | ✅ |  |
+| **compatibilityMatrix** | `{ from: string; to: string; compatibility: Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| 'breaking-changes' \| 'incompatible'>; breakingChanges?: { introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| 'dependency-changed' \| 'configuration-changed' \| 'protocol-changed'>; description: string; migrationGuide?: string; … }[]; … }[]` | ✅ |  |
+| **supportedVersions** | `{ version: string; supported: boolean; endOfLife?: string; securitySupport: boolean }[]` | ✅ |  |
 | **minimumCompatibleVersion** | `string` | optional | Oldest version that can be directly upgraded |
 
 
@@ -157,8 +157,8 @@ Compatibility level between versions
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ |  |
-| **resolved** | `Object[]` | optional |  |
-| **conflicts** | `Object[]` | optional |  |
+| **resolved** | `{ pluginId: string; version: string; resolvedVersion: string }[]` | optional |  |
+| **conflicts** | `{ type: Enum<'version-mismatch' \| 'missing-dependency' \| 'circular-dependency' \| 'incompatible-versions' \| 'conflicting-interfaces'>; plugins: { pluginId: string; version: string; requirement?: string }[]; description: string; resolutions?: { strategy: Enum<'upgrade' \| 'downgrade' \| 'replace' \| 'disable' \| 'manual'>; description: string; automaticResolution: boolean; riskLevel: Enum<'low' \| 'medium' \| 'high'> }[]; … }[]` | optional |  |
 | **warnings** | `string[]` | optional |  |
 | **installationOrder** | `string[]` | optional | Plugin IDs in order they should be installed |
 | **dependencyGraph** | `Record<string, string[]>` | optional | Map of plugin ID to its dependencies |
@@ -173,16 +173,16 @@ Compatibility level between versions
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ |  |
-| **version** | `Object` | ✅ | Semantic version number |
+| **version** | `{ major: integer; minor: integer; patch: integer; preRelease?: string; … }` | ✅ | Semantic version number |
 | **versionString** | `string` | ✅ | Full version string (e.g., 1.2.3-beta.1+build.123) |
 | **releaseDate** | `string` | ✅ |  |
 | **releaseNotes** | `string` | optional |  |
-| **breakingChanges** | `Object[]` | optional |  |
-| **deprecations** | `Object[]` | optional |  |
-| **compatibilityMatrix** | `Object[]` | optional |  |
-| **securityFixes** | `Object[]` | optional |  |
-| **statistics** | `Object` | optional |  |
-| **support** | `Object` | ✅ |  |
+| **breakingChanges** | `{ introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| 'dependency-changed' \| 'configuration-changed' \| 'protocol-changed'>; description: string; migrationGuide?: string; … }[]` | optional |  |
+| **deprecations** | `{ feature: string; deprecatedIn: string; removeIn?: string; reason: string; … }[]` | optional |  |
+| **compatibilityMatrix** | `{ from: string; to: string; compatibility: Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| 'breaking-changes' \| 'incompatible'>; breakingChanges?: { introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| 'dependency-changed' \| 'configuration-changed' \| 'protocol-changed'>; description: string; migrationGuide?: string; … }[]; … }[]` | optional |  |
+| **securityFixes** | `{ cve?: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; description: string; fixedIn: string }[]` | optional |  |
+| **statistics** | `{ downloads?: integer; installations?: integer; ratings?: number }` | optional |  |
+| **support** | `{ status: Enum<'active' \| 'maintenance' \| 'deprecated' \| 'eol'>; endOfLife?: string; securitySupport: boolean }` | ✅ |  |
 
 
 ---
@@ -278,7 +278,7 @@ Type: `string`
 
 Any version
 
-Type: `string`
+Type: `'*'`
 
 ---
 
@@ -286,7 +286,7 @@ Type: `string`
 
 Latest stable version
 
-Type: `string`
+Type: `'latest'`
 
 ---
 

@@ -35,17 +35,17 @@ const result = Datasource.parse(data);
 | **label** | `string` | optional | Display label |
 | **driver** | `string` | ✅ | Underlying driver type |
 | **config** | `Record<string, any>` | ✅ | Driver specific configuration |
-| **pool** | `Object` | optional | Connection pool settings |
+| **pool** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool settings |
 | **readReplicas** | `Record<string, any>[]` | optional | Read-only replica configurations |
-| **capabilities** | `Object` | optional | Capability overrides |
-| **healthCheck** | `Object` | optional | Datasource health check configuration |
-| **ssl** | `Object` | optional | SSL/TLS configuration for secure database connections |
-| **retryPolicy** | `Object` | optional | Connection retry policy for transient failures |
+| **capabilities** | `{ transactions: boolean; queryFilters: boolean; queryAggregations: boolean; querySorting: boolean; … }` | optional | Capability overrides |
+| **healthCheck** | `{ enabled: boolean; intervalMs: number; timeoutMs: number }` | optional | Datasource health check configuration |
+| **ssl** | `{ enabled: boolean; rejectUnauthorized: boolean; ca?: string; cert?: string; … }` | optional | SSL/TLS configuration for secure database connections |
+| **retryPolicy** | `{ maxRetries: number; baseDelayMs: number; maxDelayMs: number; backoffMultiplier: number }` | optional | Connection retry policy for transient failures |
 | **description** | `string` | optional | Internal description |
 | **active** | `boolean` | ✅ | Is datasource enabled |
 | **autoConnect** | `boolean` | ✅ | Force a live driver connection at boot even when managed + unrouted (ADR-0062 D2). |
 | **schemaMode** | `Enum<'managed' \| 'external' \| 'validate-only'>` | ✅ | Schema ownership mode |
-| **external** | `Object` | optional | External datasource federation settings (schemaMode != "managed") |
+| **external** | `{ label?: string; allowedSchemas?: string[]; allowWrites: boolean; validation: object; … }` | optional | External datasource federation settings (schemaMode != "managed") |
 | **origin** | `Enum<'code' \| 'runtime'>` | ✅ | Datasource provenance (server-managed, read-only) |
 
 
@@ -83,7 +83,7 @@ const result = Datasource.parse(data);
 | **description** | `string` | optional |  |
 | **icon** | `string` | optional |  |
 | **configSchema** | `Record<string, any>` | ✅ | JSON Schema for connection configuration |
-| **capabilities** | `Object` | optional |  |
+| **capabilities** | `{ transactions: boolean; queryFilters: boolean; queryAggregations: boolean; querySorting: boolean; … }` | optional |  |
 
 
 ---
@@ -102,7 +102,7 @@ External datasource federation settings (schemaMode != "managed")
 | **label** | `string` | optional | Display label, e.g. "Snowflake — ANALYTICS / PROD" |
 | **allowedSchemas** | `string[]` | optional | Whitelist of remote schemas/databases that may be exposed. |
 | **allowWrites** | `boolean` | ✅ | Global write gate. Individual objects must also opt in via object.external.writable. |
-| **validation** | `Object` | ✅ | Boot/drift validation policy |
+| **validation** | `{ onMismatch: Enum<'fail' \| 'warn' \| 'ignore'>; checkOnBoot: boolean; checkIntervalMs?: number }` | ✅ | Boot/drift validation policy |
 | **credentialsRef** | `string` | optional | Reference into the secrets store; never inline credentials. |
 | **queryTimeoutMs** | `number` | ✅ | Hard cap on per-query execution time. |
 | **requirePermission** | `string` | optional | Optional convenience: gate the entire datasource behind a single role. |

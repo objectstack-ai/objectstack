@@ -57,11 +57,11 @@ cohesive plugin that "takes over" the entire platform's metadata management:
 
 ## References
 
-- kernel/metadata-loader.zod.ts — Storage backend protocol
+- [kernel/metadata-loader.zod.ts](/docs/references/kernel/metadata-loader) — Storage backend protocol
 
-- kernel/metadata-customization.zod.ts — Overlay/merge protocol
+- [kernel/metadata-customization.zod.ts](/docs/references/kernel/metadata-customization) — Overlay/merge protocol
 
-- system/metadata-persistence.zod.ts — Database record format
+- [system/metadata-persistence.zod.ts](/docs/references/system/metadata-persistence) — Database record format
 
 - contracts/metadata-service.ts — Service interface
 
@@ -87,7 +87,7 @@ const result = MetadataBulkRegisterRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **items** | `Object[]` | ✅ | Items to register |
+| **items** | `{ type: string; name: string; data: Record<string, any>; namespace?: string }[]` | ✅ | Items to register |
 | **continueOnError** | `boolean` | ✅ | Continue if individual item fails |
 | **validate** | `boolean` | ✅ | Validate before register |
 
@@ -103,7 +103,7 @@ const result = MetadataBulkRegisterRequest.parse(data);
 | **total** | `integer` | ✅ | Total items processed |
 | **succeeded** | `integer` | ✅ | Successfully processed |
 | **failed** | `integer` | ✅ | Failed items |
-| **errors** | `Object[]` | optional | Per-item errors |
+| **errors** | `{ type: string; name: string; error: string }[]` | optional | Per-item errors |
 
 
 ---
@@ -147,10 +147,10 @@ const result = MetadataBulkRegisterRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **storage** | `Object` | ✅ | Storage backend configuration |
-| **customizationPolicies** | `Object[]` | optional | Default customization policies per type |
-| **mergeStrategy** | `Object` | optional | Merge strategy for package upgrades |
-| **additionalTypes** | `Object[]` | optional | Additional custom metadata types |
+| **storage** | `{ datasource?: string; tableName?: string; fallback?: Enum<'filesystem' \| 'memory' \| 'none'>; rootDir?: string; … }` | ✅ | Storage backend configuration |
+| **customizationPolicies** | `{ metadataType: string; allowCustomization?: boolean; lockedFields?: string[]; customizableFields?: string[]; … }[]` | optional | Default customization policies per type |
+| **mergeStrategy** | `{ defaultStrategy?: Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>; alwaysAcceptIncoming?: string[]; alwaysKeepCustom?: string[]; autoResolveNonConflicting?: boolean }` | optional | Merge strategy for package upgrades |
+| **additionalTypes** | `{ label: string; description?: string; filePatterns: string[]; supportsOverlay?: boolean; … }[]` | optional | Additional custom metadata types |
 | **enableEvents** | `boolean` | optional | Emit metadata change events |
 | **validateOnWrite** | `boolean` | optional | Validate metadata on write |
 | **enableVersioning** | `boolean` | optional | Track metadata version history |
@@ -166,13 +166,13 @@ const result = MetadataBulkRegisterRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Metadata plugin ID |
-| **name** | `string` | ✅ | Plugin name |
+| **id** | `'com.objectstack.metadata'` | ✅ | Metadata plugin ID |
+| **name** | `'ObjectStack Metadata Service'` | ✅ | Plugin name |
 | **version** | `string` | ✅ | Plugin version |
-| **type** | `string` | ✅ | Plugin type |
+| **type** | `'standard'` | ✅ | Plugin type |
 | **description** | `string` | optional | Plugin description |
-| **capabilities** | `Object` | ✅ | Plugin capabilities |
-| **config** | `Object` | optional | Plugin configuration |
+| **capabilities** | `{ crud?: boolean; query?: boolean; overlay?: boolean; watch?: boolean; … }` | ✅ | Plugin capabilities |
+| **config** | `{ storage: object; customizationPolicies?: { metadataType: string; allowCustomization?: boolean; lockedFields?: string[]; customizableFields?: string[]; … }[]; mergeStrategy?: object; additionalTypes?: { label: string; description?: string; filePatterns: string[]; supportsOverlay?: boolean; … }[]; … }` | optional | Plugin configuration |
 
 
 ---
@@ -204,7 +204,7 @@ const result = MetadataBulkRegisterRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **items** | `Object[]` | ✅ | Matched metadata items |
+| **items** | `{ type: string; name: string; namespace?: string; label?: string; … }[]` | ✅ | Matched metadata items |
 | **total** | `integer` | ✅ | Total matching items |
 | **page** | `integer` | ✅ | Current page |
 | **pageSize** | `integer` | ✅ | Page size |
@@ -263,7 +263,7 @@ const result = MetadataBulkRegisterRequest.parse(data);
 | **executionPinned** | `boolean` | optional | Transaction rows reference a specific version_hash; history GC is disabled and getByHash() MUST resolve old hashes (ADR-0009) |
 | **loadOrder** | `integer` | optional | Loading priority (lower = earlier) |
 | **domain** | `Enum<'data' \| 'ui' \| 'automation' \| 'system' \| 'security' \| 'ai'>` | ✅ | Protocol domain |
-| **actions** | `Object[]` | optional | Declarative type-level actions (e.g. datasource "Test connection"), reusing ActionSchema; merged with plugin-registered actions when emitted |
+| **actions** | `{ name: string; label: string; objectName?: string; icon?: string; … }[]` | optional | Declarative type-level actions (e.g. datasource "Test connection"), reusing ActionSchema; merged with plugin-registered actions when emitted |
 
 
 ---
@@ -275,8 +275,8 @@ const result = MetadataBulkRegisterRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **valid** | `boolean` | ✅ | Whether the metadata is valid |
-| **errors** | `Object[]` | optional | Validation errors |
-| **warnings** | `Object[]` | optional | Validation warnings |
+| **errors** | `{ path: string; message: string; code?: string }[]` | optional | Validation errors |
+| **warnings** | `{ path: string; message: string }[]` | optional | Validation warnings |
 
 
 ---

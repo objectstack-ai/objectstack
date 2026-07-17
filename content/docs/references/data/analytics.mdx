@@ -57,8 +57,8 @@ const result = AggregationMetricType.parse(data);
 | **cube** | `string` | optional | Target cube name (optional when provided externally, e.g. in API request wrapper) |
 | **measures** | `string[]` | ✅ | List of metrics to calculate |
 | **dimensions** | `string[]` | optional | List of dimensions to group by |
-| **where** | `[__schema0](./__schema0)` | optional | Filtering criteria (canonical Query DSL FilterCondition) |
-| **timeDimensions** | `Object[]` | optional |  |
+| **where** | `any` | optional | Filtering criteria (canonical Query DSL FilterCondition) |
+| **timeDimensions** | `{ dimension: string; granularity?: Enum<'second' \| 'minute' \| 'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: string \| string[] }[]` | optional |  |
 | **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
 | **limit** | `number` | optional |  |
 | **offset** | `number` | optional |  |
@@ -77,10 +77,10 @@ const result = AggregationMetricType.parse(data);
 | **title** | `string` | optional |  |
 | **description** | `string` | optional |  |
 | **sql** | `string` | ✅ | Base SQL statement or Table Name |
-| **measures** | `Record<string, Object>` | ✅ | Quantitative metrics |
-| **dimensions** | `Record<string, Object>` | ✅ | Qualitative attributes |
-| **joins** | `Record<string, Object>` | optional |  |
-| **refreshKey** | `Object` | optional |  |
+| **measures** | `Record<string, { name: string; label: string; description?: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>; … }>` | ✅ | Quantitative metrics |
+| **dimensions** | `Record<string, { name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }>` | ✅ | Qualitative attributes |
+| **joins** | `Record<string, { name: string; relationship: Enum<'one_to_one' \| 'one_to_many' \| 'many_to_one'>; sql: string }>` | optional |  |
+| **refreshKey** | `{ every?: string; sql?: string }` | optional |  |
 | **public** | `boolean` | ✅ |  |
 
 
@@ -139,7 +139,7 @@ const result = AggregationMetricType.parse(data);
 | **description** | `string` | optional |  |
 | **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |
 | **sql** | `string` | ✅ | SQL expression or field reference |
-| **filters** | `Object[]` | optional |  |
+| **filters** | `{ sql: string }[]` | optional |  |
 | **format** | `string` | optional |  |
 
 

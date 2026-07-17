@@ -73,11 +73,11 @@ const result = ApiRoutes.parse(data);
 | **name** | `string` | ✅ |  |
 | **version** | `string` | ✅ |  |
 | **environment** | `Enum<'production' \| 'sandbox' \| 'development'>` | ✅ |  |
-| **routes** | `Object` | ✅ |  |
-| **locale** | `Object` | ✅ |  |
-| **services** | `Record<string, Object>` | ✅ | Per-service availability map keyed by CoreServiceName |
-| **capabilities** | `Record<string, Object>` | optional | Hierarchical capability descriptors for frontend intelligent adaptation |
-| **schemaDiscovery** | `Object` | optional | Schema discovery endpoints for API toolchain integration |
+| **routes** | `{ data: string; metadata: string; discovery?: string; ui?: string; … }` | ✅ |  |
+| **locale** | `{ default: string; supported: string[]; timezone: string }` | ✅ |  |
+| **services** | `Record<string, { enabled: boolean; status: Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>; handlerReady?: boolean; route?: string; … }>` | ✅ | Per-service availability map keyed by CoreServiceName |
+| **capabilities** | `Record<string, { enabled: boolean; features?: Record<string, boolean>; description?: string }>` | optional | Hierarchical capability descriptors for frontend intelligent adaptation |
+| **schemaDiscovery** | `{ openapi?: string; graphql?: string; jsonSchema?: string }` | optional | Schema discovery endpoints for API toolchain integration |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
 
 
@@ -111,7 +111,7 @@ const result = ApiRoutes.parse(data);
 | **totalDeclared** | `integer` | ✅ | Total routes declared in discovery |
 | **totalRegistered** | `integer` | ✅ | Routes with confirmed handler |
 | **totalMissing** | `integer` | ✅ | Routes missing a handler |
-| **routes** | `Object[]` | ✅ | Per-route health entries |
+| **routes** | `{ route: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; service: string; declared: boolean; … }[]` | ✅ | Per-route health entries |
 
 
 ---
@@ -129,7 +129,7 @@ const result = ApiRoutes.parse(data);
 | **provider** | `string` | optional | e.g. "objectql", "plugin-redis", "driver-memory" |
 | **version** | `string` | optional | Semantic version of the service implementation (e.g. "3.0.6") |
 | **message** | `string` | optional | e.g. "Install plugin-workflow to enable" |
-| **rateLimit** | `Object` | optional | Rate limit and quota info for this service |
+| **rateLimit** | `{ requestsPerMinute?: integer; requestsPerHour?: integer; burstLimit?: integer; retryAfterMs?: integer }` | optional | Rate limit and quota info for this service |
 
 
 ---

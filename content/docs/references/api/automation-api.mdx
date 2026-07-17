@@ -104,13 +104,13 @@ const result = AutomationApiErrorCode.parse(data);
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional | Deployment status |
 | **template** | `boolean` | optional | Is logic template (Subflow) |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
-| **variables** | `Object[]` | optional | Flow variables |
-| **nodes** | `Object[]` | ✅ | Flow nodes |
-| **edges** | `Object[]` | ✅ | Flow connections |
+| **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean }[]` | optional | Flow variables |
+| **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[]` | ✅ | Flow connections |
 | **active** | `boolean` | optional | Is active (Deprecated: use status) |
 | **runAs** | `Enum<'system' \| 'user'>` | optional | Execution identity for the run: system = elevated (bypasses RLS), user = the triggering user (RLS-respecting). A schedule-triggered run has no trigger user, so under user it runs UNSCOPED (elevated) — declare system to make that explicit. |
-| **errorHandling** | `Object` | optional | Flow-level error handling configuration |
-| **protection** | `Object` | optional | Package author protection block — lock policy for this flow. |
+| **errorHandling** | `{ strategy?: Enum<'fail' \| 'retry' \| 'continue'>; maxRetries?: integer; retryDelayMs?: integer; backoffMultiplier?: number; … }` | optional | Flow-level error handling configuration |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this flow. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -129,9 +129,9 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | The created flow definition |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ name: string; label: string; description?: string; successMessage?: string; … }` | ✅ | The created flow definition |
 
 
 ---
@@ -154,9 +154,9 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ name: string; deleted: boolean }` | ✅ |  |
 
 
 ---
@@ -197,9 +197,9 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Full flow definition |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ name: string; label: string; description?: string; successMessage?: string; … }` | ✅ | Full flow definition |
 
 
 ---
@@ -223,9 +223,9 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | Full execution log with step details |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ id: string; flowName: string; flowVersion?: integer; status: Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying'>; … }` | ✅ | Full execution log with step details |
 
 
 ---
@@ -251,9 +251,9 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ flows: { name: string; label: string; type: string; status: string; … }[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 
 ---
@@ -279,9 +279,9 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ runs: { id: string; flowName: string; flowVersion?: integer; status: Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying'>; … }[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 
 ---
@@ -305,9 +305,9 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ name: string; enabled: boolean }` | ✅ |  |
 
 
 ---
@@ -335,9 +335,9 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ |  |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ success: boolean; output?: any; error?: string; durationMs?: number }` | ✅ |  |
 
 
 ---
@@ -349,7 +349,7 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Flow machine name (snake_case) |
-| **definition** | `Object` | ✅ | Partial flow definition to update |
+| **definition** | `{ name?: string; label?: string; description?: string; successMessage?: string; … }` | ✅ | Partial flow definition to update |
 
 
 ---
@@ -361,9 +361,9 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object` | ✅ | The updated flow definition |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ name: string; label: string; description?: string; successMessage?: string; … }` | ✅ | The updated flow definition |
 
 
 ---

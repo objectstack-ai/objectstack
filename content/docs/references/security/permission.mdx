@@ -106,13 +106,13 @@ const result = AdminScope.parse(data);
 | **packageId** | `string` | optional | [ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored) |
 | **managedBy** | `Enum<'package' \| 'platform' \| 'user'>` | optional | [ADR-0086 D3] Record provenance: package (upgrade-owned metadata) vs platform/user (env config) |
 | **isDefault** | `boolean` | ✅ | [ADR-0090 D5] App baseline for the everyone position: app-level sets are auto-bound at boot (guarded, idempotent); package-level sets become install-time suggestions an admin confirms |
-| **objects** | `Record<string, Object>` | ✅ | Entity permissions |
-| **fields** | `Record<string, Object>` | optional | Field level security |
+| **objects** | `Record<string, { allowCreate: boolean; allowRead: boolean; allowEdit: boolean; allowDelete: boolean; … }>` | ✅ | Entity permissions |
+| **fields** | `Record<string, { readable: boolean; editable: boolean }>` | optional | Field level security |
 | **systemPermissions** | `string[]` | optional | System level capabilities |
 | **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional | App/tab visibility: visible, hidden, default_on (shown by default), default_off (available but hidden initially) |
-| **rowLevelSecurity** | `Object[]` | optional | Row-level security policies (see rls.zod.ts for full spec) |
+| **rowLevelSecurity** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | Row-level security policies (see rls.zod.ts for full spec) |
 | **contextVariables** | `Record<string, any>` | optional | Context variables for RLS evaluation |
-| **adminScope** | `Object` | optional | [ADR-0090 D12] Scoped delegated-administration grant (BU subtree + assignable-set allowlist) |
+| **adminScope** | `{ businessUnit: string; includeSubtree: boolean; manageAssignments: boolean; manageBindings: boolean; … }` | optional | [ADR-0090 D12] Scoped delegated-administration grant (BU subtree + assignable-set allowlist) |
 
 
 ---

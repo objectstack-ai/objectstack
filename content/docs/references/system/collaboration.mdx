@@ -55,7 +55,7 @@ const result = AwarenessEvent.parse(data);
 | :--- | :--- | :--- | :--- |
 | **sessionId** | `string` | ✅ | Session identifier |
 | **documentId** | `string` | optional | Document ID this session is for |
-| **users** | `Object[]` | ✅ | Active users in session |
+| **users** | `{ userId: string; sessionId: string; userName: string; userAvatar?: string; … }[]` | ✅ | Active users in session |
 | **startedAt** | `string` | ✅ | ISO 8601 datetime when session started |
 | **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last update |
 | **metadata** | `Record<string, any>` | optional | Session metadata |
@@ -104,8 +104,8 @@ const result = AwarenessEvent.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **state** | `Object \| Object \| Object \| Object \| Object` | ✅ | Merged CRDT state |
-| **conflicts** | `Object[]` | optional | Conflicts encountered during merge |
+| **state** | `{ type: 'lww-register'; value: any; timestamp: string; replicaId: string; … } \| { type: 'g-counter'; counts: Record<string, integer> } \| { type: 'pn-counter'; positive: Record<string, integer>; negative: Record<string, integer> } \| { type: 'or-set'; elements: { value: any; timestamp: string; replicaId: string; uid: string; … }[] } \| { type: 'text'; documentId: string; content: string; operations: { operationId: string; replicaId: string; position: integer; insert?: string; … }[]; … }` | ✅ | Merged CRDT state |
+| **conflicts** | `{ type: string; description: string; resolved: boolean }[]` | optional | Conflicts encountered during merge |
 
 
 ---
@@ -124,11 +124,11 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'lww-register'` | ✅ |  |
 | **value** | `any` | ✅ | Current register value |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime of last write |
 | **replicaId** | `string` | ✅ | ID of replica that performed last write |
-| **vectorClock** | `Object` | optional | Optional vector clock for causality tracking |
+| **vectorClock** | `{ clock: Record<string, integer> }` | optional | Optional vector clock for causality tracking |
 
 ---
 
@@ -140,7 +140,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'g-counter'` | ✅ |  |
 | **counts** | `Record<string, integer>` | ✅ | Map of replica ID to count |
 
 ---
@@ -153,7 +153,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'pn-counter'` | ✅ |  |
 | **positive** | `Record<string, integer>` | ✅ | Positive increments per replica |
 | **negative** | `Record<string, integer>` | ✅ | Negative increments per replica |
 
@@ -167,8 +167,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
-| **elements** | `Object[]` | ✅ | Set elements with metadata |
+| **type** | `'or-set'` | ✅ |  |
+| **elements** | `{ value: any; timestamp: string; replicaId: string; uid: string; … }[]` | ✅ | Set elements with metadata |
 
 ---
 
@@ -180,12 +180,12 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'text'` | ✅ |  |
 | **documentId** | `string` | ✅ | Document identifier |
 | **content** | `string` | ✅ | Current text content |
-| **operations** | `Object[]` | ✅ | History of operations |
+| **operations** | `{ operationId: string; replicaId: string; position: integer; insert?: string; … }[]` | ✅ | History of operations |
 | **lamportClock** | `integer` | ✅ | Current Lamport clock value |
-| **vectorClock** | `Object` | ✅ | Vector clock for causality |
+| **vectorClock** | `{ clock: Record<string, integer> }` | ✅ | Vector clock for causality |
 
 ---
 
@@ -229,11 +229,11 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **sessionId** | `string` | ✅ | Session identifier |
 | **documentId** | `string` | ✅ | Document identifier |
-| **config** | `Object` | ✅ | Session configuration |
-| **users** | `Object[]` | ✅ | Active users |
-| **cursors** | `Object[]` | ✅ | Active cursors |
+| **config** | `{ mode: Enum<'ot' \| 'crdt' \| 'lock' \| 'hybrid'>; enableCursorSharing: boolean; enablePresence: boolean; enableAwareness: boolean; … }` | ✅ | Session configuration |
+| **users** | `{ userId: string; sessionId: string; userName: string; userAvatar?: string; … }[]` | ✅ | Active users |
+| **cursors** | `{ userId: string; sessionId: string; documentId: string; userName: string; … }[]` | ✅ | Active cursors |
 | **version** | `integer` | ✅ | Current document version |
-| **operations** | `Object \| Object[]` | optional | Recent operations |
+| **operations** | `{ operationId: string; documentId: string; userId: string; sessionId: string; … } \| { operationId: string; replicaId: string; position: integer; insert?: string; … }[]` | optional | Recent operations |
 | **createdAt** | `string` | ✅ | ISO 8601 datetime when session was created |
 | **lastActivity** | `string` | ✅ | ISO 8601 datetime of last activity |
 | **status** | `Enum<'active' \| 'idle' \| 'ended'>` | ✅ | Session status |
@@ -255,7 +255,7 @@ This schema accepts one of the following structures:
 | **idleTimeout** | `integer` | ✅ | Idle timeout in milliseconds |
 | **conflictResolution** | `Enum<'ot' \| 'crdt' \| 'manual'>` | ✅ | Conflict resolution strategy |
 | **persistence** | `boolean` | ✅ | Enable operation persistence |
-| **snapshot** | `Object` | optional | Snapshot configuration |
+| **snapshot** | `{ enabled: boolean; interval: integer }` | optional | Snapshot configuration |
 
 
 ---
@@ -270,9 +270,9 @@ This schema accepts one of the following structures:
 | **sessionId** | `string` | ✅ | Session identifier |
 | **documentId** | `string` | ✅ | Document identifier |
 | **userName** | `string` | ✅ | Display name of user |
-| **position** | `Object` | ✅ | Current cursor position |
-| **selection** | `Object` | optional | Current text selection |
-| **style** | `Object` | ✅ | Visual style for this cursor |
+| **position** | `{ line: integer; column: integer }` | ✅ | Current cursor position |
+| **selection** | `{ anchor: object; focus: object; direction?: Enum<'forward' \| 'backward'> }` | optional | Current text selection |
+| **style** | `{ color: Enum<'blue' \| 'green' \| 'red' \| 'yellow' \| 'purple' \| 'orange' \| 'pink' \| 'teal' \| 'indigo' \| 'cyan'> \| string; opacity: number; label?: string; showLabel: boolean; … }` | ✅ | Visual style for this cursor |
 | **isTyping** | `boolean` | ✅ | Whether user is currently typing |
 | **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
 | **metadata** | `Record<string, any>` | optional | Additional cursor metadata |
@@ -317,8 +317,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **anchor** | `Object` | ✅ | Selection anchor (start point) |
-| **focus** | `Object` | ✅ | Selection focus (end point) |
+| **anchor** | `{ line: integer; column: integer }` | ✅ | Selection anchor (start point) |
+| **focus** | `{ line: integer; column: integer }` | ✅ | Selection focus (end point) |
 | **direction** | `Enum<'forward' \| 'backward'>` | optional | Selection direction |
 
 
@@ -345,8 +345,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **position** | `Object` | optional | Updated cursor position |
-| **selection** | `Object` | optional | Updated selection |
+| **position** | `{ line: integer; column: integer }` | optional | Updated cursor position |
+| **selection** | `{ anchor: object; focus: object; direction?: Enum<'forward' \| 'backward'> }` | optional | Updated selection |
 | **isTyping** | `boolean` | optional | Updated typing state |
 | **metadata** | `Record<string, any>` | optional | Updated metadata |
 
@@ -359,7 +359,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'g-counter'` | ✅ |  |
 | **counts** | `Record<string, integer>` | ✅ | Map of replica ID to count |
 
 
@@ -371,11 +371,11 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'lww-register'` | ✅ |  |
 | **value** | `any` | ✅ | Current register value |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime of last write |
 | **replicaId** | `string` | ✅ | ID of replica that performed last write |
-| **vectorClock** | `Object` | optional | Optional vector clock for causality tracking |
+| **vectorClock** | `{ clock: Record<string, integer> }` | optional | Optional vector clock for causality tracking |
 
 
 ---
@@ -386,8 +386,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
-| **elements** | `Object[]` | ✅ | Set elements with metadata |
+| **type** | `'or-set'` | ✅ |  |
+| **elements** | `{ value: any; timestamp: string; replicaId: string; uid: string; … }[]` | ✅ | Set elements with metadata |
 
 
 ---
@@ -421,7 +421,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'insert'` | ✅ |  |
 | **text** | `string` | ✅ | Text to insert |
 | **attributes** | `Record<string, any>` | optional | Text formatting attributes (e.g., bold, italic) |
 
@@ -435,7 +435,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'delete'` | ✅ |  |
 | **count** | `integer` | ✅ | Number of characters to delete |
 
 ---
@@ -448,7 +448,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'retain'` | ✅ |  |
 | **count** | `integer` | ✅ | Number of characters to retain |
 | **attributes** | `Record<string, any>` | optional | Attribute changes to apply |
 
@@ -467,7 +467,7 @@ This schema accepts one of the following structures:
 | **documentId** | `string` | ✅ | Document identifier |
 | **userId** | `string` | ✅ | User who created the operation |
 | **sessionId** | `string` | ✅ | Session identifier |
-| **components** | `Object \| Object \| Object[]` | ✅ | Operation components |
+| **components** | `{ type: 'insert'; text: string; attributes?: Record<string, any> } \| { type: 'delete'; count: integer } \| { type: 'retain'; count: integer; attributes?: Record<string, any> }[]` | ✅ | Operation components |
 | **baseVersion** | `integer` | ✅ | Document version this operation is based on |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when operation was created |
 | **metadata** | `Record<string, any>` | optional | Additional operation metadata |
@@ -492,7 +492,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **operation** | `Object` | ✅ | Transformed operation |
+| **operation** | `{ operationId: string; documentId: string; userId: string; sessionId: string; … }` | ✅ | Transformed operation |
 | **transformed** | `boolean` | ✅ | Whether transformation was applied |
 | **conflicts** | `string[]` | optional | Conflict descriptions if any |
 
@@ -505,7 +505,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'pn-counter'` | ✅ |  |
 | **positive** | `Record<string, integer>` | ✅ | Positive increments per replica |
 | **negative** | `Record<string, integer>` | ✅ | Negative increments per replica |
 
@@ -535,12 +535,12 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ |  |
+| **type** | `'text'` | ✅ |  |
 | **documentId** | `string` | ✅ | Document identifier |
 | **content** | `string` | ✅ | Current text content |
-| **operations** | `Object[]` | ✅ | History of operations |
+| **operations** | `{ operationId: string; replicaId: string; position: integer; insert?: string; … }[]` | ✅ | History of operations |
 | **lamportClock** | `integer` | ✅ | Current Lamport clock value |
-| **vectorClock** | `Object` | ✅ | Vector clock for causality |
+| **vectorClock** | `{ clock: Record<string, integer> }` | ✅ | Vector clock for causality |
 
 
 ---

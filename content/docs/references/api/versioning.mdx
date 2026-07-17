@@ -68,7 +68,7 @@ const result = VersionDefinition.parse(data);
 | **resolved** | `string` | ✅ | Resolved API version for this request |
 | **supported** | `string[]` | ✅ | All supported version identifiers |
 | **deprecated** | `string[]` | optional | Deprecated version identifiers |
-| **versions** | `Object[]` | optional | Full version definitions with lifecycle metadata |
+| **versions** | `{ version: string; status: Enum<'preview' \| 'current' \| 'supported' \| 'deprecated' \| 'retired'>; releasedAt: string; deprecatedAt?: string; … }[]` | optional | Full version definitions with lifecycle metadata |
 
 
 ---

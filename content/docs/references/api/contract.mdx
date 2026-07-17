@@ -45,8 +45,8 @@ const result = ApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 
 
 ---
@@ -84,9 +84,9 @@ const result = ApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
-| **data** | `Object[]` | ✅ | Results for each item in the batch |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; details?: any; … }[]; index?: number; … }[]` | ✅ | Results for each item in the batch |
 
 
 ---
@@ -126,8 +126,8 @@ const result = ApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **id** | `string` | ✅ | ID of the deleted record |
 
 
@@ -140,21 +140,21 @@ const result = ApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name (e.g. account) |
-| **fields** | `[__schema1](./__schema1)[]` | optional | Fields to retrieve |
-| **where** | `[__schema2](./__schema2)` | optional | Filtering criteria (WHERE) |
-| **search** | `Object` | optional | Full-text search configuration ($search parameter) |
-| **orderBy** | `Object[]` | optional | Sorting instructions (ORDER BY) |
+| **fields** | `string \| { field: string; fields?: object[]; alias?: string }[]` | optional | Fields to retrieve |
+| **where** | `any` | optional | Filtering criteria (WHERE) |
+| **search** | `{ query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search configuration ($search parameter) |
+| **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
 | **top** | `number` | optional | Alias for limit (OData compatibility) |
 | **cursor** | `Record<string, any>` | optional | Cursor for keyset pagination |
-| **joins** | `Object[]` | optional | Explicit Table Joins |
-| **aggregations** | `Object[]` | optional | Aggregation functions |
-| **groupBy** | `string \| Object[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
-| **having** | `[__schema2](./__schema2)` | optional | HAVING clause for aggregation filtering |
-| **windowFunctions** | `Object[]` | optional | Window functions with OVER clause |
+| **joins** | `{ type: Enum<'inner' \| 'left' \| 'right' \| 'full'>; strategy?: Enum<'auto' \| 'database' \| 'hash' \| 'loop'>; object: string; alias?: string; … }[]` | optional | Explicit Table Joins |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]` | optional | Aggregation functions |
+| **groupBy** | `string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string }[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
+| **having** | `any` | optional | HAVING clause for aggregation filtering |
+| **windowFunctions** | `{ function: Enum<'row_number' \| 'rank' \| 'dense_rank' \| 'percent_rank' \| 'lag' \| 'lead' \| 'first_value' \| 'last_value' \| 'sum' \| 'avg' \| 'count' \| 'min' \| 'max'>; field?: string; alias: string; over: object }[]` | optional | Window functions with OVER clause |
 | **distinct** | `boolean` | optional | SELECT DISTINCT flag |
-| **expand** | `Record<string, [__schema0](./__schema0)>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
+| **expand** | `Record<string, { object: string; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; where?: any; search?: object; … }>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
 
 
 ---
@@ -177,10 +177,10 @@ const result = ApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>[]` | ✅ | Array of matching records |
-| **pagination** | `Object` | ✅ | Pagination info |
+| **pagination** | `{ total?: number; limit?: number; offset?: number; cursor?: string; … }` | ✅ | Pagination info |
 
 
 ---
@@ -193,7 +193,7 @@ const result = ApiError.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Record ID if processed |
 | **success** | `boolean` | ✅ |  |
-| **errors** | `Object[]` | optional |  |
+| **errors** | `{ code: string; message: string; category?: string; details?: any; … }[]` | optional |  |
 | **index** | `number` | optional | Index in original request |
 | **data** | `any` | optional | Result data (e.g. created record) |
 
@@ -207,8 +207,8 @@ const result = ApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **preventNPlusOne** | `boolean` | ✅ | Enable N+1 query detection and prevention |
-| **dataLoader** | `Object` | optional | DataLoader batch loading configuration |
-| **batchStrategy** | `Object` | optional | Batch loading strategy configuration |
+| **dataLoader** | `{ maxBatchSize: integer; batchScheduleFn: Enum<'microtask' \| 'timeout' \| 'manual'>; cacheEnabled: boolean; cacheKeyFn?: string; … }` | optional | DataLoader batch loading configuration |
+| **batchStrategy** | `{ strategy: Enum<'dataloader' \| 'windowed' \| 'prefetch'>; windowMs?: number; prefetchDepth?: integer; associationLoading: Enum<'lazy' \| 'eager' \| 'batch'> }` | optional | Batch loading strategy configuration |
 | **maxQueryDepth** | `integer` | ✅ | Maximum depth for nested relation queries |
 | **queryComplexityLimit** | `number` | optional | Maximum allowed query complexity score |
 | **enableQueryPlan** | `boolean` | ✅ | Log query execution plans for debugging |
@@ -226,8 +226,8 @@ const result = ApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `Object` | optional | Error details if success is false |
-| **meta** | `Object` | optional | Response metadata |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>` | ✅ | The requested or modified record |
 
 

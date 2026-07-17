@@ -38,11 +38,11 @@ const result = ApiEndpoint.parse(data);
 | **description** | `string` | optional |  |
 | **type** | `Enum<'flow' \| 'script' \| 'object_operation' \| 'proxy'>` | ✅ | Implementation type |
 | **target** | `string` | ✅ | Target Flow ID, Script Name, or Proxy URL |
-| **objectParams** | `Object` | optional | For object_operation type |
-| **inputMapping** | `Object[]` | optional | Map Request Body to Internal Params |
-| **outputMapping** | `Object[]` | optional | Map Internal Result to Response Body |
+| **objectParams** | `{ object?: string; operation?: Enum<'find' \| 'get' \| 'create' \| 'update' \| 'delete'> }` | optional | For object_operation type |
+| **inputMapping** | `{ source: string; target: string; transform?: string }[]` | optional | Map Request Body to Internal Params |
+| **outputMapping** | `{ source: string; target: string; transform?: string }[]` | optional | Map Internal Result to Response Body |
 | **authRequired** | `boolean` | ✅ | Require authentication |
-| **rateLimit** | `Object` | optional | Rate limiting policy |
+| **rateLimit** | `{ enabled: boolean; windowMs: integer; maxRequests: integer }` | optional | Rate limiting policy |
 | **cacheTtl** | `number` | optional | Response cache TTL in seconds |
 
 

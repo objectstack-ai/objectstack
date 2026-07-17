@@ -32,7 +32,7 @@ const result = AIChatWindowProps.parse(data);
 | **mode** | `Enum<'float' \| 'sidebar' \| 'inline'>` | ✅ | Display mode for the chat window |
 | **agentId** | `string` | optional | Specific AI agent to use |
 | **context** | `Record<string, any>` | optional | Contextual data to pass to the AI |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -49,7 +49,7 @@ const result = AIChatWindowProps.parse(data);
 | **icon** | `string` | optional | Icon name (Lucide icon) |
 | **iconPosition** | `Enum<'left' \| 'right'>` | ✅ | Icon position relative to label |
 | **disabled** | `boolean` | ✅ | Disable the button |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -65,7 +65,7 @@ const result = AIChatWindowProps.parse(data);
 | **targetVariable** | `string` | optional | Page variable to store filter state |
 | **layout** | `Enum<'inline' \| 'dropdown' \| 'sidebar'>` | ✅ | Filter display layout |
 | **showSearch** | `boolean` | ✅ | Show search input |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -80,8 +80,8 @@ const result = AIChatWindowProps.parse(data);
 | **fields** | `string[]` | optional | Fields to display (defaults to all editable fields) |
 | **mode** | `Enum<'create' \| 'edit'>` | optional | Form mode |
 | **submitLabel** | `string` | optional | Submit button label |
-| **onSubmit** | `string \| Object` | optional | Action expression on form submit (CEL) |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **onSubmit** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Action expression on form submit (CEL) |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -96,7 +96,7 @@ const result = AIChatWindowProps.parse(data);
 | **alt** | `string` | optional | Alt text for accessibility |
 | **fit** | `Enum<'cover' \| 'contain' \| 'fill'>` | ✅ | Image object-fit mode |
 | **height** | `number` | optional | Fixed height in pixels |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -112,7 +112,7 @@ const result = AIChatWindowProps.parse(data);
 | **object** | `string` | optional | Owning object — required for object-scoped kinds: state_machine is a rule ON an object (ADR-0020), permission renders a matrix FOR one; omit for top-level flow |
 | **mode** | `Enum<'diagram' \| 'matrix' \| 'summary'>` | optional | Render form; defaults per type (diagram for flow/state_machine, matrix for permission) |
 | **detail** | `Enum<'business' \| 'technical'>` | ✅ | Authoring altitude (ADR-0051 §3.4): business collapses technical flow nodes to business steps + approvals. NOT access (cf. book.audience); permission projection is automatic and render-time, never set here |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -126,11 +126,11 @@ const result = AIChatWindowProps.parse(data);
 | **object** | `string` | ✅ | Source object |
 | **field** | `string` | optional | Field to aggregate |
 | **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregation function |
-| **filter** | `[__schema0](./__schema0)` | optional | Filter criteria |
+| **filter** | `any` | optional | Filter criteria |
 | **format** | `Enum<'number' \| 'currency' \| 'percent'>` | optional | Number display format |
 | **prefix** | `string` | optional | Prefix text (e.g. "$") |
 | **suffix** | `string` | optional | Suffix text (e.g. "%") |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -144,11 +144,11 @@ const result = AIChatWindowProps.parse(data);
 | **object** | `string` | ✅ | Object to pick records from |
 | **displayField** | `string` | ✅ | Field to display as the record label |
 | **searchFields** | `string[]` | optional | Fields to search against |
-| **filter** | `[__schema0](./__schema0)` | optional | Filter criteria for available records |
+| **filter** | `any` | optional | Filter criteria for available records |
 | **multiple** | `boolean` | ✅ | Allow multiple record selection |
 | **targetVariable** | `string` | optional | Page variable to bind selected record ID(s) |
 | **placeholder** | `string` | optional | Placeholder text |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -167,7 +167,7 @@ const result = AIChatWindowProps.parse(data);
 | **disabled** | `boolean` | ✅ | Disable the input |
 | **description** | `string` | optional | Helper text shown below the input |
 | **targetVariable** | `string` | optional | Page variable this input writes to. Declarative hint; the live binding resolves via the variable whose `source` equals this component id (see PageVariableSchema). |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -181,7 +181,7 @@ const result = AIChatWindowProps.parse(data);
 | **content** | `string` | ✅ | Text or Markdown content |
 | **variant** | `Enum<'heading' \| 'subheading' \| 'body' \| 'caption'>` | ✅ | Text style variant |
 | **align** | `Enum<'left' \| 'center' \| 'right'>` | ✅ | Text alignment |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -192,9 +192,9 @@ const result = AIChatWindowProps.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **items** | `Object[]` | ✅ |  |
+| **items** | `{ label: string; icon?: string; collapsed: boolean; children: any[] }[]` | ✅ |  |
 | **allowMultiple** | `boolean` | ✅ | Allow multiple panels to be expanded simultaneously |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -210,7 +210,7 @@ const result = AIChatWindowProps.parse(data);
 | **actions** | `string[]` | optional |  |
 | **body** | `any[]` | optional | Card content components (slot) |
 | **footer** | `any[]` | optional | Card footer components (slot) |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -226,7 +226,7 @@ const result = AIChatWindowProps.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **breadcrumb** | `boolean` | ✅ | Show breadcrumb |
 | **actions** | `string[]` | optional | Action IDs to show in header |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -239,8 +239,8 @@ const result = AIChatWindowProps.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'line' \| 'card' \| 'pill'>` | optional |  |
 | **position** | `Enum<'top' \| 'left'>` | optional |  |
-| **items** | `Object[]` | ✅ |  |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **items** | `{ label: string; icon?: string; visibleWhen?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; children: any[] }[]` | ✅ |  |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -262,7 +262,7 @@ const result = AIChatWindowProps.parse(data);
 | **enableReactions** | `boolean` | ✅ | Enable emoji reactions on feed items |
 | **enableThreading** | `boolean` | ✅ | Enable threaded replies on comments |
 | **showSubscriptionToggle** | `boolean` | ✅ | Show bell icon for record-level notification subscription |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -277,8 +277,8 @@ const result = AIChatWindowProps.parse(data);
 | **width** | `string \| number` | optional | Panel width (e.g., "350px", "30%") |
 | **collapsible** | `boolean` | ✅ | Whether the panel can be collapsed |
 | **defaultCollapsed** | `boolean` | ✅ | Whether the panel starts collapsed |
-| **feed** | `Object` | optional | Embedded activity feed configuration |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **feed** | `{ types?: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'>[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -293,7 +293,7 @@ const result = AIChatWindowProps.parse(data);
 | **layout** | `Enum<'auto' \| 'custom'>` | ✅ | Layout mode: auto uses object highlightFields, custom uses explicit sections |
 | **sections** | `string[]` | optional | Section IDs to show (required when layout is "custom") |
 | **fields** | `string[]` | optional | Explicit field list to display (optional, overrides highlightFields) |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -334,9 +334,9 @@ Type: `string`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `string \| Object[]` | ✅ | Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or `{name, label?, icon?, type?}` for inline overrides. |
+| **fields** | `string \| { name: string; label?: string; icon?: string; type?: string }[]` | ✅ | Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or `{name, label?, icon?, type?}` for inline overrides. |
 | **layout** | `Enum<'horizontal' \| 'vertical'>` | ✅ | Layout orientation for highlight fields |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -348,8 +348,8 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **statusField** | `string` | ✅ | Field name representing the current status/stage |
-| **stages** | `Object[]` | optional | Explicit stage definitions (if not using field metadata) |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **stages** | `{ value: string; label: string }[]` | optional | Explicit stage definitions (if not using field metadata) |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---
@@ -364,14 +364,14 @@ Type: `string`
 | **relationshipField** | `string` | ✅ | Field on related object that points to this record (e.g., "account_id") |
 | **relationshipValueField** | `string` | ✅ | Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions). |
 | **columns** | `string[]` | optional | Fields to display in the related list. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns → this inline list. |
-| **sort** | `string \| Object[]` | optional | Sort order for related records |
+| **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order for related records |
 | **limit** | `integer` | ✅ | Number of records to display initially |
-| **filter** | `Object[]` | optional | Additional filter criteria for related records |
+| **filter** | `{ field: string; operator: string; value?: string \| number \| boolean \| null \| string \| number[] }[]` | optional | Additional filter criteria for related records |
 | **title** | `string` | optional | Custom title for the related list |
 | **showViewAll** | `boolean` | ✅ | Show "View All" link to see all related records |
 | **actions** | `string[]` | optional | Action IDs available for related records |
-| **add** | `Object` | optional | Add-existing-via-picker config (generic m2m/junction assignment). |
-| **aria** | `Object` | optional | ARIA accessibility attributes |
+| **add** | `{ picker: object; linkField?: string; label?: string }` | optional | Add-existing-via-picker config (generic m2m/junction assignment). |
+| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---

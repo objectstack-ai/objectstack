@@ -71,7 +71,7 @@ Package manifest snapshot embedded in a package version
 | **description** | `string` | optional | Short description |
 | **scope** | `Enum<'platform' \| 'environment'>` | ✅ | Package scope |
 | **minPlatformVersion** | `string` | optional | Minimum required platform version (semver) |
-| **dependencies** | `Object[]` | ✅ | Package dependencies |
+| **dependencies** | `{ packageId: string; versionRange: string; optional: boolean }[]` | ✅ | Package dependencies |
 | **metadataTypes** | `string[]` | ✅ | Metadata types provided by this package |
 | **migrations** | `string[]` | ✅ | Migration script identifiers (ordered) |
 | **configurationSchema** | `Record<string, any>` | optional | JSON Schema for per-installation configuration properties |

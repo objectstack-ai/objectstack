@@ -13,7 +13,7 @@ Implements P0 requirement for ObjectStack kernel.
 
 ## Caching in ObjectStack
 
-**HTTP Cache (`api/http-cache.zod.ts`) - This File**
+**HTTP Cache (`[api/http-cache.zod.ts](/docs/references/api/http-cache)`) - This File**
 
 - **Purpose**: Cache API responses at HTTP protocol level
 
@@ -25,7 +25,7 @@ Implements P0 requirement for ObjectStack kernel.
 
 - **Scope**: HTTP layer, client-server communication
 
-**Application Cache (`system/cache.zod.ts`)**
+**Application Cache (`[system/cache.zod.ts](/docs/references/system/cache)`)**
 
 - **Purpose**: Cache computed data, query results, aggregations
 
@@ -49,7 +49,7 @@ Implements P0 requirement for ObjectStack kernel.
 
 Industry alignment: HTTP Caching (RFC 7234), Salesforce Metadata API
 
-@see ../../system/cache.zod.ts for application-level caching
+See also: ../../[system/cache.zod.ts](/docs/references/system/cache) for application-level caching
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/http-cache.zod.ts`
@@ -156,7 +156,7 @@ const result = CacheControl.parse(data);
 | :--- | :--- | :--- | :--- |
 | **ifNoneMatch** | `string` | optional | ETag value for conditional request (If-None-Match header) |
 | **ifModifiedSince** | `string` | optional | Timestamp for conditional request (If-Modified-Since header) |
-| **cacheControl** | `Object` | optional | Client cache control preferences |
+| **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Client cache control preferences |
 
 
 ---
@@ -168,9 +168,9 @@ const result = CacheControl.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **data** | `any` | optional | Metadata payload (omitted for 304 Not Modified) |
-| **etag** | `Object` | optional | ETag for this resource version |
+| **etag** | `{ value: string; weak: boolean }` | optional | ETag for this resource version |
 | **lastModified** | `string` | optional | Last modification timestamp |
-| **cacheControl** | `Object` | optional | Cache control directives |
+| **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Cache control directives |
 | **notModified** | `boolean` | ✅ | True if resource has not been modified (304 response) |
 | **version** | `string` | optional | Metadata version identifier |
 

@@ -61,7 +61,7 @@ Complete object dependency graph for seed data loading
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **nodes** | `Object[]` | ✅ | All objects in the dependency graph |
+| **nodes** | `{ object: string; dependsOn: string[]; references: { field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'> }[] }[]` | ✅ | All objects in the dependency graph |
 | **insertOrder** | `string[]` | ✅ | Topologically sorted insert order |
 | **circularDependencies** | `string[][]` | ✅ | Circular dependency chains (e.g., [["a", "b", "a"]]) |
 
@@ -78,7 +78,7 @@ Object node in the seed data dependency graph
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name (snake_case) |
 | **dependsOn** | `string[]` | ✅ | Objects this object depends on |
-| **references** | `Object[]` | ✅ | Field-level reference details |
+| **references** | `{ field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'> }[]` | ✅ | Field-level reference details |
 
 
 ---
@@ -126,8 +126,8 @@ Identity context for resolving os.user / os.org in seed CEL values
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **user** | `Object` | optional | Subject bound to os.user in seed CEL expressions |
-| **org** | `Object` | optional | Organization bound to os.org in seed CEL expressions |
+| **user** | `{ id: string; role?: string; email?: string }` | optional | Subject bound to os.user in seed CEL expressions |
+| **org** | `{ id: string; tier?: string }` | optional | Organization bound to os.org in seed CEL expressions |
 
 
 ---
@@ -149,7 +149,7 @@ Result of loading a single dataset
 | **total** | `integer` | ✅ | Total records in dataset |
 | **referencesResolved** | `integer` | ✅ | References resolved via externalId |
 | **referencesDeferred** | `integer` | ✅ | References deferred to second pass |
-| **errors** | `Object[]` | ✅ | Reference resolution errors |
+| **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | ✅ | Reference resolution errors |
 
 
 ---
@@ -170,7 +170,7 @@ Seed data loader configuration
 | **transaction** | `boolean` | ✅ | Wrap entire load in a transaction (all-or-nothing) |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>` | optional | Only load datasets matching this environment |
 | **organizationId** | `string` | optional | Target organization id for per-tenant seed replay |
-| **identity** | `Object` | optional | Identity bound to os.user / os.org when resolving CEL seed values |
+| **identity** | `{ user?: object; org?: object }` | optional | Identity bound to os.user / os.org when resolving CEL seed values |
 
 
 ---
@@ -183,8 +183,8 @@ Seed loader request with datasets and configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **seeds** | `Object[]` | ✅ | Seeds to load |
-| **config** | `Object` | ✅ | Loader configuration |
+| **seeds** | `{ object: string; externalId: string; mode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | ✅ | Seeds to load |
+| **config** | `{ dryRun: boolean; haltOnError: boolean; multiPass: boolean; defaultMode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; … }` | ✅ | Loader configuration |
 
 
 ---
@@ -199,10 +199,10 @@ Complete seed loader result
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Overall success status |
 | **dryRun** | `boolean` | ✅ | Whether this was a dry-run |
-| **dependencyGraph** | `Object` | ✅ | Object dependency graph |
-| **results** | `Object[]` | ✅ | Per-object load results |
-| **errors** | `Object[]` | ✅ | All reference resolution errors |
-| **summary** | `Object` | ✅ | Summary statistics |
+| **dependencyGraph** | `{ nodes: { object: string; dependsOn: string[]; references: { field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'> }[] }[]; insertOrder: string[]; circularDependencies: string[][] }` | ✅ | Object dependency graph |
+| **results** | `{ object: string; mode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; inserted: integer; updated: integer; … }[]` | ✅ | Per-object load results |
+| **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | ✅ | All reference resolution errors |
+| **summary** | `{ objectsProcessed: integer; totalRecords: integer; totalInserted: integer; totalUpdated: integer; … }` | ✅ | Summary statistics |
 
 
 ---
