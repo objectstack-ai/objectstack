@@ -184,7 +184,7 @@ Every object ships a REST API automatically — no controllers to write:
 
 ```bash
 # CRUD endpoints for the `todo_task` object you defined above
-curl http://localhost:3000/api/v1/todo_task
+curl http://localhost:3000/api/v1/data/todo_task
 ```
 
 For the browser, the typed client SDK and React hooks (`useQuery` / `useMutation` / `usePagination`) live in [`@objectstack/client-react`](packages/client-react). Need a new capability? Write a plugin, driver, or service against the same kernel APIs — every built-in is one (see below).

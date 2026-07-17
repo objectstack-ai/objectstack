@@ -4,28 +4,46 @@ Comprehensive guide for implementing validation rules in ObjectStack.
 
 ## Available Rule Types
 
+The **complete** set of `type` discriminators accepted by `ValidationRuleSchema`:
+
 | Type | Purpose | When Validation Fails |
 |:-----|:--------|:---------------------|
-| `script` | Formula expression | When expression evaluates to `true` |
-| `unique` | Composite uniqueness | When duplicate found |
+| `script` | CEL predicate over the record | When predicate evaluates to `true` |
 | `state_machine` | Legal state transitions | When transition not allowed |
 | `format` | Regex or built-in format | When format doesn't match |
-| `cross_field` | Compare values across fields | When comparison fails |
+| `cross_field` | CEL predicate comparing fields | When predicate evaluates to `true` |
 | `json_schema` | Validate JSON field | When JSON doesn't match schema |
-| `async` | External API validation | When API returns error |
-| `custom` | Registered validator function | When function returns false |
-| `conditional` | Apply rule conditionally | When nested rule fails |
+| `conditional` | Apply nested rule when a predicate holds | When nested rule fails |
+
+There is no other type. In particular:
+
+- **No `unique` type** (removed from the spec in #1475) — enforce uniqueness
+  with a **unique index** ([see below](#uniqueness--use-unique-indexes)).
+- **No `async` / `custom` type** — external checks and arbitrary validation
+  code belong in a `beforeInsert` / `beforeUpdate` **lifecycle hook**
+  (see [hooks.md](./hooks.md)).
+
+## Expression Syntax
+
+`condition` / `when` are **CEL predicates** (ADR-0032). Author them with the
+`P` tag from `@objectstack/spec`; a plain string is also accepted and parsed
+as CEL. Record fields are addressed as `record.<field>`; on update the prior
+row is available as `previous.<field>`. CEL uses `==`, `!=`, `&&`, `||`,
+`!` — not SQL's `=`, `AND`, `IS NULL`.
+
+**⚠️ CRITICAL:** For `script` **and** `cross_field`, the predicate expresses
+the **failure** condition — validation **fails** when it evaluates to `true`.
 
 ## Script Validation
 
-**⚠️ CRITICAL:** Script condition is **inverted** — validation **fails** when expression is `true`.
-
 ```typescript
+import { P } from '@objectstack/spec';
+
 validations: [
   {
     name: 'prevent_past_dates',
     type: 'script',
-    condition: 'due_date < TODAY()',  // ❌ Fails when this is TRUE
+    condition: P`record.due_date < today()`,  // ❌ Fails when this is TRUE
     message: 'Due date cannot be in the past',
     severity: 'error',
     events: ['insert', 'update'],
@@ -37,38 +55,37 @@ validations: [
 
 ```typescript
 // Prevent negative values
-condition: 'amount < 0'
+condition: P`record.amount < 0`
 
 // Require field when another field has value
-condition: 'status = "approved" AND approver_id IS NULL'
+condition: P`record.status == 'approved' && isBlank(record.approver_id)`
 
 // Date range validation
-condition: 'end_date < start_date'
+condition: P`record.end_date < record.start_date`
 
 // Conditional required field
-condition: 'type = "enterprise" AND account_manager IS NULL'
+condition: P`record.type == 'enterprise' && isBlank(record.account_manager)`
 ```
 
-## Unique Validation
+> On **insert**, an optional field omitted from the payload reads as `null`
+> in the predicate — `record.due_date == null` matches an omitted field the
+> same as an explicit `null` (#1871). Use `isBlank(v)` to catch `null` and
+> empty strings together.
+
+## Uniqueness — Use Unique Indexes
+
+There is **no `unique` validation type**. Uniqueness — including composite
+uniqueness — is declared as a unique **index** on the object:
 
 ```typescript
-validations: [
-  {
-    name: 'unique_email',
-    type: 'unique',
-    fields: ['email'],
-    caseSensitive: false,
-    message: 'Email address already exists',
-  },
-  {
-    name: 'unique_tenant_email',
-    type: 'unique',
-    fields: ['tenant_id', 'email'],  // Composite uniqueness
-    caseSensitive: false,
-    message: 'Email already exists in this tenant',
-  },
+indexes: [
+  { fields: ['email'], unique: true },               // single-field uniqueness
+  { fields: ['tenant_id', 'email'], unique: true },  // composite uniqueness
 ]
 ```
+
+The database enforces the constraint; duplicate writes are rejected at the
+driver layer. See [indexing.md](./indexing.md) for index options.
 
 ## State Machine Validation
 
@@ -102,16 +119,16 @@ validations: [
     name: 'email_format',
     type: 'format',
     field: 'email',
-    format: 'email',  // Built-in: email, url, phone, json, uuid
+    format: 'email',  // Built-in: email, url, phone, json
     message: 'Invalid email format',
   },
 
-  // Custom regex
+  // Custom regex — the key is `regex`, not `pattern`
   {
     name: 'sku_format',
     type: 'format',
     field: 'sku',
-    pattern: '^[A-Z]{3}-\\d{4}$',  // e.g., ABC-1234
+    regex: '^[A-Z]{3}-\\d{4}$',  // e.g., ABC-1234
     message: 'SKU must be format: XXX-0000',
   },
 ]
@@ -119,19 +136,22 @@ validations: [
 
 ## Cross-Field Validation
 
+Same inverted semantics as `script` — the predicate is the **failure**
+condition. `fields` lists the fields involved (used for error targeting).
+
 ```typescript
 validations: [
   {
     name: 'date_range',
     type: 'cross_field',
-    condition: 'end_date > start_date',
+    condition: P`record.end_date <= record.start_date`,  // ❌ TRUE = invalid
     message: 'End date must be after start date',
     fields: ['start_date', 'end_date'],
   },
   {
     name: 'discount_limit',
     type: 'cross_field',
-    condition: 'discount_amount <= subtotal * 0.5',
+    condition: P`record.discount_amount > record.subtotal * 0.5`,
     message: 'Discount cannot exceed 50% of subtotal',
     fields: ['discount_amount', 'subtotal'],
   },
@@ -161,41 +181,72 @@ validations: [
 ]
 ```
 
-## Async Validation
-
-```typescript
-validations: [
-  {
-    name: 'external_api_check',
-    type: 'async',
-    field: 'tax_id',
-    endpoint: 'https://api.example.com/validate/tax-id',
-    method: 'POST',
-    timeout: 5000,
-    debounce: 500,  // Delay validation by 500ms
-    message: 'Invalid tax ID',
-  },
-]
-```
-
 ## Conditional Validation
+
+Shape is `when` / `then` / `otherwise` — `when` is a CEL predicate, `then`
+is a **single** nested rule applied when it holds, `otherwise` (optional) a
+single rule applied when it doesn't. There is no `validations: []` array —
+compose multiple checks as multiple top-level rules or nested conditionals.
 
 ```typescript
 validations: [
   {
     name: 'enterprise_requires_manager',
     type: 'conditional',
-    condition: "type = 'enterprise'",
-    validations: [
-      {
-        name: 'manager_required',
-        type: 'script',
-        condition: 'account_manager IS NULL',
-        message: 'Enterprise accounts must have an account manager',
-      },
-    ],
+    when: P`record.type == 'enterprise'`,
+    message: 'Enterprise account validation',
+    then: {
+      name: 'manager_required',
+      type: 'script',
+      condition: P`isBlank(record.account_manager)`,
+      message: 'Enterprise accounts must have an account manager',
+    },
   },
 ]
+```
+
+With an `otherwise` branch:
+
+```typescript
+{
+  name: 'payment_validation',
+  type: 'conditional',
+  when: P`record.order_total > 10000`,
+  message: 'Order validation',
+  then: {
+    name: 'manager_approval_required',
+    type: 'script',
+    condition: P`isBlank(record.manager_approval_id)`,
+    message: 'Orders over $10,000 require manager approval',
+  },
+  otherwise: {
+    name: 'payment_method_required',
+    type: 'script',
+    condition: P`isBlank(record.payment_method)`,
+    message: 'Payment method is required',
+  },
+}
+```
+
+## External / Custom Validation → Lifecycle Hooks
+
+Calling an external API, hitting another object, or running arbitrary code is
+**not** a validation type. Implement it as a `beforeInsert` / `beforeUpdate`
+lifecycle hook and throw on failure — the typed, supported extension point:
+
+```typescript
+import { Hook, HookContext } from '@objectstack/spec/data';
+
+const taxIdCheck: Hook = {
+  name: 'tax_id_external_check',
+  object: 'account',
+  events: ['beforeInsert', 'beforeUpdate'],
+  handler: async (ctx: HookContext) => {
+    if (ctx.input.tax_id && !(await verifyTaxId(ctx.input.tax_id))) {
+      throw new Error('Invalid tax ID');
+    }
+  },
+};
 ```
 
 ## Validation Properties
@@ -234,7 +285,7 @@ Lower numbers execute **first**.
 ```typescript
 {
   type: 'script',
-  condition: 'amount > 0',  // ❌ Fails when amount > 0 (inverted!)
+  condition: P`record.amount > 0`,  // ❌ Fails when amount > 0 (inverted!)
   message: 'Amount must be positive',
 }
 ```
@@ -244,30 +295,28 @@ Lower numbers execute **first**.
 ```typescript
 {
   type: 'script',
-  condition: 'amount <= 0',  // ✅ Fails when amount <= 0
+  condition: P`record.amount <= 0`,  // ✅ Fails when amount <= 0
   message: 'Amount must be positive',
 }
 ```
 
-### ❌ Incorrect — Missing Severity
+### ❌ Incorrect — SQL Syntax in a CEL Predicate
 
 ```typescript
 {
   type: 'script',
-  condition: 'end_date < start_date',
-  message: 'End date must be after start date',
-  // ❌ No severity — defaults to 'error' which may be too strict
+  condition: "status = 'approved' AND approver_id IS NULL",  // ❌ not CEL
+  message: 'Approved records need an approver',
 }
 ```
 
-### ✅ Correct — Explicit Severity
+### ✅ Correct — CEL Predicate
 
 ```typescript
 {
   type: 'script',
-  condition: 'end_date < start_date',
-  message: 'End date must be after start date',
-  severity: 'warning',  // ✅ Allow save but warn user
+  condition: P`record.status == 'approved' && isBlank(record.approver_id)`,
+  message: 'Approved records need an approver',
 }
 ```
 
@@ -276,7 +325,7 @@ Lower numbers execute **first**.
 ```typescript
 {
   type: 'script',
-  condition: 'status = "draft"',
+  condition: P`record.status == 'draft'`,
   message: 'Record is still in draft',
   // ❌ No events — runs on all operations
 }
@@ -287,7 +336,7 @@ Lower numbers execute **first**.
 ```typescript
 {
   type: 'script',
-  condition: 'status = "draft"',
+  condition: P`record.status == 'draft'`,
   message: 'Cannot publish draft records',
   events: ['update'],  // ✅ Only validate on update
 }
@@ -301,8 +350,8 @@ Lower numbers execute **first**.
 {
   name: 'no_backdate',
   type: 'script',
-  condition: 'created_at < TODAY()',
-  message: 'Cannot create records with past dates',
+  condition: P`record.effective_date < today()`,
+  message: 'Effective date cannot be in the past',
   events: ['insert'],
 }
 ```
@@ -313,14 +362,14 @@ Lower numbers execute **first**.
 {
   name: 'high_value_approval',
   type: 'conditional',
-  condition: 'amount > 10000',
-  validations: [
-    {
-      type: 'script',
-      condition: 'approved_by IS NULL',
-      message: 'High-value transactions require approval',
-    },
-  ],
+  when: P`record.amount > 10000`,
+  message: 'High-value transaction validation',
+  then: {
+    name: 'approval_required',
+    type: 'script',
+    condition: P`isBlank(record.approved_by)`,
+    message: 'High-value transactions require approval',
+  },
 }
 ```
 
@@ -331,7 +380,7 @@ Lower numbers execute **first**.
   name: 'email_domain',
   type: 'format',
   field: 'email',
-  pattern: '^[a-zA-Z0-9._%+-]+@(company\\.com|partner\\.com)$',
+  regex: '^[a-zA-Z0-9._%+-]+@(company\\.com|partner\\.com)$',
   message: 'Email must be from company.com or partner.com',
 }
 ```
@@ -343,21 +392,19 @@ Lower numbers execute **first**.
   name: 'phone_format',
   type: 'format',
   field: 'phone',
-  pattern: '^\\+?[1-9]\\d{1,14}$',  // E.164 format
+  regex: '^\\+?[1-9]\\d{1,14}$',  // E.164 format
   message: 'Phone must be in international format (+1234567890)',
 }
 ```
 
-### Composite Unique (Tenant + Email)
+### Composite Uniqueness (Tenant + Email)
+
+Not a validation — declare a unique index on the object:
 
 ```typescript
-{
-  name: 'tenant_email_unique',
-  type: 'unique',
-  fields: ['tenant_id', 'email'],
-  caseSensitive: false,
-  message: 'Email already exists in this tenant',
-}
+indexes: [
+  { fields: ['tenant_id', 'email'], unique: true },
+]
 ```
 
 ## Best Practices
@@ -367,16 +414,15 @@ Lower numbers execute **first**.
 3. **Events scope** — Only validate on relevant operations to avoid overhead
 4. **Priority order** — System validations first (0-99), app validations second (100-999), user validations last (1000+)
 5. **Clear error messages** — Tell users exactly what's wrong and how to fix it
-6. **Async validation debounce** — Use debounce to reduce API calls on fast typing
-7. **State machine for workflows** — Use state_machine instead of complex script logic
-8. **Unique constraints** — Always use unique validation, not script-based checks
+6. **State machine for workflows** — Use state_machine instead of complex script logic
+7. **Uniqueness is an index concern** — Declare `indexes: [{ fields, unique: true }]`, never a script-based existence check
+8. **External checks are hooks** — Call APIs from `beforeInsert`/`beforeUpdate` hooks, not validations
 9. **Cross-field for comparisons** — More efficient than script validation
 10. **Test thoroughly** — Validate edge cases, nulls, empty strings
 
 ## Performance Considerations
 
 - **Script validations are expensive** — Use sparingly, prefer declarative rules
-- **Async validations add latency** — Use debounce and appropriate timeouts
 - **Priority affects order** — Lower priority = runs first
-- **Unique checks hit database** — Index the unique fields for performance
+- **Unique indexes are enforced by the database** — no per-write query cost beyond index maintenance
 - **State machine is optimized** — Better than complex conditional logic

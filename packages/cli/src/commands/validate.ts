@@ -10,6 +10,7 @@ import { ObjectStackDefinitionSchema, normalizeStackInput, type ConversionNotice
 import { loadConfig } from '../utils/config.js';
 import { validateStackExpressions } from '@objectstack/lint';
 import { validateListViewMode } from '@objectstack/lint';
+import { validateViewContainers } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
@@ -142,6 +143,34 @@ export default class Validate extends Command {
         console.log('');
         printError(`List-view mode check failed (${listViewErrors.length} issue${listViewErrors.length > 1 ? 's' : ''})`);
         for (const f of listViewErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+        }
+        this.exit(1);
+      }
+
+      // 2d. View container shape — a flat list-view object in `views: []`
+      //     parses to an EMPTY container (ViewSchema strips unknown keys), so
+      //     the schema step passes while zero views register and the Console
+      //     silently renders nothing. Checked on `normalized` (PRE-parse) —
+      //     `result.data` has already had the flat keys stripped.
+      if (!flags.json) printStep('Checking view container shape...');
+      const viewContainerFindings = validateViewContainers(normalized as Record<string, unknown>);
+      const viewContainerErrors = viewContainerFindings.filter((f) => f.severity === 'error');
+
+      if (viewContainerErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({
+            valid: false,
+            errors: viewContainerErrors,
+            duration: timer.elapsed(),
+          }, null, 2));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`View container check failed (${viewContainerErrors.length} issue${viewContainerErrors.length > 1 ? 's' : ''})`);
+        for (const f of viewContainerErrors.slice(0, 50)) {
           console.log(`  • ${f.where}: ${f.message}`);
           console.log(chalk.dim(`      ${f.hint}`));
           console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));

@@ -1154,7 +1154,7 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 
 | Command | What it does |
 |:--------|:-------------|
-| `os data seed` | Run all `defineDataset()` entries scoped to current env |
+| `os data seed` | Run all `defineSeed()` entries scoped to current env |
 | `os data export` / `import` | Bulk import / export records as JSONL |
 | `os diff` | Show schema diff between local and target environment |
 | `os meta apply` | Apply metadata + data migrations to the target |

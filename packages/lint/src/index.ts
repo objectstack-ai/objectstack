@@ -29,6 +29,9 @@ export type { ExprIssue } from './validate-expressions.js';
 export { validateListViewMode, LIST_VIEW_FILTERS_IN_VIEWS_MODE } from './validate-list-view-mode.js';
 export type { ListViewModeFinding, ListViewModeSeverity } from './validate-list-view-mode.js';
 
+export { validateViewContainers, VIEW_CONTAINER_SHAPE } from './validate-view-containers.js';
+export type { ViewContainerFinding, ViewContainerSeverity } from './validate-view-containers.js';
+
 export {
   validateResponsiveStyles,
   STYLE_NODE_MISSING_ID,

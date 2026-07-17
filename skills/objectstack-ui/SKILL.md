@@ -186,6 +186,35 @@ back-compat alias. Load **objectstack-formula** when authoring non-trivial CEL.
 
 ## Configuring a List View
 
+### The `defineView` container (`*.view.ts` file shape)
+
+Views ship **inside a `defineView` container** — one per object, aggregating
+the default `list`, named `listViews`, and `formViews`. The loader expands it
+into `<object>.<key>` view items that power the view switcher.
+
+```typescript
+import { defineView } from '@objectstack/spec';
+
+const data = { provider: 'object' as const, object: 'support_case' };
+
+export const CaseViews = defineView({
+  list: { label: 'All Cases', type: 'grid', data, columns: ['subject', 'status'] },
+  listViews: {
+    open: { label: 'Open', type: 'grid', data, columns: ['subject', 'status'],
+            filter: [{ field: 'status', operator: 'equals', value: 'open' }] },
+  },
+  formViews: {
+    edit: { type: 'simple', data, sections: [{ label: 'Case', fields: ['subject', 'status'] }] },
+  },
+});
+```
+
+> **Never export a bare flat view object** (`{ name, label, type, columns }`
+> at top level). It is not a valid view container — nothing registers and no
+> view appears in the switcher. Every view lives under `list` / `listViews` /
+> `formViews`. Full canonical reference:
+> `examples/app-showcase/src/ui/views/task.view.ts`.
+
 ### Data Source (`data`)
 
 Every view connects to data via one of three providers:
@@ -221,7 +250,7 @@ columns: [
   { field: 'assigned_to', label: 'Owner' },
   {
     field: 'due_date',
-    summary: { function: 'min' },
+    summary: 'min',       // footer aggregation — plain enum value, not an object
     sortable: true,
   },
 ]
@@ -328,33 +357,47 @@ sort: [
 
 ## Configuring Kanban Views
 
+Board settings nest under `kanban:` (`KanbanConfigSchema`) — there is **no
+top-level `groupBy`**. The top-level `columns` is required on every list view
+(including kanban), while `kanban.columns` picks the fields shown on each card.
+
 ```typescript
 {
   type: 'kanban',
-  data: { provider: 'object', object: 'support_case' },
-  columns: ['subject', 'priority', 'assigned_to'],
-  groupBy: 'status',
+  data: { provider: 'object', object: 'project_task' },
+  columns: ['title', 'assignee', 'priority'],       // required on every list view
+  kanban: {
+    groupByField: 'status',                // one board column per select option
+    summarizeField: 'estimate_hours',      // optional — summed at the top of each column
+    columns: ['title', 'assignee', 'priority'],   // fields shown on each card
+  },
   sort: 'priority desc',
 }
 ```
 
-> **Key rule:** The `groupBy` field should be a `select` type with well-defined
-> options. Each option becomes a column on the board.
+> **Key rule:** `kanban.groupByField` should be a `select` type with
+> well-defined options. Each option becomes a column on the board.
 
 ---
 
 ## Configuring Gantt Views
+
+Timeline settings nest under `gantt:` (`GanttConfigSchema`);
+`startDateField` / `endDateField` / `titleField` are required in it.
 
 ```typescript
 {
   type: 'gantt',
   data: { provider: 'object', object: 'project_task' },
   columns: ['name', 'assigned_to', 'status'],   // left-pane tree columns
-  startField: 'start_date',                       // task bar start
-  endField: 'end_date',                           // task bar end
-  progressField: 'progress',                      // 0–100 fill
-  dependencyField: 'depends_on',                  // FS dependency arrows
-  parentField: 'parent',                          // builds the summary-bar tree
+  gantt: {
+    startDateField: 'start_date',               // task bar start
+    endDateField: 'end_date',                   // task bar end
+    titleField: 'name',                         // bar label
+    progressField: 'progress',                  // 0–100 fill
+    dependenciesField: 'depends_on',            // FS dependency arrows
+    parentField: 'parent',                      // builds the summary-bar tree
+  },
 }
 ```
 
@@ -366,20 +409,23 @@ freely unless `locked: true`.
 
 `timeSegments` splits each day column into ordered **bands** (e.g. 白班 / 夜班)
 for shift-based scheduling. It is an **ObjectUI display extension**, *not* part
-of the upstream `GanttConfigSchema` in `@objectstack/spec` — it lives only in
-the gantt view config and is read by the ObjectUI gantt runtime.
+of the upstream `GanttConfigSchema` in `@objectstack/spec` — it lives inside
+the nested `gantt: {}` view config and is read by the ObjectUI gantt runtime.
 
 ```typescript
 {
   type: 'gantt',
   data: { provider: 'object', object: 'work_order' },
-  startField: 'start', endField: 'end',
-  timeSegments: {
-    dayStart: '08:00',                 // clock time the 排班日 begins (default '00:00')
-    bands: [
-      { key: 'day',   label: '白班', start: '08:00', end: '20:00' },
-      { key: 'night', label: '夜班', start: '20:00', end: '08:00', color: '#6366f1' },
-    ],
+  columns: ['name', 'assignee'],
+  gantt: {
+    startDateField: 'start', endDateField: 'end', titleField: 'name',
+    timeSegments: {
+      dayStart: '08:00',               // clock time the 排班日 begins (default '00:00')
+      bands: [
+        { key: 'day',   label: '白班', start: '08:00', end: '20:00' },
+        { key: 'night', label: '夜班', start: '20:00', end: '08:00', color: '#6366f1' },
+      ],
+    },
   },
 }
 ```

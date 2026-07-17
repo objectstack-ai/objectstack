@@ -46,7 +46,7 @@ ObjectStack ships **9 domain-specific skills**. Each is self-contained — an AI
 | # | Skill | Domain | Path | What it covers |
 | :--- | :--- | :--- | :--- | :--- |
 | 1 | [Platform](#platform) | `platform` | `skills/objectstack-platform/` | Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, adapters, scaffolding), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready` and `data:*`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel). |
-| 2 | [Data](#data) | `data` | `skills/objectstack-data/` | Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security — and the seed datasets (`defineDataset()`) that load fixtures and reference data alongside them. |
+| 2 | [Data](#data) | `data` | `skills/objectstack-data/` | Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security — and the seeds (`defineSeed()`) that load fixtures and reference data alongside them. |
 | 3 | [Query](#query) | `query` | `skills/objectstack-query/` | Construct ObjectQL queries — filters, sorting, pagination, aggregation, joins/expansion, window functions, and full-text search. |
 | 4 | [UI](#ui) | `ui` | `skills/objectstack-ui/` | Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`). |
 | 5 | [Automation](#automation) | `automation` | `skills/objectstack-automation/` | Design ObjectStack automation — Flows (visual logic), Workflows (declarative rules), Triggers, Approvals, scheduled jobs, and webhooks. |
@@ -75,13 +75,13 @@ Do not use for data schema design (see objectstack-data) or query patterns (see 
 
 **Domain** `data` · **Path** `skills/objectstack-data/`
 
-Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security — and the seed datasets (`defineDataset()`) that load fixtures and reference data alongside them.
+Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security — and the seeds (`defineSeed()`) that load fixtures and reference data alongside them.
 
 Use when the user is creating or modifying `*.object.ts` / `*.seed.ts` files, picking field types, modelling relationships, writing `beforeInsert`/`afterUpdate` hooks, configuring per-object access control, or authoring bootstrap / demo data. Use for `visibleWhen` / `readonlyWhen` / `requiredWhen` rules that belong on fields.
 
 Do not use for querying data (see objectstack-query) or for plugin / kernel hooks (see objectstack-platform). CEL expressions in formulas / validations / sharing rules / dynamic seed values: load objectstack-formula alongside.
 
-**Tags:** `object`, `field`, `validation`, `index`, `relationship`, `hook`, `schema`, `permission`, `rls`, `security`, `seed`, `dataset`, `fixture`
+**Tags:** `object`, `field`, `validation`, `index`, `relationship`, `hook`, `schema`, `permission`, `rls`, `security`, `seed`, `fixture`
 
 ---
 

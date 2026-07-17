@@ -1037,7 +1037,11 @@ export const ViewSchema = lazySchema(() => z.object({
 /**
  * Type-safe factory for creating view definitions.
  *
- * Validates the config at creation time using Zod `.parse()`.
+ * Validates the config at creation time using Zod `.parse()`, and rejects a
+ * container that defines no views: `ViewSchema` strips unknown top-level keys,
+ * so a *flat* list view (`{ name, label, type, columns, ... }`) would parse to
+ * an empty container — zero views register and the Console silently renders
+ * nothing. Failing here surfaces that authoring mistake at build time.
  *
  * @example
  * ```ts
@@ -1055,7 +1059,21 @@ export const ViewSchema = lazySchema(() => z.object({
  * ```
  */
 export function defineView(config: z.input<typeof ViewSchema>): View {
-  return ViewSchema.parse(config);
+  const parsed = ViewSchema.parse(config);
+  const viewCount =
+    (parsed.list ? 1 : 0) +
+    (parsed.form ? 1 : 0) +
+    Object.keys(parsed.listViews ?? {}).length +
+    Object.keys(parsed.formViews ?? {}).length;
+  if (viewCount === 0) {
+    throw new Error(
+      'defineView: the container defines no views — nothing registers and no view appears in the Console. '
+      + 'Declare at least one of `list`, `form`, `listViews`, `formViews`. '
+      + 'If you passed a flat list view ({ name, label, type, columns, ... }), wrap it: '
+      + 'defineView({ list: { type, data, columns, ... } }).'
+    );
+  }
+  return parsed;
 }
 
 // ───────────────────────────────────────────────────────────────────────────

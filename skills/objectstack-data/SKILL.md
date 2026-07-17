@@ -4,7 +4,7 @@ description: >
   Design ObjectStack data schemas — objects, fields, field conditional
   rules, relationships, validations, indexes, lifecycle hooks, permissions,
   row-level security —
-  and the seed datasets (`defineDataset()`) that load fixtures and
+  and the seeds (`defineSeed()`) that load fixtures and
   reference data alongside them. Use when the user is creating or
   modifying `*.object.ts` / `*.seed.ts` files, picking field types,
   modelling relationships, writing `beforeInsert`/`afterUpdate` hooks,
@@ -20,7 +20,7 @@ metadata:
   author: objectstack-ai
   version: "4.2"
   domain: data
-  tags: object, field, validation, index, relationship, hook, schema, permission, rls, security, seed, dataset, fixture
+  tags: object, field, validation, index, relationship, hook, schema, permission, rls, security, seed, fixture
 ---
 
 # Data Modeling — ObjectStack Data Protocol
@@ -47,7 +47,7 @@ relationship modelling, validation rules, index strategy, and lifecycle hooks.
 - You are creating a **new business object** (e.g., `account`, `project_task`)
 - You need to **choose the right field type** from the 48 supported types
 - You are configuring **lookup / master-detail relationships** between objects
-- You need to add **validation rules** (uniqueness, cross-field, state machine, etc.)
+- You need to add **validation rules** (cross-field, state machine, format, etc.)
 - You are optimising **query performance with indexes**
 - You are extending an existing object with new fields or capabilities
 - You need to **implement data lifecycle hooks** for business logic
@@ -348,12 +348,17 @@ See [rules/relationships.md](./rules/relationships.md) for detailed examples.
 > validation predicate — so `record.due_date == null` matches an omitted field the
 > same as an explicit `null` (#1871). (On update, the prior record supplies it.)
 
-Common validation types:
+The **complete** set of validation types (`ValidationRuleSchema` discriminators):
 - `script` — Formula expression (inverted logic)
-- `unique` — Composite uniqueness
 - `state_machine` — Legal state transitions
 - `format` — Regex or built-in format
 - `cross_field` — Compare values across fields
+- `json_schema` — Validate a JSON field against a JSON Schema
+- `conditional` — Apply a nested rule only `when` a predicate holds
+
+> **There is NO `unique` validation type** (removed from the spec in #1475).
+> Enforce uniqueness — including composite — with a **unique index**:
+> `indexes: [{ fields: ['tenant_id', 'email'], unique: true }]`.
 
 See [rules/validation.md](./rules/validation.md) for all types and examples.
 
@@ -760,23 +765,27 @@ export const SetupApp = defineApp({
 
 ---
 
-## Seed Data & Fixtures (`defineDataset()`)
+## Seed Data & Fixtures (`defineSeed()`)
 
 Object definition and its seed data live together — writing a `*.object.ts`
 almost always goes with a `*.seed.ts` (test fixtures, reference rows,
-bootstrap data). `defineDataset()` is type-safe: pass the object definition
+bootstrap data). `defineSeed()` is type-safe: pass the object definition
 and TypeScript checks every record's field keys at compile time.
+
+> The factory is named `defineSeed` — **not** `defineDataset`. The `dataset`
+> name is reserved for the unrelated ADR-0021 analytics semantic layer
+> (`defineDataset` from `@objectstack/spec/ui`), which is not a seed factory.
 
 ### Quick start
 
 ```typescript
 // src/data/index.ts
-import { defineDataset } from '@objectstack/spec/data';
+import { defineSeed } from '@objectstack/spec/data';
 import { Status } from '../objects/status.object';
 import { Category } from '../objects/category.object';
 
 // Reference data — every environment
-export const statusSeed = defineDataset(Status, {
+export const statusSeed = defineSeed(Status, {
   externalId: 'code',
   mode: 'upsert',
   records: [
@@ -786,7 +795,7 @@ export const statusSeed = defineDataset(Status, {
 });
 
 // Demo data — dev/test only
-export const categorySeed = defineDataset(Category, {
+export const categorySeed = defineSeed(Category, {
   externalId: 'slug',
   mode: 'upsert',
   env: ['dev', 'test'],
@@ -798,17 +807,17 @@ export const categorySeed = defineDataset(Category, {
 export const SeedData = [statusSeed, categorySeed];   // parents first
 ```
 
-### `Dataset` fields
+### `Seed` fields
 
 | Field | Default | Purpose |
 |:------|:--------|:--------|
 | `object` | derived | Auto-set from `objectDef.name` — never write manually |
 | `externalId` | `'name'` | Stable business key used for upsert / update lookup |
 | `mode` | `'upsert'` | Import strategy (see below) |
-| `env` | `['prod','dev','test']` | Environments where the dataset loads |
+| `env` | `['prod','dev','test']` | Environments where the seed loads |
 | `records` | — | `Partial<Record<keyof object.fields, unknown>>[]` |
 
-Full Zod shape: `node_modules/@objectstack/spec/src/data/dataset.zod.ts`.
+Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
 
 ### Import modes
 
@@ -835,7 +844,7 @@ across environments.
 ### Relationship references
 
 For `lookup` fields, supply the **natural key** of the target record (not
-its UUID). The seed runner resolves at load time. Order datasets so parents
+its UUID). The seed runner resolves at load time. Order seeds so parents
 appear before children in the exported array:
 
 > If a lookup value matches no natural key, the loader now falls back to
@@ -845,7 +854,7 @@ appear before children in the exported array:
 > didn't seed (e.g. a system user).
 
 ```typescript
-const contacts = defineDataset(Contact, {
+const contacts = defineSeed(Contact, {
   externalId: 'email',
   records: [{
     email: 'john@acme.example.com',
@@ -863,9 +872,10 @@ time-based or identity-derived seed values — `new Date()` ships the package
 author's clock to every customer and breaks build determinism.
 
 ```typescript
-import { defineDataset, cel } from '@objectstack/spec';
+import { defineSeed } from '@objectstack/spec/data';
+import { cel } from '@objectstack/spec';
 
-defineDataset(Opportunity, {
+defineSeed(Opportunity, {
   records: [{
     name:            'Acme Q3 Renewal',
     close_date:      cel`daysFromNow(45)`,
@@ -888,11 +898,11 @@ changes must produce byte-identical `dist/objectstack.json`. CEL + pinned
 
 | Practice | Why |
 |:---------|:----|
-| Always use `defineDataset()`, never `DatasetSchema.parse()` | Lose compile-time field checking otherwise |
+| Always use `defineSeed()`, never `SeedSchema.parse()` | Lose compile-time field checking otherwise |
 | Prefer natural keys (`code` / `email` / `slug`) | Portable across environments |
 | Default to `upsert` | Idempotent re-runs |
 | Scope demo data with `env: ['dev','test']` | Keep noise out of prod |
-| Order datasets parent → child in the exported array | References resolve at load time |
+| Order seeds parent → child in the exported array | References resolve at load time |
 | Use `replace` only on cache/lookup tables, with comments | Data-loss footgun |
 | One `{object}.seed.ts` file per object | Readability at scale |
 

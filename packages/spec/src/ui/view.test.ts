@@ -2043,6 +2043,19 @@ describe('defineView', () => {
       list: { type: 'invalid_type' as 'grid', columns: ['name'] },
     })).toThrow();
   });
+
+  it('should throw on an empty container (zero views)', () => {
+    expect(() => defineView({})).toThrow(/defines no views/);
+  });
+
+  it('should throw on a flat list view — stripped keys must not silently produce an empty container', () => {
+    expect(() => defineView({
+      name: 'all_tasks',
+      label: 'All Tasks',
+      type: 'grid',
+      columns: ['name', 'status'],
+    } as never)).toThrow(/defines no views/);
+  });
 });
 
 // ---------------------------------------------------------------------------

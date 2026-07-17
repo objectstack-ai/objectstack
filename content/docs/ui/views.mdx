@@ -7,31 +7,76 @@ description: Configure list views and form views — grid, kanban, calendar, gan
 
 A **View** defines how records of an Object are displayed to users. ObjectStack supports two main view categories: **List Views** for browsing records and **Form Views** for editing individual records.
 
+## The `defineView` Container
+
+Views are authored **per object** inside a `defineView({ ... })` container — the default `list`, named `listViews`, and named `formViews` all live in one document. The loader expands the container into independently addressable `<object>.<key>` view items that power the view switcher.
+
+```typescript
+// src/ui/views/task.view.ts
+import { defineView } from '@objectstack/spec';
+
+const data = { provider: 'object' as const, object: 'task' };
+
+export const TaskViews = defineView({
+  // Default list shown when the object is opened
+  list: {
+    label: 'All Tasks',
+    type: 'grid',
+    data,
+    columns: [
+      { field: 'title', width: 300 },
+      { field: 'status', width: 120 },
+      { field: 'assignee', width: 200 },
+      { field: 'due_date', width: 150 },
+    ],
+    sort: [{ field: 'created_at', order: 'desc' }],
+  },
+
+  // Named saved views — entries in the view switcher
+  listViews: {
+    urgent: {
+      label: 'Urgent',
+      type: 'grid',
+      data,
+      columns: [{ field: 'title' }, { field: 'assignee' }, { field: 'due_date' }],
+      filter: [{ field: 'priority', operator: 'equals', value: 'urgent' }],
+    },
+  },
+
+  // Named form views
+  formViews: {
+    edit: {
+      type: 'simple',
+      data,
+      sections: [
+        { label: 'Task', columns: 2, fields: ['title', 'status', 'assignee', 'due_date'] },
+      ],
+    },
+  },
+});
+```
+
+Register the container in your stack config:
+
+```typescript
+// objectstack.config.ts
+export default defineStack({
+  // ...
+  views: [TaskViews],
+});
+```
+
+<Callout type="warn">
+  **Do not author a flat view object** — `{ name: 'all_tasks', label: 'All
+  Tasks', type: 'grid', columns: [...] }` at the top level is *not* a view
+  container. Nothing registers from it and no view appears in the switcher.
+  Every view must live under `list`, `listViews`, or `formViews`, and each
+  view binds its object via `data: { provider: 'object', object: '...' }`.
+</Callout>
+
 ## List View
 
 A List View controls how a collection of records is presented. It supports multiple visualization types.
-
-### Basic Structure
-
-```typescript
-const taskListView = {
-  name: 'all_tasks',
-  label: 'All Tasks',
-  type: 'grid',
-  data: {
-    provider: 'object',
-    object: 'task',
-  },
-  columns: [
-    { field: 'title', label: 'Title', width: 300 },
-    { field: 'status', label: 'Status', width: 120 },
-    { field: 'assignee', label: 'Assignee', width: 200 },
-    { field: 'due_date', label: 'Due Date', width: 150 },
-  ],
-  filter: [],
-  sort: [{ field: 'created_at', order: 'desc' }],
-};
-```
 
 ### View Types
 
@@ -51,15 +96,13 @@ const taskListView = {
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `name` | `string` | ✅ | Machine name (`snake_case`) |
-| `label` | `string` | ✅ | Display label |
+| `columns` | `string[] \| ListColumn[]` | ✅ | Column definitions (required on **every** list view, including kanban/calendar/…) |
+| `label` | `string` | optional | Display label shown in the view switcher |
 | `type` | `enum` | optional | View type (see table above; default `'grid'`) |
 | `data` | `ViewData` | optional | Data source configuration (defaults to the `object` provider) |
-| `columns` | `ListColumn[]` | optional | Column definitions |
-| `filter` | `array` | optional | Filter criteria |
+| `filter` | `array` | optional | Base filter criteria |
 | `sort` | `array` | optional | Sort configuration |
 | `searchableFields` | `string[]` | optional | Fields included in search |
-| `filterableFields` | `string[]` | optional | Fields available for filtering |
 | `grouping` | `object` | optional | Row grouping configuration |
 | `pagination` | `object` | optional | Pagination settings |
 | `selection` | `object` | optional | Row selection mode |
@@ -68,6 +111,10 @@ const taskListView = {
 | `bulkActions` | `array` | optional | Bulk selection actions, by action name — see [Actions](/docs/ui/actions) |
 | `inlineEdit` | `boolean` | optional | Enable inline editing |
 | `exportOptions` | `string[]` | optional | Enabled export formats (`csv`, `xlsx`, `pdf`, `json`) |
+
+The view's machine name is its **key** in the container (`listViews.urgent` on
+object `task` becomes `task.urgent`); the default `list` claims `task.default`.
+List and form views share that one namespace — don't reuse a key.
 
 ### Column Configuration
 
@@ -101,6 +148,7 @@ columns: [
 | `pinned` | `'left' \| 'right'` | Freeze column position |
 | `sortable` | `boolean` | Allow column sorting |
 | `resizable` | `boolean` | Allow column resize |
+| `wrap` | `boolean` | Allow text wrapping |
 | `summary` | `enum` | Footer aggregation: `none`, `count`, `count_empty`, `count_filled`, `count_unique`, `percent_empty`, `percent_filled`, `sum`, `avg`, `min`, `max` |
 | `align` | `'left' \| 'center' \| 'right'` | Text alignment |
 | `link` | `boolean` | Cell functions as the primary navigation link |
@@ -128,10 +176,15 @@ data: {
 
 ### Type-Specific Configuration
 
+Each non-grid visualization reads its settings from a **nested config block
+named after the type** (`kanban`, `calendar`, `gantt`, `gallery`, `timeline`,
+`chart`, `tree`) — not from top-level keys.
+
 #### Kanban
 
 ```typescript
 type: 'kanban',
+columns: ['title', 'assignee', 'priority'],   // still required at the top level
 kanban: {
   groupByField: 'status',     // Field to group columns by (usually status/select)
   summarizeField: 'amount',   // Optional numeric field summed at top of each column
@@ -166,36 +219,38 @@ gantt: {
 
 ## Form View
 
-A Form View defines how a single record is displayed for viewing or editing.
+A Form View defines how a single record is displayed for viewing or editing. Form views live under `formViews` in the same `defineView` container as the object's list views.
 
 ### Basic Structure
 
 ```typescript
-const taskFormView = {
-  type: 'simple',
-  data: { provider: 'object', object: 'task' },
-  sections: [
-    {
-      label: 'Basic Information',
-      columns: 2,
-      fields: [
-        { field: 'title', colSpan: 2 },
-        { field: 'status' },
-        { field: 'priority' },
-        { field: 'assignee' },
-        { field: 'due_date' },
-      ],
-    },
-    {
-      label: 'Details',
-      collapsible: true,
-      columns: 1,
-      fields: [
-        { field: 'description', colSpan: 1 },
-      ],
-    },
-  ],
-};
+formViews: {
+  edit: {
+    type: 'simple',
+    data: { provider: 'object', object: 'task' },
+    sections: [
+      {
+        label: 'Basic Information',
+        columns: 2,
+        fields: [
+          { field: 'title', span: 'full' },
+          { field: 'status' },
+          { field: 'priority' },
+          { field: 'assignee' },
+          { field: 'due_date' },
+        ],
+      },
+      {
+        label: 'Details',
+        collapsible: true,
+        columns: 1,
+        fields: [
+          { field: 'description' },
+        ],
+      },
+    ],
+  },
+},
 ```
 
 ### Form Types
@@ -213,11 +268,13 @@ const taskFormView = {
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
+| `name` | `string` | Stable identifier (snake_case) for i18n lookup |
 | `label` | `string` | Section header |
 | `columns` | `1-4` | Grid column count |
 | `collapsible` | `boolean` | Can section be collapsed |
 | `collapsed` | `boolean` | Initially collapsed |
-| `fields` | `FormField[]` | Fields in the section |
+| `visibleWhen` | `string` | CEL predicate — section shown only when TRUE |
+| `fields` | `(string \| FormField)[]` | Fields in the section |
 
 ### Form Field Configuration
 
@@ -231,9 +288,8 @@ fields: [
     placeholder: 'Enter title',
     helpText: 'A brief description of the task',
     required: true,              // Override required
-    colSpan: 2,                  // Span 2 grid columns
-    widget: 'custom-editor',     // Custom widget component
-    visibleWhen: "status != 'cancelled'",
+    span: 'full',                // Take the whole row at any column count
+    visibleWhen: "record.status != 'cancelled'",
   },
 ]
 ```
@@ -247,71 +303,81 @@ fields: [
 | `readonly` | `boolean` | Read-only override |
 | `required` | `boolean` | Required override |
 | `hidden` | `boolean` | Hidden override |
-| `colSpan` | `1-4` | Column span in grid layout |
+| `span` | `'auto' \| 'full'` | Relative width — `'full'` takes the whole row at any column count (preferred) |
+| `colSpan` | `1-4` | Legacy absolute column span — prefer `span` |
 | `widget` | `string` | Custom widget/component name |
 | `dependsOn` | `string` | Parent field for cascading |
-| `visibleWhen` | `string` | Visibility condition expression (was `visibleOn`, ADR-0089) |
-
-### Default Sort for Related Lists
-
-```typescript
-// Sort related records
-defaultSort: [
-  { field: 'created_at', order: 'desc' },
-]
-```
+| `visibleWhen` | `string` | Visibility predicate (CEL); runtime forms bind `record` + `current_user` (was `visibleOn`, ADR-0089) |
 
 ## Complete Example
 
-```typescript
-// List view: Kanban board for tasks
-const taskKanban = {
-  name: 'task_board',
-  label: 'Task Board',
-  type: 'kanban',
-  data: { provider: 'object', object: 'task' },
-  kanban: {
-    groupByField: 'status',
-    columns: ['title', 'assignee', 'priority', 'due_date'],
-  },
-  columns: [
-    { field: 'title', label: 'Title' },
-    { field: 'assignee', label: 'Assignee' },
-    { field: 'priority', label: 'Priority' },
-    { field: 'due_date', label: 'Due Date' },
-  ],
-  sort: [{ field: 'priority', order: 'desc' }],
-};
+One container covering a default grid, a kanban saved view, and a tabbed edit form — mirroring `examples/app-showcase/src/ui/views/task.view.ts`:
 
-// Form view: Task edit form
-const taskForm = {
-  type: 'tabbed',
-  data: { provider: 'object', object: 'task' },
-  sections: [
-    {
-      label: 'Details',
-      columns: 2,
-      fields: [
-        { field: 'title', colSpan: 2, required: true },
-        { field: 'status' },
-        { field: 'priority' },
-        { field: 'assignee' },
-        { field: 'due_date' },
-        { field: 'description', colSpan: 2 },
+```typescript
+import { defineView } from '@objectstack/spec';
+
+const data = { provider: 'object' as const, object: 'task' };
+
+export const TaskViews = defineView({
+  list: {
+    label: 'All Tasks',
+    type: 'grid',
+    data,
+    columns: [
+      { field: 'title', label: 'Title' },
+      { field: 'assignee', label: 'Assignee' },
+      { field: 'priority', label: 'Priority' },
+      { field: 'due_date', label: 'Due Date' },
+    ],
+    sort: [{ field: 'priority', order: 'desc' }],
+  },
+
+  listViews: {
+    board: {
+      label: 'Task Board',
+      type: 'kanban',
+      data,
+      columns: ['title', 'assignee', 'priority', 'due_date'],
+      kanban: {
+        groupByField: 'status',
+        columns: ['title', 'assignee', 'priority', 'due_date'],
+      },
+    },
+  },
+
+  formViews: {
+    edit: {
+      type: 'tabbed',
+      data,
+      sections: [
+        {
+          name: 'details',
+          label: 'Details',
+          columns: 2,
+          fields: [
+            { field: 'title', span: 'full', required: true },
+            { field: 'status' },
+            { field: 'priority' },
+            { field: 'assignee' },
+            { field: 'due_date' },
+            { field: 'description', span: 'full' },
+          ],
+        },
+        {
+          name: 'system',
+          label: 'System',
+          collapsible: true,
+          collapsed: true,
+          columns: 2,
+          fields: [
+            { field: 'created_at', readonly: true },
+            { field: 'updated_at', readonly: true },
+          ],
+        },
       ],
     },
-    {
-      label: 'System',
-      collapsible: true,
-      collapsed: true,
-      columns: 2,
-      fields: [
-        { field: 'created_at', readonly: true },
-        { field: 'updated_at', readonly: true },
-      ],
-    },
-  ],
-};
+  },
+});
 ```
 
 ## Related

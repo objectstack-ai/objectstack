@@ -122,13 +122,10 @@ export default ObjectSchema.create({
     role: { type: 'text' },
     hours_allocated: { type: 'number' },
   },
-  validations: [
-    {
-      name: 'unique_assignment',
-      type: 'unique',
-      fields: ['project_id', 'employee_id'],
-      message: 'Employee already assigned to this project',
-    },
+  indexes: [
+    // One assignment per (project, employee) pair — uniqueness is an index
+    // concern; there is no 'unique' validation type.
+    { fields: ['project_id', 'employee_id'], unique: true },
   ],
 });
 ```
