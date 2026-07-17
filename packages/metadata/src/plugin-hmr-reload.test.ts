@@ -90,6 +90,34 @@ describe('MetadataPlugin._reloadAndAnnounce — fires metadata:reloaded after re
         ]);
     });
 
+    it('announces ONCE per reload, not once per ingested item (#3112)', async () => {
+        // `register()` announces to subscribe() watchers by default. Artifact
+        // ingest deliberately opts out (`{ notify: false }`) because this hook
+        // is the announcement for the whole batch. If someone drops that
+        // opt-out, every reload fans N per-item events into every watcher —
+        // each one racing the ingest that is still landing — and boot-time
+        // registration floods subscribers that have nothing to refresh yet.
+        const plugin = new MetadataPlugin({
+            watch: false,
+            config: { bootstrap: 'eager' },
+            environmentId: 'proj_test',
+        });
+        const mgr = (plugin as any).manager as NodeMetadataManager;
+        const ctx = fakeCtx();
+        const file = writeArtifact('sweep3');
+
+        const perItemEvents: unknown[] = [];
+        mgr.subscribe('flow', (evt) => perItemEvents.push(evt));
+
+        await (plugin as any)._reloadAndAnnounce(ctx, { path: file, fetchTimeoutMs: undefined }, [file]);
+
+        expect(perItemEvents).toEqual([]);
+        // The single batch-level announcement is the contract, and it carries
+        // the bodies consumers need to re-ingest.
+        expect(ctx.trigger).toHaveBeenCalledTimes(1);
+        expect(await mgr.get('flow', 'sweep3')).toBeDefined();
+    });
+
     it('still announces even if a subscriber throws (reload must not break)', async () => {
         const plugin = new MetadataPlugin({
             watch: false,

@@ -402,13 +402,15 @@ export class ObjectQLPlugin implements Plugin {
         await this.resyncAuthoredActions(ctx);
         // 15.1 third-party eval: an object added while `os dev` runs was
         // invisible until a manual restart. Two gaps compounded:
-        //   1. MetadataPlugin's artifact reload calls `manager.register()`,
-        //      which does NOT fire `subscribe()` watchers — so the bridge in
-        //      `subscribeToMetadataEvents` never saw the new object and the
-        //      SchemaRegistry never learned it ("Object … is not registered").
-        //      Ingest the reloaded object definitions straight off the
-        //      `metadata:reloaded` payload (mirroring the subscribe handler's
-        //      registerObject call, provenance included).
+        //   1. MetadataPlugin's artifact reload ingests through
+        //      `manager.register(…, { notify: false })` — one announcement per
+        //      artifact, not per item (#3112) — so the bridge in
+        //      `subscribeToMetadataEvents` never sees the new object and the
+        //      SchemaRegistry never learns it ("Object … is not registered").
+        //      This hook IS that announcement: ingest the reloaded object
+        //      definitions straight off the `metadata:reloaded` payload
+        //      (mirroring the subscribe handler's registerObject call,
+        //      provenance included).
         //   2. Tables were only ever created by the boot-time sync — re-run
         //      the idempotent schema sync after each reload so new objects
         //      get their DDL immediately. Honors the same opt-out as boot
@@ -1056,6 +1058,15 @@ export class ObjectQLPlugin implements Plugin {
    *
    * Runs after both restoreMetadataFromDb() and syncRegisteredSchemas() to
    * catch all objects in the SchemaRegistry regardless of their source.
+   *
+   * Registers with `{ notify: false }`: this bridge copies objects OUT of the
+   * SchemaRegistry, so announcing would feed our own `subscribe('object')`
+   * handler right back into the registry the definitions came from. That is
+   * not merely redundant — the handler re-registers under
+   * `_packageId ?? 'metadata-service'`, so every bridged object whose body
+   * carries no `_packageId` would have its true package provenance
+   * overwritten with 'metadata-service'. Nothing is stale either: the
+   * registry is the source here, and it already holds what we just copied.
    */
   private async bridgeObjectsToMetadataService(ctx: PluginContext): Promise<void> {
     try {
@@ -1079,7 +1090,7 @@ export class ObjectQLPlugin implements Plugin {
           const existing = await metadataService.getObject(obj.name);
           if (!existing) {
             // Register object that exists in SchemaRegistry but not in metadata service
-            await metadataService.register('object', obj.name, obj);
+            await metadataService.register('object', obj.name, obj, { notify: false });
             bridged++;
           }
         } catch (e: unknown) {

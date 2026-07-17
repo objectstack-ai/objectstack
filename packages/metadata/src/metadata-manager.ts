@@ -28,6 +28,7 @@ import type {
   MetadataImportOptions,
   MetadataImportResult,
   MetadataTypeInfo,
+  MetadataWriteOptions,
   IRealtimeService,
   RealtimeEventPayload,
   IPubSub,
@@ -276,8 +277,20 @@ export class MetadataManager implements IMetadataService {
    * Stores in-memory registry and persists to database-backed loaders only.
    * FilesystemLoader (protocol 'file:') is read-only for static metadata and
    * should not be written to during runtime registration.
+   *
+   * Announces the write to {@link subscribe} watchers as an `added` /
+   * `changed` {@link MetadataWatchEvent}, so consumers that cache metadata
+   * (ObjectQL's SchemaRegistry bridge, the HMR SSE stream) refresh instead of
+   * serving the pre-write definition until restart. Pass `{ notify: false }`
+   * for bulk ingest that announces by other means — read
+   * {@link MetadataWriteOptions.notify} before doing so.
    */
-  async register(type: string, name: string, data: unknown): Promise<void> {
+  async register(
+    type: string,
+    name: string,
+    data: unknown,
+    options?: MetadataWriteOptions,
+  ): Promise<void> {
     // Persistence write gate: when `persistence.writable` is explicitly false
     // we treat register() as read-only. Default `true` (or omitted) preserves
     // historical behavior.
@@ -289,6 +302,11 @@ export class MetadataManager implements IMetadataService {
       this.logger.warn(msg);
       return;
     }
+
+    // Captured before the write so the event distinguishes a first
+    // registration from an overwrite, matching the repo-watch path's
+    // 'added' vs 'changed' split.
+    const existed = this.registry.get(type)?.has(name) ?? false;
 
     if (!this.registry.has(type)) {
       this.registry.set(type, new Map());
@@ -326,6 +344,20 @@ export class MetadataManager implements IMetadataService {
         this.logger.warn(`Failed to publish metadata event`, { type, name, error });
       }
     }
+
+    // Announce last, once the write has landed in the registry and every
+    // writable loader — a subscriber that re-reads on the event must not
+    // race ahead of the data it is meant to observe.
+    if (options?.notify !== false) {
+      this.notifyWatchers(type, {
+        type: existed ? 'changed' : 'added',
+        metadataType: type,
+        name,
+        path: '',
+        data,
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   /**
@@ -336,6 +368,13 @@ export class MetadataManager implements IMetadataService {
    * Addendum) declared in `*.datasource.ts` and owned by source control. Writing
    * them through `register()` would persist them to `sys_metadata` and create
    * drift between the artefact and the DB; this method avoids that.
+   *
+   * Deliberately silent: it does NOT announce to {@link subscribe} watchers.
+   * This is a boot-time seeding primitive for artefacts that source control
+   * owns — callers that mutate metadata mid-run want {@link register}, which
+   * announces. If you add a mid-run caller here, announce the change yourself
+   * (as the artifact reload path does via `metadata:reloaded`) or its
+   * consumers will read the pre-write definition until restart.
    */
   registerInMemory(type: string, name: string, data: unknown): void {
     if (!this.registry.has(type)) {
@@ -415,8 +454,13 @@ export class MetadataManager implements IMetadataService {
   /**
    * Unregister/remove a metadata item by type and name.
    * Deletes from database-backed loaders only (same rationale as register()).
+   *
+   * Announces the removal to {@link subscribe} watchers as a `deleted`
+   * {@link MetadataWatchEvent} — the delete half of the {@link register}
+   * contract. Pass `{ notify: false }` only for teardown that announces by
+   * other means.
    */
-  async unregister(type: string, name: string): Promise<void> {
+  async unregister(type: string, name: string, options?: MetadataWriteOptions): Promise<void> {
     // Remove from in-memory registry
     const typeStore = this.registry.get(type);
     if (typeStore) {
@@ -457,6 +501,18 @@ export class MetadataManager implements IMetadataService {
       } catch (error) {
         this.logger.warn(`Failed to publish metadata event`, { type, name, error });
       }
+    }
+
+    // Announce last, once the removal has landed everywhere (see register()).
+    if (options?.notify !== false) {
+      this.notifyWatchers(type, {
+        type: 'deleted',
+        metadataType: type,
+        name,
+        path: '',
+        data: undefined,
+        timestamp: new Date().toISOString(),
+      });
     }
   }
 
@@ -892,20 +948,24 @@ export class MetadataManager implements IMetadataService {
   // ==========================================
 
   /**
-   * Register multiple metadata items in a single batch
+   * Register multiple metadata items in a single batch.
+   *
+   * Announces one event per item, like {@link register}. Pass
+   * `{ notify: false }` when the batch is boot-time ingest or when the caller
+   * announces the whole set once — see {@link MetadataWriteOptions.notify}.
    */
   async bulkRegister(
     items: Array<{ type: string; name: string; data: unknown }>,
-    options?: { continueOnError?: boolean; validate?: boolean }
+    options?: { continueOnError?: boolean; validate?: boolean } & MetadataWriteOptions
   ): Promise<MetadataBulkResult> {
-    const { continueOnError = false } = options ?? {};
+    const { continueOnError = false, notify } = options ?? {};
     let succeeded = 0;
     let failed = 0;
     const errors: Array<{ type: string; name: string; error: string }> = [];
 
     for (const item of items) {
       try {
-        await this.register(item.type, item.name, item.data);
+        await this.register(item.type, item.name, item.data, { notify });
         succeeded++;
       } catch (e) {
         failed++;
@@ -927,16 +987,21 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
-   * Unregister multiple metadata items in a single batch
+   * Unregister multiple metadata items in a single batch.
+   *
+   * Announces one `deleted` event per item, like {@link unregister}.
    */
-  async bulkUnregister(items: Array<{ type: string; name: string }>): Promise<MetadataBulkResult> {
+  async bulkUnregister(
+    items: Array<{ type: string; name: string }>,
+    options?: MetadataWriteOptions,
+  ): Promise<MetadataBulkResult> {
     let succeeded = 0;
     let failed = 0;
     const errors: Array<{ type: string; name: string; error: string }> = [];
 
     for (const item of items) {
       try {
-        await this.unregister(item.type, item.name);
+        await this.unregister(item.type, item.name, options);
         succeeded++;
       } catch (e) {
         failed++;

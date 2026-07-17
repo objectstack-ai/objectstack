@@ -124,18 +124,47 @@ export interface MetadataTypeInfo {
     actions?: Action[];
 }
 
+/**
+ * Options for the {@link IMetadataService} write path
+ * (`register` / `unregister` and their bulk forms).
+ */
+export interface MetadataWriteOptions {
+    /**
+     * Announce the write to `subscribe(type, …)` watchers. Default `true`.
+     *
+     * A write that changes what readers see must reach the consumers that
+     * cache it — ObjectQL's SchemaRegistry bridge, the HMR SSE stream —
+     * otherwise they serve the pre-write definition until the process
+     * restarts. Announcing is therefore the default, so a new call site is
+     * correct without knowing this contract exists.
+     *
+     * Pass `false` ONLY for bulk ingest whose subscribers either do not exist
+     * yet (boot-time registration) or re-read the whole set from a different
+     * signal — those paths MUST announce by other means, as the artifact
+     * reload path does via the `metadata:reloaded` hook. Silencing a write
+     * that nothing else announces is exactly how runtime consumers go stale.
+     */
+    notify?: boolean;
+}
+
 export interface IMetadataService {
     // ==========================================
     // Core CRUD Operations
     // ==========================================
 
     /**
-     * Register/save a metadata item by type
+     * Register/save a metadata item by type.
+     *
+     * Announces the write to `subscribe(type, …)` watchers unless
+     * `options.notify === false` — see {@link MetadataWriteOptions.notify}
+     * before silencing it.
+     *
      * @param type - Metadata type (e.g. 'object', 'view', 'flow')
      * @param name - Item name/identifier (snake_case)
      * @param data - The metadata definition to register
+     * @param options - Write options; `{ notify: false }` suppresses the watcher event
      */
-    register(type: string, name: string, data: unknown): Promise<void>;
+    register(type: string, name: string, data: unknown, options?: MetadataWriteOptions): Promise<void>;
 
     /**
      * Get a metadata item by type and name
@@ -153,11 +182,17 @@ export interface IMetadataService {
     list(type: string): Promise<unknown[]>;
 
     /**
-     * Unregister/remove a metadata item by type and name
+     * Unregister/remove a metadata item by type and name.
+     *
+     * Announces the removal to `subscribe(type, …)` watchers as a `deleted`
+     * event unless `options.notify === false` — see
+     * {@link MetadataWriteOptions.notify} before silencing it.
+     *
      * @param type - Metadata type
      * @param name - Item name/identifier
+     * @param options - Write options; `{ notify: false }` suppresses the watcher event
      */
-    unregister(type: string, name: string): Promise<void>;
+    unregister(type: string, name: string, options?: MetadataWriteOptions): Promise<void>;
 
     /**
      * Check if a metadata item exists
