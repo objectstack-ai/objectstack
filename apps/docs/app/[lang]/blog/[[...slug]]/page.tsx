@@ -27,7 +27,13 @@ export default async function BlogPage({
   
   // If no slug, show blog index
   if (!slug || slug.length === 0) {
-    const posts = blog.getPages();
+    // getPages() returns source order — newest first is the only order a blog
+    // index should ever be in. Undated posts sort last rather than jumping.
+    const posts = [...blog.getPages()].sort((a, b) => {
+      const at = new Date((a.data as unknown as BlogPostData).date ?? 0).getTime();
+      const bt = new Date((b.data as unknown as BlogPostData).date ?? 0).getTime();
+      return bt - at;
+    });
 
     return (
       <HomeLayout {...baseOptions()}>

@@ -1,0 +1,151 @@
+---
+title: "The Constraint Isn't Typing Speed. It's the Context Window."
+description: AI can write an enterprise app. Whether it can maintain one depends on whether the whole system fits in its head — which is an argument about the target format, not the model.
+author: ObjectStack Team
+date: 2026-07-17
+tags: [ai, architecture, metadata, positioning]
+---
+
+Point a coding agent at an empty repository and ask for an expense-approval
+system. You'll get one. It'll have a schema, some endpoints, a couple of React
+screens, a permissions check or two. It'll take an afternoon instead of a
+quarter, and it'll mostly work.
+
+Now come back in six weeks and ask for a change: expenses over $50k need a
+second approver from Finance.
+
+This is where the afternoon's magic runs out. The agent has to find every place
+that assumed one approver — the schema, the approval logic, the UI that renders
+the button, the permission check, the notification text, the test fixtures.
+Twelve files, maybe thirty. It reads what it can, misses what it can't, and
+ships something that type-checks and quietly does the wrong thing on the 5% path
+nobody clicks until quarter-end.
+
+The problem wasn't the model's intelligence. **The problem was that the system
+no longer fit in its head.**
+
+## The number that actually matters
+
+There's a temptation to sell AI-native development on volume: *N× less code, M×
+faster*. Those numbers are marketing until someone measures them, and the honest
+truth is that "how many lines would the traditional version have been?" is a
+counterfactual nobody can measure — because that version doesn't exist.
+
+Here's what *can* be measured. This is a real, working CRM in this repository —
+[`examples/app-crm`](https://github.com/objectstack-ai/framework/tree/main/examples/app-crm):
+accounts, contacts, leads, opportunities with line items, activities. Views,
+a dashboard, a lead-conversion flow, permission sets, an action, translations.
+
+| | |
+| :--- | :--- |
+| Files | 31 |
+| Lines | 1,792 |
+| Approximate tokens | ~16,000 |
+
+That's the **entire business system**. Not a module of it — the data model, the
+UI, the automation, the access rules, all of it. It fits in about 8% of a
+200k-token context window.
+
+The Todo example is ~14.5k tokens. The kitchen-sink showcase app — which
+deliberately exercises every metadata type in the protocol, 83 files of it — is
+~101k. Even that one, the maximalist case, leaves half a modern context window
+free for the actual work.
+
+Measure your own:
+
+```bash
+find src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l
+```
+
+## Why "fits in the window" is a different claim
+
+"Less code" is an efficiency argument. **"Fits in the window" is a capability
+argument** — it changes what the agent is able to do at all, not how fast it
+does it.
+
+An agent that can hold the whole system at once can answer questions that an
+agent working through a 40k-file repository fundamentally cannot:
+
+- *Which things break if I add a second approver?* — It can see every consumer
+  of the approval, because every consumer is in the same few thousand lines.
+- *Is this change safe?* — It can check the permission set against the view
+  against the flow, in one pass, without hoping its grep found everything.
+- *What did I miss?* — There's no "somewhere else in the codebase" for a
+  dependency to hide in.
+
+This is the line between an agent that autocompletes and an agent that
+maintains. Retrieval helps a model *find* things; it doesn't give it the whole
+dependency graph at once. And for the change above, the whole graph is exactly
+what you need.
+
+## How the system gets small
+
+It isn't compression, and it isn't a clever DSL. It's that most of an enterprise
+app was never business-specific to begin with.
+
+Pagination. Sort order. Optimistic concurrency. Foreign-key resolution. Form
+validation mirrored on the client and the server. Audit rows. Permission checks
+on every endpoint. The list view that needs a filter bar. **None of that is your
+business** — it's the same in every CRM ever written, and traditionally you (or
+your agent) rewrite it per app, per screen, because there's nowhere else to put
+it.
+
+Put it in the runtime instead, and what's left in the source is the part that's
+actually yours:
+
+```ts
+export const Opportunity = ObjectSchema.create({
+  name: 'crm_opportunity',
+  label: 'Opportunity',
+  sharingModel: 'private',
+  fields: {
+    name: Field.text({ label: 'Opportunity Name', required: true }),
+    account: Field.lookup('crm_account', { label: 'Account', required: true }),
+    amount: Field.currency({ label: 'Amount', min: 0 }),
+    probability: Field.percent({ label: 'Probability', defaultValue: 0.5 }),
+    expected_revenue: Field.formula({
+      label: 'Expected Revenue',
+      expression: cel`amount * probability`,
+    }),
+  },
+});
+```
+
+From that, the runtime derives the table, the REST endpoints, the list and form
+UI, and the MCP tools an agent can call. There is no generated code sitting in
+your repo that has to be regenerated, reviewed, and kept in sync — the surface
+*is* the definition, and the definition is what you read.
+
+This is what ObjectStack is for. Not "a framework that writes less code" —
+**a target format small enough that the thing writing it can also understand
+it.**
+
+## The catch, stated plainly
+
+A small system is only useful if it's a *correct* small system, and compactness
+cuts both ways: a one-line mistake in a few hundred lines of metadata is
+proportionally a much bigger mistake.
+
+Worse, the errors that matter here mostly don't crash. A predicate that
+references a field the wrong way doesn't throw — it evaluates to nothing, the
+button silently never renders, and you find out when a user asks why they can't
+resolve a ticket. TypeScript won't catch it: the predicate is a string, and the
+string is a perfectly valid string.
+
+That's why the gate exists. `os validate` runs the checks a type system
+structurally cannot: CEL predicates actually parse and reference fields that
+exist, widget bindings point at datasets that exist, every custom object
+declares its access baseline. It rejects at authoring time, with a located
+error the agent can read and fix in the same breath — which is the other half of
+why the host language is TypeScript. Not because it's fashionable, but because
+an agent's mistakes come back as *text it can act on*, seconds after it made
+them, instead of as a silent runtime failure six weeks later.
+
+Small enough to fit. Strict enough to be worth fitting. That's the whole bet.
+
+---
+
+**Try the measurement yourself:** `npm create objectstack@latest my-app`, build
+something with your agent, then count the lines. If the whole app doesn't fit in
+your agent's context window, we'd like to hear about it — that's a bug in the
+target format, and the format is [open](https://github.com/objectstack-ai/framework).
