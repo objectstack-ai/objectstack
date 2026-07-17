@@ -510,6 +510,14 @@ export class MetadataPlugin implements Plugin {
     /**
      * Parse raw artifact JSON (envelope or bare definition) and register all
      * metadata items into the MetadataManager.
+     *
+     * Registers with `{ notify: false }` — one announcement per artifact, not
+     * one per item. Both callers cover the whole set already: the boot load
+     * runs before consumers have cached anything, and the reload path
+     * (`_reloadAndAnnounce`) fires `metadata:reloaded` carrying the parsed
+     * artifact once the ingest is complete. Announcing here too would emit N
+     * duplicate events per reload, each racing the batch that is still
+     * landing.
      */
     private async _parseAndRegisterArtifact(ctx: PluginContext, raw: unknown, label: string): Promise<number> {
         const { EnvironmentArtifactSchema } = await import('@objectstack/spec/cloud');
@@ -568,7 +576,7 @@ export class MetadataPlugin implements Plugin {
                         packageVersion: manifestVersion,
                     });
                     await memLoader.save('view', viewObject, item);
-                    await this.manager.register('view', viewObject, item);
+                    await this.manager.register('view', viewObject, item, { notify: false });
                     totalRegistered++;
                     for (const vi of expandViewContainer(viewObject, item)) {
                         for (const w of vi._diagnostics?.warnings ?? []) {
@@ -579,7 +587,7 @@ export class MetadataPlugin implements Plugin {
                             packageVersion: manifestVersion,
                         });
                         await memLoader.save('view', vi.name, vi);
-                        await this.manager.register('view', vi.name, vi);
+                        await this.manager.register('view', vi.name, vi, { notify: false });
                         totalRegistered++;
                     }
                     continue;
@@ -614,7 +622,7 @@ export class MetadataPlugin implements Plugin {
                     packageVersion: manifestVersion,
                 });
                 await memLoader.save(metaType, name, item);
-                await this.manager.register(metaType, name, item);
+                await this.manager.register(metaType, name, item, { notify: false });
                 totalRegistered++;
             }
         }
@@ -738,7 +746,11 @@ export class MetadataPlugin implements Plugin {
                             applyProtection(meta, {
                                 packageId: this.options.packageId,
                             });
-                            await this.manager.register(entry.type, meta.name, item);
+                            // Silent: boot-time priming, before any consumer
+                            // has cached a definition to go stale. Post-boot
+                            // edits to these files reach watchers through the
+                            // FileSystemRepository attached by onEnable.
+                            await this.manager.register(entry.type, meta.name, item, { notify: false });
                         }
                     }
                     ctx.logger.info(`Loaded ${items.length} ${entry.type} from file system`);
