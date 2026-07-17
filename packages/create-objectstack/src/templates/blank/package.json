@@ -14,7 +14,10 @@
     "@objectstack/spec": "^15.0.0",
     "@objectstack/runtime": "^15.0.0",
     "@objectstack/driver-memory": "^15.0.0",
-    "@objectstack/plugin-hono-server": "^15.0.0"
+    "@objectstack/plugin-hono-server": "^15.0.0",
+    "@objectstack/connector-rest": "^15.0.0",
+    "@objectstack/connector-openapi": "^15.0.0",
+    "@objectstack/connector-mcp": "^15.0.0"
   },
   "devDependencies": {
     "@objectstack/cli": "^15.0.0",

@@ -101,6 +101,9 @@ filename-suffix magic — metadata exists in the app only if it is imported here
 
 ```typescript title="objectstack.config.ts"
 import { defineStack } from '@objectstack/spec';
+import { ConnectorRestPlugin } from '@objectstack/connector-rest';
+import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
+import { ConnectorMcpPlugin } from '@objectstack/connector-mcp';
 import * as objects from './src/objects/index.js';
 
 export default defineStack({
@@ -111,12 +114,25 @@ export default defineStack({
     type: 'app',
     name: 'My App',
   },
+  // `automation` runs flows and, per ADR-0097, materializes declarative
+  // `connectors:` entries at boot. The three generic executors below register
+  // their `rest` / `openapi` / `mcp` provider factories with it.
+  requires: ['automation'],
+  plugins: [
+    new ConnectorRestPlugin(),
+    new ConnectorOpenApiPlugin(),
+    new ConnectorMcpPlugin(),
+  ],
   objects: Object.values(objects),
 });
 ```
 
 The REST API needs no configuration — it is on by default for every object
-with `apiEnabled`.
+with `apiEnabled`. The `plugins:` array ships the three **generic connector
+executors**, so you can integrate an external REST / OpenAPI / MCP service as
+pure metadata: add a `connectors:` entry naming a `provider` and the
+`automation` capability materializes it into a live connector at boot — see
+[Automation → Flows](/docs/automation/flows).
 
 **`src/objects/note.object.ts`** is a complete data model — schema, validation,
 API surface, and searchability in one typed definition:
@@ -151,6 +167,7 @@ framework surface you install:
 | `@objectstack/runtime` | The kernel that interprets metadata at runtime. |
 | `@objectstack/driver-memory` | In-memory database driver for development. Swap for SQLite / Postgres / MongoDB in production — [no code changes](/docs/data-modeling/drivers). |
 | `@objectstack/plugin-hono-server` | The HTTP server that mounts the generated REST API. |
+| `@objectstack/connector-rest` · `-openapi` · `-mcp` | The three generic connector executors — register the `rest` / `openapi` / `mcp` provider factories so declarative `connectors:` entries materialize ([ADR-0097](/docs/automation/flows)). |
 | `@objectstack/cli` *(dev)* | The `os` / `objectstack` CLI: `dev`, `validate`, `build`, `start`. |
 
 ## 3. Run it

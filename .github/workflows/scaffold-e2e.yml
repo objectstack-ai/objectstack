@@ -19,7 +19,6 @@ on:
   pull_request:
     paths:
       - 'packages/create-objectstack/**'
-      - 'examples/docker/**'
       - 'docker/**'
       - '.github/workflows/scaffold-e2e.yml'
   schedule:
@@ -116,8 +115,9 @@ jobs:
           kill "$SERVER_PID"
 
       - name: Build official runtime image from this checkout
-        # examples/docker builds FROM ghcr.io/objectstack-ai/objectstack.
-        # Build that base HERE from docker/Dockerfile instead of pulling, so
+        # The scaffolded app's Dockerfile builds FROM
+        # ghcr.io/objectstack-ai/objectstack. Build that base HERE from
+        # docker/Dockerfile instead of pulling, so
         # (a) PRs exercise the official runtime Dockerfile itself, and
         # (b) the e2e stays hermetic — no dependency on a prior release
         # having published the tag (chicken-and-egg on the very first one).
@@ -126,12 +126,13 @@ jobs:
             --build-arg OS_CLI_VERSION=latest \
             "$GITHUB_WORKSPACE/docker"
 
-      - name: Docker build and run (examples/docker)
+      - name: Docker build and run (scaffolded Dockerfile)
+        # The blank template ships its own Dockerfile / docker-compose.yml /
+        # .dockerignore, so build the generated project as-is — this exercises
+        # the exact Docker path a real `npm create objectstack` user ships (the
+        # standalone examples/docker copy was removed in 6c28bac).
         run: |
           cd "$RUNNER_TEMP/e2e-app"
-          cp "$GITHUB_WORKSPACE"/examples/docker/Dockerfile \
-             "$GITHUB_WORKSPACE"/examples/docker/docker-compose.yml \
-             "$GITHUB_WORKSPACE"/examples/docker/.dockerignore .
           docker build --pull=false -t e2e-app .
           docker run -d --name e2e -p 18080:8080 \
             -e OS_SECRET_KEY="$(openssl rand -hex 32)" \

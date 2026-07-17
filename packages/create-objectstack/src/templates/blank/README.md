@@ -26,6 +26,32 @@ curl -b cookies.txt "http://localhost:3000/api/v1/data/<your_object>"
 - `objectstack.config.ts` — environment manifest (objects, API, plugins)
 - `src/objects/` — object definitions (one file per object)
 
+## Connectors (default providers)
+
+`objectstack.config.ts` wires the three **generic connector executors**, so you
+can call an external system from a flow as pure metadata — no host code:
+
+| Provider | Package | Use for |
+|:---|:---|:---|
+| `rest` | `@objectstack/connector-rest` | Any JSON/HTTP REST API |
+| `openapi` | `@objectstack/connector-openapi` | An API described by an OpenAPI document |
+| `mcp` | `@objectstack/connector-mcp` | A Model Context Protocol server |
+
+Add a `connectors:` entry that names one of these `provider`s and the
+`automation` capability materializes it into a live, dispatchable connector at
+boot (ADR-0097); a flow's `connector_action` node then calls it. To add a brand
+connector (e.g. Slack), install its package and add `new ConnectorSlackPlugin()`
+to `plugins:`; to drop a provider, remove its plugin.
+
+> **Security — declarative MCP over stdio.** An `mcp` connector whose transport
+> spawns a local process (`stdio`) is denied by default, because the command
+> comes from metadata. Opt in per host with
+> `new ConnectorMcpPlugin({ declarativeStdio: ['node'] })`; `http` transports
+> need no opt-in.
+
+See [Automation → Flows](https://docs.objectstack.ai/docs/automation/flows) for
+the full connector and `connector_action` guide.
+
 ## Verify your changes
 
 After editing any metadata, run:
