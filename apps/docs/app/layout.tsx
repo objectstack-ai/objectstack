@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   },
   description: 'Documentation for the ObjectStack Protocol and runtime.',
   icons: {
-    icon: 'https://objectstack.ai/logo.png',
+    icon: '/logo.svg',
   },
 };
 

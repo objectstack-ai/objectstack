@@ -19,14 +19,6 @@ const config = {
       'lucide-react': './node_modules/lucide-react',
     },
   },
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'objectstack.ai',
-      },
-    ],
-  },
   async redirects() {
     return toNextRedirects();
   },
