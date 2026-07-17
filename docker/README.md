@@ -56,7 +56,7 @@ straight from your release storage.
 **You must inject at runtime:** `OS_DATABASE_URL`, `OS_AUTH_SECRET`,
 `OS_SECRET_KEY` — never bake them into an image. Full variable catalog and
 reverse-proxy / multi-node guidance:
-[Self-Hosted Deployment](https://docs.objectstack.ai/docs/deployment/self-hosting).
+[Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-hosting).
 
 ## Local build of this image
 

@@ -125,7 +125,7 @@ Ready for production? The scaffolded project is container-ready:
 docker build -t my-app . && docker compose up -d   # app + Postgres on the official runtime image
 ```
 
-See [Self-Hosted Deployment](https://docs.objectstack.ai/docs/deployment/self-hosting) for bare Node, Kubernetes, and the secrets you must pin.
+See [Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-hosting) for bare Node, Kubernetes, and the secrets you must pin.
 
 ### For Framework Contributors
 
@@ -314,7 +314,7 @@ Key standards:
 
 ## Documentation
 
-Full documentation: **[https://docs.objectstack.ai](https://docs.objectstack.ai)**
+Full documentation: **[https://objectstack.ai/docs](https://objectstack.ai/docs)**
 
 **Upgrading from 10.x?** See [Upgrading to ObjectStack 11](./docs/upgrading-to-11.md).
 
