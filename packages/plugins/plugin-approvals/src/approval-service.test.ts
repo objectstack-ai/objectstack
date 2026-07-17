@@ -227,6 +227,57 @@ describe('ApprovalService (node era)', () => {
     expect(req.pending_approvers).toEqual(['position:sales_manager']);
   });
 
+  // ── approver expansion: org_membership_level + its deprecated `role` alias
+  //    (ADR-0090 D3) ────────────────────────────────────────────────────────
+
+  // `recordId` is parameterised: the service rejects a second pending request
+  // on the same record, and the alias test deliberately opens two.
+  const tierInput = (type: 'org_membership_level' | 'role', recordId = 'opp1') => ({
+    ...openInput([]),
+    recordId,
+    record: { id: recordId, amount: 100 },
+    config: {
+      approvers: [{ type: type as any, value: 'admin' }],
+      behavior: 'first_response' as const,
+      lockRecord: true,
+    },
+  });
+
+  it('org_membership_level approver: expands the better-auth tier, org-scoped', async () => {
+    engine._tables['sys_member'] = [
+      { id: 'm1', user_id: 'u1', role: 'admin', organization_id: 't1' },
+      { id: 'm2', user_id: 'u2', role: 'admin', organization_id: 't1' },
+      { id: 'm3', user_id: 'u3', role: 'admin', organization_id: 't2' },  // other tenant
+      { id: 'm4', user_id: 'u4', role: 'member', organization_id: 't1' }, // other tier
+    ];
+    const req = await svc.openNodeRequest(tierInput('org_membership_level'), CTX);
+    expect(req.pending_approvers.sort()).toEqual(['u1', 'u2']);
+  });
+
+  it('deprecated `role` alias resolves IDENTICALLY to org_membership_level', async () => {
+    engine._tables['sys_member'] = [
+      { id: 'm1', user_id: 'u1', role: 'admin', organization_id: 't1' },
+      { id: 'm2', user_id: 'u4', role: 'member', organization_id: 't1' },
+    ];
+    const canonical = await svc.openNodeRequest(tierInput('org_membership_level', 'opp_canon'), CTX);
+    const deprecated = await svc.openNodeRequest(tierInput('role', 'opp_depr'), CTX);
+    expect(deprecated.pending_approvers).toEqual(canonical.pending_approvers);
+    expect(deprecated.pending_approvers).toEqual(['u1']);
+  });
+
+  // The fallback literal keeps the AUTHORED spelling: `sys_approval_approver`
+  // rows and `pending_approvers` slots written by 15.x carry `role:<v>`, and
+  // canonicalising the literal here would orphan every one of them.
+  it('deprecated `role` alias keeps its legacy literal on fallback (no orphaned slots)', async () => {
+    const req = await svc.openNodeRequest(tierInput('role'), CTX);
+    expect(req.pending_approvers).toEqual(['role:admin']);
+  });
+
+  it('org_membership_level falls back to its own canonical literal', async () => {
+    const req = await svc.openNodeRequest(tierInput('org_membership_level'), CTX);
+    expect(req.pending_approvers).toEqual(['org_membership_level:admin']);
+  });
+
   it("department approver: honors the spec enum value 'department' (not just the business_unit dialect)", async () => {
     engine._tables['sys_business_unit'] = [
       { id: 'bu1', organization_id: 't1', active: true },

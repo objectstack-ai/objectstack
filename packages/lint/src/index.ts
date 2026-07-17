@@ -101,7 +101,8 @@ export type { CapabilityRefFinding, CapabilityRefSeverity } from './validate-cap
 
 export {
   validateApprovalApprovers,
-  APPROVAL_ROLE_NOT_MEMBERSHIP_TIER,
+  APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
+  APPROVAL_APPROVER_TYPE_DEPRECATED,
   APPROVAL_APPROVER_TYPE_UNKNOWN,
   APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
 } from './validate-approval-approvers.js';

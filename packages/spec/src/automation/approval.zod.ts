@@ -8,9 +8,18 @@ import { lazySchema } from '../shared/lazy-schema';
  */
 export const ApproverType = z.enum([
   'user',           // Specific user(s)
-  // `role` is the better-auth ORG-MEMBERSHIP TIER (sys_member.role: owner /
-  // admin / member) — NOT an org position. Post ADR-0090 D3 a value like
-  // 'sales_manager' here silently matches nobody; author `position` instead.
+  // The better-auth ORG-MEMBERSHIP TIER (sys_member.role: owner / admin /
+  // member), spelled with the projection name ADR-0057 D7 mandates and
+  // ADR-0090 D3 assumes ("relabelled `org_membership_level` … its UI label is
+  // 'organization membership', never 'role'"). NOT an org position: a value
+  // like 'sales_manager' matches nobody — author `position` for those.
+  'org_membership_level',
+  // @deprecated ADR-0090 D3 — the pre-relabel spelling of
+  // `org_membership_level`. D3 makes "role" reserved-forbidden on platform
+  // surfaces; its exception covers better-auth's own `sys_member.role` column,
+  // NOT this enum (which is ours). Accepted for one deprecation window: the
+  // runtime resolves it identically and warns, `os lint` prescribes the
+  // rewrite. Removed in the next major.
   'role',
   'position',       // Holders of a position (sys_user_position, ADR-0090 D3)
   'team',           // Members of a flat collaboration team (sys_team)
@@ -19,6 +28,20 @@ export const ApproverType = z.enum([
   'field',          // User ID defined in a record field
   'queue'           // Data ownership queue
 ]);
+
+/**
+ * Deprecated approver-type spellings → their canonical replacement
+ * (ADR-0090 D3). The runtime and `os lint` both read this map, so a future
+ * removal is a one-line edit here plus the enum entry.
+ */
+export const DEPRECATED_APPROVER_TYPES = {
+  role: 'org_membership_level',
+} as const satisfies Record<string, z.infer<typeof ApproverType>>;
+
+/** Resolve a possibly-deprecated approver type to its canonical spelling. */
+export function canonicalApproverType(type: string): string {
+  return (DEPRECATED_APPROVER_TYPES as Record<string, string>)[type] ?? type;
+}
 
 // ==========================================================================
 // Approval as a Flow Node (ADR-0019, canonical)
@@ -76,21 +99,32 @@ export const APPROVAL_BRANCH_LABELS = {
 
 /** A single approver assignment on an Approval node. */
 export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
-  type: ApproverType,
+  // `xEnumDeprecated` lists enum members that still PARSE but must not be
+  // offered for new authoring. Without it the Studio designer derives its
+  // approver-type dropdown straight from this enum and keeps offering `role`
+  // — the exact trap ADR-0090 D3 is retiring — one click away from `position`.
+  // Renderers omit these from pickers while still rendering a stored value.
+  type: ApproverType.meta({
+    xEnumDeprecated: Object.keys(DEPRECATED_APPROVER_TYPES),
+  }),
   /**
    * The approver reference, interpreted per `type`: a user id (`user`), a
-   * membership tier — owner/admin/member (`role`), a position machine name
-   * (`position`), team/department id (`team`/`department`), field name
-   * holding a user id (`field`), or queue id (`queue`). Omitted for `manager`
-   * (resolved from the submitter's `manager_id`).
+   * membership tier — owner/admin/member (`org_membership_level`), a position
+   * machine name (`position`), team/department id (`team`/`department`), field
+   * name holding a user id (`field`), or queue id (`queue`). Omitted for
+   * `manager` (resolved from the submitter's `manager_id`).
    */
   // `xRef` marks this string as a *polymorphic* typed reference (ADR-0018
   // §configSchema): the concrete picker follows the sibling `type` column, so
-  // the Studio designer shows a user/role/position/team/department/queue
-  // picker — or an object-field picker (resolved from the flow's `$trigger`
-  // object) when `type` is `field`. `manager` and any unmapped value carry no
-  // `value` and stay free text. A single `.meta()` carries both description
-  // and annotation.
+  // the Studio designer shows a user/membership-tier/position/team/department/
+  // queue picker — or an object-field picker (resolved from the flow's
+  // `$trigger` object) when `type` is `field`. `manager` and any unmapped
+  // value carry no `value` and stay free text. A single `.meta()` carries both
+  // description and annotation.
+  //
+  // The `role` → `org-membership-level` picker kind is the deprecated alias's
+  // entry: it maps to the SAME picker as the canonical spelling, so a stored
+  // legacy node still renders correctly for its deprecation window.
   value: z.string().optional().meta({
     description: 'User id / membership tier / position / team / department / field / queue — per `type`',
     xRef: {
@@ -98,7 +132,8 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
       objectSource: '$trigger',
       map: {
         user: 'user',
-        role: 'role',
+        org_membership_level: 'org-membership-level',
+        role: 'org-membership-level',
         position: 'position',
         team: 'team',
         department: 'department',

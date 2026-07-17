@@ -3,22 +3,28 @@
 /**
  * Approval-node approver authoring lint (ADR-0090 D3 fallout).
  *
- * The `role` approver type resolves against better-auth's org-membership tier
- * (`sys_member.role`: owner / admin / member) — it is NOT a position. After
- * ADR-0090 D3 renamed `sys_role` → `sys_position`, downstream apps that
- * authored `{ type: 'role', value: 'sales_manager' }` silently route the
- * approval to nobody: the expansion finds no member row, falls back to the
- * `role:sales_manager` literal, and the request waits on an approver that can
- * never act. This rule moves that failure from a stuck request at runtime to
- * a located fix-it at author time.
+ * `org_membership_level` (and `role`, its deprecated spelling) resolves against
+ * better-auth's org-membership tier (`sys_member.role`: owner / admin / member)
+ * — it is NOT a position. After ADR-0090 D3 renamed `sys_role` → `sys_position`,
+ * downstream apps that authored `{ type: 'role', value: 'sales_manager' }`
+ * silently route the approval to nobody: the expansion finds no member row,
+ * falls back to the `role:sales_manager` literal, and the request waits on an
+ * approver that can never act. These rules move that failure from a stuck
+ * request at runtime to a located fix-it at author time.
  *
  * Rules:
  *
  * | Rule                                       | Severity | Origin                     |
  * |--------------------------------------------|----------|----------------------------|
- * | approval-role-not-membership-tier          | warning  | ADR-0090 D3 (hotcrm class) |
+ * | approval-approver-not-membership-tier      | warning  | ADR-0090 D3 (hotcrm class) |
+ * | approval-approver-type-deprecated          | warning  | ADR-0090 D3 (#3133)        |
  * | approval-approver-type-unknown             | warning  | contract-first (PD #12)    |
  * | approval-escalation-reassign-no-target     | warning  | silent notify degradation  |
+ *
+ * The first two are mutually exclusive by construction — a bad *value* wins,
+ * because its fix (`position`) differs from the deprecation's fix
+ * (`org_membership_level`), and prescribing the latter for a position name
+ * would be wrong advice.
  *
  * Warnings (not errors): a custom better-auth membership tier is legal, and
  * the runtime keeps its literal fallback — but both shapes are near-certainly
@@ -27,9 +33,15 @@
  * Pure `(stack) => Finding[]`; accepts the NORMALIZED stack input.
  */
 
-import { ApproverType, APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
+import {
+  ApproverType,
+  APPROVAL_NODE_TYPE,
+  DEPRECATED_APPROVER_TYPES,
+  canonicalApproverType,
+} from '@objectstack/spec/automation';
 
-export const APPROVAL_ROLE_NOT_MEMBERSHIP_TIER = 'approval-role-not-membership-tier';
+export const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER = 'approval-approver-not-membership-tier';
+export const APPROVAL_APPROVER_TYPE_DEPRECATED = 'approval-approver-type-deprecated';
 export const APPROVAL_APPROVER_TYPE_UNKNOWN = 'approval-approver-type-unknown';
 export const APPROVAL_ESCALATION_REASSIGN_NO_TARGET = 'approval-escalation-reassign-no-target';
 
@@ -54,7 +66,8 @@ type AnyRec = Record<string, unknown>;
 /**
  * The better-auth org-membership tiers `sys_member.role` actually stores
  * (see `identity/organization.zod.ts` + `mapMembershipRole`). Anything else
- * authored as `{ type: 'role' }` is almost certainly a position name.
+ * authored as `{ type: 'org_membership_level' }` (or its deprecated `role`
+ * spelling) is almost certainly a position name.
  */
 const MEMBERSHIP_TIERS = new Set(['owner', 'admin', 'member', 'guest']);
 
@@ -121,20 +134,39 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           continue;
         }
 
-        if (type === 'role' && value && !MEMBERSHIP_TIERS.has(value.toLowerCase())) {
+        const canonical = canonicalApproverType(type);
+
+        // Exactly one of the two below fires. Order matters: a bad VALUE is
+        // the more serious (and differently-fixed) defect, so it wins. Telling
+        // an author to rewrite { type: 'role', value: 'sales_manager' } as
+        // `org_membership_level` would be actively wrong advice — the fix is
+        // `position`, and the deprecation is beside the point.
+        if (canonical === 'org_membership_level' && value && !MEMBERSHIP_TIERS.has(value.toLowerCase())) {
           findings.push({
             severity: 'warning',
-            rule: APPROVAL_ROLE_NOT_MEMBERSHIP_TIER,
+            rule: APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
             where,
             path: `${path}.value`,
             message:
-              `approver { type: 'role', value: '${value}' } resolves against the better-auth ` +
+              `approver { type: '${type}', value: '${value}' } resolves against the better-auth ` +
               `org-membership tier (sys_member.role: owner/admin/member) — '${value}' is not a ` +
               `membership tier, so this approver matches nobody and the request stalls.`,
             hint:
               `If '${value}' is an org position, author { type: 'position', value: '${value}' } ` +
-              `(resolved via sys_user_position, ADR-0090 D3). Keep type 'role' only for ` +
-              `membership tiers (owner/admin/member).`,
+              `(resolved via sys_user_position, ADR-0090 D3). Keep type 'org_membership_level' ` +
+              `only for membership tiers (owner/admin/member).`,
+          });
+        } else if (type in DEPRECATED_APPROVER_TYPES) {
+          const fix = canonicalApproverType(type);
+          findings.push({
+            severity: 'warning',
+            rule: APPROVAL_APPROVER_TYPE_DEPRECATED,
+            where,
+            path: `${path}.type`,
+            message:
+              `approver type '${type}' is the deprecated spelling of '${fix}' (ADR-0090 D3) and ` +
+              `is removed in the next major.`,
+            hint: `Author { type: '${fix}', value: '${value}' }. It resolves identically today.`,
           });
         }
       }

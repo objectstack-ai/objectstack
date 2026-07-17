@@ -54,7 +54,7 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'user' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue'>` | ✅ |  |
+| **type** | `Enum<'user' \| 'org_membership_level' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue'>` | ✅ |  |
 | **value** | `string` | optional | User id / membership tier / position / team / department / field / queue — per `type` |
 
 
@@ -66,7 +66,7 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **approvers** | `{ type: Enum<'user' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue'>; value?: string }[]` | ✅ | Allowed approvers for this node |
+| **approvers** | `{ type: Enum<'user' \| 'org_membership_level' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue'>; value?: string }[]` | ✅ | Allowed approvers for this node |
 | **behavior** | `Enum<'first_response' \| 'unanimous'>` | ✅ | How to combine multiple approvers |
 | **lockRecord** | `boolean` | ✅ | Lock the record from editing while pending |
 | **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
@@ -81,6 +81,7 @@ const result = ApprovalDecision.parse(data);
 ### Allowed Values
 
 * `user`
+* `org_membership_level`
 * `role`
 * `position`
 * `team`

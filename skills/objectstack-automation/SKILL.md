@@ -377,7 +377,7 @@ branch — you never resume the flow by hand.
 |:-------|:------------|
 | `user`       | A specific user id (`value` = user id) |
 | `position`   | Holders of a position — `value` = the position machine name, resolved via `sys_user_position` (ADR-0090 D3) |
-| `role`       | The better-auth **org-membership tier** (`sys_member.role`: `owner`/`admin`/`member`) — **NOT** a position. `{ type: 'role', value: 'sales_manager' }` matches nobody; use `position` |
+| `org_membership_level` | The better-auth **org-membership tier** — `value` is one of `owner`/`admin`/`member`, and nothing else. **NOT** a position: `{ type: 'org_membership_level', value: 'sales_manager' }` matches nobody; use `position`. Spelled `role` before ADR-0090 D3 — that spelling is deprecated, still resolves, and is removed in the next major |
 | `team`       | Members of a flat `sys_team` |
 | `department` | A department + all descendant departments |
 | `manager`    | The submitter's manager (`sys_user.manager_id`) |

@@ -3,7 +3,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateApprovalApprovers,
-  APPROVAL_ROLE_NOT_MEMBERSHIP_TIER,
+  APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
+  APPROVAL_APPROVER_TYPE_DEPRECATED,
   APPROVAL_APPROVER_TYPE_UNKNOWN,
   APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
 } from './validate-approval-approvers.js';
@@ -27,26 +28,52 @@ describe('validateApprovalApprovers', () => {
     expect(validateApprovalApprovers({ flows: [] })).toEqual([]);
   });
 
-  it('accepts membership tiers for type role (owner/admin/member/guest)', () => {
+  it('accepts membership tiers for org_membership_level (owner/admin/member/guest)', () => {
     const findings = validateApprovalApprovers(stackWithApprovers([
-      { type: 'role', value: 'admin' },
-      { type: 'role', value: 'Owner' }, // case-insensitive
-      { type: 'role', value: 'member' },
-      { type: 'role', value: 'guest' },
+      { type: 'org_membership_level', value: 'admin' },
+      { type: 'org_membership_level', value: 'Owner' }, // case-insensitive
+      { type: 'org_membership_level', value: 'member' },
+      { type: 'org_membership_level', value: 'guest' },
     ]));
     expect(findings).toEqual([]);
   });
 
-  it("flags a position name authored as type 'role' (the ADR-0090 D3 hotcrm class)", () => {
+  it("flags a position name authored as a membership tier (the ADR-0090 D3 hotcrm class)", () => {
     const findings = validateApprovalApprovers(stackWithApprovers([
-      { type: 'role', value: 'sales_manager' },
+      { type: 'org_membership_level', value: 'sales_manager' },
     ]));
     expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(APPROVAL_ROLE_NOT_MEMBERSHIP_TIER);
+    expect(findings[0].rule).toBe(APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER);
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].where).toContain('expense_approval');
     expect(findings[0].path).toBe('flows[0].nodes[1].config.approvers[0].value');
     expect(findings[0].hint).toContain("type: 'position'");
+  });
+
+  // ── the deprecated `role` spelling (ADR-0090 D3, #3133) ──────────────────
+
+  it('flags the deprecated `role` spelling even when its value is a valid tier', () => {
+    const findings = validateApprovalApprovers(stackWithApprovers([
+      { type: 'role', value: 'admin' },
+    ]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_APPROVER_TYPE_DEPRECATED);
+    expect(findings[0].path).toBe('flows[0].nodes[1].config.approvers[0].type');
+    expect(findings[0].hint).toContain("type: 'org_membership_level'");
+  });
+
+  // The two rules must not both fire: rewriting { type: 'role', value:
+  // 'sales_manager' } as `org_membership_level` is WRONG advice — the value is
+  // a position, so `position` is the fix and the deprecation is beside the
+  // point. Exactly one finding, and it must be the value rule.
+  it('prefers the value fix over the deprecation notice for a position name', () => {
+    const findings = validateApprovalApprovers(stackWithApprovers([
+      { type: 'role', value: 'sales_manager' },
+    ]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER);
+    expect(findings[0].hint).toContain("type: 'position'");
+    expect(findings[0].hint).not.toContain('org_membership_level, value');
   });
 
   it('accepts the position approver type and the other spec types silently', () => {

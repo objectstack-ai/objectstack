@@ -3,6 +3,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
   APPROVAL_BRANCH_LABELS,
+  canonicalApproverType,
   type ApprovalNodeConfig,
 } from '@objectstack/spec/automation';
 import type {
@@ -274,10 +275,10 @@ export class ApprovalService implements IApprovalService {
 
   /**
    * Expand the approvers on an Approval node into user IDs by querying the
-   * graph tables for `team:` / `department:` / `position:` / `role:` /
-   * `manager:` approver types. Falls back to a prefixed literal
-   * (`type:value`) when graph lookups produce nothing — so existing fixtures
-   * and flows that rely on substring matching keep working.
+   * graph tables for `team:` / `department:` / `position:` /
+   * `org_membership_level:` / `manager:` approver types. Falls back to a
+   * prefixed literal (`type:value`) when graph lookups produce nothing — so
+   * existing fixtures and flows that rely on substring matching keep working.
    *
    * **Graph semantics:**
    *   - `team`       → flat members of `sys_team` (better-auth; no BFS)
@@ -285,34 +286,50 @@ export class ApprovalService implements IApprovalService {
    *                    → members of every descendant via `sys_business_unit_member`
    *   - `position`   → holders via `sys_user_position` ∪ `sys_member.role`
    *                    transition source (ADR-0090 D3 / ADR-0057 D4)
-   *   - `role`       → users with `sys_member.role = value` in tenant — the
+   *   - `org_membership_level`
+   *                  → users with `sys_member.role = value` in tenant — the
    *                    better-auth MEMBERSHIP TIER (owner/admin/member), not a
    *                    position; author `position` for org positions
    *   - `manager`    → `sys_user.manager_id` of `record[value] ?? record.owner_id`
    *   - `field`      → literal user id stored in `record[value]`
    *   - `user`       → literal value
+   *
+   * `role` is accepted as the deprecated spelling of `org_membership_level`
+   * (ADR-0090 D3) for one window: it resolves identically and logs a warning.
    */
   private async expandApprovers(step: any, record?: any, organizationId?: string | null): Promise<string[]> {
     if (!step || !Array.isArray(step.approvers)) return [];
     const out: string[] = [];
     for (const a of step.approvers) {
       if (!a) continue;
-      if (a.type === 'user') { out.push(String(a.value)); continue; }
-      if (a.type === 'field' && record) { out.push(String((record as any)[a.value] ?? '')); continue; }
+      // ADR-0090 D3: `role` is the deprecated spelling of
+      // `org_membership_level`. Resolve on the canonical type, but keep the
+      // AUTHORED spelling in the `type:value` fallback below — stored
+      // `sys_approval_approver` rows and `pending_approvers` slots from 15.x
+      // carry the old literal, and rewriting it here would orphan them.
+      const type = canonicalApproverType(String(a.type));
+      if (type !== a.type) {
+        this.logger?.warn?.(
+          `[approvals] approver type '${a.type}' is deprecated (ADR-0090 D3) — author '${type}' instead`,
+          { deprecated: a.type, canonical: type },
+        );
+      }
+      if (type === 'user') { out.push(String(a.value)); continue; }
+      if (type === 'field' && record) { out.push(String((record as any)[a.value] ?? '')); continue; }
       try {
-        if (a.type === 'team') {
+        if (type === 'team') {
           const users = await this.expandTeamUsers(String(a.value));
           if (users.length) { for (const u of users) out.push(u); continue; }
-        } else if (a.type === 'department' || a.type === 'business_unit' || a.type === 'bu') {
+        } else if (type === 'department' || type === 'business_unit' || type === 'bu') {
           const users = await this.expandBusinessUnitUsers(String(a.value), organizationId);
           if (users.length) { for (const u of users) out.push(u); continue; }
-        } else if (a.type === 'position') {
+        } else if (type === 'position') {
           const users = await this.expandPositionUsers(String(a.value), organizationId);
           if (users.length) { for (const u of users) out.push(u); continue; }
-        } else if (a.type === 'role') {
-          const users = await this.expandRoleUsers(String(a.value), organizationId);
+        } else if (type === 'org_membership_level') {
+          const users = await this.expandMembershipTierUsers(String(a.value), organizationId);
           if (users.length) { for (const u of users) out.push(u); continue; }
-        } else if (a.type === 'manager' && record) {
+        } else if (type === 'manager' && record) {
           const subject = (record as any)[a.value] ?? (record as any).owner_id;
           if (subject) {
             const mgr = await this.lookupManager(String(subject));
@@ -406,14 +423,23 @@ export class ApprovalService implements IApprovalService {
         if (uid) users.add(uid);
       }
     } catch { /* table may not exist on minimal stacks — union source below still applies */ }
-    for (const uid of await this.expandRoleUsers(positionName, organizationId)) users.add(uid);
+    // ADR-0057 D4 transition source: pre-migration stacks still carry the
+    // position name in better-auth's `sys_member.role` column, so the same
+    // lookup serves a position name here and a membership tier for
+    // `org_membership_level` — the column is one, the two concepts are not.
+    for (const uid of await this.expandMembershipTierUsers(positionName, organizationId)) users.add(uid);
     return Array.from(users);
   }
 
-  /** better-auth org-membership tier (`sys_member.role`) — NOT positions. */
-  private async expandRoleUsers(roleName: string, organizationId?: string | null): Promise<string[]> {
-    if (!roleName) return [];
-    const filter: any = { role: roleName };
+  /**
+   * better-auth org-membership tier (`sys_member.role`: owner/admin/member) —
+   * NOT positions. Named for the projection (`org_membership_level`, ADR-0057
+   * D7 / ADR-0090 D3), not for better-auth's column: the column name is theirs
+   * and stays, the platform-facing word does not.
+   */
+  private async expandMembershipTierUsers(tier: string, organizationId?: string | null): Promise<string[]> {
+    if (!tier) return [];
+    const filter: any = { role: tier };
     if (organizationId) filter.organization_id = organizationId;
     let rows: any[] = [];
     try {

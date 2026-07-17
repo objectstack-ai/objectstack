@@ -53,11 +53,14 @@ defineFlow({
 ```
 
 <Callout type="warn">
-**`position` vs `role`.** `{ type: 'position', value: 'finance_manager' }` routes to the
-holders of a position (`sys_user_position`, ADR-0090 D3). The `role` approver type is the
-better-auth **org-membership tier** (`sys_member.role`: `owner`/`admin`/`member`) — a position
-name authored as `type: 'role'` matches nobody and the request stalls; `os lint` flags this
-(`approval-role-not-membership-tier`).
+**`position` vs `org_membership_level`.** `{ type: 'position', value: 'finance_manager' }` routes
+to the holders of a position (`sys_user_position`, ADR-0090 D3). `org_membership_level` is a
+different thing — the better-auth **org-membership tier**, whose only values are
+`owner`/`admin`/`member`. A position name authored there matches nobody and the request stalls;
+`os lint` flags it (`approval-approver-not-membership-tier`).
+
+Authored `type: 'role'` on 15.x? That is the deprecated spelling of `org_membership_level`
+(ADR-0090 D3): it still resolves, warns at runtime, and is removed in the next major.
 </Callout>
 
 Approving is itself a gated action — model "may approve" as a capability (`approve_invoice`) the approver's permission set grants, and gate the approve action's `requiredPermissions` on it so the gate is enforced on **both** the UI and the server (ADR-0066 D4).
@@ -133,9 +136,11 @@ Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
 
 Approver entries resolve by kind — `position`, `user`, `field`, `manager`,
-`team`, `department`, `queue`, and the membership-tier kind described in the
+`team`, `department`, `queue`, and `org_membership_level`, described in the
 [callout above](#3-the-approval-node), which is the one that silently resolves
-to nobody when it's mistaken for a business hierarchy.
+to nobody when it's mistaken for a business hierarchy. An entry that resolves
+to nobody is not an error: the request opens with an empty `pending_approvers`
+and nothing can move it, so the run parks forever.
 
 ### The approver finds it in their queue
 
@@ -148,9 +153,10 @@ curl -b cookies.txt \
   "https://your-app.example.com/api/v1/approvals/requests?status=pending&approverId=usr_123"
 ```
 
-`approverId` accepts a user id, an email, or a membership-tier reference — and
-takes several values (comma-separated or repeated) to cover a person's
-identities in one call.
+`approverId` accepts a user id, an email, or a `<type>:<value>` approver literal
+(`position:finance_manager` — the form an entry falls back to when it resolves
+to no users) — and takes several values (comma-separated or repeated) to cover
+a person's identities in one call.
 Other filters: `status`, `object`, `recordId`, `submitterId`, `q`, `limit`,
 `offset`.
 
