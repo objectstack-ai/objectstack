@@ -1,0 +1,210 @@
+# Publish Smoke — the dynamic half of the #3091 prevention.
+#
+# 15.1.0 shipped with every fresh project's auth endpoints returning 500:
+# the workspace's pnpm overrides (better-auth pinned to 1.7.0-rc.1) made all
+# in-repo CI green, but overrides do NOT ship with published packages, so
+# downstream installs resolved a dependency mix that was never tested here.
+# The static gate is scripts/check-override-consistency.mjs (#3085 — override
+# targets must be reflected in published manifests). This workflow is the
+# dynamic gate: install the exact bits a user would get and drive the
+# first-run flow (auth sign-up/sign-in/get-session + REST CRUD) for real.
+#
+# Two jobs, one driver script (scripts/publish-smoke.sh):
+#
+#   pack-smoke      SMOKE_MODE=pack — `pnpm pack` every publishable package
+#                   (pack applies the same manifest rewrites as publish),
+#                   scaffold a fresh project OUTSIDE the workspace, pin
+#                   @objectstack/* to the tarballs via the project's own pnpm
+#                   overrides, and smoke it. This is "what 15.1.0 would have
+#                   failed": the release-candidate combination, no workspace
+#                   overrides in sight.
+#
+#   registry-canary SMOKE_MODE=registry — weekly `npx create-objectstack@latest`
+#                   against the real npm registry. Catches ^-range drift in the
+#                   ecosystem (a transitive release) breaking ALREADY-published
+#                   versions after the fact. Opens/refreshes an issue on failure.
+#
+# Trigger notes: the changesets release PR (changeset-release/main) is pushed
+# with GITHUB_TOKEN, and GITHUB_TOKEN events never trigger other workflows —
+# a plain `on: pull_request` / `on: push` would silently never run (the
+# release PR has NO Actions checks today). So pack-smoke runs on
+# `workflow_run` after each Release run completes (that's the moment
+# changesets creates/updates the release branch), checks out the release
+# branch if an open release PR exists, and reports the verdict back as a
+# commit status on the branch head so it IS visible on the release PR.
+# Not wired into normal PR CI on purpose: full build + pack + clean install
+# is far too slow for the inner loop.
+
+name: Publish Smoke
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  schedule:
+    - cron: '47 4 * * 1' # weekly registry canary (Mon 04:47 UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-smoke-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Resolve target
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.target.outputs.run }}
+      ref: ${{ steps.target.outputs.ref }}
+      report-sha: ${{ steps.target.outputs.report-sha }}
+    steps:
+      - name: Pick the ref to smoke
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual run: smoke whatever ref the run was dispatched on.
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "ref=${{ github.ref }}" >> "$GITHUB_OUTPUT"
+            echo "report-sha=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # workflow_run (a Release run finished): smoke the release branch
+          # iff an open changesets release PR exists; otherwise skip.
+          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" \
+            --head changeset-release/main --state open \
+            --json headRefOid -q '.[0].headRefOid // empty')
+          if [ -n "$pr" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            # Checkout the exact SHA the status is reported against, so a
+            # concurrent force-push of the release branch can't skew the two.
+            echo "ref=$pr" >> "$GITHUB_OUTPUT"
+            echo "report-sha=$pr" >> "$GITHUB_OUTPUT"
+            echo "Release PR open at $pr — smoking changeset-release/main"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No open release PR — nothing to smoke"
+          fi
+
+  pack-smoke:
+    name: Packed-tarball smoke (release candidate)
+    needs: resolve
+    if: needs.resolve.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Mark pending on the release PR head
+        if: needs.resolve.outputs.report-sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/statuses/${{ needs.resolve.outputs.report-sha }}" \
+            -f state=pending -f context='publish-smoke / packed-tarballs' \
+            -f description='Installing the release candidate into a fresh project…' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Setup turbo cache
+        uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Publish smoke (packed tarballs)
+        run: bash scripts/publish-smoke.sh
+
+      - name: Report verdict to the release PR head
+        if: always() && needs.resolve.outputs.report-sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            state=success; desc='Fresh install of the release candidate: auth + CRUD green'
+          else
+            state=failure; desc='Release candidate fails a fresh install — see the run log'
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/${{ needs.resolve.outputs.report-sha }}" \
+            -f state="$state" -f context='publish-smoke / packed-tarballs' \
+            -f description="$desc" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+  registry-canary:
+    name: Registry canary (published latest)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Publish smoke (npm registry)
+        run: SMOKE_MODE=registry bash scripts/publish-smoke.sh
+
+      - name: Open or refresh the canary issue
+        # Scheduled runs have no human watching — surface the breakage as an
+        # issue (deduped: one open issue, refreshed with a comment per failure).
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          title="Registry canary failed: fresh npx create-objectstack install is broken"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "\"$title\" in:title" --json number -q '.[0].number // empty')
+          body=$(printf 'The weekly publish-smoke registry canary failed: a fresh `npx create-objectstack@latest` project no longer passes first-run auth + CRUD against the npm registry.\n\nThis is the #3091 failure class hitting ALREADY-published versions (e.g. a transitive dependency released into a ^ range). See the run log for the failing probe: %s\n' "$run_url")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" \
+              --body "Still failing as of $run_url"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
