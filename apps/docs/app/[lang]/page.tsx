@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     absolute: 'ObjectStack — AI writes the app. ObjectStack is what it writes.',
   },
   description:
-    'The open target format and runtime for AI-written business apps. Agents write compact typed metadata — often ~1% of a traditional codebase — strict TypeScript, Zod, and a validation gate catch mistakes at authoring time, and the runtime derives the database, REST API, UI, and MCP server. Your business ontology as an open protocol.',
+    'The open target format and runtime for AI-written business apps. Agents write compact typed metadata — a complete CRM is under 2,000 lines, so the whole app fits in an agent\'s context — strict TypeScript, Zod, and a validation gate catch mistakes at authoring time, and the runtime derives the database, REST API, UI, and MCP server. Your business ontology as an open protocol.',
 };
 
 const VOCABULARY: { tag: string; title: string; copy: string }[] = [
@@ -121,11 +121,11 @@ export default function HomePage() {
             </h1>
             <p className="mt-6 max-w-xl text-lg text-fd-muted-foreground text-pretty">
               The open target format and runtime for AI-written business apps. Your coding agent
-              writes models, UI, workflows, and permissions as compact typed metadata — often
-              around 1% of a traditional codebase — and strict TypeScript, Zod schemas, and a
-              validation gate catch its mistakes at authoring time. The runtime derives the
-              database, REST API, UI, and MCP server, and enforces permissions and audit on
-              every call.
+              writes models, UI, workflows, and permissions as compact typed metadata — a
+              complete CRM is under 2,000 lines, so the whole app fits in the agent's context —
+              and strict TypeScript, Zod schemas, and a validation gate catch its mistakes at
+              authoring time. The runtime derives the database, REST API, UI, and MCP server,
+              and enforces permissions and audit on every call.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
@@ -154,7 +154,7 @@ export default function HomePage() {
               className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-fd-muted-foreground"
               style={{ fontFamily: 'var(--l-mono)' }}
             >
-              <span>~1% code surface</span>
+              <span>Fits in an agent's context</span>
               <span aria-hidden className="text-fd-border">|</span>
               <span>Typed, validated, governed</span>
               <span aria-hidden className="text-fd-border">|</span>

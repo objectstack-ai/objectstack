@@ -8,12 +8,13 @@
 >
 > The open target format and runtime for AI-written business apps. Your coding
 > agent writes models, UI, workflows, and permissions as compact typed metadata —
-> often around 1% of a traditional codebase — and strict TypeScript, Zod schemas,
-> and a validation gate catch its mistakes at authoring time. The runtime derives
-> the database, REST API, UI, and MCP server, and enforces permissions and audit
-> on every call.
+> [a complete CRM is under 2,000 lines](#why-the-mistakes-dont-ship), so the whole
+> app fits in the agent's context — and strict TypeScript, Zod schemas, and a
+> validation gate catch its mistakes at authoring time. The runtime derives the
+> database, REST API, UI, and MCP server, and enforces permissions and audit on
+> every call.
 
-`~1% code surface` · `Typed, validated, governed` · `Self-host anywhere` · Apache-2.0
+`Fits in an agent's context` · `Typed, validated, governed` · `Self-host anywhere` · Apache-2.0
 
 <p align="center">
   <img src="docs/screenshots/architecture.png" width="940" alt="ObjectStack architecture: author typed Zod metadata (objects, flows, views, policies); the microkernel compiles it into a versioned JSON artifact and loads plugins, drivers, and services; it generates a REST API, client SDK, Console and Studio UI, and MCP tools used by developers and AI agents, governed by Auth, RBAC, RLS, FLS, and audit, over PostgreSQL, MySQL, SQLite, or MongoDB">
@@ -121,11 +122,20 @@ The reason this works is the same reason TypeScript was the right host language:
 **an agent's errors become located, corrective text it can read and fix itself**,
 in seconds — instead of a silent runtime failure nobody traces back.
 
-And because the whole business system is a few hundred lines of typed metadata
-rather than tens of thousands of lines of CRUD and glue, it **fits in an agent's
-context window** — so the agent can load it end-to-end, reason about every
-dependency, and refactor across data, API, UI, and permissions in one change.
-That's the difference between AI as autocomplete and AI as a co-maintainer.
+The other half is size. The CRM in this repo — [`examples/app-crm`](./examples/app-crm):
+six objects, views, a dashboard, a lead-conversion flow, permission sets, actions,
+translations — is **31 files, 1,792 lines, roughly 16k tokens**. That's the whole
+business system, in about 8% of a 200k-token context window. Count it yourself:
+
+```bash
+find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l
+```
+
+Because it **fits in an agent's context window**, the agent can load it
+end-to-end, reason about every dependency, and refactor across data, API, UI, and
+permissions in one change — it can answer *"what breaks if I change this?"*
+instead of grepping and hoping. That's the difference between AI as autocomplete
+and AI as a co-maintainer.
 
 > Your objects, permissions, and flows are your business ontology — and the
 > definition layer of the AI era should be an open protocol you own.

@@ -205,14 +205,34 @@ Node.js         Python
 React           Flutter
 ```
 
-### 4. ~100× Less Code — Sized for AI Agents
+### 4. Small Enough to Fit in an Agent's Context
 
-**Traditional:** ~300 lines of code for a simple CRUD feature
-**ObjectStack:** ~30 lines of metadata
+A simple CRUD feature that takes ~300 lines of hand-written code is ~30 lines of
+metadata. But per-feature ratios are the least interesting part. Here is the
+measurement that matters — the CRM bundled in this repo
+([`examples/app-crm`](https://github.com/objectstack-ai/framework/tree/main/examples/app-crm):
+six objects, views, a dashboard, a lead-conversion flow, permission sets,
+actions, translations):
 
-For a complete enterprise module (CRM, ticketing, approvals, …) the gap typically widens to **roughly two orders of magnitude** — tens of thousands of lines of hand-written CRUD, forms, validation, and API glue collapse into a few hundred lines of typed metadata.
+| | |
+| :--- | :--- |
+| Files | 31 |
+| Lines | 1,792 |
+| Approximate tokens | ~16,000 |
 
-The point isn't lines of code. The point is **fit in an agent's context window.** When the entire business system is small, typed, and declarative, an AI agent can load it end-to-end, reason about every dependency, and safely refactor across data, API, UI, and permissions in a single change. That turns AI from an autocomplete tool into a real co-maintainer.
+That's the **whole business system** — about 8% of a 200k-token context window.
+Count it yourself:
+
+```bash
+find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l
+```
+
+The point isn't lines of code. The point is **fit in an agent's context window.**
+When the entire business system is small, typed, and declarative, an AI agent can
+load it end-to-end, reason about every dependency, and safely refactor across
+data, API, UI, and permissions in a single change — it can answer *"what breaks
+if I change this?"* instead of grepping and hoping. That turns AI from an
+autocomplete tool into a real co-maintainer.
 
 ```typescript
 // All you need:

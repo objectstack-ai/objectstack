@@ -25,10 +25,11 @@ build the thing I actually meant?*
 
 ## Why it's fast
 
-A typical enterprise app is tens of thousands of lines of CRUD, forms, queries,
-permissions, and API glue spread across dozens of files. ObjectStack collapses the
-same surface into **a few hundred lines of typed metadata** — roughly two orders
-of magnitude less code to read, write, and maintain.
+A typical enterprise app spreads CRUD, forms, queries, permissions, and API glue
+across dozens of files. ObjectStack keeps only the part that's yours: the CRM
+bundled in this repo — six objects, views, a dashboard, a lead-conversion flow,
+permission sets, actions, translations — is **1,792 lines across 31 files, about
+16k tokens**. That's the entire business system, not a module of it.
 
 The point isn't lines of code; it's **fit in an agent's context window.** When the
 entire business system is small, typed, and declarative, an agent can load it
