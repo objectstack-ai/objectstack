@@ -3051,7 +3051,7 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             // language until a hard refresh (issue #1319). Folding the resolved
             // locale into the hash gives each locale a distinct validator.
             const content = JSON.stringify(item);
-            const hash = simpleHash(request.locale ? `${request.locale} ${content}` : content);
+            const hash = simpleHash(request.locale ? `${request.locale}\u0000${content}` : content);
             const etag = { value: hash, weak: false };
 
             // Check If-None-Match header
