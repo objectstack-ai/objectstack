@@ -9,6 +9,7 @@ import {
   ApprovalNodeApproverSchema,
   ApprovalEscalationSchema,
   ApprovalNodeConfigSchema,
+  getApprovalNodeConfigJsonSchema,
 } from './approval.zod';
 
 describe('ApproverType', () => {
@@ -39,6 +40,20 @@ describe('ApproverType', () => {
     for (const target of Object.values(DEPRECATED_APPROVER_TYPES)) {
       expect(() => ApproverType.parse(target)).not.toThrow();
     }
+  });
+
+  // Cross-repo contract: the published node configSchema must carry
+  // `xEnumDeprecated` on the approver type, or the Studio designer (objectui)
+  // derives its dropdown straight from `enum` and keeps offering `role` — the
+  // exact trap ADR-0090 D3 retires. Renderers read this to omit deprecated
+  // members from pickers while still rendering a stored value.
+  it('publishes xEnumDeprecated on the approver type so pickers can drop `role`', () => {
+    const schema = getApprovalNodeConfigJsonSchema() as any;
+    const typeNode = schema?.properties?.approvers?.items?.properties?.type;
+    expect(typeNode?.enum).toContain('role');            // still parses (back-compat)
+    expect(typeNode?.enum).toContain('org_membership_level');
+    expect(typeNode?.xEnumDeprecated).toEqual(Object.keys(DEPRECATED_APPROVER_TYPES));
+    expect(typeNode?.xEnumDeprecated).toContain('role');
   });
 });
 

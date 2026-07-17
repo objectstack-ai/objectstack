@@ -99,7 +99,14 @@ export const APPROVAL_BRANCH_LABELS = {
 
 /** A single approver assignment on an Approval node. */
 export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
-  type: ApproverType,
+  // `xEnumDeprecated` lists enum members that still PARSE but must not be
+  // offered for new authoring. Without it the Studio designer derives its
+  // approver-type dropdown straight from this enum and keeps offering `role`
+  // — the exact trap ADR-0090 D3 is retiring — one click away from `position`.
+  // Renderers omit these from pickers while still rendering a stored value.
+  type: ApproverType.meta({
+    xEnumDeprecated: Object.keys(DEPRECATED_APPROVER_TYPES),
+  }),
   /**
    * The approver reference, interpreted per `type`: a user id (`user`), a
    * membership tier — owner/admin/member (`org_membership_level`), a position
