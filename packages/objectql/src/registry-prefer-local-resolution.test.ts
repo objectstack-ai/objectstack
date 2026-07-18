@@ -60,4 +60,19 @@ describe('SchemaRegistry — package-scoped resolution (ADR-0048 §3.3)', () => 
     expect(registry.getItem<any>('flow', 'cleanup', 'com.a.sys')?.title).toBe('A');
     expect(registry.getItem<any>('flow', 'cleanup', 'com.b.sys')?.title).toBe('B');
   });
+
+  it('getArtifactItem does not return a bare overlay owned by a DIFFERENT package (ADR-0048 #1828)', () => {
+    // A runtime/DB overlay hydrated under the bare key carries package A's
+    // provenance. Once the unscoped metadata list stopped collapsing colliding
+    // rows, the protocol decorates each row via getArtifactItem(type, name,
+    // <row's own package>). Package B's row must NOT pick up A's bare overlay as
+    // its "artifact", or B's `_packageId`/lock gets mislabeled as A.
+    registry.registerItem('page', { name: 'home', title: 'A overlay', _packageId: 'com.acme.a' }, 'name');
+
+    // Asking within package B misses — the bare entry belongs to A, not B.
+    expect(registry.getArtifactItem<any>('page', 'home', 'com.acme.b')).toBeUndefined();
+    // Asking within A returns it; a package-less caller keeps the legacy first-match.
+    expect(registry.getArtifactItem<any>('page', 'home', 'com.acme.a')?.title).toBe('A overlay');
+    expect(registry.getArtifactItem<any>('page', 'home')?.title).toBe('A overlay');
+  });
 });

@@ -370,6 +370,104 @@ function mergeArtifactProtection(item: unknown, artifactItem: unknown): unknown 
 }
 
 /**
+ * ADR-0048 (#1828) — composite dedup identity for the unscoped metadata list.
+ *
+ * Two installed packages may legitimately ship the same `type`/`name`
+ * (e.g. `page/home`); the SchemaRegistry already stores them under distinct
+ * `${packageId}:${name}` keys. Any list-merge that deduplicates by bare `name`
+ * collapses the two packages' rows into one (last-write-wins), which is the
+ * bug this key closes. A `NUL` separator keeps names containing `:` unambiguous.
+ */
+function metaItemKey(packageId: string | null | undefined, name: unknown): string {
+    return `${packageId ?? ''}\u0000${String(name)}`;
+}
+
+/**
+ * ADR-0048 (#1828) — package-aware overlay merge for the unscoped metadata list.
+ *
+ * `baseItems` (the lower layer: registry artifacts, or the running result) and
+ * `records` (the higher layer: active `sys_metadata` overlays, or draft rows)
+ * are merged so that:
+ *
+ *   • Two installed packages shipping the same `type/name` stay TWO rows —
+ *     resolution is per `(package, name)`, not bare `name`, so a higher-layer
+ *     row no longer collapses a same-name row from a different package.
+ *   • For each package `P` that owns a row of a given name, the winner is the
+ *     LATEST contribution that is either `P`'s own row or a package-less
+ *     ("global", `package_id IS NULL`) row — mirroring
+ *     `getMetaItem(name, packageId=P)`'s "scoped-then-global-fallback"
+ *     resolution, so the list and single-item paths agree. This is also why a
+ *     legacy row whose active/draft layers disagree on package attribution
+ *     still collapses (a package-less active row + its `package_id`-bearing
+ *     draft resolve to the one package slot, draft winning).
+ *   • A name with NO package-owned row resolves to its latest package-less
+ *     contribution — the pre-existing env-wide behaviour, unchanged.
+ *
+ * `transform(data, prev)` runs on each `records` body before it enters the
+ * merge (view-identity healing, draft tagging); `prev` is the base row it
+ * shadows at the same slot (or any same-name base row), else undefined.
+ */
+function mergePackageAwareOverlay(
+    baseItems: unknown[],
+    records: Array<{ data: unknown; packageId: string | undefined }>,
+    transform?: (data: any, prev: any) => any,
+): unknown[] {
+    // Per-name, layer-ordered contributions; `pkg: undefined` = package-less.
+    const buckets = new Map<string, Array<{ pkg: string | undefined; item: any }>>();
+    const order: string[] = []; // first-seen name order → stable output
+    const push = (name: string, pkg: string | undefined, item: any) => {
+        let list = buckets.get(name);
+        if (!list) { buckets.set(name, (list = [])); order.push(name); }
+        list.push({ pkg, item });
+    };
+
+    for (const raw of baseItems) {
+        const item = raw as any;
+        if (item && typeof item === 'object' && 'name' in item) {
+            push(item.name, (item._packageId ?? undefined) as string | undefined, item);
+        }
+    }
+    for (const { data, packageId } of records) {
+        const body = data as any;
+        if (!(body && typeof body === 'object' && 'name' in body)) continue;
+        // The base row this record shadows at its own slot (for view-identity
+        // healing): a same-package row, else a package-less one, else any
+        // same-name row it stands in for.
+        const list = buckets.get(body.name);
+        const prev = list
+            ? (list.find((c) => c.pkg === packageId)?.item
+                ?? list.find((c) => c.pkg === undefined)?.item
+                ?? list[0]?.item)
+            : undefined;
+        push(body.name, packageId, transform ? transform(body, prev) : body);
+    }
+
+    const out: unknown[] = [];
+    for (const name of order) {
+        const list = buckets.get(name)!;
+        const reals = Array.from(new Set(list.filter((c) => c.pkg !== undefined).map((c) => c.pkg)));
+        if (reals.length === 0) {
+            out.push(list[list.length - 1].item); // latest package-less row wins
+            continue;
+        }
+        for (const real of reals) {
+            // getMetaItem(name, real) resolution: latest row that is `real`'s
+            // own or package-less (global fallback).
+            let chosen: any;
+            for (const c of list) {
+                if (c.pkg === real || c.pkg === undefined) chosen = c.item;
+            }
+            if (chosen === undefined) continue;
+            // A package-less body standing in for package `real` must carry
+            // `real`'s provenance (the base row it replaced was `real`'s).
+            if (chosen._packageId === undefined) chosen = { ...chosen, _packageId: real };
+            out.push(chosen);
+        }
+    }
+    return out;
+}
+
+/**
  * Simple hash function for ETag generation (browser-compatible)
  * Uses a basic hash algorithm instead of crypto.createHash
  */
@@ -1608,63 +1706,69 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             };
             const envWideRecords = await queryByOrg(null);
             const orgRecords = orgId ? await queryByOrg(orgId) : [];
-            // org-specific rows override env-wide rows on name collision
+            // org-specific rows override env-wide rows on name collision.
+            // ADR-0048 (#1828) — key by (package, name), not bare name, so a
+            // package A row and a package B row of the same name do not
+            // collapse; org-over-env precedence still holds within each slot.
             const mergedMap = new Map<string, any>();
-            for (const r of envWideRecords) mergedMap.set(r.name, r);
-            for (const r of orgRecords) mergedMap.set(r.name, r);
+            for (const r of envWideRecords) mergedMap.set(metaItemKey(r.package_id, r.name), r);
+            for (const r of orgRecords) mergedMap.set(metaItemKey(r.package_id, r.name), r);
             const records = Array.from(mergedMap.values());
             if (records && records.length > 0) {
-                const byName = new Map<string, any>();
-                for (const existing of items) {
-                    const entry = existing as any;
-                    if (entry && typeof entry === 'object' && 'name' in entry) {
-                        byName.set(entry.name, entry);
-                    }
-                }
-                for (const record of records) {
+                const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
+                // Parse each overlay body once and surface its persisted
+                // software-package binding so the sidebar package filter and
+                // provenance classification see overlay rows the way they see
+                // registry items.
+                const overlays = records.map((record) => {
                     const data = typeof record.metadata === 'string'
                         ? JSON.parse(record.metadata)
                         : record.metadata;
-                    if (data && typeof data === 'object' && 'name' in data) {
-                        // Surface the persisted software-package binding so the
-                        // sidebar package filter and provenance classification
-                        // see overlay rows the same way they see registry items.
-                        const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
-                        if (recPkg && (data as any)._packageId === undefined) {
-                            (data as any)._packageId = recPkg;
-                        }
-                        // #2555 — heal identity-less view overlays already in the
-                        // DB (persisted by pre-fix saves): a raw-config row would
-                        // replace the flattened package entry wholesale, dropping
-                        // viewKind/object and vanishing the view from every
-                        // consumer that filters on them (switcher endpoint).
-                        // Inherit the identity fields from the shadowed entry;
-                        // the overlay's own fields still win.
-                        if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view') {
-                            const patch = viewIdentityPatch(data as Record<string, unknown>, byName.get(data.name));
-                            if (patch) Object.assign(data, patch);
-                        }
-                        byName.set(data.name, data);
+                    const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
+                    if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
+                        (data as any)._packageId = recPkg;
                     }
-                    // Only hydrate the global registry for unscoped calls —
-                    // scoped project entries must not leak process-wide.
-                    // Graft the artifact's protection envelope onto the
-                    // overlay body BEFORE registering: the plain-key entry
-                    // written here shadows the packaged artifact on
-                    // `registry.getItem`, and a bare overlay body would
-                    // strip `_lock`/`_packageId`/`_provenance` from every
-                    // registry-direct reader (ADR-0010 §3.3 — an overlay
-                    // must never loosen a packaged lock).
-                    if (this.environmentId === undefined && data && typeof data === 'object') {
-                        const artifact = this.lookupArtifactItem(request.type, (data as any).name);
-                        this.engine.registry.registerItem(
-                            request.type,
-                            mergeArtifactProtection(data, artifact),
-                            'name' as any,
-                        );
+                    return { data, packageId: recPkg };
+                });
+
+                // ADR-0048 (#1828) — package-aware merge: a package-scoped row
+                // overlays ONLY its own package's entry, so two installed
+                // packages shipping the same `type/name` (e.g. `page/home`) are
+                // not collapsed to one. #2555 — heal identity-less view overlays
+                // from the entry they shadow (a raw-config row would otherwise
+                // drop viewKind/object and vanish the view from switcher/list
+                // consumers); the overlay's own fields still win.
+                items = mergePackageAwareOverlay(items, overlays, (data, prev) => {
+                    if (isView && data && typeof data === 'object') {
+                        const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
+                        if (patch) Object.assign(data as Record<string, unknown>, patch);
+                    }
+                    return data;
+                });
+
+                // Only hydrate the global registry for unscoped (control-plane)
+                // calls — scoped project entries must not leak process-wide.
+                // Graft the artifact's protection envelope onto the overlay body
+                // BEFORE registering: the plain-key entry written here shadows
+                // the packaged artifact on `registry.getItem`, and a bare
+                // overlay body would strip `_lock`/`_packageId`/`_provenance`
+                // from every registry-direct reader (ADR-0010 §3.3 — an overlay
+                // must never loosen a packaged lock). ADR-0048 (#1828) — scope
+                // the artifact lookup to the row's OWN package so a colliding
+                // overlay no longer grafts the first-registered package's
+                // provenance/lock onto another package's row.
+                if (this.environmentId === undefined) {
+                    for (const { data, packageId: recPkg } of overlays) {
+                        if (data && typeof data === 'object' && 'name' in data) {
+                            const artifact = this.lookupArtifactItem(request.type, (data as any).name, recPkg);
+                            this.engine.registry.registerItem(
+                                request.type,
+                                mergeArtifactProtection(data, artifact),
+                                'name' as any,
+                            );
+                        }
                     }
                 }
-                items = Array.from(byName.values());
             }
         } catch {
             // DB not available — fall through with whatever we already have.
@@ -1698,21 +1802,22 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                 };
                 const draftRecords = [...(await queryDrafts(null)), ...(orgId ? await queryDrafts(orgId) : [])];
                 if (draftRecords.length > 0) {
-                    const byName = new Map<string, any>();
-                    for (const existing of items) {
-                        const entry = existing as any;
-                        if (entry && typeof entry === 'object' && 'name' in entry) byName.set(entry.name, entry);
-                    }
-                    for (const record of draftRecords) {
+                    // ADR-0048 (#1828) — package-aware draft overlay (parity with
+                    // the active-overlay merge above): a package-scoped draft
+                    // previews only its own package's entry, so two packages'
+                    // same-name drafts stay distinct. Draft rows win over active.
+                    const drafts = draftRecords.map((record) => {
                         const data = typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata;
-                        if (data && typeof data === 'object' && 'name' in data) {
-                            const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
-                            if (recPkg && (data as any)._packageId === undefined) (data as any)._packageId = recPkg;
-                            (data as any)._draft = true;
-                            byName.set(data.name, data);
+                        const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
+                        if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
+                            (data as any)._packageId = recPkg;
                         }
-                    }
-                    items = Array.from(byName.values());
+                        return { data, packageId: recPkg };
+                    });
+                    items = mergePackageAwareOverlay(items, drafts, (data) => {
+                        if (data && typeof data === 'object') (data as any)._draft = true;
+                        return data;
+                    });
                 }
             } catch {
                 // DB unavailable — serve the active result unchanged.
@@ -1733,12 +1838,14 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                     runtimeItems = runtimeItems.filter((item: any) => item?._packageId === packageId);
                 }
                 if (runtimeItems && runtimeItems.length > 0) {
-                    // Merge, avoiding duplicates by name
+                    // Merge, avoiding duplicates. ADR-0048 (#1828) — key by
+                    // (package, name), not bare name, so a runtime item from one
+                    // package does not collapse a same-name item from another.
                     const itemMap = new Map<string, any>();
                     for (const item of items) {
                         const entry = item as any;
                         if (entry && typeof entry === 'object' && 'name' in entry) {
-                            itemMap.set(entry.name, entry);
+                            itemMap.set(metaItemKey(entry._packageId ?? undefined, entry.name), entry);
                         }
                     }
                     for (const item of runtimeItems) {
@@ -1752,8 +1859,9 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
                             // view overlays disappear from list endpoints on
                             // refresh (detail endpoint kept showing the
                             // overlay because it uses a different code path).
-                            if (!itemMap.has(entry.name)) {
-                                itemMap.set(entry.name, entry);
+                            const key = metaItemKey(entry._packageId ?? undefined, entry.name);
+                            if (!itemMap.has(key)) {
+                                itemMap.set(key, entry);
                             }
                         }
                     }

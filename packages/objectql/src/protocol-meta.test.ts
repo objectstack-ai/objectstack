@@ -869,6 +869,67 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(byPkg['com.globex.crm']).toBe('Globex Home');
         });
 
+        it('keeps both colliding rows when EACH package has its own sys_metadata overlay (ADR-0048 #1828)', async () => {
+            // The #1828 gap: two installed packages ship `page/home` AND each has
+            // a package-scoped sys_metadata overlay. The DB-overlay merge deduped
+            // by bare `name`, collapsing the two rows to one (last-write-wins).
+            // Each overlay must merge onto its OWN package's entry → two rows.
+            registry.registerItem('page', { name: 'home', label: 'Acme (artifact)' }, 'name', 'com.acme.crm');
+            registry.registerItem('page', { name: 'home', label: 'Globex (artifact)' }, 'name', 'com.globex.crm');
+            mockEngine.find.mockResolvedValue([
+                { type: 'page', name: 'home', state: 'active', package_id: 'com.acme.crm', metadata: JSON.stringify({ name: 'home', label: 'Acme (overlay)' }) },
+                { type: 'page', name: 'home', state: 'active', package_id: 'com.globex.crm', metadata: JSON.stringify({ name: 'home', label: 'Globex (overlay)' }) },
+            ]);
+
+            const result = await protocol.getMetaItems({ type: 'page' });
+            const homes = (result.items as any[]).filter((i) => i.name === 'home');
+
+            expect(homes).toHaveLength(2);
+            const byPkg = Object.fromEntries(homes.map((h: any) => [h._packageId, h.label]));
+            // Overlay wins over the artifact, and neither package collapses.
+            expect(byPkg['com.acme.crm']).toBe('Acme (overlay)');
+            expect(byPkg['com.globex.crm']).toBe('Globex (overlay)');
+        });
+
+        it('single-package env-wide (package-less) overlay still overlays the artifact (ADR-0005 unchanged, #1828)', async () => {
+            // A package-less overlay (package_id IS NULL) must still WIN over the
+            // one artifact it customizes and stay a single row — the package-aware
+            // merge must not split a global overlay off from its lone artifact.
+            registry.registerItem('page', { name: 'home', label: 'Artifact' }, 'name', 'com.acme.crm');
+            mockEngine.find.mockResolvedValue([
+                { type: 'page', name: 'home', state: 'active', package_id: null, metadata: JSON.stringify({ name: 'home', label: 'Customized' }) },
+            ]);
+
+            const result = await protocol.getMetaItems({ type: 'page' });
+            const homes = (result.items as any[]).filter((i) => i.name === 'home');
+
+            expect(homes).toHaveLength(1);
+            expect(homes[0].label).toBe('Customized');          // overlay wins (ADR-0005)
+            expect(homes[0]._packageId).toBe('com.acme.crm');   // provenance retained
+        });
+
+        it('keeps both colliding rows from the MetadataService baseline (ADR-0048 #1828)', async () => {
+            // Third merge site: two packages contribute a runtime `agent/assistant`
+            // via MetadataService. The merge deduped by bare name, dropping one.
+            const metadataService = {
+                list: vi.fn().mockResolvedValue([
+                    { name: 'assistant', label: 'Acme Assistant', _packageId: 'com.acme.crm' },
+                    { name: 'assistant', label: 'Globex Assistant', _packageId: 'com.globex.crm' },
+                ]),
+            };
+            const services = new Map<string, any>([['metadata', metadataService]]);
+            const scoped = new ObjectStackProtocolImplementation(mockEngine, () => services);
+            mockEngine.find.mockResolvedValue([]);
+
+            const result = await scoped.getMetaItems({ type: 'agent' });
+            const agents = (result.items as any[]).filter((i) => i.name === 'assistant');
+
+            expect(agents).toHaveLength(2);
+            const byPkg = Object.fromEntries(agents.map((a: any) => [a._packageId, a.label]));
+            expect(byPkg['com.acme.crm']).toBe('Acme Assistant');
+            expect(byPkg['com.globex.crm']).toBe('Globex Assistant');
+        });
+
         it('should fall back to DB when registry is empty for type', async () => {
             mockEngine.find.mockResolvedValue([
                 {
