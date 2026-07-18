@@ -2126,6 +2126,7 @@ describe('UserActionsConfigSchema', () => {
     expect(config.sort).toBe(true);
     expect(config.search).toBe(true);
     expect(config.filter).toBe(true);
+    expect(config.refresh).toBe(true);
     expect(config.rowHeight).toBe(true);
     expect(config.addRecordForm).toBe(false);
     expect(config.editInline).toBe(false);
@@ -2335,11 +2336,13 @@ describe('ListViewSchema — Airtable Interface parity fields', () => {
         sort: true,
         search: true,
         filter: false,
+        refresh: false,
         rowHeight: false,
       },
     });
     expect(listView.userActions?.sort).toBe(true);
     expect(listView.userActions?.filter).toBe(false);
+    expect(listView.userActions?.refresh).toBe(false);
   });
 
   it('should accept list view with appearance', () => {

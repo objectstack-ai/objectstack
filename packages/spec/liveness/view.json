@@ -41,7 +41,7 @@
         "conditionalFormatting": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
         "inlineEdit": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
         "exportOptions": { "status": "live", "note": "objectui: ObjectGrid.tsx (audit L15)." },
-        "userActions": { "status": "live", "note": "objectui: ListView.tsx:374 toolbarFlags (search/sort/filters/density/hide-fields/group/color + addRecordForm). Sub-key userActions.buttons has NO reader (audit L20, re-verified objectui@fb35e48) — dead sub-surface, enforce-or-remove worklist." },
+        "userActions": { "status": "live", "note": "objectui: ListView.tsx:374 toolbarFlags (search/sort/filters/refresh/density/hide-fields/group/color + addRecordForm). Sub-key userActions.refresh drives the manual toolbar Refresh button (objectui#2634). Sub-key userActions.buttons has NO reader (audit L20, re-verified objectui@fb35e48) — dead sub-surface, enforce-or-remove worklist." },
         "appearance": { "status": "live", "note": "objectui: allowedVisualizations gates the view-type switcher (audit L15); showDescription gates ListView.tsx:1728." },
         "tabs": { "status": "live", "note": "objectui: TabBar.tsx — icon/visible/pinned/filter wired (audit L15). Sub-key tabs[].order is NOT used for sorting (audit L20) — dead sub-surface." },
         "addRecord": { "status": "live", "note": "objectui: ListView.tsx:374 (addRecord + userActions.addRecordForm drive the add-record flow). Sub-keys addRecord.mode / addRecord.formView have NO reader (audit L20, re-verified objectui@fb35e48) — dead sub-surface." },

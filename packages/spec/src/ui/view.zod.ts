@@ -240,6 +240,7 @@ export const UserActionsConfigSchema = lazySchema(() => z.object({
   sort: z.boolean().default(true).describe('Allow users to sort records'),
   search: z.boolean().default(true).describe('Allow users to search records'),
   filter: z.boolean().default(true).describe('Allow users to filter records'),
+  refresh: z.boolean().default(true).describe('Allow users to reload the view data from the backend without a full page reload'),
   rowHeight: z.boolean().default(true).describe('Allow users to toggle row height/density'),
   addRecordForm: z.boolean().default(false).describe('Add records through a form instead of inline'),
   editInline: z.boolean().default(false).describe('Allow users to edit records inline — click a cell to edit it with the field\'s type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in.'),
