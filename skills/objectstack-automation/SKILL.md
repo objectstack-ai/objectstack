@@ -55,7 +55,7 @@ parallel. Flows are the primary automation building block in ObjectStack.
 |:-----|:------------|
 | `autolaunched` | Runs without user interaction — triggered by events, APIs, or other flows |
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
-| `schedule` | Runs on a cron schedule (daily cleanup, weekly reports) |
+| `schedule` | Runs on a cron schedule (daily cleanup, weekly reports) — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
 | `record_change` | Fires automatically on record create/update/delete (bind via the `start` node's `triggerType`) |
 | `api` | Invoked explicitly via the API / `engine.execute()`, **or** bound as an inbound **webhook**: `POST /api/v1/automation/hooks/:flowName/:hookId` (see *Inbound webhook triggers* below) |
 
@@ -508,6 +508,47 @@ read at runtime, not Zod-validated):
 > triggers — `previous.x` is the value before the change, `record.x` is the
 > value after. (Salesforce-flavor `OLD` / `NEW` were removed in M9.5 and now
 > evaluate to `null`.) See [objectstack-formula](../objectstack-formula/SKILL.md).
+
+### Time-relative triggers — scheduled per-record date sweep
+
+**Don't** express "act N days before/after a date" (renewal reminders, "expiring
+soon", overdue sweeps) as a `record_change` flow gated on date-equality
+(`end_date == daysFromNow(60)`) — that predicate is only evaluated when the
+record *happens to change*, so unattended it almost never fires. Use a
+**declarative time-relative trigger**: a `schedule`-type flow whose `start` node
+carries a **`timeRelative`** descriptor is swept on a schedule (daily by default)
+and launched **once per record** whose date field falls in the window. The record
+is on the context, so the start `condition` and `{record.*}` interpolation work
+exactly as for a record-change flow — and because the window is evaluated every
+day, a threshold is never missed.
+
+```typescript
+{
+  name: 'renewal_alert',
+  type: 'schedule',
+  runAs: 'system',              // a sweep has no trigger user — elevate explicitly
+  nodes: [{
+    id: 'start', type: 'start',
+    config: {
+      timeRelative: {
+        object: 'contracts',
+        dateField: 'end_date',
+        offsetDays: [60, 30, 7],   // fire exactly at T-60 / T-30 / T-7
+        // — or — withinDays: 30    // "expiring within 30 days" (negative = overdue lookback)
+        filter: { status: 'active' },  // optional, ANDed with the date window
+        // maxRecords: 1000            // optional per-sweep cap (default 1000)
+      },
+      // schedule: cron`0 8 * * *`     // optional sweep cadence; omit for daily 08:00 UTC
+    },
+  }, /* …downstream nodes, connected via `edges` */],
+}
+```
+
+Exactly one of `offsetDays` (discrete T-minus days) or `withinDays` (a range;
+negative = overdue) is required. Ships in `@objectstack/trigger-schedule` —
+needs `requires: ['automation', 'triggers']` **plus `'job'`** (the sweep cadence
+runs on the job service). See the
+[Time Relative Trigger reference](/docs/references/automation/time-relative-trigger).
 
 ---
 

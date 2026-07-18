@@ -735,6 +735,51 @@ export const contractExpirationCheck: Flow = {
 };
 ```
 
+### Time-relative flow (declarative date sweep)
+
+Instead of hand-writing the "find records, then act" query above — and far more
+robust than a `record_change` flow gated on date-equality (`end_date ==
+daysFromNow(60)`), which only fires if the record is edited on the exact day — a
+`schedule` flow whose `start` node declares a `timeRelative` descriptor is swept
+on a schedule (daily by default) and runs **once per matching record**:
+
+```typescript
+export const renewalReminder: Flow = {
+  name: 'renewal_reminder',
+  label: 'Renewal Reminder',
+  type: 'schedule',
+  status: 'active',
+  runAs: 'system', // a sweep has no trigger user — elevate explicitly
+  nodes: [
+    {
+      id: 'start',
+      type: 'start',
+      label: 'Start',
+      config: {
+        timeRelative: {
+          object: 'contract',
+          dateField: 'end_date',
+          offsetDays: [60, 30, 7], // — or — withinDays: 30 (negative = overdue lookback)
+          filter: { status: 'active' }, // optional, ANDed with the date window
+        },
+        // schedule: { type: 'cron', expression: '0 8 * * *' } // optional; defaults to daily 08:00 UTC
+      },
+    },
+    { id: 'notify_owner', type: 'notify', label: 'Notify Owner' },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'notify_owner' },
+    { id: 'e2', source: 'notify_owner', target: 'end' },
+  ],
+};
+```
+
+Exactly one of `offsetDays` (discrete T-minus days) or `withinDays` (a range) is
+required. Requires the `triggers` **and** `job` capabilities. The record is on
+the flow context (`record.*`), so the start `condition` and `{record.*}`
+interpolation work as in a record-change flow.
+
 ### Update-triggered flow
 
 Trigger on a record update and compare against the previous value:
