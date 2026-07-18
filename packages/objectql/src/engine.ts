@@ -20,6 +20,7 @@ import type { ICryptoProvider, CryptoHandle } from '@objectstack/spec/contracts'
 import {
   collectSecretFields,
   collectMaskedReadFields,
+  collectCredentialFields,
   makeSecretRef,
   parseSecretRef,
   isSecretRef,
@@ -2919,8 +2920,49 @@ export class ObjectQL implements IDataEngine {
      return opCtx.result as number;
   }
 
+  /**
+   * Fail-closed guard (ADR-0100 / #3171): refuse to aggregate over a credential
+   * field. `secret`/`password` values are masked on the generic read path so
+   * plaintext never leaves the engine, but `aggregate()` has no equivalent mask
+   * — a GROUP BY / MIN / MAX / array_agg over such a column would surface the
+   * stored `secret:<id>` ref or the password value, and post-hoc masking would
+   * corrupt group keys. So we reject instead. The check is unconditional
+   * (ignores `managedBy`): aggregating a credential is never legitimate, even on
+   * a better-auth object, where it would be an inference oracle over hashes.
+   *
+   * Only the two output-bearing positions on `EngineAggregateOptions` carry
+   * field names: `aggregations[].field` (skip COUNT(*) — undefined or '*') and
+   * `groupBy[]` (a string, or a `{ field }` bucket object).
+   */
+  private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
+    const schema = this._registry.getObject(object);
+    const credentialFields = collectCredentialFields(schema);
+    if (credentialFields.length === 0) return;
+
+    const referenced = new Set<string>();
+    for (const agg of query?.aggregations ?? []) {
+      const field = (agg as { field?: string })?.field;
+      if (field && field !== '*') referenced.add(field);
+    }
+    for (const g of (query?.groupBy as unknown[]) ?? []) {
+      const field = typeof g === 'string' ? g : (g as { field?: string })?.field;
+      if (field) referenced.add(field);
+    }
+
+    const hit = credentialFields.filter((f) => referenced.has(f));
+    if (hit.length > 0) {
+      throw new Error(
+        `Cannot aggregate credential field(s) ${hit.map((f) => `"${object}.${f}"`).join(', ')}: `
+          + 'secret/password fields are masked on read so plaintext never leaves the engine, and '
+          + 'aggregating them (group-by, min/max, array_agg, …) would surface the stored value. '
+          + 'Refusing (fail-closed) — see ADR-0100 / #3171.',
+      );
+    }
+  }
+
   async aggregate(object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {
       object = this.resolveObjectName(object);
+      this.rejectCredentialAggregation(object, query);
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
 

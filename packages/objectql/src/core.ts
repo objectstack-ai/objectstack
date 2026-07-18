@@ -76,6 +76,7 @@ export {
   parseSecretRef,
   collectSecretFields,
   collectMaskedReadFields,
+  collectCredentialFields,
 } from './secret-fields.js';
 
 // Utilities

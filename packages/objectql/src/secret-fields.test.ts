@@ -320,3 +320,51 @@ describe('objectql password-field masking (ADR-0100)', () => {
     expect(viaOne.password).toBe('hashed-by-auth');
   });
 });
+
+describe('objectql aggregate() rejects credential fields (ADR-0100 / #3171)', () => {
+  it('rejects a `secret` field used as an aggregation measure', async () => {
+    const { engine } = await buildEngine(true);
+    await expect(
+      engine.aggregate('ext_datasource', { aggregations: [{ function: 'max', field: 'db_password', alias: 'x' }] as any }),
+    ).rejects.toThrow(/credential field.*db_password/i);
+  });
+
+  it('rejects a `secret` field used as a string groupBy dimension', async () => {
+    const { engine } = await buildEngine(true);
+    await expect(
+      engine.aggregate('ext_datasource', { aggregations: [{ function: 'count', alias: 'n' }], groupBy: ['db_password'] } as any),
+    ).rejects.toThrow(/db_password/);
+  });
+
+  it('rejects a `secret` field used as a structured {field} groupBy bucket', async () => {
+    const { engine } = await buildEngine(true);
+    await expect(
+      engine.aggregate('ext_datasource', { aggregations: [{ function: 'count', alias: 'n' }], groupBy: [{ field: 'db_password' }] } as any),
+    ).rejects.toThrow(/db_password/);
+  });
+
+  it('does NOT reject when the credential field is not referenced (no false positive)', async () => {
+    const { engine } = await buildEngine(true);
+    await engine.insert('ext_datasource', { name: 'pg', db_password: 's3cr3t' });
+    // COUNT(*) touches no credential column — the object merely *has* one.
+    await expect(
+      engine.aggregate('ext_datasource', { aggregations: [{ function: 'count', alias: 'n' }] } as any),
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects a generic `password` field used as a groupBy dimension', async () => {
+    const { engine } = await buildPasswordEngine();
+    await expect(
+      engine.aggregate('device', { aggregations: [{ function: 'count', alias: 'n' }], groupBy: ['admin_password'] } as any),
+    ).rejects.toThrow(/admin_password/);
+  });
+
+  it('rejects even on a better-auth object — read-masking is exempt there, aggregation is NOT', async () => {
+    const { engine } = await buildPasswordEngine();
+    // authy_user is managedBy:'better-auth' (password NOT masked on read), but
+    // aggregating the credential is still refused (unconditional collector).
+    await expect(
+      engine.aggregate('authy_user', { aggregations: [{ function: 'max', field: 'password', alias: 'x' }] as any }),
+    ).rejects.toThrow(/password/);
+  });
+});

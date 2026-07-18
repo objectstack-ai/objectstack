@@ -97,3 +97,28 @@ export function collectMaskedReadFields(schema: ServiceObject | undefined | null
   }
   return out;
 }
+
+/**
+ * Collect the names of every credential-bearing field on an object — `secret`
+ * OR `password` — **unconditionally**, ignoring `managedBy`.
+ *
+ * This differs from {@link collectMaskedReadFields} on purpose. Read-masking
+ * exempts `password` on `managedBy: 'better-auth'` objects so login reads still
+ * see the stored value; but *aggregating* a credential field must never be
+ * allowed, even on a better-auth object — a GROUP BY / MIN / MAX over a password
+ * column is an inference oracle regardless of who owns the table. So the
+ * aggregate-rejection gate keys off this stricter, exemption-free collector,
+ * keeping the two concerns independent (they must not drift). See ADR-0100 / #3171.
+ *
+ * Returns an empty array when the schema has no fields or no credential fields,
+ * so callers can fast-path on `length === 0`.
+ */
+export function collectCredentialFields(schema: ServiceObject | undefined | null): string[] {
+  const fields = (schema as any)?.fields as Record<string, { type?: string }> | undefined;
+  if (!fields) return [];
+  const out: string[] = [];
+  for (const [name, def] of Object.entries(fields)) {
+    if (def && (def.type === 'secret' || def.type === 'password')) out.push(name);
+  }
+  return out;
+}
