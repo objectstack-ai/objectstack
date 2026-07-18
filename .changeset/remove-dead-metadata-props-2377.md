@@ -1,8 +1,12 @@
 ---
-"@objectstack/spec": major
+"@objectstack/spec": minor
 ---
 
 feat(spec)!: remove dead author-facing metadata properties (#2377, ADR-0049 enforce-or-remove)
+
+Breaking spec-surface removal, versioned as `minor` per the launch-window changeset
+policy (a `major` would promote the whole fixed-group monorepo; breaking cleanups ride
+the minor line, as with #2402 → 11.1.0).
 
 Removes a batch of spec properties that parsed but had **no runtime consumer** —
 authoring them was a false affordance (especially dangerous for AI-authored
