@@ -3202,11 +3202,6 @@ export class ObjectStackClient {
       notifications: '/api/v1/notifications',
       ai: '/api/v1/ai',
       i18n: '/api/v1/i18n',
-      // NOTE: the `feed` route constant is retained only to satisfy the
-      // discovery `ApiRoutes` type (`routes.feed`), which is a separate
-      // follow-up cleanup. The feed SDK accessor + backend were retired
-      // (ADR-0052 §5); no client code consumes this route.
-      feed: '/api/v1/feed',
       graphql: '/graphql',
     };
     

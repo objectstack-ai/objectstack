@@ -1307,22 +1307,6 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             }
         }
 
-        // Add feed service status
-        if (registeredServices.has('feed')) {
-            services['feed'] = {
-                enabled: true,
-                status: 'available' as const,
-                route: '/api/v1/data',
-                provider: 'service-feed',
-            };
-        } else {
-            services['feed'] = {
-                enabled: false,
-                status: 'unavailable' as const,
-                message: 'Install service-feed to enable',
-            };
-        }
-
         const routes: ApiRoutes = {
             data: '/api/v1/data',
             metadata: '/api/v1/meta',
@@ -1333,8 +1317,11 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
         // DiscoverySchema defines capabilities as Record<string, { enabled, features?, description? }>
         // (hierarchical format). We also keep a flat WellKnownCapabilities for backward compat.
         const wellKnown: WellKnownCapabilities = {
-            feed: registeredServices.has('feed'),
-            comments: registeredServices.has('feed'),
+            // Comments/chatter are served by the `sys_comment` object via the generic
+            // data API (ADR-0052 §5) — not a dedicated service. The capability is true
+            // iff that object is loaded (the always-on audit slate provides it); this
+            // keeps declared === enforced (Prime Directive #10). #3180
+            comments: !!this.engine.registry?.getObject?.('sys_comment'),
             automation: registeredServices.has('automation'),
             cron: registeredServices.has('job'),
             search: registeredServices.has('search'),
