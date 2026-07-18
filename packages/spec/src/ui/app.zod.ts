@@ -41,6 +41,9 @@ const BaseNavItemSchema = z.object({
   /** Badge text or count displayed on the navigation item (e.g. "3", "New") */
   badge: z.union([z.string(), z.number()]).optional().describe('Badge text or count displayed on the item'),
 
+  /** Visual variant for the badge (consumed by objectui NavigationRenderer) */
+  badgeVariant: z.enum(['default', 'secondary', 'destructive', 'outline']).optional().describe('Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894).'),
+
   /** 
    * Visibility condition. 
    * Formula expression returning boolean. 
@@ -264,10 +267,22 @@ export const GroupNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
 }));
 
 /**
+ * 9. Separator Navigation Item
+ * A visual divider in the navigation list. Renders no target; declared to
+ * match the objectui renderer's `item.type === 'separator'` branch
+ * (inverse-drift fix, liveness audit #1878/#1891/#1894).
+ */
+const SeparatorNavItemSchema = lazySchema(() => z.object({
+  type: z.literal('separator'),
+  id: SnakeCaseIdentifierSchema.optional().describe('Optional id for the separator'),
+  order: z.number().optional().describe('Sort order within the same level (lower = first)'),
+}));
+
+/**
  * Recursive Union of all navigation item types.
  * Allows constructing an unlimited-depth navigation tree.
  */
-export const NavigationItemSchema: z.ZodType<any> = z.lazy(() => 
+export const NavigationItemSchema: z.ZodType<any> = z.lazy(() =>
   z.union([
     ObjectNavItemSchema.extend({
       children: z.array(NavigationItemSchema).optional().describe('Child navigation items (e.g. specific views)'),
@@ -278,6 +293,7 @@ export const NavigationItemSchema: z.ZodType<any> = z.lazy(() =>
     ReportNavItemSchema,
     ActionNavItemSchema,
     ComponentNavItemSchema,
+    SeparatorNavItemSchema,
     GroupNavItemSchema.extend({
       children: z.array(NavigationItemSchema).describe('Child navigation items'),
     })
@@ -324,6 +340,7 @@ export type NavigationContribution = z.infer<typeof NavigationContributionSchema
  */
 export const AppBrandingSchema = lazySchema(() => z.object({
   primaryColor: z.string().optional().describe('Primary theme color hex code'),
+  accentColor: z.string().optional().describe('Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit #1878/#1891/#1894).'),
   logo: z.string().optional().describe('Custom logo URL for this app'),
   favicon: z.string().optional().describe('Custom favicon URL for this app'),
 }));

@@ -54,6 +54,7 @@ const result = ActionNavItem.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -75,11 +76,11 @@ const result = ActionNavItem.parse(data);
 | **version** | `string` | optional | App version |
 | **description** | `string` | optional | App description |
 | **icon** | `string` | optional | App icon used in the App Launcher |
-| **branding** | `{ primaryColor?: string; logo?: string; favicon?: string }` | optional | App-specific branding |
+| **branding** | `{ primaryColor?: string; accentColor?: string; logo?: string; favicon?: string }` | optional | App-specific branding |
 | **active** | `boolean` | optional | Whether the app is enabled |
 | **isDefault** | `boolean` | optional | Is default app |
 | **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead |
-| **navigation** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … }[]` | optional | Full navigation tree for the app sidebar |
+| **navigation** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| { id: string; label: string; icon?: string; order?: number; … }[]` | optional | Full navigation tree for the app sidebar |
 | **areas** | `{ id: string; label: string; icon?: string; order?: number; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
 | **contextSelectors** | `{ id: string; label: string; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
 | **homePageId** | `string` | optional | ID of the navigation item to serve as landing page |
@@ -110,6 +111,7 @@ const result = ActionNavItem.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **primaryColor** | `string` | optional | Primary theme color hex code |
+| **accentColor** | `string` | optional | Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **logo** | `string` | optional | Custom logo URL for this app |
 | **favicon** | `string` | optional | Custom favicon URL for this app |
 
@@ -145,6 +147,7 @@ const result = ActionNavItem.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -167,6 +170,7 @@ const result = ActionNavItem.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -188,6 +192,7 @@ const result = ActionNavItem.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -211,7 +216,7 @@ const result = ActionNavItem.parse(data);
 | **description** | `string` | optional | Area description |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) for this area. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this area |
-| **navigation** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … }[]` | ✅ | Navigation items within this area |
+| **navigation** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| { id: string; label: string; icon?: string; order?: number; … }[]` | ✅ | Navigation items within this area |
 
 
 ---
@@ -227,7 +232,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **app** | `string` | ✅ | Target app name to contribute navigation into (e.g. "setup") |
 | **group** | `string` | optional | Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level |
 | **priority** | `integer` | optional | Merge priority within the target group — lower applied first (matches object extender priority) |
-| **items** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … }[]` | ✅ | Navigation items contributed into the target app/group |
+| **items** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| { id: string; label: string; icon?: string; order?: number; … }[]` | ✅ | Navigation items contributed into the target app/group |
 
 
 ---
@@ -251,6 +256,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -278,6 +284,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -300,6 +307,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -323,6 +331,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -346,6 +355,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -368,6 +378,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -390,6 +401,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -402,6 +414,20 @@ This schema accepts one of the following structures:
 
 #### Option 8
 
+**Type:** `separator`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'separator'` | ✅ |  |
+| **id** | `string` | optional | Optional id for the separator |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+
+---
+
+#### Option 9
+
 **Type:** `group`
 
 ### Properties
@@ -413,6 +439,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -437,6 +464,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -462,6 +490,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -484,6 +513,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
@@ -505,6 +535,7 @@ This schema accepts one of the following structures:
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |

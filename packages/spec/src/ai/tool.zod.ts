@@ -117,7 +117,7 @@ export const ToolSchema = lazySchema(() => z.object({
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 
-}));
+}).describe('AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Authoring a tool as metadata does NOT make it runnable: this schema has no `implementation`/`handler` field and no framework executor loads a metadata-authored tool. The runtime executes a separately-registered `AIToolDefinition` (cloud `@objectstack/service-ai`); tool metadata is a one-way projection for Studio/discovery. Do not expect a hand-authored tool to run in the open edition (liveness audit #1878/#1892).'));
 
 export type Tool = z.infer<typeof ToolSchema>;
 

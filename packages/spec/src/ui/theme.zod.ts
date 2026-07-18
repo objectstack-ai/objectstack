@@ -223,7 +223,7 @@ export const ThemeSchema = lazySchema(() => z.object({
   typography: TypographySchema.optional().describe('Typography settings'),
   
   /** Spacing */
-  spacing: SpacingSchema.optional().describe('Spacing scale'),
+  spacing: SpacingSchema.optional().describe('Spacing scale. [EXPERIMENTAL — not enforced] generateThemeVars does not emit spacing tokens yet (liveness audit #1878/#1893).'),
   
   /** Border radius */
   borderRadius: BorderRadiusSchema.optional().describe('Border radius scale'),
@@ -232,7 +232,7 @@ export const ThemeSchema = lazySchema(() => z.object({
   shadows: ShadowSchema.optional().describe('Box shadow effects'),
   
   /** Breakpoints */
-  breakpoints: BreakpointsSchema.optional().describe('Responsive breakpoints'),
+  breakpoints: BreakpointsSchema.optional().describe('Responsive breakpoints. [EXPERIMENTAL — not enforced] generateThemeVars does not emit breakpoint tokens yet (liveness audit #1878/#1893).'),
   
   /** Animation */
   animation: AnimationSchema.optional().describe('Animation settings'),
@@ -254,16 +254,16 @@ export const ThemeSchema = lazySchema(() => z.object({
   extends: z.string().optional().describe('Base theme to extend from'),
 
   /** Display density mode */
-  density: DensityModeSchema.optional().describe('Display density: compact, regular, or spacious'),
+  density: DensityModeSchema.optional().describe('Display density: compact, regular, or spacious. [EXPERIMENTAL — not enforced] The theme engine does not consume theme-level density yet; view-level densityMode is a separate live setting (liveness audit #1878/#1893).'),
 
   /** WCAG contrast level requirement */
   wcagContrast: WcagContrastLevelSchema.optional().describe('WCAG color contrast level (AA or AAA)'),
 
   /** Right-to-left language support */
-  rtl: z.boolean().optional().describe('Enable right-to-left layout direction'),
+  rtl: z.boolean().optional().describe('Enable right-to-left layout direction. [EXPERIMENTAL — not enforced] No renderer reads theme.rtl yet (liveness audit #1878/#1893).'),
 
   /** Touch target accessibility configuration */
-  touchTarget: TouchTargetConfigSchema.optional().describe('Touch target sizing defaults'),
+  touchTarget: TouchTargetConfigSchema.optional().describe('Touch target sizing defaults. [EXPERIMENTAL — not enforced] No renderer consumes touchTarget yet (liveness audit #1878/#1893).'),
 
   /** Keyboard navigation and focus management */
   keyboardNavigation: FocusManagementSchema.optional().describe('Keyboard focus management settings'),

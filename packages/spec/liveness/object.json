@@ -179,11 +179,13 @@
         },
         "trash": {
           "status": "dead",
-          "evidence": "no behavior-changing reader"
+          "evidence": "no behavior-changing reader",
+          "note": "Kept `dead` (not experimental): enable.trash defaults to true, and the author-side liveness lint auto-warns on experimental props — for a default-true boolean it cannot distinguish an authored value from the schema default, so tagging it experimental would warn on every object (noise). Disposition for #1893 is prune-or-build, tracked in the sub-issue; no authorWarn so it stays silent."
         },
         "mru": {
           "status": "dead",
-          "evidence": "no behavior-changing reader"
+          "evidence": "no behavior-changing reader",
+          "note": "Kept `dead` (not experimental) for the same default-true-boolean reason as enable.trash; disposition tracked in #1893. No authorWarn so it stays silent."
         },
         "clone": {
           "status": "live",

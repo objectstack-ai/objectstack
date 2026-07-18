@@ -99,7 +99,7 @@ export const WebhookSchema = lazySchema(() => z.object({
   authentication: z.object({
     type: z.enum(['none', 'bearer', 'basic', 'api-key']).describe('Authentication type'),
     credentials: z.record(z.string(), z.string()).optional().describe('Authentication credentials'),
-  }).optional().describe('Authentication configuration'),
+  }).optional().describe("Authentication configuration. [EXPERIMENTAL — not enforced] The webhook delivery path only applies HMAC signing via `secret`; bearer/basic/api-key credentials are not attached to outbound requests yet (liveness audit #1878/#1893)."),
   
   /** Retry Policy */
   retryPolicy: z.object({

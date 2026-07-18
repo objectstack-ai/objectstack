@@ -319,7 +319,7 @@ export const PortalSchema = lazySchema(() => z.object({
 
   /** Whether the portal is active. */
   active: z.boolean().optional().default(true),
-}));
+}).describe('Portal projection. [EXPERIMENTAL — not enforced] PortalSchema is not registered as an authorable metadata type; no dispatcher route family, auth scope, LayoutDispatcher, NavigationBuilder or ThemeProvider consumes it yet. The entire schema is a forward-looking design (framework #1294); authoring a portal today is a no-op (liveness audit #1878/#1893).'));
 
 // ---------------------------------------------------------------------------
 // Factory + types
