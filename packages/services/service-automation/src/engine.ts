@@ -353,6 +353,88 @@ export interface StepLogEntry {
 }
 
 /**
+ * Compact a run's step log for durable history (#2585, #3234).
+ *
+ * Under {@link MAX_PERSISTED_HISTORY_STEPS} the log is persisted whole (only
+ * `error.stack` is dropped — the code/message pair is the designer-facing "why";
+ * stacks bloat rows without aiding the Runs surface).
+ *
+ * Over budget — a long `loop` alone can emit `iterations × body-steps` entries —
+ * a plain tail-slice would drop the `loop`/`parallel`/`try_catch` **container**
+ * step (it precedes all its body steps) and every early iteration, leaving the
+ * Runs surface with body steps it can no longer nest and, worse, silently hiding
+ * an early failure. Instead select a bounded, order-preserving subset that keeps
+ * the run's structural backbone:
+ *
+ *  1. Every **top-level** step (`parentNodeId === undefined`) — `start`/`end`,
+ *     main-graph nodes, and the region container steps. Bounded by the flow's
+ *     static node count, not by loop iterations.
+ *  2. Every **failure**, wherever it occurred — the reason the run is worth
+ *     keeping — each pulled in with its ancestor container chain for context.
+ *  3. The most **recent** body steps (the tail shows what the run was doing when
+ *     it ended), each also pulled in with its ancestor chain.
+ *
+ * Every retained body step therefore keeps its enclosing container(s), so the
+ * compacted log never contains an orphan and the observability surface's
+ * per-iteration / per-region nesting still reconstructs; the result is
+ * hard-capped at `max` so `steps_json` stays bounded (#2585).
+ */
+export function compactStepLogForHistory(
+    steps: StepLogEntry[],
+    max: number = MAX_PERSISTED_HISTORY_STEPS,
+): StepLogEntry[] {
+    const strip = (s: StepLogEntry): StepLogEntry =>
+        s.error?.stack ? { ...s, error: { code: s.error.code, message: s.error.message } } : s;
+
+    if (steps.length <= max) return steps.map(strip);
+
+    // Nearest preceding container-instance index for each step (its parent), or
+    // -1 when top-level / its container is not in the log. The flat log is
+    // pre-order, so a step's container is the closest earlier step whose nodeId
+    // equals this step's parentNodeId (the same instance `buildStepTree` nests
+    // under). O(n) via a running last-seen-index map.
+    const parentIdx = new Array<number>(steps.length).fill(-1);
+    const lastSeen = new Map<string, number>();
+    for (let i = 0; i < steps.length; i++) {
+        const pid = steps[i].parentNodeId;
+        if (pid !== undefined) parentIdx[i] = lastSeen.get(pid) ?? -1;
+        lastSeen.set(steps[i].nodeId, i);
+    }
+    // Indices of `i`'s ancestor chain (i first) not already selected in `into`.
+    const missingChain = (i: number, into: Set<number>): number[] => {
+        const chain: number[] = [];
+        for (let k = i; k >= 0 && !into.has(k); k = parentIdx[k]) chain.push(k);
+        return chain;
+    };
+
+    const keep = new Set<number>();
+    // (1) + (2): structural backbone + every failure, each with its container chain.
+    for (let i = 0; i < steps.length; i++) {
+        if (steps[i].parentNodeId === undefined || steps[i].status === 'failure') {
+            for (const k of missingChain(i, keep)) keep.add(k);
+        }
+    }
+
+    const emit = (): StepLogEntry[] => {
+        let idx = [...keep].sort((a, b) => a - b);
+        // The backbone alone can exceed the cap on a very large flow — keep the
+        // most recent `max` selected steps so the row stays bounded.
+        if (idx.length > max) idx = idx.slice(idx.length - max);
+        return idx.map((i) => strip(steps[i]));
+    };
+    if (keep.size >= max) return emit();
+
+    // (3): fill the remaining budget with the most recent body steps, each with
+    // its ancestor chain so no retained body step is left orphaned.
+    for (let i = steps.length - 1; i >= 0 && keep.size < max; i--) {
+        if (keep.has(i)) continue;
+        const chain = missingChain(i, keep);
+        if (keep.size + chain.length <= max) for (const k of chain) keep.add(k);
+    }
+    return emit();
+}
+
+/**
  * Internal execution log entry — compatible with ExecutionLog from spec.
  */
 interface ExecutionLogEntry {
@@ -2049,16 +2131,15 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * Compact a run's step log for durable history: keep the newest
-     * {@link MAX_PERSISTED_HISTORY_STEPS} steps (the tail carries the failure)
-     * and drop `error.stack` (the code/message pair is the designer-facing
-     * "why"; stacks bloat rows without aiding the Runs surface). Bounds the
-     * `steps_json` column so history rows stay cheap under retention (#2585).
+     * Compact a run's step log for durable history. Delegates to the region-aware
+     * {@link compactStepLogForHistory} (#3234): under {@link MAX_PERSISTED_HISTORY_STEPS}
+     * the log is kept whole (stacks stripped); over budget it keeps the run's
+     * structural backbone (top-level + container steps + every failure) plus the
+     * most recent body steps, so a long loop's container survives and the Runs
+     * surface can still nest what it retains.
      */
     private compactStepsForHistory(steps: StepLogEntry[]): StepLogEntry[] {
-        return steps.slice(-MAX_PERSISTED_HISTORY_STEPS).map((s) =>
-            s.error?.stack ? { ...s, error: { code: s.error.code, message: s.error.message } } : s,
-        );
+        return compactStepLogForHistory(steps, MAX_PERSISTED_HISTORY_STEPS);
     }
 
     /**
