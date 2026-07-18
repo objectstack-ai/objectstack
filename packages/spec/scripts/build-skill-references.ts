@@ -122,13 +122,24 @@ const SKILL_MAP: Record<string, string[]> = {
 function extractLocalImports(filePath: string): string[] {
   const content = fs.readFileSync(filePath, 'utf-8');
   const imports: string[] = [];
-  const re = /^import\s+.*\s+from\s+['"](\.[^'"]+)['"]/gm;
+  const dir = path.dirname(filePath);
+  // Match `import … from '<relative>'`, tolerating a multi-line import clause.
+  // The clause between `import` and `from` never contains a `;`, quote, or `(`,
+  // so excluding those keeps the non-greedy span from bridging across a
+  // statement boundary, a side-effect import (`import './x'`), or a dynamic
+  // `import(...)` into the wrong specifier. A plain `.` (the old pattern) does
+  // not cross newlines, so multi-line named imports were silently dropped.
+  const re = /^import\b[^;'"()]*?\bfrom\s*['"](\.[^'"]+)['"]/gm;
   let match: RegExpExecArray | null;
   while ((match = re.exec(content)) !== null) {
     const importSpec = match[1];
-    const dir = path.dirname(filePath);
     let resolved = path.resolve(dir, importSpec);
-    if (!resolved.endsWith('.ts')) resolved += '.ts';
+    // ESM specifiers may carry a `.js` extension that maps to a `.ts` source
+    // (`./types.js` → `./types.ts`); otherwise append `.ts` for an
+    // extensionless local specifier. Blindly appending `.ts` turned `.js`
+    // imports into a non-existent `foo.js.ts` that was then dropped.
+    if (resolved.endsWith('.js')) resolved = resolved.slice(0, -3) + '.ts';
+    else if (!resolved.endsWith('.ts')) resolved += '.ts';
     if (fs.existsSync(resolved)) {
       imports.push(path.relative(SPEC_SRC, resolved));
     }
