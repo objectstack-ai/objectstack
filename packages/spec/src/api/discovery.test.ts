@@ -37,13 +37,11 @@ describe('ApiRoutesSchema', () => {
       actions: '/api/v1/p',
       storage: '/api/v1/storage',
       graphql: '/api/v1/graphql',
-      feed: '/api/v1/feed',
       discovery: '/api/v1/discovery',
     });
 
     expect(routes.data).toBe('/api/v1/data');
     expect(routes.graphql).toBe('/api/v1/graphql');
-    expect(routes.feed).toBe('/api/v1/feed');
     expect(routes.discovery).toBe('/api/v1/discovery');
   });
 
@@ -705,7 +703,6 @@ describe('DiscoverySchema (schemaDiscovery field)', () => {
 describe('WellKnownCapabilitiesSchema', () => {
   it('should accept all capabilities enabled', () => {
     const caps: WellKnownCapabilities = {
-      feed: true,
       comments: true,
       automation: true,
       cron: true,
@@ -718,7 +715,6 @@ describe('WellKnownCapabilitiesSchema', () => {
 
   it('should accept all capabilities disabled', () => {
     const caps = WellKnownCapabilitiesSchema.parse({
-      feed: false,
       comments: false,
       automation: false,
       cron: false,
@@ -726,19 +722,18 @@ describe('WellKnownCapabilitiesSchema', () => {
       export: false,
       chunkedUpload: false,
     });
-    expect(caps.feed).toBe(false);
+    expect(caps.comments).toBe(false);
     expect(caps.chunkedUpload).toBe(false);
   });
 
   it('should reject missing required fields', () => {
-    expect(() => WellKnownCapabilitiesSchema.parse({ feed: true })).toThrow();
+    expect(() => WellKnownCapabilitiesSchema.parse({ comments: true })).toThrow();
     expect(() => WellKnownCapabilitiesSchema.parse({})).toThrow();
   });
 
   it('should reject non-boolean values', () => {
     expect(() => WellKnownCapabilitiesSchema.parse({
-      feed: 'yes',
-      comments: true,
+      comments: 'yes',
       automation: true,
       cron: true,
       search: true,
@@ -749,7 +744,6 @@ describe('WellKnownCapabilitiesSchema', () => {
 
   it('should have .describe() annotations on all fields', () => {
     const shape = WellKnownCapabilitiesSchema.shape;
-    expect(shape.feed.description).toBeDefined();
     expect(shape.comments.description).toBeDefined();
     expect(shape.automation.description).toBeDefined();
     expect(shape.cron.description).toBeDefined();

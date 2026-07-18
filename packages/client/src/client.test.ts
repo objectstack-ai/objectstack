@@ -863,7 +863,6 @@ describe('ObjectStackClient.automation', () => {
 
     it('should expose capabilities after connect', async () => {
         const caps = {
-            feed: true,
             comments: true,
             automation: false,
             cron: false,
@@ -887,7 +886,7 @@ describe('ObjectStackClient.automation', () => {
 
         await client.connect();
         expect(client.capabilities).toBeDefined();
-        expect(client.capabilities!.feed).toBe(true);
+        expect(client.capabilities!.comments).toBe(true);
         expect(client.capabilities!.automation).toBe(false);
         expect(client.capabilities!.search).toBe(true);
     });

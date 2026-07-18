@@ -132,13 +132,12 @@ describe('DEFAULT_DISPATCHER_ROUTES', () => {
     expect(services).toContain('auth');
   });
 
-  it('should include storage and feed services', () => {
+  it('should include the storage service', () => {
     const services = DEFAULT_DISPATCHER_ROUTES.map(r => r.service);
     expect(services).toContain('file-storage');
-    // feed route maps to the data service
-    const feedRoute = DEFAULT_DISPATCHER_ROUTES.find(r => r.prefix.includes('feed'));
-    expect(feedRoute).toBeDefined();
-    expect(feedRoute!.service).toBe('data');
+    // The feed route was retired (ADR-0052 §5 / #3180) — comments/activity are
+    // served by the generic data API on sys_comment / sys_activity.
+    expect(DEFAULT_DISPATCHER_ROUTES.find(r => r.prefix.includes('feed'))).toBeUndefined();
   });
 
   it('should include optional services', () => {

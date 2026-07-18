@@ -198,7 +198,7 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     // workflow is registered but doesn't map to a well-known capability directly
     expect(discovery.services.workflow.enabled).toBe(true);
     // All well-known capabilities should be disabled since workflow doesn't map to any
-    expect(discovery.capabilities!.feed).toEqual({ enabled: false });
+    // (comments derives from the sys_comment object, which is not registered here).
     expect(discovery.capabilities!.comments).toEqual({ enabled: false });
     expect(discovery.capabilities!.automation).toEqual({ enabled: false });
     expect(discovery.capabilities!.cron).toEqual({ enabled: false });
@@ -212,7 +212,6 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     const discovery = await protocol.getDiscovery();
 
     expect(discovery.capabilities).toBeDefined();
-    expect(discovery.capabilities!.feed).toEqual({ enabled: false });
     expect(discovery.capabilities!.comments).toEqual({ enabled: false });
     expect(discovery.capabilities!.automation).toEqual({ enabled: false });
     expect(discovery.capabilities!.cron).toEqual({ enabled: false });
@@ -223,7 +222,6 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
 
   it('should dynamically set capabilities based on registered services', async () => {
     const mockServices = new Map<string, any>();
-    mockServices.set('feed', {});
     mockServices.set('automation', {});
     mockServices.set('search', {});
     mockServices.set('file-storage', {});
@@ -231,13 +229,27 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
     const discovery = await protocol.getDiscovery();
 
-    expect(discovery.capabilities!.feed).toEqual({ enabled: true });
-    expect(discovery.capabilities!.comments).toEqual({ enabled: true });
     expect(discovery.capabilities!.automation).toEqual({ enabled: true });
     expect(discovery.capabilities!.cron).toEqual({ enabled: false });
     expect(discovery.capabilities!.search).toEqual({ enabled: true });
     expect(discovery.capabilities!.export).toEqual({ enabled: true });
     expect(discovery.capabilities!.chunkedUpload).toEqual({ enabled: true });
+    // comments is independent of services — it tracks the sys_comment object (#3180).
+    expect(discovery.capabilities!.comments).toEqual({ enabled: false });
+  });
+
+  it('should enable comments capability when the sys_comment object is registered (#3180)', async () => {
+    // comments/chatter are served by the sys_comment object via the data API
+    // (ADR-0052 §5), not a dedicated service — so the capability tracks that
+    // object's presence, keeping declared === enforced.
+    engine.registerObject(
+      { name: 'sys_comment', label: 'Comment', fields: { body: { type: 'text' } } } as any,
+      'plugin-audit',
+    );
+    protocol = new ObjectStackProtocolImplementation(engine, () => new Map());
+    const discovery = await protocol.getDiscovery();
+
+    expect(discovery.capabilities!.comments).toEqual({ enabled: true });
   });
 
   it('should enable cron capability when job service is registered', async () => {

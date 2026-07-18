@@ -201,9 +201,6 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
 
   /** Base URL for Internationalization */
   i18n: z.string().optional().describe('e.g. /api/v1/i18n'),
-
-  /** Base URL for Feed / Chatter API */
-  feed: z.string().optional().describe('e.g. /api/v1/feed'),
 }));
 
 /**
@@ -280,10 +277,8 @@ export const DiscoverySchema = lazySchema(() => z.object({
  * Clients can use these to show/hide UI elements without probing individual endpoints.
  */
 export const WellKnownCapabilitiesSchema = lazySchema(() => z.object({
-  /** Whether the backend supports Feed / Chatter API */
-  feed: z.boolean().describe('Whether the backend supports Feed / Chatter API'),
-  /** Whether the backend supports comments (a subset of Feed) */
-  comments: z.boolean().describe('Whether the backend supports comments (a subset of Feed)'),
+  /** Whether the backend supports record comments / chatter (served by `sys_comment` via the data API) */
+  comments: z.boolean().describe('Whether the backend supports record comments / chatter (the `sys_comment` object served via the data API)'),
   /** Whether the backend supports Automation CRUD (flows, triggers) */
   automation: z.boolean().describe('Whether the backend supports Automation CRUD (flows, triggers)'),
   /** Whether the backend supports cron scheduling */

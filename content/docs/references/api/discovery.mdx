@@ -59,7 +59,6 @@ const result = ApiRoutes.parse(data);
 | **notifications** | `string` | optional | e.g. /api/v1/notifications |
 | **ai** | `string` | optional | e.g. /api/v1/ai |
 | **i18n** | `string` | optional | e.g. /api/v1/i18n |
-| **feed** | `string` | optional | e.g. /api/v1/feed |
 
 
 ---
@@ -155,8 +154,7 @@ Well-known capability flags for frontend intelligent adaptation
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **feed** | `boolean` | ✅ | Whether the backend supports Feed / Chatter API |
-| **comments** | `boolean` | ✅ | Whether the backend supports comments (a subset of Feed) |
+| **comments** | `boolean` | ✅ | Whether the backend supports record comments / chatter (the `sys_comment` object served via the data API) |
 | **automation** | `boolean` | ✅ | Whether the backend supports Automation CRUD (flows, triggers) |
 | **cron** | `boolean` | ✅ | Whether the backend supports cron scheduling |
 | **search** | `boolean` | ✅ | Whether the backend supports full-text search |
