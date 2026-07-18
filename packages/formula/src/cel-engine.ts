@@ -167,6 +167,125 @@ export function detectBareReference(source: string): string | null {
   return firstUndeclaredReference(source);
 }
 
+/**
+ * The CEL type a field is declared as for the Tier-4 type-soundness check
+ * (#1928). Deliberately coarse: only genuinely-scalar, non-numeric-intent
+ * fields are pinned to a concrete type; everything the runtime rescues stays
+ * `dyn` and can therefore never fault. See {@link firstTypeMismatch}.
+ */
+export type FieldCelType = 'string' | 'bool' | 'dyn';
+
+/**
+ * A `no such overload` fault for an ARITHMETIC (`+ - * / %`) or ORDERING
+ * (`< > <= >=`) operator, with the two operand types captured. Equality
+ * (`==` / `!=`) is intentionally excluded: cel-js's checker faults on a
+ * heterogeneous equality (`string == int`) but the runtime evaluates it
+ * cleanly to `false` — so a fault there is NOT a runtime failure and must not
+ * warn. Linear (no nested quantifiers) — no ReDoS. Operand types are `[\w.]+`
+ * (e.g. `string`, `int`, `google.protobuf.Timestamp`); the operator token is
+ * punctuation, so the two never overlap.
+ */
+const UNSOUND_OVERLOAD_RE = /no such overload:\s*([\w.]+)\s*(<=|>=|<|>|\+|-|\*|\/|%)\s*([\w.]+)/;
+
+/**
+ * A `record`-typed environment where each field carries a concrete CEL type
+ * (`string`/`bool`) or `dyn`. Member access (`record.<field>`) then resolves to
+ * the field's type, so cel-js's checker faults an arithmetic/ordering operator
+ * applied across incompatible types. Built per call — cheap, and only used at
+ * build time.
+ */
+function buildTypedRecordEnv(fieldCelTypes: Readonly<Record<string, FieldCelType>>): Environment {
+  const env = new Environment({
+    unlistedVariablesAreDyn: false,
+    enableOptionalTypes: true,
+    limits: DEFAULT_LIMITS,
+  });
+  registerStdLib(env, () => new Date(0));
+  const fields: Record<string, string> = {};
+  for (const [name, t] of Object.entries(fieldCelTypes)) fields[name] = t;
+  try { env.registerType('OsRecordScope', { fields }); } catch { /* invalid field name — ignore */ }
+  // The record namespaces carry the typed struct; every other root stays a
+  // `map` (dyn members) so a reference through it never faults.
+  for (const root of ['record', 'previous', 'input']) {
+    try { env.registerVariable(root, 'OsRecordScope'); } catch { /* duplicate — ignore */ }
+  }
+  for (const root of SCOPE_ROOTS) {
+    try { env.registerVariable(root, 'map'); } catch { /* already typed above / duplicate — ignore */ }
+  }
+  return env;
+}
+
+/**
+ * The first `record.<field>` (or `previous.`/`input.`) reference in `source`
+ * whose declared CEL type matches `celType` — best-effort attribution of an
+ * overload fault to the offending field. Returns `null` if none is found.
+ */
+function offendingField(
+  source: string,
+  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
+  celType: FieldCelType,
+): string | null {
+  for (const [name, t] of Object.entries(fieldCelTypes)) {
+    if (t !== celType) continue;
+    // Word-bounded so `amount` does not match `amount_total`.
+    if (new RegExp(`(?:record|previous|input)\\.${name}(?![\\w$])`).test(source)) return name;
+  }
+  return null;
+}
+
+/**
+ * Tier-4 type-soundness (#1928): detect a `record`-scoped expression that
+ * type-checks structurally but faults a runtime operator overload because a
+ * text (`string`) or boolean (`bool`) field is used with an arithmetic or
+ * ordering operator against a number. Such an expression evaluates to `null`
+ * at runtime (unless the text value happens to be numeric), so it is surfaced
+ * as a NON-blocking warning.
+ *
+ * Soundness (the ADR-0032 design law — never flag what the runtime tolerates):
+ *  - Number / currency / percent / date / datetime fields are declared `dyn`,
+ *    because the runtime rescues every mixed case for them — `registerOperator`
+ *    for `double`×`int` arithmetic and the string-hydration retry for
+ *    numeric-string / ISO-date values — so they can never fault here.
+ *  - Equality (`==` / `!=`) is excluded ({@link UNSOUND_OVERLOAD_RE}): a
+ *    heterogeneous equality is runtime-safe.
+ *
+ * Returns the operand types, the faulting operator, the concrete operand CEL
+ * type, and (best-effort) the offending field — or `null` when type-sound.
+ */
+export function firstTypeMismatch(
+  source: string,
+  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
+): { operator: string; operands: string; celType: FieldCelType; field: string | null } | null {
+  if (typeof source !== 'string' || !source.trim()) return null;
+  // An all-`dyn` record can never fault an overload — skip the parse entirely.
+  if (!Object.values(fieldCelTypes).some((t) => t === 'string' || t === 'bool')) return null;
+  try {
+    const env = buildTypedRecordEnv(fieldCelTypes);
+    const result = env.parse(source).check?.() as
+      | { valid?: boolean; error?: { message?: string } }
+      | undefined;
+    if (!result || result.valid !== false) return null;
+    const m = UNSOUND_OVERLOAD_RE.exec(result.error?.message ?? '');
+    if (!m) return null;
+    const operator = m[2];
+    const celType: FieldCelType | null =
+      m[1] === 'string' || m[1] === 'bool' ? (m[1] as FieldCelType)
+      : m[3] === 'string' || m[3] === 'bool' ? (m[3] as FieldCelType)
+      : null;
+    if (!celType) return null;
+    return {
+      operator,
+      operands: `${m[1]} ${operator} ${m[3]}`,
+      celType,
+      field: offendingField(source, fieldCelTypes, celType),
+    };
+  } catch {
+    // A parse/other fault is the syntax checker's job (celEngine.compile); this
+    // helper only reports a clean type-soundness verdict.
+    return null;
+  }
+}
+
 /** Coerce cel-js's BigInt-flavored return into spec-friendly JS values. */
 function coerce(value: unknown): unknown {
   if (typeof value === 'bigint') {

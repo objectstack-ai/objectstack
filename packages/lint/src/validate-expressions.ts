@@ -56,6 +56,35 @@ function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
 }
 
 /**
+ * object name → (field name → field type), for the #1928 tier-4 type-soundness
+ * check. Handles both `fields` shapes (array of `{name, type}` and name-keyed
+ * map). Fields with a non-string `type` are simply omitted (treated as `dyn`).
+ */
+function buildFieldTypeIndex(objects: AnyRec[]): Map<string, Record<string, string>> {
+  const idx = new Map<string, Record<string, string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const fields = obj.fields;
+    const types: Record<string, string> = {};
+    if (Array.isArray(fields)) {
+      for (const f of fields as AnyRec[]) {
+        const fn = (f as AnyRec)?.name;
+        const ft = (f as AnyRec)?.type;
+        if (typeof fn === 'string' && typeof ft === 'string') types[fn] = ft;
+      }
+    } else if (fields && typeof fields === 'object') {
+      for (const [fn, def] of Object.entries(fields as AnyRec)) {
+        const ft = (def as AnyRec)?.type;
+        if (typeof ft === 'string') types[fn] = ft;
+      }
+    }
+    idx.set(name, types);
+  }
+  return idx;
+}
+
+/**
  * Validate every predicate in the stack. Returns the list of issues (empty =
  * clean). Caller decides how to surface / whether to fail the build.
  */
@@ -63,6 +92,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   const issues: ExprIssue[] = [];
   const objects = asArray(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
+  const fieldTypeIndex = buildFieldTypeIndex(objects);
 
   const check = (
     where: string,
@@ -72,8 +102,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   ): void => {
     if (raw == null) return;
     const fields = objectName ? fieldIndex.get(objectName) : undefined;
+    // Field types feed the #1928 tier-4 soundness warning; only consulted for
+    // `record`-scoped sites, so it is harmless to pass for flattened ones too.
+    const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
-      objectName ? { objectName, fields, scope } : { scope });
+      objectName ? { objectName, fields, fieldTypes, scope } : { scope });
     for (const e of res.errors) issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
   };
@@ -193,7 +226,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         // formulas are `value` role (any return type), still CEL. They are
         // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
         const res = validateExpression('value', f.formula as string | { dialect?: string; source?: string },
-          objectName ? { objectName, fields: fieldIndex.get(objectName), scope: 'record' } : { scope: 'record' });
+          objectName ? { objectName, fields: fieldIndex.get(objectName), fieldTypes: fieldTypeIndex.get(objectName), scope: 'record' } : { scope: 'record' });
         const fieldWhere = `object '${objectName}' · field '${(f.name as string) ?? '?'}' formula`;
         for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
         for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });

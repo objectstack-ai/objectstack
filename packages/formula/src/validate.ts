@@ -17,7 +17,7 @@
  * This validator detects that specific mistake and returns the exact fix.
  */
 
-import { celEngine, firstUndeclaredReference, inferCelType } from './cel-engine';
+import { celEngine, firstUndeclaredReference, firstTypeMismatch, inferCelType, type FieldCelType } from './cel-engine';
 import { templateEngine } from './template-engine';
 
 export type FieldRole = 'predicate' | 'value' | 'template';
@@ -36,6 +36,15 @@ export interface ExprSchemaHint {
   objectName?: string;
   /** Known top-level field names, so `record.<field>` can be checked. */
   fields?: readonly string[];
+  /**
+   * #1928 tier 4 — field name → spec field type (`'text'`, `'currency'`,
+   * `'boolean'`, `'date'`, …). Enables the advisory type-soundness check: a
+   * text or boolean field used with an arithmetic/ordering operator against a
+   * number faults at runtime and the expression silently evaluates to `null`,
+   * so it is surfaced as a NON-blocking warning. Absent ⇒ the check is skipped.
+   * Only consulted for `scope: 'record'` sites (where refs are `record.<field>`).
+   */
+  fieldTypes?: Readonly<Record<string, string>>;
   /**
    * Evaluation scope of the authoring site — determines whether a bare top-level
    * identifier is legal (#1928):
@@ -80,6 +89,32 @@ export interface ExprValidationResult {
    * variable.
    */
   warnings: ExprValidationError[];
+}
+
+/**
+ * #1928 tier 4 — spec field type → the CEL type it is declared as for the
+ * type-soundness check. ONLY genuinely-scalar, non-numeric-intent types are
+ * pinned to a concrete type (`string` / `bool`); every other type — numbers,
+ * dates, selects (option values may be numeric codes), lookups, media, JSON —
+ * maps to `dyn` so it can never fault (the runtime rescues all of those). Any
+ * field type absent from this map is treated as `dyn`. Keeping the map narrow
+ * is the source of the check's near-zero false-positive rate.
+ */
+const SPEC_TYPE_TO_CEL: Readonly<Record<string, FieldCelType>> = {
+  // Free text — arithmetic / ordering against a number is (almost) always a bug.
+  text: 'string', textarea: 'string', email: 'string', url: 'string',
+  phone: 'string', markdown: 'string', html: 'string', richtext: 'string',
+  // Booleans — arithmetic / ordering against a number ALWAYS faults at runtime.
+  boolean: 'bool', toggle: 'bool',
+};
+
+/** Map an object's field-type hints onto the CEL types the soundness check uses. */
+function toCelFieldTypes(fieldTypes: Readonly<Record<string, string>>): Record<string, FieldCelType> {
+  const out: Record<string, FieldCelType> = {};
+  for (const [name, specType] of Object.entries(fieldTypes)) {
+    out[name] = SPEC_TYPE_TO_CEL[specType] ?? 'dyn';
+  }
+  return out;
 }
 
 /** A bare `{x}` that is NOT part of a `{{x}}` mustache hole. */
@@ -260,6 +295,28 @@ export function validateExpression(
             `\`record\` namespace, not at top level, so \`${bare}\` resolves to nothing and the ` +
             `expression silently evaluates to null. Write \`record.${bare}\`.`,
         });
+      } else if (schema.fieldTypes) {
+        // #1928 tier 4 — with per-field types in hand, flag a text/boolean field
+        // used with an arithmetic/ordering operator against a number: it faults
+        // the runtime overload and the expression silently evaluates to null.
+        // Advisory (never blocks the build): the runtime CAN succeed if a text
+        // value happens to be numeric, so this is a warning, not an error. Only
+        // runs when there is no bare-ref error (the typed check needs the
+        // canonical `record.<field>` form).
+        const mismatch = firstTypeMismatch(source, toCelFieldTypes(schema.fieldTypes));
+        if (mismatch) {
+          const held = mismatch.celType === 'bool' ? 'a boolean' : 'text';
+          const subject = mismatch.field
+            ? `\`record.${mismatch.field}\` holds ${held}`
+            : `${held === 'a boolean' ? 'a boolean' : 'a text'} field`;
+          warnings.push({
+            source,
+            message:
+              `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
+              `against a number. This faults at runtime, so the expression silently evaluates to null ` +
+              `(unless the value happens to be numeric). Use a number field, or drop the arithmetic/comparison.`,
+          });
+        }
       }
     } else if (schema?.fields && schema.fields.length > 0) {
       // Flattened flow/automation condition: the record's fields ARE bound at
