@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { celEngine, temporalEqualityFields } from './cel-engine';
+import { celEngine, rewriteTemporalEquality } from './cel-engine';
 import { CEL_STDLIB_FUNCTIONS } from './validate';
 import type { Expression } from '@objectstack/spec';
 
@@ -169,20 +169,23 @@ describe('celEngine', () => {
         .toEqual({ ok: true, value: true });
     });
 
-    it('KNOWN GAP: bare `date-string == today()` silently returns false (cel-js equality)', () => {
-      // Characterization guard, NOT an endorsement. cel-js's `isEqual`
-      // (overloads.js) hard-codes `string == X` to false and never consults a
-      // registered overload, so a bare `Field.date` string compared with `==`
-      // silently misses — independent of timezone (fails identically at UTC).
-      // The fix must hydrate date fields to Date in the data layer (where field
-      // types are known); tracked as a separate follow-up. Authors should use
-      // the idioms in the test above until then. If this starts returning true,
-      // the follow-up landed — update/remove this guard.
-      const now = new Date('2026-11-02T04:30:00Z');
-      const r = celEngine.evaluate(cel('record.due_date == today()'), {
-        now, timezone: 'America/New_York', record: { due_date: '2026-11-01' },
-      });
-      expect(r).toEqual({ ok: true, value: false });
+    it('bare `date-string == today()` now matches (the #3183 runtime fix)', () => {
+      // Previously the KNOWN GAP: cel-js's `isEqual` hard-codes `string == X` to
+      // false, so a bare `Field.date` string never equalled the Timestamp from
+      // today(). The engine now rewrites the field operand to `date(record.d)`
+      // (AST temporal-comparison rewrite, #3183), so it compares two Timestamps
+      // and matches on the reference-tz calendar day.
+      const now = new Date('2026-11-02T04:30:00Z'); // Nov 1 in NY
+      const ny = { now, timezone: 'America/New_York', record: { due_date: '2026-11-01' } };
+      expect(celEngine.evaluate(cel('record.due_date == today()'), ny))
+        .toEqual({ ok: true, value: true });
+      // The `!=` dual is now correctly false for a same-day record.
+      expect(celEngine.evaluate(cel('record.due_date != today()'), ny))
+        .toEqual({ ok: true, value: false });
+      // A different day still compares unequal.
+      expect(celEngine.evaluate(cel('record.due_date == today()'), {
+        now, timezone: 'America/New_York', record: { due_date: '2026-10-31' },
+      })).toEqual({ ok: true, value: false });
     });
   });
 
@@ -511,35 +514,78 @@ describe('celEngine', () => {
     });
   });
 
-  // #3183 — AST walk backing the date-equality guardrail. Returns field names
-  // compared with `==`/`!=` directly against a temporal function; the validator
-  // filters these by field type. AST-based, so no ReDoS on adversarial source.
-  describe('temporalEqualityFields (#3183)', () => {
-    it('finds the field on either side, for all four temporal functions', () => {
-      expect(temporalEqualityFields('record.due == today()')).toEqual(['due']);
-      expect(temporalEqualityFields('today() != record.due')).toEqual(['due']);
-      expect(temporalEqualityFields('record.due == daysFromNow(3)')).toEqual(['due']);
-      expect(temporalEqualityFields('record.due != daysAgo(7)')).toEqual(['due']);
-      expect(temporalEqualityFields('previous.due == now()')).toEqual(['due']);
-      expect(temporalEqualityFields('due == today()')).toEqual(['due']); // bare (flattened)
+  // #3183 — AST rewrite backing the runtime date-equality fix: wrap a field
+  // operand compared with `==`/`!=` against a temporal function in `date(...)`.
+  describe('rewriteTemporalEquality (#3183)', () => {
+    it('wraps the field operand on either side, for all four temporal functions', () => {
+      expect(rewriteTemporalEquality('record.due == today()')).toBe('date(record.due) == today()');
+      expect(rewriteTemporalEquality('today() != record.due')).toBe('today() != date(record.due)');
+      expect(rewriteTemporalEquality('record.due == daysFromNow(3)')).toBe('date(record.due) == daysFromNow(3)');
+      expect(rewriteTemporalEquality('record.due != daysAgo(7)')).toBe('date(record.due) != daysAgo(7)');
+      expect(rewriteTemporalEquality('previous.due == now()')).toBe('date(previous.due) == now()');
+      expect(rewriteTemporalEquality('due == today()')).toBe('date(due) == today()'); // bare (flattened)
     });
 
-    it('returns nothing for the working idioms or ordering comparisons', () => {
-      expect(temporalEqualityFields('date(record.due) == today()')).toEqual([]);
-      expect(temporalEqualityFields('record.due >= today()')).toEqual([]);
-      expect(temporalEqualityFields('daysBetween(today(), record.due) == 0')).toEqual([]);
-      expect(temporalEqualityFields('record.a == record.b')).toEqual([]);
+    it('leaves the working idioms, ordering comparisons, and non-temporal equality untouched', () => {
+      for (const src of [
+        'date(record.due) == today()',                    // already coerced — idempotent
+        'record.due >= today()',                          // ordering (already works)
+        'daysBetween(today(), record.due) == 0',          // integer compare
+        'record.a == record.b',                           // no temporal
+        'record.due == "2026-06-20"',                     // string literal, no temporal
+      ]) {
+        expect(rewriteTemporalEquality(src)).toBe(src);
+      }
     });
 
-    it('de-duplicates and finds fields nested in a compound predicate', () => {
-      expect(temporalEqualityFields('record.due == today() || record.due == daysFromNow(1)')).toEqual(['due']);
-      expect(temporalEqualityFields('record.a == today() && b != now()').sort()).toEqual(['a', 'b']);
+    it('rewrites per-occurrence — a mixed literal+temporal expression keeps the literal intact', () => {
+      expect(rewriteTemporalEquality('record.d == "2026-06-20" || record.d == today()'))
+        .toBe('record.d == "2026-06-20" || date(record.d) == today()');
     });
 
-    it('is linear on adversarial input (the CodeQL ReDoS repros) and returns []', () => {
-      // These would drive the previous regex O(n²); the AST walk parses or bails fast.
-      expect(temporalEqualityFields('$'.repeat(5000))).toEqual([]);
-      expect(temporalEqualityFields('now('.repeat(2000))).toEqual([]);
+    it('returns the source unchanged (no throw) on adversarial input — no ReDoS', () => {
+      // AST-based + a plain-`includes` gate; the parse either bails or is linear.
+      expect(rewriteTemporalEquality('$'.repeat(5000))).toBe('$'.repeat(5000));
+      expect(rewriteTemporalEquality('now('.repeat(2000))).toBe('now('.repeat(2000));
+    });
+  });
+
+  // #3183 — the end-to-end runtime behavior the rewrite delivers: a `Field.date`
+  // string operand now matches a temporal function under `==`/`!=`, while string
+  // literals and already-typed operands are unaffected.
+  describe('date-string == temporal runtime fix (#3183)', () => {
+    const now = new Date('2026-06-20T08:00:00Z');
+    const rec = (due: unknown) => ({ now, record: { due } });
+
+    it('a date-only string field == today() matches on the same day', () => {
+      expect(celEngine.evaluate(cel('record.due == today()'), rec('2026-06-20')))
+        .toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(cel('record.due == today()'), rec('2026-06-19')))
+        .toEqual({ ok: true, value: false });
+      // same-day record → `!=` is correctly false (previously silently true)
+      expect(celEngine.evaluate(cel('record.due != today()'), rec('2026-06-20')))
+        .toEqual({ ok: true, value: false });
+    });
+
+    it('a string literal comparison is unchanged, even mixed with a temporal one', () => {
+      // Pre-existing behavior: string == string literal works.
+      expect(celEngine.evaluate(cel('record.due == "2026-06-20"'), rec('2026-06-20')))
+        .toEqual({ ok: true, value: true });
+      // Mixed: literal clause AND temporal clause both correct for a same-day record.
+      expect(celEngine.evaluate(cel('record.due == "2026-06-20" || record.due == today()'), rec('2026-06-20')))
+        .toEqual({ ok: true, value: true });
+      // Mixed, record on neither day: both clauses false.
+      expect(celEngine.evaluate(cel('record.due == "2026-06-20" || record.due == today()'), rec('2026-06-18')))
+        .toEqual({ ok: true, value: false });
+    });
+
+    it('an already-Date operand and non-date/null operands are unaffected (graceful date() coercion)', () => {
+      expect(celEngine.evaluate(cel('record.due == today()'), rec(new Date('2026-06-20T00:00:00Z'))))
+        .toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(cel('record.due == today()'), rec('not-a-date')))
+        .toEqual({ ok: true, value: false });
+      expect(celEngine.evaluate(cel('record.due == today()'), rec(null)))
+        .toEqual({ ok: true, value: false });
     });
   });
 });

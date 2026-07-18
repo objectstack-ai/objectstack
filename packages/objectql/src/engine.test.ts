@@ -1295,6 +1295,35 @@ describe('ObjectQL Engine', () => {
             expect(result[1].ts).toEqual(result[2].ts);
         });
 
+        it('a read-time date formula `record.d == today()` matches a YYYY-MM-DD string field (#3183)', async () => {
+            // The driver returns a `Field.date` as a "YYYY-MM-DD" string (ADR-0053
+            // Phase 1). cel-js equality never matches a string against the Timestamp
+            // from today(), so this silently returned false until the engine's AST
+            // temporal-comparison rewrite (#3183). End-to-end proof through find().
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({
+                name: 'todo',
+                fields: {
+                    id: { type: 'text' },
+                    due_date: { type: 'date' },
+                    is_due_today: {
+                        type: 'formula',
+                        expression: { dialect: 'cel', source: 'record.due_date == today()' },
+                    },
+                },
+            } as any);
+
+            // UTC calendar day — matches today()'s default (UTC) resolution.
+            const todayStr = new Date().toISOString().slice(0, 10);
+            vi.mocked(mockDriver.find).mockResolvedValueOnce([
+                { id: 't1', due_date: todayStr },      // due today  → true
+                { id: 't2', due_date: '2020-01-01' },  // long past  → false
+            ]);
+
+            const result = await engine.find('todo', { fields: ['id', 'due_date', 'is_due_today'] } as any);
+
+            expect(result.map((r: any) => r.is_due_today)).toEqual([true, false]);
+        });
+
         it('should handle null values gracefully during expand', async () => {
             vi.mocked(SchemaRegistry.getObject).mockImplementation((name) => {
                 if (name === 'task') return {

@@ -13,7 +13,7 @@
  *    third-party plugins can't ship runaway predicates.
  */
 
-import { Environment } from '@marcbachmann/cel-js';
+import { Environment, serialize } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
 import { buildScope, registerNumericCoercions, registerStdLib } from './stdlib';
@@ -360,36 +360,80 @@ function fieldRefName(node: unknown): string | null {
   return null;
 }
 
+/** Wrap an AST field-reference node in a `date(...)` call (the stdlib coercion). */
+function wrapInDate(node: CelNode): CelNode {
+  return { op: 'call', args: ['date', [node]] };
+}
+
 /**
- * #3183 — field names compared with `==`/`!=` DIRECTLY against a temporal
- * function (`today()`/`daysFromNow()`/`daysAgo()`/`now()`), found by walking the
- * cel-js AST (never a regex on the source — no ReDoS). The caller filters these
- * by field type; a `Field.date` reads back as a string and cel-js equality never
- * matches it against a timestamp, so such a comparison silently misses. The
- * `date(…)`/`datetime(…)`/`timestamp(…)` coercions are NOT temporal calls, so the
- * fixed idiom `date(record.d) == today()` yields nothing. Returns `[]` on a parse
- * fault (compile() reports those) or when there is no such comparison.
+ * #3183 — rewrite each `<field> ==/!= <temporal>()` (either operand order) so the
+ * FIELD operand is coerced with `date(...)`. A `Field.date` reads back as a
+ * `YYYY-MM-DD` string and cel-js equality never matches a string against the
+ * Timestamp that `today()` etc. return, so the bare comparison silently misses;
+ * `date(record.d) == today()` compares two Timestamps and matches on the calendar
+ * day. The rewrite is:
+ *   - **per-occurrence** — only the operand paired with a temporal call is wrapped,
+ *     so `record.d == "2026-06-20" || record.d == today()` keeps the string-literal
+ *     comparison intact while fixing the temporal one (no field-wide trade-off);
+ *   - **type-blind-safe** — `date()`/`toDate` degrades gracefully (an already-`Date`
+ *     datetime field passes through; a non-date string / null → `Invalid Date` →
+ *     the comparison stays `false`, exactly as today), so no field-type info is
+ *     needed and a currently-correct result is never worsened;
+ *   - **idempotent** — `date(record.d)` is a `call`, not a field ref, so it is not
+ *     re-wrapped.
+ *
+ * Returns the (possibly rewritten) source. Only reserializes when a rewrite
+ * actually happened — the ~99% case that needs no rewrite evaluates the original
+ * source untouched. Memoized per source string; a parse fault returns the source
+ * unchanged (compile()/evaluate() report it).
  */
-export function temporalEqualityFields(source: string): string[] {
-  if (typeof source !== 'string' || !source.trim()) return [];
+export function rewriteTemporalEquality(source: string): string {
+  if (typeof source !== 'string' || !source.trim()) return source;
+  const cached = temporalRewriteCache.get(source);
+  if (cached !== undefined) return cached;
+  // Cheap gate: a rewrite needs an equality operator AND a temporal call.
+  const gated = (source.includes('==') || source.includes('!='))
+    && (source.includes('today') || source.includes('daysFromNow')
+      || source.includes('daysAgo') || source.includes('now'));
+  if (!gated) { rememberRewrite(source, source); return source; }
+
   let ast: unknown;
   try {
     ast = (recordScopeEnv ??= buildScopedEnv([])).parse(source).ast;
   } catch {
-    return [];
+    rememberRewrite(source, source);
+    return source;
   }
-  const out = new Set<string>();
+  let changed = false;
   const visit = (node: unknown): void => {
     if (!isCelNode(node)) return;
     if ((node.op === '==' || node.op === '!=') && Array.isArray(node.args) && node.args.length === 2) {
-      const [left, right] = node.args;
-      if (isTemporalCall(left)) { const f = fieldRefName(right); if (f) out.add(f); }
-      if (isTemporalCall(right)) { const f = fieldRefName(left); if (f) out.add(f); }
+      const args = node.args as unknown[];
+      const [left, right] = args;
+      // Wrap the field operand paired with a temporal call. Guard `fieldRefName`
+      // so we never wrap a literal, another call, or an arithmetic sub-tree.
+      if (isTemporalCall(left) && isCelNode(right) && fieldRefName(right)) { args[1] = wrapInDate(right); changed = true; }
+      else if (isTemporalCall(right) && isCelNode(left) && fieldRefName(left)) { args[0] = wrapInDate(left); changed = true; }
     }
     if (Array.isArray(node.args)) for (const child of node.args) visit(child);
   };
   visit(ast);
-  return [...out];
+  const out = changed ? serialize(ast as Parameters<typeof serialize>[0]) : source;
+  rememberRewrite(source, out);
+  return out;
+}
+
+/** Bounded memo of source → temporal-equality-rewritten source (#3183). */
+const temporalRewriteCache = new Map<string, string>();
+const TEMPORAL_REWRITE_CACHE_MAX = 500;
+function rememberRewrite(source: string, rewritten: string): void {
+  // Simple FIFO cap — expression sources are few and long-lived; this only guards
+  // against an unbounded set of one-off dynamic strings.
+  if (temporalRewriteCache.size >= TEMPORAL_REWRITE_CACHE_MAX) {
+    const first = temporalRewriteCache.keys().next().value;
+    if (first !== undefined) temporalRewriteCache.delete(first);
+  }
+  temporalRewriteCache.set(source, rewritten);
 }
 
 /** Coerce cel-js's BigInt-flavored return into spec-friendly JS values. */
@@ -541,8 +585,13 @@ export const celEngine: DialectEngine = {
     try {
       const env = buildEnv(now, ctx.timezone ?? 'UTC');
       const scope = buildScope(ctx);
+      // #3183 — coerce a date-field operand compared with `==`/`!=` against a
+      // temporal function (`date(record.d) == today()`), so a `Field.date` string
+      // matches the Timestamp instead of silently never equalling it. No-op (and
+      // no reserialize) for any source without such a comparison.
+      const evalSource = rewriteTemporalEquality(source);
       try {
-        const raw = env.evaluate(source, scope);
+        const raw = env.evaluate(evalSource, scope);
         return { ok: true, value: coerce(raw) as T };
       } catch (err) {
         // ADR-0032 §1c — string-serialized fields make CEL raise
@@ -558,7 +607,7 @@ export const celEngine: DialectEngine = {
         if (!isNumericOverloadError(err)) throw err;
         const hydrated = hydrateOverloadStrings(scope) as Record<string, unknown>;
         try {
-          const raw = env.evaluate(source, hydrated);
+          const raw = env.evaluate(evalSource, hydrated);
           return { ok: true, value: coerce(raw) as T };
         } catch {
           // Hydration did not resolve it — surface the original fault, not the

@@ -17,7 +17,7 @@
  * This validator detects that specific mistake and returns the exact fix.
  */
 
-import { celEngine, firstUndeclaredReference, firstTypeMismatch, inferCelType, temporalEqualityFields, type FieldCelType } from './cel-engine';
+import { celEngine, firstUndeclaredReference, firstTypeMismatch, inferCelType, type FieldCelType } from './cel-engine';
 import { templateEngine } from './template-engine';
 
 export type FieldRole = 'predicate' | 'value' | 'template';
@@ -142,37 +142,6 @@ function typeSoundnessWarning(
       `against a number. This faults at runtime, so the expression silently evaluates to null ` +
       `(unless the value happens to be numeric). Use a number field, or drop the arithmetic/comparison.`,
   };
-}
-
-/**
- * #3183 — flag `==`/`!=` between a calendar-day (`date`) field and a temporal
- * function (`today()`/`daysFromNow()`/`daysAgo()`/`now()`). A `Field.date` reads
- * back as a `YYYY-MM-DD` string (ADR-0053 Phase 1), and cel-js's equality
- * (`overloads.js` `isEqual`) treats a string and a timestamp as unequal without
- * consulting any overload, so the comparison silently never matches. Advisory
- * `warning` only — on the write/validation path the value may be a real `Date` —
- * and no-op unless `schema.fieldTypes` marks the referenced field `date`. Derives
- * the date fields from the shared `fieldTypes` hint (no separate plumbing).
- */
-function checkTemporalDateEquality(
-  source: string,
-  schema: ExprSchemaHint | undefined,
-  warnings: ExprValidationError[],
-): void {
-  const fieldTypes = schema?.fieldTypes;
-  if (!fieldTypes) return;
-  // AST-based (no regex on the raw source → no ReDoS); filter to `date` fields.
-  for (const field of temporalEqualityFields(source)) {
-    if (fieldTypes[field] !== 'date') continue;
-    warnings.push({
-      source,
-      message:
-        `\`${field}\` is a calendar-day (date) field, stored as a "YYYY-MM-DD" string, so comparing it to a ` +
-        `timestamp function with \`==\`/\`!=\` silently never matches (CEL treats a string and a timestamp as ` +
-        `unequal). Wrap the field to coerce it — \`date(record.${field}) == today()\` — or use a range ` +
-        `(\`record.${field} >= today() && record.${field} <= today()\`) or \`daysBetween(today(), record.${field}) == 0\`.`,
-    });
-  }
 }
 
 /** A bare `{x}` that is NOT part of a `{{x}}` mustache hole. */
@@ -341,10 +310,6 @@ export function validateExpression(
   } else {
     checkFieldExistence(source, schema, errors);
     checkRoleCatalog(source, schema, errors);
-    // #3183 — date-field `==`/`!=` a temporal function silently never matches.
-    // Scope-independent (wrong in both record and flattened sites), so run it
-    // outside the scope branch below.
-    checkTemporalDateEquality(source, schema, warnings);
     if (schema?.scope === 'record') {
       // In a `record`-scoped site a bare top-level identifier is a silent bug —
       // it must be `record.<field>` (#1928). Hard error.
