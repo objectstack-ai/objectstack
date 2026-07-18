@@ -7,6 +7,13 @@ const withMDX = createMDX();
 const config = {
   reactStrictMode: true,
   output: 'standalone',
+  experimental: {
+    // The docs site prerenders 400+ MDX pages. Next spawns one static-generation
+    // worker per CPU, and on Vercel's high-core build container that fan-out
+    // multiplied the resident set until the build was OOM-killed (exit 137).
+    // Cap the worker count so peak memory stays well under the container limit.
+    cpus: 2,
+  },
   typescript: {
     ignoreBuildErrors: false,
   },
