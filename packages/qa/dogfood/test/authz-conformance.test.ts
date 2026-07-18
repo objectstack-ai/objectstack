@@ -164,6 +164,10 @@ const HIGH_RISK = [
   // is false compliance (declared ≠ enforced) and approval/status columns are
   // one direct PATCH away from self-approval.
   'readonly-static-write',
+  // #3167 — the MCP HTTP surface guards the same object data as REST /data
+  // through a sibling execution surface (tool dispatch); proven e2e that a
+  // member's MCP tools/call is RLS-scoped and anonymous is denied.
+  'mcp-http-identity',
 ];
 
 describe('ADR-0056 D10 — authorization conformance matrix', () => {

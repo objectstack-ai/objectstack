@@ -14,6 +14,7 @@
     "@objectstack/connector-rest": "workspace:*",
     "@objectstack/example-crm": "workspace:*",
     "@objectstack/example-showcase": "workspace:*",
+    "@objectstack/mcp": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-audit": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
