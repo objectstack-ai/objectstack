@@ -83,9 +83,10 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     const config = (start?.node.config ?? {}) as AnyRec;
     const triggerType = typeof config.triggerType === 'string' ? config.triggerType : undefined;
     const isRecordTriggered = !!triggerType && triggerType.startsWith('record-');
+    const isTimeRelative = config.timeRelative != null && typeof config.timeRelative === 'object';
     const isAutoTriggered =
       isRecordTriggered || triggerType === 'api' || config.schedule != null ||
-      flow.type === 'schedule' || flow.type === 'api';
+      isTimeRelative || flow.type === 'schedule' || flow.type === 'api';
 
     // 1. Record-triggered flow targeting an object this stack does not define.
     if (isRecordTriggered && start) {
@@ -103,6 +104,28 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
             `Object names match exactly. Check config.objectName against the object's registered name ` +
             `(e.g. 'app_candidate', not 'candidate'). If the object comes from another installed package, ` +
             `this warning can be ignored.`,
+        });
+      }
+    }
+
+    // 1b. Time-relative flow sweeping an object this stack does not define. Like
+    //     the record-change case, a wrong object name makes the sweep match
+    //     nothing forever with no runtime output.
+    if (isTimeRelative && start) {
+      const tr = config.timeRelative as AnyRec;
+      const objectName = typeof tr.object === 'string' ? tr.object : undefined;
+      if (objectName && !objectNames.has(objectName) && !objectName.startsWith('sys_')) {
+        findings.push({
+          severity: 'warning',
+          rule: FLOW_TRIGGER_UNKNOWN_OBJECT,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.timeRelative.object`,
+          message:
+            `sweeps object '${objectName}', which this stack does not define — if the name is wrong, ` +
+            `the sweep will match nothing (and the runtime stays quiet about it).`,
+          hint:
+            `Object names match exactly. Check config.timeRelative.object against the object's registered name. ` +
+            `If the object comes from another installed package, this warning can be ignored.`,
         });
       }
     }

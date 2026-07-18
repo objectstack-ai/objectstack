@@ -2459,6 +2459,73 @@ describe('AutomationEngine - Flow Trigger Wiring', () => {
         await rec.fire('rc_flow', { record: { status: 'done' }, previous: { status: 'open' }, object: 'task', event: 'record-after-update' });
         expect(seen).toEqual([{ status: 'done', prevStatus: 'open' }]);
     });
+
+    it('binds a time-relative flow (config.timeRelative) to the time_relative trigger (#1874)', () => {
+        const rec = recordingTrigger('time_relative');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('renewal_alert', {
+            name: 'renewal_alert',
+            label: 'Renewal Alert',
+            type: 'schedule' as const,
+            nodes: [
+                {
+                    id: 'start',
+                    type: 'start' as const,
+                    label: 'Start',
+                    config: {
+                        timeRelative: { object: 'contracts', dateField: 'end_date', offsetDays: [60, 30, 7] },
+                        schedule: { type: 'cron', expression: '0 8 * * *' },
+                        condition: 'status == "active"',
+                    },
+                },
+                { id: 'end', type: 'end' as const, label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        });
+
+        expect(engine.getActiveTriggerBindings()).toEqual([
+            { flowName: 'renewal_alert', triggerType: 'time_relative' },
+        ]);
+        expect(rec.started[0]).toMatchObject({
+            flowName: 'renewal_alert',
+            object: 'contracts',
+            schedule: { type: 'cron', expression: '0 8 * * *' },
+            condition: 'status == "active"',
+        });
+        // The raw descriptor rides along in config for the trigger to parse.
+        expect((rec.started[0].config as Record<string, any>)?.timeRelative?.offsetDays).toEqual([60, 30, 7]);
+    });
+
+    it('routes a timeRelative flow to time_relative even when a schedule trigger is present too (precedence)', () => {
+        const sched = recordingTrigger('schedule');
+        const timeRel = recordingTrigger('time_relative');
+        engine.registerTrigger(sched.trigger);
+        engine.registerTrigger(timeRel.trigger);
+        engine.registerFlow('expiring', {
+            name: 'expiring',
+            label: 'Expiring',
+            type: 'schedule' as const,
+            nodes: [
+                {
+                    id: 'start',
+                    type: 'start' as const,
+                    label: 'Start',
+                    config: {
+                        timeRelative: { object: 'hr_document', dateField: 'expires_on', withinDays: 30 },
+                        schedule: { type: 'cron', expression: '0 7 * * *' },
+                    },
+                },
+                { id: 'end', type: 'end' as const, label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        });
+
+        expect(engine.getActiveTriggerBindings()).toEqual([
+            { flowName: 'expiring', triggerType: 'time_relative' },
+        ]);
+        expect(timeRel.started).toHaveLength(1);
+        expect(sched.started).toHaveLength(0);
+    });
 });
 
 describe('AutomationEngine - flow status enable/disable gate', () => {

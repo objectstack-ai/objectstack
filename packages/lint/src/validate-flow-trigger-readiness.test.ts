@@ -123,6 +123,58 @@ describe('validateFlowTriggerReadiness', () => {
     expect(findings.map((f) => f.rule)).toEqual([FLOW_DRAFT_STATUS_AMBIGUOUS]);
   });
 
+  it('treats a time-relative flow (config.timeRelative) as auto-triggered — flags missing status', () => {
+    const findings = validateFlowTriggerReadiness({
+      objects: [{ name: 'contracts', label: 'Contracts', fields: {} }],
+      flows: [
+        {
+          name: 'renewal_alert',
+          type: 'schedule',
+          nodes: [
+            {
+              id: 'start',
+              type: 'start',
+              config: {
+                timeRelative: { object: 'contracts', dateField: 'end_date', offsetDays: [60, 30, 7] },
+              },
+            },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        },
+      ],
+    });
+    expect(findings.map((f) => f.rule)).toEqual([FLOW_DRAFT_STATUS_AMBIGUOUS]);
+  });
+
+  it('warns when a time-relative flow sweeps an object the stack does not define', () => {
+    const findings = validateFlowTriggerReadiness({
+      objects: [{ name: 'contracts', label: 'Contracts', fields: {} }],
+      flows: [
+        {
+          name: 'renewal_alert',
+          type: 'schedule',
+          status: 'active',
+          nodes: [
+            {
+              id: 'start',
+              type: 'start',
+              config: {
+                timeRelative: { object: 'contract', dateField: 'end_date', withinDays: 60 },
+              },
+            },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TRIGGER_UNKNOWN_OBJECT);
+    expect(findings[0].message).toContain("'contract'");
+    expect(findings[0].path).toBe('flows[0].nodes[0].config.timeRelative.object');
+  });
+
   it('handles map-keyed flows/objects and stacks with no flows', () => {
     expect(validateFlowTriggerReadiness({})).toEqual([]);
     const findings = validateFlowTriggerReadiness({

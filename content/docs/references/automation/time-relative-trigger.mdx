@@ -1,0 +1,129 @@
+---
+title: Time Relative Trigger
+description: Time Relative Trigger protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Time-Relative Trigger Protocol
+
+A **declarative** trigger for time-relative business rules — "act on records
+
+whose date field is coming up (or overdue) relative to today" — without the
+
+author hand-writing a cron job + range query, and without the fragile
+
+date-equality-on-record-change anti-pattern (#1874).
+
+## The anti-pattern it replaces
+
+Authors used to express "alert 60 days before `end_date`" as a `record_change`
+
+flow gated on `end_date == daysFromNow(60)`. That predicate is only evaluated
+
+when the record *happens to change*, so it fires only if the record is edited
+
+on exactly that day — i.e. almost never, unattended. The robust alternative
+
+was a hand-written `schedule` flow that queries a date range every day, which
+
+every author re-implemented (contracts `renewal_alert`, hr
+
+`document_expiring_soon`, procurement `po_overdue`, …).
+
+## What this declares instead
+
+A `time_relative` trigger sweeps an object on a schedule (daily by default)
+
+and launches the flow **once per matching record**, with that record in the
+
+automation context (so `\{record.<field>\}` interpolation and the start-node
+
+`condition` gate work exactly as they do for record-change flows). The
+
+descriptor is carried on the flow's start node as `config.timeRelative`.
+
+@example T-minus renewal reminders (fires on the day a contract is 60/30/7 days out)
+
+```ts
+
+// flow start node
+
+config: \{
+
+timeRelative: \{
+
+object: 'contracts',
+
+dateField: 'end_date',
+
+offsetDays: [60, 30, 7],
+
+filter: \{ status: 'active' \},
+
+\},
+
+// optional sweep cadence — defaults to daily at 08:00 UTC
+
+schedule: \{ type: 'cron', expression: '0 8 * * *' \},
+
+\}
+
+```
+
+@example "Expiring soon" range (fires every day a document is within 30 days of expiry)
+
+```ts
+
+config: \{
+
+timeRelative: \{ object: 'hr_document', dateField: 'expires_on', withinDays: 30 \},
+
+\}
+
+```
+
+@example Overdue sweep (fires for POs up to 14 days past due)
+
+```ts
+
+config: \{
+
+timeRelative: \{ object: 'purchase_order', dateField: 'due_date', withinDays: -14, filter: \{ status: 'open' \} \},
+
+\}
+
+```
+
+<Callout type="info">
+**Source:** `packages/spec/src/automation/time-relative-trigger.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { TimeRelativeTrigger } from '@objectstack/spec/automation';
+import type { TimeRelativeTrigger } from '@objectstack/spec/automation';
+
+// Validate data
+const result = TimeRelativeTrigger.parse(data);
+```
+
+---
+
+## TimeRelativeTrigger
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object (machine name) to sweep, e.g. "contracts". |
+| **dateField** | `string` | ✅ | Date or datetime field evaluated relative to today, e.g. "end_date". |
+| **withinDays** | `integer` | optional | Range mode: fire while dateField is within N days of today. Positive = upcoming, negative = overdue lookback, 0 = today. |
+| **offsetDays** | `integer[]` | optional | Offset mode: fire when dateField is exactly today + each offset (e.g. [60, 30, 7]). |
+| **filter** | `Record<string, any>` | optional | Extra ObjectQL where-map ANDed with the date window (e.g. `{ status: "active" }`). |
+| **maxRecords** | `integer` | optional | Max records launched per sweep (default 1000). The sweep logs when it clamps. |
+
+
+---
+

@@ -8,3 +8,11 @@ export type {
     JobServiceSurface,
     TriggerLogger,
 } from './schedule-trigger.js';
+
+export { TimeRelativeTriggerPlugin } from './time-relative-plugin.js';
+export {
+    TimeRelativeTrigger,
+    computeDateWindows,
+    buildWindowWhere,
+} from './time-relative-trigger.js';
+export type { TimeRelativeDataEngine, DateWindow } from './time-relative-trigger.js';

@@ -573,6 +573,7 @@
     "automation/SyncExecutionResult",
     "automation/SyncExecutionStatus",
     "automation/SyncMode",
+    "automation/TimeRelativeTrigger",
     "automation/Transition",
     "automation/TryCatchConfig",
     "automation/WaitEventType",

@@ -9,6 +9,7 @@ export * from './webhook.zod';
 export * from './approval.zod';
 export * from './etl.zod';
 export * from './trigger-registry.zod';
+export * from './time-relative-trigger.zod';
 export * from './sync.zod';
 export * from './state-machine.zod';
 export * from './node-executor.zod';

@@ -1902,6 +1902,15 @@ export default class Serve extends Command {
               nameMatch: ['trigger-schedule', 'ScheduleTriggerPlugin'],
             },
             {
+              // Declarative time-relative sweep (#1874) — arms flows whose start
+              // node declares `config.timeRelative` (fire daily for records whose
+              // date field is within N days / at T-minus offsets). Ships in
+              // @objectstack/trigger-schedule; needs the job service + ObjectQL.
+              pkg: '@objectstack/trigger-schedule',
+              export: 'TimeRelativeTriggerPlugin',
+              nameMatch: ['trigger-schedule', 'TimeRelativeTriggerPlugin'],
+            },
+            {
               // Inbound webhook/HTTP trigger (ADR-0041 Tier 1) — arms
               // `type: 'api'` flows with HMAC-verified, queue-backed hooks.
               pkg: '@objectstack/trigger-api',

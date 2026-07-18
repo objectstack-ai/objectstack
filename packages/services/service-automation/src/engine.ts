@@ -781,6 +781,31 @@ export class AutomationEngine implements IAutomationService {
             };
         }
 
+        // Declarative time-relative sweep (#1874): a start node carrying a
+        // `timeRelative` descriptor is swept on a schedule and launched once per
+        // record whose date field falls in the window. Checked BEFORE `schedule`
+        // because such a flow ALSO carries a `schedule` cadence (the sweep
+        // interval) — without this precedence it would bind to the plain schedule
+        // trigger and fire once with no record instead of once per record.
+        if (config.timeRelative != null && typeof config.timeRelative === 'object') {
+            const tr = config.timeRelative as Record<string, unknown>;
+            return {
+                triggerType: 'time_relative',
+                binding: {
+                    flowName,
+                    object:
+                        typeof tr.object === 'string'
+                            ? tr.object
+                            : typeof config.objectName === 'string'
+                              ? config.objectName
+                              : undefined,
+                    schedule: config.schedule,
+                    condition: (config.condition as FlowTriggerBinding['condition']) ?? undefined,
+                    config,
+                },
+            };
+        }
+
         if (config.schedule != null || flow.type === 'schedule') {
             return {
                 triggerType: 'schedule',
@@ -1218,7 +1243,7 @@ export class AutomationEngine implements IAutomationService {
             if (!resolved) continue; // manual / screen flow — nothing to bind
             const reason = this.triggers.has(resolved.triggerType)
                 ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
-                : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/api ship in @objectstack/trigger-*)`;
+                : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
             audit.push({ flowName: name, triggerType: resolved.triggerType, reason });
         }
         return audit;

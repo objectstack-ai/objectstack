@@ -46,6 +46,14 @@ export interface TriggerLogger {
     info(msg: string, ...args: unknown[]): void;
     warn(msg: string, ...args: unknown[]): void;
     debug?(msg: string, ...args: unknown[]): void;
+    /**
+     * Execution failures log here when available (falling back to `warn`).
+     * ERROR matters operationally: the CLI's boot-quiet window swallows
+     * stdout (debug/info/warn) but stderr (error/fatal) always lands — so a
+     * per-record sweep failure stays visible. Mirrors the record-change
+     * trigger's logger surface.
+     */
+    error?(msg: string, ...args: unknown[]): void;
 }
 
 const JOB_PREFIX = 'flow-schedule';

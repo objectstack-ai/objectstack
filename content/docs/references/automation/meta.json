@@ -13,6 +13,7 @@
     "offline",
     "state-machine",
     "sync",
+    "time-relative-trigger",
     "trigger-registry",
     "webhook"
   ]

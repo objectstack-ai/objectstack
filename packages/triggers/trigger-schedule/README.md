@@ -66,3 +66,57 @@ rather than failing startup.
 
 A flow that throws during a scheduled run is logged and swallowed — it never
 crashes the job runner.
+
+## Time-relative trigger (`TimeRelativeTriggerPlugin`)
+
+The **declarative** answer to "act on records whose date field is coming up (or
+overdue)" (#1874) — without the fragile date-equality-on-record-change pattern
+(which only fires if a record happens to be edited on the threshold day) or a
+hand-rolled cron + range query per flow.
+
+A flow whose `start` node declares a `timeRelative` descriptor is swept on a
+schedule and launched **once per matching record**:
+
+```ts
+{
+  type: 'start',
+  config: {
+    timeRelative: {
+      object: 'contracts',
+      dateField: 'end_date',
+      offsetDays: [60, 30, 7],       // T-minus reminders — fires on each threshold day
+      // — or — withinDays: 30       // "expiring soon" range (negative = overdue lookback)
+      filter: { status: 'active' },  // optional, ANDed with the date window
+      maxRecords: 1000,              // optional per-sweep cap (default 1000)
+    },
+    schedule: { type: 'cron', expression: '0 8 * * *' }, // optional; defaults to daily 08:00 UTC
+    condition: '...',                // optional per-record start-condition gate
+  },
+}
+```
+
+The matched record rides on the automation context (`event: 'time_relative'`,
+`record`, `params`), so the start-node `condition` gate and `{record.<field>}`
+interpolation work exactly as for a record-change flow. Because the window is
+evaluated **every day**, a threshold is never missed regardless of when the
+record last changed.
+
+| Mode                | Semantics (day-granular, UTC, always includes today)                  |
+| ------------------- | --------------------------------------------------------------------- |
+| `withinDays: N`     | `dateField ∈ [today, today + N]` (upcoming). `N < 0` = overdue lookback. |
+| `offsetDays: [a,b]` | one single-day match per offset (`today + a`, `today + b`, …).         |
+
+It needs both the job service (sweep cadence) **and** the ObjectQL engine (the
+date-window query); register it alongside the schedule trigger:
+
+```ts
+import { ScheduleTriggerPlugin, TimeRelativeTriggerPlugin } from '@objectstack/plugin-trigger-schedule';
+
+kernel
+  .use(new ScheduleTriggerPlugin())      // plain schedule flows
+  .use(new TimeRelativeTriggerPlugin());  // ← time-relative sweeps (needs the ObjectQL engine)
+```
+
+The discovery query runs as a system operation (RLS-bypassing — a background
+sweep sees all rows), is capped at `maxRecords` per tick (logged when it
+clamps), and isolates per-record failures so one bad row never aborts the sweep.
