@@ -71,7 +71,7 @@ const result = Webhook.parse(data);
 | **body** | `any` | optional | Request body payload (if not using default record data) |
 | **payloadFields** | `string[]` | optional | Fields to include. Empty = All |
 | **includeSession** | `boolean` | ✅ | Include user session info |
-| **authentication** | `{ type: Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>; credentials?: Record<string, string> }` | optional | Authentication configuration |
+| **authentication** | `{ type: Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>; credentials?: Record<string, string> }` | optional | Authentication configuration. [EXPERIMENTAL — not enforced] The webhook delivery path only applies HMAC signing via `secret`; bearer/basic/api-key credentials are not attached to outbound requests yet (liveness audit #1878/#1893). |
 | **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'exponential' \| 'linear' \| 'fixed'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Retry policy configuration |
 | **timeoutMs** | `integer` | ✅ | Request timeout in milliseconds |
 | **secret** | `string` | optional | Signing secret for HMAC signature verification |

@@ -29,7 +29,8 @@ const result = AIKnowledge.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **topics** | `string[]` | ✅ | Topics/Tags to recruit knowledge from |
+| **sources** | `string[]` | optional | Knowledge sources/tags to recruit RAG context from. Canonical key consumed by the agent renderer (objectui AgentPreview KnowledgeSummary). |
+| **topics** | `string[]` | optional | Deprecated alias for `sources` (spec key ≠ consumed key drift, liveness audit #1878/#1891). Prefer `sources`; `topics` is retained for back-compat but the renderer reads `sources`. |
 | **indexes** | `string[]` | ✅ | Vector Store Indexes |
 
 
@@ -79,7 +80,7 @@ const result = AIKnowledge.parse(data);
 | **surface** | `Enum<'ask' \| 'build'>` | ✅ | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
 | **skills** | `string[]` | optional | Skill names to attach (Agent→Skill→Tool architecture) |
 | **tools** | `{ type: Enum<'action' \| 'flow' \| 'query' \| 'vector_search'>; name: string; description?: string }[]` | optional | Direct tool references (legacy fallback) |
-| **knowledge** | `{ topics: string[]; indexes: string[] }` | optional | RAG access |
+| **knowledge** | `{ sources?: string[]; topics?: string[]; indexes: string[] }` | optional | RAG access |
 | **active** | `boolean` | ✅ |  |
 | **access** | `string[]` | optional | Who can chat with this agent |
 | **permissions** | `string[]` | optional | Required permission-set capabilities |

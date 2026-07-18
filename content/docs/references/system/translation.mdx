@@ -154,9 +154,9 @@ Internationalization configuration
 | **supportedLocales** | `string[]` | ✅ | Supported BCP-47 locale codes |
 | **fallbackLocale** | `string` | optional | Fallback locale code |
 | **fileOrganization** | `Enum<'bundled' \| 'per_locale' \| 'per_namespace'>` | ✅ | File organization strategy |
-| **messageFormat** | `Enum<'icu' \| 'simple'>` | ✅ | Message interpolation format (ICU MessageFormat or simple) |
+| **messageFormat** | `Enum<'icu' \| 'simple'>` | ✅ | Message interpolation format (ICU MessageFormat or simple). [EXPERIMENTAL — 'icu' not enforced] No ICU MessageFormat engine is wired; messageFormat:'icu' is accepted but interpolation falls back to simple substitution (liveness audit #1878/#1893). |
 | **lazyLoad** | `boolean` | ✅ | Load translations on demand |
-| **cache** | `boolean` | ✅ | Cache loaded translations |
+| **cache** | `boolean` | ✅ | Cache loaded translations. [EXPERIMENTAL — not enforced] No runtime consumer reads this cache flag yet (liveness audit #1878/#1893). |
 
 
 ---

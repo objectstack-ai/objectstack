@@ -32,7 +32,8 @@ export const AIToolSchema = lazySchema(() => z.object({
  * RAG configuration.
  */
 export const AIKnowledgeSchema = lazySchema(() => z.object({
-  topics: z.array(z.string()).describe('Topics/Tags to recruit knowledge from'),
+  sources: z.array(z.string()).optional().describe('Knowledge sources/tags to recruit RAG context from. Canonical key consumed by the agent renderer (objectui AgentPreview KnowledgeSummary).'),
+  topics: z.array(z.string()).optional().describe('Deprecated alias for `sources` (spec key ≠ consumed key drift, liveness audit #1878/#1891). Prefer `sources`; `topics` is retained for back-compat but the renderer reads `sources`.'),
   indexes: z.array(z.string()).describe('Vector Store Indexes'),
 }));
 

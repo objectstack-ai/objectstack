@@ -162,19 +162,19 @@ const result = Animation.parse(data);
 | **mode** | `Enum<'light' \| 'dark' \| 'auto'>` | ✅ | Theme mode (light, dark, or auto) |
 | **colors** | `{ primary: string; secondary?: string; accent?: string; success?: string; … }` | ✅ | Color palette configuration |
 | **typography** | `{ fontFamily?: object; fontSize?: object; fontWeight?: object; lineHeight?: object; … }` | optional | Typography settings |
-| **spacing** | `{ 0?: string; 1?: string; 2?: string; 3?: string; … }` | optional | Spacing scale |
+| **spacing** | `{ 0?: string; 1?: string; 2?: string; 3?: string; … }` | optional | Spacing scale. [EXPERIMENTAL — not enforced] generateThemeVars does not emit spacing tokens yet (liveness audit #1878/#1893). |
 | **borderRadius** | `{ none?: string; sm?: string; base?: string; md?: string; … }` | optional | Border radius scale |
 | **shadows** | `{ none?: string; sm?: string; base?: string; md?: string; … }` | optional | Box shadow effects |
-| **breakpoints** | `{ xs?: string; sm?: string; md?: string; lg?: string; … }` | optional | Responsive breakpoints |
+| **breakpoints** | `{ xs?: string; sm?: string; md?: string; lg?: string; … }` | optional | Responsive breakpoints. [EXPERIMENTAL — not enforced] generateThemeVars does not emit breakpoint tokens yet (liveness audit #1878/#1893). |
 | **animation** | `{ duration?: object; timing?: object }` | optional | Animation settings |
 | **zIndex** | `{ base?: number; dropdown?: number; sticky?: number; fixed?: number; … }` | optional | Z-index scale for layering |
 | **customVars** | `Record<string, string>` | optional | Custom CSS variables (key-value pairs) |
 | **logo** | `{ light?: string; dark?: string; favicon?: string }` | optional | Logo assets |
 | **extends** | `string` | optional | Base theme to extend from |
-| **density** | `Enum<'compact' \| 'regular' \| 'spacious'>` | optional | Display density: compact, regular, or spacious |
+| **density** | `Enum<'compact' \| 'regular' \| 'spacious'>` | optional | Display density: compact, regular, or spacious. [EXPERIMENTAL — not enforced] The theme engine does not consume theme-level density yet; view-level densityMode is a separate live setting (liveness audit #1878/#1893). |
 | **wcagContrast** | `Enum<'AA' \| 'AAA'>` | optional | WCAG color contrast level (AA or AAA) |
-| **rtl** | `boolean` | optional | Enable right-to-left layout direction |
-| **touchTarget** | `{ minWidth: number; minHeight: number; padding?: number; hitSlop?: object }` | optional | Touch target sizing defaults |
+| **rtl** | `boolean` | optional | Enable right-to-left layout direction. [EXPERIMENTAL — not enforced] No renderer reads theme.rtl yet (liveness audit #1878/#1893). |
+| **touchTarget** | `{ minWidth: number; minHeight: number; padding?: number; hitSlop?: object }` | optional | Touch target sizing defaults. [EXPERIMENTAL — not enforced] No renderer consumes touchTarget yet (liveness audit #1878/#1893). |
 | **keyboardNavigation** | `{ tabOrder: Enum<'auto' \| 'manual'>; skipLinks: boolean; focusVisible: boolean; focusTrap?: object; … }` | optional | Keyboard focus management settings |
 
 

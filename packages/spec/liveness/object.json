@@ -178,12 +178,14 @@
           "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts (writeAudit: explicit activities:false skips the sys_activity timeline mirror; audit row unaffected); objectui RecordDetailView skips the timeline merge on explicit false. Opt-out — spec default true; the per-object lever for activity-row growth, ADR-0057 (#2707)."
         },
         "trash": {
-          "status": "dead",
-          "evidence": "no behavior-changing reader"
+          "status": "experimental",
+          "evidence": "no behavior-changing reader",
+          "note": "Declared, intentionally not enforced yet: no Recycle Bin / restore surface consumes enable.trash. Marked experimental (not dead) per ADR-0049 — the flag names a planned capability; spec .describe() carries the [EXPERIMENTAL — not enforced] marker (#1878/#1893)."
         },
         "mru": {
-          "status": "dead",
-          "evidence": "no behavior-changing reader"
+          "status": "experimental",
+          "evidence": "no behavior-changing reader",
+          "note": "Declared, intentionally not enforced yet: no Most-Recently-Used tracker consumes enable.mru. Marked experimental per ADR-0049; spec .describe() carries the marker (#1878/#1893)."
         },
         "clone": {
           "status": "live",

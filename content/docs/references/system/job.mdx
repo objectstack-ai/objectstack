@@ -62,8 +62,8 @@ const result = CronSchedule.parse(data);
 | **description** | `string` | optional | Job description / purpose |
 | **schedule** | `{ type: 'cron'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string } \| { type: 'interval'; intervalMs: integer } \| { type: 'once'; at: string }` | ✅ | Job schedule configuration |
 | **handler** | `string` | ✅ | Handler function name (must match a key in `defineStack({ functions })`) |
-| **retryPolicy** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number }` | optional | Retry policy configuration |
-| **timeout** | `integer` | optional | Timeout in milliseconds |
+| **retryPolicy** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number }` | optional | Retry policy configuration. [EXPERIMENTAL — not enforced] The service-job scheduler does not yet read retryPolicy; failed runs are not retried per this config (liveness audit #1878/#1893). |
+| **timeout** | `integer` | optional | Timeout in milliseconds. [EXPERIMENTAL — not enforced] The service-job scheduler does not yet enforce a per-run timeout (liveness audit #1878/#1893). |
 | **enabled** | `boolean` | optional | Whether the job is enabled |
 
 

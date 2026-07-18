@@ -107,10 +107,10 @@ export const ObjectCapabilities = z.object({
   activities: z.boolean().default(true).describe('Record activity timeline (sys_activity mirror of CRUD). Default on; explicit false stops mirroring and hides the timeline'),
 
   /** Enable Recycle Bin / Soft Delete */
-  trash: z.boolean().default(true).describe('Enable soft-delete with restore capability'),
+  trash: z.boolean().default(true).describe('Enable soft-delete with restore capability. [EXPERIMENTAL — not enforced] No runtime consumer reads this flag yet; a Recycle Bin / restore surface is planned but not wired (liveness audit #1878/#1893).'),
 
   /** Enable "Recently Viewed" tracking */
-  mru: z.boolean().default(true).describe('Track Most Recently Used (MRU) list for users'),
+  mru: z.boolean().default(true).describe('Track Most Recently Used (MRU) list for users. [EXPERIMENTAL — not enforced] No runtime consumer reads this flag yet (liveness audit #1878/#1893).'),
   
   /** Allow cloning records */
   clone: z.boolean().default(true).describe('Allow record deep cloning'),

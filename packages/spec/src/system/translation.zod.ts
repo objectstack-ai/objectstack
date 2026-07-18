@@ -414,11 +414,11 @@ export const TranslationConfigSchema = lazySchema(() => z.object({
    * @default 'simple'
    */
   messageFormat: MessageFormatSchema.default('simple')
-    .describe('Message interpolation format (ICU MessageFormat or simple)'),
+    .describe("Message interpolation format (ICU MessageFormat or simple). [EXPERIMENTAL — 'icu' not enforced] No ICU MessageFormat engine is wired; messageFormat:'icu' is accepted but interpolation falls back to simple substitution (liveness audit #1878/#1893)."),
   /** Load translations on demand instead of eagerly */
   lazyLoad: z.boolean().default(false).describe('Load translations on demand'),
   /** Cache loaded translations in memory */
-  cache: z.boolean().default(true).describe('Cache loaded translations'),
+  cache: z.boolean().default(true).describe('Cache loaded translations. [EXPERIMENTAL — not enforced] No runtime consumer reads this cache flag yet (liveness audit #1878/#1893).'),
 }).describe('Internationalization configuration'));
 
 export type TranslationConfig = z.infer<typeof TranslationConfigSchema>;
