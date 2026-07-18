@@ -305,8 +305,8 @@ export class SeedLoaderService implements ISeedLoaderService {
               const freshlyInserted = toInsert.length === 0
                 ? []
                 : toInsert.length === 1
-                  ? [await this.engine.insert(objectName, toInsert[0], opts)]
-                  : await this.engine.insert(objectName, toInsert, opts);
+                  ? [await this.writeRecoveringSummary(() => this.engine.insert(objectName, toInsert[0], opts))]
+                  : await this.writeRecoveringSummary(() => this.engine.insert(objectName, toInsert, opts));
               lastBatchUncertain = false;
               return assembleInOrder(rows, existing, freshlyInserted as any[]);
             } catch (e) {
@@ -323,7 +323,7 @@ export class SeedLoaderService implements ISeedLoaderService {
                 if (hit) return hit; // already committed by a prior attempt
               }
             }
-            return this.engine.insert(objectName, row, opts);
+            return this.writeRecoveringSummary(() => this.engine.insert(objectName, row, opts));
           },
         },
       );
@@ -596,7 +596,7 @@ export class SeedLoaderService implements ISeedLoaderService {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
             try {
-              await withTransientRetry(() => this.engine.update(objectName, { ...record, id: decision.id }, opts));
+              await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.update(objectName, { ...record, id: decision.id }, opts)));
               updated++;
             } catch (err: any) {
               errored++;
@@ -800,6 +800,29 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   private static readonly SEED_OPTIONS = { context: { isSystem: true, skipTriggers: true } } as const;
 
+  /**
+   * Run an engine write; if it fails ONLY because a post-write roll-up summary
+   * recompute exhausted its retries (framework#3147, `code`
+   * 'ERR_SUMMARY_RECOMPUTE'), the record WAS written — treat it as a warning
+   * and return the written value rather than re-writing (which would
+   * duplicate). Matched by `code` so we needn't import objectql (which depends
+   * on this package — importing back would cycle). Any other error propagates.
+   */
+  private async writeRecoveringSummary<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (e: any) {
+      if (e?.code === 'ERR_SUMMARY_RECOMPUTE') {
+        this.logger.warn(
+          '[SeedLoader] roll-up summary recompute failed after retries; records were written (summary values may be stale)',
+          { failures: Array.isArray(e.failures) ? e.failures.length : undefined },
+        );
+        return e.written as T;
+      }
+      throw e;
+    }
+  }
+
   private async writeRecord(
     objectName: string,
     record: Record<string, unknown>,
@@ -813,7 +836,7 @@ export class SeedLoaderService implements ISeedLoaderService {
 
     switch (mode) {
       case 'insert': {
-        const result = await withTransientRetry(() => this.engine.insert(objectName, record, opts));
+        const result = await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };
       }
 
@@ -825,7 +848,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (this.isNoOpReplay(record, existing)) {
           return { action: 'skipped', id };
         }
-        await withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts));
+        await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts)));
         return { action: 'updated', id };
       }
 
@@ -835,10 +858,10 @@ export class SeedLoaderService implements ISeedLoaderService {
           if (this.isNoOpReplay(record, existing)) {
             return { action: 'skipped', id };
           }
-          await withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts));
+          await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts)));
           return { action: 'updated', id };
         } else {
-          const result = await withTransientRetry(() => this.engine.insert(objectName, record, opts));
+          const result = await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
           return { action: 'inserted', id: this.extractId(result) };
         }
       }
@@ -847,18 +870,18 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (existing) {
           return { action: 'skipped', id: this.extractId(existing) };
         }
-        const result = await withTransientRetry(() => this.engine.insert(objectName, record, opts));
+        const result = await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };
       }
 
       case 'replace': {
         // Replace mode: just insert (caller should have cleared the table)
-        const result = await withTransientRetry(() => this.engine.insert(objectName, record, opts));
+        const result = await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };
       }
 
       default: {
-        const result = await withTransientRetry(() => this.engine.insert(objectName, record, opts));
+        const result = await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };
       }
     }

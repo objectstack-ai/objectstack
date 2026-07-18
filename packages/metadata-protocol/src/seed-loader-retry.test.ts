@@ -179,3 +179,40 @@ describe('seed batched path — idempotent retry after commit-then-lost-response
     expect(result.summary.totalErrored).toBe(0);
   });
 });
+
+describe('seed batched path — summary recompute failure is a warning, not an error (framework#3147)', () => {
+  it('records the rows as inserted (not errored) and does not re-insert on ERR_SUMMARY_RECOMPUTE', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = createMetadata();
+
+    // The array insert writes the rows, then reports a post-write summary
+    // recompute failure — the records ARE written (carried on `written`).
+    const realInsert = (engine.insert as any).getMockImplementation();
+    let arrayCalls = 0;
+    (engine.insert as any).mockImplementation(async (obj: string, data: any, opts: any) => {
+      if (obj === 'my_app_widget' && Array.isArray(data)) {
+        arrayCalls++;
+        const written = await realInsert(obj, data, opts);
+        throw Object.assign(new Error('summary recompute failed'), {
+          code: 'ERR_SUMMARY_RECOMPUTE', written, failures: [{ parentObject: 'x' }],
+        });
+      }
+      return realInsert(obj, data, opts);
+    });
+
+    const result = await new SeedLoaderService(engine, metadata, createLogger()).load({
+      seeds: [{
+        object: 'my_app_widget',
+        externalId: 'sku',
+        mode: 'insert',
+        env: ['prod', 'dev', 'test'],
+        records: [{ name: 'A', sku: 'W-A' }, { name: 'B', sku: 'W-B' }],
+      }] as any,
+      config: CONFIG,
+    });
+
+    expect(arrayCalls).toBe(1);              // recovered, NOT re-inserted
+    expect(store.my_app_widget).toHaveLength(2); // no duplicates
+    expect(result.summary.totalErrored).toBe(0); // a stale summary is not a write error
+  });
+});

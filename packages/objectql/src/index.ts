@@ -36,6 +36,8 @@ export type { SysMetadataEngine, SysMetadataRepositoryOptions } from '@objectsta
 // Export Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
 export type { ObjectQLHostContext, HookHandler, HookEntry, OperationContext, EngineMiddleware } from './engine.js';
+export { SummaryRecomputeError } from './summary-errors.js';
+export type { SummaryRecomputeFailure } from './summary-errors.js';
 
 // Export in-memory aggregation fallback (used by engine.aggregate when the
 // driver lacks native groupBy/aggregations support; also useful for tests).

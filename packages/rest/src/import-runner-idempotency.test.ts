@@ -103,4 +103,27 @@ describe('runImport — idempotent retry with natural keys (framework#3149)', ()
     // written twice. This pins the contract (exactly-once needs matchFields).
     expect(store).toHaveLength(4);
   });
+
+  it('marks rows created-with-warning on a summary recompute failure, without failing or duplicating (framework#3147)', async () => {
+    const store: Array<Record<string, any>> = [];
+    let idc = 0;
+    const createManyData = vi.fn(async (args: { records: any[] }) => {
+      const recs = args.records.map((r) => { const rec = { id: `id-${++idc}`, ...r }; store.push(rec); return rec; });
+      // Records written, but the post-write summary recompute failed.
+      throw Object.assign(new Error('summary recompute failed'), { code: 'ERR_SUMMARY_RECOMPUTE', written: recs });
+    });
+    const createData = vi.fn();
+    const p: ImportProtocolLike = { findData: vi.fn(async () => []), createData, updateData: vi.fn(), createManyData };
+
+    const summary = await runImport({
+      ...baseOpts, p, writeMode: 'insert', matchFields: [],
+      rows: [{ name: 'x' }, { name: 'y' }],
+    });
+
+    expect(createData).not.toHaveBeenCalled(); // not degraded / re-created
+    expect(store).toHaveLength(2);             // no duplicate
+    expect(summary.created).toBe(2);
+    expect(summary.errors).toBe(0);
+    expect(summary.results.every((r) => r.ok && r.code === 'SUMMARY_RECOMPUTE_FAILED')).toBe(true);
+  });
 });

@@ -279,8 +279,23 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   // duplicate a row (framework#3149). A pure-insert import (no matchFields) has
   // no natural key to recheck against and stays at-least-once by contract.
   let lastBatchUncertain = false;
+  // Set when a flush's write succeeded but its post-write roll-up summary
+  // recompute exhausted retries (framework#3147). The rows ARE written; we mark
+  // them created-with-a-warning code rather than failing (or re-writing) them.
+  let flushSummaryStale = false;
   const isUncertainOutcome = (e: unknown) =>
     defaultIsTransientError(e) || (e as { code?: unknown } | null)?.code === 'ERR_BULK_RESULT_MISMATCH';
+  // A post-write summary recompute failure (ERR_SUMMARY_RECOMPUTE) means the
+  // records were written; recover the written records from the error rather
+  // than letting the write look failed (which would re-create → duplicate).
+  const recoverSummaryStale = (e: unknown): unknown[] | null => {
+    const err = e as { code?: unknown; written?: unknown } | null;
+    if (err?.code === 'ERR_SUMMARY_RECOMPUTE') {
+      flushSummaryStale = true;
+      return Array.isArray(err.written) ? err.written : (err.written != null ? [err.written] : []);
+    }
+    return null;
+  };
   const existingByMatch = async (data: Record<string, any>): Promise<Record<string, any> | null> => {
     if (matchFields.length === 0) return null;
     const found = await findExisting(data);
@@ -288,6 +303,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   };
   const flushPendingCreates = async (): Promise<void> => {
     if (pendingCreates.length === 0) return;
+    flushSummaryStale = false;
     const batch = pendingCreates.splice(0, pendingCreates.length);
     const writeResults: BulkWriteRowResult[] = await bulkWrite(
       batch.map(b => b.data),
@@ -310,12 +326,22 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
             }
           }
           try {
-            const createdRecords = toCreate.length === 0
-              ? []
-              : (await p.createManyData!({
+            let createdRecords: any[];
+            if (toCreate.length === 0) {
+              createdRecords = [];
+            } else {
+              try {
+                createdRecords = (await p.createManyData!({
                   object: objectName, records: toCreate, context: writeCtx,
                   ...(environmentId ? { environmentId } : {}),
                 })).records;
+              } catch (e) {
+                // Records written but summary recompute failed: recover them.
+                const recovered = recoverSummaryStale(e);
+                if (!recovered) throw e;
+                createdRecords = recovered;
+              }
+            }
             // Surface a short/non-array createManyData return as a failed batch
             // (framework#3151) rather than padding the reassembly with undefined
             // — this drops into per-row degradation, which rechecks first.
@@ -340,10 +366,16 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
             const hit = await existingByMatch(row);
             if (hit) return hit; // already committed by a prior attempt
           }
-          return p.createData({
-            object: objectName, data: row, context: writeCtx,
-            ...(environmentId ? { environmentId } : {}),
-          });
+          try {
+            return await p.createData({
+              object: objectName, data: row, context: writeCtx,
+              ...(environmentId ? { environmentId } : {}),
+            });
+          } catch (e) {
+            const recovered = recoverSummaryStale(e);
+            if (recovered) return recovered[0]; // record written; summary stale
+            throw e;
+          }
         },
       },
     );
@@ -353,7 +385,8 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
         const id = extractRecordId(res.record);
         okCount++; created++;
         if (collectUndo && id != null) undoLog.created.push(id);
-        results[index] = { row: rowNo, ok: true, action: 'created', id };
+        results[index] = { row: rowNo, ok: true, action: 'created', id,
+          ...(flushSummaryStale ? { code: 'SUMMARY_RECOMPUTE_FAILED' } : {}) };
       } else {
         errCount++;
         results[index] = toFailedResult(rowNo, res.error);
@@ -420,13 +453,24 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               else { created++; results[i] = { row: rowNo, ok: true, action: 'created' }; }
             } else if (willUpdate) {
               const target = existing as Record<string, any>;
-              const res2 = await withTransientRetry(() => p.updateData({ object: objectName, id: target.id, data, context: writeCtx, ...(environmentId ? { environmentId } : {}) }));
+              let res2: unknown;
+              let updateSummaryStale = false;
+              try {
+                res2 = await withTransientRetry(() => p.updateData({ object: objectName, id: target.id, data, context: writeCtx, ...(environmentId ? { environmentId } : {}) }));
+              } catch (e) {
+                // Record updated but summary recompute failed (framework#3147):
+                // the update landed, so recover rather than fail the row.
+                const recovered = recoverSummaryStale(e);
+                if (!recovered) throw e;
+                res2 = recovered[0]; updateSummaryStale = true;
+              }
               const id = extractRecordId(res2) ?? String(target.id);
               okCount++; updated++;
               if (collectUndo && target.id != null) {
                 undoLog.updated.push({ id: String(target.id), before: captureBefore(target, data) });
               }
-              results[i] = { row: rowNo, ok: true, action: 'updated', id };
+              results[i] = { row: rowNo, ok: true, action: 'updated', id,
+                ...(updateSummaryStale ? { code: 'SUMMARY_RECOMPUTE_FAILED' } : {}) };
             } else if (canBulkCreate) {
               // Buffer — the actual write happens in a batched flush below.
               pendingCreates.push({ index: i, rowNo, data });
