@@ -1584,6 +1584,9 @@ importers:
       '@objectstack/example-showcase':
         specifier: workspace:*
         version: link:../../../examples/app-showcase
+      '@objectstack/mcp':
+        specifier: workspace:*
+        version: link:../../mcp
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql

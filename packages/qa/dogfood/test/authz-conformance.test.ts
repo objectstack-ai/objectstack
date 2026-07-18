@@ -167,6 +167,9 @@ const HIGH_RISK = [
   // is false compliance (declared ≠ enforced) and approval/status columns are
   // one direct PATCH away from self-approval.
   'readonly-static-write',
+  // #3167 — the MCP tool-execution surface is agent/external-reachable and
+  // default-on, so it must carry an end-to-end boundary proof (ADR-0096 D4).
+  'mcp-tool-exec-identity',
 ];
 
 describe('ADR-0056 D10 — authorization conformance matrix', () => {
