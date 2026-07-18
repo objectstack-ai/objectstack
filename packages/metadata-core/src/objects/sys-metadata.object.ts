@@ -227,7 +227,13 @@ export const SysMetadataObject = ObjectSchema.create({
     trackHistory: true,
     searchable: false,
     apiEnabled: true,
-    apiMethods: ['get', 'list', 'create', 'update', 'delete'],
+    // #3220 — sys_metadata is `managedBy: 'system'`: customization overlays are
+    // authored ONLY through the metadata-protocol RPC (its engine writes carry a
+    // transaction context, not a user session), never the generic /data route.
+    // Neither the framework nor the Console (objectui) POSTs /data/sys_metadata,
+    // so the generic write verbs were a latent hole for a user-context raw write
+    // the bucket forbids. Reads stay open for the Setup "Data Model" grids.
+    apiMethods: ['get', 'list'],
     trash: false,
   },
 
