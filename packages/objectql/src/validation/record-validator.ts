@@ -74,6 +74,7 @@ export interface FieldValidationError {
     | 'invalid_type'
     // Object-level validation rules (ADR-0020, see rule-validator.ts)
     | 'invalid_transition'
+    | 'invalid_initial_state'
     | 'rule_violation'
     | 'invalid_format'
     | 'invalid_json'

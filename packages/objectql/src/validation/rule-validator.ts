@@ -17,7 +17,9 @@
  *
  *  - `state_machine` — the headline guardrail. On update, if the state field
  *    changed and the new value is not in `transitions[oldValue]`, the write
- *    is rejected. Needs the **prior** record (see plumbing note below).
+ *    is rejected. Needs the **prior** record (see plumbing note below). On
+ *    insert, if the rule declares `initialStates`, the created value must be one
+ *    of them (the FSM entry point, #3165); otherwise insert is a no-op.
  *  - `script` / `cross_field` — CEL predicates. If the predicate evaluates
  *    TRUE the rule is violated. These share the prior-record gap with
  *    `state_machine` (a PATCH carries only changed fields), so they are
@@ -64,8 +66,9 @@
  * `state_machine` and the field-spanning predicates are meaningful only with
  * the record's prior state. The engine fetches it once (see
  * `engine.update`) and threads it in via `opts.previous`. On `insert` there
- * is no prior state, so `state_machine` is a no-op (the field-level select
- * check already constrains the initial value to a declared option). On a
+ * is no prior state, so `state_machine`'s TRANSITION check is a no-op — but its
+ * `initialStates` entry-point check (#3165) does run against the created value.
+ * On a
  * multi-row update the engine reads the row-scoped match set (the same AST the
  * write binds, shared with the `readonlyWhen` bulk strip) and calls the
  * evaluator once per matched row — one payload, N priors (#3106).
@@ -92,6 +95,9 @@ interface StateMachineRule extends BaseRule {
   type: 'state_machine';
   field: string;
   transitions: Record<string, string[]>;
+  /** States a record may be CREATED in (#3165). When set, an insert whose state
+   *  field value is outside this list is rejected — the FSM entry point. */
+  initialStates?: string[];
 }
 
 interface PredicateRule extends BaseRule {
@@ -586,12 +592,18 @@ function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | 
 }
 
 /**
- * State-machine transition check.
+ * State-machine check.
  *
- * Only meaningful on update with a prior record: if the state field changed,
- * the new value must appear in `transitions[oldValue]`. Lenient where it
- * cannot reason (no prior record, unchanged value, or a prior state with no
- * declared transitions) so it never blocks legitimate or legacy data.
+ * On UPDATE (with a prior record): if the state field changed, the new value
+ * must appear in `transitions[oldValue]`. Lenient where it cannot reason (no
+ * prior record, unchanged value, or a prior state with no declared transitions)
+ * so it never blocks legitimate or legacy data.
+ *
+ * On INSERT: if the rule declares `initialStates` (#3165), the state field's
+ * (defaulted) value must be one of them — the FSM entry point, since a `select`
+ * field alone permits ANY declared option as an initial value (a record could
+ * otherwise be born already `approved`). Absent `initialStates`, insert is a
+ * no-op (legacy behavior); a missing/empty value is left to required-validation.
  */
 function checkStateMachine(
   rule: StateMachineRule,
@@ -599,9 +611,24 @@ function checkStateMachine(
   data: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
 ): FieldValidationError | null {
-  // Insert has no prior state — the field-level select check already
-  // constrains the initial value to a declared option.
-  if (mode === 'insert' || !previous) return null;
+  if (mode === 'insert') {
+    const initial = rule.initialStates;
+    if (!Array.isArray(initial) || initial.length === 0) return null; // no initial-state contract → legacy no-op
+    if (!(rule.field in data)) return null; // absent → required-validation's job
+    const value = data[rule.field];
+    if (value === undefined || value === null || value === '') return null; // empty → not an initial state to check
+    if (!initial.includes(String(value))) {
+      return {
+        field: rule.field,
+        code: 'invalid_initial_state',
+        message:
+          rule.message ||
+          `Invalid initial state for ${rule.field}: ${String(value)} (allowed: ${initial.join(', ')})`,
+      };
+    }
+    return null;
+  }
+  if (!previous) return null;
   // The PATCH didn't touch the state field → no transition to validate.
   if (!(rule.field in data)) return null;
 

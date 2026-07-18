@@ -160,6 +160,8 @@ Enforce allowed state transitions:
   severity: 'error',
   message: 'Invalid status transition',
   field: 'status',
+  // Which states a record may be CREATED in (the FSM entry point).
+  initialStates: ['draft'],
   transitions: {
     draft: ['submitted', 'cancelled'],
     submitted: ['approved', 'rejected', 'cancelled'],
@@ -168,14 +170,16 @@ Enforce allowed state transitions:
     cancelled: [],
     completed: [],
   },
-  events: ['update'],
 }
 ```
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
 | `field` | `string` | State field name |
-| `transitions` | `Record<string, string[]>` | Map of current state → allowed next states |
+| `transitions` | `Record<string, string[]>` | Map of current state → allowed next states (enforced on **update**) |
+| `initialStates` | `string[]` (optional) | States a record may be **created** in. Server-rejects an insert whose state field is outside this list — without it a `select` field permits any declared option as the initial value (a record could be born already `approved`). Omit to keep the legacy behavior (no initial-state check). |
+
+`transitions` governs updates; `initialStates` governs the create. A rule may declare either or both.
 
 ### Cross-Field Validation
 

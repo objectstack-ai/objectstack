@@ -1557,4 +1557,61 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       expect(bulkUpdates[0].amount).toBe(50); // unlocked row: edit goes through
     });
   });
+
+  // #3165 — a state_machine `initialStates` rule constrains which state a record
+  // may be CREATED in, enforced end-to-end on the engine insert path (AFTER field
+  // defaults). Proves the FSM entry point, not just the transition check.
+  describe('state_machine initialStates enforcement on INSERT (#3165)', () => {
+    async function bootInsert() {
+      const inserts: Record<string, any>[] = [];
+      const mockDriver = {
+        name: 'sm-capture', version: '1.0.0',
+        connect: async () => {}, disconnect: async () => {},
+        find: async () => [], findOne: async () => null,
+        create: async (_o: string, d: any) => { inserts.push({ ...d }); return { id: 'rec-1', ...d }; },
+        update: async (_o: string, _i: any, d: any) => ({ id: _i, ...d }),
+        delete: async () => true, syncSchema: async () => {},
+      };
+      await kernel.use({
+        name: 'sm-capture-plugin', type: 'driver', version: '1.0.0',
+        init: async (ctx) => { ctx.registerService('driver.sm-capture', mockDriver); },
+      });
+      await kernel.use(new ObjectQLPlugin());
+      await kernel.bootstrap();
+      const objectql = kernel.getService('objectql') as any;
+      const obj: ObjectSchema = {
+        name: 'sm_request', label: 'SM Request', datasource: 'sm-capture',
+        fields: {
+          // approval status: a select with a draft default; readonly to users.
+          approval_status: { name: 'approval_status', label: 'Status', type: 'select', defaultValue: 'draft' } as any,
+        },
+        validations: [{
+          type: 'state_machine', name: 'approval_flow', message: 'A request must start as draft.',
+          field: 'approval_status', initialStates: ['draft'],
+          transitions: { draft: ['pending'], pending: ['approved', 'rejected'] },
+        }] as any,
+      };
+      objectql.registry.registerObject(obj, 'test', 'test');
+      return { objectql, inserts };
+    }
+
+    it('rejects a create born mid-flow (approval_status: approved)', async () => {
+      const { objectql, inserts } = await bootInsert();
+      await expect(objectql.insert(
+        'sm_request',
+        { approval_status: 'approved' },
+        { context: { userId: 'user-9' } },
+      )).rejects.toThrow(/must start as draft/);
+      expect(inserts.length).toBe(0); // nothing written
+    });
+
+    it('accepts a create in the declared initial state, and the defaulted value passes', async () => {
+      const { objectql, inserts } = await bootInsert();
+      await objectql.insert('sm_request', { approval_status: 'draft' }, { context: { userId: 'user-9' } });
+      // Omitted → defaultValue 'draft' is applied before validation and passes.
+      await objectql.insert('sm_request', {}, { context: { userId: 'user-9' } });
+      expect(inserts.length).toBe(2);
+      expect(inserts.map((r) => r.approval_status)).toEqual(['draft', 'draft']);
+    });
+  });
 });

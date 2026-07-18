@@ -240,6 +240,69 @@ describe('state_machine enforcement', () => {
   });
 });
 
+// #3165 — the FSM entry point: `initialStates` constrains which state a record
+// may be CREATED in (a `select` field alone would permit any declared option).
+describe('state_machine initialStates enforcement on INSERT (#3165)', () => {
+  const approvalSchema = {
+    validations: [
+      {
+        type: 'state_machine' as const,
+        name: 'approval_flow',
+        field: 'approval_status',
+        message: 'A request must start as draft.',
+        initialStates: ['draft'],
+        transitions: {
+          draft: ['pending'],
+          pending: ['approved', 'rejected'],
+        },
+      },
+    ],
+  };
+
+  it('allows an insert whose state is a declared initial state', () => {
+    expect(() =>
+      evaluateValidationRules(approvalSchema, { approval_status: 'draft' }, 'insert'),
+    ).not.toThrow();
+  });
+
+  it('rejects an insert that is born mid-flow (approval_status: approved)', () => {
+    try {
+      evaluateValidationRules(approvalSchema, { approval_status: 'approved' }, 'insert');
+      throw new Error('expected throw');
+    } catch (e) {
+      const err = e as ValidationError;
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.fields[0].code).toBe('invalid_initial_state');
+      expect(err.fields[0].field).toBe('approval_status');
+      expect(err.fields[0].message).toBe('A request must start as draft.');
+    }
+  });
+
+  it('is a no-op on insert when the field carries no value (required-validation owns presence)', () => {
+    expect(() =>
+      evaluateValidationRules(approvalSchema, { name: 'x' }, 'insert'),
+    ).not.toThrow();
+    expect(() =>
+      evaluateValidationRules(approvalSchema, { approval_status: null }, 'insert'),
+    ).not.toThrow();
+  });
+
+  it('does not affect UPDATE transitions (initialStates is insert-only)', () => {
+    // draft → pending is a declared transition; initialStates must not interfere.
+    expect(() =>
+      evaluateValidationRules(approvalSchema, { approval_status: 'pending' }, 'update', {
+        previous: { approval_status: 'draft' },
+      }),
+    ).not.toThrow();
+  });
+
+  it('legacy no-op: a state_machine WITHOUT initialStates still allows any insert value', () => {
+    expect(() =>
+      evaluateValidationRules(accountSchema, { status: 'churned' }, 'insert'),
+    ).not.toThrow();
+  });
+});
+
 describe('execution control', () => {
   it('skips inactive rules', () => {
     const schema = {
