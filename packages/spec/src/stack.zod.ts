@@ -405,11 +405,23 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    * `plugins[]` or pass `--preset` flags at the CLI level.
    *
    * Built-in capability names (mapped in `@objectstack/cli`):
-   *   `ai`         → AIServicePlugin
+   *   `ai`         → AIServicePlugin (`@objectstack/service-ai`)
+   *   `ai-studio`  → AIStudioPlugin (`@objectstack/service-ai-studio`; implies `ai`)
    *   `automation` → AutomationServicePlugin (+ default node packs)
    *   `analytics`  → AnalyticsServicePlugin
    *   `audit`      → AuditPlugin
    *   `i18n`       → I18nPlugin
+   *
+   * INTENT, not presence (#1597). Listing a capability here is an explicit
+   * declaration that this app REQUIRES it, so the platform resolves it
+   * fail-fast at startup: if the provider package is not installed (or its
+   * plugin throws while starting), boot ABORTS with a clear error instead of
+   * silently degrading. This is the opposite of "load it if the package happens
+   * to be installed" — a capability the app merely bundles but does NOT list
+   * here is loaded best-effort (absent ⇒ quiet skip), and tier gating remains an
+   * orthogonal deny (a capability whose tier is off never loads, whatever the
+   * intent). Use this for the AI service too: `requires: ['ai']` makes a missing
+   * `@objectstack/service-ai` a hard boot error rather than a broken-but-booted app.
    *
    * If a capability is also provided explicitly via `plugins[]`, the
    * explicit instance wins (and the resolver does not double-register).
@@ -423,7 +435,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    * });
    * ```
    */
-  requires: z.array(z.string()).optional().describe('Capability names this stack requires from the platform'),
+  requires: z.array(z.string()).optional().describe('Capability names this stack requires from the platform (declared-but-missing ⇒ fail-fast at startup)'),
 
   /**
    * Plugin tier presets to auto-register (e.g. `core`, `ai`, `ui`, `auth`).

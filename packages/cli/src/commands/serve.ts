@@ -209,6 +209,53 @@ export default class Serve extends Command {
     full: ['core', 'i18n', 'ui', 'ai', 'auth'],
   };
 
+  /**
+   * True when a dynamic `import()` / `require.resolve()` failed because the
+   * module is simply NOT INSTALLED — as opposed to the module being present but
+   * throwing while it loads (a real crash). Checking `err.code` FIRST is the
+   * #1595 fix: ESM reports a missing package as `err.code ===
+   * 'ERR_MODULE_NOT_FOUND'` with the human message `Cannot find package '...'`;
+   * matching only the older `Cannot find module` string mis-classified that as a
+   * crash. One owner for this test so the optional-plugin guards and the
+   * capability resolver can't drift apart and re-introduce that bug (#1597).
+   */
+  static isModuleNotFoundError(err: unknown): boolean {
+    const code = (err as { code?: string } | null | undefined)?.code;
+    if (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') return true;
+    const msg = err instanceof Error ? err.message : String(err);
+    return msg.includes('Cannot find module') || msg.includes('Cannot find package');
+  }
+
+  /**
+   * Resolve HOW an optional, separately-published service plugin (e.g.
+   * `@objectstack/service-ai`, `@objectstack/service-ai-studio`) should load,
+   * from explicit INTENT rather than mere package presence (#1597).
+   *
+   * Two orthogonal axes decide the outcome — the app's declared intent and the
+   * license TIER (an orthogonal DENY):
+   *
+   *   tierAllowed=false               → 'off'      never load (CE / `tiers` sans the feature)
+   *   required=true  (+ tierAllowed)  → 'required' MUST load; a missing package is fail-fast
+   *   declared=true  (+ tierAllowed)  → 'auto'     opt-in convenience; best-effort load
+   *   neither declared nor required   → 'off'      skip, with NO speculative import
+   *
+   * `required` is an explicit capability declaration (`requires: [...]`), NOT
+   * "the package happens to be installed". `declared` means the host app listed
+   * the package in its OWN package.json — a deliberate authoring act, the opt-in
+   * path — resolved WITHOUT importing anything. The caller maps the result:
+   * 'required'/'auto' → attempt load (fail-fast only when 'required'); 'off' → skip.
+   */
+  static resolveOptionalPluginLoad(opts: {
+    tierAllowed: boolean;
+    required: boolean;
+    declared: boolean;
+  }): 'required' | 'auto' | 'off' {
+    if (!opts.tierAllowed) return 'off';
+    if (opts.required) return 'required';
+    if (opts.declared) return 'auto';
+    return 'off';
+  }
+
   async run(): Promise<void> {
     const { args, flags } = await this.parse(Serve);
 
@@ -471,6 +518,13 @@ export default class Serve extends Command {
       const requires: string[] = Array.isArray((config as any).requires)
         ? (config as any).requires.filter((c: unknown) => typeof c === 'string')
         : [];
+      // Snapshot the app's EXPLICIT capability declarations BEFORE the platform
+      // appends its own convenience defaults (auth→email, mcp, pinyin-search,
+      // ALWAYS_ON_CAPABILITIES, queue/job). Only these explicit declarations carry
+      // "required" INTENT (#1597): a declared capability whose provider package is
+      // absent is a hard boot error, whereas an auto-injected default that happens
+      // to be absent stays best-effort (warn + continue).
+      const declaredRequires = new Set<string>(requires);
       // Auth callbacks (password-reset, email-verification, magic-link,
       // invitation) depend on the email service. Auto-pull `email` when
       // `auth` is required so transactional mail works out of the box
@@ -535,6 +589,10 @@ export default class Serve extends Command {
       // capability-resolver block further down.
       const CAPABILITY_TO_TIER: Record<string, string> = {
         ai: 'ai',
+        // `ai-studio` (AI-driven authoring) rides on the base AI service, so
+        // requiring it opens the same `ai` tier (#1597). The dedicated AI block
+        // below resolves its load; it has no CAPABILITY_PROVIDERS entry.
+        'ai-studio': 'ai',
         i18n: 'i18n',
         ui: 'ui',
         auth: 'auth',
@@ -1497,7 +1555,7 @@ export default class Serve extends Command {
           }
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          if (!msg.includes('Cannot find module') && !msg.includes('ERR_MODULE_NOT_FOUND')) {
+          if (!Serve.isModuleNotFoundError(err)) {
             console.warn(chalk.yellow(`  ⚠ AuthPlugin failed to load: ${msg}`));
           }
           // @objectstack/plugin-auth not installed — login/register endpoints unavailable
@@ -1650,61 +1708,120 @@ export default class Serve extends Command {
           return false;
         }
       };
-      // AI Studio (`@objectstack/service-ai-studio`) attaches its personas via the
-      // `ai:ready` hook the base service fires, so declaring Studio implies the base
-      // service — load it even when only Studio is in the deps (the base is a
-      // transitive dep of Studio, so it stays resolvable).
+      // `wantsAiService` is the AUTO (opt-in) signal: the host app listed the base
+      // AI service — or the Studio that builds on it — in its OWN package.json. This
+      // is a package.json READ (a deliberate authoring act), not a speculative
+      // import: gating on a *declared* dep, not mere resolvability, is reliable in a
+      // workspace/monorepo where a package stays hoist-resolvable when undeclared.
+      // Studio implies the base service (it attaches via the `ai:ready` hook the base
+      // fires; the base is a transitive dep of Studio, so it stays resolvable).
       const wantsAiService =
         hostDeclaresDependency('@objectstack/service-ai')
         || hostDeclaresDependency('@objectstack/service-ai-studio');
-      if (!hasAIPlugin && tierEnabled('ai') && wantsAiService) {
+
+      // Load an optional, separately-published service plugin by INTENT (#1597).
+      // `required` (from an explicit `requires: [...]` capability) makes a missing
+      // OR crashing package a HARD boot error — a declared-but-broken capability
+      // must fail-fast, never boot silently degraded (the outer boot catch prints
+      // the message and exits 1). `auto` (the package is merely DECLARED as a dep)
+      // is best-effort: a genuine crash is surfaced loudly, an absent package is the
+      // expected quiet skip. Presence is never inferred by importing-and-catching —
+      // the caller already decided to attempt this from intent, so the module-not-
+      // found test only WORDS the failure, it never decides whether to load.
+      // Returns true when the plugin was registered.
+      const loadOptionalServicePlugin = async (
+        pkg: string,
+        exportName: string,
+        opts: { required: boolean; label: string; track: string },
+      ): Promise<boolean> => {
         try {
-          const aiPkg = '@objectstack/service-ai';
-          const { AIServicePlugin } = await importFromHost(aiPkg);
-
-          // AIServicePlugin will auto-detect LLM provider from environment variables
-          // (AI_GATEWAY_MODEL, OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY)
-          // No need to manually construct the adapter here.
-          await kernel.use(new AIServicePlugin());
-          trackPlugin('AIService');
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          const code = (err as { code?: string })?.code;
-          const missing = code === 'ERR_MODULE_NOT_FOUND'
-            || msg.includes('Cannot find module')
-            || msg.includes('Cannot find package');
-          if (!missing) {
-            console.error('[AI] AIServicePlugin failed to start:', msg);
-          }
-          // @objectstack/service-ai not installed — AI features unavailable
-        }
-
-        // 4b. Auto-register AI Studio (AI-driven metadata authoring / "online
-        // development") when the private @objectstack/service-ai-studio package
-        // is installed. It is NOT part of the open-source framework: the dynamic
-        // import below silently skips when absent, so open-source installs get
-        // the generic AI runtime only. Enterprise installs that ship the package
-        // get full AI authoring. AIStudioPlugin attaches via the `ai:ready` hook.
-        const hasAIStudio = plugins.some(
-          (p: any) => p.name === 'com.objectstack.service-ai-studio'
-              || p.constructor?.name === 'AIStudioPlugin'
-        );
-        if (!hasAIStudio) {
-          try {
-            const studioPkg = '@objectstack/service-ai-studio';
-            const { AIStudioPlugin } = await importFromHost(studioPkg);
-            await kernel.use(new AIStudioPlugin());
-            trackPlugin('AIStudio');
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            const code = (err as { code?: string })?.code;
-            const missing = code === 'ERR_MODULE_NOT_FOUND'
-              || msg.includes('Cannot find module')
-              || msg.includes('Cannot find package');
-            if (!missing) {
-              console.error('[AI Studio] AIStudioPlugin failed to start:', msg);
+          const mod: any = await importFromHost(pkg);
+          const Ctor = mod[exportName];
+          if (typeof Ctor !== 'function') {
+            const detail = `${pkg} did not export ${exportName}`;
+            if (opts.required) {
+              throw new Error(`[${opts.label}] required but ${detail}.`);
             }
-            // @objectstack/service-ai-studio not installed — AI authoring unavailable
+            console.warn(chalk.yellow(`  ⚠ ${opts.label}: ${detail} — skipping`));
+            return false;
+          }
+          await kernel.use(new Ctor());
+          trackPlugin(opts.track);
+          return true;
+        } catch (err: unknown) {
+          if (opts.required) {
+            const msg = err instanceof Error ? err.message : String(err);
+            throw new Error(
+              Serve.isModuleNotFoundError(err)
+                ? `[${opts.label}] required but ${pkg} is not installed. `
+                    + `Add it to the app's dependencies, or drop the capability from \`requires\`.`
+                : `[${opts.label}] failed to start: ${msg}`,
+            );
+          }
+          // auto (opt-in): non-fatal. A real crash is surfaced; a missing package is
+          // the expected "not installed" path and stays quiet.
+          if (!Serve.isModuleNotFoundError(err)) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[${opts.label}] failed to start: ${msg}`);
+          }
+          return false;
+        }
+      };
+
+      // Base AI service — enable from declared INTENT, not package presence (#1597):
+      //   • `requires: ['ai']` (or `['ai-studio']`, which implies the base) ⇒ required
+      //     → a missing/broken package aborts startup (fail-fast).
+      //   • package declared in the app's package.json (but not required) ⇒ auto
+      //     → load best-effort.
+      //   • otherwise ⇒ skip, with NO speculative import.
+      // The `ai` tier is the orthogonal DENY: a Community-Edition deployment whose
+      // `tiers` omit `ai` never loads it, whatever the intent — so a CE app that
+      // omits AI gets no AI service, no agents, and no `services.ai` in discovery
+      // (the console hides its AI surface), while every other capability is unaffected.
+      const aiRequired =
+        declaredRequires.has('ai') || declaredRequires.has('ai-studio');
+      const aiDecision = Serve.resolveOptionalPluginLoad({
+        tierAllowed: tierEnabled('ai'),
+        required: aiRequired,
+        declared: wantsAiService,
+      });
+      if (!hasAIPlugin && aiDecision !== 'off') {
+        // AIServicePlugin auto-detects its LLM provider from environment
+        // (AI_GATEWAY_MODEL, OPENAI_API_KEY, ANTHROPIC_API_KEY,
+        // GOOGLE_GENERATIVE_AI_API_KEY) — no adapter to construct here.
+        const aiLoaded = await loadOptionalServicePlugin(
+          '@objectstack/service-ai',
+          'AIServicePlugin',
+          { required: aiDecision === 'required', label: 'AI', track: 'AIService' },
+        );
+
+        // AI Studio (AI-driven metadata authoring / "online development") builds on
+        // the base service and attaches via its `ai:ready` hook, so only attempt it
+        // once the base actually loaded. It is NOT part of the open-source framework:
+        //   • `requires: ['ai-studio']` ⇒ required → fail-fast if the private package
+        //     is absent (an app that advertises Studio must ship it).
+        //   • package declared but not required ⇒ auto (best-effort).
+        //   • otherwise ⇒ skip — this is the control-plane host path (apps/cloud ships
+        //     no Studio and MUST boot clean, cloud#107): not declared + not required
+        //     ⇒ no import, no error.
+        if (aiLoaded) {
+          const hasAIStudio = plugins.some(
+            (p: any) => p.name === 'com.objectstack.service-ai-studio'
+                || p.constructor?.name === 'AIStudioPlugin'
+          );
+          if (!hasAIStudio) {
+            const studioDecision = Serve.resolveOptionalPluginLoad({
+              tierAllowed: tierEnabled('ai'),
+              required: declaredRequires.has('ai-studio'),
+              declared: hostDeclaresDependency('@objectstack/service-ai-studio'),
+            });
+            if (studioDecision !== 'off') {
+              await loadOptionalServicePlugin(
+                '@objectstack/service-ai-studio',
+                'AIStudioPlugin',
+                { required: studioDecision === 'required', label: 'AI Studio', track: 'AIStudio' },
+              );
+            }
           }
         }
       }
@@ -1994,10 +2111,26 @@ export default class Serve extends Command {
           }
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          if (!msg.includes('Cannot find module') && !msg.includes('ERR_MODULE_NOT_FOUND')) {
+          const missing = Serve.isModuleNotFoundError(err);
+          // Fail-fast (#1597) for capabilities the app EXPLICITLY declared in
+          // `requires`: one that can't be provided — its provider package absent, or
+          // its plugin throwing while it starts — is a hard boot error, not a warning
+          // to scroll past (declared ≠ enforced, Prime Directive #10). The outer boot
+          // catch prints the message and exits 1. Platform-injected convenience
+          // defaults (ALWAYS_ON, mcp, pinyin-search, auth→email, queue/job) stay
+          // best-effort: absent ⇒ warn, crash ⇒ error, boot continues.
+          if (declaredRequires.has(cap)) {
+            throw new Error(
+              missing
+                ? `Capability "${cap}" is required but ${spec.pkg} is not installed. `
+                    + `Add it to the app's dependencies, or remove "${cap}" from \`requires\`.`
+                : `Capability "${cap}" (${spec.pkg}) failed to start: ${msg}`,
+            );
+          }
+          if (!missing) {
             console.error(`[Capability:${cap}] failed to load ${spec.pkg}: ${msg}`);
           } else {
-            console.warn(chalk.yellow(`  ⚠ Capability "${cap}" required but ${spec.pkg} is not installed`));
+            console.warn(chalk.yellow(`  ⚠ Capability "${cap}" (auto-enabled default) not installed — skipping ${spec.pkg}`));
           }
         }
       }
@@ -2037,7 +2170,7 @@ export default class Serve extends Command {
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (!msg.includes('Cannot find module') && !msg.includes('ERR_MODULE_NOT_FOUND')) {
+        if (!Serve.isModuleNotFoundError(err)) {
           console.error(`[Datasource] federation wiring failed: ${msg}`);
         }
       }
@@ -2153,7 +2286,7 @@ export default class Serve extends Command {
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (!msg.includes('Cannot find module') && !msg.includes('ERR_MODULE_NOT_FOUND')) {
+        if (!Serve.isModuleNotFoundError(err)) {
           console.error(`[Datasource] runtime-UI admin wiring failed: ${msg}`);
         }
       }
