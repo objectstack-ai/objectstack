@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
+import { FilterConditionSchema } from './filter.zod';
 
 /**
  * Field Type Enum
@@ -402,6 +403,19 @@ export const FieldSchema = lazySchema(() => z.object({
     field: z.string().describe('Field on child object to aggregate (ignored for count)'),
     function: z.enum(['count', 'sum', 'min', 'max', 'avg']).describe('Aggregation function to apply'),
     relationshipField: z.string().optional().describe('FK field on the child pointing back to this parent. Auto-detected from the child\'s lookup/master_detail field referencing this object when omitted; set explicitly only when the child has more than one such reference.'),
+    /**
+     * Optional predicate that restricts WHICH child rows are aggregated — a
+     * FilterCondition (the same object DSL as a query `where`), evaluated against
+     * each child row. Omit to aggregate every child. This is what lets several
+     * summaries roll up the SAME child object into different totals — e.g.
+     * `content_publication.total_signups` = count of engagement rows where
+     * `{ type: 'signup' }` vs `total_clicks` where `{ type: 'click' }`, or
+     * `procurement_order.received_amount` = sum of receipt lines where
+     * `{ status: 'received' }`. The engine ANDs it with the parent-FK match, so
+     * a child moving in or out of the predicate (a status change) recomputes the
+     * parent on its next write like any other child update.
+     */
+    filter: FilterConditionSchema.optional().describe("Predicate restricting which child rows are aggregated (a query `where` FilterCondition, e.g. { status: 'received' } or { type: { $in: ['signup','trial'] } }). Omit to aggregate all children. Lets one child object feed multiple filtered roll-ups."),
   }).optional().describe('Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted.'),
 
   /** Enhanced Field Type Configurations */

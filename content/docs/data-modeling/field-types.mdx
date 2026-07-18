@@ -447,6 +447,7 @@ Roll-up summary from child records.
 | `summaryOperations.field` | `string` | **required** | Child field to aggregate; ignored for `count` |
 | `summaryOperations.function` | `enum` | **required** | `count`, `sum`, `avg`, `min`, or `max` |
 | `summaryOperations.relationshipField` | `string` | auto | Child FK back to the parent when it cannot be inferred |
+| `summaryOperations.filter` | `FilterCondition` | — | Only child rows matching this `where` predicate are aggregated |
 
 ```typescript
 {
@@ -459,6 +460,32 @@ Roll-up summary from child records.
     function: 'count',
     relationshipField: 'project',
   },
+}
+```
+
+Add a `filter` to aggregate only a subset of children — this is how one child
+object feeds several different totals. The engine ANDs the predicate with the
+parent-FK match and recomputes on the child's next write, so a row moving in or
+out of the filter (a status change) keeps the parent current:
+
+```typescript
+// Sum only received receipt lines (3-way match), not every line.
+{
+  name: 'received_amount',
+  type: 'summary',
+  summaryOperations: {
+    object: 'procurement_receipt',
+    field: 'amount',
+    function: 'sum',
+    filter: { status: 'received' },
+  },
+}
+
+// One `engagement` child → distinct totals, differentiated only by the filter.
+{
+  name: 'total_signups',
+  type: 'summary',
+  summaryOperations: { object: 'engagement', field: 'id', function: 'count', filter: { type: 'signup' } },
 }
 ```
 

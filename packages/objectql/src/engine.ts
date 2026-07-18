@@ -283,6 +283,12 @@ interface SummaryDescriptor {
   fn: 'count' | 'sum' | 'min' | 'max' | 'avg';
   /** Child field aggregated (unused for count). */
   sourceField: string;
+  /**
+   * Optional predicate (a query `where` FilterCondition) restricting which child
+   * rows are aggregated. ANDed with the parent-FK match when the aggregate runs.
+   * Undefined ⇒ aggregate every child of the parent.
+   */
+  filter?: Record<string, unknown>;
 }
 
 export class ObjectQL implements IDataEngine {
@@ -1841,8 +1847,14 @@ export class ObjectQL implements IDataEngine {
           }
         }
         if (!fkField) continue; // can't resolve the relationship — skip
+        // Optional per-summary predicate: only child rows matching it are
+        // aggregated (e.g. sum receipts where { status: 'received' }). ANDed with
+        // the parent-FK match at recompute time. Ignore a non-object filter.
+        const filter = so.filter && typeof so.filter === 'object' && !Array.isArray(so.filter)
+          ? so.filter as Record<string, unknown>
+          : undefined;
         const list = index.get(childObject) ?? [];
-        list.push({ parentObject: parent.name, summaryField, fkField, fn, sourceField: so.field });
+        list.push({ parentObject: parent.name, summaryField, fkField, fn, sourceField: so.field, filter });
         index.set(childObject, list);
       }
     }
@@ -1882,8 +1894,12 @@ export class ObjectQL implements IDataEngine {
           // aggregate/update) with backoff — a network blip here used to leave
           // the parent summary silently stale (framework#3147).
           await withTransientRetry(async () => {
+            // AND the parent-FK match with the optional per-summary filter so
+            // only matching child rows are aggregated (e.g. received receipts).
+            const fkMatch = { [desc.fkField]: parentId };
+            const where = desc.filter ? { $and: [fkMatch, desc.filter] } : fkMatch;
             const rows = await this.aggregate(childObject, {
-              where: { [desc.fkField]: parentId },
+              where,
               aggregations: [{
                 function: desc.fn,
                 ...(desc.fn === 'count' ? {} : { field: desc.sourceField }),

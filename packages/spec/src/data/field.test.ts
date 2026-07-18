@@ -382,7 +382,7 @@ describe('FieldSchema', () => {
 
     it('should accept all summary functions', () => {
       const functions = ['count', 'sum', 'min', 'max', 'avg'] as const;
-      
+
       functions.forEach(fn => {
         const field: Field = {
           name: 'test_summary',
@@ -397,6 +397,40 @@ describe('FieldSchema', () => {
 
         expect(() => FieldSchema.parse(field)).not.toThrow();
       });
+    });
+
+    it('should accept a summary field with a filter predicate', () => {
+      const field: Field = {
+        name: 'received_amount',
+        label: 'Received Amount',
+        type: 'summary',
+        summaryOperations: {
+          object: 'procurement_receipt',
+          field: 'amount',
+          function: 'sum',
+          filter: { status: 'received' },
+        },
+      };
+
+      const parsed = FieldSchema.parse(field);
+      expect(parsed.summaryOperations?.filter).toEqual({ status: 'received' });
+    });
+
+    it('should accept a filtered count with operator syntax and an explicit relationship field', () => {
+      const field: Field = {
+        name: 'signup_count',
+        label: 'Signups',
+        type: 'summary',
+        summaryOperations: {
+          object: 'engagement',
+          field: 'id',
+          function: 'count',
+          relationshipField: 'publication_id',
+          filter: { type: { $in: ['signup', 'trial'] } },
+        },
+      };
+
+      expect(() => FieldSchema.parse(field)).not.toThrow();
     });
   });
 

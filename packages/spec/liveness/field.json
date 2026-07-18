@@ -65,7 +65,7 @@
     "summaryOperations": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts",
-      "note": "rollup {object,field,function,relationshipField}."
+      "note": "rollup {object,field,function,relationshipField,filter}. `filter` (a query `where` FilterCondition) is read by buildSummaryIndex and ANDed with the parent-FK match in recomputeSummaries, so one child object can feed several filtered totals."
     },
     "requiredWhen": {
       "status": "live",

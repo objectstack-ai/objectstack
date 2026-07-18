@@ -132,7 +132,7 @@ const result = Address.parse(data);
 | **allowCreate** | `boolean` | optional | Allow inline quick-create from the record picker: when no match exists the user can create a record from the typed text (optimistic dataSource.create with the display field). Best for simple objects whose only required field is the display field. |
 | **expression** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Formula expression (CEL). e.g. F`record.amount * 0.1` |
 | **returnType** | `Enum<'number' \| 'text' \| 'boolean' \| 'date'>` | optional | Inferred value type of a formula field (number/text/boolean/date) |
-| **summaryOperations** | `{ object: string; field: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string }` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
+| **summaryOperations** | `{ object: string; field: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
 | **language** | `string` | optional | Programming language for syntax highlighting (e.g., javascript, python, sql) |
 | **step** | `number` | optional | Step increment for slider (default: 1) |
 | **currencyConfig** | `{ precision?: integer; currencyMode?: Enum<'dynamic' \| 'fixed'>; defaultCurrency?: string }` | optional | Configuration for currency field type |

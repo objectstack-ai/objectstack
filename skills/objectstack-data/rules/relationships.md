@@ -63,9 +63,11 @@ export default ObjectSchema.create({
     invoice_number: { type: 'text', required: true },
     total: {
       type: 'summary',
-      reference: 'invoice_line_item',
-      summaryType: 'sum',
-      summaryField: 'amount',
+      summaryOperations: {
+        object: 'invoice_line_item',
+        field: 'amount',
+        function: 'sum',
+      },
     },
   }
 });
@@ -181,6 +183,8 @@ transaction as the write, so it's consistent and never summed on the client).
     // relationshipField: 'invoice' // optional; auto-detected from the child's
                                      // master_detail/lookup field referencing
                                      // this parent when omitted
+    // filter: { status: 'received' } // optional; only children matching this
+                                       // `where` predicate are aggregated
   },
 }
 ```
@@ -188,6 +192,16 @@ transaction as the write, so it's consistent and never summed on the client).
 Empty collections roll up to `0` for `count`/`sum`, `null` for `min`/`max`/`avg`.
 Pairs naturally with inline editing (below): the parent total updates atomically
 as line items are saved.
+
+Add `filter` (a query `where` FilterCondition) to aggregate only a **subset** of
+the children — this is how a single child object feeds several different totals.
+For example one `engagement` child yields `total_signups`
+(`filter: { type: 'signup' }`) and `total_clicks` (`filter: { type: 'click' }`),
+and a `procurement_receipt` child yields `received_amount`
+(`function: 'sum', filter: { status: 'received' }`). The predicate is ANDed with
+the parent-FK match; a child moving in or out of it (e.g. a status change)
+recomputes the parent on its next write like any other child update. Operator
+and compound forms work too (`filter: { type: { $in: ['signup','trial'] } }`).
 
 ## Inline Editing (Master-Detail Entry)
 
