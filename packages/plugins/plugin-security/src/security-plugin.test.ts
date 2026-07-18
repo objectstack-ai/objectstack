@@ -384,6 +384,96 @@ describe('SecurityPlugin', () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // [ADR-0095 D1 / #2937 Finding 1] step 3.7 — the Layer 0 tenant wall on the
+  // WRITE post-image. A SUPPLIED (non-empty) `organization_id` in an insert /
+  // update payload must satisfy the same Layer 0 filter the read side uses;
+  // a forged (insert) or re-pointed (update) value that would land the row in
+  // another tenant is denied fail-closed. Previously only the read-side Layer 0
+  // and the multitenant dogfood covered this — these are the package-level
+  // write-side unit tests for the wall.
+  //
+  // A plain-CRUD permission set with NO `tenant_isolation` RLS policy is used on
+  // purpose, so Layer 0 (step 3.7) — not a business RLS `check` (step 3.6) — is
+  // the sole enforcer under test. `orgScoping: true` flips
+  // `SecurityPlugin.orgScopingEnabled`, which is what makes Layer 0 active.
+  // -------------------------------------------------------------------------
+  describe('organization_id tenant wall on writes (step 3.7)', () => {
+    const memberSet: PermissionSet = {
+      name: 'member_default',
+      label: 'Member',
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    } as any;
+
+    const boot = async (findOneImpl?: (query: any) => any) => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: [memberSet], orgScoping: true, findOneImpl });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      return harness;
+    };
+    const memberCtx = (extra: Record<string, unknown> = {}) =>
+      ({ userId: 'u1', tenantId: 'org-1', positions: [], permissions: [], ...extra });
+
+    it('insert forging a cross-tenant organization_id is denied', async () => {
+      const harness = await boot();
+      const opCtx: any = {
+        object: 'task', operation: 'insert', data: { name: 'A', organization_id: 'org-2' },
+        context: memberCtx(),
+      };
+      await expect(harness.run(opCtx)).rejects.toThrow(/would place .* in another tenant/);
+    });
+
+    it("insert supplying the caller's own organization_id passes", async () => {
+      const harness = await boot();
+      const opCtx: any = {
+        object: 'task', operation: 'insert', data: { name: 'A', organization_id: 'org-1' },
+        context: memberCtx(),
+      };
+      await harness.run(opCtx); // must not throw
+      expect(opCtx.data.organization_id).toBe('org-1');
+    });
+
+    it('update re-pointing organization_id to another tenant is denied', async () => {
+      // Pre-image is visible (in-tenant), so step 2.7 passes and 3.7 is reached.
+      const harness = await boot(() => ({ id: 't1', organization_id: 'org-1' }));
+      const opCtx: any = {
+        object: 'task', operation: 'update', data: { id: 't1', organization_id: 'org-2' },
+        context: memberCtx(),
+      };
+      await expect(harness.run(opCtx)).rejects.toThrow(/would place .* in another tenant/);
+    });
+
+    it("update echoing the caller's own organization_id passes", async () => {
+      const harness = await boot(() => ({ id: 't1', organization_id: 'org-1' }));
+      const opCtx: any = {
+        object: 'task', operation: 'update', data: { id: 't1', name: 'renamed', organization_id: 'org-1' },
+        context: memberCtx(),
+      };
+      await harness.run(opCtx); // must not throw
+    });
+
+    it("a write that doesn't supply organization_id is untouched (auto-stamp's job)", async () => {
+      const harness = await boot();
+      const opCtx: any = {
+        object: 'task', operation: 'insert', data: { name: 'A' },
+        context: memberCtx(),
+      };
+      await harness.run(opCtx); // must not throw — no cross-tenant check on an absent value
+      // SecurityPlugin never stamps organization_id (that's plugin-org-scoping's job).
+      expect(opCtx.data.organization_id).toBeUndefined();
+    });
+
+    it('a system-context write bypasses the wall (import / migration / SYSTEM_CTX)', async () => {
+      const harness = await boot();
+      const opCtx: any = {
+        object: 'task', operation: 'insert', data: { name: 'A', organization_id: 'org-2' },
+        context: memberCtx({ isSystem: true }),
+      };
+      await harness.run(opCtx); // isSystem short-circuits the whole middleware — legit cross-org moves unaffected
+    });
+  });
+
   it('without org-scoping plugin — strips tenant_isolation RLS so find applies no tenant where', async () => {
     const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
     const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });

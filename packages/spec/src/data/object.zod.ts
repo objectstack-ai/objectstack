@@ -692,32 +692,39 @@ const ObjectSchemaBase = z.object({
    *
    * The `SchemaRegistry` augments every user object with a small set of
    * implicit system fields at registration time so authors don't have to
-   * declare them per-object (Salesforce-style). Currently injected:
+   * declare them per-object (Salesforce-style). Currently injected
+   * (`packages/objectql/src/registry.ts` → `applySystemFields`):
    *
-   *   - `organization_id` — `lookup → sys_organization`. Injected only when
-   *     the kernel runs in multi-tenant mode (`OS_MULTI_ORG_ENABLED === 'true'`;
-   *     default is off — single-tenant).
-   *     Required for the default `tenant_isolation` RLS policy and the
-   *     SecurityPlugin's auto-fill on insert to take effect.
+   *   - `organization_id` — `lookup → sys_organization`. The COLUMN is
+   *     provisioned unconditionally (subject to the opt-outs below); only its
+   *     DB index is gated on multi-tenant mode. It stays NULL on single-tenant
+   *     stacks and is auto-stamped on insert by `@objectstack/organizations`
+   *     (the `org-scoping` service) in multi-tenant mode.
+   *   - Audit columns — `created_at`, `created_by`, `updated_at`, `updated_by`
+   *     (`readonly` + `system`). Gated by `audit` below.
+   *   - `owner_id` — `lookup → sys_user`, auto-provisioned on user-authored
+   *     business objects (auto-stamped to the creating user on insert;
+   *     reassignable). Governed by the object-level `ownership` property
+   *     (`'user' | 'org' | 'none'`), NOT by `owner` below.
    *
    * Author-declared fields with the same name always win over injection
-   * (no overwrite). Objects with `managedBy` set are skipped entirely —
-   * better-auth/system/platform tables already declare what they need.
+   * (no overwrite). Objects with `managedBy` set (and the `sys_*` namespace)
+   * are skipped for ownership; `managedBy: 'better-auth'` is skipped entirely —
+   * better-auth's own migrations own that column layout.
    *
    * Set `systemFields: false` to opt the object out completely. Pass an
-   * options object to selectively disable individual injections (currently
-   * only `tenant`, but reserved keys `owner`/`audit` are pre-defined for
-   * future expansion).
+   * options object to selectively disable individual injections (`tenant`,
+   * `audit`).
    *
-   * @default undefined (= injection enabled, gated by kernel mode)
+   * @default undefined (= injection enabled)
    */
   systemFields: z
     .union([
       z.literal(false),
       z.object({
-        tenant: z.boolean().optional().describe('Inject organization_id (multi-tenant only). Default true.'),
-        owner: z.boolean().optional().describe('Reserved for future owner_id auto-injection.'),
-        audit: z.boolean().optional().describe('Reserved for future created_by/updated_by auto-injection.'),
+        tenant: z.boolean().optional().describe('Inject the organization_id column. Default true (the column is always provisioned; the multi-tenant flag governs only its index).'),
+        owner: z.boolean().optional().describe('Unwired: owner_id provisioning is governed by the object-level `ownership` property (`user`/`org`/`none`), not this key. Reserved.'),
+        audit: z.boolean().optional().describe('Inject the audit columns (created_at/created_by/updated_at/updated_by). Default true.'),
       }),
     ])
     .optional()
