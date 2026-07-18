@@ -195,4 +195,14 @@ describe('defaultIsTransientError', () => {
     expect(defaultIsTransientError(new Error('Validation failed: email is required'))).toBe(false);
     expect(defaultIsTransientError(new Error('UNIQUE constraint failed: task.id'))).toBe(false);
   });
+
+  it('classifies a mixed constraint+network message as logical, not transient (#3150)', () => {
+    // A logical signature must win even when a transient keyword also appears,
+    // so we do not burn retries on a row that will fail identically each time.
+    expect(defaultIsTransientError(new Error('CHECK constraint failed: network_zone'))).toBe(false);
+    expect(defaultIsTransientError(new Error('column network_id is not allowed'))).toBe(false);
+    expect(defaultIsTransientError(new Error('value out of range at row 503'))).toBe(false);
+    // Pure transient signatures are unaffected.
+    expect(defaultIsTransientError(new Error('fetch failed'))).toBe(true);
+  });
 });

@@ -690,10 +690,10 @@ export class SeedLoaderService implements ISeedLoaderService {
 
         if (recordId) {
           try {
-            await this.engine.update(deferred.objectName, {
+            await withTransientRetry(() => this.engine.update(deferred.objectName, {
               id: recordId,
               [deferred.field]: resolvedId,
-            }, { context: { isSystem: true } } as any);
+            }, { context: { isSystem: true } } as any));
 
             // Update result stats
             const resultEntry = allResults.find(r => r.object === deferred.objectName);
@@ -764,7 +764,7 @@ export class SeedLoaderService implements ISeedLoaderService {
 
     switch (mode) {
       case 'insert': {
-        const result = await this.engine.insert(objectName, record, opts);
+        const result = await withTransientRetry(() => this.engine.insert(objectName, record, opts));
         return { action: 'inserted', id: this.extractId(result) };
       }
 
@@ -776,7 +776,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (this.isNoOpReplay(record, existing)) {
           return { action: 'skipped', id };
         }
-        await this.engine.update(objectName, { ...record, id }, opts);
+        await withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts));
         return { action: 'updated', id };
       }
 
@@ -786,10 +786,10 @@ export class SeedLoaderService implements ISeedLoaderService {
           if (this.isNoOpReplay(record, existing)) {
             return { action: 'skipped', id };
           }
-          await this.engine.update(objectName, { ...record, id }, opts);
+          await withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts));
           return { action: 'updated', id };
         } else {
-          const result = await this.engine.insert(objectName, record, opts);
+          const result = await withTransientRetry(() => this.engine.insert(objectName, record, opts));
           return { action: 'inserted', id: this.extractId(result) };
         }
       }
@@ -798,18 +798,18 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (existing) {
           return { action: 'skipped', id: this.extractId(existing) };
         }
-        const result = await this.engine.insert(objectName, record, opts);
+        const result = await withTransientRetry(() => this.engine.insert(objectName, record, opts));
         return { action: 'inserted', id: this.extractId(result) };
       }
 
       case 'replace': {
         // Replace mode: just insert (caller should have cleared the table)
-        const result = await this.engine.insert(objectName, record, opts);
+        const result = await withTransientRetry(() => this.engine.insert(objectName, record, opts));
         return { action: 'inserted', id: this.extractId(result) };
       }
 
       default: {
-        const result = await this.engine.insert(objectName, record, opts);
+        const result = await withTransientRetry(() => this.engine.insert(objectName, record, opts));
         return { action: 'inserted', id: this.extractId(result) };
       }
     }

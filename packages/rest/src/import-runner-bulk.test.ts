@@ -118,6 +118,27 @@ describe('runImport — bulk create batching (framework#2678)', () => {
     expect(summary.created).toBe(5);
   });
 
+  it('retries a transient createData failure on the no-createManyData fallback path (#3150)', async () => {
+    let attempts = 0;
+    const createData = vi.fn(async (args: { data: { name: string } }) => {
+      attempts++;
+      if (attempts === 1) throw new Error('fetch failed'); // one transient blip, then succeeds
+      return { id: `id_${args.data.name}` };
+    });
+    const p: ImportProtocolLike = {
+      findData: vi.fn(async () => []),
+      createData,
+      updateData: vi.fn(),
+      // no createManyData → inline per-row fallback path (previously un-retried)
+    };
+
+    const summary = await runImport({ ...baseOpts, p, rows: rowsOf(1) });
+
+    expect(createData).toHaveBeenCalledTimes(2); // first throws, retried, succeeds
+    expect(summary.created).toBe(1);
+    expect(summary.errors).toBe(0);
+  });
+
   it('preserves row order in results even with update/skip rows interleaved between buffered creates', async () => {
     const createManyData = vi.fn(async (args: { records: any[] }) => ({
       records: args.records.map((r) => ({ id: `id_${r.name}`, ...r })),

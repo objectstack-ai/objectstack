@@ -361,7 +361,11 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               pendingCreates.push({ index: i, rowNo, data });
             } else {
               // No bulk-create primitive on this protocol: original inline path.
-              const res2 = await p.createData({ object: objectName, data, context: writeCtx, ...(environmentId ? { environmentId } : {}) });
+              // Wrap in transient retry to match the update path above (L352)
+              // and the batched create path (bulkWrite's internal retry) — a
+              // single `fetch failed` blip must not silently drop the row
+              // (framework#3150).
+              const res2 = await withTransientRetry(() => p.createData({ object: objectName, data, context: writeCtx, ...(environmentId ? { environmentId } : {}) }));
               const id = extractRecordId(res2);
               okCount++; created++;
               if (collectUndo && id != null) undoLog.created.push(id);

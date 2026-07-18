@@ -97,11 +97,33 @@ const TRANSIENT_PATTERNS: RegExp[] = [
 
 const TRANSIENT_CODES = /^(ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|EAI_AGAIN|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND)$/i;
 
+/**
+ * Validation / constraint / schema signatures that are DEFINITIVELY logical,
+ * never worth retrying. Checked before {@link TRANSIENT_PATTERNS} so a message
+ * that happens to mention both (e.g. `CHECK constraint failed: network_zone`,
+ * `column network_id is not allowed`) is classified as logical rather than
+ * burning retries on a row that will fail identically every time (framework
+ * #3150).
+ */
+const NON_TRANSIENT_PATTERNS: RegExp[] = [
+  /validation/i,
+  /constraint/i,
+  /\brequired\b/i,
+  /\bunique\b/i,
+  /duplicate/i,
+  /not[\s_-]*null/i,
+  /invalid/i,
+  /not allowed/i,
+  /out of range/i,
+];
+
 export function defaultIsTransientError(err: unknown): boolean {
-  const code = (err as { code?: unknown } | null)?.code;
-  if (typeof code === 'string' && TRANSIENT_CODES.test(code)) return true;
   const message = (err as { message?: unknown } | null)?.message;
   const text = typeof message === 'string' ? message : String(err ?? '');
+  // A definitive logical signature wins even if a transient word also appears.
+  if (NON_TRANSIENT_PATTERNS.some((re) => re.test(text))) return false;
+  const code = (err as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && TRANSIENT_CODES.test(code)) return true;
   return TRANSIENT_PATTERNS.some((re) => re.test(text));
 }
 
