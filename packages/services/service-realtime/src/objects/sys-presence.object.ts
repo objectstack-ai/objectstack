@@ -113,7 +113,13 @@ export const SysPresence = ObjectSchema.create({
     trackHistory: false,
     searchable: false,
     apiEnabled: true,
-    apiMethods: ['get', 'list', 'create', 'update', 'delete'],
+    // #3220 — sys_presence is `managedBy: 'append-only'` and is written only
+    // over the realtime (websocket/in-memory) path, never through ObjectQL.
+    // Advertising create/update/delete here (and update/delete on an
+    // append-only object at that) was a latent hole: it left the generic
+    // /data route open for a user-context write the bucket forbids. Reads
+    // stay open for diagnostic list views.
+    apiMethods: ['get', 'list'],
     trash: false,
     mru: false,
   },

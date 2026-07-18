@@ -70,4 +70,12 @@ describe('SysPresence object definition', () => {
   it('should have API enabled', () => {
     expect(SysPresence.enable?.apiEnabled).toBe(true);
   });
+
+  it('exposes reads only — append-only, written over the realtime path, never /data (#3220)', () => {
+    expect(SysPresence.enable?.apiMethods).toEqual(['get', 'list']);
+    // Guard against re-introducing a generic write verb on an append-only object.
+    for (const verb of ['create', 'update', 'delete', 'upsert']) {
+      expect(SysPresence.enable?.apiMethods).not.toContain(verb);
+    }
+  });
 });
