@@ -183,6 +183,6 @@ describe('nested control-flow composition (ADR-0031)', () => {
     expect(result.success).toBe(true);
     // The loop body's mutation of `lastSeen` survived to the flow output — the
     // region ran in the enclosing scope, last iteration wins.
-    expect(result.output?.lastSeen).toBe('n:Z');
+    expect((result.output as Record<string, unknown> | undefined)?.lastSeen).toBe('n:Z');
   });
 });

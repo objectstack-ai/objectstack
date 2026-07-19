@@ -8,7 +8,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { AutomationEngine, compactStepLogForHistory, MAX_PERSISTED_HISTORY_STEPS } from './engine.js';
-import type { StepLogEntry } from './engine.js';
+import type { StepLogEntry, NodeExecutor } from './engine.js';
+import { registerLoopNode } from './builtin/loop-node.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 
@@ -254,5 +255,66 @@ describe('compactStepLogForHistory (#3234 region-aware history compaction)', () 
         expect(out.length).toBeLessThanOrEqual(200);
         expect(hasNoOrphans(out)).toBe(true);
         expect(out.some((s) => s.nodeId === 'outer')).toBe(true);
+    });
+});
+
+// End-to-end through the real engine: a >MAX-step loop must fold its per-iteration
+// body steps into the run log (#1479), then survive durable persistence +
+// rehydration (#2585) with region-aware compaction (#3234) — not just the pure
+// `compactStepLogForHistory` unit above.
+describe('region-aware compaction — end-to-end through the engine (#3234)', () => {
+    const pluginCtx = () => ({ logger: silent, getService() { throw new Error('none'); } }) as never;
+
+    it('a >MAX-step loop persists its container + recent iterations (no orphans) across a restart', async () => {
+        const store = new InMemorySuspendedRunStore();
+        const engineA = new AutomationEngine(silent, store);
+        registerLoopNode(engineA, pluginCtx());
+        // A trivial body node so each iteration contributes exactly one logged step.
+        engineA.registerNodeExecutor({ type: 'touch', async execute() { return { success: true }; } } as NodeExecutor);
+
+        const N = 250; // > MAX_PERSISTED_HISTORY_STEPS (200)
+        engineA.registerFlow('big_loop', {
+            name: 'big_loop', label: 'Big Loop', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'loop', type: 'loop', label: 'Loop', config: {
+                    collection: Array.from({ length: N }, (_, i) => i),
+                    iteratorVariable: 'item', indexVariable: 'i',
+                    body: { nodes: [{ id: 'touch', type: 'touch', label: 'Touch' }], edges: [] },
+                } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'loop' },
+                { id: 'e2', source: 'loop', target: 'end' },
+            ],
+        } as never);
+
+        const res = await engineA.execute('big_loop', { event: 'test' } as AutomationContext);
+        expect(res.success).toBe(true);
+        await flush(); // recordTerminal is fire-and-forget
+
+        // The in-memory log keeps FULL detail: the container + all N body steps.
+        const live = (await engineA.listRuns('big_loop'))[0];
+        expect(live.steps.filter((s) => s.nodeId === 'touch')).toHaveLength(N);
+
+        // Simulate a restart: a fresh engine with empty in-memory logs sharing the
+        // same durable store → getRun serves the COMPACTED history row.
+        const engineB = new AutomationEngine(silent, store);
+        const [listed] = await engineB.listRuns('big_loop', { limit: 1 });
+        const run = await engineB.getRun(listed.id);
+        expect(run).not.toBeNull();
+        expect(run!.status).toBe('completed');
+
+        const steps = run!.steps;
+        expect(steps.length).toBeLessThanOrEqual(MAX_PERSISTED_HISTORY_STEPS); // bounded (#2585)
+        // The loop CONTAINER survived — pre-#3234 the plain tail-slice dropped it,
+        // orphaning every retained body step.
+        expect(steps.some((s) => s.nodeId === 'loop')).toBe(true);
+        // The most recent iteration survived (tail preserved).
+        const bodyIters = steps.filter((s) => s.nodeId === 'touch').map((s) => s.iteration!);
+        expect(Math.max(...bodyIters)).toBe(N - 1);
+        // No retained body step is orphaned from its container.
+        expect(hasNoOrphans(steps)).toBe(true);
     });
 });

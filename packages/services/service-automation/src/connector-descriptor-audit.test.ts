@@ -81,8 +81,8 @@ async function bootWithConnectors(
 
 function auditWarnings(warnSpy: ReturnType<typeof vi.spyOn>): string[] {
     return warnSpy.mock.calls
-        .map((c) => String(c[0]))
-        .filter((m) => m.includes('declarative connector'));
+        .map((c: unknown[]) => String(c[0]))
+        .filter((m: string) => m.includes('declarative connector'));
 }
 
 describe('findInertDeclaredConnectors (pure contract)', () => {
