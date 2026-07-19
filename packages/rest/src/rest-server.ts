@@ -5948,6 +5948,57 @@ export class RestServer {
             metadata: { summary: 'Recall (withdraw) an approval request', tags: ['approvals'] },
         });
 
+        // Send back for revision / resubmit (ADR-0044). Both move the flow (the
+        // request finalizes `returned` and the run parks at a wait point; a
+        // resubmit re-enters the approval node), so — like recall — they are
+        // dedicated routes rather than thread interactions. The service enforces
+        // access (send-back = a pending approver; resubmit = the submitter) and
+        // returns the flow outcome (`autoRejected` / `resumed`) verbatim.
+        const flowMoveRoute = (
+            action: 'revise' | 'resubmit',
+            invoke: (svc: any, id: string, body: any, context: any) => Promise<unknown>,
+        ) => {
+            this.routeManager.register({
+                method: 'POST',
+                path: `${dataPath}/approvals/requests/:id/${action}`,
+                handler: async (req: any, res: any) => {
+                    try {
+                        const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        const context = await this.resolveExecCtx(environmentId, req);
+                        if (this.enforceAuth(req, res, context)) return;
+                        const svc = await resolveService(environmentId);
+                        if (!svc) return respond501(res);
+                        const body = req.body ?? {};
+                        try {
+                            const out = await invoke(svc, req.params.id, body, context ?? {});
+                            res.json(out);
+                        } catch (err: any) {
+                            if (handleApprovalError(res, err)) return;
+                            throw err;
+                        }
+                    } catch (error: any) {
+                        logError(`[REST] ${action} approval error:`, error);
+                        res.status(500).json({ code: `APPROVAL_${action.toUpperCase()}_FAILED`, error: String(error?.message ?? error).slice(0, 500) });
+                    }
+                },
+                metadata: { summary: `${action} an approval request`, tags: ['approvals'] },
+            });
+        };
+        flowMoveRoute('revise', (svc, id, body, context) => {
+            if (typeof svc.sendBack !== 'function') throw new Error('VALIDATION_FAILED: revise is not supported');
+            return svc.sendBack(id, {
+                actorId: body.actorId ?? body.actor_id ?? context?.userId,
+                comment: body.comment,
+            }, context);
+        });
+        flowMoveRoute('resubmit', (svc, id, body, context) => {
+            if (typeof svc.resubmit !== 'function') throw new Error('VALIDATION_FAILED: resubmit is not supported');
+            return svc.resubmit(id, {
+                actorId: body.actorId ?? body.actor_id ?? context?.userId,
+                comment: body.comment,
+            }, context);
+        });
+
         // Thread interactions — reassign / remind / request-info / comment.
         // None of these move the flow; they update approver slots or the
         // audit thread. Registered generically: the service method enforces

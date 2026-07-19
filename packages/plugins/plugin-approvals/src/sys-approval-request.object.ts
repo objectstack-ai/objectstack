@@ -278,12 +278,107 @@ export const SysApprovalRequest = ObjectSchema.create({
       method: 'POST',
       target: '/api/v1/approvals/requests/{id}/reassign',
       params: [
-        { name: 'to', label: 'New approver (user id)', type: 'text', required: true },
+        // Field-backed on `submitter_id` (the object's only `sys_user` lookup):
+        // the console resolves its lookup config (`reference_to: sys_user`) so the
+        // dialog renders a real user picker, while `name: 'to'` overrides the
+        // request-body key to the `to` the reassign route expects. This is a
+        // config-borrow, not a submitter pre-fill (`defaultFromRow` stays off).
+        { field: 'submitter_id', name: 'to', label: 'New approver', required: true, helpText: 'User to hand this step to' },
         { name: 'comment', label: 'Comment', type: 'textarea', required: false },
       ],
       visible: 'record.status == "pending"',
       locations: ['record_section'],
       successMessage: 'Reassigned.',
+      refreshAfter: true,
+    },
+
+    // ── Approver secondary decisions ────────────────────────────────
+    // Send back for revision / request more info (ADR-0044). Both are approver
+    // actions on a pending request; the service is the authority on who may act,
+    // so `visible` only trims the non-pending case (matching approve/reject).
+    {
+      name: 'approval_send_back',
+      label: 'Send back',
+      icon: 'corner-up-left',
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/approvals/requests/{id}/revise',
+      params: [
+        { name: 'comment', label: 'Reason', type: 'textarea', required: false },
+      ],
+      visible: 'record.status == "pending"',
+      locations: ['record_section'],
+      successMessage: 'Sent back for revision.',
+      refreshAfter: true,
+    },
+    {
+      name: 'approval_request_info',
+      label: 'Request info',
+      icon: 'help-circle',
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/approvals/requests/{id}/request-info',
+      params: [
+        { name: 'comment', label: 'What do you need?', type: 'textarea', required: true },
+      ],
+      visible: 'record.status == "pending"',
+      locations: ['record_section'],
+      successMessage: 'Information requested.',
+      refreshAfter: true,
+    },
+
+    // ── Submitter continuity actions ────────────────────────────────
+    // Remind / recall (pending) and resubmit / recall (returned). These are the
+    // submitter's own levers, so `visible` gates on `submitter_id == ctx.user.id`
+    // — the current user is exposed via the console's predicate scope. The
+    // service re-checks ownership; the predicate keeps a non-submitter from ever
+    // seeing a button they cannot use.
+    {
+      name: 'approval_remind',
+      label: 'Send reminder',
+      icon: 'bell-ring',
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/approvals/requests/{id}/remind',
+      params: [
+        { name: 'comment', label: 'Note', type: 'textarea', required: false },
+      ],
+      visible: 'record.status == "pending" && record.submitter_id == ctx.user.id',
+      locations: ['record_section'],
+      successMessage: 'Reminder sent.',
+      refreshAfter: true,
+    },
+    {
+      name: 'approval_recall',
+      label: 'Recall',
+      icon: 'undo-2',
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/approvals/requests/{id}/recall',
+      params: [
+        { name: 'comment', label: 'Comment', type: 'textarea', required: false },
+      ],
+      // Recall applies while the request is live for the submitter — pending
+      // (withdraw) or returned (abandon the revision instead of resubmitting).
+      visible: '(record.status == "pending" || record.status == "returned") && record.submitter_id == ctx.user.id',
+      confirmText: 'Recall this request? Approvers can no longer act on it and the record is unlocked.',
+      locations: ['record_section'],
+      successMessage: 'Recalled.',
+      refreshAfter: true,
+    },
+    {
+      name: 'approval_resubmit',
+      label: 'Resubmit',
+      icon: 'refresh-cw',
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/approvals/requests/{id}/resubmit',
+      params: [
+        { name: 'comment', label: 'What changed?', type: 'textarea', required: false },
+      ],
+      visible: 'record.status == "returned" && record.submitter_id == ctx.user.id',
+      locations: ['record_section'],
+      successMessage: 'Resubmitted.',
       refreshAfter: true,
     },
   ],
