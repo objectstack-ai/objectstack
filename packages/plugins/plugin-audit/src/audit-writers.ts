@@ -153,22 +153,43 @@ function recordLabel(record: any, id: string): string {
 }
 
 /**
- * Compute a shallow JSON diff between two records. Returns only keys whose
- * value changed (and ignores keys in `NOISE_FIELDS`). Both sides are
- * serialisable via `JSON.stringify` — values that fail to serialise are
- * coerced to `String(value)`.
+ * Field types whose values the engine computes on READ (formula / summary /
+ * rollup / autonumber). The `before` snapshot is read back through the query
+ * path and therefore carries them, but `after` (`ctx.result`) is the raw
+ * write result and does not — so diffing them records a phantom
+ * "value → null" change on EVERY update (surfaced by the objectui record
+ * History tab). As derived values their changes are implied by their source
+ * fields anyway, so they are excluded from the audit diff.
  */
-function diff(before: Record<string, any>, after: Record<string, any>): { old: Record<string, any>; next: Record<string, any> } {
+const COMPUTED_FIELD_TYPES = new Set<string>(['formula', 'summary', 'rollup', 'autonumber', 'auto_number']);
+
+/**
+ * Compute a shallow JSON diff between two records. Returns only keys whose
+ * value changed (and ignores keys in `NOISE_FIELDS` plus computed field
+ * types per `fieldDefs`). Both sides are serialisable via `JSON.stringify` —
+ * values that fail to serialise are coerced to `String(value)`.
+ */
+function diff(
+  before: Record<string, any>,
+  after: Record<string, any>,
+  fieldDefs?: Record<string, any> | null,
+): { old: Record<string, any>; next: Record<string, any> } {
   const oldOut: Record<string, any> = {};
   const newOut: Record<string, any> = {};
   const keys = new Set<string>([...Object.keys(before || {}), ...Object.keys(after || {})]);
   for (const k of keys) {
     if (NOISE_FIELDS.has(k)) continue;
-    const b = before?.[k];
-    const a = after?.[k];
+    const type = fieldDefs?.[k]?.type;
+    if (typeof type === 'string' && COMPUTED_FIELD_TYPES.has(type)) continue;
+    // `?? null` BEFORE comparing: a key absent on one side (undefined) must
+    // compare equal to an explicit null on the other. JSON.stringify(undefined)
+    // returns undefined (not a string), so the raw comparison saw
+    // undefined ≠ 'null' and wrote a noise row with old=new=null.
+    const b = before?.[k] ?? null;
+    const a = after?.[k] ?? null;
     if (safeStringify(b) !== safeStringify(a)) {
-      oldOut[k] = b ?? null;
-      newOut[k] = a ?? null;
+      oldOut[k] = b;
+      newOut[k] = a;
     }
   }
   return { old: oldOut, next: newOut };
@@ -455,7 +476,7 @@ export function installAuditWriters(
     if (action === 'create') {
       newValue = (after && typeof after === 'object') ? { ...after } : null;
     } else if (action === 'update') {
-      const d = diff(before || {}, after || {});
+      const d = diff(before || {}, after || {}, getFieldDefs(ctx.object));
       oldValue = d.old;
       newValue = d.next;
       // If nothing meaningfully changed, skip the audit row to avoid noise.

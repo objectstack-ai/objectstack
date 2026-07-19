@@ -440,6 +440,96 @@ describe('audit writers — enable.files server-side enforcement (#2727)', () =>
   });
 });
 
+describe('audit writers — update diff hygiene (objectui detail-history report)', () => {
+  // gantt_plan-shaped object: a formula helper alongside real fields. The
+  // `before` snapshot is read through the query path (formula computed), but
+  // `after` (ctx.result) is the raw write result (formula absent) — the diff
+  // must not record that asymmetry as a change.
+  const SCHEMA = {
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: SINGLE_TENANT.sys_activity,
+    gantt_plan: {
+      id: { type: 'text' },
+      name: { type: 'text', label: 'Name' },
+      plan_start: { type: 'datetime', label: 'Plan Start' },
+      deps_rendered: { type: 'formula', label: 'Deps (rendered)' },
+    },
+  };
+
+  it('excludes computed (formula) fields from the update diff', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterUpdate', {
+      object: 'gantt_plan',
+      input: { id: 'p-1', plan_start: '2026-08-04T12:00:00.000Z' },
+      // before: query-path snapshot carries the computed formula value…
+      __previous: { id: 'p-1', name: 'Plan C', plan_start: '2026-07-26T00:00:00.000Z', deps_rendered: ['LnLJIsTwXbv1E2gF'] },
+      // …after: raw write result does not.
+      result: { id: 'p-1', name: 'Plan C', plan_start: '2026-08-04T12:00:00.000Z' },
+      session: { userId: 'user-1' },
+    });
+
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(audit).toBeDefined();
+    const oldValue = JSON.parse(audit!.row.old_value);
+    const newValue = JSON.parse(audit!.row.new_value);
+    expect(newValue).toEqual({ plan_start: '2026-08-04T12:00:00.000Z' });
+    expect(oldValue).toEqual({ plan_start: '2026-07-26T00:00:00.000Z' });
+    expect('deps_rendered' in oldValue).toBe(false);
+    expect('deps_rendered' in newValue).toBe(false);
+  });
+
+  it('writes NO audit row when only computed fields differ', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterUpdate', {
+      object: 'gantt_plan',
+      input: { id: 'p-1' },
+      __previous: { id: 'p-1', name: 'Plan C', deps_rendered: ['LnLJIsTwXbv1E2gF'] },
+      result: { id: 'p-1', name: 'Plan C' },
+      session: { userId: 'user-1' },
+    });
+
+    expect(created.find((c) => c.object === 'sys_audit_log')).toBeUndefined();
+    expect(created.find((c) => c.object === 'sys_activity')).toBeUndefined();
+  });
+
+  it('treats an absent key (undefined) and an explicit null as equal — no noise row', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterUpdate', {
+      object: 'gantt_plan',
+      input: { id: 'p-1', plan_start: null },
+      // `plan_start` key absent before, explicit null after: not a change.
+      __previous: { id: 'p-1', name: 'Plan C' },
+      result: { id: 'p-1', name: 'Plan C', plan_start: null },
+      session: { userId: 'user-1' },
+    });
+
+    expect(created.find((c) => c.object === 'sys_audit_log')).toBeUndefined();
+  });
+
+  it('still records a real transition to null (value cleared)', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterUpdate', {
+      object: 'gantt_plan',
+      input: { id: 'p-1', plan_start: null },
+      __previous: { id: 'p-1', name: 'Plan C', plan_start: '2026-07-26T00:00:00.000Z' },
+      result: { id: 'p-1', name: 'Plan C', plan_start: null },
+      session: { userId: 'user-1' },
+    });
+
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(JSON.parse(audit!.row.old_value)).toEqual({ plan_start: '2026-07-26T00:00:00.000Z' });
+    expect(JSON.parse(audit!.row.new_value)).toEqual({ plan_start: null });
+  });
+});
+
 // timeout: the FIRST localized case pays the one-off cost of dynamically
 // importing @objectstack/core + the shipped translation bundle (and, with the
 // #3071 src aliases, their vite transforms). On a shared 4-vCPU CI runner that
