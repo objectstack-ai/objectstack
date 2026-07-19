@@ -164,3 +164,27 @@ describe('map node executor (sequential multi-instance)', () => {
     expect(await store.list()).toHaveLength(0);
   });
 });
+
+describe('map descriptor configSchema (objectui #2670 Phase 3 / #3304)', () => {
+  it('publishes a structured config form matching the objectui `map` field group', () => {
+    // `map` is the one previously-schemaless node whose fields all map cleanly
+    // through jsonSchemaToFlowFields (scalars + typed references, no keyValue /
+    // virtual columns), so shipping this schema makes the online designer form
+    // match the offline hardcoded one with zero regression.
+    const engine = new AutomationEngine(silentLogger());
+    registerMapNode(engine, ctx());
+    const schema = engine.getActionDescriptor('map')?.configSchema as
+      | { properties?: Record<string, { xExpression?: unknown; xRef?: { kind?: string } }>; required?: string[] }
+      | undefined;
+    expect(schema).toBeDefined();
+    // `collection` is an interpolate() `{items}` template (mono editor + `{var}`
+    // picker, no CEL brace-trap) — the same marker as loop.collection.
+    expect(schema?.properties?.collection?.xExpression).toBe('template');
+    // `flowName` / `itemObject` are typed references → pickers, not free text.
+    expect(schema?.properties?.flowName?.xRef?.kind).toBe('flow');
+    expect(schema?.properties?.itemObject?.xRef?.kind).toBe('object');
+    // Plain scalar text fields carry no authoring marker.
+    expect(schema?.properties?.iteratorVariable?.xExpression).toBeUndefined();
+    expect(schema?.properties?.outputVariable?.xExpression).toBeUndefined();
+  });
+});

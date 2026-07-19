@@ -49,6 +49,25 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       // Each item's subflow may pause, so the map suspends and resumes per item.
       supportsPause: true,
       isAsync: true,
+      // Structured config form for the flow designer (ADR-0018). Mirrors the
+      // objectui hardcoded `map` field group field-for-field, so the online
+      // (schema-driven) form matches the offline one (objectui #2670 Phase 3 /
+      // #3304). `map` is the one previously-schemaless node whose fields are all
+      // scalars / typed references — no `keyValue` map, no virtual columns — so
+      // it maps cleanly through `jsonSchemaToFlowFields` with zero regression.
+      configSchema: {
+        type: 'object',
+        properties: {
+          // interpolate() single-brace `{items}` template, not bare CEL — same
+          // marker + rationale as loop.collection.
+          collection: { type: 'string', title: 'Collection', description: 'Expression resolving to the array to process, one item at a time.', xExpression: 'template' },
+          flowName: { type: 'string', title: 'Per-item flow', description: 'Subflow run for each item — it may pause (e.g. an approval).', xRef: { kind: 'flow' } },
+          iteratorVariable: { type: 'string', title: 'Item variable' },
+          itemObject: { type: 'string', title: 'Item object', description: 'When items are records, the object they belong to (exposes each item as the child’s record).', xRef: { kind: 'object' } },
+          outputVariable: { type: 'string', title: 'Output variable', description: 'Each item’s subflow output, collected in order.' },
+        },
+        required: ['collection', 'flowName'],
+      },
     }),
     async execute(node, variables, context) {
       const cfg = (node.config ?? {}) as Record<string, unknown>;
