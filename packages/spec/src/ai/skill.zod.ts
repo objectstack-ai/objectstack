@@ -77,7 +77,9 @@ export const SkillSchema = lazySchema(() => z.object({
    * matches either); the runtime enforces this at load time. An agent's
    * tool set is the union of its surface-compatible skills' tools — there
    * is no global fall-through (ADR-0064). Defaults to `'ask'`, the
-   * open-source/free surface.
+   * data-console surface. (Both the `ask` and `build` in-product agent
+   * runtimes ship in the cloud / Enterprise distribution per ADR-0025;
+   * the surface value here is authoring metadata, not an edition gate.)
    */
   surface: z.enum(['ask', 'build', 'both']).default('ask').describe(
     "Agent surface this skill binds to ('ask' | 'build' | 'both') — ADR-0063 §3",
