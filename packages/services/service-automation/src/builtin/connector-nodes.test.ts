@@ -193,7 +193,7 @@ describe('AutomationEngine connector registry', () => {
                         inputSchema: { message: { type: 'string' } },
                     },
                 ],
-            } as Connector,
+            } as unknown as Connector,
             { async echo() { return {}; } },
         );
 

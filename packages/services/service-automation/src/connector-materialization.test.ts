@@ -15,6 +15,7 @@ import * as path from 'node:path';
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type {
+    Connector,
     ConnectorProviderContext,
     ConnectorProviderFactory,
     ConnectorInstanceAuth,
@@ -69,7 +70,7 @@ function makeFakeProvider() {
                 description: ctx.description,
                 authentication: { type: 'none' },
                 actions: [{ key: 'ping', label: 'Ping' }],
-            },
+            } as unknown as Connector,
             handlers: {
                 ping: async (input: Record<string, unknown>) => ({
                     ok: true,
@@ -155,7 +156,7 @@ function makeClosableProvider() {
                 type: 'api',
                 authentication: { type: 'none' },
                 actions: [{ key: 'ping', label: 'Ping' }],
-            },
+            } as unknown as Connector,
             handlers: { ping: async () => ({ ok: true }) },
             close: async () => { closed.push(ctx.name); },
         };
@@ -459,7 +460,7 @@ function makeFileReadingProvider() {
         const text = await ctx.loadPackageFile!(String(ctx.providerConfig.spec));
         reads.push(text);
         return {
-            def: { name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] },
+            def: { name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] } as unknown as Connector,
             handlers: { ping: async () => ({ ok: true }) },
         };
     };
@@ -573,7 +574,7 @@ function makeFlakyUpstreamProvider(opts: { down: boolean }) {
                 type: 'api',
                 authentication: { type: 'none' },
                 actions: [{ key: 'ping', label: 'Ping' }],
-            },
+            } as unknown as Connector,
             handlers: { ping: async () => ({ ok: true }) },
             close: async () => { closed.push(ctx.name); },
         };

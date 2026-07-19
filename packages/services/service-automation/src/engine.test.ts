@@ -173,7 +173,7 @@ describe('AutomationEngine', () => {
         it('should execute nodes and collect output', async () => {
             engine.registerNodeExecutor({
                 type: 'assignment',
-                async execute(node, variables) {
+                async execute(_node, variables) {
                     variables.set('result', 42);
                     return { success: true };
                 },
@@ -2242,6 +2242,7 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
                 isAsync: false,
                 source: 'plugin',
                 deprecated: false,
+                maturity: 'ga',
             },
             async execute() { return { success: true }; },
         });
@@ -2262,7 +2263,7 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
                 type: 'send_sms', version: '1.0.0', name: 'Send SMS',
                 category: 'io', paradigms: ['flow'], supportsPause: false,
                 supportsCancellation: false, supportsRetry: true,
-                needsOutbox: false, isAsync: false, source: 'plugin', deprecated: false,
+                needsOutbox: false, isAsync: false, source: 'plugin', deprecated: false, maturity: 'ga',
             },
             async execute() { return { success: true }; },
         });

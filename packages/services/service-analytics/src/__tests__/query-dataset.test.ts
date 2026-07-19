@@ -192,6 +192,105 @@ describe('AnalyticsService.queryDataset', () => {
     expect(result.dimensionFields).toBeUndefined();
     expect(result.object).toBeUndefined();
     expect(result.drillRawRows).toBeUndefined();
+    // …and, absent a `dateGranularity`, no RANGE sidecar either (it's not a bucket).
+    expect(result.drillRanges).toBeUndefined();
+  });
+
+  // ── #1752 — half-open date-RANGE drill sidecar for granularity buckets ─────
+  // Granularity bucketing runs through the ObjectQL aggregate path (the native
+  // SQL strategy declines it), so these drive `executeAggregate` and mock the
+  // already-bucketed rows (the strategy lowers the dim to a `dateGranularity`
+  // groupBy). Dimension name == field so the mocked row key is unambiguous.
+  it('#1752 — emits a half-open date range for a granularity-bucketed date dimension', async () => {
+    const q = DatasetSchema.parse({
+      name: 'sales_q', label: 'Sales', object: 'opportunity', include: [],
+      dimensions: [{ name: 'close_date', field: 'close_date', type: 'date', dateGranularity: 'quarter' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+    });
+    const svc = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      executeAggregate: async () => [{ close_date: '2026-Q2', revenue: 100 }],
+      getReadScope: (_o, ctx?: ExecutionContext) => (ctx?.tenantId ? { organization_id: ctx.tenantId } : undefined),
+    });
+    const result = await svc.queryDataset(q, { dimensions: ['close_date'], measures: ['revenue'] }, { tenantId: 'org_A' } as ExecutionContext) as any;
+    // The date bucket "2026-Q2" drills into the SPAN [2026-04-01, 2026-07-01).
+    expect(result.object).toBe('opportunity');
+    expect(result.drillRanges).toEqual([
+      { close_date: { field: 'close_date', gte: '2026-04-01', lt: '2026-07-01' } },
+    ]);
+    // Range is its OWN channel — the date dim is still absent from the equality sidecar.
+    expect(result.dimensionFields).toBeUndefined();
+    expect(result.drillRawRows).toBeUndefined();
+  });
+
+  it('#1752 — a matrix "X by time" report carries BOTH the equality dim and the date range', async () => {
+    const mx = DatasetSchema.parse({
+      name: 'pipe_mx', label: 'Pipe', object: 'opportunity', include: [],
+      dimensions: [
+        { name: 'stage', field: 'stage', type: 'string' },
+        { name: 'close_date', field: 'close_date', type: 'date', dateGranularity: 'month' },
+      ],
+      measures: [{ name: 'cnt', aggregate: 'count' }],
+    });
+    const svc = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      executeAggregate: async () => [{ stage: 'qualification', close_date: '2026-06', cnt: 3 }],
+      getReadScope: (_o, ctx?: ExecutionContext) => (ctx?.tenantId ? { organization_id: ctx.tenantId } : undefined),
+    });
+    const result = await svc.queryDataset(mx, { dimensions: ['stage', 'close_date'], measures: ['cnt'] }, { tenantId: 'org_A' } as ExecutionContext) as any;
+    expect(result.object).toBe('opportunity');
+    // The non-date dim drills by equality; the date dim drills by range — side by side.
+    expect(result.dimensionFields).toEqual({ stage: 'stage' });
+    expect(result.drillRawRows).toEqual([{ stage: 'qualification' }]);
+    expect(result.drillRanges).toEqual([
+      { close_date: { field: 'close_date', gte: '2026-06-01', lt: '2026-07-01' } },
+    ]);
+  });
+
+  it('#1752 — omits the range for a datetime field under a non-UTC reference tz (superset fallback)', async () => {
+    const q = DatasetSchema.parse({
+      name: 'sales_dt', label: 'Sales', object: 'opportunity', include: [],
+      dimensions: [{ name: 'closed_at', field: 'closed_at', type: 'date', dateGranularity: 'month' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+    });
+    const svc = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      executeAggregate: async () => [{ closed_at: '2026-06', revenue: 100 }],
+      // closed_at is a datetime instant → its month bucket boundary is that tz's
+      // midnight, which YYYY-MM-DD calendar bounds can't express → omit (superset).
+      measureCurrency: (_o, f) => (f === 'closed_at' ? { type: 'datetime' } : undefined),
+      getReadScope: (_o, ctx?: ExecutionContext) => (ctx?.tenantId ? { organization_id: ctx.tenantId } : undefined),
+    });
+    const result = await svc.queryDataset(
+      q,
+      { dimensions: ['closed_at'], measures: ['revenue'], timezone: 'America/New_York' },
+      { tenantId: 'org_A' } as ExecutionContext,
+    ) as any;
+    expect(result.drillRanges).toBeUndefined();
+    expect(result.object).toBeUndefined();
+  });
+
+  it('#1752 — still emits the range for a tz-naive date field under a non-UTC tz', async () => {
+    const q = DatasetSchema.parse({
+      name: 'sales_d_tz', label: 'Sales', object: 'opportunity', include: [],
+      dimensions: [{ name: 'close_date', field: 'close_date', type: 'date', dateGranularity: 'month' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+    });
+    const svc = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      executeAggregate: async () => [{ close_date: '2026-06', revenue: 100 }],
+      measureCurrency: (_o, f) => (f === 'close_date' ? { type: 'date' } : undefined),
+      getReadScope: (_o, ctx?: ExecutionContext) => (ctx?.tenantId ? { organization_id: ctx.tenantId } : undefined),
+    });
+    const result = await svc.queryDataset(
+      q,
+      { dimensions: ['close_date'], measures: ['revenue'], timezone: 'America/New_York' },
+      { tenantId: 'org_A' } as ExecutionContext,
+    ) as any;
+    // A `date` is a tz-naive calendar day (ADR-0053) → bounds are exact under any tz.
+    expect(result.drillRanges).toEqual([
+      { close_date: { field: 'close_date', gte: '2026-06-01', lt: '2026-07-01' } },
+    ]);
   });
 
   it('marks a LOOKUP dimension drillable, exposing the raw FK for exact-match drill', async () => {

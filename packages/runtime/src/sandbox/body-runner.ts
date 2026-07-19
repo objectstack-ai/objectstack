@@ -71,7 +71,11 @@ export function hookBodyRunnerFactory(
             name: hook.name,
             object: typeof (hook as any).object === 'string' ? (hook as any).object : undefined,
           },
-          timeoutMs: (body as any).timeoutMs ?? 250,
+          // When the body declares no timeout, leave opts.timeoutMs unset so the
+          // runner's own configurable hook default applies (QuickJSScriptRunner
+          // defaults to 250ms). Hardcoding the fallback here would make that
+          // constructor option dead for hooks.
+          timeoutMs: (body as any).timeoutMs,
         });
         applyMutationsToInput(engineCtx, result);
       } catch (err: any) {
@@ -123,7 +127,9 @@ export function actionBodyRunnerFactory(
         });
         const result = await runner.run(body, sandboxCtx, {
           origin: { kind: 'action', name: action.name, object: action.object },
-          timeoutMs: (body as any).timeoutMs ?? action.timeoutMs ?? 5000,
+          // As with hooks above: no declared timeout → let the runner's
+          // configurable action default (5000ms) apply.
+          timeoutMs: (body as any).timeoutMs ?? action.timeoutMs,
         });
         return result.value;
       } catch (err: any) {

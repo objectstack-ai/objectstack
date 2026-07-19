@@ -4,7 +4,13 @@ import { describe, it, expect } from 'vitest';
 import { QuickJSScriptRunner, SandboxError } from './quickjs-runner.js';
 import type { ScriptContext, ScriptRunOptions } from './script-runner.js';
 
-const runner = new QuickJSScriptRunner();
+// Generous hook budget: these tests exercise sandbox *behaviour*, not the stock
+// 250ms hook budget. Every invocation compiles a fresh WASM module, and nested
+// hooks compile another one inside the parent's budget — on a loaded CI machine
+// that fixed cost alone can blow 250ms and flake (e.g. "hook 'lvl4' exceeded
+// timeout of 250ms"). Tests that ARE about the default budget use
+// `defaultRunner` below.
+const runner = new QuickJSScriptRunner({ hookTimeoutMs: 10_000 });
 const hookOpts: ScriptRunOptions = { origin: { kind: 'hook', name: 't' } };
 const actionOpts: ScriptRunOptions = { origin: { kind: 'action', name: 't' } };
 
@@ -364,6 +370,10 @@ describe('QuickJSScriptRunner — nested sandbox re-entrancy (#1867)', () => {
 // the 250ms hook default and killed mid-flight.
 // ---------------------------------------------------------------------------
 describe('QuickJSScriptRunner — timeout resolution honors body.timeoutMs (#1867)', () => {
+  // Stock engine defaults (250ms hooks) — these tests assert the default budget
+  // itself, so they must NOT use the generous shared `runner` above.
+  const defaultRunner = new QuickJSScriptRunner();
+
   it('honors a hook body timeoutMs above the 250ms hook default', async () => {
     // Host call settles at ~600ms — comfortably past the old 250ms hook cap but
     // within the body's declared 5000ms budget. Must resolve, not time out.
@@ -375,7 +385,7 @@ describe('QuickJSScriptRunner — timeout resolution honors body.timeoutMs (#186
         },
       }),
     };
-    const r = await runner.runScript(
+    const r = await defaultRunner.runScript(
       {
         language: 'js',
         source: "return await ctx.api.object('x').update({});",
@@ -390,27 +400,26 @@ describe('QuickJSScriptRunner — timeout resolution honors body.timeoutMs (#186
 
   it('still applies the 250ms hook default when the body declares no timeoutMs', async () => {
     const api = { object: () => ({ update: () => new Promise<never>(() => {}) }) };
-    const start = Date.now();
     await expect(
-      runner.runScript(
+      defaultRunner.runScript(
         { language: 'js', source: "return await ctx.api.object('x').update({});", capabilities: ['api.write'] },
         ctx({ api }),
         hookOpts,
       ),
-    ).rejects.toThrow(/timeout/i);
-    // Fired near the 250ms default, not some larger value.
-    expect(Date.now() - start).toBeLessThan(2000);
+      // The error message embeds the effective budget — asserting on it proves
+      // the 250ms default applied without a flaky wall-clock measurement.
+    ).rejects.toThrow(/timeout of 250ms/);
   }, 10000);
 
   it('lets a hook body LOWER its timeout below the default', async () => {
     const api = { object: () => ({ update: () => new Promise<never>(() => {}) }) };
     await expect(
-      runner.runScript(
+      defaultRunner.runScript(
         { language: 'js', source: "return await ctx.api.object('x').update({});", capabilities: ['api.write'], timeoutMs: 50 },
         ctx({ api }),
         hookOpts,
       ),
-    ).rejects.toThrow(/timeout/i);
+    ).rejects.toThrow(/timeout of 50ms/);
   }, 10000);
 });
 

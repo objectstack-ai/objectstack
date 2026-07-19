@@ -90,8 +90,13 @@ describe('#1867 nested cross-object write from a hook (real engine + sandbox)', 
     engine.registerDriver(driver, true);
     await engine.init();
     for (const o of [parent, child]) engine.registry.registerObject(o as any);
+    // Generous hook budget: the subject here is nested-write correctness, not
+    // the 250ms default. Each hook invocation compiles a fresh WASM module and
+    // the nested parent hook compiles another inside the child's budget — on a
+    // loaded CI machine that overhead alone blew 250ms ("hook
+    // 'rollup_parent_total' exceeded timeout of 250ms").
     engine.setDefaultBodyRunner(
-      hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql: engine, appId: 'test' }),
+      hookBodyRunnerFactory(new QuickJSScriptRunner({ hookTimeoutMs: 10_000 }), { ql: engine, appId: 'test' }),
     );
   });
 
