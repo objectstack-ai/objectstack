@@ -187,7 +187,11 @@ export const SysUser = ObjectSchema.create({
           'Copy the temporary password now — it is shown only once and never stored.',
         acknowledge: 'I have saved this password',
         fields: [
+          // The dialog skips fields whose path is absent from the response, so
+          // conditional keys are safe to declare: phoneNumber only exists for
+          // phone-based users, temporaryPassword only when the server minted one.
           { path: 'user.email', label: 'Email', format: 'text' },
+          { path: 'user.phoneNumber', label: 'Phone Number', format: 'text' },
           { path: 'temporaryPassword', label: 'Temporary Password', format: 'secret' },
         ],
       },
