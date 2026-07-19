@@ -73,12 +73,12 @@ jobs:
         # The deterministic in-repo floor is @objectstack/downstream-contract;
         # this is the live ceiling.
         env:
-          # v2.0.0: hotcrm adopted the ADR-0090 Permission Model v2 vocabulary
-          # (role→position recipients, profiles removed, explicit OWD —
-          # hotcrm#438), closing the launch-window advisory period from #2719.
+          # v2.1.0: hotcrm upgraded to ObjectStack 14.7 (hotcrm#448) and
+          # dropped the agent `visibility` field that spec 15 removes as
+          # unenforced surface (ADR-0056 D8, #3216).
           # Bump this ref whenever a deliberate spec surface removal ships a
           # matching hotcrm release.
-          HOTCRM_REF: v2.0.0
+          HOTCRM_REF: v2.1.0
         run: bash scripts/downstream-smoke.sh
 
       - name: Create Release Pull Request or Publish to npm
