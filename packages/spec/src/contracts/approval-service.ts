@@ -145,6 +145,8 @@ export interface ApprovalActionRow {
   action: ApprovalActionKind;
   actor_id?: string;
   comment?: string;
+  /** File references attached to this action (decision attachments, #3266). */
+  attachments?: string[];
   created_at?: string;
   /** Display name of the actor (`sys_user.name`), when resolvable. */
   actor_name?: string;

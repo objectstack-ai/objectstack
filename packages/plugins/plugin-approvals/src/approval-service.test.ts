@@ -1446,3 +1446,18 @@ describe('ApprovalService — decision_progress & deep links (#2678 P1.5)', () =
     expect(note.payload.actionUrl).toBe(`/system/approvals?request=${encodeURIComponent(req.id)}`);
   });
 });
+
+// listActions must surface decision attachments through the contract mapping
+// (#3266 — the column existed but rowFromAction dropped it; caught in browser).
+describe('ApprovalService — listActions attachments mapping (#3266)', () => {
+  it('returns the attachments recorded on a decision', async () => {
+    const engine = makeFakeEngine();
+    let n = 0;
+    const svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9', attachments: ['file_a'] }, SYS);
+    const acts = await svc.listActions(req.id, SYS);
+    const approve = acts.find(a => a.action === 'approve');
+    expect(approve?.attachments).toEqual(['file_a']);
+  });
+});

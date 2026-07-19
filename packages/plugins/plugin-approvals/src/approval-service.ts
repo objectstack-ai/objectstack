@@ -205,6 +205,10 @@ function rowFromAction(row: any): ApprovalActionRow {
     action: row.action,
     actor_id: row.actor_id ?? undefined,
     comment: row.comment ?? undefined,
+    // Decision attachments (#3266). The column shipped in #3268 but this
+    // contract mapping didn't — the raw engine row carried the fileIds while
+    // every consumer of listActions saw none (caught by browser verification).
+    attachments: Array.isArray(row.attachments) && row.attachments.length ? row.attachments.map(String) : undefined,
     created_at: row.created_at ?? undefined,
   };
 }
