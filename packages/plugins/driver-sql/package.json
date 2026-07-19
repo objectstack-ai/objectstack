@@ -31,7 +31,6 @@
   "peerDependencies": {
     "mysql2": "^3.0.0",
     "pg": "^8.0.0",
-    "sqlite3": "^5.0.0",
     "tedious": "^18.0.0"
   },
   "peerDependenciesMeta": {
@@ -39,9 +38,6 @@
       "optional": true
     },
     "pg": {
-      "optional": true
-    },
-    "sqlite3": {
       "optional": true
     },
     "tedious": {
