@@ -32,7 +32,7 @@
 // objects) and is annotated inline.
 
 import { describe, it, expect, vi } from 'vitest';
-import { derivePosture } from '@objectstack/core';
+import { derivePosture, POSTURE_RANK } from '@objectstack/core';
 import { SecurityPlugin, hasPlatformAdminCapability } from './security-plugin.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
@@ -53,7 +53,19 @@ const publicReader: PermissionSet = {
   ],
 } as any;
 
-const ALL_SETS: PermissionSet[] = [...defaultPermissionSets, publicReader];
+// [ADR-0099 two-axis Amendment] A per-object super-bit DELEGATED to a non-admin
+// position — the auditor pattern (Salesforce object-level View All / Modify All):
+// "read (and write) every row of THIS ONE private object", granted without any
+// admin stature. This is the scope-axis primitive posture cannot represent (it is
+// per-principal × per-object); the P2′ cells below pin that it short-circuits
+// Layer 1 for the holder AND stays walled by Layer 0 (invariant I7).
+const invoiceAuditor: PermissionSet = {
+  name: 'invoice_auditor',
+  label: 'Invoice Auditor (delegated per-object view/modify all)',
+  objects: { crm_secret: { allowRead: true, allowCreate: true, allowEdit: true, viewAllRecords: true, modifyAllRecords: true } },
+} as any;
+
+const ALL_SETS: PermissionSet[] = [...defaultPermissionSets, publicReader, invoiceAuditor];
 const DENY = RLS_DENY_FILTER.id; // the fail-closed sentinel's marker value
 
 // ── Minimal middleware harness ──────────────────────────────────────────────
@@ -674,5 +686,89 @@ describe('ADR-0099 P1 — Layer 0 exemption reads the carried rung (#3211 M2)', 
       (c: any[]) => typeof c[0] === 'string' && c[0].includes('[authz/ADR-0099]'),
     );
     expect(authzWarn).toHaveLength(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADR-0099 P2′ — two-axis: per-object super-bit is the Layer 1 scope,
+//                posture is only the boundary (#3211 M3′)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The two-axis Amendment (2026-07-18): the original P2 (collapse the Layer 1
+// tier onto posture) was REJECTED — Layer 1's tier input is the per-object
+// super-bit, a per-principal × per-object DELEGATION primitive that posture (one
+// rung per principal) structurally cannot carry. Collapsing it would have made a
+// declared, grantable bit conditionally inert (the ADR-0049 class) and deleted
+// the mainstream "delegate view-all of one object to a non-admin" capability.
+//
+// These are documentation cells, zero behavior change. They pin:
+//   1. the two axes AGREE on the seeded surface (every seeded super-bit holder
+//      is already >= TENANT_ADMIN — so the seeded face never needed collapsing);
+//   2. the DELEGATION cell — a MEMBER holding a delegated per-object super-bit
+//      short-circuits Layer 1 (all rows in-org) AND stays walled by Layer 0
+//      (I7). LOAD-BEARING: a future "posture convergence" cleanup MUST keep this
+//      green or it silently deletes the auditor pattern;
+//   3. I7 — the scope axis never crosses a boundary the posture axis has not
+//      opened (the holder cannot read/write/insert cross-tenant).
+describe("ADR-0099 P2′ — per-object super-bit is the Layer 1 scope axis (#3211 M3′)", () => {
+  const evaluator = new PermissionEvaluator();
+  const byName = (...names: string[]): PermissionSet[] =>
+    ALL_SETS.filter((ps) => names.includes(ps.name));
+  const tenantPlus = (evidence: { isPlatformAdmin: boolean; isTenantAdmin: boolean }): boolean =>
+    POSTURE_RANK[derivePosture(evidence)] >= POSTURE_RANK.TENANT_ADMIN;
+
+  // ── Seeded-face agreement ─────────────────────────────────────────────────
+  // On the seeded surface the two axes coincide: the ONLY seeded sets granting a
+  // super-bit are admin_full_access + organization_admin, both of which resolve
+  // to posture >= TENANT_ADMIN. So "holds the super-bit" and "posture >=
+  // TENANT_ADMIN" agree for every seeded principal — which is exactly why the
+  // seeded matrix never moved under P1, and why the collapse *looked* safe until
+  // the delegation case (below) showed the axes are not the same fact.
+  const SEEDED = [
+    { shape: 'admin_full_access holder', sets: byName('admin_full_access', 'member_default'), evidence: { isPlatformAdmin: true, isTenantAdmin: false } },
+    { shape: 'organization_admin holder', sets: byName('organization_admin', 'member_default'), evidence: { isPlatformAdmin: false, isTenantAdmin: true } },
+    { shape: 'baseline member', sets: byName('member_default'), evidence: { isPlatformAdmin: false, isTenantAdmin: false } },
+  ] as const;
+
+  it.each(SEEDED)('[seeded agreement] $shape: holds Layer 1 super-bit ⟺ posture ≥ TENANT_ADMIN', ({ sets, evidence }) => {
+    const holdsReadBit = evaluator.hasSuperuserReadBypass('crm_secret', sets as PermissionSet[], { isPrivate: true });
+    expect(holdsReadBit).toBe(tenantPlus(evidence));
+  });
+
+  // ── The delegation cell — LOAD-BEARING (the auditor pattern) ───────────────
+  // A MEMBER holding a per-object view/modify-all on ONE private object. Posture
+  // is MEMBER, so the two axes DIVERGE here (super-bit true, posture < TENANT_ADMIN)
+  // — the case the original P2 would have broken. It must: short-circuit Layer 1
+  // (see every row IN-ORG) yet stay walled by Layer 0 (org-1 only).
+  const auditor = {
+    userId: 'auditor', tenantId: 'org-1',
+    positions: ['org_member'], permissions: ['invoice_auditor'],
+    posture: 'MEMBER',
+  };
+
+  it('[delegation] MEMBER with a delegated per-object view-all sees ALL rows in-org (Layer 1 short-circuit)', async () => {
+    // Layer 1 short-circuits to null (the super-bit); Layer 0 AND-composes the
+    // org wall (posture is not PLATFORM_ADMIN) → effective read = the org wall.
+    expect(await readFilter(OBJECTS.private_obj, auditor)).toEqual({ organization_id: 'org-1' });
+  });
+
+  it('[delegation / I7] the holder stays tenant-walled on write (Layer 0 pre-image, not a full BYPASS)', async () => {
+    // modifyAllRecords short-circuits Layer 1, but isPlatformAdmin=false so Layer 0
+    // is the write pre-image: the holder is boxed to org-1 (contrast: a true
+    // platform admin returns BYPASS here). The scope bit did not cross the boundary.
+    expect(await writeFilter(OBJECTS.private_obj, auditor)).toEqual([{ organization_id: 'org-1' }]);
+  });
+
+  it('[delegation / I7] a supplied cross-tenant organization_id on insert is DENIED for the holder', async () => {
+    expect(await insertOrg(OBJECTS.private_obj, auditor, 'org-2')).toBe('CRUD_DENY:PermissionDeniedError');
+  });
+
+  // ── Contrast — the bit is a REAL, grantable capability, not conditionally inert ─
+  // Without the delegation a plain member cannot even read the private object (the
+  // wildcard grant does not cover a private posture — ADR-0066 ④). So the per-object
+  // bit is precisely what unlocks view-all; collapsing the tier onto posture would
+  // have made writing that bit a silent no-op for a member (the ADR-0049 class).
+  it('[contrast] a plain member WITHOUT the delegated bit is denied on the private object', async () => {
+    expect(await readFilter(OBJECTS.private_obj, ROLES.member)).toBe('CRUD_DENY:PermissionDeniedError');
   });
 });
