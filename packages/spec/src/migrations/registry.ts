@@ -277,6 +277,51 @@ const step15: MigrationStep = {
   ],
 };
 
+/**
+ * Protocol 16 step.
+ *
+ * Mechanical: none — the pre-ADR-0021 inline analytics shape
+ * (`object`+`categoryField`+`valueField`+`aggregate`, pivot
+ * `rowField`/`columnField`) was already removed at protocol 9 (the single-form
+ * cutover), below the chain floor, so there is no key to rewrite. Semantic: the
+ * `.strict()` flip on `DashboardWidgetSchema` (framework#3251) turns a
+ * previously silently-stripped undeclared widget key into a parse error — a
+ * class of error that must move from fallible human review to deterministic CI,
+ * with no lossless auto-target for an arbitrary unknown key.
+ */
+const step16: MigrationStep = {
+  toMajor: 16,
+  rationale:
+    'Protocol 16 flipped `DashboardWidgetSchema` to `.strict()` (framework#3251, ' +
+    'ADR-0021 endpoint): an undeclared top-level widget key is now a loud parse ' +
+    'error instead of a silent strip (ADR-0049 enforce-or-remove, ADR-0078 ' +
+    'no-silently-inert). The inline analytics shape it most often catches ' +
+    '(`object`+`categoryField`+`valueField`+`aggregate`, pivot ' +
+    '`rowField`/`columnField`) was already removed at protocol 9, so no mechanical ' +
+    'rewrite applies; the residue is the strictness itself, delegated to the author ' +
+    'because an arbitrary unknown key has no lossless canonical target.',
+  conversionIds: [],
+  semantic: [
+    {
+      id: 'dashboard-widget-strict-unknown-keys',
+      surface: 'dashboard widgets (undeclared top-level keys — legacy inline ' +
+        'analytics, objectui-internal `component`/`data`, or typos)',
+      replacement: 'declared keys only (`dataset` + `dimensions` + `values` for ' +
+        'analytics; `options` for renderer-specific extras)',
+      reason:
+        'The `.strict()` flip turns a previously silently-stripped unknown key into a ' +
+        'parse error. There is no mapping target for an arbitrary unknown key — ' +
+        'auto-deleting it would be exactly the silent data loss ADR-0078 bans — so ' +
+        'each occurrence needs the author to decide: bind a `dataset` and select ' +
+        '`dimensions`/`values`, move a renderer setting under `options`, or delete ' +
+        'the dead key.',
+      acceptanceCriteria:
+        '`objectstack validate` passes with no unknown-key parse errors on dashboard ' +
+        'widgets.',
+    },
+  ],
+};
+
 /** All migration steps, keyed by the major they migrate into. */
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   11: step11,
@@ -284,6 +329,7 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   13: step13,
   14: step14,
   15: step15,
+  16: step16,
 };
 
 /** The majors that have a step, ascending. */

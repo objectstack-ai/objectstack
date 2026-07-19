@@ -81,6 +81,14 @@ export const WIDGET_LEGACY_ANALYTICS_UNRENDERABLE = 'widget-legacy-analytics-unr
  * errored) because they still parse and a legacy object-bound widget keeps
  * rendering — the author is just being steered to the governed shape.
  * (liveness audit #1878 / #1894).
+ *
+ * Interplay with `DashboardWidgetSchema.strict()` (framework#3251, protocol 16):
+ * on the schema-parsed CLI paths (`compile`, `validate`) strict rejects these
+ * keys as a hard parse error *before* binding validation runs, so these rules
+ * are effectively preempted there. They remain the friendly, suppressible
+ * bridge on the raw-config paths (`lint`, `doctor`) that hand
+ * `validateWidgetBindings` un-parsed config — keeping the actionable
+ * "steer to the dataset shape" message rather than a bare unknown-key error.
  */
 const LEGACY_ANALYTICS_KEYS = [
   'categoryField', 'valueField', 'xAxisField', 'yAxisFields',

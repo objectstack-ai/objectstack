@@ -67,8 +67,48 @@ describe('DashboardWidgetSchema (dataset-bound)', () => {
     expect(() => DashboardWidgetSchema.parse({ id: 'x', type: 'metric', dataset: 'sales', values: [], layout: { x: 0, y: 0, w: 3, h: 2 } })).toThrow();
   });
 
-  it('a widget supplying only the removed inline fields is invalid (no dataset)', () => {
+  it('a widget supplying only the removed inline fields is invalid (missing dataset AND unknown keys)', () => {
+    // Fails twice over now: no `dataset`/`values`, and under `.strict()` the
+    // legacy `object`/`aggregate` keys are unrecognized.
     expect(() => DashboardWidgetSchema.parse({ id: 'x', type: 'metric', object: 'opportunity', aggregate: 'count', layout: { x: 0, y: 0, w: 3, h: 2 } } as any)).toThrow();
+  });
+
+  // ── .strict() endpoint (framework#3251, protocol 16 step16) ──────────────
+  it('rejects an otherwise-valid widget carrying a legacy analytics key, and points at the dataset shape', () => {
+    const legacy = { id: 'w_legacy', type: 'bar', dataset: 'sales', values: ['revenue'], categoryField: 'stage' } as any;
+    const res = DashboardWidgetSchema.safeParse(legacy);
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      const unknown = res.error.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(unknown).toBeDefined();
+      const msg = unknown!.message;
+      expect(msg).toContain('categoryField');
+      expect(msg).toContain('dataset');
+    }
+  });
+
+  it('rejects the objectui-internal `component` / inline `data` keys', () => {
+    expect(() => DashboardWidgetSchema.parse({ id: 'w_comp', type: 'metric', dataset: 'sales', values: ['revenue'], component: {} } as any)).toThrow();
+    const res = DashboardWidgetSchema.safeParse({ id: 'w_data', type: 'metric', dataset: 'sales', values: ['revenue'], data: [] } as any);
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      const unknown = res.error.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(unknown!.message).toContain('objectui-internal');
+    }
+  });
+
+  it('rejects an unknown/typo top-level key and names it in the error', () => {
+    const res = DashboardWidgetSchema.safeParse({ id: 'w_typo', type: 'metric', dataset: 'sales', values: ['revenue'], colourVariant: 'blue' } as any);
+    expect(res.success).toBe(false);
+    if (!res.success) expect(JSON.stringify(res.error.issues)).toContain('colourVariant');
+  });
+
+  it('keeps `options` as the free-form renderer-extras escape hatch', () => {
+    const w = DashboardWidgetSchema.parse({
+      id: 'w_opts', type: 'bar', dataset: 'sales', values: ['revenue'],
+      options: { stacked: true, palette: ['#111', '#222'], drillDown: { enabled: true } },
+    });
+    expect((w.options as any).stacked).toBe(true);
   });
 
   it('keeps the runtime capability gates', () => {

@@ -69,6 +69,60 @@ export const DashboardHeaderSchema = lazySchema(() => z.object({
 }).describe('Dashboard header configuration'));
 
 /**
+ * Legacy / quarantined widget keys that `.strict()` now rejects. Naming them
+ * lets the error map hand the author a fixable message instead of a bare
+ * "unrecognized key". Two families:
+ *
+ * - **Pre-ADR-0021 inline analytics** (`object`/`categoryField`/`valueField`/
+ *   `aggregate`/`rowField`/`columnField`/…): removed from the authorable spec at
+ *   `@objectstack/spec` 9.0.0 (the single-form cutover). Bind a `dataset` and
+ *   select `dimensions`/`values` instead.
+ * - **objectui-internal props** (`component`, inline `data`): renderer-only
+ *   capabilities that are intentionally not modeled server-side (framework#3251
+ *   decision tree) — they must not appear on AI-authored dashboard metadata.
+ */
+const LEGACY_WIDGET_ANALYTICS_KEYS = new Set([
+  'object', 'categoryField', 'categoryGranularity', 'valueField', 'aggregate',
+  'aggregation', 'rowField', 'columnField', 'xAxisField', 'yAxisFields', 'measures',
+]);
+const QUARANTINED_WIDGET_KEYS = new Set(['component', 'data']);
+
+/**
+ * Error map for the strict `DashboardWidgetSchema`. Turns an
+ * `unrecognized_keys` rejection into a *fixable* message: it always names the
+ * offending key(s), and when a key is a removed inline-analytics key or an
+ * objectui-internal prop it points the author at the ADR-0021 dataset shape
+ * (and `options` for renderer-specific extras). Mirrors `strictVisibilityError`
+ * (ADR-0089 D3a); every other issue code defers to zod's default.
+ */
+const strictWidgetAnalyticsError: z.core.$ZodErrorMap = (issue) => {
+  if (issue.code !== 'unrecognized_keys') return undefined;
+  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
+  const list = keys.map((k) => `\`${k}\``).join(', ');
+  const base =
+    `Unrecognized key(s) on this dashboard widget: ${list}. ` +
+    `Undeclared top-level keys were dropped silently before strict validation, ` +
+    `shipping inert metadata; a stale or mis-layered key is now a loud parse error.`;
+  if (keys.some((k) => LEGACY_WIDGET_ANALYTICS_KEYS.has(k))) {
+    return (
+      base +
+      ' The pre-ADR-0021 inline analytics shape (`object` + `categoryField` + ' +
+      '`valueField` + `aggregate`, pivot `rowField`/`columnField`) was removed — ' +
+      'bind a `dataset` and select `dimensions` + `values` by name. Renderer-only ' +
+      'settings belong under `options`.'
+    );
+  }
+  if (keys.some((k) => QUARANTINED_WIDGET_KEYS.has(k))) {
+    return (
+      base +
+      ' `component` and inline `data` are objectui-internal renderer capabilities, ' +
+      'not part of the author-facing dashboard spec (framework#3251).'
+    );
+  }
+  return base;
+};
+
+/**
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
  */
@@ -210,7 +264,13 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
   // ADR-0021 single-form: every widget binds a `dataset` and selects `values`
   // (both required above) — there is no inline-query shape to disambiguate.
-}));
+}, { error: strictWidgetAnalyticsError })
+  // ADR-0021 endpoint (framework#3251, protocol 16 `step16`): reject undeclared
+  // top-level keys instead of silently stripping them. A hallucinated or legacy
+  // key is now a deterministic author-time error (CI) rather than a silent
+  // no-op a human reviewer would miss. `options` stays the free-form escape
+  // hatch for renderer-specific extras.
+  .strict());
 
 /**
  * Dynamic options binding for global filters.
