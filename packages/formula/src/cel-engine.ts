@@ -22,7 +22,8 @@ import type { DialectEngine, EvalContext, EvalResult } from './types';
 /**
  * Default execution bounds. Picked conservatively — every metadata-authored
  * expression we've seen is well under these. If you hit them, the expression
- * is too complex for ObjectStack and should be moved to a hook (`dialect: js`).
+ * is too complex for a CEL formula and should move to a hook/action body
+ * (`ScriptBody { language: 'js' }`, the L2 sandboxed surface).
  */
 export const DEFAULT_LIMITS = {
   maxAstNodes: 256,

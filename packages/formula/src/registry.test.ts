@@ -10,8 +10,10 @@ describe('ExpressionEngine registry', () => {
     expect(r).toEqual({ ok: true, value: 2 });
   });
 
-  it('returns dialect error for js stub', () => {
-    const expr: Expression = { dialect: 'js', source: 'foo' };
+  it("returns dialect error for the retired 'js' expression dialect (#3278)", () => {
+    // `js` is no longer a valid ExpressionDialect — cast past the narrowed type
+    // to exercise the runtime path a stale persisted artifact would hit.
+    const expr = { dialect: 'js', source: 'foo' } as unknown as Expression;
     const r = ExpressionEngine.evaluate(expr, {});
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.kind).toBe('dialect');
@@ -51,11 +53,17 @@ describe('ExpressionEngine registry', () => {
 
   it('getEngine returns registered engine', () => {
     expect(getEngine('cel')?.dialect).toBe('cel');
-    expect(getEngine('js')?.dialect).toBe('js');
+    expect(getEngine('js')).toBeUndefined(); // retired (#3278)
     expect(getEngine('nonexistent')).toBeUndefined();
   });
 
-  it('hasDialect distinguishes real engines from stubs', () => {
+  it('hasDialect reports only registered real engines', () => {
     expect(hasDialect('cel')).toBe(true);
+    expect(hasDialect('cron')).toBe(true);
+    expect(hasDialect('template')).toBe(true);
+    // Retired (#3278) — this assertion is what makes the gate able to go red;
+    // before the fix `hasDialect('js')` returned a false-positive `true`.
+    expect(hasDialect('js')).toBe(false);
+    expect(hasDialect('nonexistent')).toBe(false);
   });
 });

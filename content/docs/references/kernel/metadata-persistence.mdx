@@ -45,7 +45,7 @@ const result = MetadataCollectionInfo.parse(data);
 | :--- | :--- | :--- | :--- |
 | **output** | `string` | ✅ | Output file path |
 | **format** | `Enum<'json' \| 'yaml' \| 'typescript' \| 'javascript'>` | optional | Export format |
-| **filter** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Filter items to export (CEL) |
+| **filter** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Filter items to export (CEL) |
 | **includeStats** | `boolean` | optional | Include metadata statistics |
 | **compress** | `boolean` | optional | Compress output (gzip) |
 | **prettify** | `boolean` | optional | Pretty print output |
@@ -91,7 +91,7 @@ const result = MetadataCollectionInfo.parse(data);
 | **ifModifiedSince** | `string` | optional | Only load if modified after this date |
 | **validate** | `boolean` | optional | Validate against schema |
 | **useCache** | `boolean` | optional | Enable caching |
-| **filter** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Filter predicate (CEL) |
+| **filter** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Filter predicate (CEL) |
 | **limit** | `integer` | optional | Maximum items to load |
 | **recursive** | `boolean` | optional | Search subdirectories |
 

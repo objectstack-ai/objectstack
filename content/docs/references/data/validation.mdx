@@ -147,7 +147,7 @@ const result = ConditionalValidation.parse(data);
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **type** | `'conditional'` | ✅ |  |
-| **when** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.type == 'enterprise'` |
+| **when** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.type == 'enterprise'` |
 | **then** | `{ name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| [ConditionalValidation](#conditionalvalidation)` | ✅ | Validation rule to apply when condition is true |
 | **otherwise** | `{ name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| [ConditionalValidation](#conditionalvalidation)` | optional | Validation rule to apply when condition is false |
 
@@ -170,7 +170,7 @@ const result = ConditionalValidation.parse(data);
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **type** | `'cross_field'` | ✅ |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date` |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date` |
 | **fields** | `string[]` | ✅ | Fields involved. Only fields[0] is read (labels which field the violation attaches to); the rest are advisory. Shares script’s evaluation path. |
 
 
@@ -237,7 +237,7 @@ const result = ConditionalValidation.parse(data);
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **type** | `'script'` | ✅ |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0` |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0` |
 
 
 ---
@@ -289,7 +289,7 @@ This schema accepts one of the following structures:
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **type** | `'script'` | ✅ |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0` |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0` |
 
 ---
 
@@ -359,7 +359,7 @@ This schema accepts one of the following structures:
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **type** | `'cross_field'` | ✅ |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date` |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date` |
 | **fields** | `string[]` | ✅ | Fields involved. Only fields[0] is read (labels which field the violation attaches to); the rest are advisory. Shares script’s evaluation path. |
 
 ---
@@ -405,7 +405,7 @@ This schema accepts one of the following structures:
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **type** | `'conditional'` | ✅ |  |
-| **when** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.type == 'enterprise'` |
+| **when** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.type == 'enterprise'` |
 | **then** | `[ValidationRule](#validationrule)` | ✅ | Validation rule to apply when condition is true |
 | **otherwise** | `[ValidationRule](#validationrule)` | optional | Validation rule to apply when condition is false |
 

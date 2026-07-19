@@ -107,8 +107,8 @@ Interface-level page configuration (Airtable parity)
 | **style** | `Record<string, string>` | optional | Inline styles or utility classes |
 | **className** | `string` | optional | CSS class names |
 | **responsiveStyles** | `{ large?: Record<string, string \| number>; medium?: Record<string, string \| number>; small?: Record<string, string \| number>; xsmall?: Record<string, string \| number> }` | optional | Per-breakpoint scoped style maps (ADR-0065) |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — component rendered only when TRUE. Binds `record`, `current_user`, `page.<var>`. e.g. "page.selectedProjectId != ''" |
-| **visibility** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — component rendered only when TRUE. Binds `record`, `current_user`, `page.<var>`. e.g. "page.selectedProjectId != ''" |
+| **visibility** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
 | **dataSource** | `{ object: string; view?: string; filter?: any; sort?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional | Per-element data binding for multi-object pages |
 | **responsive** | `{ breakpoint?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>; hiddenOn?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>[]; columns?: object; order?: object }` | optional | Responsive layout configuration |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |

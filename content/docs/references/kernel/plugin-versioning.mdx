@@ -129,7 +129,7 @@ Compatibility level between versions
 | **enabled** | `boolean` | optional |  |
 | **maxConcurrentVersions** | `integer` | optional | How many versions can run at the same time |
 | **selectionStrategy** | `Enum<'latest' \| 'stable' \| 'compatible' \| 'pinned' \| 'canary' \| 'custom'>` | optional |  |
-| **routing** | `{ condition: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; version: string; priority?: integer }[]` | optional |  |
+| **routing** | `{ condition: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; version: string; priority?: integer }[]` | optional |  |
 | **rollout** | `{ enabled?: boolean; strategy: Enum<'percentage' \| 'blue-green' \| 'canary'>; percentage?: number; duration?: integer }` | optional |  |
 
 

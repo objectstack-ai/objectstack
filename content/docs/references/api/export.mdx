@@ -533,7 +533,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **fields** | `string[]` | optional | Fields to include |
 | **filter** | `Record<string, any>` | optional | Record filter criteria |
 | **templateId** | `string` | optional | Export template ID for field mappings |
-| **schedule** | `{ cronExpression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string }` | ✅ | Schedule timing configuration |
+| **schedule** | `{ cronExpression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string }` | ✅ | Schedule timing configuration |
 | **delivery** | `{ method: Enum<'email' \| 'storage' \| 'webhook'>; recipients?: string[]; storagePath?: string; webhookUrl?: string }` | ✅ | Export delivery configuration |
 
 
@@ -567,7 +567,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **fields** | `string[]` | optional | Fields to include |
 | **filter** | `Record<string, any>` | optional | Record filter criteria |
 | **templateId** | `string` | optional | Export template ID for field mappings |
-| **schedule** | `{ cronExpression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string }` | ✅ | Schedule timing configuration |
+| **schedule** | `{ cronExpression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string }` | ✅ | Schedule timing configuration |
 | **delivery** | `{ method: Enum<'email' \| 'storage' \| 'webhook'>; recipients?: string[]; storagePath?: string; webhookUrl?: string }` | ✅ | Export delivery configuration |
 | **enabled** | `boolean` | optional | Whether the scheduled export is active |
 | **lastRunAt** | `string` | optional | Last execution timestamp |

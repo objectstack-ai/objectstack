@@ -166,7 +166,7 @@ const result = Checkpoint.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Schedule instance ID |
 | **flowName** | `string` | ✅ | Flow machine name |
-| **cronExpression** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 9 * * MON-FRI` |
+| **cronExpression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 9 * * MON-FRI` |
 | **timezone** | `string` | optional | IANA timezone for cron evaluation |
 | **status** | `Enum<'active' \| 'paused' \| 'disabled' \| 'expired'>` | optional | Current schedule status |
 | **nextRunAt** | `string` | optional | Next scheduled execution timestamp |

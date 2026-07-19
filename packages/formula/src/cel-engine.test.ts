@@ -203,7 +203,7 @@ describe('celEngine', () => {
   });
 
   it('rejects evaluation when dialect mismatches', () => {
-    const r = celEngine.evaluate({ dialect: 'js', source: 'x' } as Expression, {});
+    const r = celEngine.evaluate({ dialect: 'cron', source: 'x' }, {});
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.kind).toBe('dialect');
   });

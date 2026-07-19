@@ -83,9 +83,9 @@ const result = Action.parse(data);
 | **refreshAfter** | `boolean` | optional | Refresh view after execution |
 | **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). |
 | **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| 'phoneNumberOtp'>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |
-| **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Boolean or predicate (CEL) — action is disabled when TRUE. |
+| **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Boolean or predicate (CEL) — action is disabled when TRUE. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capabilities required to invoke this action (server-enforced 403 + UI hide/disable). |
 | **shortcut** | `string` | optional | Keyboard shortcut to trigger this action (e.g., "Ctrl+S") |
 | **bulkEnabled** | `boolean` | optional | Whether this action can be applied to multiple selected records |
@@ -151,7 +151,7 @@ const result = Action.parse(data);
 | **helpText** | `string` | optional |  |
 | **defaultValue** | `any` | optional |  |
 | **defaultFromRow** | `boolean` | optional |  |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
 | **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| 'phoneNumberOtp'>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
 
 

@@ -191,7 +191,7 @@ const result = ETLDestination.parse(data);
 | **destination** | `{ type: Enum<'database' \| 'api' \| 'file' \| 'stream' \| 'object' \| 'warehouse' \| 'storage' \| 'spreadsheet'>; connector?: string; config: Record<string, any>; writeMode?: Enum<'append' \| 'overwrite' \| 'upsert' \| 'merge'>; … }` | ✅ | Data destination |
 | **transformations** | `{ name?: string; type: Enum<'map' \| 'filter' \| 'aggregate' \| 'join' \| 'script' \| 'lookup' \| 'split' \| 'merge' \| 'normalize' \| 'deduplicate'>; config: Record<string, any>; continueOnError?: boolean }[]` | optional | Transformation pipeline |
 | **syncMode** | `Enum<'full' \| 'incremental' \| 'cdc'>` | optional | Sync mode |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron schedule expression |
+| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron schedule expression |
 | **enabled** | `boolean` | optional | Pipeline enabled status |
 | **retry** | `{ maxAttempts?: integer; backoffMs?: integer }` | optional | Retry configuration |
 | **notifications** | `{ onSuccess?: string[]; onFailure?: string[] }` | optional | Notification settings |

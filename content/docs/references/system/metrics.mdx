@@ -232,7 +232,7 @@ Service Level Indicator
 | **description** | `string` | optional | SLI description |
 | **metric** | `string` | ✅ | Base metric name |
 | **type** | `Enum<'availability' \| 'latency' \| 'throughput' \| 'error_rate' \| 'saturation' \| 'custom'>` | ✅ | SLI type |
-| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
+| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
 | **window** | `{ size: integer; rolling?: boolean }` | ✅ | Measurement window |
 | **enabled** | `boolean` | optional |  |
 

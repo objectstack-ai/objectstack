@@ -133,8 +133,8 @@ Aggregation function for column footer summary
 | **fields** | `[FormField](#formfield)[]` | optional | Sub-fields for composite/repeater/record types |
 | **keyField** | `{ field?: string; label?: string; placeholder?: string; helpText?: string; … }` | optional | Key column config for record-typed fields |
 | **dependsOn** | `string` | optional | Parent field name for cascading |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). e.g. P`record.priority == 'urgent'` |
-| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). e.g. P`record.priority == 'urgent'` |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
 | **disclosure** | `Enum<'inline' \| 'popover'>` | optional | Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure). |
 
 
@@ -151,8 +151,8 @@ Aggregation function for column footer summary
 | **description** | `string` | optional | Optional description rendered under the section header. |
 | **collapsible** | `boolean` | optional |  |
 | **collapsed** | `boolean` | optional |  |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). |
-| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| '1' \| '2' \| '3' \| '4'` | optional |  |
 | **fields** | `string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; options?: { label: string; value: string; color?: string; default?: boolean; … }[]; reference?: string; … }[]` | ✅ |  |
 
@@ -371,7 +371,7 @@ List chart view configuration
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `Record<string, any>[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog) |
 | **virtualScroll** | `boolean` | optional | Enable virtual scrolling for large datasets |
-| **conditionalFormatting** | `{ condition: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
+| **conditionalFormatting** | `{ condition: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
 | **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'pdf' \| 'json'>[]` | optional | Available export format options |
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
@@ -459,7 +459,7 @@ List chart view configuration
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `Record<string, any>[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog) |
 | **virtualScroll** | `boolean` | optional | Enable virtual scrolling for large datasets |
-| **conditionalFormatting** | `{ condition: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
+| **conditionalFormatting** | `{ condition: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
 | **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'pdf' \| 'json'>[]` | optional | Available export format options |
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |

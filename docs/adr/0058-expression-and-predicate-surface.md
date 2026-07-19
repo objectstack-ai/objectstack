@@ -8,6 +8,20 @@
 
 ---
 
+> **Addendum (2026-07, #3278) — the `js` expression dialect is retired.**
+> The Pass-3 inventory and the Decision below list `js` among the expression
+> dialects (`{cel, js, cron, template}`). In practice `js` was only ever a
+> declared enum member and a registry *stub* — no engine, and no author helper
+> ever emitted it (`cel`/`F`/`P` → CEL, `tmpl` → template, `cron` → cron). Per
+> ADR-0049 (enforce-or-remove), it is removed from `ExpressionDialect`; the set
+> is now `{cel, cron, template}`. Procedural JavaScript remains available as the
+> **L2** authoring surface — the sandboxed, capability-gated
+> `ScriptBody { language: 'js' }` in hook/action bodies — which is a separate
+> enum and is unaffected. This also fixed a latent `hasDialect` bug that
+> reported the stub as a real engine.
+
+---
+
 ## TL;DR
 
 ObjectStack exposes **~50 authorable declarations** that hold an expression — formulas, visibility/required/readonly predicates, validation rules, hook conditions, flow/edge conditions, sharing-rule conditions, RLS `using`/`check`, action/view/app visibility, notification/ETL/export/sync/connector conditions — and they all funnel through **one authoring primitive** (`ExpressionInputSchema` → `{ dialect: 'cel', source }`, helpers `cel`/`F`/`P`). The authoring surface is already unified and clean.
@@ -79,7 +93,7 @@ The interpreter and the RLS compiler **share no grammar or AST** — confirmed. 
 
 ### Pass 3 — the spec declaration inventory (evidence)
 
-`ExpressionInputSchema` (`spec/src/shared/expression.zod.ts`): a bare string `.transform(s => ({ dialect:'cel', source:s }))`; the canonical envelope is `{ dialect, source, ast?, meta? }`, `dialect ∈ {cel, js, cron, template}`. Helpers `cel`/`F`/`P` all emit CEL; `tmpl` → Mustache; `cron` → cron. **~50 declarations** consume it (formula, `visibleWhen`/`readonlyWhen`/`requiredWhen`, validation, hook, flow edge, action `visible`/`disabled`, view/app/page visibility, notification condition/recipients, ETL/export/sync/connector/graphql conditions, feature flags, cache invalidation, …).
+`ExpressionInputSchema` (`spec/src/shared/expression.zod.ts`): a bare string `.transform(s => ({ dialect:'cel', source:s }))`; the canonical envelope is `{ dialect, source, ast?, meta? }`, `dialect ∈ {cel, js, cron, template}` (the `js` slot was a declared-but-unshipped stub — **retired in #3278**, see Addendum above). Helpers `cel`/`F`/`P` all emit CEL; `tmpl` → Mustache; `cron` → cron. **~50 declarations** consume it (formula, `visibleWhen`/`readonlyWhen`/`requiredWhen`, validation, hook, flow edge, action `visible`/`disabled`, view/app/page visibility, notification condition/recipients, ETL/export/sync/connector/graphql conditions, feature flags, cache invalidation, …).
 
 Of these, the **expression-surface experimental/divergent set** is exactly two: **sharing `condition`** (#1887) and **RLS `check`**. The rest of the `EXPERIMENTAL — not enforced` markers (`PolicySchema` password/network/session/audit, `EncryptionConfig`, `MaskingRule`, GDPR/HIPAA/PCI, `SecurityContext`, `RLSAuditEvent`, `RLSConfig`, flow `runAs`, `allowTransfer/Restore/Purge`) are **whole subsystems with no runtime consumer** — already governed by **ADR-0056 D8 / ADR-0049** and **out of scope here** (they are not predicate-compiler problems).
 
@@ -161,7 +175,7 @@ This ADR governs the **expression / predicate / formula surface** only. The non-
 - **Not** replacing the CEL interpreter or the source language — CEL + `ExpressionInputSchema` stay; this unifies the *compile* path to match the *interpret* path.
 - **Not** adding subqueries / cross-object joins to RLS (ADR-0055 stands; pushdown uses pre-resolved `IN`).
 - **Not** designing the non-expression governance subsystems (D8 scopes them out).
-- **Not** a new dialect — `js`/`cron`/`template` dialects are unaffected.
+- **Not** a new dialect — `js`/`cron`/`template` dialects are unaffected. _(Amended #3278: the `js` expression dialect was subsequently retired — see Addendum above; `cron`/`template` stand.)_
 
 ## Alternatives considered
 
