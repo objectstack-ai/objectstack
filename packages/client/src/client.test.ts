@@ -1203,3 +1203,84 @@ describe('packages.install', () => {
         expect(body.overwrite).toBe(true);
     });
 });
+
+// ==========================================
+// Atomic cross-object batch (#1604 / ADR-0034 item 4)
+// ==========================================
+
+describe('data.batchTransaction', () => {
+    const OPS = [
+        { object: 'project', action: 'create' as const, data: { name: 'Apollo' } },
+        { object: 'task', action: 'create' as const, data: { title: 'Kickoff', project: { $ref: 0 } } },
+    ];
+
+    it('POSTs { operations, atomic: true } to the root /batch route', async () => {
+        const { client, fetchMock } = createMockClient({ results: [{ id: 'p1' }, { id: 't1' }] });
+        const res = await client.data.batchTransaction(OPS);
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost:3000/api/v1/batch',
+            expect.objectContaining({ method: 'POST' }),
+        );
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.operations).toHaveLength(2);
+        // Always atomic — the SDK never exposes a non-atomic variant; the
+        // server 400s on `atomic: false` (BATCH_NOT_ATOMIC).
+        expect(body.atomic).toBe(true);
+        expect(res.results).toEqual([{ id: 'p1' }, { id: 't1' }]);
+    });
+
+    it('serializes intra-batch { $ref } parent references verbatim', async () => {
+        const { client, fetchMock } = createMockClient({ results: [] });
+        await client.data.batchTransaction(OPS);
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.operations[1].data.project).toEqual({ $ref: 0 });
+    });
+
+    it('unwraps both the bare and the enveloped response shape', async () => {
+        // Bare `{ results }` (what the endpoint sends today)
+        const bare = createMockClient({ results: [{ id: 'a' }] });
+        expect((await bare.client.data.batchTransaction(OPS)).results).toEqual([{ id: 'a' }]);
+
+        // `{ success, data }` envelope (BaseResponse-wrapped variant)
+        const wrapped = createMockClient({ success: true, data: { results: [{ id: 'b' }] } });
+        expect((await wrapped.client.data.batchTransaction(OPS)).results).toEqual([{ id: 'b' }]);
+    });
+
+    it('derives the batch route from a discovery-overridden data route', async () => {
+        const { client, fetchMock } = createMockClient({ results: [] });
+        (client as any)['discoveryInfo'] = { routes: { data: '/custom/v9/data' } };
+        await client.data.batchTransaction(OPS);
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost:3000/custom/v9/batch',
+            expect.any(Object),
+        );
+    });
+
+    it('surfaces server rejections with code/status attached (BATCH_UNRESOLVED_REF)', async () => {
+        const { client } = createMockClient(
+            { error: "Unresolved $ref 5 on field 'project'", code: 'BATCH_UNRESOLVED_REF' },
+            400,
+        );
+        let caught: any;
+        try {
+            await client.data.batchTransaction(OPS);
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught).toBeDefined();
+        expect(caught.code).toBe('BATCH_UNRESOLVED_REF');
+        expect(caught.httpStatus).toBe(400);
+    });
+
+    it('is mirrored on the environment-scoped client', async () => {
+        const { client, fetchMock } = createMockClient({ results: [] });
+        await client.project('proj-1').data.batchTransaction(OPS);
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost:3000/api/v1/environments/proj-1/batch',
+            expect.objectContaining({ method: 'POST' }),
+        );
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.atomic).toBe(true);
+    });
+});

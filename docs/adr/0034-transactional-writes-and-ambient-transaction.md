@@ -118,6 +118,18 @@ Once (1)+(2) land and a multi-write transaction test suite is green:
 - Point ObjectUI `masterDetailTx` at it and delete the client-side best-effort
   cleanup (a smell that exists only because server atomicity was missing).
 
+> **Status (framework side: done).** The endpoint landed as
+> `POST {basePath}/batch` (`rest-server.ts` `registerBatchEndpoints`, spec
+> contract `CrossObjectBatchRequestSchema` in `spec/src/api/batch.zod.ts`),
+> and the SDK exposes it as `client.data.batchTransaction(operations)`
+> (plus the environment-scoped mirror). The SDK method is always atomic and
+> exposes no `atomic` flag — non-atomic per-object bulk writes stay on
+> `data.batch()`/`createMany`/`updateMany`, so any best-effort fallback must
+> be isolated in the caller's adapter. Remaining (objectui repo): repoint
+> `masterDetailTx` at `batchTransaction` and delete the client-side
+> best-effort cleanup, keeping the non-atomic fallback inside the
+> `data-objectstack` adapter only.
+
 ---
 
 ## Consequences

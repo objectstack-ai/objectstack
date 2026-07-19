@@ -78,6 +78,9 @@ import {
   ListImportJobsRequest,
   ListImportJobsResponse,
   UndoImportJobResponse,
+  CrossObjectBatchOperation,
+  CrossObjectBatchRequest,
+  CrossObjectBatchResponse,
 } from '@objectstack/spec/api';
 import type {
   ApprovalRequestRow,
@@ -3019,6 +3022,49 @@ export class ObjectStackClient {
     },
 
     /**
+     * Atomic cross-object batch — the canonical master-detail save path
+     * (issue #1604 / ADR-0034 item 4).
+     *
+     * Executes heterogeneous create/update/delete operations across MULTIPLE
+     * objects in ONE server-side engine transaction: commit all or roll back
+     * all. A field value of `{ $ref: <earlier op index> }` resolves to the id
+     * created by that earlier operation, so a child row can reference a
+     * parent created in the same request:
+     *
+     * ```ts
+     * const { results } = await client.data.batchTransaction([
+     *   { object: 'project', action: 'create', data: { name: 'Apollo' } },
+     *   { object: 'task', action: 'create', data: { title: 'Kickoff', project: { $ref: 0 } } },
+     * ]);
+     * ```
+     *
+     * This method is always atomic and deliberately exposes no `atomic`
+     * flag — the endpoint rejects `atomic: false` with `400 BATCH_NOT_ATOMIC`.
+     * Non-atomic, partial-success bulk writes stay on the per-object
+     * {@link batch} / {@link createMany} / {@link updateMany} surface;
+     * callers that need a best-effort fallback (e.g. against servers
+     * predating this route, which respond 404 — check `error.httpStatus`)
+     * must isolate it in their own adapter rather than here.
+     *
+     * URL note: the server mounts this route at the PARENT of the data
+     * prefix (`POST {basePath}/batch` vs `{basePath}/data/...`, see
+     * rest-server `registerBatchEndpoints`), so the path is derived by
+     * dropping the last segment of the resolved data route.
+     */
+    batchTransaction: async (
+      operations: CrossObjectBatchOperation[],
+    ): Promise<CrossObjectBatchResponse> => {
+        const dataRoute = this.getRoute('data');
+        const base = dataRoute.replace(/\/[^/]+\/?$/, '') || '/api/v1';
+        const request: CrossObjectBatchRequest = { operations, atomic: true };
+        const res = await this.fetch(`${this.baseUrl}${base}/batch`, {
+            method: 'POST',
+            body: JSON.stringify(request),
+        });
+        return this.unwrapResponse<CrossObjectBatchResponse>(res);
+    },
+
+    /**
      * Update multiple records (simplified batch update)
      * Convenience method for batch updates without full BatchUpdateRequest
      */
@@ -3469,6 +3515,21 @@ export class ScopedProjectClient {
       });
       return this.parent._unwrap<BatchUpdateResponse>(res);
     },
+    /**
+     * Atomic cross-object batch, environment-scoped
+     * (`POST /api/v1/environments/:id/batch`).
+     * See {@link ObjectStackClient} `data.batchTransaction` for semantics.
+     */
+    batchTransaction: async (
+      operations: CrossObjectBatchOperation[],
+    ): Promise<CrossObjectBatchResponse> => {
+      const request: CrossObjectBatchRequest = { operations, atomic: true };
+      const res = await this.parent._fetch(this.url('/batch'), {
+        method: 'POST',
+        body: JSON.stringify(request),
+      });
+      return this.parent._unwrap<CrossObjectBatchResponse>(res);
+    },
     updateMany: async <T = any>(
       object: string,
       records: Array<{ id: string; data: Partial<T> }>,
@@ -3631,6 +3692,9 @@ export type {
   ListImportJobsRequest,
   ListImportJobsResponse,
   UndoImportJobResponse,
+  CrossObjectBatchOperation,
+  CrossObjectBatchRequest,
+  CrossObjectBatchResponse,
 } from '@objectstack/spec/api';
 
 // Approval runtime types (ADR-0019) — surfaced so SDK consumers can type the

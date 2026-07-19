@@ -595,6 +595,9 @@ atomic transaction.
 POST /api/v1/batch
 ```
 
+The typed SDK surface for this route is
+[`client.data.batchTransaction(operations)`](/docs/api/client-sdk#clientdata--crud-operations).
+
 Each operation specifies an `action` (`create`, `update`, or `delete`), the
 target `object`, and the relevant `data` / `id`. A field value of
 `{ "$ref": <earlier op index> }` resolves to the id created by an earlier

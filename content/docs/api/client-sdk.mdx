@@ -206,7 +206,20 @@ await client.data.updateMany('account', [
   { id: '2', data: { status: 'closed' } },
 ]);
 await client.data.deleteMany('account', ['1', '2', '3']);
+
+// Atomic cross-object batch (master-detail save) — runs every operation in
+// ONE server-side transaction (POST /api/v1/batch): commit all or roll back
+// all. `{ $ref: <op index> }` lets a child reference a parent created earlier
+// in the same request. Always atomic — unlike per-object `data.batch()`,
+// there is no partial-success mode.
+const { results } = await client.data.batchTransaction([
+  { object: 'project', action: 'create', data: { name: 'Apollo' } },
+  { object: 'task', action: 'create', data: { title: 'Kickoff', project: { $ref: 0 } } },
+]);
 ```
+
+See [Batch Operations](/docs/protocol/kernel/http-protocol#batch-operations)
+for the underlying endpoint contract.
 
 ### `client.analytics` — BI Queries
 
