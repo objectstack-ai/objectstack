@@ -11,7 +11,7 @@ import Info from '../src/commands/info';
 import Generate from '../src/commands/generate';
 import Lint from '../src/commands/lint';
 import Diff from '../src/commands/diff';
-import Explain from '../src/commands/explain';
+import Explain, { SCHEMAS } from '../src/commands/explain';
 
 describe('CLI Commands (oclif)', () => {
   it('should have compile command', () => {
@@ -65,5 +65,24 @@ describe('CLI Commands (oclif)', () => {
 
   it('should have explain command', () => {
     expect(Explain.description).toContain('explanation');
+  });
+});
+
+describe('os explain — schema catalog accuracy', () => {
+  // Regression guard for #3244: `os explain object` used to document the
+  // `ownership` field as the package-contribution kind (`"own" | "extend"`),
+  // which is a DISTINCT concept (`ObjectOwnershipEnum`, set via registerObject).
+  // The real `ObjectSchema.ownership` field is the record-ownership model —
+  // `z.enum(['user','org','none'])` — see packages/spec/src/data/object.zod.ts.
+  it('documents object.ownership as the record-ownership model, not the own/extend contribution kind (#3244)', () => {
+    const ownership = SCHEMAS.object.optional.find((f) => f.name === 'ownership');
+    expect(ownership, 'object schema should document an `ownership` field').toBeDefined();
+
+    // The type string must enumerate exactly the record-ownership enum values.
+    const tokens = (ownership!.type.match(/'[^']+'|"[^"]+"/g) ?? []).map((t) => t.slice(1, -1));
+    expect(new Set(tokens)).toEqual(new Set(['user', 'org', 'none']));
+
+    // …and must never regress back to the contribution-kind values.
+    expect(ownership!.type).not.toBe('"own" | "extend"');
   });
 });

@@ -22,7 +22,7 @@ interface SchemaInfo {
   docsPath: string;
 }
 
-const SCHEMAS: Record<string, SchemaInfo> = {
+export const SCHEMAS: Record<string, SchemaInfo> = {
   object: {
     name: 'Object',
     description: 'Defines a data entity in the ObjectStack data model. Objects contain fields, enable capabilities, and form the foundation of the metadata-driven platform.',
@@ -34,7 +34,7 @@ const SCHEMAS: Record<string, SchemaInfo> = {
       { name: 'label', type: 'string', description: 'Human-readable display name' },
       { name: 'pluralLabel', type: 'string', description: 'Plural display name' },
       { name: 'description', type: 'string', description: 'Documentation for the object' },
-      { name: 'ownership', type: '"own" | "extend"', description: 'Whether this object is owned or extended' },
+      { name: 'ownership', type: "'user' | 'org' | 'none'", description: 'Record-ownership model: user (default, injects a reassignable owner_id) | org | none (no per-record owner). Distinct from the package own/extend contribution kind.' },
       { name: 'enable', type: 'ObjectCapabilities', description: 'Feature flags (trackHistory, apiEnabled, etc.)' },
       { name: 'icon', type: 'string', description: 'Icon identifier for UI display' },
     ],
