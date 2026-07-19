@@ -96,7 +96,7 @@ const result = ResolvedSettingValue.parse(data);
 | **category** | `string` | optional | Settings hub category |
 | **order** | `number` | optional | Display order |
 | **specifiers** | `{ type: Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| 'password' \| 'email' \| 'url' \| 'phone' \| 'number' \| 'toggle' \| 'select' \| 'radio' \| 'multiselect' \| 'slider' \| 'color' \| 'json' \| 'action_button'>; id?: string; key?: string; label: string; … }[]` | ✅ | Page contents (ordered) |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Whole-manifest visibility |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Whole-manifest visibility |
 | **featureFlag** | `string` | optional | Gate manifest visibility on a feature flag |
 | **beta** | `boolean` | optional | Show a Beta chip on the page |
 
@@ -128,7 +128,7 @@ const result = ResolvedSettingValue.parse(data);
 | **description** | `string` | optional | Help text |
 | **icon** | `string` | optional | Icon name (Lucide) |
 | **default** | `any` | optional | Default value |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility expression |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility expression |
 | **required** | `boolean` | optional | Required field |
 | **encrypted** | `boolean` | optional | Encrypt value at rest (forced true for password) |
 | **scope** | `Enum<'global' \| 'tenant' \| 'user'>` | optional | Override manifest scope for this key |

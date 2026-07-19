@@ -79,7 +79,7 @@ const result = FieldMapping.parse(data);
 | :--- | :--- | :--- | :--- |
 | **source** | `string` | ✅ | Source field name |
 | **target** | `string` | ✅ | Target field name |
-| **transform** | `{ type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }` | optional | Transformation to apply |
+| **transform** | `{ type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }` | optional | Transformation to apply |
 | **defaultValue** | `any` | optional | Default if source is null/undefined |
 
 
@@ -149,7 +149,7 @@ Custom JavaScript transformation
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `'javascript'` | ✅ |  |
-| **expression** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | JS expression (dialect="js" recommended). e.g. value.toUpperCase() |
+| **expression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | JS expression (dialect="js" recommended). e.g. value.toUpperCase() |
 
 ---
 

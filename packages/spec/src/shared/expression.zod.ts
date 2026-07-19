@@ -29,8 +29,17 @@ import { z } from 'zod';
  * @see content/docs/concepts/north-star.mdx §8 "No private expression DSL"
  */
 
-/** Supported expression dialects. */
-export const ExpressionDialect = z.enum(['cel', 'js', 'cron', 'template']);
+/**
+ * Supported expression dialects.
+ *
+ * `js` was declared here but never shipped as an expression engine — it existed
+ * only as a registry stub with no author helper (`cel`/`F`/`P` → CEL, `tmpl` →
+ * template, `cron` → cron; nothing ever emitted `js`). Procedural JavaScript is
+ * the L2 authoring surface — the sandboxed, capability-gated
+ * `ScriptBody { language: 'js' }` in hook/action bodies — not an L1 expression
+ * dialect. Retired in #3278; see ADR-0058 addendum.
+ */
+export const ExpressionDialect = z.enum(['cel', 'cron', 'template']);
 export type ExpressionDialect = z.infer<typeof ExpressionDialect>;
 
 /**

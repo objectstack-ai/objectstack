@@ -121,7 +121,7 @@ const result = ModelCapability.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Registry name |
 | **models** | `Record<string, { model: object; status?: Enum<'active' \| 'deprecated' \| 'experimental' \| 'disabled'>; priority?: integer; fallbackModels?: string[]; … }>` | ✅ | Model entries by ID |
-| **promptTemplates** | `Record<string, { id: string; name: string; label: string; system?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }>` | optional | Prompt templates by name |
+| **promptTemplates** | `Record<string, { id: string; name: string; label: string; system?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }>` | optional | Prompt templates by name |
 | **defaultModel** | `string` | optional | Default model ID |
 | **enableAutoFallback** | `boolean` | optional | Auto-fallback on errors |
 
@@ -168,8 +168,8 @@ const result = ModelCapability.parse(data);
 | **id** | `string` | ✅ | Unique template identifier |
 | **name** | `string` | ✅ | Template name (snake_case) |
 | **label** | `string` | ✅ | Display name |
-| **system** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | System prompt — supports `{{var}`} interpolation |
-| **user** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | User prompt template — supports `{{var}`} interpolation |
+| **system** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | System prompt — supports `{{var}`} interpolation |
+| **user** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | User prompt template — supports `{{var}`} interpolation |
 | **assistant** | `string` | optional | Assistant message prefix |
 | **variables** | `{ name: string; type?: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required?: boolean; defaultValue?: any; … }[]` | optional | Template variables |
 | **modelId** | `string` | optional | Recommended model ID |

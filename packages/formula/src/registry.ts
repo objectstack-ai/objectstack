@@ -5,9 +5,12 @@
  * imports of the deleted custom engine. Call sites now ask the registry to
  * dispatch by `expression.dialect`.
  *
- * Stub dialects (`js`, `cron`) are registered at module load with explicit
- * `dialect`-error responses so call sites get a clear message instead of
- * silent `undefined` (the old engine's anti-pattern).
+ * Three real engines are registered at module load: `cel`, `cron`, `template`.
+ * An unregistered dialect yields an explicit `dialect`-kind error from
+ * `evaluate` / `compile` (never a silent `undefined` — the old engine's
+ * anti-pattern). There is deliberately no `js` expression engine: procedural JS
+ * is the L2 `ScriptBody { language: 'js' }` surface, not an expression dialect
+ * (retired in #3278; see ADR-0058 addendum).
  */
 
 import type { Expression } from '@objectstack/spec';
@@ -29,26 +32,16 @@ export function getEngine(dialect: string): DialectEngine | undefined {
   return registry.get(dialect);
 }
 
-/** Whether a dialect has a real (non-stub) implementation registered. */
+/** Whether a real engine is registered for this dialect. */
 export function hasDialect(dialect: string): boolean {
-  return registry.has(dialect) && !registry.get(dialect)!.dialect.startsWith('stub:');
+  return registry.has(dialect);
 }
 
-function makeStub(dialect: string, reason: string): DialectEngine {
-  return {
-    dialect,
-    compile: () => ({ ok: false, error: { kind: 'dialect', message: reason } }),
-    evaluate: () => ({ ok: false, error: { kind: 'dialect', message: reason } }),
-  };
-}
-
-// Real engines.
+// Real engines. Every registered dialect is a real engine — there are no stubs;
+// an unregistered dialect surfaces a `dialect`-kind error at the call site.
 register(celEngine);
 register(cronEngine);
 register(templateEngine);
-
-// Stubs — `js` lives in @objectstack/plugin-js-vm (not yet shipped).
-register(makeStub('js', "dialect 'js' not registered. Install @objectstack/plugin-js-vm"));
 
 /**
  * The unified evaluation entry point. Replaces the old direct calls to

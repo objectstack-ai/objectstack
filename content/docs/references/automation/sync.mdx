@@ -160,7 +160,7 @@ const result = DataDestinationConfig.parse(data);
 | **object** | `string` | optional | ObjectStack object name |
 | **connectorInstanceId** | `string` | optional | Connector instance ID |
 | **operation** | `Enum<'insert' \| 'update' \| 'upsert' \| 'delete' \| 'sync'>` | ✅ | Sync operation |
-| **mapping** | `Record<string, string> \| { source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any }[]` | optional | Field mappings |
+| **mapping** | `Record<string, string> \| { source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any }[]` | optional | Field mappings |
 | **externalResource** | `string` | optional | External resource ID |
 | **matchKey** | `string[]` | optional | Match key fields |
 

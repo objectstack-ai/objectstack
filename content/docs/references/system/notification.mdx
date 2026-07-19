@@ -66,8 +66,8 @@ const result = EmailTemplate.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Template identifier |
-| **subject** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Email subject — supports `{{var}`} interpolation |
-| **body** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Email body content — supports `{{var}`} interpolation |
+| **subject** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Email subject — supports `{{var}`} interpolation |
+| **body** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Email body content — supports `{{var}`} interpolation |
 | **bodyType** | `Enum<'text' \| 'html' \| 'markdown'>` | optional | Body content type |
 | **variables** | `string[]` | optional | Template variables |
 | **attachments** | `{ name: string; url: string }[]` | optional | Email attachments |
@@ -82,7 +82,7 @@ const result = EmailTemplate.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **title** | `string` | ✅ | Notification title |
-| **message** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Notification message — supports `{{var}`} interpolation |
+| **message** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Notification message — supports `{{var}`} interpolation |
 | **type** | `Enum<'info' \| 'success' \| 'warning' \| 'error'>` | ✅ | Notification type |
 | **actionUrl** | `string` | optional | Action URL |
 | **dismissible** | `boolean` | optional | User dismissible |
@@ -117,7 +117,7 @@ Notification delivery channel (implemented today: inbox, email, sms — push/sla
 | **id** | `string` | ✅ | Notification ID |
 | **name** | `string` | ✅ | Notification name |
 | **channel** | `Enum<'email' \| 'sms' \| 'push' \| 'in-app' \| 'slack' \| 'teams' \| 'webhook'>` | ✅ | Notification channel |
-| **template** | `{ id: string; subject: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; body: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; bodyType?: Enum<'text' \| 'html' \| 'markdown'>; … } \| { id: string; message: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; maxLength?: number; variables?: string[] } \| { title: string; body: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; icon?: string; badge?: number; … } \| { title: string; message: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; type: Enum<'info' \| 'success' \| 'warning' \| 'error'>; actionUrl?: string; … }` | ✅ | Notification template |
+| **template** | `{ id: string; subject: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; body: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; bodyType?: Enum<'text' \| 'html' \| 'markdown'>; … } \| { id: string; message: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; maxLength?: number; variables?: string[] } \| { title: string; body: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; icon?: string; badge?: number; … } \| { title: string; message: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; type: Enum<'info' \| 'success' \| 'warning' \| 'error'>; actionUrl?: string; … }` | ✅ | Notification template |
 | **recipients** | `{ to: string[]; cc?: string[]; bcc?: string[] }` | ✅ | Recipients |
 | **schedule** | `{ type: Enum<'immediate' \| 'delayed' \| 'scheduled'>; delay?: number; scheduledAt?: number }` | optional | Scheduling |
 | **retryPolicy** | `{ enabled?: boolean; maxRetries?: number; backoffStrategy: Enum<'exponential' \| 'linear' \| 'fixed'> }` | optional | Retry policy |
@@ -133,7 +133,7 @@ Notification delivery channel (implemented today: inbox, email, sms — push/sla
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **title** | `string` | ✅ | Notification title |
-| **body** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Notification body — supports `{{var}`} interpolation |
+| **body** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Notification body — supports `{{var}`} interpolation |
 | **icon** | `string` | optional | Notification icon URL |
 | **badge** | `number` | optional | Badge count |
 | **data** | `Record<string, any>` | optional | Custom data |
@@ -149,7 +149,7 @@ Notification delivery channel (implemented today: inbox, email, sms — push/sla
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Template identifier |
-| **message** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | SMS message content — supports `{{var}`} interpolation |
+| **message** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | SMS message content — supports `{{var}`} interpolation |
 | **maxLength** | `number` | optional | Maximum message length |
 | **variables** | `string[]` | optional | Template variables |
 

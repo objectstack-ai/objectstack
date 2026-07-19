@@ -39,7 +39,7 @@ const result = CriteriaSharingRule.parse(data);
 | **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | optional |  |
 | **sharedWith** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | The recipient of the shared access |
 | **type** | `'criteria'` | ✅ |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
 
 
 ---
@@ -121,7 +121,7 @@ This schema accepts one of the following structures:
 | **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | optional |  |
 | **sharedWith** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | The recipient of the shared access |
 | **type** | `'criteria'` | ✅ |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
 
 ---
 

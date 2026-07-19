@@ -32,7 +32,7 @@ const result = CronSchedule.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `'cron'` | ✅ |  |
-| **expression** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
+| **expression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
 | **timezone** | `string` | optional | Timezone for cron execution (e.g., "America/New_York") |
 
 
@@ -60,7 +60,7 @@ const result = CronSchedule.parse(data);
 | **name** | `string` | ✅ | Job name (snake_case) |
 | **label** | `string` | optional | Human-readable label |
 | **description** | `string` | optional | Job description / purpose |
-| **schedule** | `{ type: 'cron'; expression: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string } \| { type: 'interval'; intervalMs: integer } \| { type: 'once'; at: string }` | ✅ | Job schedule configuration |
+| **schedule** | `{ type: 'cron'; expression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string } \| { type: 'interval'; intervalMs: integer } \| { type: 'once'; at: string }` | ✅ | Job schedule configuration |
 | **handler** | `string` | ✅ | Handler function name (must match a key in `defineStack({ functions })`) |
 | **retryPolicy** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number }` | optional | Retry policy configuration. [EXPERIMENTAL — not enforced] The service-job scheduler does not yet read retryPolicy; failed runs are not retried per this config (liveness audit #1878/#1893). |
 | **timeout** | `integer` | optional | Timeout in milliseconds. [EXPERIMENTAL — not enforced] The service-job scheduler does not yet enforce a per-run timeout (liveness audit #1878/#1893). |
@@ -137,7 +137,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `'cron'` | ✅ |  |
-| **expression** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
+| **expression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
 | **timezone** | `string` | optional | Timezone for cron execution (e.g., "America/New_York") |
 
 ---

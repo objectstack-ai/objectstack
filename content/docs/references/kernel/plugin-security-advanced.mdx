@@ -146,7 +146,7 @@ Scope of permission application
 | **resource** | `Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| 'ui.report' \| 'system.config' \| 'system.plugin' \| 'system.api' \| 'system.service' \| 'storage.file' \| 'storage.database' \| 'network.http' \| 'network.websocket' \| 'process.spawn' \| 'process.env'>` | ✅ | Type of resource being accessed |
 | **actions** | `Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| 'share' \| 'export' \| 'import' \| 'admin'>[]` | ✅ |  |
 | **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>` | optional | Scope of permission application |
-| **filter** | `{ resourceIds?: string[]; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; fields?: string[] }` | optional |  |
+| **filter** | `{ resourceIds?: string[]; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; fields?: string[] }` | optional |  |
 | **description** | `string` | ✅ |  |
 | **required** | `boolean` | optional |  |
 | **justification** | `string` | optional | Why this permission is needed |

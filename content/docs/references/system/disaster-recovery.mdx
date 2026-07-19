@@ -58,7 +58,7 @@ Backup configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional | Backup strategy |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
+| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
 | **retention** | `{ days: number; minCopies?: number; maxCopies?: number }` | ✅ | Backup retention policy |
 | **destination** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>; bucket?: string; path?: string; region?: string }` | ✅ | Backup storage destination |
 | **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>; keyId?: string }` | optional | Backup encryption settings |
@@ -107,10 +107,10 @@ Complete disaster recovery plan configuration
 | **enabled** | `boolean` | optional | Enable disaster recovery plan |
 | **rpo** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Point Objective |
 | **rto** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Time Objective |
-| **backup** | `{ strategy?: Enum<'full' \| 'incremental' \| 'differential'>; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; retention: object; destination: object; … }` | ✅ | Backup configuration |
+| **backup** | `{ strategy?: Enum<'full' \| 'incremental' \| 'differential'>; schedule?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; retention: object; destination: object; … }` | ✅ | Backup configuration |
 | **failover** | `{ mode?: Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>; autoFailover?: boolean; healthCheckInterval?: number; failureThreshold?: number; … }` | optional | Multi-region failover configuration |
 | **replication** | `{ mode?: Enum<'synchronous' \| 'asynchronous' \| 'semi_synchronous'>; maxLagSeconds?: number; includeObjects?: string[]; excludeObjects?: string[] }` | optional | Data replication settings |
-| **testing** | `{ enabled?: boolean; schedule?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; notificationChannel?: string }` | optional | Automated disaster recovery testing |
+| **testing** | `{ enabled?: boolean; schedule?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; notificationChannel?: string }` | optional | Automated disaster recovery testing |
 | **runbookUrl** | `string` | optional | URL to disaster recovery runbook/playbook |
 | **contacts** | `{ name: string; role: string; email?: string; phone?: string }[]` | optional | Emergency contact list for DR incidents |
 

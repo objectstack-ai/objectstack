@@ -5,10 +5,11 @@
  *
  *  - {@link EvalContext}: input passed by call sites (hooks, seed loader, views).
  *  - {@link EvalResult}: discriminated union — never throws to the caller.
- *  - {@link DialectEngine}: contract any dialect (cel, js, cron) implements.
+ *  - {@link DialectEngine}: contract any dialect (cel, cron, template) implements.
  *
- * The shape is shared across `cel`, `js` and `cron` so the kernel can route
- * any persisted `Expression` to the correct engine without conditional logic.
+ * The shape is shared across `cel`, `cron` and `template` so the kernel can
+ * route any persisted `Expression` to the correct engine without conditional
+ * logic.
  */
 
 import type { Expression } from '@objectstack/spec';

@@ -80,7 +80,7 @@ const result = AIChatWindowProps.parse(data);
 | **fields** | `string[]` | optional | Fields to display (defaults to all editable fields) |
 | **mode** | `Enum<'create' \| 'edit'>` | optional | Form mode |
 | **submitLabel** | `string` | optional | Submit button label |
-| **onSubmit** | `string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Action expression on form submit (CEL) |
+| **onSubmit** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Action expression on form submit (CEL) |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -239,7 +239,7 @@ const result = AIChatWindowProps.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'line' \| 'card' \| 'pill'>` | optional |  |
 | **position** | `Enum<'top' \| 'left'>` | optional |  |
-| **items** | `{ label: string; icon?: string; visibleWhen?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; children: any[] }[]` | ✅ |  |
+| **items** | `{ label: string; icon?: string; visibleWhen?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; children: any[] }[]` | ✅ |  |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 

@@ -361,7 +361,7 @@ const result = FederationEntity.parse(data);
 | **fields** | `{ required?: string[]; selectable?: string[] }` | optional | Field selection configuration |
 | **authRequired** | `boolean` | optional | Require authentication |
 | **permissions** | `string[]` | optional | Required permissions |
-| **cache** | `{ enabled?: boolean; ttl?: integer; key?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }` | optional | Query caching |
+| **cache** | `{ enabled?: boolean; ttl?: integer; key?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }` | optional | Query caching |
 
 
 ---
@@ -408,7 +408,7 @@ const result = FederationEntity.parse(data);
 | :--- | :--- | :--- | :--- |
 | **path** | `string` | ✅ | Resolver path (Type.field) |
 | **type** | `Enum<'datasource' \| 'computed' \| 'script' \| 'proxy'>` | ✅ | Resolver implementation type |
-| **implementation** | `{ datasource?: string; query?: string; expression?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; dependencies?: string[]; … }` | optional | Implementation configuration |
+| **implementation** | `{ datasource?: string; query?: string; expression?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; dependencies?: string[]; … }` | optional | Implementation configuration |
 | **cache** | `{ enabled?: boolean; ttl?: integer; keyArgs?: string[] }` | optional | Resolver caching |
 
 

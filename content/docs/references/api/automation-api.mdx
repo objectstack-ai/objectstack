@@ -106,7 +106,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
 | **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean }[]` | optional | Flow variables |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
-| **edges** | `{ id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'js' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[]` | ✅ | Flow connections |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[]` | ✅ | Flow connections |
 | **active** | `boolean` | optional | Is active (Deprecated: use status) |
 | **runAs** | `Enum<'system' \| 'user'>` | optional | Execution identity for the run: system = elevated (bypasses RLS), user = the triggering user (RLS-respecting). A schedule-triggered run has no trigger user, so under user it runs UNSCOPED (elevated) — declare system to make that explicit. |
 | **errorHandling** | `{ strategy?: Enum<'fail' \| 'retry' \| 'continue'>; maxRetries?: integer; retryDelayMs?: integer; backoffMultiplier?: number; … }` | optional | Flow-level error handling configuration |
