@@ -15,6 +15,7 @@
 import { defineStack } from '@objectstack/spec';
 import { SysApprovalRequest } from '../src/sys-approval-request.object.js';
 import { SysApprovalAction } from '../src/sys-approval-action.object.js';
+import { SysApprovalDelegation } from '../src/sys-approval-delegation.object.js';
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
@@ -22,7 +23,7 @@ import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
 
 export default defineStack({
   name: 'plugin-approvals-i18n-extract',
-  objects: [SysApprovalRequest, SysApprovalAction] as any,
+  objects: [SysApprovalRequest, SysApprovalAction, SysApprovalDelegation] as any,
   translations: [
     { en: { objects: enObjects } },
     { 'zh-CN': { objects: zhCNObjects } },

@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ApprovalService, REMIND_COOLDOWN_MS } from './approval-service.js';
-import { bindApprovalLockHook, unbindAllHooks } from './lifecycle-hooks.js';
+import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
 
 interface FakeRow { [k: string]: any }
 
@@ -1221,5 +1221,69 @@ describe('ApprovalService — out-of-office delegation (#1322)', () => {
     seedDelegation([{ delegator_id: 'alice', delegate_id: 'bob', organization_id: null }]);
     const req = await svc.openNodeRequest(openInput(['alice']), CTX);
     expect(req.pending_approvers).toEqual(['bob']);
+  });
+});
+
+// ── Delegation self-service write guard (#1322 follow-up) ─────────────
+//
+// sys_approval_delegation is apiEnabled CRUD; a member must not be able to
+// forge a delegation for someone else (delegator_id = victim) and reroute the
+// victim's approvals. The guard forces delegator_id == acting user for normal
+// writes; system/admin contexts bypass. Row-ownership on update/delete is the
+// platform's created_by RLS (not exercised here).
+describe('sys_approval_delegation write guard (#1322)', () => {
+  const DEL = 'sys_approval_delegation';
+  let engine: ReturnType<typeof makeFakeEngine>;
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    bindDelegationWriteGuard(engine as any);
+  });
+
+  const fireInsert = (data: any, session: any) =>
+    (engine as any).fire('beforeInsert', { object: DEL, input: { data }, session });
+  const fireUpdate = (data: any, session: any) =>
+    (engine as any).fire('beforeUpdate', { object: DEL, input: { id: data?.id ?? 'd1', data }, session });
+  const member = (userId?: string) => ({ isSystem: false, roles: [], ...(userId ? { userId } : {}) });
+
+  it('allows a member to create their own delegation', async () => {
+    await expect(fireInsert({ delegator_id: 'u1', delegate_id: 'u2' }, member('u1'))).resolves.toBeUndefined();
+  });
+
+  it('rejects a member forging a delegation for someone else', async () => {
+    await expect(fireInsert({ delegator_id: 'victim', delegate_id: 'u1' }, member('u1'))).rejects.toThrow(/FORBIDDEN/);
+  });
+
+  it('stamps the caller as delegator when omitted on insert', async () => {
+    const data: any = { delegate_id: 'u2' };
+    await fireInsert(data, member('u1'));
+    expect(data.delegator_id).toBe('u1');
+  });
+
+  it('rejects an unauthenticated non-system insert', async () => {
+    await expect(fireInsert({ delegate_id: 'u2' }, member())).rejects.toThrow(/FORBIDDEN/);
+  });
+
+  it('bypasses the guard for system context', async () => {
+    await expect(fireInsert({ delegator_id: 'victim', delegate_id: 'u1' }, { isSystem: true })).resolves.toBeUndefined();
+  });
+
+  it('lets an admin set the delegator to anyone', async () => {
+    await expect(fireInsert({ delegator_id: 'victim', delegate_id: 'u2' }, { isSystem: false, roles: ['admin'], userId: 'admin1' })).resolves.toBeUndefined();
+  });
+
+  it('rejects a member relabelling delegator on update', async () => {
+    await expect(fireUpdate({ id: 'd1', delegator_id: 'victim' }, member('u1'))).rejects.toThrow(/FORBIDDEN/);
+  });
+
+  it('allows a member update that does not touch delegator_id', async () => {
+    await expect(fireUpdate({ id: 'd1', valid_until: '2026-06-01T00:00:00Z' }, member('u1'))).resolves.toBeUndefined();
+  });
+
+  it('rejects a batch insert if any row names a foreign delegator', async () => {
+    await expect(fireInsert(
+      [{ delegator_id: 'u1', delegate_id: 'u2' }, { delegator_id: 'victim', delegate_id: 'u3' }],
+      member('u1'),
+    )).rejects.toThrow(/FORBIDDEN/);
   });
 });

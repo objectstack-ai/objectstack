@@ -152,5 +152,54 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "全部"
       }
     }
+  },
+  sys_approval_delegation: {
+    label: "审批委派",
+    pluralLabel: "审批委派",
+    description: "自助不在岗规则：在时间窗内把该用户的审批人槽位改派给候补人（#1322 M1）。",
+    fields: {
+      id: {
+        label: "委派 ID"
+      },
+      delegator_id: {
+        label: "委派人",
+        help: "即将不在岗的用户；规则生效期间，路由到其个人的审批人槽位将被改派。"
+      },
+      delegate_id: {
+        label: "候补人",
+        help: "规则生效期间接收委派人审批的候补人。以其本人身份行使。"
+      },
+      valid_from: {
+        label: "生效时间",
+        help: "此刻之前规则不生效。留空 = 立即生效。在解析时通过 isGrantActive 强制（ADR-0091 D2 判定式）——绝不依赖后台任务。"
+      },
+      valid_until: {
+        label: "失效时间",
+        help: "此刻（含）及之后规则不生效（半开区间 [from, until)，UTC）。留空 = 永不过期。"
+      },
+      reason: {
+        label: "原因",
+        help: "委派存在的原因（例如“年假 5/26–5/30”）。会记入改派审计行。"
+      },
+      organization_id: {
+        label: "组织",
+        help: "拥有此规则的租户；留空 = 对该委派人跨租户生效。"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      }
+    },
+    _views: {
+      active: {
+        label: "生效中",
+        emptyState: {
+          title: "暂无委派",
+          message: "声明一条不在岗委派，休假期间审批自动改派给候补人。"
+        }
+      }
+    }
   }
 };

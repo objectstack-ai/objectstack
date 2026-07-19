@@ -13,7 +13,7 @@ import {
   ESCALATION_SCAN_INTERVAL_MS,
   type ApprovalEngine,
 } from './approval-service.js';
-import { bindApprovalLockHook, unbindAllHooks } from './lifecycle-hooks.js';
+import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 
 export interface ApprovalsPluginOptions {
@@ -124,12 +124,16 @@ export class ApprovalsServicePlugin implements Plugin {
     });
 
     // Record lock: block edits to a record while it has a pending request.
+    // Delegation write-guard: a self-service OOO delegation may only name the
+    // acting user as delegator (#1322 follow-up). Both bind under the same
+    // package id, so unbindAllHooks clears them together.
     if (!this.options.disableAutoHooks) {
       try {
         unbindAllHooks(engine);
         bindApprovalLockHook(engine, ctx.logger);
+        bindDelegationWriteGuard(engine, ctx.logger);
       } catch (err: any) {
-        ctx.logger.warn?.('[approvals] failed to bind record-lock hook', { error: err?.message });
+        ctx.logger.warn?.('[approvals] failed to bind approval hooks', { error: err?.message });
       }
     }
 

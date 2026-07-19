@@ -109,6 +109,70 @@ export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogg
   logger?.info?.('[approvals] record-lock hook bound');
 }
 
+/** The self-service out-of-office delegation object (#1322). */
+export const DELEGATION_OBJECT = 'sys_approval_delegation';
+
+/**
+ * Self-service write guard for `sys_approval_delegation` (#1322 follow-up).
+ *
+ * The object is `apiEnabled` CRUD so a user can declare their own out-of-office
+ * delegation. But it is a system object: it gets no auto `owner_id` anchor and
+ * (with no `sharingModel`) defaults to a `public` sharing model, so an
+ * unguarded member could **forge a delegation for someone else**
+ * (`delegator_id = victim`) and reroute the victim's individually-routed
+ * approvals to themselves. This guard forces a normal user's writes to name
+ * themselves as the delegator:
+ *
+ *   - **system** context (service / seed / import) → bypass;
+ *   - **admin** (`roles` includes `'admin'`) → may set `delegator_id` to anyone;
+ *   - otherwise `delegator_id` must equal the acting user — an absent delegator
+ *     on insert is stamped to the caller, a foreign delegator is rejected.
+ *
+ * Row-level ownership on update/delete (you can only touch a delegation you
+ * created) is already enforced by `member_default`'s wildcard
+ * `created_by == current_user.id` RLS; this guard adds the delegator-identity
+ * check that RLS alone can't express. Mirrors the ADR-0092 identity write-guard
+ * shape and the security plugin's `owner_id` anchor guard, scoped to this one
+ * object.
+ */
+export function bindDelegationWriteGuard(engine: MinimalEngine, logger?: MinimalLogger): void {
+  const makeGuard = (isInsert: boolean) => async (ctx: any) => {
+    const session = (ctx?.session ?? {}) as any;
+    if (session.isSystem) return;                                    // service / seed / import
+    const roles = (session.roles ?? []) as unknown[];
+    if (Array.isArray(roles) && roles.includes('admin')) return;     // admin may act for anyone
+    const userId = session.userId != null ? String(session.userId) : '';
+    const data = ctx?.input?.data;
+    const rows = Array.isArray(data) ? data : (data && typeof data === 'object' ? [data] : []);
+    const deny = (): never => {
+      const err: any = new Error(
+        'FORBIDDEN: you may only manage out-of-office delegations where you are the delegator'
+        + (userId ? ` ('${userId}')` : ''),
+      );
+      err.code = 'FORBIDDEN';
+      err.statusCode = 403;
+      throw err;
+    };
+    for (const row of rows) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+      const has = Object.prototype.hasOwnProperty.call(row, 'delegator_id');
+      const supplied = has ? String((row as any).delegator_id ?? '') : '';
+      if (isInsert && (!has || supplied === '')) {
+        // Self-service: stamp the caller as delegator when omitted (the schema's
+        // `required` is the fallback if the engine doesn't persist the stamp).
+        if (!userId) deny();
+        (row as any).delegator_id = userId;
+        continue;
+      }
+      // A foreign delegator on insert (forge) or update (relabel/hijack) → deny.
+      if (has && supplied !== userId) deny();
+    }
+  };
+  engine.registerHook('beforeInsert', makeGuard(true), { object: DELEGATION_OBJECT, packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
+  engine.registerHook('beforeUpdate', makeGuard(false), { object: DELEGATION_OBJECT, packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
+  logger?.info?.('[approvals] delegation write-guard bound');
+}
+
 /** Unregister every hook the lock module registered. */
 export function unbindAllHooks(engine: MinimalEngine): number {
   return engine.unregisterHooksByPackage(APPROVALS_HOOK_PACKAGE);

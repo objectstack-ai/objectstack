@@ -152,5 +152,54 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "All"
       }
     }
+  },
+  sys_approval_delegation: {
+    label: "Approval Delegation",
+    pluralLabel: "Approval Delegations",
+    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window (#1322 M1).",
+    fields: {
+      id: {
+        label: "Delegation ID"
+      },
+      delegator_id: {
+        label: "Delegator",
+        help: "The user going out of office; their individually-routed approver slots are rerouted while active."
+      },
+      delegate_id: {
+        label: "Delegate",
+        help: "The backup who receives the delegator's approvals while this rule is active. Acts under their own identity."
+      },
+      valid_from: {
+        label: "Valid From",
+        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive (ADR-0091 D2 predicate) — never by a background job."
+      },
+      valid_until: {
+        label: "Valid Until",
+        help: "Rule is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires."
+      },
+      reason: {
+        label: "Reason",
+        help: "Why the delegation exists (e.g. \"Annual leave 5/26\u20135/30\"). Recorded on the substitution audit row."
+      },
+      organization_id: {
+        label: "Organization",
+        help: "Tenant that owns this rule; null = applies across tenants for this delegator."
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      active: {
+        label: "Active",
+        emptyState: {
+          title: "No delegations",
+          message: "Declare an out-of-office delegation so approvals route to a backup while you are away."
+        }
+      }
+    }
   }
 };
