@@ -1390,3 +1390,59 @@ describe('ApprovalService — quorum & per_group (#3266)', () => {
     expect(act.attachments).toEqual(['file_1', 'file_2']);
   });
 });
+
+// ── Decision progress + notification deep links (#2678 P1.5) ──────────
+describe('ApprovalService — decision_progress & deep links (#2678 P1.5)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    let n = 0;
+    const base = new Date('2026-09-01T09:00:00Z').getTime();
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(base + (n++) * 1000) } });
+  });
+
+  const cfg = (approvers: any[], behavior: string, extra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    config: { approvers, behavior, lockRecord: true, ...extra },
+  });
+  const U = (v: string, group?: string) => (group ? { type: 'user', value: v, group } : { type: 'user', value: v });
+
+  it('per_group: getRequest exposes per-group progress that updates per approval', async () => {
+    const req = await svc.openNodeRequest(cfg([U('l1', 'legal'), U('f1', 'finance')], 'per_group'), CTX);
+    let row: any = await svc.getRequest(req.id, SYS);
+    expect(row.decision_progress).toMatchObject({ behavior: 'per_group', got: 0, need: 2 });
+    expect(row.decision_progress.groups).toEqual([
+      { group: 'finance', got: 0, need: 1, satisfied: false },
+      { group: 'legal', got: 0, need: 1, satisfied: false },
+    ]);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'l1' }, SYS);
+    row = await svc.getRequest(req.id, SYS);
+    expect(row.decision_progress.got).toBe(1);
+    expect(row.decision_progress.groups.find((g: any) => g.group === 'legal')).toMatchObject({ got: 1, satisfied: true });
+    expect(row.decision_progress.groups.find((g: any) => g.group === 'finance')).toMatchObject({ got: 0, satisfied: false });
+  });
+
+  it('quorum: progress reports approvals against the clamped threshold', async () => {
+    const req = await svc.openNodeRequest(cfg([U('u1'), U('u2'), U('u3')], 'quorum', { minApprovals: 2 }), CTX);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u1' }, SYS);
+    const row: any = await svc.getRequest(req.id, SYS);
+    expect(row.decision_progress).toMatchObject({ behavior: 'quorum', got: 1, need: 2 });
+  });
+
+  it('first_response: no decision_progress', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const row: any = await svc.getRequest(req.id, SYS);
+    expect(row.decision_progress).toBeUndefined();
+  });
+
+  it('notify: inbox actionUrl is rewritten to a request deep link', async () => {
+    const emitted: any[] = [];
+    svc.attachMessaging({ async emit(input) { emitted.push(input); } });
+    const req = await svc.openNodeRequest(openInput(['u1', 'u2']), CTX);
+    await svc.reassign(req.id, { actorId: 'u1', to: 'u7' }, SYS);
+    const note = emitted.find(e => e.topic === 'approval.reassigned');
+    expect(note.payload.actionUrl).toBe(`/system/approvals?request=${encodeURIComponent(req.id)}`);
+  });
+});

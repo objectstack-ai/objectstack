@@ -268,8 +268,20 @@ export class ApprovalService implements IApprovalService {
   }): Promise<number> {
     const audience = input.audience.filter(a => a && !a.includes(':'));
     if (!this.messaging || !audience.length) return 0;
+    // Deep-link the inbox (#2678 P1.5): a notification about one request should
+    // land on that request, not the bare inbox. Rewritten centrally so every
+    // call site — and any future one — inherits it; the query param is read by
+    // the console inbox to auto-open the drawer.
+    let payload = input.payload;
+    if (
+      payload?.actionUrl === '/system/approvals'
+      && input.source?.object === 'sys_approval_request'
+      && input.source.id
+    ) {
+      payload = { ...payload, actionUrl: `/system/approvals?request=${encodeURIComponent(input.source.id)}` };
+    }
     try {
-      await this.messaging.emit({ severity: 'info', ...input, audience });
+      await this.messaging.emit({ severity: 'info', ...input, payload, audience });
       return audience.length;
     } catch (err: any) {
       this.logger?.warn?.('[approvals] notification failed', {
@@ -2204,7 +2216,54 @@ export class ApprovalService implements IApprovalService {
     const row = rowFromRequest(rows[0]);
     await this.enrichRows([row]);
     await this.attachFlowSteps(row);
+    await this.attachDecisionProgress(row, rows[0]);
     return row;
+  }
+
+  /**
+   * Server-computed decision aggregation progress (#3266 / objectui#2678 P1.5).
+   * Single-read enrichment only (like {@link ApprovalService.attachFlowSteps}):
+   * for a PENDING request whose behavior aggregates multiple approvals
+   * (`unanimous` / `quorum` / `per_group`), expose
+   * `decision_progress: { behavior, got, need, groups? }` so any client renders
+   * "2 of 3" or per-group ticks without re-deriving the engine's tally rules.
+   * `first_response` requests carry no progress (one approval finalizes).
+   * Display-only and best-effort — errors leave the row untouched.
+   */
+  private async attachDecisionProgress(row: ApprovalRequestRow, raw: any): Promise<void> {
+    try {
+      if (row.status !== 'pending') return;
+      const cfg = parseJson<any>(raw.node_config_json, undefined);
+      const behavior = cfg?.behavior ?? 'first_response';
+      if (behavior !== 'unanimous' && behavior !== 'quorum' && behavior !== 'per_group') return;
+
+      const acts = await this.engine.find('sys_approval_action', {
+        where: { request_id: row.id, step_index: 0, action: 'approve' }, limit: 1000, context: SYSTEM_CTX,
+      });
+      const approved = new Set<string>((acts ?? []).map((a: any) => String(a.actor_id ?? '')).filter(Boolean));
+
+      const snapshot = cfg?.__approverGroups as Record<string, string[]> | undefined;
+      const slate = snapshot ? Object.keys(snapshot) : [...approved, ...(row.pending_approvers ?? [])];
+      const total = slate.length || 1;
+
+      const progress: any = { behavior, got: approved.size, need: total };
+      if (behavior === 'quorum') {
+        progress.need = Math.min(Math.max(1, cfg?.minApprovals ?? total), total);
+      } else if (behavior === 'per_group' && snapshot) {
+        const perGroupNeed = Math.max(1, cfg?.minApprovals ?? 1);
+        const size: Record<string, number> = {};
+        for (const gs of Object.values(snapshot)) for (const g of gs) size[g] = (size[g] ?? 0) + 1;
+        const got: Record<string, number> = {};
+        for (const a of approved) for (const g of (snapshot[a] ?? [])) got[g] = (got[g] ?? 0) + 1;
+        progress.groups = Object.keys(size).sort().map(g => {
+          const need = Math.min(perGroupNeed, size[g]);
+          return { group: g, got: Math.min(got[g] ?? 0, need), need, satisfied: (got[g] ?? 0) >= need };
+        });
+        progress.got = progress.groups.filter((g: any) => g.satisfied).length;
+        progress.need = progress.groups.length;
+      }
+      (row as any).decision_progress = progress;
+    } catch { /* display-only enrichment */ }
   }
 
   /**

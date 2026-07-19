@@ -97,6 +97,21 @@ export interface ApprovalRequestRow {
    * `node_config_json` snapshot (`__round`), so no schema migration.
    */
   round?: number;
+  /**
+   * Server-computed decision aggregation progress (#3266, single-request reads
+   * of PENDING requests only). Present when the node's behavior aggregates
+   * multiple approvals: `unanimous` (got/need = approvals of total),
+   * `quorum` (got/need = approvals of the M threshold), `per_group`
+   * (got/need = satisfied groups of total groups, plus per-group detail).
+   * Absent for `first_response`. Display-only — the engine's finalization
+   * tally in decideNode stays authoritative.
+   */
+  decision_progress?: {
+    behavior: 'unanimous' | 'quorum' | 'per_group';
+    got: number;
+    need: number;
+    groups?: Array<{ group: string; got: number; need: number; satisfied: boolean }>;
+  };
 }
 
 /** Kinds of entries on a request's audit trail. */
