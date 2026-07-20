@@ -85,7 +85,7 @@ ctx = {
   input,        // mutable input — record fields exposed flat (raw wrapper: input.data, input.options)
   result,       // mutable operation result (after* events)
   previous,     // record state before the operation (update/delete)
-  session,      // { userId, tenantId, positions, accessToken, isSystem }
+  session,      // { userId, organizationId, positions, accessToken, isSystem }
   user,         // { id, name, email } convenience shortcut — reserved for future use;
                 // not currently set by the engine, use session.userId instead
   transaction,  // active transaction handle, if any

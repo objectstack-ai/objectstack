@@ -631,7 +631,7 @@ These properties are available on **all** field types:
 | `searchable` | `boolean` | `false` | Include in search index |
 | `sortable` | `boolean` | `true` | Allow sorting by this field |
 | `hidden` | `boolean` | `false` | Hide from default views |
-| `readonly` | `boolean` | `false` | Prevent user edits |
+| `readonly` | `boolean` | `false` | Server contract — non-system writes to this field are stripped on **both** INSERT and UPDATE (the value falls back to `defaultValue`), not just hidden in the UI (#2948 / #3043) |
 | `externalId` | `boolean` | `false` | External system identifier |
 | `defaultValue` | `any` | — | Default value for new records |
 | `group` | `string` | — | Field grouping / section |

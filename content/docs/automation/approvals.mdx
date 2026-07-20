@@ -296,6 +296,32 @@ their own pending request never sees Approve/Reject/Reassign (buttons the server
 would 403 anyway), and a position-addressed approver is never wrongly hidden.
 The service stays the sole authority — the predicate only trims the UI.
 
+### Progress and notification deep links
+
+A pending multi-approver request also carries a **server-computed
+`decision_progress`** block, so the console shows real progress rather than a
+client guess:
+
+```jsonc
+// getRequest, for a pending multi-approver request:
+"decision_progress": {
+  "behavior": "per_group",
+  "got": 1, "need": 2,                 // unanimous / quorum: a running M-of-N tally
+  "groups": [                          // per_group: one entry per approver group
+    { "label": "manager", "got": 1, "need": 1 },
+    { "label": "finance", "got": 0, "need": 1 }
+  ]
+}
+```
+
+It is computed from the open-time approver snapshot (OOO substitution applied),
+so it reflects who **actually** still needs to sign — the console renders it as
+per-group tick badges or a "2 of 3 · finance pending" count.
+
+Approval **notifications deep-link into the request**: `notify()` rewrites the
+inbox action URL to `/system/approvals?request=<id>`, so clicking the bell opens
+that request's drawer directly instead of a generic list.
+
 ### Timeouts and escalation
 
 `escalation` is real, not decorative: set `enabled: true` and `timeoutHours`,

@@ -489,9 +489,9 @@ interface HookContext {
   // Execution context
   session?: {
     userId?: string;
-    organizationId?: string; // Active org — blessed name. Matches the
-                             // `organization_id` column + `current_user.organizationId` (RLS)
-    tenantId?: string;       // @deprecated alias of organizationId (identical value)
+    organizationId?: string; // Active org — the single blessed name. Matches the
+                             // `organization_id` column + `current_user.organizationId` (RLS).
+                             // The former `tenantId` alias was removed in #3290.
     roles?: string[];
     accessToken?: string;
   };
@@ -524,7 +524,7 @@ predicates, and in seed rows. Read it as **`organizationId`**:
 const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 ```
 
-> The former `ctx.session.tenantId` alias was removed in v11 (#3290) — read the
+> The former `ctx.session.tenantId` alias was removed in v16 (#3290) — read the
 > org under `organizationId`. (The generic driver-layer `execCtx.tenantId` /
 > `DriverOptions.tenantId` isolation knob is a separate axis and is unaffected.)
 

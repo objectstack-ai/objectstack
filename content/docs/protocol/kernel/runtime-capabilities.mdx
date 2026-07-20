@@ -106,6 +106,7 @@ The **Data Layer** capabilities define what query operations, data types, and bu
 |-----------|---------|-------------|
 | `transactions` | `true` | Database transaction support |
 | `bulkOperations` | `true` | Bulk create/update/delete |
+| `transactionalBatch` | — | Surfaced in **discovery** (`client.capabilities.transactionalBatch`, #3298): `true` iff the atomic cross-object batch route (`POST {basePath}/batch`, ADR-0034) is mounted **and** the engine can honour a transaction. Lets clients negotiate `client.data.batchTransaction(...)` at connect time instead of probing `404`/`405`/`501`. |
 
 ### Driver Support
 

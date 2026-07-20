@@ -36,21 +36,25 @@ Every expression in metadata is persisted as the same envelope:
 
 ```ts
 type Expression = {
-  dialect: 'cel' | 'js' | 'cron' | 'template';
+  dialect: 'cel' | 'cron' | 'template';
   source?: string;          // surface syntax
   ast?: unknown;            // parsed AST (filled by `objectstack compile`)
   meta?: { rationale?: string; generatedBy?: string };
 };
 ```
 
-ObjectStack ships **four** registered dialects (M9.9):
+ObjectStack ships **three** registered expression dialects:
 
 | Dialect    | Use for                                              | Helper        |
 |:-----------|:-----------------------------------------------------|:--------------|
 | `cel`      | computed values, predicates, defaults, formulas      | `` cel`...` `` / `` F`...` `` / `` P`...` `` |
 | `cron`     | recurring schedules (Job, ETL, sync, exports, jobs)  | `` cron`...` `` |
 | `template` | text interpolation (`{{path}}`) — notif/prompt/title | `` tmpl`...` `` |
-| `js`       | sandboxed L2 hook bodies (TypeScript source)         | n/a           |
+
+The `js` **expression** dialect was retired in v16 (#3278, ADR-0058 addendum) —
+it was a stub with no engine. Procedural JavaScript is unaffected: it remains the
+**L2** authoring surface as a sandboxed `ScriptBody { language: 'js' }` in
+hook/action bodies (a separate enum), not an expression dialect.
 
 All dialects share the same variable scope (`record`, `previous`, `os.user`,
 `os.org`, `os.env`, `vars` for flow steps), so you author once and never have
@@ -175,6 +179,7 @@ All functions are pure given a pinned `now`, which is what makes
 | `matches(s, regex)` | bool | Regex test |
 | `len(v)` | int | Length of a string / list / map (mirrors CEL's built-in `size()`) |
 | `abs(x)` / `round(x)` | number | Numeric helpers |
+| `floor(x)` / `ceil(x)` | number | Round toward −∞ / +∞ (`floor(-1.2) == -2`) — **not** integer-division's round-toward-zero |
 | `min(a, b)` / `max(a, b)` | dyn | Smaller / larger operand (numeric comparison) |
 
 Add new helpers in
@@ -211,6 +216,7 @@ come at two severities: **errors** fail the build; **warnings** are advisory
 | **Field must exist** — a typo'd `record.<field>` is flagged with a did-you-mean. | `record.amont` → `record.amount` | error |
 | **Unknown function** — a misspelled or nonexistent stdlib call. | `isBlnk(record.x)` | error |
 | **Type soundness** — a text or boolean field used with an arithmetic (`+ - * / %`) or ordering (`< > <= >=`) operator against a number faults at runtime and evaluates to `null`. Store it as a number field, or drop the arithmetic. | `record.title * 2` | warning |
+| **Date arithmetic** — a `date` / `datetime` field used with `+` / `-` against a number (a `YYYY-MM-DD` value is a string at runtime, so this always faulted to `null`). Use the date helpers instead. | `record.end_date - record.start_date + 1` → `daysBetween(record.start_date, record.end_date) + 1`; `today() + 30` → `daysFromNow(30)`; `record.date + n` → `addDays(record.date, n)` | error (#3306) |
 
 > **Integer literals in arithmetic are fine.** `record.amount / 100`,
 > `record.price * 2`, `record.total - fee` all work — the engine handles mixed
@@ -384,6 +390,18 @@ Field.formula({
   expression: 'daysBetween(today(), record.created_date)',
 })
 ```
+
+<Callout type="info">
+**`dateField == today()` now matches (#3183).** A `date` field reads back as a
+`YYYY-MM-DD` string, and CEL treats a string and a timestamp as unequal — so the
+natural "is it due today" predicate used to silently return `false`. The engine
+now rewrites temporal `==` / `!=` comparisons (coercing the field operand with
+`date(...)`), so `record.due_date == today()` matches on the calendar day. This
+applies to formulas, defaults, validation rules, and hook/flow conditions.
+Ordering (`< > <= >=`) and string equality (`record.d == "2026-06-20"`) were
+always fine. This is the read-side counterpart to the date-arithmetic build
+error above — equality is rewritten and works; `+`/`-` arithmetic is rejected.
+</Callout>
 
 ### Financial Calculations
 

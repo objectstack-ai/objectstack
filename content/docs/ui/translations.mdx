@@ -69,6 +69,7 @@ export default defineStack({
 | Picklist option labels | `objects.<name>.fields.<field>.options.<value>` |
 | View titles, descriptions, empty states | `objects.<name>._views.<view>` |
 | Action labels, confirm text, success messages | `objects.<name>._actions.<action>` |
+| Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
 | Form sections | `objects.<name>._sections.<section>` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
 | Dashboards and widgets | `dashboards.<name>` |
@@ -76,6 +77,20 @@ export default defineStack({
 
 The metadata types resolved per request are **object, view, action, app, and
 dashboard** — a field's labels are translated as part of its object document.
+
+<Callout type="info">
+**One-shot result dialogs are translatable (#3347).** The post-success
+`resultDialog` shown by actions like `create_user` (temporary password), 2FA
+backup codes, and OAuth client-secret rotation carries its own
+`_actions.<action>.resultDialog` slot (`title` / `description` / `acknowledge`
+and `fields` keyed by the literal result-field path, e.g. `"user.email"`).
+`os i18n extract` emits these keys; the shipped platform dialogs ship
+en / zh-CN / ja-JP / es-ES copy. Separately, **platform notification and
+storage strings localize to the recipient's locale** — collaboration
+assignment / @mention bell titles resolve in the locale of whoever reads the
+bell (not the actor), and `sys_file` / `sys_upload_session` ship their own
+bundles so the file-detail page and its status pipeline are localized (#3354).
+</Callout>
 
 ## How a locale is chosen
 

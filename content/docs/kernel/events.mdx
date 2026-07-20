@@ -74,7 +74,7 @@ Every data hook is a single-argument handler `(ctx: HookContext) => void | Promi
 | `ctx.input` | **Mutable** input. Shapes: insert `{ data }`, update `{ id, data }`, delete `{ id }`. Modify this to change the operation. |
 | `ctx.result` | Operation result, available in `after*` events (mutable). |
 | `ctx.previous` | Record state before the operation (update/delete). |
-| `ctx.session` | Auth/tenancy info (`userId`, `tenantId`, `roles`, …). |
+| `ctx.session` | Auth/tenancy info (`userId`, `organizationId`, `roles`, …). |
 | `ctx.api` | Scoped cross-object data access. |
 
 ### Registering Data Hooks
