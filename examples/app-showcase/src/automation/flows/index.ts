@@ -1430,9 +1430,115 @@ export const ExpenseSignoffFlow = defineFlow({
   ],
 });
 
+/**
+ * Committee Quorum (#3266) — a `quorum` (M-of-N) approval, the collective
+ * sign-off complement to {@link ExpenseSignoffFlow}'s per-group 会签. A
+ * high-value expense report needs **any 2 of 3** committee members (manager /
+ * finance / legal) to approve; a single rejection still vetoes, and
+ * `minApprovals` clamps to the approver count so a misconfiguration can never
+ * deadlock. Where `per_group` requires one from EACH group, `quorum` counts a
+ * flat tally across all approvers.
+ */
+export const CommitteeQuorumFlow = defineFlow({
+  name: 'showcase_committee_quorum',
+  label: 'High-Value Expense — Committee Quorum',
+  description: 'Any 2-of-3 committee members approve a high-value expense report (#3266 quorum / M-of-N).',
+  type: 'autolaunched',
+  status: 'active',
+  nodes: [
+    {
+      id: 'start',
+      type: 'start',
+      label: 'On High-Value Submitted',
+      config: {
+        objectName: 'showcase_expense_report',
+        triggerType: 'record-after-update',
+        condition: 'status == "submitted" && previous.status != "submitted" && total_amount >= 5000',
+      },
+    },
+    {
+      id: 'committee',
+      type: 'approval',
+      label: 'Committee Sign-off (2 of 3)',
+      config: {
+        approvers: [
+          { type: 'position', value: 'manager' },
+          { type: 'position', value: 'finance' },
+          { type: 'position', value: 'legal' },
+        ],
+        behavior: 'quorum',
+        minApprovals: 2,
+        lockRecord: true,
+      },
+    },
+    { id: 'approved', type: 'end', label: 'Approved' },
+    { id: 'rejected', type: 'end', label: 'Rejected' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'committee' },
+    { id: 'e2', source: 'committee', target: 'approved', label: 'approve' },
+    { id: 'e3', source: 'committee', target: 'rejected', label: 'reject' },
+  ],
+});
+
+/**
+ * Task Due Reminder (#1874) — a declarative `timeRelative` sweep, far more
+ * robust than a `record_change` flow gated on `due_date == daysFromNow(n)`
+ * (which fires only if the task happens to be edited on the exact threshold
+ * day). A daily sweep launches this flow **once per matching task** at T-minus
+ * 3 and 1 days before its `due_date`, with the task on the flow context. Swap
+ * `offsetDays` for `withinDays: 7` to nudge everything due within a week
+ * (negative = overdue lookback).
+ */
+export const TaskDueReminderFlow = defineFlow({
+  name: 'showcase_task_due_reminder',
+  label: 'Task Due Reminder',
+  description: 'Daily sweep: remind the owner 3 and 1 days before an open task is due (#1874 time-relative).',
+  type: 'schedule',
+  status: 'active',
+  runAs: 'system', // a sweep has no trigger user — elevate explicitly
+  nodes: [
+    {
+      id: 'start',
+      type: 'start',
+      label: 'Daily Sweep',
+      config: {
+        timeRelative: {
+          object: 'showcase_task',
+          dateField: 'due_date',
+          offsetDays: [3, 1], // — or — withinDays: 7 (negative = overdue lookback)
+          filter: { status: { $ne: 'done' } }, // optional, ANDed with the date window
+        },
+        // schedule defaults to daily 08:00 UTC; override with
+        // schedule: { type: 'cron', expression: '0 8 * * *' }
+      },
+    },
+    {
+      id: 'remind_owner',
+      type: 'notify',
+      label: 'Remind Owner',
+      config: {
+        topic: 'task.due_soon',
+        channels: ['inbox'],
+        severity: 'warning',
+        title: 'Task due soon: {record.title}',
+        message: 'Your task "{record.title}" is due on {record.due_date}.',
+        actionUrl: '/showcase_task',
+      },
+    },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'remind_owner' },
+    { id: 'e2', source: 'remind_owner', target: 'end' },
+  ],
+});
+
 export const allFlows = [
   TaskCompletedFlow,
   ExpenseSignoffFlow,
+  CommitteeQuorumFlow,
+  TaskDueReminderFlow,
   ReassignWizardFlow,
   InquiryPurgeFlow,
   BudgetApprovalFlow,

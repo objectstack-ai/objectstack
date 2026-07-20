@@ -124,9 +124,12 @@ export const Project = ObjectSchema.create({
       label: 'Project Status Flow',
       description: 'Projects progress through valid status transitions.',
       field: 'status',
-      // State machines validate *transitions*, so they run on update only —
-      // an insert sets the initial state (constrained by the select options).
-      events: ['update'] as const,
+      // `transitions` govern UPDATE; `initialStates` (#3165) is the FSM entry
+      // point on INSERT — without it a `select` would accept ANY option as the
+      // initial value, so a project could be born already `completed`. Requiring
+      // `insert` in `events` is what makes the initialStates check run on create.
+      events: ['insert', 'update'] as const,
+      initialStates: ['planned'],
       message: 'Invalid project status transition.',
       transitions: {
         planned: ['active', 'cancelled'],
