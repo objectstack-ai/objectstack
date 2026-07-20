@@ -162,9 +162,23 @@ jobs:
         # (a) PRs exercise the official runtime Dockerfile itself, and
         # (b) the e2e stays hermetic — no dependency on a prior release
         # having published the tag (chicken-and-egg on the very first one).
+        #
+        # Pin the runtime's CLI to the SAME version the generated project
+        # actually resolved to — NOT a hardcoded `latest`. The scaffolded
+        # artifact is built by that project's `@objectstack/cli` and carries
+        # its `engines.protocol` major; `os start` in the runtime image rejects
+        # any artifact from a different protocol major. During an RC window the
+        # project pins `^<repo rc>` (e.g. 16.0.0-rc.1, protocol 16) while the
+        # `latest` dist-tag still points at the last STABLE cli (protocol 15),
+        # so a hardcoded `latest` skews the two and boot fails. Reading the
+        # resolved version keeps the image in lockstep whether the project got
+        # the repo RC, the `latest` fallback (see the install step), or a
+        # published stable.
         run: |
+          CLI_VERSION=$(node -p "require('$RUNNER_TEMP/e2e-app/node_modules/@objectstack/cli/package.json').version")
+          echo "Runtime image will bundle @objectstack/cli@$CLI_VERSION (matches the scaffolded artifact's protocol)"
           docker build -t ghcr.io/objectstack-ai/objectstack:latest \
-            --build-arg OS_CLI_VERSION=latest \
+            --build-arg OS_CLI_VERSION="$CLI_VERSION" \
             "$GITHUB_WORKSPACE/docker"
 
       - name: Docker build and run (scaffolded Dockerfile)
