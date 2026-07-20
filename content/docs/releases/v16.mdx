@@ -525,6 +525,14 @@ re-exports from `spec/ui` are dropped; import them from `@objectstack/spec`
 directly) and the removal of the Gantt mobile QR-share context action
 (#2687).
 
+> **Console vs. pin.** The Console section below is sourced from **objectui's
+> own changesets**, not only the `@objectstack/console` bundle-bump summaries
+> (a bump pins a SHA and can lag objectui `main`). Four 16.0-line frontend
+> changes had merged in objectui but landed *after* the `94d4876` pin — two of
+> them minor features — so they are not in the `rc.0` bundle yet; they ship
+> with the next console pin and are called out under
+> [Landed in objectui, pending the next console pin](#landed-in-objectui-pending-the-next-console-pin).
+
 ### Approvals inbox goes metadata-driven (#2678 line)
 
 - **`DeclaredActionsBar` (#2692):** a reusable bar that renders and executes
@@ -645,6 +653,38 @@ and curated capability labels + picker group headers localize (B5).
   toggle (#2658, #2659); dashboard label fallbacks and skill activation
   editors are fixed (#2666); AgentPreview drops the removed agent
   `visibility` (#2665).
+
+### Landed in objectui, pending the next console pin
+
+These 16.0-line frontend changes merged in objectui **after** the `94d4876`
+SHA that `@objectstack/console` `rc.0` pins, so they are not in the `rc.0`
+bundle — they ship with the next console pin (folded here for a complete
+frontend picture; sourced from objectui's changesets, not the bump summary):
+
+- **Import wizard defaults to the `auto` password policy (objectui#2701,
+  minor).** The Console counterpart to framework#3236: the "Sign-in setup for
+  imported users" selector gains an **Automatic (recommended)** option, now the
+  default (was "No password"). It decides per row server-side — reachable users
+  are invited (email / SMS), unreachable ones get a one-time password shown
+  once on the result screen — and the one-time-password reveal now surfaces
+  only the rows that actually fell back, not the whole batch.
+- **Schema-driven `keyValue` / `numberList` mapping in the flow inspector
+  (objectui#2708, minor).** `jsonSchemaToFlowFields` (ADR-0018) now maps an
+  object with `additionalProperties` and no fixed `properties` → a `keyValue`
+  editor, and a number/integer array → `numberList` — the objectui half of
+  framework#3304, giving previously schema-less flow nodes (assignment, the
+  CRUD quartet, script, subflow, screen) a server-driven config form.
+- **ActionParamDialog upload guard + `autonumber` mapping (objectui#2707,
+  ADR-0059 follow-up).** Confirm is disabled while a `file`/`image` param is
+  still uploading (its value only becomes the fileId once the presigned upload
+  settles), and the spec `autonumber` field/param spelling now maps to the
+  AutoNumber widget instead of falling through to a text input.
+- **System-field classification consolidated (objectui#2706).** The grid
+  record-detail drawer, record picker (`deriveLookupColumns`), and
+  `RecordDetailDrawer` route through the shared
+  `isSystemManagedField` / `SYSTEM_MANAGED_FIELD_NAMES` classifier, so the
+  framework-injected `owner_id` lands in the muted meta section consistently
+  (follow-up to the #2702 leading-column fix).
 
 ## Upgrade checklist
 
