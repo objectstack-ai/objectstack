@@ -84,7 +84,7 @@ jobs:
       # accept a specific advisory, add an osv-scanner.toml `[[IgnoredVulns]]`
       # entry rather than lowering the gate.
       - name: Audit dependencies for known vulnerabilities (OSV-Scanner)
-        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        uses: google/osv-scanner-action/osv-scanner-action@a82132c0bd6c7261ffcb78e754c46c70ab57ad9a # v2.3.8
         with:
           scan-args: |-
             --lockfile=pnpm-lock.yaml
