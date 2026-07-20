@@ -1,11 +1,11 @@
 {
   "$comment": "GENERATED (ADR-0087 D4) — do not edit. Regenerate with: pnpm --filter @objectstack/spec gen:spec-changes. A projection of the D2 conversion table + D3 migration chain; the upgrade guide and the MCP spec_changes tool derive from this same data.",
-  "protocolVersion": "15.0.0",
+  "protocolVersion": "16.0.0",
   "supportFloor": 10,
   "migrateCommand": "objectstack migrate meta --from <N>  (N >= 10)",
   "aggregate": {
     "from": 10,
-    "to": 15,
+    "to": 16,
     "added": [],
     "converted": [
       {
@@ -132,6 +132,13 @@
         "migrationId": "ui-schemas-strict-unknown-keys",
         "toMajor": 15,
         "rationale": "The `.strict()` flip (ADR-0089 D3a) turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: fix the typo, move it to the right layer, or delete dead metadata."
+      },
+      {
+        "surface": "dashboard widgets (undeclared top-level keys — legacy inline analytics, objectui-internal `component`/`data`, or typos)",
+        "replacement": "declared keys only (`dataset` + `dimensions` + `values` for analytics; `options` for renderer-specific extras)",
+        "migrationId": "dashboard-widget-strict-unknown-keys",
+        "toMajor": 16,
+        "rationale": "The `.strict()` flip turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: bind a `dataset` and select `dimensions`/`values`, move a renderer setting under `options`, or delete the dead key."
       }
     ],
     "removed": []
@@ -304,6 +311,22 @@
           "migrationId": "ui-schemas-strict-unknown-keys",
           "toMajor": 15,
           "rationale": "The `.strict()` flip (ADR-0089 D3a) turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: fix the typo, move it to the right layer, or delete dead metadata."
+        }
+      ],
+      "removed": []
+    },
+    {
+      "from": 15,
+      "to": 16,
+      "added": [],
+      "converted": [],
+      "migrated": [
+        {
+          "surface": "dashboard widgets (undeclared top-level keys — legacy inline analytics, objectui-internal `component`/`data`, or typos)",
+          "replacement": "declared keys only (`dataset` + `dimensions` + `values` for analytics; `options` for renderer-specific extras)",
+          "migrationId": "dashboard-widget-strict-unknown-keys",
+          "toMajor": 16,
+          "rationale": "The `.strict()` flip turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: bind a `dataset` and select `dimensions`/`values`, move a renderer setting under `options`, or delete the dead key."
         }
       ],
       "removed": []
