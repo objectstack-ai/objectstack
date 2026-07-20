@@ -12,10 +12,10 @@
  * ADR-0066 authorization capabilities declared in `capabilities: [...]`.)
  *
  * Canonical spelling is lower-case kebab-case (`ai-studio`, `pinyin-search`,
- * `hierarchy-security`). Legacy camelCase spellings that shipped in cloud
- * configs are mapped through {@link DEPRECATED_PLATFORM_CAPABILITY_ALIASES}
- * for one deprecation cycle — `defineStack` normalizes them with a warning at
- * authoring time, and runtimes canonicalize raw artifact input the same way.
+ * `hierarchy-security`). The legacy camelCase spellings (`aiStudio` / `aiSeat`)
+ * that shipped transitionally were honored as deprecated aliases for one cycle
+ * (framework#3265) and have been REMOVED (framework#3308) — they are now plain
+ * unknown tokens, rejected by `defineStack` like any other typo.
  *
  * Growing the platform: when a new `requires`-resolvable service ships, add
  * its token HERE as well as to the runtime's provider registry — the CLI's
@@ -66,30 +66,10 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
 ]);
 
 /**
- * Deprecated `requires` spellings → canonical token. One deprecation cycle:
- * authoring (`defineStack`) rewrites these with a warning; runtimes accept
- * them via {@link canonicalizePlatformCapability} so artifacts built by an
- * older spec keep booting. Do not add new aliases — new tokens ship in
- * canonical kebab-case only.
- */
-export const DEPRECATED_PLATFORM_CAPABILITY_ALIASES: Readonly<Record<string, string>> =
-  Object.freeze({
-    aiStudio: 'ai-studio',
-    aiSeat: 'ai-seat',
-  });
-
-/**
- * Map a `requires` token to its canonical spelling (identity for tokens that
- * are already canonical or unknown).
- */
-export function canonicalizePlatformCapability(token: string): string {
-  return DEPRECATED_PLATFORM_CAPABILITY_ALIASES[token] ?? token;
-}
-
-/**
- * True when the token (after alias canonicalization) is part of the platform
- * capability vocabulary.
+ * True when the token is part of the platform capability vocabulary. There is
+ * no longer any alias canonicalization (framework#3308) — a token is known iff
+ * it appears verbatim in {@link PLATFORM_CAPABILITY_TOKENS}.
  */
 export function isKnownPlatformCapability(token: string): boolean {
-  return PLATFORM_CAPABILITY_TOKENS.includes(canonicalizePlatformCapability(token));
+  return PLATFORM_CAPABILITY_TOKENS.includes(token);
 }

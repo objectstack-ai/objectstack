@@ -4,10 +4,7 @@ import { z } from 'zod';
 
 import { ManifestSchema } from './kernel/manifest.zod';
 import { validateObjectNamespacePrefix } from './kernel/namespace-prefix';
-import {
-  PLATFORM_CAPABILITY_TOKENS,
-  DEPRECATED_PLATFORM_CAPABILITY_ALIASES,
-} from './kernel/platform-capabilities';
+import { PLATFORM_CAPABILITY_TOKENS } from './kernel/platform-capabilities';
 import { ClusterCapabilityConfigSchema } from './kernel/cluster.zod';
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
@@ -427,11 +424,12 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    * intent). Use this for the AI service too: `requires: ['ai']` makes a missing
    * `@objectstack/service-ai` a hard boot error rather than a broken-but-booted app.
    *
-   * Tokens must be canonical members of the platform vocabulary
-   * (`PLATFORM_CAPABILITY_TOKENS`; deprecated aliases like `aiStudio` are
-   * rewritten with a warning). An UNKNOWN token — a typo or stale reference no
-   * runtime provides — is a `defineStack` **error**, not a silent no-op
-   * (framework#3265).
+   * Tokens must be members of the platform vocabulary
+   * (`PLATFORM_CAPABILITY_TOKENS`, canonical kebab-case). An UNKNOWN token — a
+   * typo or stale reference no runtime provides — is a `defineStack` **error**,
+   * not a silent no-op (framework#3265). The legacy camelCase spellings
+   * `aiStudio`/`aiSeat` were deprecated aliases in the prior release and were
+   * removed in framework#3308 — use `ai-studio`/`ai-seat`.
    *
    * If a capability is also provided explicitly via `plugins[]`, the
    * explicit instance wins (and the resolver does not double-register).
@@ -999,50 +997,15 @@ function validateHierarchyScopeCapability(data: unknown): string[] {
 }
 
 /**
- * Canonicalize `requires` tokens against the platform capability vocabulary
- * (framework#3265): deprecated alias spellings (`aiStudio` → `ai-studio`,
- * `aiSeat` → `ai-seat`) are REWRITTEN to canonical at authoring time — the
- * producer is fixed, so every consumer (serve resolver, cloud loader,
- * discovery) sees one spelling (Prime Directive #12). Emits a deprecation
- * warning per rewritten token. Unknown tokens are NOT handled here — they are
- * rejected by {@link validateKnownCapabilities}. Strict mode only.
- */
-function canonicalizeStackRequires(config: ObjectStackDefinition): ObjectStackDefinition {
-  const raw = config.requires;
-  if (!raw || raw.length === 0) return config;
-
-  const warned = new Set<string>();
-  let changed = false;
-  const canonical = raw.map((token) => {
-    const mapped = DEPRECATED_PLATFORM_CAPABILITY_ALIASES[token];
-    if (mapped) {
-      if (!warned.has(token)) {
-        warned.add(token);
-        console.warn(
-          `[defineStack] requires: '${token}' is a deprecated spelling — use '${mapped}'. ` +
-            `The alias is honored for one release, then removed (framework#3265).`,
-        );
-      }
-      changed = true;
-      return mapped;
-    }
-    return token;
-  });
-
-  return changed ? { ...config, requires: canonical } : config;
-}
-
-/**
  * Reject `requires` tokens that are not part of the platform capability
- * vocabulary (framework#3265). Runs AFTER {@link canonicalizeStackRequires}, so
- * deprecated aliases have already resolved to canonical tokens — an unknown
- * token here is a genuine typo or a stale reference that NO runtime provides, so
- * every runtime would otherwise SILENTLY ignore it (declared ≠ enforced). Fail
- * at the producer, loudly (Prime Directive #12): the warn-first grace period
- * this replaced is over — the vocabulary is the union of every token the
- * framework CLI and cloud's objectos-runtime resolve, plus the enterprise
- * plugin-provided ones (`hierarchy-security` / `ai-seat` / `governance`).
- * Returns one error per distinct unknown token.
+ * vocabulary (framework#3265). An unknown token is a genuine typo or a stale
+ * reference that NO runtime provides, so every runtime would otherwise SILENTLY
+ * ignore it (declared ≠ enforced). Fail at the producer, loudly (Prime
+ * Directive #12): the vocabulary is the union of every token the framework CLI
+ * and cloud's objectos-runtime resolve, plus the enterprise plugin-provided ones
+ * (`hierarchy-security` / `ai-seat` / `governance`). The legacy `aiStudio` /
+ * `aiSeat` aliases were removed in #3308, so those now reject too. Returns one
+ * error per distinct unknown token.
  */
 function validateKnownCapabilities(config: ObjectStackDefinition): string[] {
   const raw = config.requires;
@@ -1085,11 +1048,11 @@ export function defineStack(
     throw new Error(formatZodError(result.error, 'defineStack validation failed'));
   }
 
-  // Canonicalize `requires` (deprecated aliases → kebab canon) BEFORE the
-  // validators below read the definition, then REJECT any unknown capability
-  // token (framework#3265): no runtime provides it, so it would otherwise be
-  // silently ignored (declared ≠ enforced, Prime Directive #12).
-  const data = canonicalizeStackRequires(result.data);
+  // REJECT any unknown capability token (framework#3265/#3308): no runtime
+  // provides it, so it would otherwise be silently ignored (declared ≠
+  // enforced, Prime Directive #12). No alias canonicalization — the deprecated
+  // `aiStudio`/`aiSeat` spellings were removed in #3308.
+  const data = result.data;
 
   const capErrors = validateKnownCapabilities(data);
   if (capErrors.length > 0) {

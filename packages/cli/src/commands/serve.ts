@@ -10,7 +10,7 @@ import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { resolveDriverType, createStorageDriver, UnsupportedDriverError } from '../utils/storage-driver.js';
 import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveAllowDegradedTenancy, isMcpServerEnabled, resolveSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
-import { PLATFORM_CAPABILITY_TOKENS, canonicalizePlatformCapability } from '@objectstack/spec/kernel';
+import { PLATFORM_CAPABILITY_TOKENS } from '@objectstack/spec/kernel';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 import {
@@ -695,22 +695,14 @@ export default class Serve extends Command {
       // instance wins over the auto-loader).
       const presetName = flags.preset ?? (isDev ? 'default' : 'default');
       const presetTiers = Serve.TIER_PRESETS[presetName] ?? Serve.TIER_PRESETS.default;
+      // Dedupe `requires` (Set keeps first-seen order). The deprecated
+      // `aiStudio`/`aiSeat` alias canonicalization was removed in framework#3308
+      // — legacy spellings are now unknown tokens (warned below, rejected at
+      // authoring by defineStack).
       const rawRequires: string[] = Array.isArray((config as any).requires)
         ? (config as any).requires.filter((c: unknown) => typeof c === 'string')
         : [];
-      // Canonicalize deprecated capability spellings (aiStudio → ai-studio, …)
-      // so artifacts compiled by an older spec keep booting; `defineStack`
-      // already rewrites + warns on the source path, this covers raw artifact
-      // JSON (framework#3265). Dedupe after mapping (Set keeps first-seen order).
-      const requires: string[] = [...new Set(rawRequires.map((c: string) => {
-        const canonical = canonicalizePlatformCapability(c);
-        if (canonical !== c) {
-          console.warn(chalk.yellow(
-            `  ⚠ requires: '${c}' is a deprecated spelling — use '${canonical}' (framework#3265)`,
-          ));
-        }
-        return canonical;
-      }))];
+      const requires: string[] = [...new Set(rawRequires)];
       // Snapshot the app's EXPLICIT capability declarations BEFORE the platform
       // appends its own convenience defaults (auth→email, mcp, pinyin-search,
       // ALWAYS_ON_CAPABILITIES, queue/job). Only these explicit declarations carry

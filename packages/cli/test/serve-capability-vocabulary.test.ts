@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  PLATFORM_CAPABILITY_TOKENS,
-  DEPRECATED_PLATFORM_CAPABILITY_ALIASES,
-} from '@objectstack/spec/kernel';
+import { PLATFORM_CAPABILITY_TOKENS } from '@objectstack/spec/kernel';
 import Serve from '../src/commands/serve.js';
 
 // framework#3265 — drift guard: the serve path's provider registries must stay
@@ -22,8 +19,8 @@ describe('serve capability registries vs spec vocabulary (#3265)', () => {
     }
   });
 
-  it('registries use only canonical spellings — never deprecated aliases', () => {
-    const legacy = Object.keys(DEPRECATED_PLATFORM_CAPABILITY_ALIASES);
+  it('registries use only canonical spellings — never the removed camelCase aliases (#3308)', () => {
+    const legacy = ['aiStudio', 'aiSeat'];
     for (const token of [...Object.keys(Serve.CAPABILITY_PROVIDERS), ...Object.keys(Serve.CAPABILITY_TO_TIER)]) {
       expect(legacy).not.toContain(token);
     }

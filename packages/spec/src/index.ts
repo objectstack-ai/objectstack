@@ -123,8 +123,6 @@ export { type PluginContext } from './kernel/plugin.zod';
 // Platform SERVICE capability vocabulary for `requires: [...]` (framework#3265).
 export {
   PLATFORM_CAPABILITY_TOKENS,
-  DEPRECATED_PLATFORM_CAPABILITY_ALIASES,
-  canonicalizePlatformCapability,
   isKnownPlatformCapability,
 } from './kernel/platform-capabilities';
 
