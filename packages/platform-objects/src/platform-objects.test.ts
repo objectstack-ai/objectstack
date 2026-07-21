@@ -5,6 +5,7 @@ import {
   SysAccount,
   SysApiKey,
   SysBusinessUnit,
+  SysBusinessUnitMember,
   SysDeviceCode,
   SysInvitation,
   SysJwks,
@@ -245,6 +246,27 @@ describe('@objectstack/platform-objects', () => {
       for (const verb of ['get', 'list', 'create', 'update', 'delete'] as const) {
         expect(SysBusinessUnit.enable?.apiMethods).toContain(verb);
       }
+    });
+
+    it('sys_business_unit_member allows import/export and keeps CRUD (#3391 P0)', () => {
+      // HRIS org-tree sync imports TWO tables together — the units (above) AND
+      // their memberships. The sibling membership table carries the same kind
+      // of restrictive whitelist, so it needs import/export too or the
+      // membership import path 405s (OBJECT_API_METHOD_NOT_ALLOWED). #3391's P0
+      // checklist pairs both tables; this is the half #3392 did not cover.
+      const methods = SysBusinessUnitMember.enable?.apiMethods ?? [];
+      expect(methods).toContain('import');
+      expect(methods).toContain('export');
+      // CRUD must remain — import writes reuse create/update; the membership
+      // grid depends on the rest.
+      for (const verb of ['get', 'list', 'create', 'update', 'delete'] as const) {
+        expect(methods).toContain(verb);
+      }
+      // Transitional: #3391 P2 derives import/export (import ⊆ create/update,
+      // export ⊆ list) and reclaims both objects' explicit entries together.
+      // Reconcile-safe: import/export are not generic write verbs, so
+      // reconcileManagedApiMethods (managedBy:'platform') never strips them —
+      // this static whitelist IS what apiAccessDenialFromEnable enforces.
     });
   });
 

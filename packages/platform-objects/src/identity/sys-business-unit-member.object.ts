@@ -101,7 +101,14 @@ export const SysBusinessUnitMember = ObjectSchema.create({
     trackHistory: true,
     searchable: true,
     apiEnabled: true,
-    apiMethods: ['get', 'list', 'create', 'update', 'delete'],
+    // import/export complete the HRIS org-tree sync scenario: the units
+    // (sys_business_unit, #3025/#3392) and their memberships are imported
+    // together as one bulk operation. Import reuses the already-granted
+    // create/update affordances; export is a bulk read. Transitional — #3391
+    // P2 derives these from create/update|list and reclaims the explicit
+    // entries. Reconcile-safe: import/export are not generic write verbs, so
+    // reconcileManagedApiMethods (managedBy:'platform') never strips them.
+    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'import', 'export'],
     trash: true,
     mru: false,
   },
