@@ -87,7 +87,7 @@ v1 = the shared predicate + the audit's **verified Tier-A** shapes (authoring co
 ## Consequences
 
 - **Positive.** Closes the gate-1 instance-completeness hole and the path asymmetry: one predicate, enforced on every authoring surface, so a hand/CLI/MCP author gets the same protection the cloud build agent does. Silent inertness becomes a *loud, self-correctable* error (ADR-0038 loop) instead of a false "done". The three gates compose into an honest chain — *valid* → *complete* → *has a live consumer* → *runs correctly*. §3 makes a correct authoring un-strippable.
-- **Negative / cost.** A shared predicate plus dual wiring is more than a cloud-only rule; mitigated by reusing the `isIncoherentAggregate` pattern and the existing `@objectstack/lint` harness. The audit is a candidate list — each rule costs a verification pass before it ships (deliberately; see the sharing-rule reversal). Cloud `.framework-sha` must bump when graph-lint re-homes onto the shared predicate.
+- **Negative / cost.** A shared predicate plus dual wiring is more than a cloud-only rule; mitigated by reusing the `isIncoherentAggregate` pattern and the existing `@objectstack/lint` harness. The audit is a candidate list — each rule costs a verification pass before it ships (deliberately; see the sharing-rule reversal). Cloud `.objectstack-sha` must bump when graph-lint re-homes onto the shared predicate.
 - **Follow-up.** (1) Define the authoritative Tier-A predicate set. (2) cloud#687 is the first instance — its rules re-home onto the shared predicate in Phase 1. (3) Each Tier-B shape files its verification note before becoming a rule.
 
 ## Non-goals

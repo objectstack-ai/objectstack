@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
 const FILENAME =
-  '/Users/zhuangjianguo/Documents/GitHub/framework/examples/app-todo/.objectstack/data/todo.wasm.db';
+  '/Users/zhuangjianguo/Documents/GitHub/objectstack/examples/app-todo/.objectstack/data/todo.wasm.db';
 const STATE_FILE = new URL('./.restart-proof-id', import.meta.url);
 
 const require = createRequire(import.meta.url);

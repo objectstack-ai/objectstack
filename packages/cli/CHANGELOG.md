@@ -54,7 +54,7 @@
   Migration: use the canonical kebab-case tokens `ai-studio` / `ai-seat`. All
   first-party configs were migrated in #862/#863; only stacks still carrying the
   legacy spelling are affected. Cloud's `objectos-runtime` (pinned to an older
-  framework) follows on its next `.framework-sha` bump.
+  framework) follows on its next `.objectstack-sha` bump.
 
 ### Patch Changes
 
@@ -424,7 +424,7 @@ extract` seeds bundles from it. Coverage now honours that contract — an inline
   Migration: use the canonical kebab-case tokens `ai-studio` / `ai-seat`. All
   first-party configs were migrated in #862/#863; only stacks still carrying the
   legacy spelling are affected. Cloud's `objectos-runtime` (pinned to an older
-  framework) follows on its next `.framework-sha` bump.
+  framework) follows on its next `.objectstack-sha` bump.
 
 ### Patch Changes
 

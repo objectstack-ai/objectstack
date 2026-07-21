@@ -13,7 +13,7 @@
 #
 # Assumes sibling layout:
 #   ~/work/objectui
-#   ~/work/framework   ← run from here
+#   ~/work/objectstack   ← run from here
 #
 # objectui ships @object-ui/console as a static SPA. The framework
 # release pipeline reads .objectui-sha, clones objectui at that commit,

@@ -118,7 +118,7 @@ jobs:
         # 15.1 third-party eval: the repo-internal dogfood-verification skill
         # (.claude/skills/) leaked into scaffolded projects. Two leak paths,
         # two assertions against THIS checkout:
-        #   1. The scaffolder/docs command is `skills add …/framework/skills
+        #   1. The scaffolder/docs command is `skills add …/objectstack/skills
         #      --all` — the /skills subpath is the hard boundary, because the
         #      skills CLI's --all implies --skill '*' which INCLUDES
         #      metadata.internal skills. Install from the subpath and assert

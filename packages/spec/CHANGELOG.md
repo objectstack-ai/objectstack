@@ -282,7 +282,7 @@
   Migration: use the canonical kebab-case tokens `ai-studio` / `ai-seat`. All
   first-party configs were migrated in #862/#863; only stacks still carrying the
   legacy spelling are affected. Cloud's `objectos-runtime` (pinned to an older
-  framework) follows on its next `.framework-sha` bump.
+  framework) follows on its next `.objectstack-sha` bump.
 
 - b659111: feat(spec)!: remove dead author-facing metadata properties (#2377, ADR-0049 enforce-or-remove)
 
@@ -857,7 +857,7 @@
   Migration: use the canonical kebab-case tokens `ai-studio` / `ai-seat`. All
   first-party configs were migrated in #862/#863; only stacks still carrying the
   legacy spelling are affected. Cloud's `objectos-runtime` (pinned to an older
-  framework) follows on its next `.framework-sha` bump.
+  framework) follows on its next `.objectstack-sha` bump.
 
 ## 16.0.0-rc.0
 
