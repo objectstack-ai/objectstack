@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   SysAccount,
   SysApiKey,
+  SysBusinessUnit,
   SysDeviceCode,
   SysInvitation,
   SysJwks,
@@ -226,6 +227,23 @@ describe('@objectstack/platform-objects', () => {
         expect(a, `${name} action must exist`).toBeTruthy();
         expect(a?.locations, `${name} locations`).toContain('list_item');
         expect(a?.locations, `${name} must also surface on the detail header`).toContain('record_header');
+      }
+    });
+  });
+
+  describe('data portability whitelist (#3025)', () => {
+    it('sys_business_unit allows import/export so the org tree can be batch-synced', () => {
+      // The Business Units list exposes Import/Export buttons and the object's
+      // schema (external_ref, effective_from/to) is designed for HRIS batch
+      // sync. The REST data plane gates these routes on `enable.apiMethods`
+      // (ADR-0049), so both verbs must be present or the buttons 405 with
+      // OBJECT_API_METHOD_NOT_ALLOWED. Regression guard for #3025.
+      expect(SysBusinessUnit.enable?.apiMethods).toContain('import');
+      expect(SysBusinessUnit.enable?.apiMethods).toContain('export');
+      // The five CRUD verbs it already granted must remain — import writes
+      // reuse the create/update affordances.
+      for (const verb of ['get', 'list', 'create', 'update', 'delete'] as const) {
+        expect(SysBusinessUnit.enable?.apiMethods).toContain(verb);
       }
     });
   });

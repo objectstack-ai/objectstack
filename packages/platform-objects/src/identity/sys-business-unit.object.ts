@@ -216,7 +216,10 @@ export const SysBusinessUnit = ObjectSchema.create({
     trackHistory: true,
     searchable: true,
     apiEnabled: true,
-    apiMethods: ['get', 'list', 'create', 'update', 'delete'],
+    // Data portability is expected for the org tree: fields like `external_ref`
+    // and `effective_from/to` are designed for HRIS batch sync (#3025). Import
+    // reuses the create/update affordances this object already grants.
+    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'import', 'export'],
     trash: true,
     mru: false,
   },
