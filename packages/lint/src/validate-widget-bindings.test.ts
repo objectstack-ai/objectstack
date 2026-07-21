@@ -10,6 +10,7 @@ import {
   MEASURE_AGGREGATE_INCOHERENT,
   WIDGET_LEGACY_ANALYTICS_SHAPE,
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
+  DASHBOARD_FILTER_FIELD_UNKNOWN,
 } from './validate-widget-bindings.js';
 
 /** The downstream repro from issue #1719 — dataset with a count AND a sum
@@ -481,5 +482,137 @@ describe('validateWidgetBindings — legacy analytics shape (#1878/#1894)', () =
     };
     // errors ignore suppressWarnings — a blank widget must not be silenceable
     expect(legacyOnly(validateWidgetBindings(stack))).toHaveLength(1);
+  });
+});
+
+describe('validateWidgetBindings (dashboard-filter-field-unknown, issue #3365)', () => {
+  const only = (findings: ReturnType<typeof validateWidgetBindings>) =>
+    findings.filter((f) => f.rule === DASHBOARD_FILTER_FIELD_UNKNOWN);
+
+  /**
+   * The #3365 repro: a dashboard `dateRange` bound to `close_date` (which lives
+   * only on the opportunity object) inherited by a widget over `crm_account`.
+   * `dash` overrides the dashboard tail (dateRange/globalFilters); `widget`
+   * overrides the single account widget.
+   */
+  function stack(dash: Record<string, unknown> = {}, widget: Record<string, unknown> = {}) {
+    return {
+      objects: [
+        { name: 'crm_account', fields: [
+          { name: 'name', type: 'text' },
+          { name: 'industry', type: 'select' },
+          { name: 'renewal_date', type: 'date' },
+        ] },
+        { name: 'crm_opportunity', fields: [
+          { name: 'name', type: 'text' },
+          { name: 'close_date', type: 'date' },
+        ] },
+      ],
+      datasets: [
+        { name: 'account_metrics', object: 'crm_account',
+          dimensions: [{ name: 'industry', field: 'industry' }],
+          measures: [{ name: 'account_count', aggregate: 'count' }] },
+      ],
+      dashboards: [{
+        name: 'executive_dashboard',
+        label: 'Executive',
+        dateRange: { field: 'close_date', defaultRange: 'this_quarter' },
+        widgets: [{
+          id: 'total_accounts', type: 'metric',
+          dataset: 'account_metrics', values: ['account_count'],
+          ...widget,
+        }],
+        ...dash,
+      }],
+    };
+  }
+
+  it('errors on the repro: an inherited dateRange field absent on the widget object', () => {
+    const findings = only(validateWidgetBindings(stack()));
+    expect(findings).toHaveLength(1);
+    const f = findings[0];
+    expect(f.severity).toBe('error');
+    // names the dashboard, widget, filter, field, and object (acceptance criteria)
+    expect(f.where).toContain('executive_dashboard');
+    expect(f.where).toContain('total_accounts');
+    expect(f.message).toContain('dateRange');
+    expect(f.message).toContain('close_date');
+    expect(f.message).toContain('crm_account');
+    expect(f.hint).toContain('filterBindings: { dateRange: false }');
+    expect(f.path).toBe('dashboards[0].widgets[0]');
+  });
+
+  it('passes when the widget opts out via filterBindings: { dateRange: false }', () => {
+    expect(only(validateWidgetBindings(stack({}, { filterBindings: { dateRange: false } })))).toHaveLength(0);
+  });
+
+  it('passes when the widget re-targets to an existing field', () => {
+    expect(only(validateWidgetBindings(stack({}, { filterBindings: { dateRange: 'renewal_date' } })))).toHaveLength(0);
+  });
+
+  it('errors (explicit wording) when a re-target names a non-existent field', () => {
+    const findings = only(validateWidgetBindings(stack({}, { filterBindings: { dateRange: 'closed_date' } })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('via filterBindings');
+    expect(findings[0].message).toContain('closed_date');
+  });
+
+  it('passes when the inherited field exists on the object', () => {
+    expect(only(validateWidgetBindings(stack({ dateRange: { field: 'renewal_date' } })))).toHaveLength(0);
+  });
+
+  it('does not false-positive on the created_at system field (bare dateRange default)', () => {
+    // dateRange with no `field` defaults to `created_at`, a registry-injected
+    // system field never present in `object.fields`.
+    expect(only(validateWidgetBindings(stack({ dateRange: { defaultRange: 'this_month' } })))).toHaveLength(0);
+  });
+
+  it('checks globalFilters[] fields too (name defaults to field)', () => {
+    const findings = only(validateWidgetBindings(stack({
+      dateRange: undefined,
+      globalFilters: [{ field: 'region', type: 'select' }],
+    })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('region');
+    expect(findings[0].message).toContain('crm_account');
+  });
+
+  it('a globalFilter opt-out uses the filter name (custom name honoured)', () => {
+    // custom `name` becomes the filterBindings key, not the raw field.
+    expect(only(validateWidgetBindings(stack(
+      { dateRange: undefined, globalFilters: [{ name: 'sales_region', field: 'region', type: 'select' }] },
+      { filterBindings: { sales_region: false } },
+    )))).toHaveLength(0);
+  });
+
+  it('a targetWidgets allow-list gates the default binding (unlisted widget is unbound)', () => {
+    // `region` targets only some_other_widget, so total_accounts never inherits
+    // it — even though crm_account has no `region`.
+    expect(only(validateWidgetBindings(stack({
+      dateRange: undefined,
+      globalFilters: [{ field: 'region', type: 'select', targetWidgets: ['some_other_widget'] }],
+    })))).toHaveLength(0);
+  });
+
+  it('skips a relationship-path filter field (dotted paths are engine-resolved)', () => {
+    expect(only(validateWidgetBindings(stack({ dateRange: { field: 'account.region' } })))).toHaveLength(0);
+  });
+
+  it('cannot judge — and never false-positives — when the object is not in the stack', () => {
+    const s = stack();
+    delete (s as { objects?: unknown }).objects;
+    expect(only(validateWidgetBindings(s))).toHaveLength(0);
+  });
+
+  it('the error is NOT suppressible via suppressWarnings', () => {
+    const findings = only(validateWidgetBindings(stack({}, {
+      suppressWarnings: [DASHBOARD_FILTER_FIELD_UNKNOWN],
+    })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+  });
+
+  it('is silent on dashboards with no dashboard-level filters', () => {
+    expect(only(validateWidgetBindings(stack({ dateRange: undefined })))).toHaveLength(0);
   });
 });

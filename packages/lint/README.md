@@ -14,8 +14,11 @@ It never depends on a runtime and is never bundled into a frontend.
 ## API
 
 - `validateWidgetBindings(stack)` — dashboard widget → dataset → measure/dimension
-  reference integrity, chart-config bindings, and measure-aggregation coherence
-  (e.g. SUM of a `percent` field is meaningless).
+  reference integrity, chart-config bindings, measure-aggregation coherence
+  (e.g. SUM of a `percent` field is meaningless), and dashboard-level filter
+  field existence — every `dateRange` / `globalFilters[]` field (after any
+  `filterBindings` re-target) must exist on each bound widget's object, else the
+  broadcast filter emits invalid SQL and the widget crashes at render (#3365).
 - `validateStackExpressions(stack)` — CEL/predicate validity for field
   conditionals, sharing rules, action `visible`/`disabled`, lifecycle hooks
   (ADR-0032).

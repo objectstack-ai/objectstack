@@ -48,6 +48,16 @@ If a name doesn't resolve, the chart renders **empty** — no error (ADR-0021).
 `os validate` resolves every binding against the declared datasets and fails on a
 dangling one.
 
+The same gate also checks **dashboard-level filter fields**. A dashboard's
+`dateRange` and each `globalFilters[]` entry are broadcast into every widget's
+analytics query, so a filter field that doesn't exist on a bound widget's object
+emits invalid SQL (`no such column: …`) and crashes that widget at render time.
+`os validate` fails when a filter's effective field — after any per-widget
+`filterBindings` re-target — is absent on the widget's dataset object, naming the
+dashboard, widget, filter, field, and object. Opt a widget out with
+`filterBindings: { <name>: false }`, or re-target the filter to one of that
+object's own fields.
+
 ## The one gate, two entry points
 
 `os validate` and `os build` (alias of `os compile`) run the **same** validator:

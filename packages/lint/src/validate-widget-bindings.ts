@@ -34,6 +34,16 @@ import { isIncoherentAggregate } from '@objectstack/spec/data';
  *   renders nothing. Errored (not warned) so this class of authoring mistake —
  *   very often an AI emitting a removed shape — fails the build instead of
  *   shipping a blank widget past human review.
+ * - `dashboard-filter-field-unknown` (#3365) — a dashboard-level filter
+ *   (`dateRange` or a `globalFilters[]` entry) is wired into EVERY widget's
+ *   analytics query (#2501), but its EFFECTIVE field (after any `filterBindings`
+ *   re-target) does not exist on a bound widget's dataset object. The widget's
+ *   query then references a non-existent column and crashes at render time
+ *   (`no such column …`) — a build-decidable invariant that previously escaped
+ *   the static gate and failed only when a user opened the dashboard. A widget
+ *   opts out with `filterBindings: { <name>: false }` or re-targets to a real
+ *   field. This is the same field-existence invariant ADR-0032 enforces for
+ *   CEL formula / sharing-rule references, applied to dashboard filter fields.
  *
  * Advisory rules — severity `warning`, build stays green:
  *
@@ -72,6 +82,7 @@ export const TABLE_COUNT_ONLY = 'table-count-only';
 export const MEASURE_AGGREGATE_INCOHERENT = 'measure-aggregate-incoherent';
 export const WIDGET_LEGACY_ANALYTICS_SHAPE = 'widget-legacy-analytics-shape';
 export const WIDGET_LEGACY_ANALYTICS_UNRENDERABLE = 'widget-legacy-analytics-unrenderable';
+export const DASHBOARD_FILTER_FIELD_UNKNOWN = 'dashboard-filter-field-unknown';
 
 /**
  * Pre-ADR-0021 inline-analytics keys. The single-form cutover replaced them
@@ -189,6 +200,97 @@ function list(names: Iterable<string>): string {
   return arr.length > 0 ? arr.join(', ') : '(none)';
 }
 
+// ── dashboard-filter field-existence (#3365) ─────────────────────────────────
+
+/** Reserved filter name for the dashboard's built-in date range (#2501). */
+const DATE_RANGE_FILTER_NAME = 'dateRange';
+/**
+ * Default field of the built-in date range when `dateRange.field` is omitted.
+ * MUST track objectui `dashboard-filters.ts` `DATE_RANGE_DEFAULT_FIELD` — the
+ * runtime this check shadows. `created_at` is a registry-injected system field
+ * (below), so a bare `dateRange` never false-positives.
+ */
+const DATE_RANGE_DEFAULT_FIELD = 'created_at';
+
+/**
+ * Registry-injected fields present on (almost) every object but NOT declared in
+ * `object.fields`, so a dashboard filter targeting one must not be flagged as a
+ * missing column. Superset of the objectql registry's `applySystemFields`
+ * (audit columns, ownership, tenant, soft-delete) and spec's `SystemFieldName`.
+ * Deliberately generous: the cost of over-inclusion is at worst a missed error
+ * on a `systemFields: false` object (rare); the cost of under-inclusion is a
+ * false build failure on the ubiquitous `dateRange` → `created_at` default. The
+ * near-zero-false-positive bias mirrors ADR-0032's field-ref validator.
+ */
+const SYSTEM_FIELDS = new Set<string>([
+  'id',
+  'created_at', 'created_by', 'updated_at', 'updated_by',
+  'owner_id', 'organization_id', 'tenant_id', 'user_id',
+  'deleted_at',
+]);
+
+interface DashFilterDef {
+  /** Stable filter name — the key widgets bind against in `filterBindings`. */
+  name: string;
+  /** Default target field when a widget declares no explicit binding. */
+  field: string;
+  /** Legacy widget-id allow-list; gates the DEFAULT binding only. */
+  targetWidgets?: string[];
+}
+
+/**
+ * Normalize a dashboard's declared filters into `{ name, field, targetWidgets }`
+ * defs — the built-in `dateRange` (reserved name) first, then every
+ * `globalFilters[]` entry named by its `name` (defaulting to `field`). Later
+ * duplicates win. Mirrors objectui `resolveDashboardFilterDefs`.
+ */
+function dashboardFilterDefs(dash: AnyRec): DashFilterDef[] {
+  const byName = new Map<string, DashFilterDef>();
+
+  const dateRange = dash.dateRange;
+  if (dateRange && typeof dateRange === 'object') {
+    const declared = (dateRange as AnyRec).field;
+    const field = typeof declared === 'string' && declared ? declared : DATE_RANGE_DEFAULT_FIELD;
+    byName.set(DATE_RANGE_FILTER_NAME, { name: DATE_RANGE_FILTER_NAME, field });
+  }
+
+  for (const f of asArray(dash.globalFilters)) {
+    if (typeof f.field !== 'string' || !f.field) continue;
+    const name = typeof f.name === 'string' && f.name ? f.name : f.field;
+    const targetWidgets = Array.isArray(f.targetWidgets)
+      ? f.targetWidgets.filter((w): w is string => typeof w === 'string')
+      : undefined;
+    byName.set(name, { name, field: f.field, targetWidgets });
+  }
+
+  return [...byName.values()];
+}
+
+/**
+ * Resolve which field of `widget` a filter binds to, or `undefined` when the
+ * widget is not bound (opted out / not targeted). Precedence mirrors objectui
+ * `resolveBoundField`: explicit `filterBindings` entry (string re-targets,
+ * `false` opts out — both win) → legacy `targetWidgets` allow-list → the
+ * filter's own default `field`. `explicit` distinguishes an author-chosen field
+ * (a typo they must fix) from the inherited default (which they may opt out of).
+ */
+function effectiveFilterField(
+  widget: AnyRec,
+  def: DashFilterDef,
+): { field: string; explicit: boolean } | undefined {
+  const bindings = widget.filterBindings;
+  const binding = bindings && typeof bindings === 'object'
+    ? (bindings as AnyRec)[def.name]
+    : undefined;
+  if (binding === false) return undefined;
+  if (typeof binding === 'string' && binding) return { field: binding, explicit: true };
+  if (def.targetWidgets && def.targetWidgets.length > 0) {
+    const id = typeof widget.id === 'string' ? widget.id : undefined;
+    if (!id || !def.targetWidgets.includes(id)) return undefined;
+  }
+  return { field: def.field, explicit: false };
+}
+
 /**
  * Validate every dashboard widget's dataset binding. Returns the list of
  * findings (empty = clean). Caller decides how to surface them: `error`
@@ -253,6 +355,9 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
     const dash = dashboards[i];
     const dashName = typeof dash.name === 'string' ? dash.name : `(dashboard ${i})`;
     const widgets = Array.isArray(dash.widgets) ? (dash.widgets as AnyRec[]) : [];
+    // Dashboard-level filters (`dateRange` + `globalFilters`) are broadcast into
+    // every widget's query (#2501) — resolved once here, checked per widget below.
+    const dashFilterDefs = dashboardFilterDefs(dash);
 
     for (let j = 0; j < widgets.length; j++) {
       const w = widgets[j];
@@ -330,6 +435,49 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       }
       // Without a resolved dataset there is nothing to check names against.
       if (!dataset) continue;
+
+      // ── (a1) dashboard filter fields exist on the widget's object (#3365) ──
+      // Each dashboard-level filter is ANDed into this widget's analytics query
+      // (#2501); a filter whose EFFECTIVE field (after `filterBindings`) is not a
+      // column on the bound dataset object emits SQL like `WHERE close_date …`
+      // against a table without that column and the widget crashes at query time.
+      // Errored (not warned): a broken query, not advice. The opt-out is the
+      // author's own `filterBindings: { <name>: false }`, so no suppression needed.
+      if (dashFilterDefs.length > 0) {
+        const datasetObject = typeof dataset.object === 'string' ? dataset.object : undefined;
+        // Only judge when the bound object's fields are known in THIS stack; an
+        // object from another installed package is unknowable here — skip rather
+        // than false-positive (mirrors the measure-aggregate check above).
+        const objectFields = datasetObject ? objectFieldTypes.get(datasetObject) : undefined;
+        if (objectFields) {
+          for (const def of dashFilterDefs) {
+            const eff = effectiveFilterField(w, def);
+            if (!eff) continue; // opted out / not targeted → filter never applies
+            const field = eff.field;
+            // A relationship path (`account.region`) is resolved by the query
+            // engine, not a base column, so it can't be checked here — skip it.
+            if (field.includes('.')) continue;
+            if (objectFields.has(field) || SYSTEM_FIELDS.has(field)) continue;
+            push({
+              severity: 'error',
+              rule: DASHBOARD_FILTER_FIELD_UNKNOWN,
+              message: eff.explicit
+                ? `binds dashboard filter \`${def.name}\` to field \`${field}\` ` +
+                  `(via filterBindings), but object \`${datasetObject}\` (dataset "${dsName}") ` +
+                  `has no field \`${field}\`.`
+                : `inherits dashboard filter \`${def.name}(${field})\`, but object ` +
+                  `\`${datasetObject}\` (dataset "${dsName}") has no field \`${field}\`.`,
+              hint: eff.explicit
+                ? `Point filterBindings: { ${def.name}: '<field>' } at a field that exists on ` +
+                  `\`${datasetObject}\`, or opt out with filterBindings: { ${def.name}: false }.` +
+                  `${suggest(field, objectFields.keys())} Object fields: ${list(objectFields.keys())}.`
+                : `Set filterBindings: { ${def.name}: false } on this widget to opt out, or ` +
+                  `re-target to an existing field with filterBindings: { ${def.name}: '<field>' }.` +
+                  `${suggest(field, objectFields.keys())} Object fields: ${list(objectFields.keys())}.`,
+            });
+          }
+        }
+      }
 
       const dimensionNames = new Set<string>();
       for (const d of asArray(dataset.dimensions)) {

@@ -20,6 +20,7 @@ export {
   CHART_CONFIG_MISSING,
   TABLE_COUNT_ONLY,
   MEASURE_AGGREGATE_INCOHERENT,
+  DASHBOARD_FILTER_FIELD_UNKNOWN,
 } from './validate-widget-bindings.js';
 export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-widget-bindings.js';
 
