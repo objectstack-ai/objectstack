@@ -45,6 +45,7 @@
   "devDependencies": {
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
+    "@objectstack/service-messaging": "workspace:*",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
