@@ -57,6 +57,7 @@ export {
     allowPerfDisclosure,
     isPerfDisclosureAllowed,
     isPerfDisclosurePrivileged,
+    isPerfDisclosurePrincipal,
     type ServerTimingMark,
     type ServerTimingDetail,
     type PerfDisclosureGate,

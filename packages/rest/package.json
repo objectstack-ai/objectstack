@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/observability": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/service-package": "workspace:*",
     "@objectstack/spec": "workspace:*",

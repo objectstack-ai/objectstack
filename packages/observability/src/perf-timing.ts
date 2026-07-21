@@ -31,6 +31,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 
 /**
  * One recorded phase of a request's server-side processing, serialized as a
@@ -446,4 +447,31 @@ export function isPerfDisclosureAllowed(): boolean {
  */
 export function isPerfDisclosurePrivileged(): boolean {
     return gateStore.getStore()?.privileged ?? false;
+}
+
+/**
+ * Whether a resolved principal may see a PER-REQUEST `Server-Timing` header
+ * (#2408 perf-tuning gating). The header exposes internal phase durations — a
+ * mild backend-fingerprinting surface — so when timing is opened per-request via
+ * `X-OS-Debug-Timing` it is disclosed only to an admin/service identity:
+ *
+ *  - `isSystem` — internal/engine self-calls,
+ *  - `principalKind` `service` / `system` — service tokens & the system seed,
+ *  - `posture` `PLATFORM_ADMIN` / `TENANT_ADMIN` — the derived admin rungs.
+ *
+ * Ordinary human/guest/agent callers get `false`, so sending the debug header
+ * yields no header for them. Global (env/option) perf mode bypasses this — it
+ * opened the disclosure gate up front for the whole environment.
+ *
+ * This is the ONE definition of "who may pull per-request timings", shared by
+ * every HTTP entry point that resolves a principal — the runtime dispatcher
+ * (`timedResolveExecutionContext`), the REST server, and the standalone Hono
+ * CRUD surface — so a new admin-serving path can never silently under- or
+ * over-disclose by hand-rolling its own rule (#3361).
+ */
+export function isPerfDisclosurePrincipal(ec: ExecutionContext | undefined): boolean {
+    if (!ec) return false;
+    if (ec.isSystem === true) return true;
+    if (ec.principalKind === 'service' || ec.principalKind === 'system') return true;
+    return ec.posture === 'PLATFORM_ADMIN' || ec.posture === 'TENANT_ADMIN';
 }

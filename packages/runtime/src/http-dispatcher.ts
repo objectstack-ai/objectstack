@@ -5,7 +5,7 @@ import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 import { isMcpServerEnabled } from '@objectstack/types';
-import { measureServerTiming, allowPerfDisclosure } from '@objectstack/observability';
+import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName } from '@objectstack/spec/system';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
@@ -41,26 +41,13 @@ function isSystemObjectName(name: string): boolean {
     return /^sys_/i.test(name);
 }
 
-/**
- * Whether a resolved principal may see a PER-REQUEST `Server-Timing` header
- * (#2408 perf-tuning gating). The header exposes internal phase durations — a
- * mild backend-fingerprinting surface — so when timing is opened per-request via
- * `X-OS-Debug-Timing` it is disclosed only to an admin/service identity:
- *
- *  - `isSystem` — internal/engine self-calls,
- *  - `principalKind` `service` / `system` — service tokens & the system seed,
- *  - `posture` `PLATFORM_ADMIN` / `TENANT_ADMIN` — the derived admin rungs.
- *
- * Ordinary human/guest/agent callers get `false`, so sending the debug header
- * yields no header for them. Global (env/option) perf mode bypasses this — it
- * opened the disclosure gate up front for the whole environment.
- */
-export function isPerfDisclosurePrincipal(ec: ExecutionContext | undefined): boolean {
-    if (!ec) return false;
-    if (ec.isSystem === true) return true;
-    if (ec.principalKind === 'service' || ec.principalKind === 'system') return true;
-    return ec.posture === 'PLATFORM_ADMIN' || ec.posture === 'TENANT_ADMIN';
-}
+// The per-request `Server-Timing` disclosure predicate (#2408) now lives in
+// `@objectstack/observability` — the ONE definition shared by every HTTP entry
+// point that resolves a principal (this dispatcher, the REST server, the
+// standalone Hono CRUD surface), so an admin-serving path can never drift into
+// under- or over-disclosing (#3361). Re-exported here for back-compat with the
+// dispatcher's existing consumers/tests.
+export { isPerfDisclosurePrincipal } from '@objectstack/observability';
 
 export interface HttpProtocolContext {
     request: any;

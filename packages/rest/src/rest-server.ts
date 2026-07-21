@@ -5,6 +5,7 @@ import {
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
 } from '@objectstack/core';
 import { isMcpServerEnabled } from '@objectstack/types';
+import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
@@ -1283,7 +1284,7 @@ export class RestServer {
                 }
             } catch { /* gate is best-effort — never break context resolution */ }
 
-            return {
+            const execCtx = {
                 userId: authz.userId,
                 tenantId: authz.tenantId,
                 email: authz.email,
@@ -1306,6 +1307,18 @@ export class RestServer {
                 // authorization input — never read by RLS/permission logic.
                 __kernel: kernel,
             } as any;
+
+            // [#2408 / #3361] Open the per-request `Server-Timing` disclosure gate
+            // for an admin/service principal — the REST-server analog of the runtime
+            // dispatcher's `timedResolveExecutionContext`. This is the SOLE gate-opener
+            // on the `os serve`/`dev` data + metadata routes (which the RestServer
+            // owns, shadowing the Hono plugin's CRUD): without it the documented
+            // admin-gated `X-OS-Debug-Timing` path never emits on the standard server.
+            // A no-op when perf-tuning is off or already global (no ambient gate), and
+            // the memoized resolve runs once per request so the gate opens exactly once.
+            if (isPerfDisclosurePrincipal(execCtx)) allowPerfDisclosure();
+
+            return execCtx;
         } catch {
             return undefined;
         }
