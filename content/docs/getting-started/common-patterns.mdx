@@ -1,6 +1,6 @@
 ---
 title: Common Patterns
-description: Top 10 patterns for building applications with ObjectStack — CRUD, search, auth, realtime, and more
+description: Top 10 patterns for building applications with ObjectStack — CRUD, views, flows, agents, security, and more
 ---
 
 # Common Patterns Guide
@@ -8,7 +8,7 @@ description: Top 10 patterns for building applications with ObjectStack — CRUD
 This guide covers the most common patterns you will use when building applications with ObjectStack. Each pattern includes a complete, copy-pasteable example.
 
 <Callout type="info">
-**Import:** `import { defineStack, defineView, defineApp, defineFlow, defineAgent } from '@objectstack/spec'`
+**Import:** `import { defineStack, defineView, defineApp, defineFlow, defineAgent, definePermissionSet } from '@objectstack/spec'`
 </Callout>
 
 <Callout type="warn">
@@ -46,7 +46,8 @@ export default defineStack({
           { label: 'Complete', value: 'complete' },
           { label: 'Archived', value: 'archived' }
         ]},
-        owner: { label: 'Owner', type: 'lookup', reference: 'user' },
+        // Person references target the platform user object `sys_user`
+        owner: { label: 'Owner', type: 'lookup', reference: 'sys_user' },
         due_date: { label: 'Due Date', type: 'date' },
         budget: { label: 'Budget', type: 'currency', currencyConfig: { precision: 2, defaultCurrency: 'USD' } },
       }
@@ -73,7 +74,8 @@ export default defineStack({
           { label: 'Complete', value: 'complete' },
           { label: 'Archived', value: 'archived' }
         ]},
-        owner: { label: 'Owner', type: 'lookup', reference: 'user' },
+        // Person references target the platform user object `sys_user`
+        owner: { label: 'Owner', type: 'lookup', reference: 'sys_user' },
         due_date: { label: 'Due Date', type: 'date' },
         budget: { label: 'Budget', type: 'currency', currencyConfig: { precision: 2, defaultCurrency: 'USD' } },
       },
@@ -134,7 +136,8 @@ Create a parent-child relationship between a master and its detail records. Note
         product: { label: 'Product', type: 'lookup', reference: 'product' },
         quantity: { label: 'Qty', type: 'number', min: 1, required: true },
         unit_price: { label: 'Unit Price', type: 'currency' },
-        line_total: { label: 'Line Total', type: 'formula', expression: 'quantity * unit_price' },
+        // Formula expressions are CEL — reference fields through `record.`
+        line_total: { label: 'Line Total', type: 'formula', expression: 'record.quantity * record.unit_price', returnType: 'number' },
       }
     }
   ]
@@ -236,7 +239,10 @@ export const crm = defineApp({
 
 ## 6. Automated Flow (Record-Triggered)
 
-Create an automation that fires when a record is created or updated.
+Create an automation that fires when a record changes. The **start node's `config`
+binds the trigger**: `objectName` plus one lifecycle event in `triggerType`
+(`record-after-create`, `record-after-update`, `record-after-delete`, or the
+`record-before-*` forms) — without it the flow never fires.
 
 ```typescript
 import { defineFlow } from '@objectstack/spec';
@@ -245,15 +251,23 @@ export const assignmentNotification = defineFlow({
   name: 'task_assignment_notification',
   label: 'Task Assignment Notification',
   type: 'record_change',
+  status: 'active', // arm the trigger deliberately (default 'draft' is ambiguous)
   nodes: [
-    { id: 'start', type: 'start', label: 'Start' },
+    {
+      id: 'start',
+      type: 'start',
+      label: 'Start',
+      // Trigger binding: which object + which lifecycle event launches this flow
+      config: { objectName: 'task', triggerType: 'record-after-update' }
+    },
     {
       id: 'notify',
       type: 'notify',
       label: 'Notify Assignee',
       config: {
-        // String fields use single-brace {…} templates, not {{…}}
-        to: '{record.assigned_to.email}',
+        // String fields use single-brace {…} templates, not {{…}}.
+        // `to` takes recipient USER IDs — a lookup value interpolates to the id.
+        to: '{record.assigned_to}',
         subject: 'Task Assigned: {record.title}',
         body: 'You have been assigned to task "{record.title}".'
       }
@@ -289,8 +303,8 @@ Define a multi-step approval flow for records.
         { label: 'Approved', value: 'approved' },
         { label: 'Rejected', value: 'rejected' }
       ]},
-      submitted_by: { label: 'Submitted By', type: 'lookup', reference: 'user' },
-      approved_by: { label: 'Approved By', type: 'lookup', reference: 'user' },
+      submitted_by: { label: 'Submitted By', type: 'lookup', reference: 'sys_user' },
+      approved_by: { label: 'Approved By', type: 'lookup', reference: 'sys_user' },
     },
     enable: {
       trackHistory: true,
@@ -301,11 +315,40 @@ Define a multi-step approval flow for records.
     name: 'expense_approval',
     label: 'Expense Approval',
     type: 'record_change',
+    status: 'active',
     nodes: [
-      { id: 'start', type: 'start', label: 'Start' },
+      {
+        id: 'start',
+        type: 'start',
+        label: 'Start',
+        config: {
+          objectName: 'expense_report',
+          triggerType: 'record-after-update',
+          // Start condition (bare CEL): launch only on the draft → submitted transition
+          condition: "record.status == 'submitted' && previous.status != 'submitted'"
+        }
+      },
       { id: 'check_amount', type: 'decision', label: 'Check Amount' },
-      { id: 'auto_approve', type: 'update_record', label: 'Auto Approve' },
-      { id: 'request_approval', type: 'notify', label: 'Request Approval' },
+      {
+        id: 'auto_approve',
+        type: 'update_record',
+        label: 'Auto Approve',
+        config: {
+          objectName: 'expense_report',
+          filter: { id: '{record.id}' },
+          fields: { status: 'approved' }
+        }
+      },
+      {
+        id: 'request_approval',
+        type: 'notify',
+        label: 'Request Approval',
+        config: {
+          to: '{record.submitted_by}',
+          subject: 'Expense approval needed: {record.title}',
+          body: 'Expense "{record.title}" needs manual approval.'
+        }
+      },
       { id: 'end', type: 'end', label: 'End' }
     ],
     edges: [
@@ -388,10 +431,15 @@ const page2 = { ...page1, offset: 25 };
 const page3 = { ...page1, offset: 50 };
 ```
 
-### Cursor-Based (Scalable)
+### Keyset (Scalable)
+
+Instead of skipping N rows, filter past the last row you already received —
+stable under concurrent writes and cheap at any depth. (The query schema also
+reserves a `cursor` property, but it is not executed by the engine — use the
+`where` + `orderBy` + `limit` form below.)
 
 ```typescript
-// First page — no cursor yet
+// First page
 const firstPage = {
   object: 'activity',
   fields: ['id', 'type', 'description', 'created_at'],
@@ -399,10 +447,11 @@ const firstPage = {
   limit: 50
 };
 
-// Next page — pass the opaque cursor token returned with the previous response
+// Next page — filter past the last row of the previous page
+const lastRow = previousPage[previousPage.length - 1];
 const nextPage = {
   ...firstPage,
-  cursor: { /* opaque cursor token from the previous response */ }
+  where: { created_at: { $lt: lastRow.created_at } }
 };
 ```
 
