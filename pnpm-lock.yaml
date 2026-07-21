@@ -1769,6 +1769,9 @@ importers:
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../services/service-messaging
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
