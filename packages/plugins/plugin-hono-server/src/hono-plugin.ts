@@ -3,10 +3,13 @@
 import {
     Plugin, PluginContext, IDataEngine,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
+    derivePosture,
 } from '@objectstack/core';
 import {
     RestServerConfig,
 } from '@objectstack/spec/api';
+import { ADMIN_FULL_ACCESS, ORGANIZATION_ADMIN } from '@objectstack/spec';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { HonoHttpServer, HonoCorsOptions } from './adapter';
 import { cors } from 'hono/cors';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -18,6 +21,8 @@ import {
     PerfTiming,
     runWithPerfTiming,
     runWithPerfDisclosure,
+    allowPerfDisclosure,
+    isPerfDisclosurePrincipal,
     type PerfDisclosureGate,
 } from '@objectstack/observability';
 
@@ -868,6 +873,23 @@ export class HonoServerPlugin implements Plugin {
                     } catch {
                         /* no ai_access column / query failed → no seat (safe) */
                     }
+                }
+                // [#2408 / #3361] Open the per-request `Server-Timing` disclosure
+                // gate for an admin/service principal — the standalone-surface analog
+                // of the runtime dispatcher's `timedResolveExecutionContext`. This
+                // self-contained resolver derives no posture rung, so derive one HERE,
+                // for the gate decision ONLY, from the resolved permission-set grants,
+                // and hand it to the shared `isPerfDisclosurePrincipal` predicate. The
+                // rung is computed onto a THROW-AWAY object, never the returned
+                // context: `ctx.posture` is an enforcement input (Layer 0 tier
+                // adjudication, ADR-0099 D1) and only the authoritative resolver may
+                // set it. A no-op when perf-tuning is off (no ambient gate).
+                const disclosurePosture = derivePosture({
+                    isPlatformAdmin: permissions.includes(ADMIN_FULL_ACCESS),
+                    isTenantAdmin: permissions.includes(ORGANIZATION_ADMIN),
+                });
+                if (isPerfDisclosurePrincipal({ isSystem: false, posture: disclosurePosture } as ExecutionContext)) {
+                    allowPerfDisclosure();
                 }
                 return {
                     userId,

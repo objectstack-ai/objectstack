@@ -1671,6 +1671,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../core
+      '@objectstack/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../platform-objects

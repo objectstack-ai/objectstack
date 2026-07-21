@@ -14,9 +14,11 @@ import {
     allowPerfDisclosure,
     isPerfDisclosureAllowed,
     isPerfDisclosurePrivileged,
+    isPerfDisclosurePrincipal,
     recordServerTimingDetail,
     type PerfDisclosureGate,
 } from './perf-timing.js';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 
 describe('formatServerTiming', () => {
     it('serializes name + duration', () => {
@@ -347,5 +349,26 @@ describe('disclosure gate', () => {
             expect(currentPerfTiming()).toBeUndefined();
             expect(isPerfDisclosureAllowed()).toBe(true);
         });
+    });
+});
+
+describe('isPerfDisclosurePrincipal', () => {
+    const ctx = (over: Partial<ExecutionContext>): ExecutionContext =>
+        ({ isSystem: false, positions: [], permissions: [], ...over }) as ExecutionContext;
+
+    it('denies an undefined / anonymous / ordinary principal', () => {
+        expect(isPerfDisclosurePrincipal(undefined)).toBe(false);
+        expect(isPerfDisclosurePrincipal(ctx({}))).toBe(false);
+        expect(isPerfDisclosurePrincipal(ctx({ principalKind: 'human', posture: 'MEMBER' }))).toBe(false);
+        expect(isPerfDisclosurePrincipal(ctx({ principalKind: 'guest' }))).toBe(false);
+        expect(isPerfDisclosurePrincipal(ctx({ principalKind: 'agent' }))).toBe(false);
+    });
+
+    it('allows system / service principals and the admin posture rungs', () => {
+        expect(isPerfDisclosurePrincipal(ctx({ isSystem: true }))).toBe(true);
+        expect(isPerfDisclosurePrincipal(ctx({ principalKind: 'service' }))).toBe(true);
+        expect(isPerfDisclosurePrincipal(ctx({ principalKind: 'system' }))).toBe(true);
+        expect(isPerfDisclosurePrincipal(ctx({ posture: 'PLATFORM_ADMIN' }))).toBe(true);
+        expect(isPerfDisclosurePrincipal(ctx({ posture: 'TENANT_ADMIN' }))).toBe(true);
     });
 });
