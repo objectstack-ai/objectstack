@@ -40,6 +40,14 @@ export const Account = ObjectSchema.create({
   // every surface, no per-page config.
   highlightFields: ['status', 'industry', 'annual_revenue'],
 
+  // Show the record **History tab** (audit-trail UI). The console gates the tab
+  // on object-level `enable.trackHistory` (RecordDetailView) — audit *capture*
+  // is always on, but the tab is opt-in — so without this the tab never renders
+  // and the feature is undemonstrable. Paired with the per-field `trackHistory`
+  // on `industry` / `status` below so those changes get summarized diffs
+  // (display values, not raw ids; computed fields excluded — #2691/#3293).
+  enable: { trackHistory: true },
+
   fields: {
     name: Field.text({ label: 'Account Name', required: true, searchable: true, maxLength: 200 }),
     industry: Field.select({
