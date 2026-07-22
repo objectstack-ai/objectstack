@@ -44,7 +44,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           pending: "待处理",
           approved: "已批准",
           rejected: "已拒绝",
-          recalled: "已撤回"
+          recalled: "已撤回",
+          returned: "已退回修改"
         }
       },
       current_step: {
@@ -86,7 +87,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       my_pending: {
-        label: "我的待办"
+        label: "我的待办",
+        emptyState: {
+          title: "暂无待办审批",
+          message: "全部处理完毕，没有等待你审批的请求。"
+        }
       },
       submitted_by_me: {
         label: "我提交的"
@@ -96,6 +101,92 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       all_requests: {
         label: "全部"
+      }
+    },
+    _actions: {
+      approval_approve: {
+        label: "通过",
+        successMessage: "已通过。",
+        params: {
+          comment: {
+            label: "审批意见"
+          },
+          attachments: {
+            label: "附件"
+          }
+        }
+      },
+      approval_reject: {
+        label: "拒绝",
+        confirmText: "拒绝该请求？拒绝对所有审批人立即生效。",
+        successMessage: "已拒绝。",
+        params: {
+          comment: {
+            label: "审批意见"
+          },
+          attachments: {
+            label: "附件"
+          }
+        }
+      },
+      approval_reassign: {
+        label: "转签",
+        successMessage: "已转签。",
+        params: {
+          to: {
+            label: "新审批人",
+            helpText: "将此审批步骤转交给的用户"
+          },
+          comment: {
+            label: "备注"
+          }
+        }
+      },
+      approval_send_back: {
+        label: "退回修改",
+        successMessage: "已退回修改。",
+        params: {
+          comment: {
+            label: "原因"
+          }
+        }
+      },
+      approval_request_info: {
+        label: "退回补充",
+        successMessage: "已退回给申请人补充材料。",
+        params: {
+          comment: {
+            label: "需要申请人补充什么？"
+          }
+        }
+      },
+      approval_remind: {
+        label: "催办",
+        successMessage: "已发送催办。",
+        params: {
+          comment: {
+            label: "备注"
+          }
+        }
+      },
+      approval_recall: {
+        label: "撤回",
+        confirmText: "撤回该请求？撤回后审批人将无法继续处理，记录随即解锁。",
+        successMessage: "已撤回。",
+        params: {
+          comment: {
+            label: "备注"
+          }
+        }
+      },
+      approval_resubmit: {
+        label: "重新提交",
+        successMessage: "已重新提交。",
+        params: {
+          comment: {
+            label: "你修改了什么？"
+          }
+        }
       }
     }
   },
@@ -128,7 +219,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           approve: "批准",
           reject: "拒绝",
           recall: "撤回",
-          escalate: "升级"
+          escalate: "升级",
+          reassign: "转签",
+          remind: "催办",
+          request_info: "要求补充材料",
+          comment: "评论",
+          revise: "退回修改",
+          resubmit: "重新提交",
+          ooo_substitute: "不在岗改派"
         }
       },
       actor_id: {
@@ -137,13 +235,21 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "评论"
       },
+      attachments: {
+        label: "附件",
+        help: "支持该操作的文件——例如已签署的合同或证明材料（#3266）。"
+      },
       created_at: {
         label: "创建时间"
       }
     },
     _views: {
       recent: {
-        label: "最近"
+        label: "最近",
+        emptyState: {
+          title: "暂无审批操作记录",
+          message: "审批推进时会自动记录操作。"
+        }
       },
       by_actor: {
         label: "按执行人"

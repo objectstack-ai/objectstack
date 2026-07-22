@@ -44,7 +44,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           pending: "pending",
           approved: "approved",
           rejected: "rejected",
-          recalled: "recalled"
+          recalled: "recalled",
+          returned: "returned"
         }
       },
       current_step: {
@@ -86,7 +87,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       my_pending: {
-        label: "My Pending"
+        label: "My Pending",
+        emptyState: {
+          title: "No pending approvals",
+          message: "You're all caught up."
+        }
       },
       submitted_by_me: {
         label: "I Submitted"
@@ -96,6 +101,92 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       all_requests: {
         label: "All"
+      }
+    },
+    _actions: {
+      approval_approve: {
+        label: "Approve",
+        successMessage: "Approved.",
+        params: {
+          comment: {
+            label: "Comment"
+          },
+          attachments: {
+            label: "Attachments"
+          }
+        }
+      },
+      approval_reject: {
+        label: "Reject",
+        confirmText: "Reject this request? A rejection is final for every approver.",
+        successMessage: "Rejected.",
+        params: {
+          comment: {
+            label: "Comment"
+          },
+          attachments: {
+            label: "Attachments"
+          }
+        }
+      },
+      approval_reassign: {
+        label: "Reassign",
+        successMessage: "Reassigned.",
+        params: {
+          to: {
+            label: "New approver",
+            helpText: "User to hand this step to"
+          },
+          comment: {
+            label: "Comment"
+          }
+        }
+      },
+      approval_send_back: {
+        label: "Send back",
+        successMessage: "Sent back for revision.",
+        params: {
+          comment: {
+            label: "Reason"
+          }
+        }
+      },
+      approval_request_info: {
+        label: "Request info",
+        successMessage: "Information requested.",
+        params: {
+          comment: {
+            label: "What do you need?"
+          }
+        }
+      },
+      approval_remind: {
+        label: "Send reminder",
+        successMessage: "Reminder sent.",
+        params: {
+          comment: {
+            label: "Note"
+          }
+        }
+      },
+      approval_recall: {
+        label: "Recall",
+        confirmText: "Recall this request? Approvers can no longer act on it and the record is unlocked.",
+        successMessage: "Recalled.",
+        params: {
+          comment: {
+            label: "Comment"
+          }
+        }
+      },
+      approval_resubmit: {
+        label: "Resubmit",
+        successMessage: "Resubmitted.",
+        params: {
+          comment: {
+            label: "What changed?"
+          }
+        }
       }
     }
   },
@@ -128,7 +219,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           approve: "approve",
           reject: "reject",
           recall: "recall",
-          escalate: "escalate"
+          escalate: "escalate",
+          reassign: "reassign",
+          remind: "remind",
+          request_info: "request_info",
+          comment: "comment",
+          revise: "revise",
+          resubmit: "resubmit",
+          ooo_substitute: "ooo_substitute"
         }
       },
       actor_id: {
@@ -137,13 +235,21 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "Comment"
       },
+      attachments: {
+        label: "Attachments",
+        help: "Files supporting this action — e.g. a signed contract or evidence (#3266)."
+      },
       created_at: {
         label: "Created At"
       }
     },
     _views: {
       recent: {
-        label: "Recent"
+        label: "Recent",
+        emptyState: {
+          title: "No approval actions yet",
+          message: "Actions are logged automatically when approvals progress."
+        }
       },
       by_actor: {
         label: "By Actor"
@@ -179,7 +285,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reason: {
         label: "Reason",
-        help: "Why the delegation exists (e.g. \"Annual leave 5/26\u20135/30\"). Recorded on the substitution audit row."
+        help: "Why the delegation exists (e.g. \"Annual leave 5/26–5/30\"). Recorded on the substitution audit row."
       },
       organization_id: {
         label: "Organization",

@@ -44,7 +44,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           pending: "Pendiente",
           approved: "Aprobada",
           rejected: "Rechazada",
-          recalled: "Retirada"
+          recalled: "Retirada",
+          returned: "Devuelta para revisión"
         }
       },
       current_step: {
@@ -86,7 +87,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       my_pending: {
-        label: "Mis pendientes"
+        label: "Mis pendientes",
+        emptyState: {
+          title: "Sin aprobaciones pendientes",
+          message: "Estás al día: nada espera tu aprobación."
+        }
       },
       submitted_by_me: {
         label: "Enviadas por mí"
@@ -96,6 +101,92 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       all_requests: {
         label: "Todas"
+      }
+    },
+    _actions: {
+      approval_approve: {
+        label: "Aprobar",
+        successMessage: "Aprobada.",
+        params: {
+          comment: {
+            label: "Comentario"
+          },
+          attachments: {
+            label: "Adjuntos"
+          }
+        }
+      },
+      approval_reject: {
+        label: "Rechazar",
+        confirmText: "¿Rechazar esta solicitud? Un rechazo es definitivo para todos los aprobadores.",
+        successMessage: "Rechazada.",
+        params: {
+          comment: {
+            label: "Comentario"
+          },
+          attachments: {
+            label: "Adjuntos"
+          }
+        }
+      },
+      approval_reassign: {
+        label: "Reasignar",
+        successMessage: "Reasignada.",
+        params: {
+          to: {
+            label: "Nuevo aprobador",
+            helpText: "Usuario al que se entrega este paso"
+          },
+          comment: {
+            label: "Comentario"
+          }
+        }
+      },
+      approval_send_back: {
+        label: "Devolver",
+        successMessage: "Devuelta para revisión.",
+        params: {
+          comment: {
+            label: "Motivo"
+          }
+        }
+      },
+      approval_request_info: {
+        label: "Pedir información",
+        successMessage: "Información solicitada.",
+        params: {
+          comment: {
+            label: "¿Qué necesitas?"
+          }
+        }
+      },
+      approval_remind: {
+        label: "Enviar recordatorio",
+        successMessage: "Recordatorio enviado.",
+        params: {
+          comment: {
+            label: "Nota"
+          }
+        }
+      },
+      approval_recall: {
+        label: "Retirar",
+        confirmText: "¿Retirar esta solicitud? Los aprobadores ya no podrán actuar sobre ella y el registro se desbloqueará.",
+        successMessage: "Retirada.",
+        params: {
+          comment: {
+            label: "Comentario"
+          }
+        }
+      },
+      approval_resubmit: {
+        label: "Reenviar",
+        successMessage: "Reenviada.",
+        params: {
+          comment: {
+            label: "¿Qué ha cambiado?"
+          }
+        }
       }
     }
   },
@@ -128,7 +219,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           approve: "Aprobar",
           reject: "Rechazar",
           recall: "Retirar",
-          escalate: "Escalar"
+          escalate: "Escalar",
+          reassign: "Reasignación",
+          remind: "Recordatorio",
+          request_info: "Petición de información",
+          comment: "Comentario",
+          revise: "Devolución",
+          resubmit: "Reenvío",
+          ooo_substitute: "Sustitución por ausencia"
         }
       },
       actor_id: {
@@ -137,13 +235,21 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "Comentario"
       },
+      attachments: {
+        label: "Adjuntos",
+        help: "Archivos que respaldan esta acción, p. ej. un contrato firmado o pruebas (#3266)."
+      },
       created_at: {
         label: "Creado el"
       }
     },
     _views: {
       recent: {
-        label: "Recientes"
+        label: "Recientes",
+        emptyState: {
+          title: "Aún no hay acciones de aprobación",
+          message: "Las acciones se registran automáticamente a medida que avanza la aprobación."
+        }
       },
       by_actor: {
         label: "Por actor"
@@ -179,7 +285,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reason: {
         label: "Reason",
-        help: "Why the delegation exists (e.g. \"Annual leave 5/26\u20135/30\"). Recorded on the substitution audit row."
+        help: "Why the delegation exists (e.g. \"Annual leave 5/26–5/30\"). Recorded on the substitution audit row."
       },
       organization_id: {
         label: "Organization",

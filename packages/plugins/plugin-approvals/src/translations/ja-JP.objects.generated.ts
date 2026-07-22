@@ -44,7 +44,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           pending: "保留中",
           approved: "承認済み",
           rejected: "却下済み",
-          recalled: "取り消し済み"
+          recalled: "取り消し済み",
+          returned: "差し戻し済み"
         }
       },
       current_step: {
@@ -86,7 +87,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       my_pending: {
-        label: "自分の保留中"
+        label: "自分の保留中",
+        emptyState: {
+          title: "承認待ちはありません",
+          message: "すべて処理済みです。あなたの承認を待つリクエストはありません。"
+        }
       },
       submitted_by_me: {
         label: "自分が送信"
@@ -96,6 +101,92 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       all_requests: {
         label: "すべて"
+      }
+    },
+    _actions: {
+      approval_approve: {
+        label: "承認",
+        successMessage: "承認しました。",
+        params: {
+          comment: {
+            label: "コメント"
+          },
+          attachments: {
+            label: "添付ファイル"
+          }
+        }
+      },
+      approval_reject: {
+        label: "却下",
+        confirmText: "このリクエストを却下しますか？却下はすべての承認者に対して最終決定になります。",
+        successMessage: "却下しました。",
+        params: {
+          comment: {
+            label: "コメント"
+          },
+          attachments: {
+            label: "添付ファイル"
+          }
+        }
+      },
+      approval_reassign: {
+        label: "再割り当て",
+        successMessage: "再割り当てしました。",
+        params: {
+          to: {
+            label: "新しい承認者",
+            helpText: "このステップを引き継ぐユーザー"
+          },
+          comment: {
+            label: "コメント"
+          }
+        }
+      },
+      approval_send_back: {
+        label: "差し戻し",
+        successMessage: "修正のため差し戻しました。",
+        params: {
+          comment: {
+            label: "理由"
+          }
+        }
+      },
+      approval_request_info: {
+        label: "追加情報を依頼",
+        successMessage: "追加情報を依頼しました。",
+        params: {
+          comment: {
+            label: "何が必要ですか？"
+          }
+        }
+      },
+      approval_remind: {
+        label: "リマインダー送信",
+        successMessage: "リマインダーを送信しました。",
+        params: {
+          comment: {
+            label: "メモ"
+          }
+        }
+      },
+      approval_recall: {
+        label: "取り下げ",
+        confirmText: "このリクエストを取り下げますか？承認者は操作できなくなり、レコードのロックが解除されます。",
+        successMessage: "取り下げました。",
+        params: {
+          comment: {
+            label: "コメント"
+          }
+        }
+      },
+      approval_resubmit: {
+        label: "再提出",
+        successMessage: "再提出しました。",
+        params: {
+          comment: {
+            label: "何を変更しましたか？"
+          }
+        }
       }
     }
   },
@@ -128,7 +219,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           approve: "承認",
           reject: "却下",
           recall: "取消",
-          escalate: "エスカレーション"
+          escalate: "エスカレーション",
+          reassign: "再割り当て",
+          remind: "リマインダー",
+          request_info: "追加情報依頼",
+          comment: "コメント",
+          revise: "差し戻し",
+          resubmit: "再提出",
+          ooo_substitute: "不在時代理"
         }
       },
       actor_id: {
@@ -137,13 +235,21 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "コメント"
       },
+      attachments: {
+        label: "添付ファイル",
+        help: "この操作を裏付けるファイル——署名済み契約書や証憑など（#3266）。"
+      },
       created_at: {
         label: "作成日時"
       }
     },
     _views: {
       recent: {
-        label: "最近"
+        label: "最近",
+        emptyState: {
+          title: "承認操作はまだありません",
+          message: "承認が進むと操作は自動的に記録されます。"
+        }
       },
       by_actor: {
         label: "操作者別"
@@ -179,7 +285,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       reason: {
         label: "Reason",
-        help: "Why the delegation exists (e.g. \"Annual leave 5/26\u20135/30\"). Recorded on the substitution audit row."
+        help: "Why the delegation exists (e.g. \"Annual leave 5/26–5/30\"). Recorded on the substitution audit row."
       },
       organization_id: {
         label: "Organization",
