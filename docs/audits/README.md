@@ -52,6 +52,8 @@ field enhanced-type configs (barcode/qr/slider/rating/color/location) + governan
 ### 6. Inverse drift — renderer depends on UNDECLARED props
 dashboard `component`/`data`/`rowField`/`columnField`; view `ObjectView` form-adapter keys; app `accentColor`/`badgeVariant`/`separator`. These break a strict `Schema.parse()`.
 
+**✅ Resolved (#1894).** All three reconciled so strict validation holds: **dashboard** — `component`/`data` + the pre-ADR-0021 inline-analytics keys (`rowField`/`columnField`/…) are quarantined and rejected by the strict `DashboardWidgetSchema` error map (`dashboard.zod.ts`), pointing authors at the `dataset`/`dimensions`/`values` shape (renderer-only extras → `options`). **app** — `accentColor`/`badgeVariant`/`separator` are now declared on `AppSchema` (`app.zod.ts`). **view** — the structured `buttons`/`defaults` were added to `FormViewSchema` (#2998 Track A) and are now consumed: objectui `ObjectForm` folds them onto its flat renderer props (framework#1894 / #2998), so the two liveness-ledger entries flip `experimental → live`; the remaining flat form-adapter keys (`customFields`/`className`/`fields`) are classified renderer-only ObjectUI extensions (objectui#2545).
+
 ### 7. Designer authoring gaps (live prop, no Studio editor)
 dataset `filter`/`format`/`derived`/`dateGranularity`; skill `triggerConditions` (the activation-critical field); flow `notify` (absent from static palette).
 

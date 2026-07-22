@@ -23,6 +23,7 @@ Variant routing (`tabbed/wizard/split/drawer/modal`) exists in `plugin-form/Obje
 - `bulkActions` works **only** because `ListView.tsx:1318` remaps it to `batchActions` (ObjectGrid's real key) — a direct `object-grid` caller using `bulkActions` silently no-ops.
 - `groups` vs `sections` — both alive but on different code paths, not aliased in one place.
 - Inverse problem: `ObjectView.tsx:809-823`'s form adapter reads keys (`layout,showSubmit,submitText,customFields,title,initialValues,className`) that **don't exist in `FormViewSchema`** — renderer-invented surface with no spec backing.
+  - **✅ Resolved (#1894 / #2998).** `layout`/`title` are declared on `FormViewSchema`; the button/visibility keys (`showSubmit`/`submitText`/`showCancel`/`cancelText`/`showReset`) and `initialValues` got structured spec homes (`buttons` / `defaults`) that the objectui `ObjectForm` now folds onto its flat props — so the two ledger entries are `live`, and the flat keys survive only as deprecated back-compat. `customFields`/`className`/`fields` stay classified as renderer-only ObjectUI extensions (objectui#2545), not spec surface.
 
 ## Recommendation (for ADR)
 1. **Migrate the chart renderers to `dataset`/`dimensions`/`values`** (ADR-0021) — pairs with the dashboard/report seed migration; currently the entire chart view variant is dead against the spec.

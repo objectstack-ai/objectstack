@@ -1933,7 +1933,7 @@ describe('FormViewSchema - defaultSort', () => {
 });
 
 // ============================================================================
-// FormView structured buttons + defaults (#2998, EXPERIMENTAL until objectui#2545)
+// FormView structured buttons + defaults (#2998; live now the objectui ObjectForm folds them, framework#1894)
 // ============================================================================
 
 describe('FormViewSchema - buttons & defaults', () => {
@@ -1987,10 +1987,13 @@ describe('FormViewSchema - buttons & defaults', () => {
     expect(result.defaults).toBeUndefined();
   });
 
-  it('marks both keys experimental until the renderer wiring lands (ADR-0078)', () => {
+  it('marks both keys live now the ObjectForm renderer folds them (framework#1894 / #2998)', () => {
     const shape = (FormViewSchema as unknown as z.ZodObject<z.ZodRawShape>).shape;
     for (const key of ['buttons', 'defaults'] as const) {
-      expect(shape[key].description, `${key} .describe()`).toMatch(/EXPERIMENTAL — NOT ENFORCED/);
+      // The renderer wiring landed (objectui ObjectForm foldFormButtons), so the
+      // ADR-0078 escape-hatch marker must be gone — the spec liveness gate keys
+      // `experimental` off this exact substring.
+      expect(shape[key].description, `${key} .describe()`).not.toMatch(/EXPERIMENTAL — NOT ENFORCED/);
     }
   });
 });

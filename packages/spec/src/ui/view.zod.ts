@@ -898,7 +898,7 @@ export const FormSectionSchema = lazySchema(() => z.object({
 
 /**
  * A single form action button (submit / cancel / reset): visibility + label.
- * Leaf of the [EXPERIMENTAL] {@link FormViewSchema} `buttons` block (#2998).
+ * Leaf of the {@link FormViewSchema} `buttons` block (#2998).
  * `.strict()` per ADR-0089 D3a so a typo'd key errors instead of vanishing.
  */
 export const FormButtonConfigSchema = lazySchema(() => z.object({
@@ -1023,30 +1023,30 @@ export const FormViewSchema = lazySchema(() => z.object({
   ]).optional().describe('Post-submit behavior'),
 
   /**
-   * ⚠️ EXPERIMENTAL — NOT ENFORCED (#2998, ADR-0078). Structured action-button
-   * config: per-button visibility + label for `submit` / `cancel` / `reset`.
-   * This is the spec home for the flat renderer-invented keys ObjectUI's
-   * `ObjectForm` reads today (`showSubmit`/`submitText`/`showCancel`/`cancelText`/
-   * `showReset`, objectui#2545) — those never existed here and are silently
-   * stripped by this strip-mode container. Experimental until the ObjectUI
-   * renderer reads `buttons.*` (the ADR-0078 escape hatch: the contract ships
-   * ahead of its consumer, marked so authoring it is not a false promise).
+   * Structured action-button config: per-button visibility + label for
+   * `submit` / `cancel` / `reset`. The spec home for the flat renderer-invented
+   * keys ObjectUI's `ObjectForm` used to read (`showSubmit`/`submitText`/
+   * `showCancel`/`cancelText`/`showReset`) — now consumed: `ObjectForm` folds
+   * `buttons.*` down onto those flat props at render (framework#1894, #2998),
+   * with the flat keys kept only as deprecated back-compat. Authoring `buttons`
+   * takes effect; a stale flat key still wins where explicitly set.
    */
   buttons: z.object({
     submit: FormButtonConfigSchema.optional().describe('Submit button'),
     cancel: FormButtonConfigSchema.optional().describe('Cancel button'),
     reset: FormButtonConfigSchema.optional().describe('Reset button'),
   }).strict().optional()
-    .describe('[EXPERIMENTAL — NOT ENFORCED, #2998] Form action-button visibility & labels. Renderer wiring pending in ObjectUI (objectui#2545).'),
+    .describe('Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998).'),
 
   /**
-   * ⚠️ EXPERIMENTAL — NOT ENFORCED (#2998, ADR-0078). Initial field values for
-   * create-mode forms, keyed by field machine name. Spec home for ObjectUI's
-   * renderer-invented `initialValues` (objectui#2545). Experimental until the
-   * ObjectUI renderer reads it.
+   * Initial field values for create-mode forms, keyed by field machine name —
+   * the spec home for ObjectUI's renderer-invented `initialValues`. Consumed:
+   * `ObjectForm` folds `defaults` into its create-mode initial values at render
+   * (framework#1894, #2998); an explicit `initialValues` (e.g. URL prefill)
+   * still wins.
    */
   defaults: z.record(z.string(), z.unknown()).optional()
-    .describe('[EXPERIMENTAL — NOT ENFORCED, #2998] Initial field values for create-mode forms (spec home for ObjectUI `initialValues`). Renderer wiring pending (objectui#2545).'),
+    .describe('Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998).'),
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes for the form view'),
