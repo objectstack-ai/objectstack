@@ -171,8 +171,6 @@ export const Task = ObjectSchema.create({
     files: true,
     feeds: true,
     activities: true,
-    trash: true,
-    mru: true,
   },
   
   // Database indexes for performance

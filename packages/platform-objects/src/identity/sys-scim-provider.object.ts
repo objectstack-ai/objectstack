@@ -120,7 +120,5 @@ export const SysScimProvider = ObjectSchema.create({
     // under /api/v1/auth/scim/*; the generic data layer is read-only so the
     // credential cannot be written/bypassed through it.
     apiMethods: ['list'],
-    trash: false,
-    mru: false,
   },
 });

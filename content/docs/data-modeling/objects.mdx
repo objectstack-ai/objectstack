@@ -83,8 +83,6 @@ enable: {
   files: true,             // File attachments
   feeds: true,             // Activity feed and comments
   activities: true,        // Tasks and events tracking
-  trash: true,             // Soft delete with restore
-  mru: true,               // Most Recently Used tracking
   clone: true,             // Deep record cloning
 }
 ```
@@ -98,8 +96,6 @@ enable: {
 | `files` | `false` | Enable file attachments |
 | `feeds` | `true` | Enable social feed and comments |
 | `activities` | `true` | Enable tasks and events tracking |
-| `trash` | `true` | Enable soft delete with restore |
-| `mru` | `true` | Track Most Recently Used list |
 | `clone` | `true` | Allow record deep cloning |
 
 ### Enterprise Features
@@ -330,7 +326,6 @@ export const ProjectTask = ObjectSchema.create({
     searchable: true,
     trackHistory: true,
     feeds: true,
-    trash: true,
   },
 
   validations: [

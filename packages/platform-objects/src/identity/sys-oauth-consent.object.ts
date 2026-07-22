@@ -101,7 +101,5 @@ export const SysOauthConsent = ObjectSchema.create({
     searchable: false,
     apiEnabled: false,
     apiMethods: [],
-    trash: false,
-    mru: false,
   },
 });

@@ -16,7 +16,7 @@
  * `"authorWarn": true` (+ an optional `"authorHint"`). A property being merely
  * `dead` is NOT enough — plenty of dead props are benign display/doc metadata.
  * Only entries an author would be *misled* by are marked. Booleans warn only when
- * set truthy (so schema defaults like `enable.trash` never trip it); object/
+ * set truthy (so schema defaults like `enable.searchable` never trip it); object/
  * string/array props warn when present at all.
  */
 

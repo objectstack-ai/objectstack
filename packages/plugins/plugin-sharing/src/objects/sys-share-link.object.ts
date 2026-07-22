@@ -248,8 +248,6 @@ export const SysShareLink = ObjectSchema.create({
     // The /api/v1/share-links endpoints are the authoritative surface;
     // the generic data API is exposed read-only for the admin grid.
     apiMethods: ['get', 'list'],
-    trash: false,
-    mru: false,
     clone: false,
   },
 });

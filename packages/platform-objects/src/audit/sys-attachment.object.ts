@@ -137,8 +137,6 @@ export const SysAttachment = ObjectSchema.create({
     // reap guard reclaims a file's bytes once its last join row is gone, so a
     // "restore" would dangle. Declare `false` — the honest state — rather than
     // claim a restore capability the runtime does not provide.
-    trash: false,
-    mru: false,
     clone: false,
   },
 });

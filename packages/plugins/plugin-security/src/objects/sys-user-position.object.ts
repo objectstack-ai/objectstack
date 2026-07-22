@@ -157,7 +157,5 @@ export const SysUserPosition = ObjectSchema.create({
     searchable: true,
     apiEnabled: true,
     apiMethods: ['get', 'list', 'create', 'update', 'delete'],
-    trash: true,
-    mru: false,
   },
 });

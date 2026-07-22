@@ -117,7 +117,5 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
     // Read-only over the generic data API — confirm/dismiss go through the
     // `security` service so the anchor + delegated-admin gates always apply.
     apiMethods: ['get', 'list'],
-    trash: false,
-    mru: false,
   },
 });

@@ -153,8 +153,6 @@ export const SysComment = ObjectSchema.create({
     trackHistory: true,
     searchable: true,
     apiEnabled: true,
-    trash: true,
-    mru: false,
     clone: false,
   },
 });

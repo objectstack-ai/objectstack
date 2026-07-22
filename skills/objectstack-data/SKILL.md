@@ -96,8 +96,6 @@ Toggle system behaviours per object:
 | `files` | `false` | Attachments & document management |
 | `feeds` | `true` | Social feed, comments, mentions — **opt-out**: explicit `false` hides the feed UI and rejects new comments |
 | `activities` | `true` | Activity timeline (`sys_activity` mirror of CRUD) — **opt-out**: explicit `false` stops mirroring and hides the timeline |
-| `trash` | `true` | Soft-delete with restore |
-| `mru` | `true` | Most Recently Used tracking |
 | `clone` | `true` | Record deep cloning |
 
 ---
@@ -227,7 +225,6 @@ export default ObjectSchema.create({
     trackHistory: true,
     feeds: true,
     activities: true,
-    trash: true,
   },
   fields: {
     subject:     { type: 'text', required: true, maxLength: 255 },
@@ -802,7 +799,6 @@ export const SetupApp = defineApp({
 |:--------|:-----------------|
 | `tenancy` | Multi-tenant SaaS — `{ enabled: true, tenantField: 'tenant_id' }` row-level isolation (DB-per-tenant is an environment/deployment choice, not object metadata) |
 | `lifecycle` | Append-only / high-write-rate objects — retention / rotation / archival contract (ADR-0057); see [rules/lifecycle.md](./rules/lifecycle.md) |
-| `enable.trash` | Soft-delete with restore — defaults on; explicit `false` disables the recycle bin |
 | per-field `trackHistory` | Render a field's value changes as human-readable activity-timeline entries (pair with `enable.trackHistory`, ADR-0052 §5b) |
 
 > The former `softDelete` / `versioning` object keys were **removed** from the

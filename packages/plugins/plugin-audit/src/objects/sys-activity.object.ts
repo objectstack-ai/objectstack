@@ -208,8 +208,6 @@ export const SysActivity = ObjectSchema.create({
     searchable: true,
     apiEnabled: true,
     apiMethods: ['get', 'list'],
-    trash: false,
-    mru: false,
     clone: false,
   },
 });

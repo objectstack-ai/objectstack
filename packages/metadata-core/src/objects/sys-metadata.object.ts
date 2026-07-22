@@ -234,7 +234,6 @@ export const SysMetadataObject = ObjectSchema.create({
     // so the generic write verbs were a latent hole for a user-context raw write
     // the bucket forbids. Reads stay open for the Setup "Data Model" grids.
     apiMethods: ['get', 'list'],
-    trash: false,
   },
 
   // Named list views — power the Setup App "Data Model" group so admins

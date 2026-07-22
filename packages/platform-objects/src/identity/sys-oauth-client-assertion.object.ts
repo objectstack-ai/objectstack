@@ -49,7 +49,5 @@ export const SysOauthClientAssertion = ObjectSchema.create({
     searchable: false,
     apiEnabled: false,
     apiMethods: [],
-    trash: false,
-    mru: false,
   },
 });

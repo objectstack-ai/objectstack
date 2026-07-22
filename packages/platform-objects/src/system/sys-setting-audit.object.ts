@@ -174,7 +174,6 @@ export const SysSettingAudit = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
-    audit: false, // this IS the audit; no recursion
     // [ADR-0103] Engine-owned: appended by the settings service (SYSTEM_CTX),
     // never via the generic data API. Reads stay open for compliance review.
     apiMethods: ['get', 'list'],

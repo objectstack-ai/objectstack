@@ -146,7 +146,5 @@ export const SysOauthAccessToken = ObjectSchema.create({
     searchable: false,
     apiEnabled: false,
     apiMethods: [],
-    trash: false,
-    mru: false,
   },
 });

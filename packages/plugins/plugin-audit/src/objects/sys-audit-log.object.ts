@@ -225,8 +225,6 @@ export const SysAuditLog = ObjectSchema.create({
     searchable: true,
     apiEnabled: true,
     apiMethods: ['get', 'list'], // Read-only — creation happens via internal system hooks only
-    trash: false, // Never soft-delete audit logs
-    mru: false,
     clone: false,
   },
 });

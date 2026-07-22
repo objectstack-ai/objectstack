@@ -276,7 +276,5 @@ export const SysPosition = ObjectSchema.create({
     searchable: true,
     apiEnabled: true,
     apiMethods: ['get', 'list', 'create', 'update', 'delete'],
-    trash: true,
-    mru: true,
   },
 });

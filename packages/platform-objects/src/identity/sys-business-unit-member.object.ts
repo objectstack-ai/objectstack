@@ -109,7 +109,5 @@ export const SysBusinessUnitMember = ObjectSchema.create({
     // entries. Reconcile-safe: import/export are not generic write verbs, so
     // reconcileManagedApiMethods (managedBy:'platform') never strips them.
     apiMethods: ['get', 'list', 'create', 'update', 'delete', 'import', 'export'],
-    trash: true,
-    mru: false,
   },
 });

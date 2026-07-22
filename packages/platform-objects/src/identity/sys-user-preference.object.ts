@@ -116,7 +116,5 @@ export const SysUserPreference = ObjectSchema.create({
     searchable: false,
     apiEnabled: true,
     apiMethods: ['get', 'list', 'create', 'update', 'delete'],
-    trash: false,
-    mru: false,
   },
 });

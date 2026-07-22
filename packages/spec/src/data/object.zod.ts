@@ -27,6 +27,49 @@ export const ApiMethod = z.enum([
 export type ApiMethod = z.infer<typeof ApiMethod>;
 
 /**
+ * Tombstones for RETIRED capability flags — same doctrine as the tenancy
+ * block and the top-level `UNKNOWN_KEY_GUIDANCE` map below: a retired
+ * key's rejection must carry the upgrade prescription, because the parse
+ * error is the one channel every consumer bumping `@objectstack/spec` is
+ * guaranteed to hit. Removed in the 16.x line (#2377, ADR-0049
+ * enforce-or-remove).
+ */
+const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
+  trash:
+    '`enable.trash` was removed from @objectstack/spec in the 16.x line (#2377, ' +
+    'ADR-0049) — it never had a runtime consumer: every delete has always been a ' +
+    'hard delete, and a default-true flag promising a recycle bin was a false ' +
+    'affordance (authors wrote `trash: false` believing they were opting out of a ' +
+    'soft-delete that never ran). Delete the key. For recoverability use per-field ' +
+    '`trackHistory` (audit trail) or a `lifecycle` policy; a real recycle bin, if ' +
+    'built, returns as a live enforced flag (#1893 prune-or-build).',
+  mru:
+    '`enable.mru` was removed from @objectstack/spec in the 16.x line (#2377, ' +
+    'ADR-0049) — Most-Recently-Used tracking was never implemented; no reader ' +
+    'existed, so the flag changed nothing. Delete the key. If MRU tracking is ' +
+    'built it returns as a live enforced flag (#1893 prune-or-build).',
+};
+
+/**
+ * Custom zod `error` for the `.strict()` capabilities block (pattern of
+ * `strictTenancyError` below): an unknown key — a retired `trash`/`mru` or a
+ * typo like `feedEnabled` — is a loud, *fixable* parse error instead of a
+ * silent strip (#1535), and a retired key's error carries its upgrade
+ * prescription. Every other issue code defers to zod's default.
+ */
+const strictCapabilitiesError: z.core.$ZodErrorMap = (issue) => {
+  if (issue.code !== 'unrecognized_keys') return undefined;
+  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
+  const lines = keys.map((key) =>
+    CAPABILITIES_RETIRED_KEY_GUIDANCE[key] ?? `\`${key}\` is not an \`enable\` capability flag.`,
+  );
+  return (
+    `Unrecognized key(s) on \`enable\`: ${keys.map((k) => `\`${k}\``).join(', ')}.\n` +
+    lines.map((l) => `  • ${l}`).join('\n')
+  );
+};
+
+/**
  * Capability Flags
  * Defines what system features are enabled for this object.
  *
@@ -35,10 +78,13 @@ export type ApiMethod = z.infer<typeof ApiMethod>;
  * defined enforcement contract (#2707); a flag with no runtime consumer is a
  * bug, not a reservation — see `@objectstack/spec/liveness/object.json`.
  *
- * Opt-out flags (`feeds`, `activities`, `trash`, `mru`, `clone`, `searchable`,
- * `apiEnabled`) default to `true`: absent block/flag = enabled, and consumers
- * gate on explicit `false` only. Opt-in flags (`trackHistory`, `files`)
- * default to `false`.
+ * Opt-out flags (`feeds`, `activities`, `clone`, `searchable`, `apiEnabled`)
+ * default to `true`: absent block/flag = enabled, and consumers gate on
+ * explicit `false` only. Opt-in flags (`trackHistory`, `files`) default to
+ * `false`.
+ *
+ * `.strict()`: unknown keys (incl. the retired `trash` / `mru`, #2377) are
+ * rejected with guidance, not stripped (#1535).
  *
  * @example
  * {
@@ -106,15 +152,9 @@ export const ObjectCapabilities = z.object({
    */
   activities: z.boolean().default(true).describe('Record activity timeline (sys_activity mirror of CRUD). Default on; explicit false stops mirroring and hides the timeline'),
 
-  /** Enable Recycle Bin / Soft Delete */
-  trash: z.boolean().default(true).describe('Enable soft-delete with restore capability'),
-
-  /** Enable "Recently Viewed" tracking */
-  mru: z.boolean().default(true).describe('Track Most Recently Used (MRU) list for users'),
-  
   /** Allow cloning records */
   clone: z.boolean().default(true).describe('Allow record deep cloning'),
-});
+}, { error: strictCapabilitiesError }).strict();
 
 /**
  * Schema for database indexes.

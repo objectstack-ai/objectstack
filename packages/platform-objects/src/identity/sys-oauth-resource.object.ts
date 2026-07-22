@@ -139,7 +139,5 @@ export const SysOauthResource = ObjectSchema.create({
     searchable: false,
     apiEnabled: false,
     apiMethods: [],
-    trash: false,
-    mru: false,
   },
 });

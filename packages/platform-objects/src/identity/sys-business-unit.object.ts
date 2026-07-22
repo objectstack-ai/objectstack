@@ -220,7 +220,5 @@ export const SysBusinessUnit = ObjectSchema.create({
     // and `effective_from/to` are designed for HRIS batch sync (#3025). Import
     // reuses the create/update affordances this object already grants.
     apiMethods: ['get', 'list', 'create', 'update', 'delete', 'import', 'export'],
-    trash: true,
-    mru: false,
   },
 });

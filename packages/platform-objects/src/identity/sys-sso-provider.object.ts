@@ -297,7 +297,5 @@ export const SysSsoProvider = ObjectSchema.create({
     // the generic data layer is read-only so sysadmins cannot bypass
     // server-side validation / secret handling.
     apiMethods: ['get', 'list'],
-    trash: false,
-    mru: false,
   },
 });

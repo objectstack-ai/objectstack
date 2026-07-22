@@ -110,7 +110,7 @@ Two rules keep it false-positive-free, **both of which the marker author must re
    marked; an author isn't misled by them.
 2. **Booleans: only mark `default(false)` flags.** The lint warns on a boolean only when set
    `true`, and it can't tell author-set-`true` from a schema default. A `default(true)` flag
-   (`enable.trash`/`mru`, `enable.searchable`) would then warn on *every* object that has an
+   (`enable.searchable`) would then warn on *every* object that has an
    `enable` block — so leave those unmarked (see `enable.searchable`'s `_authorWarnSkipped`).
    Object/string/array props warn when merely present, so this caveat is boolean-only.
 
@@ -189,7 +189,7 @@ EOF
 
 | Type | live | exp | dead | planned | Notes |
 |---|---|---|---|---|---|
-| object | 40 | – | 2 | 1 | aspirational tier (versioning/softDelete/search/recordName/keyPrefix) + tags/active/abstract REMOVED (#2377) — tombstoned in UNKNOWN_KEY_GUIDANCE; `isSystem` + `enable.searchable` CORRECTED to live (#2377 — sharing default-model + global-search opt-out; 2026-06 audit missed both readers); remaining dead = `enable.trash`/`mru` (inert default-true, ~35 sys-object setters → deferred); `tenancy.strategy`/`crossTenantAccess` REMOVED post-15.0 (#2763) |
+| object | 40 | – | 0 | 1 | aspirational tier (versioning/softDelete/search/recordName/keyPrefix) + tags/active/abstract REMOVED (#2377) — tombstoned in UNKNOWN_KEY_GUIDANCE; `enable.trash`/`mru` REMOVED (#2377 close-out) — tombstoned in the now-`.strict()` ObjectCapabilities; `isSystem` + `enable.searchable` CORRECTED to live (#2377 — sharing default-model + global-search opt-out; 2026-06 audit missed both readers); `tenancy.strategy`/`crossTenantAccess` REMOVED post-15.0 (#2763) |
 | field | 55 | – | 0 | – | healthy — full dead set (vectorConfig/fileAttachmentConfig/dependencies, then referenceFilters/columnName/index) REMOVED (#2377); columnName also dropped the ADR-0062 D7 lint + StorageNameMapping column helpers |
 | flow | 27 | – | 4 | – | dead = description/template/nodes.outputSchema/errorHandling.fallbackNodeId (engine uses fault edges) |
 | action | 35 | 1 | 0 | – | `disabled` went LIVE via metadata-admin authoring UI (2026-06 audit missed objectui); `type:'form'` CORRECTED to live (objectui ActionRunner.executeForm, #2377); dead `timeout` REMOVED (#2377) |

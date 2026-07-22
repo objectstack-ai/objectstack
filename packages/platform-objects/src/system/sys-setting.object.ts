@@ -198,7 +198,5 @@ export const SysSetting = ObjectSchema.create({
     // the UI MUST go through /api/settings/:namespace so the resolver
     // and audit hooks fire. The grid is diagnostic-only.
     apiMethods: ['get', 'list'],
-    trash: false,
-    mru: false,
   },
 });

@@ -177,7 +177,5 @@ export const SysTeam = ObjectSchema.create({
     // The HTTP layer now answers 405 (api-exposure) before the engine's
     // 403 backstop. See #1591.
     apiMethods: ['get', 'list'],
-    trash: true,
-    mru: false,
   },
 });

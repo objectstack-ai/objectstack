@@ -760,8 +760,6 @@ export const SysUser = ObjectSchema.create({
     // clamped to the profile-field whitelist ({name, image}) by the guard —
     // `userActions.edit: true` above declares the affordance.
     apiMethods: ['get', 'list', 'update'],
-    trash: true,
-    mru: true,
   },
 
   // Email uniqueness is enforced by the unique index above (and better-auth's

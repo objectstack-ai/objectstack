@@ -120,7 +120,5 @@ export const SysPresence = ObjectSchema.create({
     // /data route open for a user-context write the bucket forbids. Reads
     // stay open for diagnostic list views.
     apiMethods: ['get', 'list'],
-    trash: false,
-    mru: false,
   },
 });

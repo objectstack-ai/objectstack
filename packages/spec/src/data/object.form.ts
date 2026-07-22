@@ -190,8 +190,6 @@ export const objectForm = defineForm({
             { field: 'files', type: 'boolean' },
             { field: 'feeds', type: 'boolean' },
             { field: 'activities', type: 'boolean' },
-            { field: 'trash', type: 'boolean' },
-            { field: 'mru', type: 'boolean' },
             { field: 'clone', type: 'boolean' },
           ],
         },

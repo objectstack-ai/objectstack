@@ -184,6 +184,5 @@ export const SysMetadataHistoryObject = ObjectSchema.create({
     searchable: false,
     apiEnabled: true,
     apiMethods: ['get', 'list'],
-    trash: false,
   },
 });

@@ -148,6 +148,5 @@ export const SysMetadataCommitObject = ObjectSchema.create({
     searchable: false,
     apiEnabled: true,
     apiMethods: ['get', 'list'],
-    trash: false,
   },
 });

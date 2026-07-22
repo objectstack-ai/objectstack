@@ -10,11 +10,9 @@ describe('ObjectCapabilities', () => {
     expect(result.apiEnabled).toBe(true);
     expect(result.files).toBe(false);
     // feeds/activities are opt-OUT capabilities (#2707): default on, consumers
-    // gate on explicit `false` only — same posture as trash/mru/clone.
+    // gate on explicit `false` only — same posture as clone.
     expect(result.feeds).toBe(true);
     expect(result.activities).toBe(true);
-    expect(result.trash).toBe(true);
-    expect(result.mru).toBe(true);
     expect(result.clone).toBe(true);
   });
 
@@ -26,13 +24,29 @@ describe('ObjectCapabilities', () => {
       files: true,
       feeds: true,
       activities: false,
-      trash: false,
-      mru: true,
       clone: true,
     };
 
     const result = ObjectCapabilities.parse(capabilities);
     expect(result).toEqual(capabilities);
+  });
+
+  // #2377 (ADR-0049): `trash`/`mru` parsed-but-did-nothing for years — the
+  // retired keys must fail loudly with the upgrade prescription, not strip
+  // silently (#1535; pattern of the tenancy tombstones, #2763).
+  it('rejects the retired trash/mru flags with upgrade guidance', () => {
+    for (const key of ['trash', 'mru'] as const) {
+      const result = ObjectCapabilities.safeParse({ [key]: true });
+      expect(result.success).toBe(false);
+      const message = result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
+      expect(message).toContain(`\`${key}\``);
+      expect(message).toContain('#2377');
+    }
+  });
+
+  it('rejects unknown capability keys instead of stripping them', () => {
+    const result = ObjectCapabilities.safeParse({ feedEnabled: true });
+    expect(result.success).toBe(false);
   });
 });
 
@@ -459,8 +473,7 @@ describe('ObjectSchema', () => {
           searchable: true,
           apiEnabled: true,
           files: true,
-          feedEnabled: true,
-          trash: true,
+          feeds: true,
         },
       };
 
@@ -544,8 +557,7 @@ describe('ObjectSchema', () => {
           searchable: true,
           apiEnabled: true,
           files: true,
-          feedEnabled: true,
-          trash: true,
+          feeds: true,
         },
       };
 
@@ -608,8 +620,7 @@ describe('ObjectSchema', () => {
           searchable: true,
           apiEnabled: true,
           files: false,
-          feedEnabled: false,
-          trash: true,
+          feeds: false,
         },
       };
 

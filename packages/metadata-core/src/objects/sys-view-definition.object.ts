@@ -139,6 +139,5 @@ export const SysViewDefinitionObject = ObjectSchema.create({
     searchable: false,
     apiEnabled: true,
     apiMethods: ['get', 'list', 'create', 'update', 'delete'],
-    trash: false,
   },
 });

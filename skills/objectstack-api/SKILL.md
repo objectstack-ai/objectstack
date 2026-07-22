@@ -51,7 +51,7 @@ GET    /api/v1/data/{object}          # List records (with filter, sort, paginat
 GET    /api/v1/data/{object}/:id      # Get single record
 POST   /api/v1/data/{object}          # Create record
 PATCH  /api/v1/data/{object}/:id      # Update record
-DELETE /api/v1/data/{object}/:id      # Delete record (soft-delete if trash enabled)
+DELETE /api/v1/data/{object}/:id      # Delete record (hard delete)
 POST   /api/v1/data/{object}/query    # Complex queries + aggregation (QueryAST in body)
 POST   /api/v1/data/{object}/batch    # Per-object batch operations
 POST   /api/v1/batch                  # Cross-object atomic batch
@@ -183,7 +183,7 @@ access:
 | `aggregate` | No dedicated route — use `POST /data/{object}/query` with `groupBy`/`aggregations` | Count, sum, avg, min, max |
 | `history` | Enum value gating access — no dedicated generated route today | Audit trail access |
 | `search` | Global `GET /api/v1/search` (cross-object), not per-object | Full-text search |
-| `restore` | Enum value gating access — no dedicated generated route today | Restore from trash |
+| `restore` | Enum value gating access — no dedicated generated route today | Restore a soft-deleted record (reserved — platform deletes are hard today) |
 | `purge` | Enum value gating access — no dedicated generated route today | Permanent deletion |
 | `import` | `POST /data/{object}/import` | Bulk data import |
 | `export` | `GET /data/{object}/export` | Data export |
@@ -451,9 +451,10 @@ async function firstTenAccounts() {
    locking (version field) and return `409` on conflict.
 4. **Ignoring rate limiting.** Always configure rate limits for public and
    external-facing APIs.
-5. **Using `DELETE` for soft-delete.** ObjectStack `DELETE` performs soft-delete
-   when `trash: true` is enabled on the object. Do not implement soft-delete
-   logic in custom endpoints — use the built-in mechanism.
+5. **Assuming `DELETE` is recoverable.** ObjectStack `DELETE` is a hard
+   delete — there is no recycle bin (the dead `enable.trash` flag was removed
+   in 16.x, #2377). For recoverability, use per-field `trackHistory` (audit
+   trail) or a `lifecycle` archive policy instead of custom soft-delete logic.
 
 ---
 

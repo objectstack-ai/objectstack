@@ -491,7 +491,5 @@ export const SysOauthApplication = ObjectSchema.create({
     // bypass server-side OAuth validation. The Delete row action above is
     // wired to /api/v1/auth/oauth2/delete-client.
     apiMethods: ['get', 'list'],
-    trash: false,
-    mru: false,
   },
 });

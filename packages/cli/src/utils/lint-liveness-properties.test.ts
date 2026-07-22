@@ -22,9 +22,9 @@ describe('lintLivenessProperties', () => {
   // action.undoable). The object/field WALKER is still exercised by the
   // silent-clean and default-on-suppression cases below.
 
-  it('does NOT warn on a default-on flag the author left alone (enable.trash: true)', () => {
-    const findings = lintLivenessProperties(objStack({ enable: { trash: true } }));
-    expect(paths(findings).some((m) => m.includes('enable.trash'))).toBe(false);
+  it('does NOT warn on a default-on flag the author left alone (enable.searchable: true)', () => {
+    const findings = lintLivenessProperties(objStack({ enable: { searchable: true } }));
+    expect(paths(findings).some((m) => m.includes('enable.searchable'))).toBe(false);
   });
 
   // #2707/#2727: every ObjectCapabilities flag is now LIVE (opt-out
