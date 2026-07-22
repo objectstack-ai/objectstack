@@ -192,6 +192,15 @@ async function launchSignoff(
    * start condition silently evaluates false and no request opens.
    */
   previousStatus: string,
+  /**
+   * Who is asking. The approval node stamps the request from `context.userId`
+   * (`submitterId: context?.userId ?? null` in approval-node.ts). Without it
+   * every seeded request has a null submitter, which renders as 申请人 `—`,
+   * leaves the "我发起的" inbox tab empty for every user, and suppresses the
+   * submitter-only affordances (recall / remind) — so the submitter half of
+   * the approval UI is unreachable.
+   */
+  submitterId: string | null,
 ): Promise<void> {
   const recordId = String(record.id ?? '');
   if (!recordId) return;
@@ -213,6 +222,7 @@ async function launchSignoff(
       previous: { ...record, status: previousStatus },
       object: objectName,
       organizationId,
+      ...(submitterId ? { userId: submitterId } : {}),
     })) as { success?: boolean; error?: string; output?: { skipped?: boolean; reason?: string } };
     if (result?.success === false) {
       ctx.logger?.warn?.('[showcase] approval-demo flow returned an error', { flow: flowName, error: result.error });
@@ -250,7 +260,9 @@ export function registerShowcaseApprovalDemo(ctx: ApprovalDemoContext): void {
     const organizationId = (anyMember?.organization_id as string | undefined) ?? null;
 
     await assignPositions(ctx, adminId, ADMIN_APPROVAL_POSITIONS, organizationId, 'admin');
-    await ensureDemoUser(ctx, PHONE_DEMO_USER);
+    // Mei holds no approval position, which makes her a clean *submitter* — a
+    // requester who is never also one of her own approvers.
+    const submitterId = (await ensureDemoUser(ctx, PHONE_DEMO_USER)) ?? null;
     // The auditor persona backs the `finance` group of the per-group demo. It
     // deliberately holds ONLY `auditor`, so the two groups have distinct
     // holders and the request stays open until each group has answered.
@@ -272,9 +284,21 @@ export function registerShowcaseApprovalDemo(ctx: ApprovalDemoContext): void {
     // is `status == "sent" && previous.status != "sent"`, so it entered from
     // `draft`. Both named approvers must answer (not one-per-group — that is
     // the expense demo below).
+    // Submitted by the ADMIN on purpose: it is the one request the logged-in dev
+    // admin owns, so the "我发起的" tab is non-empty and the submitter-only
+    // affordances (recall / remind) have somewhere to appear.
     const sentInvoice = await findOne(ctx, 'showcase_invoice', { status: 'sent' });
     if (sentInvoice) {
-      await launchSignoff(ctx, engine, 'showcase_invoice_signoff', 'showcase_invoice', sentInvoice, organizationId, 'draft');
+      await launchSignoff(
+        ctx,
+        engine,
+        'showcase_invoice_signoff',
+        'showcase_invoice',
+        sentInvoice,
+        organizationId,
+        'draft',
+        adminId,
+      );
     }
 
     // Quorum (2-of-3): High-Value Committee needs a `submitted` report ≥ $5000;
@@ -282,7 +306,16 @@ export function registerShowcaseApprovalDemo(ctx: ApprovalDemoContext): void {
     // && total_amount >= 5000`, so it entered from `draft`.
     const demoExpense = await findOne(ctx, 'showcase_expense_report', { name: 'EXP-DEMO' });
     if (demoExpense) {
-      await launchSignoff(ctx, engine, 'showcase_committee_quorum', 'showcase_expense_report', demoExpense, organizationId, 'draft');
+      await launchSignoff(
+        ctx,
+        engine,
+        'showcase_committee_quorum',
+        'showcase_expense_report',
+        demoExpense,
+        organizationId,
+        'draft',
+        submitterId,
+      );
     }
 
     // 会签 (per_group): Expense Sign-off needs one approval from EACH of the
@@ -299,6 +332,7 @@ export function registerShowcaseApprovalDemo(ctx: ApprovalDemoContext): void {
         perGroupExpense,
         organizationId,
         'draft',
+        submitterId,
       );
     }
   };
