@@ -5,9 +5,11 @@ import {
   createObjectQLAdapter,
   createObjectQLAdapterFactory,
   withSystemContext,
+  withValidationErrorMapping,
   AUTH_MODEL_TO_PROTOCOL,
   resolveProtocolName,
 } from './objectql-adapter';
+import { isAPIError } from 'better-auth/api';
 import {
   AUTH_USER_CONFIG,
   AUTH_SESSION_CONFIG,
@@ -380,5 +382,105 @@ describe('createObjectQLAdapter – reads bypass control-plane org-scope (regres
     const adapter = createObjectQLAdapter(mockEngine);
     await adapter.findMany({ model: 'account', limit: 10 });
     expect(mockEngine.find).toHaveBeenCalledWith('sys_account', expect.objectContaining({ context: { isSystem: true } }));
+  });
+});
+
+describe('withValidationErrorMapping – ObjectQL ValidationError → better-auth APIError', () => {
+  // Faithful mimic of ObjectQL's record-validator ValidationError
+  // (packages/objectql/src/validation/record-validator.ts): plugin-auth does
+  // not depend on @objectstack/objectql, and the mapping is duck-typed by
+  // `code` / `name`, so a same-shape stand-in exercises the exact code path.
+  class FakeValidationError extends Error {
+    readonly code = 'VALIDATION_FAILED';
+    readonly fields: Array<Record<string, unknown>>;
+    constructor(fields: Array<Record<string, unknown>>) {
+      super(fields.map((f) => f.message).join('; '));
+      this.name = 'ValidationError';
+      this.fields = fields;
+    }
+  }
+
+  const IMAGE_ERR = () =>
+    new FakeValidationError([
+      { field: 'image', code: 'invalid_url', message: 'image must be a valid URL (scheme://...)' },
+    ]);
+
+  it('maps a thrown ValidationError to a 400 APIError carrying message + fields', async () => {
+    const adapter = withValidationErrorMapping({
+      update: async () => {
+        throw IMAGE_ERR();
+      },
+    });
+
+    let caught: any;
+    try {
+      await adapter.update();
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeDefined();
+    expect(isAPIError(caught)).toBe(true);
+    // better-call maps the 'BAD_REQUEST' status string to HTTP 400.
+    expect(caught.statusCode).toBe(400);
+    expect(caught.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: 'image must be a valid URL (scheme://...)',
+    });
+    expect(caught.body.fields).toEqual([
+      { field: 'image', code: 'invalid_url', message: 'image must be a valid URL (scheme://...)' },
+    ]);
+  });
+
+  it('re-throws non-validation errors verbatim (not remapped to an APIError)', async () => {
+    const boom = new Error('driver exploded');
+    const adapter = withValidationErrorMapping({
+      update: async () => {
+        throw boom;
+      },
+    });
+
+    await expect(adapter.update()).rejects.toBe(boom);
+  });
+
+  it('passes successful results through untouched and leaves non-function props alone', async () => {
+    const adapter = withValidationErrorMapping({
+      create: async (x: number) => x + 1,
+      options: { adapterId: 'objectql' },
+    });
+
+    await expect(adapter.create(41)).resolves.toBe(42);
+    expect(adapter.options).toEqual({ adapterId: 'objectql' });
+  });
+
+  it('factory adapter surfaces engine ValidationError on update as a 400 APIError', async () => {
+    // End-to-end through the production factory: a real ObjectQL engine that
+    // rejects an invalid `image` on update must reach better-auth as a 400,
+    // not a raw 500 (the update-user regression).
+    const engine = {
+      insert: vi.fn(),
+      findOne: vi.fn().mockResolvedValue({ id: 'u1' }),
+      find: vi.fn(),
+      count: vi.fn(),
+      update: vi.fn().mockRejectedValue(IMAGE_ERR()),
+      delete: vi.fn(),
+    } as unknown as IDataEngine;
+
+    const adapter: any = (createObjectQLAdapterFactory(engine) as any)({} as any);
+
+    let caught: any;
+    try {
+      await adapter.update({
+        model: 'user',
+        where: [{ field: 'id', value: 'u1', operator: 'eq', connector: 'AND' }],
+        update: { image: 'notaurl' },
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(isAPIError(caught)).toBe(true);
+    expect(caught.statusCode).toBe(400);
+    expect(caught.body).toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 });

@@ -141,6 +141,80 @@ function convertWhere(where: CleanedWhere[]): Record<string, any> {
 }
 
 // ---------------------------------------------------------------------------
+// ObjectQL → better-auth error mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * ObjectQL's record-validator (packages/objectql/src/validation/record-validator.ts)
+ * throws a `ValidationError` — `code: 'VALIDATION_FAILED'`, a human `.message`,
+ * and per-field `.fields[]` — when an incoming insert/update payload fails
+ * field-level validation (e.g. a non-URL `image` on `POST /api/v1/auth/update-user`).
+ *
+ * better-auth only maps its OWN `APIError`s to clean HTTP responses; any other
+ * error thrown from an adapter method propagates to better-call's router as an
+ * unhandled fault → a raw **500 with an empty body**, so the client never learns
+ * why the write was rejected.
+ *
+ * This is the auth-path analogue of the REST data layer's `mapDataError`
+ * (packages/rest/src/rest-server.ts): we detect the ObjectQL validation envelope
+ * (by `code` / `name`, so plugin-auth needs no hard dependency on
+ * `@objectstack/objectql` and cross-realm `instanceof` can't bite) and re-throw
+ * it as a better-auth `APIError('BAD_REQUEST', …)`, giving the endpoint a 400
+ * that carries the validation message plus per-field detail.
+ */
+function isObjectQLValidationError(
+  err: unknown,
+): err is { code?: string; name?: string; message?: string; fields?: unknown } {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: unknown; name?: unknown };
+  return e.code === 'VALIDATION_FAILED' || e.name === 'ValidationError';
+}
+
+/**
+ * Re-throw `err` as a better-auth `APIError` when it is an ObjectQL validation
+ * failure; otherwise re-throw it verbatim. Always throws — the return type is
+ * `never`.
+ */
+async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
+  if (isObjectQLValidationError(err)) {
+    const { APIError } = await import('better-auth/api');
+    const fields = (err as { fields?: unknown }).fields;
+    throw new APIError('BAD_REQUEST', {
+      message:
+        typeof err.message === 'string' && err.message.trim()
+          ? err.message
+          : 'Validation failed',
+      code: 'VALIDATION_FAILED',
+      ...(Array.isArray(fields) ? { fields } : {}),
+    });
+  }
+  throw err;
+}
+
+/**
+ * Wrap every function-valued method of a better-auth adapter so an ObjectQL
+ * `ValidationError` thrown from the underlying engine surfaces as a 4xx
+ * `APIError` instead of an opaque 500. Non-function properties pass through
+ * untouched, and every non-validation error is re-thrown verbatim.
+ */
+export function withValidationErrorMapping<A extends Record<string, any>>(adapter: A): A {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(adapter)) {
+    out[key] =
+      typeof value === 'function'
+        ? async (...args: any[]) => {
+            try {
+              return await value(...args);
+            } catch (err) {
+              await rethrowAsBetterAuthError(err); // always throws
+            }
+          }
+        : value;
+  }
+  return out as A;
+}
+
+// ---------------------------------------------------------------------------
 // Adapter factory
 // ---------------------------------------------------------------------------
 
@@ -233,7 +307,7 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       supportsDates: false,
       supportsJSON: true,
     },
-    adapter: () => ({
+    adapter: () => withValidationErrorMapping({
       create: async <T extends Record<string, any>>(
         { model, data, select: _select }: { model: string; data: T; select?: string[] },
       ): Promise<T> => {
