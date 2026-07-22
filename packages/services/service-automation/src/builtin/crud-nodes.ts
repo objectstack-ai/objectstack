@@ -3,10 +3,28 @@
 import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
 import { readAliasedConfig } from './config-aliases.js';
 import { resolveRunDataContext } from '../runtime-identity.js';
+
+/**
+ * #3407 — render a data-layer strip event as a step warning. The write itself
+ * SUCCEEDED; the warning tells the flow author which requested fields never
+ * landed and why, so the run trace is not a silent 3ms `success` (#3356's
+ * masked approval stage write-backs). `readonlyWhen` wording covers the bulk
+ * "locked in ≥1 matched row" semantics too — a multi-row update drops a
+ * conditionally-locked field for the whole batch.
+ */
+const DROPPED_REASON_LABEL: Record<DroppedFieldsEvent['reason'], string> = {
+    readonly: 'the field is read-only (readonly: true)',
+    readonly_when: 'the field is conditionally read-only (readonlyWhen; on multi-row updates: locked in ≥1 matched row)',
+};
+
+function droppedFieldsWarning(nodeType: string, e: DroppedFieldsEvent): string {
+    return `${nodeType}(${e.object}): requested field(s) [${e.fields.join(', ')}] were NOT written — ${DROPPED_REASON_LABEL[e.reason] ?? e.reason}. The write succeeded without them.`;
+}
 
 /**
  * CRUD built-in nodes — `get_record` / `create_record` / `update_record` /
@@ -133,7 +151,16 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // #1888 — honor flow.runAs (system → RLS-bypassing; user → trigger user).
                 const dataCtx = resolveRunDataContext(context);
                 try {
-                    const created = await data.insert(objectName, fields, { context: dataCtx });
+                    // #3407 — symmetric with update_record. Today the engine's
+                    // insert path strips nothing (INSERT is readonly-exempt and
+                    // FLS write denial throws), so this listener never fires;
+                    // wired anyway so a future insert-side strip surfaces here
+                    // automatically instead of going silent.
+                    const dropped: DroppedFieldsEvent[] = [];
+                    const created = await data.insert(objectName, fields, {
+                        context: dataCtx,
+                        onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+                    });
                     const createdRecord = Array.isArray(created) ? created[0] : created;
                     const insertedId =
                         createdRecord && typeof createdRecord === 'object'
@@ -148,7 +175,19 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                             createdRecord && typeof createdRecord === 'object' ? createdRecord : { id: insertedId },
                         );
                     }
-                    return { success: true, output: { id: insertedId, record: createdRecord, object: objectName } };
+                    const droppedFields = dropped.flatMap((e) => e.fields);
+                    return {
+                        success: true,
+                        output: {
+                            id: insertedId,
+                            record: createdRecord,
+                            object: objectName,
+                            ...(droppedFields.length > 0 ? { droppedFields } : {}),
+                        },
+                        ...(dropped.length > 0
+                            ? { warnings: dropped.map((e) => droppedFieldsWarning('create_record', e)) }
+                            : {}),
+                    };
                 } catch (err) {
                     return { success: false, error: `create_record(${objectName}) failed: ${(err as Error).message}` };
                 }
@@ -194,8 +233,30 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // #1888 — honor flow.runAs (system → RLS-bypassing; user → trigger user).
                 const dataCtx = resolveRunDataContext(context);
                 try {
-                    const result = await data.update(objectName, fields, { where: filter, context: dataCtx });
-                    return { success: true, output: { result, object: objectName } };
+                    // #3407 — collect the data layer's silently-stripped write
+                    // fields (readonly / readonlyWhen). The strip is LEGAL — the
+                    // update still succeeds — but the step must say which
+                    // requested fields never landed instead of reporting a clean
+                    // success while the DB truth stayed unchanged.
+                    const dropped: DroppedFieldsEvent[] = [];
+                    const result = await data.update(objectName, fields, {
+                        where: filter,
+                        context: dataCtx,
+                        onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+                    });
+                    const droppedFields = dropped.flatMap((e) => e.fields);
+                    return {
+                        success: true,
+                        output: {
+                            result,
+                            object: objectName,
+                            // Structured list for downstream nodes ({<nodeId>.droppedFields}).
+                            ...(droppedFields.length > 0 ? { droppedFields } : {}),
+                        },
+                        ...(dropped.length > 0
+                            ? { warnings: dropped.map((e) => droppedFieldsWarning('update_record', e)) }
+                            : {}),
+                    };
                 } catch (err) {
                     return { success: false, error: `update_record(${objectName}) failed: ${(err as Error).message}` };
                 }

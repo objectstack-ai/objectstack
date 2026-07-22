@@ -8,8 +8,10 @@ import {
   EngineUpdateOptions,
   EngineDeleteOptions,
   EngineAggregateOptions,
-  EngineCountOptions
+  EngineCountOptions,
+  type DroppedFieldsEvent
 } from '@objectstack/spec/data';
+import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled } from '@objectstack/spec/data';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import { IDataDriver, IDataEngine, Logger, createLogger, withTransientRetry, type RetryOptions } from '@objectstack/core';
@@ -2345,7 +2347,13 @@ export class ObjectQL implements IDataEngine {
    * validation passes, so a doomed attempt no longer consumes a sequence value
    * (no number-range gaps from a rejected batch).
    */
-  async insert(object: string, data: any | any[], options?: DataEngineInsertOptions): Promise<any> {
+  // [#3407] `WriteObservabilityOptions.onFieldsDropped` is accepted for
+  // signature symmetry with `update()` but never fires here: INSERT is
+  // deliberately exempt from the readonly/readonlyWhen strips (a create may
+  // legitimately seed read-only columns), and the FLS write gate throws
+  // instead of stripping. If insert ever gains a silent strip, wire the
+  // listener at that strip site — do not let it go silent.
+  async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
@@ -2597,7 +2605,7 @@ export class ObjectQL implements IDataEngine {
     return this.insert(object, rows, { ...(options ?? {}), __partialRowErrors: true } as any);
   }
 
-  async update(object: string, data: any, options?: EngineUpdateOptions): Promise<any> {
+  async update(object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<any> {
      object = this.resolveObjectName(object);
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
@@ -2650,6 +2658,33 @@ export class ObjectQL implements IDataEngine {
        Object.keys((opCtx.data ?? {}) as Record<string, unknown>),
      );
 
+     // [#3407] Structured strip observability. The readonly/readonlyWhen strips
+     // below are LEGAL semantics (the write still succeeds without the locked
+     // fields), but until now the only trace was a server-side logger warn — a
+     // caller that reports success per requested field (a flow's `update_record`
+     // step) saw a clean success while the DB value never changed. When the
+     // caller registers `onFieldsDropped`, report each strip pass's dropped
+     // keys back with its reason. Diffing before/after key sets is exact here:
+     // every strip helper returns the SAME reference when nothing was dropped,
+     // else a shallow copy with keys removed. A listener fault must never break
+     // the write.
+     const onFieldsDropped = options?.onFieldsDropped;
+     const reportDroppedFields = (
+       before: Record<string, unknown> | null | undefined,
+       after: Record<string, unknown> | null | undefined,
+       reason: DroppedFieldsEvent['reason'],
+     ): void => {
+       if (!onFieldsDropped || before === after || !before) return;
+       const afterObj = (after ?? {}) as Record<string, unknown>;
+       const fields = Object.keys(before).filter((k) => !(k in afterObj));
+       if (fields.length === 0) return;
+       try {
+         onFieldsDropped({ object, fields, reason });
+       } catch (err) {
+         this.logger.warn('onFieldsDropped listener threw — ignored', { object, error: err });
+       }
+     };
+
      await this.executeWithMiddleware(opCtx, async () => {
        const hookContext: HookContext = {
           object,
@@ -2688,14 +2723,18 @@ export class ObjectQL implements IDataEngine {
                // B2: drop writes to fields locked by a TRUE `readonlyWhen` — the
                // field is read-only for this record's state, so the incoming
                // change is ignored (the persisted value is kept).
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, hookContext.input.data as Record<string, unknown>, priorRecord, this.logger) as any;
+               const preRoWhen = hookContext.input.data as Record<string, unknown>;
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger) as any;
+               reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
                // columns and are exempt). Runs AFTER hooks/middleware stamped
                // their columns; `suppliedKeys` ensures only caller-forged
                // read-only writes are dropped, never the server stamps.
                if (!opCtx.context?.isSystem) {
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, hookContext.input.data as Record<string, unknown>, suppliedKeys, this.logger) as any;
+                   const preRo = hookContext.input.data as Record<string, unknown>;
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedKeys, this.logger) as any;
+                   reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context) });
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
@@ -2739,14 +2778,18 @@ export class ObjectQL implements IDataEngine {
                // `where` to reach the unlocked rows). Symmetric with the
                // single-id `stripReadonlyWhenFields`; INSERT stays exempt.
                if (payloadHasReadonlyWhen) {
-                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, hookContext.input.data as Record<string, unknown>, priorRows, this.logger) as any;
+                   const preRoWhenMulti = hookContext.input.data as Record<string, unknown>;
+                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger) as any;
+                   reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
                // [#2948] Same static-`readonly` write guard on the bulk path —
                // a forged read-only column in a multi-row update is dropped for
                // non-system callers (a foreign `organization_id` is additionally
                // rejected upstream by the tenant write wall, #2946).
                if (!opCtx.context?.isSystem) {
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, hookContext.input.data as Record<string, unknown>, suppliedKeys, this.logger) as any;
+                   const preRoMulti = hookContext.input.data as Record<string, unknown>;
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedKeys, this.logger) as any;
+                   reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#3106] Same enforcement the single-id branch runs at its
                // `evaluateValidationRules` call, applied per matched row: any

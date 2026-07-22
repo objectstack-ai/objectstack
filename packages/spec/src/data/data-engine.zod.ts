@@ -173,6 +173,40 @@ export const EngineUpdateOptionsSchema = lazySchema(() => BaseEngineOptionsSchem
 }).describe('QueryAST-aligned options for DataEngine.update operations'));
 
 // --------------------------------------------------------------------------
+// Write observability: silently-dropped write fields (#3407)
+// --------------------------------------------------------------------------
+
+/**
+ * One strip event on a write path: the engine dropped caller-supplied field(s)
+ * from the payload for a LEGAL reason (static `readonly` (#2948) or a TRUE
+ * `readonlyWhen` predicate) and completed the write without them. The write
+ * itself still succeeds — stripping is legitimate semantics, not an error —
+ * but callers that report success per requested field (e.g. a flow's
+ * `update_record` step) need to know which fields never landed (#3407).
+ *
+ * Delivered in-process via the `onFieldsDropped` listener on the write options
+ * (see `WriteObservabilityOptions` in `contracts/data-engine.ts`). The
+ * listener itself is deliberately NOT part of this serializable options
+ * schema: a function is unrepresentable in JSON Schema and cannot cross the
+ * RPC (Virtual Data Engine) boundary.
+ */
+export const DroppedFieldsEventSchema = lazySchema(() => z.object({
+  /** Object the write targeted (resolved object name). */
+  object: z.string().describe('Object the write targeted (resolved object name)'),
+  /** Caller-supplied field names the engine removed from the write payload. */
+  fields: z.array(z.string()).describe('Caller-supplied field names the engine removed from the write payload'),
+  /**
+   * Why the fields were dropped:
+   * - `readonly` — static `readonly: true` fields, caller-supplied writes are
+   *   stripped for non-system contexts (#2948);
+   * - `readonly_when` — a `readonlyWhen` predicate locked the field for the
+   *   target record's state; on a multi-row update this is "locked in ≥1
+   *   matched row" semantics (#3042).
+   */
+  reason: z.enum(['readonly', 'readonly_when']).describe('Why the fields were dropped: static readonly (#2948) or a TRUE readonlyWhen predicate (#3042)'),
+}).describe('A write-path strip event: caller-supplied fields legally dropped from the payload (#3407)'));
+
+// --------------------------------------------------------------------------
 // Legacy: DataEngineUpdateOptionsSchema (DEPRECATED)
 // --------------------------------------------------------------------------
 
@@ -485,6 +519,7 @@ export const DataEngineRequestSchema = lazySchema(() => z.discriminatedUnion('me
 // --- New: QueryAST-aligned types (preferred) ---
 export type EngineQueryOptions = z.infer<typeof EngineQueryOptionsSchema>;
 export type EngineUpdateOptions = z.infer<typeof EngineUpdateOptionsSchema>;
+export type DroppedFieldsEvent = z.infer<typeof DroppedFieldsEventSchema>;
 export type EngineDeleteOptions = z.infer<typeof EngineDeleteOptionsSchema>;
 export type EngineAggregateOptions = z.infer<typeof EngineAggregateOptionsSchema>;
 export type EngineCountOptions = z.infer<typeof EngineCountOptionsSchema>;

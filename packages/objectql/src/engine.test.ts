@@ -1002,6 +1002,112 @@ describe('ObjectQL Engine', () => {
         });
     });
 
+    /**
+     * #3407 — the readonly/readonlyWhen strips are legal semantics, but they
+     * must not be SILENT to the caller: `options.onFieldsDropped` reports each
+     * strip pass's dropped keys + reason so callers (flow `update_record`
+     * steps) can surface a warning on an otherwise-successful write.
+     */
+    describe('Dropped-field write observability (#3407)', () => {
+        beforeEach(async () => {
+            engine.registerDriver(mockDriver, true);
+            await engine.init();
+            (mockDriver as any).updateMany = vi.fn().mockResolvedValue(1);
+        });
+
+        const docSchema = {
+            name: 'doc',
+            fields: {
+                title: { type: 'text' },
+                created_by: { type: 'text', readonly: true },
+            },
+        } as any;
+
+        it('reports caller-supplied static-readonly fields stripped on a single-id update', async () => {
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue(docSchema);
+            const events: any[] = [];
+            await engine.update('doc', { id: '1', title: 'x', created_by: 'attacker' }, {
+                onFieldsDropped: (e: any) => events.push(e),
+            } as any);
+
+            expect(events).toEqual([{ object: 'doc', fields: ['created_by'], reason: 'readonly' }]);
+            // The strip behavior itself is unchanged: the write proceeded without the field.
+            const [, , data] = vi.mocked(mockDriver.update).mock.calls[0];
+            expect(data).not.toHaveProperty('created_by');
+            expect(data).toHaveProperty('title', 'x');
+        });
+
+        it('reports a readonlyWhen-locked field on a single-id update (reason readonly_when)', async () => {
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({
+                name: 'invoice',
+                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' } },
+            } as any);
+            vi.mocked(mockDriver.findOne).mockResolvedValue({ id: '1', locked: true, amount: 100 } as any);
+
+            const events: any[] = [];
+            await engine.update('invoice', { id: '1', amount: 999 }, {
+                onFieldsDropped: (e: any) => events.push(e),
+            } as any);
+
+            expect(events).toEqual([{ object: 'invoice', fields: ['amount'], reason: 'readonly_when' }]);
+            const [, , data] = vi.mocked(mockDriver.update).mock.calls[0];
+            expect(data).not.toHaveProperty('amount');
+        });
+
+        it('reports bulk-path strips too (multi update — locked in ≥1 matched row)', async () => {
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({
+                name: 'invoice',
+                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' } },
+            } as any);
+            vi.mocked(mockDriver.find).mockResolvedValue([
+                { id: 'a', locked: false, amount: 10 },
+                { id: 'b', locked: true, amount: 20 },
+            ] as any);
+
+            const events: any[] = [];
+            await engine.update('invoice', { amount: 999 }, {
+                where: { status: 'draft' }, multi: true,
+                onFieldsDropped: (e: any) => events.push(e),
+            } as any);
+
+            expect(events).toEqual([{ object: 'invoice', fields: ['amount'], reason: 'readonly_when' }]);
+            const [, , data] = (mockDriver as any).updateMany.mock.calls[0];
+            expect(data).not.toHaveProperty('amount');
+        });
+
+        it('does NOT report for a system-context update (the readonly strip is skipped)', async () => {
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue(docSchema);
+            const events: any[] = [];
+            await engine.update('doc', { id: '1', created_by: 'importer' }, {
+                context: { isSystem: true },
+                onFieldsDropped: (e: any) => events.push(e),
+            } as any);
+            expect(events).toEqual([]);
+            // System writes legitimately set read-only columns — kept, not stripped.
+            const [, , data] = vi.mocked(mockDriver.update).mock.calls[0];
+            expect(data).toHaveProperty('created_by', 'importer');
+        });
+
+        it('does NOT report when nothing was stripped', async () => {
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue(docSchema);
+            const events: any[] = [];
+            await engine.update('doc', { id: '1', title: 'clean' }, {
+                onFieldsDropped: (e: any) => events.push(e),
+            } as any);
+            expect(events).toEqual([]);
+        });
+
+        it('a throwing listener never breaks the write', async () => {
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue(docSchema);
+            await expect(
+                engine.update('doc', { id: '1', created_by: 'x' }, {
+                    onFieldsDropped: () => { throw new Error('listener bug'); },
+                } as any),
+            ).resolves.not.toThrow();
+            expect(vi.mocked(mockDriver.update)).toHaveBeenCalledTimes(1);
+        });
+    });
+
     describe('Expand Related Records', () => {
         beforeEach(async () => {
             engine.registerDriver(mockDriver, true);

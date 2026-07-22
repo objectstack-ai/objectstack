@@ -37,9 +37,9 @@ export interface IDataEngine {
   count(objectName: string, query?: EngineCountOptions): Promise<number>;
   aggregate(objectName: string, query: EngineAggregateOptions): Promise<any[]>;
 
-  // Mutation
-  insert(objectName: string, data: any | any[], options?: DataEngineInsertOptions): Promise<any>;
-  update(objectName: string, data: any, options?: EngineUpdateOptions): Promise<any>;
+  // Mutation (write ops also accept in-process WriteObservabilityOptions — see `update`)
+  insert(objectName: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any>;
+  update(objectName: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<any>;
   delete(objectName: string, options?: EngineDeleteOptions): Promise<any>;
 
   // AI / Vector Search (optional)
@@ -221,6 +221,36 @@ interface EngineUpdateOptions {
   context?: ExecutionContext;
 }
 ```
+
+### WriteObservabilityOptions
+
+The write methods (`insert` / `update`) additionally accept an **in-process**
+`onFieldsDropped` listener. The engine invokes it when caller-supplied write
+fields are legally stripped from the payload before the driver write — static
+`readonly` fields or a TRUE `readonlyWhen` predicate. The write still succeeds;
+the listener exists so callers that report per-field success (e.g. the flow
+engine's `update_record` step) can surface a warning instead of a silent
+success.
+
+```typescript
+interface WriteObservabilityOptions {
+  onFieldsDropped?: (event: DroppedFieldsEvent) => void;
+}
+
+interface DroppedFieldsEvent {
+  object: string;                        // resolved object name
+  fields: string[];                      // caller-supplied fields that were dropped
+  reason: 'readonly' | 'readonly_when';  // why they were dropped
+}
+```
+
+<Callout type="warn">
+`onFieldsDropped` is a **TS-contract-level, in-process-only** channel. It is
+deliberately not part of the serializable Zod options schemas: a function is
+unrepresentable in JSON Schema and cannot cross the RPC (Virtual Data Engine)
+boundary, so remote callers never receive these events. A listener that throws
+never breaks the write — the engine catches and logs.
+</Callout>
 
 ### delete
 

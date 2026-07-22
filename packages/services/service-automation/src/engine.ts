@@ -55,6 +55,15 @@ export interface NodeExecutionResult {
     success: boolean;
     output?: Record<string, unknown>;
     error?: string;
+    /**
+     * #3407: advisory warnings surfaced on the step's log entry. The step still
+     * SUCCEEDS — a warning flags a legal-but-surprising outcome (e.g. an
+     * `update_record` whose requested fields the data layer legally stripped as
+     * `readonly`/`readonlyWhen`) so the run trace never shows a clean success
+     * for a write that partially didn't land. {@link AutomationEngine.executeNode}
+     * copies them onto the {@link StepLogEntry}.
+     */
+    warnings?: string[];
     /** Used by decision nodes — returns the selected branch label */
     branchLabel?: string;
     /**
@@ -368,6 +377,14 @@ export interface StepLogEntry {
     completedAt?: string;
     durationMs?: number;
     error?: { code: string; message: string; stack?: string };
+    /**
+     * #3407: advisory warnings from the node executor ({@link NodeExecutionResult.warnings}).
+     * A `success` step may carry warnings — e.g. an `update_record` whose
+     * requested fields the data layer legally stripped (`readonly` /
+     * `readonlyWhen`) — so the Runs surface shows WHY a successful write
+     * partially didn't land instead of a silent success.
+     */
+    warnings?: string[];
     /**
      * #1479: structured-region grouping. When a step ran inside a `loop` /
      * `parallel` / `try_catch` body region, these tag it with its **immediate**
@@ -2561,6 +2578,7 @@ export class AutomationEngine implements IAutomationService {
                     completedAt: new Date().toISOString(),
                     durationMs: Date.now() - stepStart,
                     error: { code: 'NODE_FAILURE', message: errMsg },
+                    ...(result.warnings?.length ? { warnings: result.warnings } : {}),
                 });
 
                 // Write error output to variable context for downstream nodes
@@ -2578,7 +2596,8 @@ export class AutomationEngine implements IAutomationService {
                 throw new Error(`Node '${node.id}' failed: ${errMsg}`);
             }
 
-            // Log successful step
+            // Log successful step (#3407: advisory executor warnings ride along
+            // so a legal-but-partial outcome never reads as a clean success).
             steps.push({
                 nodeId: node.id,
                 nodeType: node.type,
@@ -2586,6 +2605,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt: stepStartedAt,
                 completedAt: new Date().toISOString(),
                 durationMs: Date.now() - stepStart,
+                ...(result.warnings?.length ? { warnings: result.warnings } : {}),
             });
 
             // #1479: fold a structured-region container's body/branch/handler

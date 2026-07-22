@@ -734,6 +734,7 @@
     "data/DriverDefinition",
     "data/DriverOptions",
     "data/DriverType",
+    "data/DroppedFieldsEvent",
     "data/ESignatureConfig",
     "data/EngineAggregateOptions",
     "data/EngineCountOptions",
