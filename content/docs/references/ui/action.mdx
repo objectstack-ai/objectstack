@@ -35,7 +35,21 @@ params: [
 
 inline when no matching object field exists. Inline values may also be
 
-used alongside `field` to override individual properties.
+used alongside `field` to override individual properties. A `lookup` /
+
+`master_detail` param declared this way MUST name its target object via
+
+`reference` — there is no field to inherit it from:
+
+```ts
+
+params: [
+
+\{ name: 'inspector', label: 'Inspector', type: 'lookup', reference: 'sys_user' \},
+
+]
+
+```
 
 `name` is required unless `field` is provided (in which case it defaults
 
@@ -153,6 +167,7 @@ const result = Action.parse(data);
 | **multiple** | `boolean` | optional | Allow multiple values (array value shape); mirrors FieldSchema.multiple. |
 | **accept** | `string[]` | optional | Accepted upload types (MIME types / extensions) for file/image params. |
 | **maxSize** | `integer` | optional | Max upload size in bytes for file/image params. |
+| **reference** | `string` | optional | Reference target object for inline lookup/master_detail params; mirrors FieldSchema.reference. |
 | **defaultFromRow** | `boolean` | optional |  |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
 | **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| 'phoneNumberOtp'>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
