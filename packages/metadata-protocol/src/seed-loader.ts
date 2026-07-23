@@ -154,7 +154,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     const objectSet = new Set(objectNames);
 
     for (const objectName of objectNames) {
-      const objDef = await this.metadata.getObject(objectName) as any;
+      const objDef = await this.resolveObjectDefinition(objectName);
       const dependsOn: string[] = [];
       const references: ReferenceResolution[] = [];
 
@@ -190,6 +190,33 @@ export class SeedLoaderService implements ISeedLoaderService {
     const { insertOrder, circularDependencies } = this.topologicalSort(nodes);
 
     return { nodes, insertOrder, circularDependencies };
+  }
+
+  /**
+   * Object definition for reference-graph construction: the metadata service
+   * first, then the engine's own schema registry.
+   *
+   * The engine fallback matters for marketplace-installed packages: their
+   * objects are registered through the `manifest` service straight into the
+   * ObjectQL registry AFTER `bridgeObjectsToMetadataService` ran at boot, so
+   * the metadata service has never heard of them. Resolving only via metadata
+   * left the reference graph empty for those objects — every lookup /
+   * master_detail seed value was written verbatim (the raw externalId string,
+   * e.g. `crm_contact.crm_account = 'Acme Corporation'`) instead of the target
+   * record's id. Dangling references break parent joins, and under
+   * `sharingModel: controlled_by_parent` RLS that makes the whole object
+   * invisible to everyone, admins included.
+   */
+  private async resolveObjectDefinition(objectName: string): Promise<any> {
+    const fromMetadata = (await this.metadata.getObject(objectName)) as any;
+    if (fromMetadata?.fields) return fromMetadata;
+    try {
+      const engineSchema = (this.engine as { getSchema?(name: string): unknown }).getSchema?.(objectName) as any;
+      if (engineSchema?.fields) return engineSchema;
+    } catch {
+      // Engine may not expose a schema registry — the metadata result stands.
+    }
+    return fromMetadata;
   }
 
   async validate(datasets: Seed[], config?: SeedLoaderConfigInput): Promise<SeedLoaderResult> {
