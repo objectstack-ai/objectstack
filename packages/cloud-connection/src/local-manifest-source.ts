@@ -44,6 +44,12 @@ export interface InstalledManifestEntry {
      *  database. True after install (seedNow=true) or an explicit reseed;
      *  false after a purge. Persisted so the UI can show "Add" vs "Re-seed". */
     withSampleData?: boolean;
+    /** True only after an explicit purge-sample-data call. The rehydrate-time
+     *  sample-data healer (see MarketplaceInstallLocalPlugin.maybeHealSampleData)
+     *  must not resurrect demo rows the user deliberately removed — an empty
+     *  table after a purge is desired state, not data loss. Cleared again by
+     *  install/reseed runs that land rows. */
+    sampleDataPurged?: boolean;
 }
 
 /** Default ledger location, relative to the runtime's working directory. */

@@ -186,10 +186,74 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // the original install, and multi-tenant orgs will replay
                 // via the security middleware on next sys_organization insert.
                 await this.applySideEffects(ctx, entry.manifest, { seedNow: false });
+                // …EXCEPT when the database no longer has them: the ledger is
+                // anchored to <cwd> while the database can be swapped out from
+                // under it (`os dev --fresh`, a deleted dev.db, a --database
+                // switch). Config-declared apps re-seed on every single-tenant
+                // boot via AppPlugin, but a rehydrated marketplace package
+                // would stay empty forever — app visible, tables created,
+                // zero rows. Heal that case.
+                await this.maybeHealSampleData(ctx, entry);
                 ctx.logger?.info?.(`[MarketplaceInstallLocal] rehydrated ${entry.manifestId}@${entry.version}`);
             } catch (err: any) {
                 ctx.logger?.error?.(`[MarketplaceInstallLocal] rehydrate failed for ${entry.manifestId}`, err instanceof Error ? err : new Error(String(err)));
             }
+        }
+    };
+
+    /**
+     * Rehydrate-time sample-data healing (the "installed app, empty database"
+     * repair). Runs the bundled seed datasets iff:
+     *
+     *   • the cached manifest actually bundles seed datasets, AND
+     *   • the user never explicitly purged them (`sampleDataPurged`), AND
+     *   • single-tenant mode (multi-tenant seeding is owned by the per-org
+     *     replay on sys_organization insert — the datasets were already merged
+     *     into the kernel's `seed-datasets` service by applySideEffects), AND
+     *   • EVERY seeded object is empty. One surviving row anywhere means the
+     *     install-time rows (or the user's own data) are still present, and
+     *     re-upserting would silently revert user edits on every boot.
+     *
+     * Never throws — a failed heal logs and leaves the boot untouched.
+     */
+    private maybeHealSampleData = async (ctx: PluginContext, entry: InstalledEntry): Promise<void> => {
+        const datasets = Array.isArray(entry.manifest?.data)
+            ? entry.manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
+            : [];
+        if (datasets.length === 0) return;
+        if (entry.sampleDataPurged === true) return;
+        if (resolveMultiOrgEnabled()) {
+            ctx.logger?.info?.(`[MarketplaceInstallLocal] multi-tenant — sample-data heal for ${entry.manifestId} left to per-org replay`);
+            return;
+        }
+
+        let ql: any;
+        try { ql = ctx.getService('objectql'); } catch { return; }
+        if (!ql || typeof ql.find !== 'function') return;
+
+        // Emptiness probe: any row in any seeded object → nothing to heal.
+        const objects = [...new Set(datasets.map((d: any) => String(d.object)))];
+        for (const object of objects) {
+            try {
+                const rows = await ql.find(object, { limit: 1, context: { isSystem: true } } as any);
+                const first = Array.isArray(rows) ? rows[0] : rows?.items?.[0];
+                if (first !== undefined && first !== null) return;
+            } catch { /* unknown/missing table reads as empty — keep probing */ }
+        }
+
+        try {
+            const summary = await this.runInlineSeed(ctx, datasets);
+            const landed = (summary.inserted ?? 0) + (summary.updated ?? 0);
+            if (landed > 0) {
+                entry.withSampleData = true;
+                entry.sampleDataPurged = false;
+                try { this.ledger.write(entry); } catch { /* non-fatal */ }
+                ctx.logger?.info?.(`[MarketplaceInstallLocal] healed sample data for ${entry.manifestId}: inserted=${summary.inserted} updated=${summary.updated} errors=${summary.errors}`);
+            } else {
+                ctx.logger?.warn?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows${summary.errorSample ? ` — first error: ${summary.errorSample}` : ''}`);
+            }
+        } catch (err: any) {
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] sample-data heal failed for ${entry.manifestId}: ${err?.message ?? err}`);
         }
     };
 
@@ -394,8 +458,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //      • stash seed datasets on the kernel + run them now so the
         //        installed app has demo data on first paint.
         const seededSummary = await this.applySideEffects(ctx, manifest, { seedNow: true, c });
-        if (seededSummary.seeded.mode === 'inline' && (seededSummary.seeded.inserted ?? 0) + (seededSummary.seeded.updated ?? 0) > 0) {
+        // `skipped` counts too: an all-skip run means the rows are ALREADY in
+        // the database (e.g. a reinstall/upgrade over live sample data) — the
+        // install carries sample data either way. Leaving the flag false here
+        // is what made older ledgers claim "no sample data" over a seeded DB.
+        const seededRows = (seededSummary.seeded.inserted ?? 0) + (seededSummary.seeded.updated ?? 0) + (seededSummary.seeded.skipped ?? 0);
+        if (seededSummary.seeded.mode === 'inline' && seededRows > 0) {
             entry.withSampleData = true;
+            entry.sampleDataPurged = false;
             try {
                 this.ledger.write(entry);
             } catch { /* non-fatal — entry already on disk */ }
@@ -589,6 +659,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // Only mark the install as carrying sample data once rows actually landed.
         try {
             entry.withSampleData = true;
+            entry.sampleDataPurged = false;
             this.ledger.write(entry);
         } catch { /* non-fatal */ }
 
@@ -671,9 +742,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
         }
 
-        // Flip flag so UI reflects the empty baseline
+        // Flip flag so UI reflects the empty baseline. `sampleDataPurged`
+        // additionally tells the rehydrate-time healer this emptiness is
+        // deliberate — demo rows must not come back on the next restart.
         try {
             entry.withSampleData = false;
+            entry.sampleDataPurged = true;
             this.ledger.write(entry);
         } catch { /* non-fatal */ }
 
@@ -713,7 +787,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         ctx: PluginContext,
         manifest: any,
         opts: { seedNow: boolean; c?: any },
-    ): Promise<{ translationsLoaded: number; seeded: { mode: 'inline' | 'replayer' | 'skipped'; inserted?: number; updated?: number; errors?: number; reason?: string; errorSample?: string } }> => {
+    ): Promise<{ translationsLoaded: number; seeded: { mode: 'inline' | 'replayer' | 'skipped'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string } }> => {
         const appId = String(manifest?.id ?? 'unknown');
         let translationsLoaded = 0;
         let seedSummary: any = { mode: 'skipped', reason: 'no-datasets' };
@@ -807,33 +881,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                         }
                     }
                     if (!multiTenant || organizationId) {
-                        const [{ SeedLoaderService }, { SeedLoaderRequestSchema }] = await Promise.all([
-                            import('@objectstack/runtime'),
-                            import('@objectstack/spec/data'),
-                        ]);
-                        const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
-                        const request = (SeedLoaderRequestSchema as any).parse({
-                            // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
-                            seeds: datasets,
-                            config: {
-                                defaultMode: 'upsert',
-                                multiPass: true,
-                                ...(organizationId ? { organizationId } : {}),
-                            },
-                        });
-                        const result = await seedLoader.load(request);
-                        seedSummary = {
-                            mode: 'inline',
-                            inserted: result.summary.totalInserted,
-                            updated: result.summary.totalUpdated,
-                            errors: result.errors.length,
-                            // Surface the first write/resolution failure so the
-                            // caller can report WHY nothing landed (e.g. a locked
-                            // DB, a missing table, a failed validation) instead of
-                            // a bare "0 rows".
-                            errorSample: result.errors[0]?.message,
-                        };
-                        ctx.logger?.info?.(`[MarketplaceInstallLocal] inline seed for ${appId}${organizationId ? ` (org=${organizationId})` : ''}: inserted=${seedSummary.inserted} updated=${seedSummary.updated} errors=${seedSummary.errors}`);
+                        const s = await this.runInlineSeed(ctx, datasets, organizationId);
+                        seedSummary = { mode: 'inline', ...s };
+                        ctx.logger?.info?.(`[MarketplaceInstallLocal] inline seed for ${appId}${organizationId ? ` (org=${organizationId})` : ''}: inserted=${s.inserted} updated=${s.updated} skipped=${s.skipped} errors=${s.errors}`);
                     }
                 }
             } catch (err: any) {
@@ -843,6 +893,49 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
 
         return { translationsLoaded, seeded: seedSummary };
+    };
+
+    /**
+     * One SeedLoaderService run over `datasets` (upsert, multi-pass) — the
+     * shared engine behind install-time seeding, the reseed endpoint and the
+     * rehydrate-time healer. Throws when objectql/metadata are unavailable;
+     * per-row write failures are counted into `errors`, not thrown.
+     */
+    private runInlineSeed = async (
+        ctx: PluginContext,
+        datasets: any[],
+        organizationId?: string,
+    ): Promise<{ inserted: number; updated: number; skipped: number; errors: number; errorSample?: string }> => {
+        const ql: any = ctx.getService('objectql');
+        let metadata: any;
+        try { metadata = ctx.getService('metadata'); } catch { /* none */ }
+        if (!ql || !metadata) throw new Error('objectql-or-metadata-missing');
+
+        const [{ SeedLoaderService }, { SeedLoaderRequestSchema }] = await Promise.all([
+            import('@objectstack/runtime'),
+            import('@objectstack/spec/data'),
+        ]);
+        const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+        const request = (SeedLoaderRequestSchema as any).parse({
+            // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
+            seeds: datasets,
+            config: {
+                defaultMode: 'upsert',
+                multiPass: true,
+                ...(organizationId ? { organizationId } : {}),
+            },
+        });
+        const result = await seedLoader.load(request);
+        return {
+            inserted: result.summary.totalInserted,
+            updated: result.summary.totalUpdated,
+            skipped: result.summary.totalSkipped ?? 0,
+            errors: result.errors.length,
+            // Surface the first write/resolution failure so the caller can
+            // report WHY nothing landed (e.g. a locked DB, a missing table,
+            // a failed validation) instead of a bare "0 rows".
+            errorSample: result.errors[0]?.message,
+        };
     };
 
     /**
