@@ -134,6 +134,17 @@ export class ObjectQLPlugin implements Plugin {
   /** Serializes reload-time schema syncs so overlapping reloads can't race DDL. */
   private reloadSchemaSync: Promise<void> = Promise.resolve();
   private hydrateMetadataFromDb = false;
+  /**
+   * Armed once `start()` has run the one-shot
+   * {@link bridgeObjectsToMetadataService}. From that point on, every
+   * manifest registered through the `manifest` service bridges its own
+   * objects into the metadata service incrementally — the one-shot bridge
+   * never runs again, so late registrations (marketplace install /
+   * rehydrate on `kernel:ready`) would otherwise stay invisible to every
+   * IMetadataService consumer. Stays false on project kernels
+   * (`environmentId` set), matching the one-shot bridge's gate.
+   */
+  private bridgeLateManifests = false;
   /** Unsubscribe handles for metadata-event subscriptions (ADR-0008 PR-7). */
   private metadataUnsubscribes: Array<() => void> = [];
   /** ADR-0057 lifecycle enforcement (Reaper/Rotator/Archiver). */
@@ -187,6 +198,15 @@ export class ObjectQLPlugin implements Plugin {
         ctx.logger.debug('Manifest registered via manifest service', {
           id: manifest.id || manifest.name
         });
+        // Manifests registered AFTER start() (marketplace install / ledger
+        // rehydrate arrive on `kernel:ready` or an HTTP request) land in the
+        // SchemaRegistry only — the one-shot startup bridge already ran — so
+        // bridge this manifest's objects into the metadata service now.
+        // No-op until start() arms it, so boot-time registrations keep the
+        // single startup bridge. The promise never rejects; async callers
+        // (marketplace install) await it so metadata reads right after
+        // install are deterministic, sync callers may ignore it.
+        return this.bridgeManifestObjectsToMetadataService(ctx, manifest);
       }
     });
 
@@ -521,6 +541,14 @@ export class ObjectQLPlugin implements Plugin {
     // skip it in that case.
     if (this.environmentId === undefined) {
         await this.bridgeObjectsToMetadataService(ctx);
+        // The one-shot bridge above covered everything registered so far.
+        // Arm the incremental per-manifest bridge for everything after —
+        // marketplace install / rehydrate register through the `manifest`
+        // service on `kernel:ready`, long after this line, and without the
+        // incremental bridge their objects never reach the metadata service
+        // (AI describe_object, Studio object lists, metadata.listObjects all
+        // miss them; only the seed loader has an engine fallback, #3422).
+        this.bridgeLateManifests = true;
     }
 
     // Register built-in audit hooks
@@ -1113,6 +1141,91 @@ export class ObjectQLPlugin implements Plugin {
       }
     } catch (e: unknown) {
       ctx.logger.debug('Failed to bridge objects to metadata service', {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  /**
+   * Bridge ONE manifest's objects into the metadata service — the
+   * late-registration companion to {@link bridgeObjectsToMetadataService}.
+   *
+   * The one-shot startup bridge runs exactly once during `start()`, but
+   * manifests keep arriving after that: marketplace install and ledger
+   * rehydrate register through the `manifest` service on `kernel:ready` (or
+   * an HTTP request), so their objects landed in the SchemaRegistry only and
+   * every IMetadataService consumer (AI describe_object, Studio object
+   * lists, `metadata.listObjects`) missed them. This bridges exactly the
+   * objects the given manifest contributes, resolved through the registry so
+   * both `objects` forms (array / name-keyed map) and extension merges come
+   * out canonical, with `_packageId` stamped.
+   *
+   * The metadata service is resolved at CALL time, never captured at init:
+   * when this plugin inits, MetadataPlugin may not have registered it yet.
+   *
+   * Existing same-name entries are left alone UNLESS they carry the same
+   * `_packageId` — i.e. they are this bridge's own copy from a previous
+   * version of the same package. That keeps a hot marketplace upgrade fresh
+   * while never clobbering an authored / artifact-parsed definition.
+   *
+   * Registers `{ notify: false }` for the same reason as the startup bridge
+   * (#3112 notify contract): these definitions come OUT of the
+   * SchemaRegistry, so announcing would feed our own `subscribe('object')`
+   * handler right back into the registry and overwrite the objects' true
+   * package provenance with 'metadata-service'.
+   *
+   * Never throws — a bridge failure must not fail the install that
+   * triggered it.
+   */
+  private async bridgeManifestObjectsToMetadataService(
+    ctx: PluginContext,
+    manifest: any,
+  ): Promise<void> {
+    if (!this.bridgeLateManifests) return;
+    const packageId = manifest?.id || manifest?.name;
+    if (!packageId || !this.ql?.registry) return;
+
+    try {
+      let metadataService: any;
+      try {
+        metadataService = ctx.getService<any>('metadata');
+      } catch {
+        return; // no metadata service on this kernel — nothing to bridge into
+      }
+      if (!metadataService || typeof metadataService.register !== 'function') return;
+
+      const objects = this.ql.registry.getAllObjects(packageId);
+      let bridged = 0;
+
+      for (const obj of objects) {
+        try {
+          const existing = await metadataService.getObject(obj.name);
+          const ownPreviousCopy =
+            existing != null &&
+            (obj as any)._packageId !== undefined &&
+            (existing as any)._packageId === (obj as any)._packageId;
+          if (!existing || ownPreviousCopy) {
+            await metadataService.register('object', obj.name, obj, { notify: false });
+            bridged++;
+          }
+        } catch (e: unknown) {
+          ctx.logger.debug('Failed to bridge manifest object to metadata service', {
+            package: packageId,
+            object: obj.name,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+
+      if (bridged > 0) {
+        ctx.logger.info('Bridged late-registered manifest objects to metadata service', {
+          package: packageId,
+          count: bridged,
+        });
+      }
+    } catch (e: unknown) {
+      ctx.logger.debug('Failed to bridge manifest objects to metadata service', {
+        package: packageId,
         error: e instanceof Error ? e.message : String(e),
       });
     }

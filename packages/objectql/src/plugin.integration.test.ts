@@ -1614,4 +1614,102 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       expect(inserts.map((r) => r.approval_status)).toEqual(['draft', 'draft']);
     });
   });
+
+  // Marketplace-installed template packages register through the `manifest`
+  // service AFTER `start()` ran the one-shot SchemaRegistry→metadata bridge
+  // (install and ledger rehydrate both happen on `kernel:ready` or an HTTP
+  // request), so their objects used to land in the ObjectQL registry only —
+  // invisible to every IMetadataService consumer (AI describe_object, Studio
+  // object lists, metadata.listObjects; only the seed loader grew an engine
+  // fallback, #3422). The manifest service now bridges each late manifest's
+  // own objects incrementally.
+  describe('late manifest.register bridges objects to the metadata service', () => {
+    type ManifestService = { register(m: any): void | Promise<void> };
+
+    const crmManifest = (label = 'Contact', version = '1.0.0') => ({
+      id: 'com.acme.crm',
+      name: 'acme_crm',
+      version,
+      type: 'app',
+      objects: [
+        {
+          name: 'crm_contact',
+          label,
+          fields: {
+            name: { name: 'name', label: 'Name', type: 'text' },
+          },
+        },
+      ],
+    });
+
+    it('installs after bootstrap land the object in the metadata service', async () => {
+      await kernel.use(new ObjectQLPlugin());
+      await kernel.bootstrap();
+
+      // Simulates marketplace install-local: register via the manifest
+      // service on a fully started kernel, then read as an
+      // IMetadataService consumer would.
+      const manifest = kernel.getService('manifest') as ManifestService;
+      await manifest.register(crmManifest());
+
+      const metadata = kernel.getService('metadata') as any;
+      const bridged = await metadata.getObject('crm_contact');
+      expect(bridged).toBeDefined();
+      expect(bridged.label).toBe('Contact');
+      // The bridged body is the registry-resolved shape, not the raw
+      // manifest fragment — provenance stamped, author fields intact.
+      expect(bridged._packageId).toBe('com.acme.crm');
+      expect(bridged.fields?.name?.type).toBe('text');
+      const listed = await metadata.listObjects();
+      expect(listed.some((o: any) => o?.name === 'crm_contact')).toBe(true);
+    });
+
+    it('re-installing the same package refreshes its bridged copy (hot upgrade)', async () => {
+      await kernel.use(new ObjectQLPlugin());
+      await kernel.bootstrap();
+      const manifest = kernel.getService('manifest') as ManifestService;
+
+      await manifest.register(crmManifest('Contact', '1.0.0'));
+      await manifest.register(crmManifest('Contact v2', '2.0.0'));
+
+      const metadata = kernel.getService('metadata') as any;
+      const bridged = await metadata.getObject('crm_contact');
+      expect(bridged.label).toBe('Contact v2');
+    });
+
+    it('never clobbers a same-name entry it did not bridge itself', async () => {
+      await kernel.use(new ObjectQLPlugin());
+      await kernel.bootstrap();
+
+      // An authored / artifact-parsed copy: no registry `_packageId` stamp.
+      const metadata = kernel.getService('metadata') as any;
+      await metadata.register('object', 'crm_contact', {
+        name: 'crm_contact',
+        label: 'Authored Contact',
+      });
+
+      const manifest = kernel.getService('manifest') as ManifestService;
+      await manifest.register(crmManifest('Marketplace Contact'));
+
+      const kept = await metadata.getObject('crm_contact');
+      expect(kept.label).toBe('Authored Contact');
+    });
+
+    it('boot-time registrations still flow through the one-shot startup bridge', async () => {
+      await kernel.use(new ObjectQLPlugin());
+      await kernel.use({
+        name: 'boot-app',
+        type: 'app',
+        version: '1.0.0',
+        dependencies: ['com.objectstack.engine.objectql'],
+        init: async (ctx) => {
+          ctx.getService<ManifestService>('manifest').register(crmManifest());
+        },
+      });
+      await kernel.bootstrap();
+
+      const metadata = kernel.getService('metadata') as any;
+      expect(await metadata.getObject('crm_contact')).toBeDefined();
+    });
+  });
 });

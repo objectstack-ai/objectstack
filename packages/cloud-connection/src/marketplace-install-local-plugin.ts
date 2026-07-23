@@ -163,7 +163,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const entries = this.readAll();
         if (entries.length === 0) return;
 
-        let manifestService: { register(m: any): void } | null = null;
+        let manifestService: { register(m: any): void | Promise<void> } | null = null;
         try {
             manifestService = ctx.getService('manifest') as any;
         } catch {
@@ -173,7 +173,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         for (const entry of entries) {
             try {
-                manifestService!.register(entry.manifest);
+                // Awaited: register also bridges the manifest's objects into
+                // the metadata service (late-registration bridge in
+                // ObjectQLPlugin) — wait for that so metadata consumers see
+                // the package as soon as rehydrate reports success.
+                await manifestService!.register(entry.manifest);
                 // Sync schemas so the driver creates tables for the newly-
                 // registered objects (idempotent — already-synced tables
                 // are no-ops).
@@ -339,7 +343,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //    would also fail on every subsequent rehydrate.
         try {
             const manifestService = ctx.getService('manifest') as any;
-            manifestService.register(manifest);
+            // Awaited: register also bridges the manifest's objects into the
+            // metadata service — a caller that reads metadata right after a
+            // 200 (AI describe_object, Studio object list) must see them.
+            await manifestService.register(manifest);
         } catch (err: any) {
             // For offline file imports we treat a register failure as a hard
             // failure (don't persist). Cloud installs historically tolerated
