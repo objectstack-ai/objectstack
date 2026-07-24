@@ -14,7 +14,7 @@ But you do need to **read** them. In AI development the human's job shifts from
 writing code to *verifying* what the agent produced: is the object modelled right,
 is that predicate scoped correctly, does the app match what you asked for? This
 page is a tour of the pieces so you can review an agent's work with confidence —
-and catch the things the [validation gate](/docs/getting-started/validating-metadata)
+and catch the things the [validation gate](/docs/deployment/validating-metadata)
 can't.
 
 <Callout type="tip">
@@ -153,7 +153,7 @@ npx os dev --ui     # boot the app, then open http://localhost:3000/_console/
 `os validate` proves the metadata is *well-formed*; the **Console** at `/_console/`
 proves it does what you *meant* — create a record, watch an action show/hide,
 confirm the nav and filters. That visual check is the human's half of every build
-loop. See [Validating Metadata](/docs/getting-started/validating-metadata) for what
+loop. See [Validating Metadata](/docs/deployment/validating-metadata) for what
 the gate catches, and [Build with Claude Code](/docs/getting-started/build-with-claude-code)
 for the full describe → author → validate → verify cycle.
 
@@ -186,5 +186,5 @@ for the full describe → author → validate → verify cycle.
 
 - [Build with Claude Code](/docs/getting-started/build-with-claude-code) &mdash; Build a real app end-to-end with an agent
 - [Example Apps](/docs/getting-started/examples) &mdash; Run the Todo, CRM, and showcase examples
-- [CLI Reference](/docs/getting-started/cli) &mdash; All available commands
+- [CLI Reference](/docs/deployment/cli) &mdash; All available commands
 - [Protocol Reference](/docs/references) &mdash; Complete schema documentation

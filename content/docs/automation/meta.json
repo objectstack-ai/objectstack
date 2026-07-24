@@ -1,6 +1,5 @@
 {
   "title": "Automation",
-  "icon": "Workflow",
   "pages": [
     "index",
     "hooks",

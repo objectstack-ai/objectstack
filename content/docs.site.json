@@ -8,7 +8,8 @@
   "i18n": {
     "enabled": true,
     "defaultLanguage": "en",
-    "languages": ["en", "cn"
+    "languages": [
+      "en"
     ]
   },
   "branding": {
@@ -18,7 +19,7 @@
       "dark": "/logo.svg"
     },
     "theme": {
-      "accentColor": "blue", 
+      "accentColor": "blue",
       "radius": "0.5rem"
     }
   },
@@ -34,7 +35,10 @@
         }
       ],
       "socials": [
-        { "platform": "github", "url": "https://github.com/objectstack-ai/spec" }
+        {
+          "platform": "github",
+          "url": "https://github.com/objectstack-ai/spec"
+        }
       ]
     },
     "sidebar": {

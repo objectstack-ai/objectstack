@@ -1,0 +1,42 @@
+---
+title: How to Request Features
+description: A one-page template that turns business needs into the platform's vocabulary — hand it to your implementation team or an AI agent and get a running system
+---
+
+
+The fastest requirement conversations happen in the platform's own vocabulary. Answer these seven questions and what you hand over is not a requirements document — it is most of the configuration.
+
+```text
+【Objects】   What data will you manage? What fields does each need?
+             e.g. Opportunity = name, account (lookup), amount, stage
+             (select: prospecting / qualified / proposal / negotiation /
+             closed), expected close date, win probability,
+             expected revenue (formula), product line items (master-detail)
+
+【Views】    Who looks at it, and through which lens?
+             e.g. reps → kanban by stage; managers → team table;
+             executives → dashboard
+
+【Rules】    What must be blocked at entry? Which stage moves are legal?
+             e.g. discounts over 40% cannot save; negotiation → won/lost only
+
+【Automation】When should the system act on its own?
+             e.g. amount crosses 500k → notify the regional manager;
+             30 days before contract expiry → create a renewal task
+
+【Approvals】 Which actions need a human yes? Who? What counts as passed?
+             e.g. discount > 30% → finance and sales director group
+             sign-off; 24h overdue → escalate to VP
+
+【Access】   Who sees which records — and which fields?
+             e.g. regions isolated; cost price managers-only;
+             deals > 1M auto-share to the VP
+
+【Reports】  What numbers do leaders watch, and how often?
+             e.g. funnel + monthly trend dashboard; Monday email digest
+```
+
+Two habits make this even faster:
+
+1. **Point at HotCRM**: *"like HotCRM's opportunity approval, but with a second tier above 2M"* — referencing a running example beats describing from scratch. Explore it via [What Can It Do?](/docs/capabilities) or install it from the Marketplace.
+2. **Hand the filled template to an AI agent**: the platform is built so that agents author configuration from exactly this kind of description — see [How AI Development Works](/docs/getting-started/how-ai-development-works).

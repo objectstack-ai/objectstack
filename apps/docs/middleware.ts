@@ -20,35 +20,6 @@ function setLocaleCookie(response: NextResponse, locale: string): void {
 }
 
 /**
- * Language code mapping
- * Maps browser language codes to our supported language codes
- */
-const LANGUAGE_MAPPING: Record<string, string> = {
-  'zh': 'cn',      // Chinese -> cn
-  'zh-CN': 'cn',   // Chinese (China) -> cn
-  'zh-TW': 'cn',   // Chinese (Taiwan) -> cn
-  'zh-HK': 'cn',   // Chinese (Hong Kong) -> cn
-};
-
-/**
- * Normalize language code to match our supported languages
- */
-function normalizeLanguage(lang: string): string {
-  // Check direct mapping first
-  if (LANGUAGE_MAPPING[lang]) {
-    return LANGUAGE_MAPPING[lang];
-  }
-  
-  // Check if the base language (without region) is mapped
-  const baseLang = lang.split('-')[0];
-  if (LANGUAGE_MAPPING[baseLang]) {
-    return LANGUAGE_MAPPING[baseLang];
-  }
-  
-  return lang;
-}
-
-/**
  * Get the preferred language from the request
  */
 function getPreferredLanguage(request: NextRequest): string {
@@ -62,12 +33,9 @@ function getPreferredLanguage(request: NextRequest): string {
   const negotiatorHeaders = Object.fromEntries(request.headers.entries());
   const negotiator = new Negotiator({ headers: negotiatorHeaders });
   const browserLanguages = negotiator.languages();
-  
-  // Normalize browser languages to match our supported languages
-  const normalizedLanguages = browserLanguages.map(normalizeLanguage);
-  
+
   // Find the first match
-  for (const lang of normalizedLanguages) {
+  for (const lang of browserLanguages) {
     if (SUPPORTED_LANGUAGES.includes(lang)) {
       return lang;
     }
@@ -82,9 +50,11 @@ function getPreferredLanguage(request: NextRequest): string {
  * This middleware:
  * - Detects the user's preferred language from browser settings or cookies
  * - Redirects users to the appropriate localized version
- * - For default language (en): keeps URL as "/" (with internal rewrite)
- * - For other languages (cn): redirects to "/cn/"
+ * - For the default language (en): keeps URL as "/" (with internal rewrite)
  * - Stores language preference as a cookie
+ *
+ * The docs are English-only by decision (2026-07); the i18n plumbing stays so a
+ * future language only needs entries in lib/i18n.ts and content, not new routing.
  */
 export default function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

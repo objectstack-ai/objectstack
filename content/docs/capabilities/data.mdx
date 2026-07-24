@@ -1,0 +1,46 @@
+---
+title: Manage Business Data
+description: Objects, 40+ field types, auto-computed fields, and relationships — every spreadsheet you run the business on, structured and governed
+---
+
+
+Every kind of record your team tracks — accounts, contacts, leads, opportunities, orders, tickets — becomes an **object**: a structured, permission-controlled, connected table you can create and change at any time. Columns become **fields**, and adding or changing a field is a configuration change, not a development request.
+
+## Field types for everything you record
+
+| You want to record | Field types |
+|---|---|
+| Names, notes, long text | Text / textarea / rich text |
+| Money, quantities, ratios | Currency amount / number / percent |
+| Dates and times | Date / datetime / time |
+| Choices | Single select (colored options) / multi-select / radio / checkbox group |
+| Yes-or-no | Boolean toggle |
+| People | Owner / user pickers |
+| Links to other records | Lookup (opportunity → account) / master-detail (opportunity → line items) |
+| Ratings and progress | Star rating / progress bar / slider |
+| Contact details | Phone / email / URL |
+| Places | Address / map location |
+| Images and files | Image / attachment / avatar / audio / video |
+| Signatures and codes | E-signature / QR code / barcode |
+| Labels | Tags |
+| Document numbers | Auto-number (e.g. `SO-2026-0001`) |
+
+## Fields that compute themselves
+
+- **Formula fields** derive values automatically: *expected revenue = amount × probability*, *days until close date*. When inputs change, the value updates — nobody maintains it.
+- **Roll-up summaries** total child rows onto the parent: an opportunity's product total is always the sum of its line items, recalculated the moment a line changes.
+
+## Records that connect
+
+- **One-to-many**: an account has many contacts and opportunities; the account page shows them all as related lists.
+- **Master-detail**: an opportunity owns its product line items — edited inline as a grid inside the opportunity form, saved in one step, and removed with their parent.
+- **Many-to-many**: contacts participate in many campaigns; campaigns have many members.
+- **Hierarchies**: product category trees, org structures, parent-subsidiary account chains.
+
+## Quality built into the data itself
+
+Uniqueness, required-ness, searchability, and history tracking are per-field switches. Records support soft delete (a recycle bin, not permanent loss), cloning, and full change history when tracking is on.
+
+> **In HotCRM**: 15 business objects model the full sales-and-service domain — lead, account, contact, opportunity (+ line items), quote (+ line items), product, contract, case, knowledge article, campaign (+ members), task, and forecast. Open any of them in Studio to see these field types in real use.
+
+**For developers**: the same ground with full technical depth in [Data Modeling](/docs/data-modeling).

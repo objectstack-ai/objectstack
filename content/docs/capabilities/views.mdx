@@ -1,0 +1,34 @@
+---
+title: Views — See Data Your Way
+description: Nine list views over the same records — table, kanban, calendar, gantt, gallery, timeline, map, tree, chart — plus saved filters and global search
+---
+
+
+The same records can be opened through different lenses, and each team picks the lens that matches how they work. Views are declared, named, saved, and shared — not coded.
+
+## Nine list views
+
+| View | What it looks like | Typical CRM use |
+|---|---|---|
+| **Table** | Spreadsheet-style list: sort, filter, group, hide columns | The opportunity master list |
+| **Kanban** | Cards in columns by stage; drag a card to change stage | Sales pipeline by stage, with amount and owner on each card |
+| **Calendar** | Records on a date grid | Follow-up tasks, visits, expected close dates |
+| **Gantt** | Time bars with dependencies | Delivery and implementation plans |
+| **Gallery** | Large-image cards | Product catalogs, reference cases |
+| **Timeline** | Records along a time axis | Customer interaction history |
+| **Map** | Records pinned by location | Territory coverage, field-visit routing |
+| **Tree** | Expandable hierarchy | Corporate account structures |
+| **Chart** | The list rendered as a chart | See [Analytics](/docs/capabilities/analytics) |
+
+One object can carry many named views at once — "My open deals (table)", "East-region pipeline (kanban)", "Delivery schedule (gantt)" — and a default can be set per team.
+
+## Finding anything
+
+- **Global search** (`⌘K`) spans objects and understands partial matches — including **pinyin search**, so typing `zhangsan` finds 张三.
+- **Filters** combine any fields with and/or logic and a full operator set (equals, contains, greater than, between, is empty…).
+- **Relative dates**: "this quarter", "last month", "past 7 days", "next 30 days" — 36 built-in tokens plus custom offsets. A saved view filtered on "this quarter" rolls forward every day by itself.
+- **Per-person scoping**: views like "My accounts" or "My team's opportunities" resolve per viewer automatically, following the permission model.
+
+> **In HotCRM**: twelve view files cover every object — open the Opportunity object and switch between its pipeline kanban, forecast table, and close-date calendar to feel the difference lenses make.
+
+**For developers**: view metadata in [Views & Apps](/docs/ui).

@@ -1,8 +1,9 @@
 {
   "title": "Deployment & Operations",
-  "icon": "Cloud",
   "pages": [
     "index",
+    "cli",
+    "validating-metadata",
     "self-hosting",
     "backup-restore",
     "vercel",

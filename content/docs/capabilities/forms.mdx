@@ -1,0 +1,30 @@
+---
+title: Forms & Data Quality
+description: Sectioned and wizard forms, validation at the moment of entry, legal stage transitions, and public forms for anonymous submission
+---
+
+
+Bad data is cheapest to stop at the moment it is typed. Forms, validation rules, and stage machines catch problems on save — not at month-end reconciliation.
+
+## Forms that fit the work
+
+- **Sectioned forms**: fields grouped under "Basics / Commercial terms / Internal notes".
+- **Multi-step wizards**: complex entry split into steps — e.g. lead conversion: confirm the account → create the opportunity → carry over products.
+- **Conditional visibility**: show or require fields only when relevant — *"Closed-won" makes "Contract date" visible and required; "Closed-lost" requires a loss reason.*
+- **Inline line items**: master-detail children (opportunity products) edited as a grid inside the parent form, saved atomically.
+- **Defaults**: owner defaults to the current user, dates default to today, values can derive from context.
+
+## Validation that actually blocks bad saves
+
+- **Required fields** — cannot save without them.
+- **Format checks** — email, phone, and code patterns rejected inline.
+- **Cross-field logic** — *end date cannot precede start date; discounts above 40% cannot be saved* (route exceptions through an [approval](/docs/capabilities/approvals) instead).
+- **Stage machines** — declare which status transitions are legal (*negotiation → won or lost only; no skipping from first-contact to won*). The runtime enforces this on every write — API and import included — so process discipline does not depend on memory.
+
+## Public forms (web-to-lead)
+
+Publish a form to a URL and put it on your website, a landing page, or a QR code. Anonymous visitors submit; each submission lands as a record (typically a lead) containing only the fields you chose to expose. Pair it with [automation](/docs/capabilities/automation) to assign and notify instantly.
+
+> **In HotCRM**: the lead-conversion wizard, opportunity stage machine, and a guest-portal permission profile for public submission are all wired in — try saving an opportunity backwards through its stages and watch the platform refuse.
+
+**For developers**: [validation and state machines](/docs/data-modeling/validation) in Data Modeling.

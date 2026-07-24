@@ -21,7 +21,7 @@ objectstack.config.ts ──(os build, CI)──▶ dist/objectstack.json ──
   JSON file — your entire app. Build it once in CI; the host needs no
   TypeScript and no build step.
 - **`os start`** boots a production server directly from that artifact
-  ([reference](/docs/getting-started/cli#os-start)).
+  ([reference](/docs/deployment/cli#os-start)).
 - **Deployment config stays outside the artifact.** Database URL, secrets, and
   environment identity are injected via `OS_*` environment variables or flags.
 
@@ -346,7 +346,7 @@ Disable with `OS_MCP_SERVER_ENABLED=false`. See
 
 - [Backup & Restore](/docs/deployment/backup-restore) — what to back up, and the restore drill
 - [Deployment Modes](/docs/deployment) — the map of local / standalone / Cloud
-- [`os start` reference](/docs/getting-started/cli#os-start) — every flag and env var
+- [`os start` reference](/docs/deployment/cli#os-start) — every flag and env var
 - [Environment Variables](/docs/deployment/environment-variables) — the full catalog
 - [Deploy to Vercel](/docs/deployment/vercel) — the serverless alternative
 - [Troubleshooting & FAQ](/docs/deployment/troubleshooting)

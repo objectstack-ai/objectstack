@@ -1,5 +1,13 @@
 {
   "title": "Releases",
-  "icon": "Tag",
-  "pages": ["index", "v16", "v15", "v14", "v13", "v12", "v9", "implementation-status"]
+  "pages": [
+    "index",
+    "v16",
+    "v15",
+    "v14",
+    "v13",
+    "v12",
+    "v9",
+    "implementation-status"
+  ]
 }

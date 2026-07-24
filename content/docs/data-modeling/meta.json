@@ -1,6 +1,5 @@
 {
   "title": "Data Modeling",
-  "icon": "Database",
   "pages": [
     "index",
     "schema-design",

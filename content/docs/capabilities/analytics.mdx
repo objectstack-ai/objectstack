@@ -1,0 +1,32 @@
+---
+title: Analytics & Dashboards
+description: ~20 chart families, period-over-period comparison, runtime filters, TV display pages, four report shapes, and scheduled email digests
+---
+
+
+The executive cockpit and the ops detail report are both configured, not built. Data is live, and permissions apply inside every chart — each viewer sees only the numbers they are allowed to see.
+
+## Dashboards
+
+Compose from roughly twenty chart families:
+
+- **Single values**: KPI tiles, gauges, progress rings — total pipeline, quarter-to-date closed, target attainment.
+- **Comparisons**: bar and column by stage, rep, or product line.
+- **Trends**: line and area over time.
+- **Composition**: pie, donut, **funnel** (stage conversion), treemap.
+- **Detail**: tables and pivot tables.
+
+Dashboard extras that matter in practice:
+
+- **Period-over-period in one switch** — KPI tiles grow a "+12% vs. last period" arrow; trend charts overlay the prior period as a dashed line.
+- **Runtime filters across the top** — quarter, owner, lead source; every widget follows the selection.
+- **Full-bleed display pages** — dark, TV-styled dashboards for the office screen, with auto-fitting KPI and chart layout.
+- **One metric, one definition** — indicators like "closed revenue" are defined once in shared datasets, so two dashboards can never disagree about what the number means.
+
+## Reports
+
+Four shapes — **tabular** (detail rows), **summary** (grouped totals), **matrix** (regions × quarters), and **joined** (multi-object) — with runtime filters and export. **Scheduled email digests** deliver a report daily or weekly: the Monday-morning sales report writes itself.
+
+> **In HotCRM**: four dashboards (executive, sales, service, CRM overview) and six reports (lead, opportunity, account, case, churn), fed by six shared datasets covering accounts, contacts, leads, opportunities, products, and cases. The executive dashboard carries quarter and owner filters plus the funnel and trend widgets described above.
+
+**For developers**: dashboards, charts, and reports as metadata in [Views & Apps](/docs/ui/dashboards).

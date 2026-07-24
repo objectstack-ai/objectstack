@@ -1,0 +1,41 @@
+---
+title: Build Without Code
+description: What admins and business analysts can do visually in Console, Studio, and Setup — and how that stays in sync with metadata written as code
+---
+
+
+You do not have to write metadata files to build on this platform. **Console**, **Studio**, and **Setup** cover the run–design–administer loop visually — and everything you do there produces *the same metadata artifacts* a developer would write by hand, checked by the same validation gate. Clicking and coding are two editors over one definition, so a team can freely mix both.
+
+## Console — where the app runs
+
+`/_console/` is the workspace end users live in:
+
+- **Home** lists your apps, pending approvals, scheduled digests, and recently visited records.
+- Each app renders its declared navigation, views (table, kanban, calendar, gantt, …), dashboards, and record pages — switch views from the toolbar, save filters, pin favorites.
+- **Approvals inbox** collects everything waiting on you; decisions (approve / reject / send back) happen here.
+- Record pages carry the collaboration surface: discussion threads, attachments, activity timeline, and change history.
+- Global search (`⌘K`) spans objects, with partial and pinyin matching.
+
+## Studio — where the app is designed
+
+From any app, **"Design in Studio"** opens the same application in design mode. Studio is organized around four pillars:
+
+| Pillar | What you manage there |
+|---|---|
+| **Data** | Every object with its fields, plus per-object tabs for records, forms, validation rules, lifecycle hooks, actions, and API exposure |
+| **Automation** | All flows in one list with enable/disable switches; each opens as a visual diagram — triggers, branches, approval nodes, run history, and problem markers |
+| **Interface** | Apps, navigation, views, pages, and dashboards |
+| **Access** | Permission sets as a matrix of object/field grants, plus sharing configuration |
+
+Two properties make Studio safe to hand to non-developers:
+
+- **Draft → publish.** Changes save as drafts and go live only when published, with a change list to review first.
+- **Same gate as code.** A change that would break the app (a dangling reference, an invalid predicate) is rejected by the same validation that checks hand-written metadata — there is no "UI edits bypass review" back door.
+
+## Setup — where the platform is administered
+
+The **System Settings** app covers platform administration: user management and invitations, permission assignment, datasources (including federated external databases), diagnostics and audit logs, and the **Marketplace** — template apps such as HotCRM install with one click and appear alongside your own apps, ready to customize in Studio.
+
+## When to reach for code instead
+
+Visual editing shines for day-to-day evolution: adding fields, adjusting views, tweaking a flow, granting access. Teams typically switch to [metadata as code](/docs/getting-started/your-first-project) when they want version control and pull-request review across many changes, AI-assisted authoring, or promotion of the same app across environments. Both roads meet in the same artifact — start visual, graduate to code, or run both side by side.

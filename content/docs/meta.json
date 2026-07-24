@@ -1,19 +1,22 @@
 {
   "title": "Documentation",
   "pages": [
+    "---Learn---",
+    "capabilities",
+    "build-without-code",
     "getting-started",
     "concepts",
+    "---Build---",
     "data-modeling",
+    "ui",
     "automation",
     "permissions",
-    "ui",
-    "api",
     "ai",
+    "api",
+    "---Platform---",
+    "deployment",
     "plugins",
     "kernel",
-    "deployment",
-    "protocol",
-    "references",
-    "releases"
+    "protocol"
   ]
 }

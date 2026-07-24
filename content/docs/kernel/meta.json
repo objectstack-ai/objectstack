@@ -1,6 +1,5 @@
 {
   "title": "Kernel & Services",
-  "icon": "Cpu",
   "pages": [
     "index",
     "architecture",

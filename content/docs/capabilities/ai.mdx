@@ -1,0 +1,29 @@
+---
+title: AI Under Governance
+description: Ask questions and get charts, let AI act under the same permissions and audit as people, and connect your own agents over MCP
+---
+
+
+The platform's rule for AI is simple: **an agent gets exactly the access its user has — never more — and every action is audited.** AI here is not a bolt-on chat window; it operates through the same typed, permission-checked surface as the UI and the API.
+
+## Ask, and get answers with charts
+
+Ask in natural language — *"top ten opportunities by amount in the East region this quarter?"* — and get the result as data **and as a chart**, inline. No SQL, no export-to-spreadsheet detour.
+
+## Let AI do the work
+
+Conversationally create and update records, run actions, and drive processes: *"convert this lead; the account name is Acme Ltd."* Risky operations ask for confirmation first, or can be routed into a human-review inbox so AI proposes and people approve.
+
+## Knowledge answers
+
+Connect product sheets, playbooks, and policy docs, and the assistant answers from **your** knowledge — with the same permission filtering on what each person may retrieve.
+
+## Bring your own agent (MCP)
+
+Every deployment exposes its objects and permitted actions as an **MCP server** — on by default at `/api/v1/mcp`. Point Claude or any MCP client at your app and that agent can inspect and operate it, under the signed-in user's permissions, with every call audited. Your app is AI-operable the day it ships, for free.
+
+> **In HotCRM**: two copilots ship ready — a **sales copilot** (lead scoring, customer-360 summaries, email drafting, revenue forecasting) and a **service copilot** (case triage, live-data Q&A) — built from six reusable AI skills. Swap the skills to retarget them at your own domain.
+
+*The conversational UI is part of the commercial runtime; the MCP surface — bring-your-own-agent — ships in open source.*
+
+**For developers**: agents, skills, and MCP configuration in [AI](/docs/ai).

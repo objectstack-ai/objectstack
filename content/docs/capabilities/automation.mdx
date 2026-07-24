@@ -1,0 +1,29 @@
+---
+title: Automation — Processes That Run Themselves
+description: Five trigger styles, visual flow diagrams, notifications, branching, loops, waits, and external calls — the work nobody should have to remember
+---
+
+
+Anything that today relies on someone remembering — reminders, hand-offs, escalations, follow-ups — becomes a **flow**: a visual diagram the platform executes reliably, with a run history you can inspect.
+
+## Five ways a flow starts
+
+1. **When records change** — created, updated, or deleted, with conditions that can compare old vs. new values (*"amount crossed 500k"* fires once, not on every unrelated edit).
+2. **On a schedule** — every morning at 8, every Monday, the 1st of each month.
+3. **Relative to record dates** — *30 days before contract expiry*, *7 days after signing*, evaluated per record.
+4. **Launched by a person** — button-triggered wizards like "Convert lead".
+5. **Called by an external system** — your website or ERP pings an endpoint and the flow runs.
+
+## What flows can do
+
+Create, update, and delete records · send notifications (in-app, email, chat) · branch on conditions · run steps in parallel and join · loop over a set of records · wait for a duration or a signal · call external services · invoke shared sub-flows.
+
+## Reliability you can see
+
+Flows are enabled or disabled with a switch and start life as drafts. Every execution leaves a run record — which node, what outcome — and the diagram in Studio *is* the executable logic, so documentation never drifts from behavior.
+
+> **In HotCRM**: seventeen flows run the whole sales-and-service motion —
+> lead auto-assignment · lead conversion · opportunity approval · stagnation alerts · won announcements · quote generation · quote expiry reminders · contract expiration · renewal task creation · case escalation · case SLA monitoring · CSAT follow-up · campaign enrollment · campaign completion · new-contact welcome · task due reminders · urgent-task alerts.
+> Open any of them in Studio's Automation pillar to read the diagram.
+
+**For developers**: triggers, nodes, and flow metadata in [Automation](/docs/automation).

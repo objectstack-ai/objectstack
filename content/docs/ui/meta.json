@@ -1,6 +1,5 @@
 {
-  "title": "UI Engine",
-  "icon": "LayoutDashboard",
+  "title": "Views & Apps",
   "pages": [
     "index",
     "apps",

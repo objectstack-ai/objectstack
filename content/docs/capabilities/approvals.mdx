@@ -1,0 +1,34 @@
+---
+title: Approvals
+description: Eight ways to pick approvers, four decision modes including group sign-off, record locking, overdue escalation, and send-back-for-revision
+---
+
+
+Discounts, contracts, spend — anything that needs a human "yes" becomes an approval step in a flow, replacing the group-chat shoulder tap with a tracked, enforceable decision.
+
+## Who approves — eight resolution styles
+
+A specific person · everyone holding a position (e.g. sales managers) · the submitter's direct manager · a team · a department (optionally including sub-departments) · organization leadership · **a person named on the record itself** (e.g. the "regional director" field) · a shared queue (first responder claims it).
+
+## How it passes — four decision modes
+
+| Mode | Rule | Fits |
+|---|---|---|
+| First response | Any one approval passes it | Routine low-value requests |
+| Unanimous | Everyone must approve | Major contracts |
+| M-of-N quorum | e.g. 3 of 5 | Committee reviews |
+| **Group sign-off** | Each group must independently approve | Finance *and* legal must each clear it |
+
+Any rejection ends the chain immediately. Multi-level ladders (manager → director → VP) are just chained steps, and conditions route by amount — under 100k ends at manager, over 500k adds the VP.
+
+## Process controls
+
+- **Record locking** while pending — no editing the deal mid-approval (configurable).
+- **Status mirrored onto the record** — lists can filter by "pending approval".
+- **Overdue escalation (SLA)** — after N hours: reassign, auto-approve, auto-reject, or notify, your choice.
+- **Send back for revision** — return to the submitter for changes and a fresh round, distinct from a hard reject; retry count can be capped.
+- **An approvals inbox** for batch processing, and a permanent audit trail of who decided what, when, and why.
+
+> **In HotCRM**: the opportunity approval flow routes large or deep-discount deals to management, mirrors the outcome onto the record, and locks it while pending.
+
+**For developers**: approval nodes and approver metadata in [Automation → Approvals](/docs/automation/approvals).

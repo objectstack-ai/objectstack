@@ -2,10 +2,12 @@ import { defineI18n } from 'fumadocs-core/i18n';
 
 /**
  * i18n Configuration for ObjectStack Documentation
- * 
+ *
  * Supported Languages:
  * - en: English (Default)
- * - cn: Chinese (中文)
+ *
+ * The docs are English-only by decision (2026-07). To add a language later,
+ * list it here and provide content — routing already handles the rest.
  */
 export const i18n = defineI18n({
   defaultLanguage: 'en',

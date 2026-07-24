@@ -12,7 +12,10 @@ export const docsRedirects = [
   // getting-started
   ['/docs/guides/cheatsheets/quick-reference', '/docs/getting-started/quick-reference'],
   ['/docs/guides/common-patterns', '/docs/getting-started/common-patterns'],
-  ['/docs/guides/validating-metadata', '/docs/getting-started/validating-metadata'],
+  ['/docs/guides/validating-metadata', '/docs/deployment/validating-metadata'],
+  // 2026-07 audience-first IA: tooling pages moved out of getting-started
+  ['/docs/getting-started/cli', '/docs/deployment/cli'],
+  ['/docs/getting-started/validating-metadata', '/docs/deployment/validating-metadata'],
   // concepts
   ['/docs/getting-started/core-concepts', '/docs/concepts'],
   ['/docs/getting-started/architecture', '/docs/concepts/architecture'],

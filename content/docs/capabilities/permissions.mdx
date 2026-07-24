@@ -1,0 +1,29 @@
+---
+title: Permissions — Who Sees What
+description: Four layers from object capability to per-field visibility, five data-depth scopes, sharing rules, audit, and an explain facility
+---
+
+
+Access control here is not an account setting — it is a four-layer model the runtime enforces **on every request**, whether it arrives from the UI, a report, the API, or an AI agent. There is no back door to forget about.
+
+## The four layers
+
+1. **Capability** — which personas may create, read, edit, or delete each object. Granted through permission sets; effective access is the union of everything granted.
+2. **Data depth** — how far each person's read reaches, in five scopes: *own records only* → *own and reports* (follows the management chain) → *business unit* → *unit and below* → *organization-wide*. A rep sees their deals; their manager sees the team's; the regional lead sees the region's.
+3. **Record sharing** — declarative rules that widen the baseline (*opportunities above ¥1M auto-share to the national sales VP, editable*), plus one-off manual shares to a person, position, or department.
+4. **Field-level security** — the same record shows different fields to different people: cost price and commission rate visible to managers only. Hidden fields are stripped server-side, so they are absent from reports and API responses too — not merely hidden on screen.
+
+## Organization model
+
+People sit in a **business-unit tree** and hold **positions**; reporting lines drive the "own and reports" scope. Permissions follow the position, so a transfer is a reassignment, not a re-grant.
+
+## Safe by default, explainable always
+
+- Every object must declare its sharing posture explicitly — "forgot to configure, so everyone can see it" cannot happen.
+- **Audit** records who changed what, when, with old and new values; tracked objects expose a history timeline on the record.
+- **Explain** answers "why can this person see this record?" layer by layer — permission questions get diagnosed, not guessed at.
+- Sign-in hardening for the enterprise tier: SSO, enforced MFA, password policy and breach checks, lockout throttling.
+
+> **In HotCRM**: six ready-made permission profiles — system admin, sales manager, sales rep, marketing, service agent, and a guest portal profile that can only submit the public form — plus sharing rules on accounts, opportunities, and cases, and a sales position ladder. Start from these and adjust.
+
+**For developers**: the full model in [Permissions & Identity](/docs/permissions).

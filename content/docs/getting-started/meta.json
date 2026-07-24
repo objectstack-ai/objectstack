@@ -1,16 +1,14 @@
 {
   "title": "Get Started",
-  "icon": "Rocket",
-  "defaultOpen": true,
   "pages": [
+    "---Start Here---",
     "index",
     "how-ai-development-works",
     "build-with-claude-code",
     "your-first-project",
     "quick-start",
     "examples",
-    "cli",
-    "validating-metadata",
+    "---Cheatsheets---",
     "common-patterns",
     "quick-reference",
     "glossary"
