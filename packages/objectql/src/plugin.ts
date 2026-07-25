@@ -759,16 +759,22 @@ export class ObjectQLPlugin implements Plugin {
       isInsert: boolean,
     ) => {
       const now = stamp();
+      // A "historical" import (#3493) reinstates the ORIGINAL timeline, so a
+      // client-supplied updated_at/updated_by is CLIENT-PREFERRED here —
+      // symmetric with created_at/created_by on insert — instead of being
+      // overwritten with the import instant. Opt-in and server-set only; a
+      // normal write leaves `preserveAudit` unset and still stamps now.
+      const preserveAudit = session?.preserveAudit === true;
       if (isInsert) {
         record.created_at = record.created_at ?? now;
       }
-      record.updated_at = now;
+      record.updated_at = preserveAudit ? (record.updated_at ?? now) : now;
       if (session?.userId) {
         if (isInsert && hasField(objectName, 'created_by')) {
           record.created_by = record.created_by ?? session.userId;
         }
         if (hasField(objectName, 'updated_by')) {
-          record.updated_by = session.userId;
+          record.updated_by = preserveAudit ? (record.updated_by ?? session.userId) : session.userId;
         }
       }
       // Stamp the driver-layer `tenant_id` column from the caller's active org.

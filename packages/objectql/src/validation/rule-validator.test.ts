@@ -153,6 +153,72 @@ describe('stripReadonlyFields (#2948)', () => {
   });
 });
 
+// #3493 — a "historical" import (preserveAudit) reinstates the original
+// timeline: the audit/timestamp family and author-declared business `readonly`
+// fields survive the strip, while platform-managed `system` columns outside the
+// audit family stay stripped (no tenancy-forging backdoor).
+const historicalFields = {
+  fields: {
+    title: { type: 'text' },
+    created_at: { type: 'datetime', readonly: true, system: true },
+    created_by: { type: 'lookup', readonly: true, system: true },
+    updated_at: { type: 'datetime', readonly: true, system: true },
+    updated_by: { type: 'lookup', readonly: true, system: true },
+    organization_id: { type: 'lookup', readonly: true, system: true },
+    // author-declared business readonly field (NOT system) — e.g. a case's close time
+    closed_at: { type: 'datetime', readonly: true },
+  },
+};
+
+describe('stripReadonlyFields — preserveAudit whitelist (#3493)', () => {
+  it('KEEPS the caller-supplied audit/timestamp family under preserveAudit', () => {
+    const supplied = new Set(['created_at', 'created_by', 'updated_at', 'updated_by']);
+    const data = {
+      created_at: '2020-01-01T00:00:00Z',
+      created_by: 'u_creator',
+      updated_at: '2021-03-01T00:00:00Z',
+      updated_by: 'u_old',
+    };
+    const out = stripReadonlyFields(historicalFields, { ...data }, supplied, undefined, { preserveAudit: true });
+    expect(out).toEqual(data);
+  });
+
+  it('KEEPS an author-declared business readonly field (closed_at) under preserveAudit', () => {
+    const supplied = new Set(['closed_at']);
+    const out = stripReadonlyFields(
+      historicalFields,
+      { closed_at: '2021-03-01T00:00:00Z' },
+      supplied,
+      undefined,
+      { preserveAudit: true },
+    );
+    expect(out).toEqual({ closed_at: '2021-03-01T00:00:00Z' });
+  });
+
+  it('STILL strips a non-audit system column (organization_id) under preserveAudit — no tenancy backdoor', () => {
+    const supplied = new Set(['organization_id', 'closed_at']);
+    const out = stripReadonlyFields(
+      historicalFields,
+      { organization_id: 'org_forged', closed_at: '2021-03-01T00:00:00Z' },
+      supplied,
+      undefined,
+      { preserveAudit: true },
+    );
+    expect(out).toEqual({ closed_at: '2021-03-01T00:00:00Z' });
+  });
+
+  it('strips the whole family as before when preserveAudit is NOT set (regression)', () => {
+    const supplied = new Set(['updated_at', 'closed_at', 'organization_id']);
+    const out = stripReadonlyFields(historicalFields, {
+      title: 'x',
+      updated_at: '2021-03-01T00:00:00Z',
+      closed_at: '2021-03-01T00:00:00Z',
+      organization_id: 'o1',
+    }, supplied);
+    expect(out).toEqual({ title: 'x' });
+  });
+});
+
 describe('needsPriorRecord — field conditional rules (B2)', () => {
   it('is true when a field declares requiredWhen / readonlyWhen', () => {
     expect(needsPriorRecord(invoiceFields as any)).toBe(true);

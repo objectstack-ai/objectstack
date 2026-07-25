@@ -1211,6 +1211,18 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
+  /**
+   * True when the UPDATE path must KEEP a caller-supplied `updated_at` rather
+   * than force-advancing it to `now` (#3493). Only for an opt-in "historical"
+   * import (`DriverOptions.preserveAudit`, threaded from
+   * `ExecutionContext.preserveAudit`) that carries an explicit `updated_at` —
+   * mirroring how `stampInsertTimestamps` preserves an explicit value on insert.
+   * A normal update leaves the flag unset, so `updated_at` always advances.
+   */
+  protected keepSuppliedUpdatedAt(formatted: Record<string, any>, options?: DriverOptions): boolean {
+    return (options as any)?.preserveAudit === true && formatted.updated_at != null;
+  }
+
   async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<any> {
     this.auditMissingTenant(object, 'update', options);
     const rotationShards = this.rotationShardsOf(object);
@@ -1219,7 +1231,7 @@ export class SqlDriver implements IDataDriver {
     this.applyTenantScope(builder, object, options);
     const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));
 
-    if (this.tablesWithTimestamps.has(object)) {
+    if (this.tablesWithTimestamps.has(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
       // Canonical instant format. On SQLite (no native timestamp type) stamp
       // full ISO-8601 WITH an explicit `Z` — matching the insert paths
       // (`stampInsertTimestamps`) so create and update agree on one
@@ -1403,7 +1415,7 @@ export class SqlDriver implements IDataDriver {
     options?: DriverOptions,
   ): Promise<any> {
     const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));
-    if (this.tablesWithTimestamps.has(object)) {
+    if (this.tablesWithTimestamps.has(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
       formatted.updated_at = this.isSqlite ? new Date().toISOString() : this.knex.fn.now();
     }
     for (const shard of shards) {

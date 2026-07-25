@@ -96,6 +96,7 @@ const result = DriverCapabilities.parse(data);
 | **traceContext** | `Record<string, string>` | optional | OpenTelemetry context or request ID |
 | **tenantId** | `string` | optional | Tenant Isolation identifier |
 | **timezone** | `string` | optional | Business reference timezone (IANA) for date-dependent generation, e.g. autonumber date tokens |
+| **preserveAudit** | `boolean` | optional | Historical import: keep a supplied updated_at instead of force-stamping now (from ExecutionContext.preserveAudit) |
 
 
 ---

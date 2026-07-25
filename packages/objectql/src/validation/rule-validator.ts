@@ -325,6 +325,15 @@ export function stripReadonlyWhenFieldsMulti(
  *    system-context writes (import, seed replay, approvals, lifecycle hooks —
  *    all `isSystem: true`) legitimately set read-only columns and skip it.
  *
+ * `options.preserveAudit` (#3493) relaxes the strip for an opt-in "historical"
+ * import that reinstates the original timeline: a caller-supplied read-only
+ * field is KEPT when {@link isPreservableUnderAudit} allows it — the
+ * audit/timestamp family or any author-declared business `readonly` field.
+ * Platform-managed `system` columns outside that family (`organization_id` /
+ * tenancy, generated columns) stay stripped, so the relaxation reinstates facts
+ * without becoming a tenancy-forging backdoor. It is a WHITELIST, deliberately
+ * narrower than the blanket `isSystem` exemption above.
+ *
  * Returns the same object when nothing is stripped, else a shallow copy with the
  * offending keys removed.
  */
@@ -333,19 +342,52 @@ export function stripReadonlyFields(
   data: Record<string, unknown> | undefined | null,
   suppliedKeys: ReadonlySet<string>,
   logger?: EvaluateRulesOptions['logger'],
+  options?: { preserveAudit?: boolean },
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
+  const preserveAudit = options?.preserveAudit === true;
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonly) continue;
     if (!(name in (result as Record<string, unknown>))) continue;
     if (!suppliedKeys.has(name)) continue; // server-stamped, not caller-supplied — keep
+    if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
     if (result === data) result = { ...data };
     delete (result as Record<string, unknown>)[name];
     logger?.warn?.(`Field '${name}' is read-only — ignoring incoming change (#2948)`);
   }
   return result;
+}
+
+/**
+ * The audit / attribution family — the "original timeline" a historical import
+ * (`preserveAudit`) is allowed to reinstate even though these columns are
+ * `system` + `readonly`. Kept in sync with the registry's auto-injected audit
+ * fields (`packages/objectql/src/registry.ts`).
+ */
+const AUDIT_TIMELINE_FIELDS: ReadonlySet<string> = new Set([
+  'created_at',
+  'created_by',
+  'updated_at',
+  'updated_by',
+]);
+
+/**
+ * Whether a caller-supplied `readonly` field may be REINSTATED by an opt-in
+ * historical import (`preserveAudit`), rather than stripped (#3493). Allows:
+ *  - the audit/timestamp family (`created_*` / `updated_*`) — the timeline the
+ *    feature exists to preserve; and
+ *  - author-declared business `readonly` fields (`closed_at`, `resolved_by`, …),
+ *    i.e. anything NOT flagged `system: true`.
+ * Still strips platform-managed `system` columns outside the audit family
+ * (`organization_id` / tenancy, generated columns): a historical import may
+ * reinstate established facts, but must not forge tenancy or system-generated
+ * values.
+ */
+function isPreservableUnderAudit(name: string, def: ConditionalFieldDef): boolean {
+  if (AUDIT_TIMELINE_FIELDS.has(name)) return true;
+  return def.system !== true;
 }
 
 /**
@@ -383,6 +425,10 @@ interface ConditionalFieldDef {
   readonlyWhen?: string | Expression;
   /** Static, unconditional read-only flag (`field.readonly`). #2948. */
   readonly?: boolean;
+  /** Auto-injected platform/audit field (`field.system`). Distinguishes the
+   *  audit family / tenancy columns from author-declared business fields when
+   *  a historical import (`preserveAudit`) relaxes the readonly strip. #3493. */
+  system?: boolean;
   /** Field type — scopes per-option `visibleWhen` enforcement to choice fields. */
   type?: string;
   /** select/multiselect/radio/checkboxes options; an option may gate itself with `visibleWhen`. */

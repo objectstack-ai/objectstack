@@ -54,21 +54,27 @@ function makeProvider() {
 }
 
 describe('runImport — historical import skips the state machine (#3479)', () => {
-  it('sets skipStateMachine on the write context when treatAsHistorical is true', async () => {
+  it('sets skipStateMachine AND preserveAudit on the write context when treatAsHistorical is true (#3493)', async () => {
     const { p, contexts } = makeProvider();
     const summary = await runImport({
       ...baseOpts, p, rows: [{ name: 'a' }, { name: 'b' }], treatAsHistorical: true,
     });
     expect(summary.created).toBe(2);
     expect(contexts.length).toBeGreaterThan(0);
-    for (const ctx of contexts) expect(ctx?.skipStateMachine).toBe(true);
+    for (const ctx of contexts) {
+      expect(ctx?.skipStateMachine).toBe(true);
+      expect(ctx?.preserveAudit).toBe(true);
+    }
   });
 
-  it('does NOT set skipStateMachine for a normal import (the FSM still applies)', async () => {
+  it('does NOT set skipStateMachine / preserveAudit for a normal import (auto-stamp + FSM still apply)', async () => {
     const { p, contexts } = makeProvider();
     await runImport({ ...baseOpts, p, rows: [{ name: 'a' }], treatAsHistorical: false });
     expect(contexts.length).toBeGreaterThan(0);
-    for (const ctx of contexts) expect(ctx?.skipStateMachine).toBeUndefined();
+    for (const ctx of contexts) {
+      expect(ctx?.skipStateMachine).toBeUndefined();
+      expect(ctx?.preserveAudit).toBeUndefined();
+    }
   });
 
   it('defaults to off when the option is omitted (safe default — walk the FSM)', async () => {

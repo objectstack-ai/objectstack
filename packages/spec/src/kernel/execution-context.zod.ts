@@ -238,6 +238,35 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   skipStateMachine: z.boolean().optional(),
 
   /**
+   * Preserve the ORIGINAL audit timeline for this write instead of stamping it
+   * "now" (#3493, the other half of a "historical" import — {@link skipStateMachine}
+   * covers the FSM half). When set:
+   *
+   *   - the built-in audit hook (`packages/objectql/src/plugin.ts`) treats
+   *     `updated_at` / `updated_by` as CLIENT-PREFERRED (`?? now` / `?? userId`),
+   *     symmetric with how `created_at` / `created_by` already behave on insert,
+   *     so a supplied historical last-modified survives instead of being
+   *     overwritten with the import instant;
+   *   - the static-`readonly` write strip (`stripReadonlyFields`) admits a
+   *     WHITELIST — the audit/timestamp family (`created_at` / `created_by` /
+   *     `updated_at` / `updated_by`) plus author-declared business `readonly`
+   *     fields (`closed_at`, `resolved_by`, …) — so migrating established facts
+   *     doesn't silently drop them on the upsert-update path. Platform-managed
+   *     `system` columns OUTSIDE that family (`organization_id` / tenancy, and
+   *     any generated column) STAY stripped: this reinstates a timeline, it is
+   *     NOT a backdoor to forge tenancy;
+   *   - the SQL driver's update stamp respects a supplied `updated_at` rather
+   *     than force-advancing it to `now` (`DriverOptions.preserveAudit`).
+   *
+   * Opt-IN and server-constructed only, never client-supplied — the REST import
+   * runner sets it from the request's explicit `treatAsHistorical` option, gated
+   * so a NORMAL write still auto-stamps and strips as before. Permissions / RLS /
+   * field-level security are unaffected: this changes only which audit/readonly
+   * values the runtime overwrites, never who may write the record.
+   */
+  preserveAudit: z.boolean().optional(),
+
+  /**
    * OAuth 2.1 scopes granted to the access token that authenticated this
    * request, when the principal was resolved from an OAuth bearer token
    * (the MCP surface's human-client track, #2698). UNDEFINED for every

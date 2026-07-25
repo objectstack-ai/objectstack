@@ -66,6 +66,34 @@ describe('SqlDriver canonical audit-timestamp format (SQLite)', () => {
     expect(updated.updated_at >= updated.created_at).toBe(true);
   });
 
+  // ── #3493 — historical import preserves a supplied updated_at on UPDATE ──────
+
+  it('update({ preserveAudit }) KEEPS a caller-supplied updated_at instead of force-stamping now', async () => {
+    await driver.create('thing', { id: 'h1', name: 'A' }, { bypassTenantAudit: true });
+    const historical = '2021-03-01T09:00:00.000Z';
+    await driver.update('thing', 'h1', { name: 'B', updated_at: historical }, { bypassTenantAudit: true, preserveAudit: true } as any);
+    const row = await raw('thing').where('id', 'h1').first();
+    expect(row.name).toBe('B');
+    expect(row.updated_at).toBe(historical); // original timeline preserved, not "now"
+  });
+
+  it('update({ preserveAudit }) with NO supplied updated_at still stamps now (fills-only-empty)', async () => {
+    await driver.create('thing', { id: 'h2', name: 'A' }, { bypassTenantAudit: true });
+    await new Promise((r) => setTimeout(r, 5));
+    await driver.update('thing', 'h2', { name: 'B' }, { bypassTenantAudit: true, preserveAudit: true } as any);
+    const row = await raw('thing').where('id', 'h2').first();
+    expect(row.updated_at).toMatch(ISO_Z);
+  });
+
+  it('update() WITHOUT preserveAudit force-advances updated_at even if the caller supplies one (regression)', async () => {
+    await driver.create('thing', { id: 'h3', name: 'A' }, { bypassTenantAudit: true });
+    const historical = '2021-03-01T09:00:00.000Z';
+    await driver.update('thing', 'h3', { name: 'B', updated_at: historical }, { bypassTenantAudit: true });
+    const row = await raw('thing').where('id', 'h3').first();
+    expect(row.updated_at).toMatch(ISO_Z);
+    expect(row.updated_at).not.toBe(historical); // normal update overwrites with now
+  });
+
   it('no on-disk format mixing: an inserted-only row and an updated row share one format (SQL ORDER BY safe)', async () => {
     await driver.create('thing', { id: 'never', name: 'x' }, { bypassTenantAudit: true });
     await driver.create('thing', { id: 'edited', name: 'y' }, { bypassTenantAudit: true });

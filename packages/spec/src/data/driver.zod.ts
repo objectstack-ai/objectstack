@@ -45,6 +45,16 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
    * (`{YYYYMMDD}`) — resolve the calendar day in this zone, falling back to UTC.
    */
   timezone: z.string().optional().describe('Business reference timezone (IANA) for date-dependent generation, e.g. autonumber date tokens'),
+
+  /**
+   * Preserve a caller-supplied `updated_at` on the UPDATE path instead of
+   * force-advancing it to `now` (#3493). Threaded from
+   * `ExecutionContext.preserveAudit` — set only for an opt-in "historical" data
+   * import that reinstates the original timeline. When true AND the row carries
+   * an explicit `updated_at`, the driver keeps it; otherwise it stamps `now` as
+   * usual. A normal update leaves this unset, so `updated_at` always advances.
+   */
+  preserveAudit: z.boolean().optional().describe('Historical import: keep a supplied updated_at instead of force-stamping now (from ExecutionContext.preserveAudit)'),
 }));
 
 /**

@@ -782,6 +782,10 @@ export class ObjectQL implements IDataEngine {
       // Propagate the full automation opt-out so `triggerHooks` can skip
       // metadata-bound hooks (import with "run automations" unchecked, undo).
       ...((execCtx as any).skipAutomations ? { skipAutomations: true } : {}),
+      // Propagate the historical-import audit-preservation flag so the built-in
+      // audit hook keeps a client-supplied updated_at/updated_by instead of
+      // stamping now (#3493). Opt-in, server-set only.
+      ...((execCtx as any).preserveAudit ? { preserveAudit: true } : {}),
     } as HookContext['session'];
   }
 
@@ -858,7 +862,8 @@ export class ObjectQL implements IDataEngine {
       !isTenancyDisabled(this._registry.getObject(object));
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
-    if (!hasTx && !hasTenant && !isSystem && !hasTz) return base;
+    const preserveAudit = (execCtx as any)?.preserveAudit === true;
+    if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit) return base;
     const opts: any = base && typeof base === 'object' ? { ...base } : {};
     if (hasTx && opts.transaction === undefined) {
       opts.transaction = tx;
@@ -876,6 +881,11 @@ export class ObjectQL implements IDataEngine {
       // hooks) are unscoped by design — silence the audit warn for them but
       // still flag genuine user-path bugs.
       opts.bypassTenantAudit = true;
+    }
+    if (preserveAudit && opts.preserveAudit === undefined) {
+      // Historical import (#3493): let the driver keep a supplied `updated_at`
+      // instead of force-stamping now on the update path.
+      opts.preserveAudit = true;
     }
     return opts;
   }
@@ -2868,7 +2878,7 @@ export class ObjectQL implements IDataEngine {
                // read-only writes are dropped, never the server stamps.
                if (!opCtx.context?.isSystem) {
                    const preRo = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedKeys, this.logger) as any;
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedKeys, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context) });
@@ -2923,7 +2933,7 @@ export class ObjectQL implements IDataEngine {
                // rejected upstream by the tenant write wall, #2946).
                if (!opCtx.context?.isSystem) {
                    const preRoMulti = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedKeys, this.logger) as any;
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedKeys, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#3106] Same enforcement the single-id branch runs at its

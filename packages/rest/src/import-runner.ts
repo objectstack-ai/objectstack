@@ -102,9 +102,11 @@ export interface RunImportOptions {
   matchFields: string[];
   dryRun: boolean;
   runAutomations: boolean;
-  /** #3479 — treat rows as established historical facts: the write context
-   *  carries `skipStateMachine`, so mid-lifecycle values aren't rejected by the
-   *  object's `state_machine` `initialStates` (insert) / `transitions` (update).
+  /** #3479 / #3493 — treat rows as established historical facts. The write
+   *  context carries `skipStateMachine` (mid-lifecycle values aren't rejected by
+   *  the object's `state_machine` `initialStates`/`transitions`) AND
+   *  `preserveAudit` (a supplied `updated_at`/`updated_by` and audit/business
+   *  `readonly` fields are preserved rather than stamped-now / stripped).
    *  Optional here (runner default is off); `prepareImportRequest` always sets it. */
   treatAsHistorical?: boolean;
   trimWhitespace: boolean;
@@ -270,10 +272,14 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   const writeCtx = {
     ...(context ?? {}),
     skipAutomations: !runAutomations,
-    // #3479 — a "historical" import carries curated established facts, so the
-    // engine skips the state_machine rule for these writes (initialStates on
-    // insert, transitions on update). Default off: a normal import walks the FSM.
-    ...(treatAsHistorical ? { skipStateMachine: true } : {}),
+    // #3479 / #3493 — a "historical" import carries curated established facts:
+    //   - skipStateMachine: the engine skips the state_machine rule (initialStates
+    //     on insert, transitions on update) so mid-lifecycle rows aren't rejected;
+    //   - preserveAudit: the ORIGINAL timeline is kept — a supplied
+    //     updated_at/updated_by survives (not stamped now), and the audit/business
+    //     readonly fields survive the upsert-update readonly strip.
+    // Default off: a normal import walks the FSM and auto-stamps as usual.
+    ...(treatAsHistorical ? { skipStateMachine: true, preserveAudit: true } : {}),
   };
 
   // Sparse-indexed by row position `i` (not push-only): CREATE rows are

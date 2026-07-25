@@ -1380,6 +1380,75 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
     });
   });
 
+  // #3493 — an opt-in "historical" import (context.preserveAudit) reinstates the
+  // ORIGINAL timeline on UPDATE: the audit hook keeps a client-supplied
+  // updated_at/updated_by (instead of stamping now/importer), and the readonly
+  // strip admits the audit family + author-declared business readonly fields
+  // (closed_at) instead of dropping them. A normal write (no flag) still stamps
+  // and strips. (The driver's own updated_at force-stamp is covered separately in
+  // driver-sql's timestamp-format test — this mock driver echoes the data.)
+  describe('preserveAudit — historical import keeps the original timeline on UPDATE (#3493)', () => {
+    async function bootHistorical() {
+      const updates: Record<string, any>[] = [];
+      const mockDriver = {
+        name: 'hist-capture', version: '1.0.0',
+        connect: async () => {}, disconnect: async () => {},
+        find: async () => [], findOne: async () => null,
+        create: async (_o: string, d: any) => ({ id: 'rec-1', ...d }),
+        update: async (_o: string, _i: any, d: any) => { updates.push({ ...d }); return { id: _i, ...d }; },
+        delete: async () => true, syncSchema: async () => {},
+      };
+      await kernel.use({
+        name: 'hist-capture-plugin', type: 'driver', version: '1.0.0',
+        init: async (ctx) => { ctx.registerService('driver.hist-capture', mockDriver); },
+      });
+      await kernel.use(new ObjectQLPlugin());
+      await kernel.bootstrap();
+      const objectql = kernel.getService('objectql') as any;
+      const obj: ObjectSchema = {
+        name: 'ticket_obj', label: 'Ticket', datasource: 'hist-capture',
+        fields: {
+          name: { name: 'name', label: 'Name', type: 'text' },
+          updated_by: { name: 'updated_by', label: 'Updated By', type: 'text', readonly: true } as any,
+          // author-declared business readonly field — a case's close time
+          closed_at: { name: 'closed_at', label: 'Closed At', type: 'datetime', readonly: true } as any,
+        },
+      };
+      objectql.registry.registerObject(obj, 'test', 'test');
+      return { objectql, updates };
+    }
+
+    it('KEEPS a supplied updated_at / updated_by / closed_at under preserveAudit', async () => {
+      const { objectql, updates } = await bootHistorical();
+      const ts = '2021-03-01T09:00:00.000Z';
+      await objectql.update(
+        'ticket_obj',
+        { id: 'rec-1', name: 'B', updated_at: ts, updated_by: 'u_original', closed_at: ts },
+        { context: { userId: 'u_import', preserveAudit: true } },
+      );
+      expect(updates.length).toBe(1);
+      const data = updates[0];
+      expect(data.name).toBe('B');
+      expect(data.updated_at).toBe(ts);        // hook kept client value (not "now")
+      expect(data.updated_by).toBe('u_original'); // hook kept client value (not importer)
+      expect(data.closed_at).toBe(ts);          // business readonly reinstated, not stripped
+    });
+
+    it('a normal update (no preserveAudit) still overwrites updated_by and strips closed_at', async () => {
+      const { objectql, updates } = await bootHistorical();
+      await objectql.update(
+        'ticket_obj',
+        { id: 'rec-1', name: 'B', closed_at: '2021-03-01T09:00:00.000Z' },
+        { context: { userId: 'u_import' } },
+      );
+      expect(updates.length).toBe(1);
+      const data = updates[0];
+      expect(data.name).toBe('B');
+      expect(data.updated_by).toBe('u_import');   // server-stamped to the actor
+      expect(data).not.toHaveProperty('closed_at'); // readonly business field stripped
+    });
+  });
+
   // #3042 — conditional `readonlyWhen` must be enforced on the BULK
   // (updateMany) path too, not only the single-id path. The bulk strip reads
   // the matched rows' prior state and drops a field locked in ≥1 of them.
