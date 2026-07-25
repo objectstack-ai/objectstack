@@ -5,6 +5,7 @@ import { assertProtocolCompat } from '@objectstack/metadata-core';
 import { resolveMultiOrgEnabled } from '@objectstack/types';
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
+import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IMetadataService, II18nService } from '@objectstack/spec/contracts';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
@@ -750,31 +751,29 @@ export class AppPlugin implements Plugin {
              // captures the SeedLoaderService closure and exposes a
              // narrow `(orgId) => Promise<summary>` surface.
              try {
-                 const kernel: any = (ctx as any).kernel;
-                 const existing = (() => {
-                     try { return kernel?.getService?.('seed-datasets'); } catch { return undefined; }
-                 })();
-                 const merged = Array.isArray(existing)
-                     ? [...existing, ...normalizedDatasets]
-                     : normalizedDatasets;
-                 const registerSvc = (name: string, value: any) => {
-                     if (kernel?.registerService) kernel.registerService(name, value);
-                     else if (typeof (ctx as any).registerService === 'function') (ctx as any).registerService(name, value);
-                 };
-                 registerSvc('seed-datasets', merged);
+                 // #3453: append this app's datasets onto the SHARED `seed-datasets`
+                 // array (register-once-then-mutate). Reading through the context's
+                 // own resolver — NOT the non-existent `(ctx as any).kernel`, which was
+                 // always undefined — means a SECOND config app (or a marketplace
+                 // install) extends the list instead of clobbering it or tripping the
+                 // duplicate-register throw. The per-org replayer below re-reads this
+                 // live list on every call, so a new org replays the full union.
+                 const sharedDatasets = mergeSeedDatasets(ctx, normalizedDatasets);
 
-                 const metadataNow = ctx.getService('metadata') as IMetadataService | undefined;
                  const loggerRef = ctx.logger;
                  const replayer = async (organizationId: string) => {
                      if (!organizationId) return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
-                     const md = metadataNow ?? (ctx.getService('metadata') as IMetadataService | undefined);
+                     const md = ctx.getService('metadata') as IMetadataService | undefined;
                      if (!md) {
                          loggerRef.warn('[seed-replayer] metadata service unavailable');
                          return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
                      }
-                     const datasetsNow = (() => {
-                         try { return kernel?.getService?.('seed-datasets'); } catch { return merged; }
-                     })() ?? merged;
+                     // Read the LIVE shared list on every replay — NOT the
+                     // `sharedDatasets` snapshot captured when this closure was built.
+                     // An org created after a later app/marketplace install must still
+                     // replay their seeds (the #3453 fix). Fall back to the snapshot
+                     // only if the service somehow vanished.
+                     const datasetsNow = readSeedDatasets(ctx) ?? sharedDatasets;
                      if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) {
                          return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
                      }
@@ -806,8 +805,15 @@ export class AppPlugin implements Plugin {
                          errors: result.errors,
                      };
                  };
-                 registerSvc('seed-replayer', replayer);
-                 ctx.logger.info(`[Seeder] Registered ${normalizedDatasets.length} datasets + replayer on kernel (total seeds: ${merged.length})`);
+                 // Register the replayer once; a later config app reuses the first
+                 // one, which reads the now-extended shared list on every call — so
+                 // there is no duplicate-register throw and no lost datasets (#3453).
+                 const replayerRegistered = registerSeedReplayerOnce(ctx, replayer);
+                 ctx.logger.info(
+                     replayerRegistered
+                         ? `[Seeder] Registered ${normalizedDatasets.length} datasets + replayer (total seeds: ${sharedDatasets.length})`
+                         : `[Seeder] Appended ${normalizedDatasets.length} datasets to shared registry; reused existing replayer (total seeds: ${sharedDatasets.length})`,
+                 );
              } catch (e: any) {
                  ctx.logger.warn('[Seeder] Failed to register seed-datasets/seed-replayer service', { error: e?.message });
              }

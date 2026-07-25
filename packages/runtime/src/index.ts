@@ -23,6 +23,10 @@ export { SeedLoaderService } from './seed-loader.js';
 // contract shared by AppPlugin and the marketplace rehydrate/heal path.
 export { recordSeedOutcome } from './seed-summary.js';
 export type { SeedSourceOutcome } from './seed-summary.js';
+// Multi-tenant seed-replay registry (#3453) — the register-once-then-mutate
+// contract shared by AppPlugin and the marketplace install path so a new org
+// replays the UNION of every seed source, not just the first one.
+export { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 // External Datasource Federation — boot-validation gate (ADR-0015, Gate 2)
 export { ExternalValidationPlugin, createExternalValidationPlugin } from './external-validation-plugin.js';
 export type { ExternalSchemaDriftEvent } from './external-validation-plugin.js';

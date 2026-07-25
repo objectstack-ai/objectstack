@@ -320,6 +320,57 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         } catch { /* banner summary is best-effort — never break the heal */ }
     };
 
+    /**
+     * Merge `datasets` onto the SHARED `seed-datasets` service via the runtime's
+     * register-once-then-mutate helper (#3453), so THIS package's seeds accumulate
+     * alongside every config app's and every other package's rather than clobbering
+     * them — the per-org replayer (AppPlugin) replays the whole union on the next
+     * `sys_organization` insert. Resolved lazily through `@objectstack/runtime` and
+     * guarded exactly like {@link recordSeedSummary}: a runtime that predates the
+     * helper — or a test that mocks the module without it — falls back to an
+     * equivalent inline merge. Returns the post-merge total for the log line.
+     */
+    private mergeSeedDatasetsIntoKernel = async (ctx: PluginContext, datasets: any[]): Promise<number> => {
+        try {
+            const mod: any = await import('@objectstack/runtime');
+            if (typeof mod?.mergeSeedDatasets === 'function') {
+                const list = mod.mergeSeedDatasets(ctx, datasets);
+                return Array.isArray(list) ? list.length : datasets.length;
+            }
+        } catch { /* fall through to the inline merge below */ }
+        return this.mergeSeedDatasetsInline(ctx, datasets);
+    };
+
+    /**
+     * Fallback for {@link mergeSeedDatasetsIntoKernel} when the runtime helper is
+     * unavailable (older build / mocked module). Same register-once-then-mutate:
+     * read the live list through the context's OWN resolver first — a standard
+     * PluginContext has no `.kernel`, which is precisely why the old
+     * `(ctx as any).kernel` read clobbered instead of accumulating — push in place,
+     * and register only when the service does not yet exist so a second source
+     * cannot trip the duplicate-register throw. Returns the post-merge total.
+     */
+    private mergeSeedDatasetsInline = (ctx: PluginContext, datasets: any[]): number => {
+        const c = ctx as any;
+        const read = (): any[] | undefined => {
+            if (typeof c?.getService === 'function') {
+                try { const v = c.getService('seed-datasets'); if (Array.isArray(v)) return v; } catch { /* absent */ }
+            }
+            if (typeof c?.kernel?.getService === 'function') {
+                try { const v = c.kernel.getService('seed-datasets'); if (Array.isArray(v)) return v; } catch { /* absent */ }
+            }
+            return undefined;
+        };
+        const current = read();
+        const list: any[] = Array.isArray(current) ? current : [];
+        list.push(...datasets);
+        if (!Array.isArray(current)) {
+            if (typeof c?.kernel?.registerService === 'function') c.kernel.registerService('seed-datasets', list);
+            else if (typeof c?.registerService === 'function') c.registerService('seed-datasets', list);
+        }
+        return list.length;
+    };
+
     private handleInstall = async (c: any, ctx: PluginContext): Promise<Response> => {
         const userId = await this.requireAuthenticatedUser(c, ctx);
         if (!userId) {
@@ -905,16 +956,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         if (datasets.length > 0) {
             try {
-                const kernel: any = (ctx as any).kernel;
-                let existing: any[] = [];
-                try {
-                    const v = kernel?.getService?.('seed-datasets');
-                    if (Array.isArray(v)) existing = v;
-                } catch { /* unset */ }
-                const merged = [...existing, ...datasets];
-                if (kernel?.registerService) kernel.registerService('seed-datasets', merged);
-                else (ctx as any).registerService?.('seed-datasets', merged);
-                ctx.logger?.info?.(`[MarketplaceInstallLocal] merged ${datasets.length} seed dataset(s) into kernel (total: ${merged.length})`);
+                const total = await this.mergeSeedDatasetsIntoKernel(ctx, datasets);
+                ctx.logger?.info?.(`[MarketplaceInstallLocal] merged ${datasets.length} seed dataset(s) into kernel (total: ${total})`);
             } catch (err: any) {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] failed to merge seed-datasets: ${err?.message ?? err}`);
             }
