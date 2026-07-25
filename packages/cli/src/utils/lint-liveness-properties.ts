@@ -181,6 +181,7 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
   { type: 'hook', key: 'hooks' },
   { type: 'page', key: 'pages' },
   { type: 'view', key: 'views' },
+  { type: 'webhook', key: 'webhooks' },
 ];
 
 /**

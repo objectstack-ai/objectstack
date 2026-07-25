@@ -158,4 +158,55 @@ describe('lintLivenessProperties', () => {
     });
     expect(findings).toEqual([]);
   });
+
+  // ── webhook (#3462) ───────────────────────────────────────────────────────
+  // The ENTIRE WebhookSchema authoring surface is disconnected from the
+  // sys_webhook dispatcher (#3461): authoring `webhooks:` never materializes a
+  // dispatchable row. Rather than warn on all 16 dead props, the ledger warns
+  // once per webhook via the required `url` carrier — one no-op heads-up per
+  // artifact. These run against the REAL webhook.json ledger.
+
+  it('warns once per authored webhook via the url carrier', () => {
+    const findings = lintLivenessProperties({
+      webhooks: [{ name: 'w1', url: 'https://hooks.example/x' }],
+    });
+    const f = findings.find((x) => x.message.includes('`url`'));
+    expect(f).toBeDefined();
+    expect(f!.where).toBe("webhook 'w1'");
+    expect(f!.hint.toLowerCase()).toContain('sys_webhook');
+  });
+
+  it('emits exactly one warning for a fully-authored (showcase-shaped) webhook', () => {
+    // object/triggers/method/retryPolicy/isActive/description are all dead too,
+    // but only `url` carries authorWarn — so the whole no-op artifact yields ONE
+    // finding, not one-per-prop. (isActive is default(true), deliberately unmarked.)
+    const findings = lintLivenessProperties({
+      webhooks: [{
+        name: 'showcase_task_changed',
+        object: 'showcase_task',
+        triggers: ['create', 'update', 'delete'],
+        url: 'https://hooks.example/showcase/task',
+        method: 'POST',
+        retryPolicy: { maxRetries: 3, backoffStrategy: 'exponential' },
+        isActive: true,
+        description: 'Sends task lifecycle events to an external system.',
+      }],
+    });
+    expect(findings.length).toBe(1);
+    expect(findings[0].message).toContain('`url`');
+  });
+
+  it('also warns on authentication (experimental — HMAC-secret-only)', () => {
+    const findings = lintLivenessProperties({
+      webhooks: [{ name: 'w1', url: 'https://hooks.example/x', authentication: { type: 'bearer' } }],
+    });
+    expect(paths(findings).some((m) => m.includes('`authentication`'))).toBe(true);
+  });
+
+  it('does NOT warn on isActive (default(true) boolean, deliberately unmarked)', () => {
+    const findings = lintLivenessProperties({
+      webhooks: [{ name: 'w1', url: 'https://hooks.example/x', isActive: true }],
+    });
+    expect(paths(findings).some((m) => m.includes('`isActive`'))).toBe(false);
+  });
 });

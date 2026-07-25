@@ -38,6 +38,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '../../src/kernel/metadata-type-schemas';
+import { WebhookSchema } from '../../src/automation/webhook.zod';
 import {
   BOUND_PROOF_PATHS,
   HIGH_RISK_CLASSES,
@@ -53,7 +54,22 @@ const repoRoot = resolve(specRoot, '../..');
 const ledgerRoot = join(specRoot, 'liveness');
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook'];
+
+// Spec-only override: governed types whose canonical schema is NOT (yet) in the
+// metadata-type registry, so they can't be resolved via getMetadataTypeSchema.
+// The ledger still governs them — being off the registry is exactly why a drift
+// can survive: neither the runtime /meta/types endpoint nor Studio's admin forms
+// touch these, so nothing else notices when the spec surface goes stale.
+//
+// `webhook` is deliberately NOT registered: registering it would turn on Studio
+// webhook CRUD + saveMetaItem overlay acceptance + diagnostics sweeping, which is
+// the wrong move while the WebhookSchema authoring surface is still disconnected
+// from the sys_webhook dispatcher (enforce-or-remove pending, #3461). The gate
+// only needs to WALK the schema, not register it — so we resolve it directly.
+const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
+  webhook: WebhookSchema,
+};
 
 // ADR-0010 provenance/lock overlay fields — system-stamped, on every type; auto-live.
 const FRAMEWORK_FIELDS = new Set([
@@ -126,7 +142,7 @@ function childShape(s: any): Record<string, any> | null {
 }
 
 function topProps(type: string): Array<{ key: string; node: any; description: string }> {
-  const schema = getMetadataTypeSchema(type);
+  const schema = SPEC_ONLY_SCHEMAS[type] ?? getMetadataTypeSchema(type);
   if (!schema) throw new Error(`metadata type '${type}' has no registered schema`);
   const shape = shapeOf(schema);
   if (!shape) throw new Error(`metadata type '${type}' is not an object schema (no walkable shape)`);

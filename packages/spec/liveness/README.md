@@ -23,6 +23,17 @@ This matters: the older gate read the generated `json-schema/` directory, which 
 most top-level authorable types (object/field/flow/action/...) — so it was blind to the
 core surface. The registry is complete.
 
+**Spec-only exception (`SPEC_ONLY_SCHEMAS`).** A type can be authorable yet deliberately
+*not* registered — `webhook` is the case: its schema is authored on a Stack/connector but
+registering it as a metadata type would switch on Studio webhook CRUD, `saveMetaItem`
+overlay acceptance, and diagnostics sweeping, which is wrong while the surface is still
+disconnected from the `sys_webhook` dispatcher (#3461). Since being off the registry is
+*itself* how such a drift hides, the gate resolves these through a small
+`SPEC_ONLY_SCHEMAS` override in `check-liveness.mts` (consulted before
+`getMetadataTypeSchema`) — it only needs to **walk** the schema, not register it. When a
+disconnect like `webhook`'s is resolved (materializer built or surface retired), fold the
+type back onto the registry and drop the override.
+
 ## Status vocabulary
 
 | Status | Meaning |
@@ -166,7 +177,7 @@ The governed set is `GOVERNED` at the top of `check-liveness.mts`. To add a type
    RecordDetailView had been gating the History tab on it the whole time (#2707).
 4. Add the type to `GOVERNED`; confirm the gate is green.
 
-## Current state — 13 governed types
+## Current state — 16 governed types
 
 Counts include drilled `children` entries; regenerate with the snippet below rather
 than hand-editing (this table drifted badly once — field was listed 34/39 while the
@@ -205,6 +216,7 @@ EOF
 
 | report | 20 | 0 | 2 | – | dataset-bound (ADR-0021); dead = aria + performance (perf authorWarn'd); audit-era `chart` DEAD superseded — DatasetReportChart plots `chart.xAxis`/`yAxis` via useDatasetRows (framework#1890 / #3441), `groupBy` stays experimental (describe marker) |
 | dashboard | 18 | 0 | 2 | – | ADR-0021 dataset widgets (WidgetConfigPanel + DashboardRenderer migrated #3251; DashboardWidgetSchema `.strict()`); dead = aria + performance (perf authorWarn'd); audit-era `globalFilters`/`dateRange` DEAD superseded — LIVE via framework#2501; `title`↔`label` fixed (objectui#2806) |
+| webhook | 0 | 1 | 16 | – | **not a registered metadata type** — governed via the gate's spec-only schema override (`SPEC_ONLY_SCHEMAS`), not `getMetadataTypeSchema` (#3461/#3462). The ENTIRE authoring surface is dead: nothing materializes an authored `webhooks:` entry into a `sys_webhook` dispatcher row (#3461, enforce-or-remove pending). `url` carries the single per-webhook `authorWarn` (one no-op heads-up per artifact, not per-prop); `authentication` experimental (HMAC-`secret`-only); `isActive` unmarked (default(true)). Notes cite the sys_webhook column map as the future materializer's mapping table |
 
 The `dead` set across types is the enforce-or-remove worklist (ADR-0049); every
 misleading entry carries `authorWarn` so authors hear about it at compile time.
