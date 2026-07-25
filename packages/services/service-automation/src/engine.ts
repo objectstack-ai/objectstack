@@ -290,6 +290,24 @@ export type FlowUserGrantsResolver = (
 ) => Promise<FlowUserGrants | undefined> | FlowUserGrants | undefined;
 
 /**
+ * Re-reads the specified single-hop lookup relations of a record-change flow's
+ * triggering record so `{record.<lookup>.<field>}` templates can traverse them
+ * (#3475). Injected by the host — the automation plugin bridges it to a
+ * data-engine `findOne(..., { expand, context })` scoped by the run's identity
+ * ({@link resolveRunDataContext}), so the referenced object's RLS/FLS are
+ * enforced as the RUN (never system-elevated for a `runAs:'user'` run). Returns
+ * the re-read record (with the requested relations expanded to objects) or
+ * `undefined`; only the declared relation keys are grafted onto the run record.
+ * When unwired, lookup traversal stays unresolved (the pre-#3475 behavior).
+ */
+export type FlowRecordExpander = (
+  objectName: string,
+  id: unknown,
+  expandFields: readonly string[],
+  runContext: AutomationContext,
+) => Promise<Record<string, unknown> | undefined> | Record<string, unknown> | undefined;
+
+/**
  * A designer-facing view of one connector action — identity + its JSON-Schema
  * input/output. The runtime handler is intentionally omitted; this is metadata.
  */
@@ -667,6 +685,9 @@ export class AutomationEngine implements IAutomationService {
     /** Bridge to the host authz resolver so a `runAs:'user'` run enforces the
      *  triggering user's real grants (#3356), if wired. See {@link FlowUserGrantsResolver}. */
     private userGrantsResolver: FlowUserGrantsResolver | null = null;
+    /** Bridge to a host data read that expands declared lookup relations on the
+     *  run record (#3475), if wired. See {@link FlowRecordExpander}. */
+    private recordExpander: FlowRecordExpander | null = null;
     private executionLogs: ExecutionLogEntry[] = [];
     private readonly maxLogSize: number;
     private logger: Logger;
@@ -1137,6 +1158,16 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Wire the record lookup-expander (#3475). The automation plugin bridges it
+     * to a `findOne(..., { expand, context })` on the same data engine the CRUD
+     * nodes use, scoped by the run's identity. Passing `null` detaches it (lookup
+     * traversal in templates then stays unresolved).
+     */
+    setRecordExpander(expander: FlowRecordExpander | null): void {
+        this.recordExpander = expander;
+    }
+
+    /**
      * Resolve a named function for a `script` node. Returns `undefined` when no
      * resolver is wired or the name is unregistered — the node then fails the
      * step with a clear error rather than silently no-op'ing.
@@ -1570,7 +1601,67 @@ export class AutomationEngine implements IAutomationService {
                 `(ADR-0049, #1888).`,
             );
         }
+
+        // #3475 — opt-in single-hop lookup expansion, AFTER identity resolution so
+        // the re-read runs as this run's own principal (see helper).
+        await this.expandDeclaredLookups(flow, runContext);
         return runContext;
+    }
+
+    /**
+     * Enrich `runContext.record` with opt-in single-hop lookup expansions the
+     * start node declares as `config.expand: string[]` (#3475). Re-reads just
+     * those relations through the injected {@link setRecordExpander} — which the
+     * host wires to a data-engine read scoped by {@link resolveRunDataContext},
+     * so the referenced object's RLS/FLS are enforced as the RUN's identity (the
+     * triggering user for `runAs:'user'`, elevated for `runAs:'system'`). Grafts
+     * ONLY the declared relation keys, and only when the re-read actually returned
+     * an object/array, so bare lookup ids and #1872 multi-lookup arrays on other
+     * relations — and the formula fields the trigger already hydrated — stay
+     * untouched. Mutates `record` in place (the same object the run's variable map
+     * already references). Best-effort: any failure leaves `record` unexpanded
+     * (the template then renders the scalar id) — expansion must never break the
+     * flow it feeds.
+     */
+    private async expandDeclaredLookups(flow: FlowParsed, runContext: AutomationContext): Promise<void> {
+        if (!this.recordExpander) return;
+        const record = runContext.record as Record<string, unknown> | undefined;
+        const id = record?.id;
+        const object = runContext.object;
+        if (!record || id == null || id === '' || !object) return;
+
+        const startNode = flow.nodes.find((n) => n.type === 'start');
+        const raw = (startNode?.config as { expand?: unknown } | undefined)?.expand;
+        const expandFields =
+            typeof raw === 'string'
+                ? raw
+                    ? [raw]
+                    : []
+                : Array.isArray(raw)
+                    ? raw.filter((f): f is string => typeof f === 'string' && f.length > 0)
+                    : [];
+        if (expandFields.length === 0) return;
+
+        try {
+            const full = await this.recordExpander(object, id, expandFields, runContext);
+            if (full && typeof full === 'object') {
+                for (const field of expandFields) {
+                    const expanded = (full as Record<string, unknown>)[field];
+                    // Graft only a genuinely expanded relation (object/array); a
+                    // scalar means the field is not a resolvable lookup — leave the
+                    // raw id in place rather than overwrite it.
+                    if (expanded !== null && typeof expanded === 'object') {
+                        record[field] = expanded;
+                    }
+                }
+            }
+        } catch (err) {
+            this.logger.warn(
+                `[expand] flow '${flow.name}' could not expand lookups [${expandFields.join(', ')}] on ` +
+                `'${object}#${String(id)}': ${(err as Error)?.message ?? String(err)}. Templates referencing ` +
+                `these relations resolve to the scalar id.`,
+            );
+        }
     }
 
     async execute(flowName: string, context?: AutomationContext): Promise<AutomationResult> {

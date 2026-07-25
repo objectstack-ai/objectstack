@@ -190,6 +190,22 @@ function boundObjectOf(flow: AnyRec): string | undefined {
 }
 
 /**
+ * The lookup relations a record-change flow opted IN to expand, from the start
+ * node's `config.expand` (#3475). A `{record.<rel>.<field>}` hop through one of
+ * these IS resolved at run time — the engine re-reads it as the run's identity —
+ * so the traversal warning is suppressed for those relations. Accepts a `string`
+ * or `string[]`; anything else yields the empty set.
+ */
+function declaredExpandOf(flow: AnyRec): Set<string> {
+  const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
+  const start = nodes.find((n) => n?.type === 'start');
+  const raw = ((start?.config ?? {}) as AnyRec).expand;
+  if (typeof raw === 'string') return new Set(raw ? [raw] : []);
+  if (Array.isArray(raw)) return new Set(raw.filter((r): r is string => typeof r === 'string' && r.length > 0));
+  return new Set();
+}
+
+/**
  * Validate `{record.<path>}` template references across every record-change
  * flow. Pure and dependency-free; safe on pre- or post-parse stacks.
  */
@@ -218,6 +234,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
     if (!obj) return;
 
     const fieldTypes = fieldTypesOf(obj);
+    const expandSet = declaredExpandOf(flow);
 
     nodes.forEach((node, nodeIndex) => {
       if (typeof node !== 'object' || !node) return;
@@ -264,7 +281,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
 
           if (nextIsIdentifier) {
             const headType = fieldTypes.get(head) ?? '';
-            if (RELATION_TYPES.has(headType)) {
+            if (RELATION_TYPES.has(headType) && !expandSet.has(head)) {
               const key = rest.join('.');
               if (seenTraversal.has(key)) continue;
               seenTraversal.add(key);
@@ -278,9 +295,9 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                   `'${head}' — the flow record carries '${head}' as a scalar id, not an expanded object, so ` +
                   `this resolves to an empty string at runtime (silently).`,
                 hint:
-                  `Single-hop lookup traversal in templates is not resolved yet (tracked on #3426). ` +
-                  `Reference the foreign-key id directly ('{record.${head}}'), or add a formula field on ` +
-                  `'${objectName}' that projects the related value and reference that instead.`,
+                  `Opt in to resolve it: add '${head}' to the start node's config.expand (#3475) and the ` +
+                  `engine re-reads it as the run's identity. Otherwise reference the foreign-key id directly ` +
+                  `('{record.${head}}'), or project the value via a formula field on '${objectName}'.`,
               });
             }
             // STRUCTURED_TYPES + any other scalar `.sub` access is left alone:

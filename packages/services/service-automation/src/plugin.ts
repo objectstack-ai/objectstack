@@ -12,6 +12,7 @@ import type {
 import { isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
 import { AutomationEngine } from './engine.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
+import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
 import {
     ObjectStoreSuspendedRunStore,
@@ -520,6 +521,34 @@ export class AutomationServicePlugin implements Plugin {
                     };
                 });
                 ctx.logger.debug('[Automation] runAs:user grant resolver bridged to @objectstack/core resolveUserAuthzGrants (#3356)');
+
+                // #3475 — bridge the lookup expander for record-change flow
+                // templates. Re-reads the relations a flow declares in its start
+                // node's `config.expand` via the run's own identity
+                // (`resolveRunDataContext` honors runAs), so `{record.<lookup>.<field>}`
+                // resolves WITHOUT bypassing the triggering user's RLS/FLS on the
+                // referenced object. Same engine the CRUD nodes and grant resolver
+                // use; a no-op when it exposes no `findOne`.
+                const expandQl = engineQl as {
+                    findOne?: (
+                        obj: string,
+                        q: Record<string, unknown>,
+                    ) => Promise<Record<string, unknown> | null | undefined>;
+                };
+                if (typeof expandQl.findOne === 'function') {
+                    this.engine.setRecordExpander(async (objectName, id, expandFields, runContext) => {
+                        const dataCtx = resolveRunDataContext(runContext);
+                        const expand: Record<string, unknown> = {};
+                        for (const f of expandFields) expand[f] = {};
+                        const query: Record<string, unknown> = { where: { id }, expand };
+                        // Omit `context` for the identity-less case (matches the CRUD
+                        // nodes), so the data engine applies its no-identity default.
+                        if (dataCtx) query.context = dataCtx;
+                        const full = await expandQl.findOne!(objectName, query);
+                        return full && typeof full === 'object' ? (full as Record<string, unknown>) : undefined;
+                    });
+                    ctx.logger.debug('[Automation] record-change lookup expander bridged (#3475)');
+                }
             } else {
                 ctx.logger.debug('[Automation] objectql not present — runAs:user runs keep the trigger-supplied identity');
             }

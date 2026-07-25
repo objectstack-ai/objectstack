@@ -186,6 +186,49 @@ describe('validateFlowTemplatePaths', () => {
     expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
   });
 
+  it('does NOT flag a lookup traversal when the start config declares expand (#3475)', () => {
+    const findings = validateFlowTemplatePaths({
+      objects: [LEAD_OBJECT],
+      flows: [
+        {
+          name: 'expand_ok',
+          type: 'record_change',
+          nodes: [
+            {
+              id: 'start',
+              type: 'start',
+              config: { objectName: 'crm_lead', triggerType: 'record-created', expand: ['crm_account'] },
+            },
+            { id: 'n1', type: 'notify', notify: { title: 'From {record.crm_account.name}', body: 'x' } },
+          ],
+        },
+      ],
+    });
+    expect(findings).toHaveLength(0);
+  });
+
+  it('still flags a lookup traversal NOT covered by the declared expand (#3475)', () => {
+    const findings = validateFlowTemplatePaths({
+      objects: [LEAD_OBJECT],
+      flows: [
+        {
+          name: 'expand_partial',
+          type: 'record_change',
+          nodes: [
+            {
+              id: 'start',
+              type: 'start',
+              config: { objectName: 'crm_lead', triggerType: 'record-created', expand: ['target_channels'] },
+            },
+            { id: 'n1', type: 'notify', notify: { title: 'From {record.crm_account.name}', body: 'x' } },
+          ],
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
+  });
+
   it('returns empty when there are no flows', () => {
     expect(validateFlowTemplatePaths({ objects: [LEAD_OBJECT] })).toHaveLength(0);
   });
