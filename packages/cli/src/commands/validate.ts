@@ -562,7 +562,7 @@ export default class Validate extends Command {
           valid: true,
           manifest: config.manifest,
           stats,
-          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...flowTemplateWarnings, ...securityAdvisories, ...capProviderWarnings],
+          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...flowTemplateWarnings, ...readonlyWriteWarnings, ...securityAdvisories, ...capProviderWarnings],
           conversions: conversionNotices,
           specVersionGap: specGap,
           duration: timer.elapsed(),
