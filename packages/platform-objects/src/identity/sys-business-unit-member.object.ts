@@ -108,6 +108,9 @@ export const SysBusinessUnitMember = ObjectSchema.create({
     // P2 derives these from create/update|list and reclaims the explicit
     // entries. Reconcile-safe: import/export are not generic write verbs, so
     // reconcileManagedApiMethods (managedBy:'platform') never strips them.
-    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'import', 'export'],
+    // `bulk` grants the createMany/updateMany/deleteMany + batch surfaces (bulk
+    // ∧ child after #3391) — memberships are imported as one bulk operation.
+    // `bulk` is a primitive — a permanent, legitimate declaration, not P2 debt.
+    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk', 'import', 'export'],
   },
 });

@@ -186,12 +186,37 @@ describe('POST {basePath}/batch — cross-object transactional batch', () => {
     expect(ql.transaction).not.toHaveBeenCalled();
   });
 
-  it('allows an operation that IS in the apiMethods whitelist', async () => {
+  it('allows an operation that IS in the apiMethods whitelist (with bulk)', async () => {
+    // #3391: the cross-object batch is a bulk surface — the object must grant the
+    // `bulk` primitive AND the child write (bulk ∧ create).
     const ql = makeQl();
-    const { route } = buildServer({ ql, objects: [{ name: 'ledger', enable: { apiMethods: ['create', 'read'] } }] });
+    const { route } = buildServer({ ql, objects: [{ name: 'ledger', enable: { apiMethods: ['create', 'bulk'] } }] });
     const res = await post(route, { operations: [{ object: 'ledger', action: 'create', data: { amount: 1 } }] });
     expect(res.statusCode).toBe(200);
     expect(ql.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks a batch write when the object grants the child but not the bulk primitive (405, #3391)', async () => {
+    // create is whitelisted but `bulk` is not → the batch/Many surface is closed.
+    const ql = makeQl();
+    const { route } = buildServer({ ql, objects: [{ name: 'ledger', enable: { apiMethods: ['create'] } }] });
+    const res = await post(route, { operations: [{ object: 'ledger', action: 'create', data: { amount: 1 } }] });
+    expect(res.statusCode).toBe(405);
+    expect(res.body.code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
+    // the 405 body carries the EFFECTIVE operation set, not the raw whitelist
+    expect(res.body.allowed).toContain('create');
+    expect(res.body.allowed).not.toContain('bulk');
+    expect(ql.transaction).not.toHaveBeenCalled();
+  });
+
+  it('blocks a batch write when the object grants bulk but not the child (405, #3391)', async () => {
+    // bulk is present but the object cannot create → bulk ∧ create fails.
+    const ql = makeQl();
+    const { route } = buildServer({ ql, objects: [{ name: 'ledger', enable: { apiMethods: ['bulk', 'update'] } }] });
+    const res = await post(route, { operations: [{ object: 'ledger', action: 'create', data: { amount: 1 } }] });
+    expect(res.statusCode).toBe(405);
+    expect(res.body.code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
+    expect(ql.transaction).not.toHaveBeenCalled();
   });
 
   // ── request validation ────────────────────────────────────────────────────

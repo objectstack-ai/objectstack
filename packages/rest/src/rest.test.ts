@@ -2746,13 +2746,52 @@ describe('RestServer — object API exposure (apiEnabled / apiMethods)', () => {
     expect(protocol.createData).not.toHaveBeenCalled();
   });
 
-  it('apiMethods whitelist → disallowed op returns 405', async () => {
+  it('apiMethods whitelist → disallowed op returns 405 with the EFFECTIVE set (#3391)', async () => {
     const { rest, protocol } = setup({ apiMethods: ['get', 'list'] });
     const res = await invoke(rest, 'POST', LIST, { object: 'widget' }, { a: 1 });
     expect(res.statusCode).toBe(405);
     expect(res.body.code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
-    expect(res.body.allowed).toEqual(['get', 'list']);
+    // #3391: `allowed` is now the derived EFFECTIVE operation set (enum-ordered),
+    // not the raw whitelist — a `list` grant derives aggregate/search/export.
+    expect(res.body.allowed).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
     expect(protocol.createData).not.toHaveBeenCalled();
+  });
+
+  it('empty whitelist [] + apiEnabled:true → deny-all 405 (flipped by #3391)', async () => {
+    const { rest, protocol } = setup({ apiMethods: [], apiEnabled: true });
+    const res = await invoke(rest, 'GET', LIST, { object: 'widget' });
+    expect(res.statusCode).toBe(405);
+    expect(res.body.code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
+    expect(res.body.allowed).toEqual([]);
+    expect(protocol.findData).not.toHaveBeenCalled();
+  });
+
+  it('createMany requires the bulk primitive: [create] alone → 405 (#3391)', async () => {
+    const { rest, protocol } = setup({ apiMethods: ['get', 'list', 'create'] });
+    const res = await invoke(rest, 'POST', '/api/v1/data/:object/createMany', { object: 'widget' }, []);
+    expect(res.statusCode).toBe(405);
+    expect(protocol.createManyData).not.toHaveBeenCalled();
+  });
+
+  it('createMany passes when [create, bulk] granted (bulk ∧ create, #3391)', async () => {
+    const { rest, protocol } = setup({ apiMethods: ['get', 'list', 'create', 'bulk'] });
+    const res = await invoke(rest, 'POST', '/api/v1/data/:object/createMany', { object: 'widget' }, []);
+    expect(res.statusCode).toBe(201);
+    expect(protocol.createManyData).toHaveBeenCalledTimes(1);
+  });
+
+  it('createMany with [bulk] but no create → 405 (child op not granted, #3391)', async () => {
+    const { rest, protocol } = setup({ apiMethods: ['get', 'list', 'bulk'] });
+    const res = await invoke(rest, 'POST', '/api/v1/data/:object/createMany', { object: 'widget' }, []);
+    expect(res.statusCode).toBe(405);
+    expect(protocol.createManyData).not.toHaveBeenCalled();
+  });
+
+  it('reverse-derived: a CRUD whitelist (no explicit bulk/import) still allows single create', async () => {
+    const { rest, protocol } = setup({ apiMethods: ['get', 'list', 'create', 'update', 'delete'] });
+    const res = await invoke(rest, 'POST', LIST, { object: 'widget' }, { a: 1 });
+    expect(res.statusCode).not.toBe(405);
+    expect(protocol.createData).toHaveBeenCalledTimes(1);
   });
 
   it('apiMethods whitelist → allowed op passes through to the engine', async () => {

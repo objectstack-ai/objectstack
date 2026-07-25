@@ -316,3 +316,70 @@ describe('export route — real engine + protocol integration', () => {
     expect(dataRows[0][2]).toBe('是');
   });
 });
+
+// ===========================================================================
+// #3391 blocking test: export column projection ≡ list's field-level security.
+// The derivation contract opens export from `list`, so export MUST NOT expose a
+// wider column set than list. The read middleware DELETES unreadable keys, so a
+// schema-derived export header would otherwise leak the *names* of FLS-hidden
+// columns as empty cells. These two tests are the "阻塞性测试" — they fail
+// (red) against the pre-#3391 header (= full schema) and pass after the fix.
+// ===========================================================================
+describe('export route — FLS column projection (#3391 blocking)', () => {
+  // Simulate field-level security with the exact delete-key semantics the
+  // security FieldMasker uses: strip `title` from every task row on read.
+  const maskTitle = (engine: any) =>
+    engine.registerHook(
+      'afterFind',
+      (ctx: any) => { if (Array.isArray(ctx.result)) for (const r of ctx.result) { if (r) delete r.title; } },
+      { object: 'task' },
+    );
+
+  it('schema-derived header is narrowed to the masked-readable column set (CSV + JSON)', async () => {
+    const { engine, protocol, route } = await boot();
+    maskTitle(engine);
+
+    // The list key set under the SAME read path (afterFind runs on find too).
+    const listRes: any = await protocol.findData({ object: 'task', query: {} });
+    const listRows: any[] = listRes.records ?? listRes.data ?? [];
+    const listKeys = new Set<string>();
+    for (const r of listRows) for (const k of Object.keys(r)) listKeys.add(k);
+    expect(listKeys.has('title')).toBe(false); // masked out of list too
+
+    // CSV: the masked column's header (标题) must be gone — no empty leak column.
+    const csv = makeRes();
+    await route.handler({ params: { object: 'task' }, query: { format: 'csv' } } as any, csv.res);
+    const header = parseCsv(csv.chunks.join(''))[0];
+    expect(header).not.toContain('标题');
+    expect(header).toEqual(['ID', '完成', '优先级', '截止', '负责人']);
+
+    // JSON: every exported row's key set ⊆ the list key set; title never present.
+    const json = makeRes();
+    await route.handler({ params: { object: 'task' }, query: { format: 'json' } } as any, json.res);
+    const arr = JSON.parse(json.chunks.join(''));
+    expect(arr.length).toBe(2);
+    for (const row of arr) {
+      for (const k of Object.keys(row)) expect(listKeys.has(k)).toBe(true);
+      expect('title' in row).toBe(false);
+    }
+  });
+
+  it('explicit ?fields= keeps a requested masked column but never emits its value', async () => {
+    const { engine, route } = await boot();
+    maskTitle(engine);
+
+    // An explicit request is honored (projection does NOT narrow it), but the
+    // masked value must always render as an empty cell — same as list `$select`.
+    const csv = makeRes();
+    await route.handler(
+      { params: { object: 'task' }, query: { format: 'csv', fields: 'id,title' } } as any,
+      csv.res,
+    );
+    const rows = parseCsv(csv.chunks.join(''));
+    expect(rows[0]).toEqual(['ID', '标题']); // header kept as requested
+    for (const r of rows.slice(1)) {
+      expect(r[0]).not.toBe('');    // id present
+      expect(r[1] ?? '').toBe('');  // title masked → always empty, never a value
+    }
+  });
+});

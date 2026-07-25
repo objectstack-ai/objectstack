@@ -219,6 +219,9 @@ export const SysBusinessUnit = ObjectSchema.create({
     // Data portability is expected for the org tree: fields like `external_ref`
     // and `effective_from/to` are designed for HRIS batch sync (#3025). Import
     // reuses the create/update affordances this object already grants.
-    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'import', 'export'],
+    // `bulk` grants the createMany/updateMany/deleteMany + batch surfaces, which
+    // after #3391 require the `bulk` primitive (bulk ∧ child). `bulk` is a
+    // primitive — a permanent, legitimate declaration, not P0/P2 debt.
+    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk', 'import', 'export'],
   },
 });

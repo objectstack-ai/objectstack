@@ -758,8 +758,11 @@ export const SysUser = ObjectSchema.create({
     // actions), so they are not exposed. `update` stays: it is the ONE
     // generic write opened on an identity table (ADR-0092 D4), server-side
     // clamped to the profile-field whitelist ({name, image}) by the guard —
-    // `userActions.edit: true` above declares the affordance.
-    apiMethods: ['get', 'list', 'update'],
+    // `userActions.edit: true` above declares the affordance. `bulk` grants the
+    // updateMany surface (bulk ∧ update after #3391); paired with the sole
+    // `update` write, only bulk-update is admitted (createMany/deleteMany still
+    // 405). `bulk` is a primitive — a permanent, legitimate declaration.
+    apiMethods: ['get', 'list', 'update', 'bulk'],
   },
 
   // Email uniqueness is enforced by the unique index above (and better-auth's

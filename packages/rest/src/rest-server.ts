@@ -11,6 +11,12 @@ import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpoints
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import {
+    resolveEffectiveApiMethods,
+    isApiOperationAllowed,
+    effectiveOperationsArray,
+    DATA_ACTION_TO_API_OPERATION,
+} from '@objectstack/spec/data';
 
 /**
  * The protocol slice the REST layer actually consumes (ADR-0076 D9 / #2462
@@ -449,18 +455,32 @@ function applyDroppedFieldsHeader(res: any, result: unknown): void {
     else if (typeof res?.setHeader === 'function') res.setHeader('X-ObjectStack-Dropped-Fields', header);
 }
 
+/** Extra context for a gate check: import `writeMode` precision / bulk∧child. */
+interface ApiAccessOpts {
+    writeMode?: string;
+    bulkChild?: string;
+}
+
 /**
  * Pure per-object API-exposure check: given an object's `enable` block, decide
  * whether `operation` is denied on the *external* REST surface (ADR-0049 /
- * #1889). Returns the `{ status, body }` to send, or `null` when allowed.
- * Shared by the single-record routes (`enforceApiAccess`) and the cross-object
- * batch route so both honour the SAME gate. A missing/loose `enable` block is
- * default-allow — objects with no `enable` behave exactly as before.
+ * #1889 / #3391). Returns the `{ status, body }` to send, or `null` when
+ * allowed. Shared by the single-record routes (`enforceApiAccess`) and the
+ * cross-object batch route so both honour the SAME gate.
+ *
+ * #3391: the decision comes from the spec's single derivation source of truth
+ * (`resolveEffectiveApiMethods` / `isApiOperationAllowed`), so the three-state
+ * whitelist (`undefined` unrestricted / `[]` deny-all / subset) and the derived
+ * verbs (import⊆create∨update, export⊆list, bulk∧child, …) are resolved
+ * identically everywhere. The 405 body's `allowed` array is the EFFECTIVE
+ * operation set (enum-ordered), the single "effective" channel the frontend
+ * consumes — never the raw whitelist.
  */
-function apiAccessDenialFromEnable(
+export function apiAccessDenialFromEnable(
     enable: any,
     objectName: string,
     operation: string,
+    opts?: ApiAccessOpts,
 ): { status: number; body: Record<string, unknown> } | null {
     if (!enable) return null;
     if (enable.apiEnabled === false) {
@@ -473,18 +493,20 @@ function apiAccessDenialFromEnable(
             },
         };
     }
-    if (Array.isArray(enable.apiMethods) && enable.apiMethods.length > 0 && !enable.apiMethods.includes(operation)) {
-        return {
-            status: 405,
-            body: {
-                error: `API operation '${operation}' is not allowed on object '${objectName}'`,
-                code: 'OBJECT_API_METHOD_NOT_ALLOWED',
-                object: objectName,
-                allowed: enable.apiMethods,
-            },
-        };
-    }
-    return null;
+    const eff = resolveEffectiveApiMethods(enable);
+    // Unrestricted (no whitelist) → default-allow, exactly as before.
+    if (eff.mode === 'unrestricted') return null;
+    const canonical = DATA_ACTION_TO_API_OPERATION[operation] ?? operation;
+    if (isApiOperationAllowed(eff, canonical, opts)) return null;
+    return {
+        status: 405,
+        body: {
+            error: `API operation '${operation}' is not allowed on object '${objectName}'`,
+            code: 'OBJECT_API_METHOD_NOT_ALLOWED',
+            object: objectName,
+            allowed: effectiveOperationsArray(eff),
+        },
+    };
 }
 
 /** Platform object backing async import jobs (see sys-import-job.object.ts). */
@@ -1108,13 +1130,14 @@ export class RestServer {
         p: RestProtocol,
         environmentId: string | undefined,
         operation: string,
+        opts?: ApiAccessOpts,
     ): Promise<boolean> {
         const objectName = req?.params?.object;
         if (!objectName) return false;
         const items = await this.loadObjectItems(p, environmentId);
         const obj = items.find((o: any) => o?.name === objectName);
         if (!obj) return false; // unknown object → let the data path 404
-        const denial = apiAccessDenialFromEnable(obj.enable, objectName, operation);
+        const denial = apiAccessDenialFromEnable(obj.enable, objectName, operation, opts);
         if (denial) {
             res.status(denial.status).json(denial.body);
             return true;
@@ -3736,6 +3759,14 @@ export class RestServer {
                     }
                     const { rows, writeMode, dryRun } = prep.prepared;
 
+                    // [#3391] Import gate — stage 2 (precise). Stage 1 above is a
+                    // coarse `create ∨ update` check that 405s fully-closed objects
+                    // BEFORE the (potentially large) CSV parse. Now that the write
+                    // mode is known, re-gate precisely: insert→create, update→update,
+                    // upsert→create∧update. Catches e.g. an object that grants only
+                    // `create` receiving an update-mode import.
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'import', { writeMode })) return;
+
                     // Delegate the per-row coercion + upsert loop to the shared
                     // runner (also used by the async import-job worker).
                     const summary = await runImport({
@@ -3819,6 +3850,11 @@ export class RestServer {
                         return;
                     }
                     const prepared = prep.prepared;
+
+                    // [#3391] Import gate — stage 2 (precise), see the synchronous
+                    // route: now that writeMode is resolved, re-gate precisely
+                    // (insert→create, update→update, upsert→create∧update).
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'import', { writeMode: prepared.writeMode })) return;
 
                     const jobId = newImportJobId();
                     const createdAt = new Date().toISOString();
@@ -4222,6 +4258,11 @@ export class RestServer {
 
                     // Resolve fields: explicit param > schema fields > derived from first row.
                     let fields: string[] | undefined;
+                    // Whether `fields` (the export columns) were derived from the object
+                    // schema rather than an explicit `?fields=` request. Only schema-derived
+                    // headers are narrowed to the FLS-readable set (#3391); an explicit
+                    // request is honored as asked (values still masked to empty).
+                    let fieldsFromSchema = false;
                     if (typeof q.fields === 'string' && q.fields.length > 0) {
                         fields = q.fields.split(',').map((s: string) => s.trim()).filter(Boolean);
                     } else if (Array.isArray(q.fields)) {
@@ -4263,7 +4304,7 @@ export class RestServer {
                         metaMap = buildFieldMetaMap(schema);
                         if (!fields || fields.length === 0) {
                             const names = [...metaMap.keys()];
-                            if (names.length > 0) fields = names;
+                            if (names.length > 0) { fields = names; fieldsFromSchema = true; }
                         }
                     } catch { /* fall back to first-row derivation + raw values */ }
 
@@ -4322,6 +4363,29 @@ export class RestServer {
                         // Derive fields from the first row if schema lookup failed.
                         if ((!fields || fields.length === 0) && firstChunk) {
                             fields = Object.keys(rows[0] ?? {});
+                        }
+
+                        // [#3391] Column projection ≡ list's field-level security.
+                        // The read middleware (FieldMasker) DELETES unreadable keys from
+                        // each row, so a schema-derived header would still leak the
+                        // *names* of FLS-hidden columns as empty cells. Narrow the
+                        // schema-derived header to the keys actually present across the
+                        // first masked chunk (their ∩ with schema fields is implicit —
+                        // `fields` already came from `metaMap.keys()`), so export headers
+                        // match list's readable columns. Explicit `?fields=` requests are
+                        // left untouched (values still masked to empty, as with list
+                        // `$select`); a fully empty first chunk leaves the header as-is
+                        // (same as today — no worse).
+                        if (fieldsFromSchema && firstChunk && fields && fields.length > 0) {
+                            const readable = new Set<string>();
+                            for (const row of rows) {
+                                if (row && typeof row === 'object') {
+                                    for (const k of Object.keys(row)) readable.add(k);
+                                }
+                            }
+                            if (readable.size > 0) {
+                                fields = fields.filter((f) => readable.has(f));
+                            }
                         }
 
                         if (format === 'csv') {
@@ -6255,7 +6319,10 @@ export class RestServer {
                             checked.add(key);
                             const obj = byName.get(op.object);
                             if (!obj) continue; // unknown object → surfaced by the op inside the tx
-                            const denial = apiAccessDenialFromEnable(obj.enable, op.object, op.action);
+                            // [#3391] Cross-object batch is a bulk surface: gate each op
+                            // as `bulk ∧ child(op.action)` — the object must grant the
+                            // `bulk` primitive AND the specific write it performs.
+                            const denial = apiAccessDenialFromEnable(obj.enable, op.object, 'bulk', { bulkChild: op.action });
                             if (denial) { res.status(denial.status).json(denial.body); return; }
                         }
                     }
@@ -6327,7 +6394,9 @@ export class RestServer {
                         const p = await this.resolveProtocol(environmentId, req);
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk')) return;
+                        // [#3391] bulk ∧ child(body.operation) — the object must grant
+                        // the `bulk` primitive AND the batched write kind.
+                        if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: req.body?.operation })) return;
                         const result = await p.batchData!({
                             object: req.params.object,
                             request: req.body,
@@ -6358,7 +6427,8 @@ export class RestServer {
                         const p = await this.resolveProtocol(environmentId, req);
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'create')) return;
+                        // [#3391] bulk ∧ create — createMany requires the `bulk` primitive.
+                        if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'create' })) return;
                         const result = await p.createManyData!({
                             object: req.params.object,
                             records: req.body || [],
@@ -6389,7 +6459,8 @@ export class RestServer {
                         const p = await this.resolveProtocol(environmentId, req);
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'update')) return;
+                        // [#3391] bulk ∧ update — updateMany requires the `bulk` primitive.
+                        if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'update' })) return;
                         const result = await p.updateManyData!({
                             object: req.params.object,
                             ...req.body,
@@ -6420,7 +6491,8 @@ export class RestServer {
                         const p = await this.resolveProtocol(environmentId, req);
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'delete')) return;
+                        // [#3391] bulk ∧ delete — deleteMany requires the `bulk` primitive.
+                        if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'delete' })) return;
                         const result = await p.deleteManyData!({
                             object: req.params.object,
                             ...req.body,
