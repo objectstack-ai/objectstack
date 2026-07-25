@@ -913,6 +913,34 @@ export class AutomationEngine implements IAutomationService {
             };
         }
 
+        // Array-form triggerType (e.g. ['record-after-create', 'record-after-delete']).
+        // Multi-event unions are deliberately unsupported (#3457). But a non-string
+        // triggerType would otherwise fall through every branch below and resolve to
+        // `undefined` — the flow silently becomes a manual/screen flow that never
+        // fires, invisible to the binding audit (#3481). Route it to the record-change
+        // trigger, exactly as an unmappable single token does, so the trigger rejects
+        // it LOUDLY at bind time (a warn naming the flow) instead of vanishing. The
+        // authoring-time lint gate (validate-flow-trigger-readiness) is the primary
+        // catch; this keeps runtime behavior consistent with the typo-token path. The
+        // raw array is preserved in `config` so the trigger can tailor its message;
+        // `event` is a joined string so the trigger's single-token mapper reports it
+        // verbatim and maps it to no hook.
+        if (
+            Array.isArray(config.triggerType) &&
+            config.triggerType.some((t) => typeof t === 'string' && (t as string).startsWith('record-'))
+        ) {
+            return {
+                triggerType: 'record_change',
+                binding: {
+                    flowName,
+                    object: typeof config.objectName === 'string' ? config.objectName : undefined,
+                    event: config.triggerType.filter((t) => typeof t === 'string').join(','),
+                    condition: (config.condition as FlowTriggerBinding['condition']) ?? undefined,
+                    config,
+                },
+            };
+        }
+
         // Declarative time-relative sweep (#1874): a start node carrying a
         // `timeRelative` descriptor is swept on a schedule and launched once per
         // record whose date field falls in the window. Checked BEFORE `schedule`

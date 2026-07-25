@@ -248,6 +248,45 @@ describe('validateFlowTriggerReadiness', () => {
     }
   });
 
+  it('flags an array-form triggerType — an unsupported multi-event shape that never fires (#3481)', () => {
+    // A non-string triggerType folds to "no trigger" at the runtime, so the flow
+    // is misclassified as manual and passes every gate silently. Catch it here.
+    const flow = recordFlow({ status: 'active' });
+    (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = [
+      'record-after-create',
+      'record-after-delete',
+    ];
+    const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+    expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNKNOWN_EVENT]);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toMatch(/array/i);
+    expect(findings[0].message).toMatch(/never fires/i);
+    expect(findings[0].path).toBe('flows[0].nodes[0].config.triggerType');
+    // The hint steers to the supported alternatives.
+    expect(findings[0].hint).toMatch(/record-after-write/);
+    expect(findings[0].hint).toMatch(/#3457/);
+  });
+
+  it('flags an array even when its elements are individually valid tokens', () => {
+    // ['record-after-create','record-after-update'] is exactly what record-after-write
+    // exists for — the array form is still unsupported, so still flagged.
+    const flow = recordFlow({ status: 'active' });
+    (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = [
+      'record-after-create',
+      'record-after-update',
+    ];
+    const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+    expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNKNOWN_EVENT]);
+  });
+
+  it('does not flag a non-record array (not the record-trigger silent-miss)', () => {
+    // An array with no record-* element is not the #3481 defect — leave it alone.
+    const flow = recordFlow({ status: 'active' });
+    (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = ['schedule', 'manual'];
+    const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+    expect(findings.some((f) => f.rule === FLOW_TRIGGER_UNKNOWN_EVENT)).toBe(false);
+  });
+
   it('handles map-keyed flows/objects and stacks with no flows', () => {
     expect(validateFlowTriggerReadiness({})).toEqual([]);
     const findings = validateFlowTriggerReadiness({

@@ -127,6 +127,71 @@ describe('trigger-fired execution failures are loud (layer 1)', () => {
     });
 });
 
+describe('array-form triggerType is routed, not silently folded to manual (#3481)', () => {
+    function arrayTriggeredFlow(name: string, object: string) {
+        return {
+            name,
+            label: name,
+            type: 'autolaunched',
+            status: 'active',
+            nodes: [
+                {
+                    id: 'start',
+                    type: 'start',
+                    label: 'Start',
+                    config: {
+                        objectName: object,
+                        triggerType: ['record-after-create', 'record-after-delete'],
+                    },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        };
+    }
+
+    it('hands an array triggerType to the record_change trigger (so it can reject loudly), not folding it to a manual flow', () => {
+        const { logger } = spyLogger();
+        const engine = new AutomationEngine(logger);
+
+        let started: { event?: string; config?: Record<string, unknown> } | undefined;
+        engine.registerTrigger({
+            type: 'record_change',
+            start: (binding) => { started = binding as typeof started; },
+            stop: () => {},
+        });
+        engine.registerFlow('array_flow', arrayTriggeredFlow('array_flow', 'wid') as never);
+
+        // Without the fix, a non-string triggerType folds to "no trigger": the
+        // flow is treated as manual and the trigger is never handed the binding.
+        expect(started, 'array-form flow routed to the record_change trigger').toBeDefined();
+        expect(engine.getActiveTriggerBindings().map((b) => b.triggerType)).toContain('record_change');
+        // The raw array is forwarded (via config) so the trigger can produce a
+        // targeted rejection message rather than the generic one.
+        expect((started!.config as { triggerType?: unknown }).triggerType).toEqual([
+            'record-after-create',
+            'record-after-delete',
+        ]);
+    });
+
+    it('ignores an array with no record-* element (not the record-trigger case)', () => {
+        const { logger } = spyLogger();
+        const engine = new AutomationEngine(logger);
+        let started = false;
+        engine.registerTrigger({
+            type: 'record_change',
+            start: () => { started = true; },
+            stop: () => {},
+        });
+        const flow = arrayTriggeredFlow('sched_array', 'wid');
+        (flow.nodes[0].config as Record<string, unknown>).triggerType = ['schedule', 'manual'];
+        engine.registerFlow('sched_array', flow as never);
+
+        // No record-* element ⇒ not routed to record_change (correctly manual).
+        expect(started).toBe(false);
+    });
+});
+
 describe('unbound triggered flows are audited at kernel:bootstrapped (layer 2)', () => {
     it('warns per enabled flow whose trigger type has no registered trigger', async () => {
         const warn = vi.fn();

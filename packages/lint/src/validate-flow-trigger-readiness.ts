@@ -95,6 +95,14 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     const config = (start?.node.config ?? {}) as AnyRec;
     const triggerType = typeof config.triggerType === 'string' ? config.triggerType : undefined;
     const isRecordTriggered = !!triggerType && triggerType.startsWith('record-');
+    // Array-form triggerType (e.g. ['record-after-create', 'record-after-delete'])
+    // is NOT supported — multi-event unions are deferred (#3457). It needs its own
+    // detection because a non-string triggerType folds to `undefined` above, so the
+    // runtime misclassifies the flow as manual and it never fires with zero output
+    // (#3481). Any record-* element is enough to recognize the (unsupported) intent.
+    const isArrayRecordTriggered =
+      Array.isArray(config.triggerType) &&
+      (config.triggerType as unknown[]).some((t) => typeof t === 'string' && t.startsWith('record-'));
     const isTimeRelative = config.timeRelative != null && typeof config.timeRelative === 'object';
     const isAutoTriggered =
       isRecordTriggered || triggerType === 'api' || config.schedule != null ||
@@ -160,6 +168,26 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         hint:
           `Use record-{before,after}-{create,update,delete,write}. 'write' fires on create OR update in one ` +
           `flow (#3427); create/insert are synonyms. There is no "any change" token — pick the specific event(s).`,
+      });
+    }
+
+    // 1d. Array-form triggerType — an unsupported multi-event shape (#3457). The
+    //     runtime folds a non-string triggerType to "no trigger" and treats the
+    //     flow as manual, so it binds to nothing and never fires, with zero output
+    //     at any layer (#3481). Surface it at authoring time like the unmappable
+    //     single tokens above (same rule id — both are "this token never fires").
+    if (start && isArrayRecordTriggered) {
+      findings.push({
+        severity: 'warning',
+        rule: FLOW_TRIGGER_UNKNOWN_EVENT,
+        where: `flow "${flowName}" › start node`,
+        path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
+        message:
+          `triggerType is an array (${JSON.stringify(config.triggerType)}), which is not supported — a start ` +
+          `node takes a single trigger event, so the flow binds to nothing and never fires (the runtime stays silent about it).`,
+        hint:
+          `Use one triggerType string. For "created or updated" use record-after-write (one flow, both events, #3427). ` +
+          `For any other combination, author one flow per event — multi-event arrays are deferred (#3457).`,
       });
     }
 

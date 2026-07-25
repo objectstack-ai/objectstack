@@ -146,6 +146,46 @@ describe('RecordChangeTrigger', () => {
         expect(hooks).toHaveLength(0);
     });
 
+    it('rejects an array-form trigger event with a targeted message, not bound (#3481)', () => {
+        // Multi-event arrays are unsupported (#3457). The engine forwards the raw
+        // array via config (with a joined `event` string that maps to no hook), so
+        // the trigger can steer the author to the supported alternatives instead of
+        // the generic "unsupported trigger event" line.
+        const { engine, hooks } = fakeEngine();
+        const warn = vi.fn();
+        const trigger = new RecordChangeTrigger(engine, { info: () => {}, warn, debug: () => {} });
+
+        trigger.start(
+            binding({
+                event: 'record-after-create,record-after-delete',
+                config: { triggerType: ['record-after-create', 'record-after-delete'] },
+            }),
+            async () => {},
+        );
+
+        expect(hooks).toHaveLength(0);
+        expect(warn).toHaveBeenCalledTimes(1);
+        const msg = String(warn.mock.calls[0][0]);
+        expect(msg).toMatch(/task_assigned_notify/);
+        expect(msg).toMatch(/array/i);
+        expect(msg).toMatch(/record-after-write/);
+        expect(msg).toMatch(/#3457/);
+    });
+
+    it('keeps the generic unsupported-event warning for a non-array bad token', () => {
+        const { engine, hooks } = fakeEngine();
+        const warn = vi.fn();
+        const trigger = new RecordChangeTrigger(engine, { info: () => {}, warn, debug: () => {} });
+
+        trigger.start(binding({ event: 'record-after-updated' }), async () => {});
+
+        expect(hooks).toHaveLength(0);
+        expect(warn).toHaveBeenCalledTimes(1);
+        const msg = String(warn.mock.calls[0][0]);
+        expect(msg).toMatch(/unsupported trigger event/i);
+        expect(msg).toMatch(/record-after-updated/);
+    });
+
     it('binds BOTH afterInsert and afterUpdate for record-after-write (create OR update, #3427)', () => {
         const { engine, hooks } = fakeEngine();
         const trigger = new RecordChangeTrigger(engine, silentLogger());

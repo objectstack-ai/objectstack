@@ -175,9 +175,23 @@ export class RecordChangeTrigger implements FlowTrigger {
         // a double-dispatch.
         const hookEvents = triggerTypeToHookEvents(binding.event);
         if (hookEvents.length === 0) {
-            this.logger.warn(
-                `[record-change] flow '${binding.flowName}' has unsupported trigger event '${binding.event ?? '(none)'}' — not bound`,
-            );
+            // Array-form triggerType (`['record-after-create', 'record-after-delete']`)
+            // reaches here via the engine, which forwards the raw array in `config`
+            // and a joined `event` string that maps to no hook. Multi-event arrays are
+            // unsupported (#3457); give a targeted message steering to the supported
+            // shapes rather than the generic unknown-token line (#3481).
+            const rawTriggerType = (binding.config as { triggerType?: unknown } | undefined)?.triggerType;
+            if (Array.isArray(rawTriggerType)) {
+                this.logger.warn(
+                    `[record-change] flow '${binding.flowName}' has an ARRAY trigger event ${JSON.stringify(rawTriggerType)} — ` +
+                        `multi-event arrays are not supported, so the flow is NOT bound and will never fire. ` +
+                        `For "created or updated" use a single 'record-after-write'; for any other combination author one flow per event (#3457).`,
+                );
+            } else {
+                this.logger.warn(
+                    `[record-change] flow '${binding.flowName}' has unsupported trigger event '${binding.event ?? '(none)'}' — not bound`,
+                );
+            }
             return;
         }
 
