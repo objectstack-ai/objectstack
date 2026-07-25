@@ -2,6 +2,13 @@
 
 **Date**: 2026-06-15 · **Scope**: `packages/spec/src/ui/report.zod.ts` (ADR-0021 single-form). **Live path**: `objectui` `ReportRenderer`→`DatasetReportRenderer` (dataset-bound). Pre-9.0 object/columns-query renderers retired; old JSON limps through the lossy `specReportToPresentation` bridge.
 
+> **✅ Fully resolved — 2026-07-25** (#3463 + follow-up). Every finding below has since been actioned; the dated body is kept as the point-in-time snapshot.
+> - **`chart` — WIRED, not dead.** `DatasetReportRenderer` now plots `report.chart.xAxis`/`yAxis` over the bound dataset via `DatasetReportChart` (`DatasetReportRenderer.tsx:429-465,773-786`); #3441 corrected the `.describe()`, and the showcase gained a `chart`-bearing report (`showcase_hours_by_status_chart`) so the path is dogfooded.
+> - **`aria`, `performance` — PRUNED** from `ReportSchema` (2026-07 report-liveness close-out).
+> - **`ReportColumnSchema` / `ReportGroupingSchema` (+ objectui `SpecReportColumn*`/`SpecReportGrouping*` re-exports) — REMOVED** (#3463 → framework #3488 / objectui #2816).
+> - **`ReportChartSchema` naming drift — RESOLVED**: the legacy `ReportViewer` chart branch that read `xAxisField`/`yAxisFields` was retired (objectui #2816); the live renderer reads the spec's `xAxis`/`yAxis`; the unread `groupBy` was pruned (#3488).
+> - **Studio joined preview — FIXED**: `ReportPreview` branches on `dataset || blocks` (`isJoinedWithBlocks`).
+
 ## LIVE & well-wired (dataset shape — the canonical path)
 `name`, `label`, `description`, `type` (summary/tabular/matrix/joined), `dataset`, `rows`, `columns` (matrix-across only, matches spec), `values`, `runtimeFilter` (`?? filter`, ANDed via `mergeFilters`), `drilldown` (default-on; cells clickable), `blocks` (joined, per-block dataset/rows/columns/values/runtimeFilter). Evidence: `DatasetReportRenderer.tsx:486-575`, `:493-543`. Wired types: tabular/summary/matrix (true cross-tab + server totals + drill)/joined.
 

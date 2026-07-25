@@ -68,8 +68,29 @@ export const TaskOverviewReport = defineReport({
   ],
 });
 
+/** 5 ── Summary with an embedded chart. Exercises the live `DatasetReportChart`
+ *  path: `chart.xAxis`/`yAxis` name the bound dataset's dimension/measure and
+ *  are plotted via a second `queryDataset` call (ADR-0021). */
+export const HoursByStatusChartReport = defineReport({
+  name: 'showcase_hours_by_status_chart',
+  label: 'Hours by Status (Chart)',
+  description: 'Estimated hours by status, plotted as a bar chart.',
+  type: 'summary',
+  drilldown: true,
+  dataset: 'showcase_task_metrics',
+  rows: ['status'],
+  values: ['est_hours'],
+  chart: {
+    // Chart type from ChartConfig; xAxis = dataset dimension, yAxis = measure.
+    type: 'bar',
+    xAxis: 'status',
+    yAxis: 'est_hours',
+  },
+});
+
 export const allReports = [
   HoursByStatusReport,
   StatusPriorityMatrixReport,
   TaskOverviewReport,
+  HoursByStatusChartReport,
 ];

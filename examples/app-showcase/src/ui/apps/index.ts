@@ -95,6 +95,7 @@ export const ShowcaseApp = App.create({
         { id: 'nav_charts', type: 'dashboard', dashboardName: 'showcase_chart_gallery', label: 'Chart Gallery', icon: 'layout-dashboard' },
         { id: 'nav_report_tabular', type: 'object', objectName: 'showcase_task', viewName: 'tabular', label: 'Task List', icon: 'table' },
         { id: 'nav_report_summary', type: 'report', reportName: 'showcase_hours_by_status', label: 'Hours by Status', icon: 'sigma' },
+        { id: 'nav_report_chart', type: 'report', reportName: 'showcase_hours_by_status_chart', label: 'Hours by Status (Chart)', icon: 'bar-chart-3' },
         { id: 'nav_report_matrix', type: 'report', reportName: 'showcase_status_priority_matrix', label: 'Status × Priority', icon: 'grid-3x3' },
         { id: 'nav_report_joined', type: 'report', reportName: 'showcase_task_overview', label: 'Task Overview', icon: 'layers' },
       ],

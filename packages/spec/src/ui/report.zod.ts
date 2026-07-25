@@ -6,8 +6,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { ChartConfigSchema } from './chart.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
-import { PerformanceConfigSchema } from './responsive.zod';
+import { I18nLabelSchema } from './i18n.zod';
 
 /**
  * Report Type Enum
@@ -125,12 +124,6 @@ export const ReportSchema = lazySchema(() => z.object({
 
   /** Visualization */
   chart: ReportChartSchema.optional().describe('Embedded chart configuration'),
-
-  /** ARIA accessibility attributes */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-
-  /** Performance optimization settings */
-  performance: PerformanceConfigSchema.optional().describe('Performance optimization settings'),
 
   /**
    * Joined report blocks — only meaningful when `type: 'joined'`.

@@ -38,7 +38,9 @@ The most serious cluster — properties that imply a security boundary but enfor
 - **Role `parent`** / **SharingRuleSchema** — manager rollup & spec sharing rules disconnected from the live engine.
 
 ### 2. 🔴 ADR-0021 analytics migration debt
-Spec moved to `dataset`+`values`/`dimensions`, but: the **chart view variant** + **dashboard renderer + Studio WidgetConfigPanel** still read the *removed* legacy `object/valueField/categoryField/aggregate` shape; **report `chart`** is dead; `ReportColumn`/`ReportGrouping` are obsolete re-exports. (Same debt that invalidated the showcase dashboard/report seeds.)
+Spec moved to `dataset`+`values`/`dimensions`, but: the **chart view variant** + **dashboard renderer + Studio WidgetConfigPanel** still read the *removed* legacy `object/valueField/categoryField/aggregate` shape. (Same debt that invalidated the showcase dashboard/report seeds.)
+
+**✅ Report slice resolved (#3463 + 2026-07 close-out).** `report.chart` is **wired** (`DatasetReportRenderer` plots `chart.xAxis`/`yAxis` via `DatasetReportChart`, now dogfooded by the showcase `…_chart` report); `ReportColumn`/`ReportGrouping` (+ objectui `SpecReport*` re-exports) and the unread `chart.groupBy` + dead `aria`/`performance` are **removed**; the legacy `ReportViewer` chart fallback is **retired**. See [`2026-06-reportschema-property-liveness.md`](./2026-06-reportschema-property-liveness.md). The **chart-view / dashboard / WidgetConfigPanel** legacy-shape readers above remain open.
 
 ### 3. 🟠 Naming drift → silent no-ops (spec key ≠ consumed key)
 field `maxLength`/`minLength`/`referenceFilters`/`maxRating`; page `type`→`pageType` & `label`→`title` & `visibility`; dashboard `title` vs `label`; app `accentColor`/`badgeVariant`/`separator` (renderer reads, **not in spec**); action `disabled`→`enabled`; flow `http` vs `http_request`; skill `requiredPermissions` vs `permissions`; agent `knowledge.{topics→sources}`; webhook `object`→`object_name`, `isActive`→`active`.

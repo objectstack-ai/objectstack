@@ -60,8 +60,6 @@ const result = JoinedReportBlock.parse(data);
 | **runtimeFilter** | `any` | optional | Render-time scope filter |
 | **drilldown** | `boolean` | ✅ | Click-through to underlying records |
 | **chart** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; title?: string; subtitle?: string; description?: string; … }` | optional | Embedded chart configuration |
-| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
-| **performance** | `{ lazyLoad?: boolean; virtualScroll?: object; cacheStrategy?: Enum<'none' \| 'cache-first' \| 'network-first' \| 'stale-while-revalidate'>; prefetch?: boolean; … }` | optional | Performance optimization settings |
 | **blocks** | `{ name: string; label?: string; description?: string; type: Enum<'tabular' \| 'summary' \| 'matrix'>; … }[]` | optional | Sub-reports for type=joined |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this report. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
