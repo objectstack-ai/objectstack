@@ -10,12 +10,19 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Studio UI without code changes. The canonical Zod schema for the
  * `definition_json` envelope lives at `@objectstack/spec/automation/webhook`.
  *
- * One row per `name`. The automation runtime
- * (`@objectstack/service-automation`, built-in `http_request` node) loads
- * active rows on boot + on `sys_webhook:changed` events, registers
- * `afterInsert` / `afterUpdate` / `afterDelete` listeners for the
- * targeted object, and dispatches outbound HTTP calls when matching
- * record events fire.
+ * ## Two authoring doors, one row
+ * Rows land here two ways, distinguished by the `managed_by` provenance column:
+ *   - **admin** — created/edited directly through this object's CRUD UI.
+ *   - **package** — declared in code (`defineStack({ webhooks })` /
+ *     `defineWebhook()`) and materialized on boot by
+ *     `bootstrapDeclaredWebhooks` (#3461). Re-seeded every boot, but an admin
+ *     edit stamps `customized: true` and freezes the row (seed-not-clobber,
+ *     mirrors `sys_sharing_rule` #2909).
+ *
+ * One row per `name`. This plugin's {@link AutoEnqueuer} loads active rows on
+ * boot + on `sys_webhook:changed` events, and turns matching `data.record.*`
+ * events into deliveries on the shared `service-messaging` HTTP outbox
+ * (ADR-0018 M3 — `sys_http_delivery`, drained by the messaging dispatcher).
  *
  * Ownership (ADR-0029 K2.a): this object is **owned by
  * `@objectstack/plugin-webhooks`** — the plugin that consumes these rows —
@@ -43,7 +50,7 @@ export const SysWebhook = ObjectSchema.create({
   // create/edit/delete so admins can at least toggle `active` and edit
   // simple URL/method fields without round-tripping through code.
   userActions: { create: true, edit: true, delete: true, import: false },
-  description: 'Outbound HTTP webhook subscription. Authored via defineWebhook() in code or the Studio editor; executed by the HTTP connector plugin.',
+  description: 'Outbound HTTP webhook subscription. Declared in code via defineStack({ webhooks }) / defineWebhook() (materialized into rows on boot) or authored directly in the Studio editor; dispatched by the webhook auto-enqueuer onto the shared HTTP outbox.',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{label}',
@@ -172,6 +179,38 @@ export const SysWebhook = ObjectSchema.create({
       required: true,
       description: 'Serialised Webhook JSON (see @objectstack/spec/automation/webhook) — full headers/auth/retry/payload config',
       group: 'Definition',
+    }),
+
+    // ── Provenance (#3461 — record-authoritative seed-not-clobber) ──
+    // Mirrors sys_sharing_rule (#2909). Both columns are `readonly`: the
+    // engine strips them from non-system payloads (forge/clear-proof), while
+    // bootstrapDeclaredWebhooks and the provenance stamp hook write with
+    // isSystem. Deliberately NOT a write gate: webhooks are a first-class admin
+    // authoring/tuning surface — admins may edit or deactivate a package row;
+    // the seeder simply stops overwriting it once `customized` is stamped.
+    managed_by: Field.select(
+      ['platform', 'package', 'admin'],
+      {
+        label: 'Managed By',
+        required: false,
+        readonly: true,
+        defaultValue: 'admin',
+        description:
+          'Record provenance: platform = framework built-in / package = app/package-declared ' +
+          '(boot-seeded from defineStack webhooks) / admin = created in Setup.',
+        group: 'System',
+      },
+    ),
+
+    customized: Field.boolean({
+      label: 'Customized',
+      required: false,
+      readonly: true,
+      defaultValue: false,
+      description:
+        'Set when an admin edits a package-declared webhook; boot seeding will no longer ' +
+        'overwrite the row (a deactivated noisy webhook survives redeploys). Meaningless on admin rows.',
+      group: 'System',
     }),
 
     created_at: Field.datetime({

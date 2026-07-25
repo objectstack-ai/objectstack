@@ -14,7 +14,9 @@
 
 import { defineStack } from '@objectstack/spec';
 import { SysWebhook } from '../src/sys-webhook.object.js';
-import { SysWebhookDelivery } from '../src/sys-webhook-delivery.object.js';
+// NOTE: sys_webhook_delivery moved to @objectstack/service-messaging
+// (sys_http_delivery, ADR-0018 M3) — this plugin no longer owns a delivery
+// object, so it is not extracted here.
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
@@ -22,7 +24,7 @@ import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
 
 export default defineStack({
   name: 'plugin-webhooks-i18n-extract',
-  objects: [SysWebhook, SysWebhookDelivery] as any,
+  objects: [SysWebhook] as any,
   translations: [
     { en: { objects: enObjects } },
     { 'zh-CN': { objects: zhCNObjects } },

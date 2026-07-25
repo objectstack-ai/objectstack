@@ -1,19 +1,29 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { defineWebhook } from '@objectstack/spec/automation';
+
 /**
  * Outbound webhook — fans out task changes to an external endpoint with a
- * retry policy. Validated as part of `defineStack({ webhooks })`.
+ * retry policy. Authored via `defineStack({ webhooks })`; on boot the webhooks
+ * plugin materializes this into a `sys_webhook` row (#3461) that the
+ * auto-enqueuer dispatches off.
+ *
+ * Shipped INACTIVE on purpose: `hooks.example` is a placeholder endpoint, so an
+ * active subscription would emit a failed HTTP delivery on every task change.
+ * The demo flow is to open Setup → Integrations → Webhooks and flip this row to
+ * Active (pointing it at a real endpoint) — that admin edit is remembered
+ * (`customized: true`) and survives redeploys.
  */
-export const TaskChangedWebhook = {
+export const TaskChangedWebhook = defineWebhook({
   name: 'showcase_task_changed',
   label: 'Task Changed → External',
   object: 'showcase_task',
-  triggers: ['create', 'update', 'delete'] as ('create' | 'update' | 'delete')[],
+  triggers: ['create', 'update', 'delete'],
   url: 'https://hooks.example/showcase/task',
-  method: 'POST' as const,
-  retryPolicy: { maxRetries: 3, backoffStrategy: 'exponential' as const, initialDelayMs: 1000, maxDelayMs: 30000 },
-  isActive: true,
-  description: 'Sends task lifecycle events to an external system.',
-};
+  method: 'POST',
+  retryPolicy: { maxRetries: 3, backoffStrategy: 'exponential', initialDelayMs: 1000, maxDelayMs: 30000 },
+  isActive: false,
+  description: 'Sends task lifecycle events to an external system. Activate in Setup and point at a real endpoint.',
+});
 
 export const allWebhooks = [TaskChangedWebhook];

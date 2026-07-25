@@ -5,6 +5,8 @@ import type { IDataEngine, IRealtimeService } from '@objectstack/spec/contracts'
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
 import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
 import { SysWebhook } from './sys-webhook.object.js';
+import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
+import { bindWebhookProvenanceStamp, unbindWebhookProvenanceStamp } from './webhook-provenance.js';
 
 /**
  * Structural view of `@objectstack/service-messaging`'s HTTP-outbox surface
@@ -62,6 +64,8 @@ export class WebhookOutboxPlugin implements Plugin {
     dependencies = ['com.objectstack.service.messaging'];
 
     private autoEnqueuer: AutoEnqueuer | undefined;
+    /** Engine the provenance hook was bound to, so `dispose()` can unbind it. */
+    private boundEngine: any;
 
     constructor(private readonly options: WebhookOutboxPluginOptions = {}) {}
 
@@ -117,6 +121,12 @@ export class WebhookOutboxPlugin implements Plugin {
 
         if (typeof (ctx as any).hook === 'function') {
             (ctx as any).hook('kernel:ready', async () => {
+                // Materialize declared webhooks FIRST — this only needs the data
+                // engine, so it must not be gated behind the auto-enqueue
+                // dispatch prerequisites (realtime + messaging). Otherwise a
+                // deployment without realtime would silently fail to materialize
+                // declared webhooks — the very no-op this bridge closes (#3461).
+                await this.bootDeclaredWebhooks(ctx);
                 await this.bootAutoEnqueue(ctx, autoEnqueueOpt);
                 this.registerAdminRoutes(ctx);
             });
@@ -129,11 +139,47 @@ export class WebhookOutboxPlugin implements Plugin {
 
     async dispose(): Promise<void> {
         await this.autoEnqueuer?.stop();
+        if (this.boundEngine) {
+            try { unbindWebhookProvenanceStamp(this.boundEngine); } catch { /* best effort */ }
+            this.boundEngine = undefined;
+        }
     }
 
     private getMessaging(ctx: PluginContext): MessagingHttpSurface | undefined {
         const svc = this.tryGetService<MessagingHttpSurface>(ctx, ['messaging']);
         return svc && typeof svc.enqueueHttp === 'function' ? svc : undefined;
+    }
+
+    /**
+     * [#3461] Bridge the declarative authoring surface to the dispatcher:
+     * materialize stack/connector-declared `webhook` metadata into `sys_webhook`
+     * rows so the auto-enqueuer (and the Studio UI) can see them.
+     *
+     * Gated on the DATA ENGINE alone — deliberately independent of the
+     * auto-enqueue dispatch prerequisites (realtime + messaging). Materializing
+     * rows is a pure write; a deployment that mounts the webhook plugin without
+     * realtime must still get its declared webhooks into the table (and the
+     * Setup UI), even if nothing dispatches them yet. Runs before
+     * {@link bootAutoEnqueue} so the enqueuer's first cache refresh sees the rows.
+     */
+    private async bootDeclaredWebhooks(ctx: PluginContext): Promise<void> {
+        const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
+        if (!engine) {
+            ctx.logger.warn?.('[webhook] declared-webhook bootstrap skipped — no data engine available');
+            return;
+        }
+        // Bind the provenance stamp so an admin edit freezes a seeded row.
+        this.boundEngine = engine;
+        bindWebhookProvenanceStamp(engine as any, ctx.logger as any);
+        let metadataService: any;
+        try { metadataService = ctx.getService('metadata'); } catch { /* optional */ }
+        try {
+            await bootstrapDeclaredWebhooks(engine, metadataService, ctx.logger as any);
+        } catch (err: any) {
+            ctx.logger.warn?.('[webhook] declared-webhook bootstrap failed (dispatcher still serves admin rows)', {
+                error: err?.message ?? String(err),
+            });
+        }
     }
 
     private async bootAutoEnqueue(

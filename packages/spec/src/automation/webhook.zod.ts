@@ -33,13 +33,24 @@ export const WebhookTriggerType = z.enum([
 
 /**
  * CANONICAL WEBHOOK DEFINITION
- * 
+ *
  * This is the single source of truth for webhook configuration across ObjectStack.
  * All other protocols (workflow, connector, etc.) should import and reference this schema.
- * 
+ *
  * Webhook Protocol - Outbound HTTP Integration
  * Push data to external URLs when events occur in the system.
- * 
+ *
+ * **RUNTIME MATERIALIZATION (#3461):**
+ * A webhook authored on a stack (`defineStack({ webhooks })`) is not dispatched
+ * directly from this envelope. On boot, `@objectstack/plugin-webhooks`
+ * materializes each declared webhook into a `sys_webhook` data row (mapping
+ * `object → object_name`, `isActive → active`, and stashing the full envelope
+ * in `definition_json`); the auto-enqueuer dispatches off those rows. Declared
+ * webhooks re-seed every boot as `managed_by: 'package'`, but a row an admin has
+ * edited in Setup (`customized: true`) is never clobbered — a deactivated noisy
+ * webhook survives redeploys. Authoring `webhooks:` is therefore live, not a
+ * no-op. (Connector `webhooks` remain NOT-yet-enforced — see #3197.)
+ *
  * **NAMING CONVENTION:**
  * Webhook names are machine identifiers and must be lowercase snake_case.
  * 

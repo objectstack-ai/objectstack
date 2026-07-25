@@ -101,7 +101,7 @@ export default defineStack({
   //                   blueprint flow to auto-create a writable "app package" home
   //                   (ADR-0033 zero-package app building) and the Studio package
   //                   selector to list DB packages.
-  requires: ['ui', 'automation', 'approvals', 'messaging', 'triggers', 'job', 'marketplace'],
+  requires: ['ui', 'automation', 'approvals', 'messaging', 'triggers', 'job', 'marketplace', 'webhooks', 'realtime'],
 
   // Concrete connectors for the `connector_action` node. The baseline engine
   // ships the dispatch node + an empty registry; these plugins populate it.
