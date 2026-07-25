@@ -319,6 +319,8 @@ export const ImportRequestSchema = lazySchema(() => z.object({
     .describe('Fields that identify an existing record (required for update/upsert)'),
   runAutomations: z.boolean().default(false)
     .describe('Fire triggers/hooks for each imported row (off by default for bulk)'),
+  treatAsHistorical: z.boolean().default(false)
+    .describe('Import as established historical facts: skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479). Off by default so a normal import still walks the FSM.'),
   trimWhitespace: z.boolean().default(true)
     .describe('Trim leading/trailing whitespace from string cells'),
   nullValues: z.array(z.string()).optional()

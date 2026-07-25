@@ -907,6 +907,14 @@ describe('ObjectQL Engine', () => {
             expect(mockDriver.create).toHaveBeenCalledTimes(1);
         });
 
+        it('admits the same INSERT when the context carries skipStateMachine (#3479 historical import)', async () => {
+            // The general flag — set by the REST import runner for a "historical"
+            // import — takes the same engine path as seedReplay.
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue(approvalObject as any);
+            await engine.insert('seed_approval', { status: 'approved' }, { context: { skipStateMachine: true } as any });
+            expect(mockDriver.create).toHaveBeenCalledTimes(1);
+        });
+
         it('still enforces non-state_machine rules under seedReplay (scoped exemption)', async () => {
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 ...approvalObject,

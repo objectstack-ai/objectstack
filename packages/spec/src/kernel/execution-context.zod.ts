@@ -219,6 +219,25 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   seedReplay: z.boolean().optional(),
 
   /**
+   * Skip the object's `state_machine` validation rule for this write — both the
+   * `initialStates` entry check on insert and the `transitions` check on update
+   * (#3479). Same engine behavior as {@link seedReplay}, but a GENERAL,
+   * server-set flag for any CURATED write of established facts that is not seed
+   * replay: notably a data import flagged "historical" (migrating a batch of
+   * already-`closed` tickets or `closed_won` deals), where the FSM entry point
+   * would otherwise reject every mid-lifecycle row.
+   *
+   * `seedReplay` is the seed-specific specialization (it also implies
+   * {@link skipTriggers} semantics at its callers); this is the plain
+   * skip-the-state-machine intent. The engine treats either flag identically.
+   * Server-constructed only, never client-supplied — the REST import runner sets
+   * it from the request's explicit `treatAsHistorical` option, gated so a normal
+   * import still walks the FSM. SCOPE is identical to `seedReplay`: only the
+   * `state_machine` rule is skipped; every other validation still runs.
+   */
+  skipStateMachine: z.boolean().optional(),
+
+  /**
    * OAuth 2.1 scopes granted to the access token that authenticated this
    * request, when the principal was resolved from an OAuth bearer token
    * (the MCP surface's human-client track, #2698). UNDEFINED for every

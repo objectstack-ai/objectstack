@@ -82,6 +82,7 @@ const result = CreateExportJobRequest.parse(data);
 | **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | insert / update / upsert semantics |
 | **matchFields** | `string[]` | optional | Fields that identify an existing record (required for update/upsert) |
 | **runAutomations** | `boolean` | ✅ | Fire triggers/hooks for each imported row (off by default for bulk) |
+| **treatAsHistorical** | `boolean` | ✅ | Import as established historical facts: skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479). Off by default so a normal import still walks the FSM. |
 | **trimWhitespace** | `boolean` | ✅ | Trim leading/trailing whitespace from string cells |
 | **nullValues** | `string[]` | optional | Strings treated as null/blank (besides empty string) |
 | **createMissingOptions** | `boolean` | ✅ | Keep unmatched select values instead of failing the row |
@@ -370,6 +371,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | insert / update / upsert semantics |
 | **matchFields** | `string[]` | optional | Fields that identify an existing record (required for update/upsert) |
 | **runAutomations** | `boolean` | ✅ | Fire triggers/hooks for each imported row (off by default for bulk) |
+| **treatAsHistorical** | `boolean` | ✅ | Import as established historical facts: skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479). Off by default so a normal import still walks the FSM. |
 | **trimWhitespace** | `boolean` | ✅ | Trim leading/trailing whitespace from string cells |
 | **nullValues** | `string[]` | optional | Strings treated as null/blank (besides empty string) |
 | **createMissingOptions** | `boolean` | ✅ | Keep unmatched select values instead of failing the row |

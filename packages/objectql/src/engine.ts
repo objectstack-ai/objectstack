@@ -220,6 +220,18 @@ function mergeReadContext(
 }
 
 /**
+ * True when this write is exempt from the `state_machine` validation rule —
+ * both the insert `initialStates` entry check and the update `transitions`
+ * check are skipped for it. Either the seed-specific `seedReplay` flag (#3433)
+ * or the general `skipStateMachine` flag (#3479, set by the REST import runner
+ * for a "historical" import) turns it off. Both are server-set, never
+ * client-supplied.
+ */
+function shouldSkipStateMachine(ctx?: ExecutionContext): boolean {
+  return ctx?.seedReplay === true || ctx?.skipStateMachine === true;
+}
+
+/**
  * Engine Middleware (Onion model)
  */
 export type EngineMiddleware = (
@@ -2569,7 +2581,7 @@ export class ObjectQL implements IDataEngine {
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
             validateRecord(schemaForValidation, rows[i], 'insert');
-            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: opCtx.context?.seedReplay === true });
+            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context) });
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
@@ -2859,7 +2871,7 @@ export class ObjectQL implements IDataEngine {
                    hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedKeys, this.logger) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
-               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: opCtx.context?.seedReplay === true });
+               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context) });
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
@@ -2927,7 +2939,7 @@ export class ObjectQL implements IDataEngine {
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: opCtx.context?.seedReplay === true });
+                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context) });
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -2936,7 +2948,7 @@ export class ObjectQL implements IDataEngine {
                        }
                    }
                } else {
-                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: opCtx.context?.seedReplay === true });
+                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context) });
                }
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else {

@@ -3831,6 +3831,7 @@ export class RestServer {
                         write_mode: prepared.writeMode,
                         dry_run: prepared.dryRun,
                         run_automations: prepared.runAutomations,
+                        treat_as_historical: prepared.treatAsHistorical,
                         created_at: createdAt,
                         ...(createdBy ? { created_by: createdBy } : {}),
                     };
@@ -4003,7 +4004,11 @@ export class RestServer {
                     const objectName = String(row.object_name ?? '');
                     const log = parseUndoLog(row.undo_log)!;
                     // Undo automations too: reversing writes shouldn't re-fire triggers.
-                    const writeCtx = { ...(context ?? {}), skipAutomations: true };
+                    // Skip the state machine as well (#3479): restoring a prior snapshot
+                    // re-writes the row's earlier state, which need not be a legal
+                    // transition from where it is now — an undo reinstates an established
+                    // fact, it does not walk the FSM.
+                    const writeCtx = { ...(context ?? {}), skipAutomations: true, skipStateMachine: true };
                     let deleted = 0, restored = 0, failed = 0;
 
                     // Delete created records first (they didn't exist before).

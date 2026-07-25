@@ -173,6 +173,9 @@ export interface PreparedImport {
     matchFields: string[];
     dryRun: boolean;
     runAutomations: boolean;
+    /** #3479 — import established historical facts: skip the state_machine rule
+     *  so mid-lifecycle rows are not rejected by `initialStates`. */
+    treatAsHistorical: boolean;
     trimWhitespace: boolean;
     nullValues?: string[];
     createMissingOptions: boolean;
@@ -256,6 +259,11 @@ export async function prepareImportRequest(
     // flag until #2922), so opt-out must be explicit — matches platform
     // convention (Salesforce runs triggers on import by default).
     const runAutomations = body?.runAutomations !== false;
+    // Default OFF (opt-in): a normal import must still walk the state machine —
+    // only an explicit "historical" import skips it (#3479), so mid-lifecycle
+    // rows aren't rejected by `initialStates`. Unlike `runAutomations`, the safe
+    // default is the strict one.
+    const treatAsHistorical = body?.treatAsHistorical === true;
     const trimWhitespace = body?.trimWhitespace !== false;
     const nullValues: string[] | undefined = Array.isArray(body?.nullValues)
         ? body.nullValues.filter((v: any) => typeof v === 'string')
@@ -392,6 +400,7 @@ export async function prepareImportRequest(
         ok: true,
         prepared: {
             rows, metaMap, writeMode, matchFields, dryRun, runAutomations,
+            treatAsHistorical,
             trimWhitespace, nullValues, createMissingOptions, skipBlankMatchKey,
         },
     };

@@ -64,6 +64,7 @@ export const SysImportJob = ObjectSchema.create({
     ),
     dry_run: Field.boolean({ label: 'Dry Run', required: false, defaultValue: false, group: 'Request' }),
     run_automations: Field.boolean({ label: 'Run Automations', required: false, defaultValue: false, group: 'Request' }),
+    treat_as_historical: Field.boolean({ label: 'Treat As Historical', required: false, defaultValue: false, group: 'Request' }),
 
     // ── outcome ──
     error: Field.textarea({ label: 'Fatal Error', required: false, group: 'Outcome' }),
