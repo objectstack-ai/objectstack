@@ -187,6 +187,65 @@ describe('ApprovalService (node era)', () => {
     expect(engine._tables['opportunity'][0].approval_status).toBe('pending');
   });
 
+  // ── approver expansion: field (live re-read + fan-out, #3447) ────
+  //
+  // A `field` approver names WHO decides from a record field. It must bind to
+  // the record's LIVE value at node entry — an earlier step (or the approver of
+  // an earlier step) may have written it after submit — not the trigger snapshot
+  // the run froze into `$record`. A multi-select user field fans out into one
+  // slot per user.
+
+  const fieldInput = (extra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    config: {
+      approvers: [{ type: 'field' as const, value: 'approvers_dynamic' }],
+      behavior: 'unanimous' as const,
+      lockRecord: true,
+    },
+    ...extra,
+  });
+
+  it('field approver: resolves against the LIVE record, not the trigger snapshot (#3447)', async () => {
+    // The minimal repro: submitted with the routing field empty; a prior step
+    // wrote the co-reviewers mid-flow. Resolution must see them.
+    engine._tables['opportunity'] = [{ id: 'opp1', amount: 100, approvers_dynamic: ['u2', 'u3'] }];
+    const req = await svc.openNodeRequest(
+      fieldInput({ record: { id: 'opp1', amount: 100, approvers_dynamic: [] } }), CTX,
+    );
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3']);
+  });
+
+  it('field approver: the live value WINS over a stale snapshot value (#3447)', async () => {
+    // Snapshot named u1; the record now names u2. u2 decides.
+    engine._tables['opportunity'] = [{ id: 'opp1', approvers_dynamic: ['u2'] }];
+    const req = await svc.openNodeRequest(
+      fieldInput({ record: { id: 'opp1', approvers_dynamic: ['u1'] } }), CTX,
+    );
+    expect(req.pending_approvers).toEqual(['u2']);
+  });
+
+  it('field approver: fans a multi-select user field into one slot per user (#3447)', async () => {
+    engine._tables['opportunity'] = [{ id: 'opp1', approvers_dynamic: ['u2', 'u3', 'u4'] }];
+    const req = await svc.openNodeRequest(fieldInput({ record: { id: 'opp1' } }), CTX);
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3', 'u4']);
+  });
+
+  it('field approver: fans a legacy CSV string field into multiple slots (#3447)', async () => {
+    engine._tables['opportunity'] = [{ id: 'opp1', approvers_dynamic: 'u2,u3' }];
+    const req = await svc.openNodeRequest(fieldInput({ record: { id: 'opp1' } }), CTX);
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3']);
+  });
+
+  it('field approver: falls back to the trigger snapshot when the record is gone (#3447)', async () => {
+    // No `opportunity` row — hard-deleted between submit and node entry. The
+    // snapshot still carries a value, so the request opens against it (warn but
+    // proceed) rather than wedging the flow.
+    const req = await svc.openNodeRequest(
+      fieldInput({ record: { id: 'opp1', approvers_dynamic: ['u7'] } }), CTX,
+    );
+    expect(req.pending_approvers).toEqual(['u7']);
+  });
+
   // ── approver expansion: position (ADR-0090 D3) ──────────────────
 
   const positionInput = (extra: Record<string, any> = {}) => ({
@@ -1292,6 +1351,20 @@ describe('ApprovalService — out-of-office delegation (#1322)', () => {
     };
     const req = await svc.openNodeRequest(input as any, CTX);
     expect(req.pending_approvers).toEqual(['bob']);
+  });
+
+  it('type:field (multi-select) — reroutes each out-of-office user independently (#3447)', async () => {
+    // Pre-#3447 the array was stringified to one bogus id ('alice,dave'), which
+    // matched no delegation — OOO silently no-op'd. Fanned out, alice → bob
+    // applies and dave is left untouched.
+    seedDelegation([{ delegator_id: 'alice', delegate_id: 'bob' }]);
+    const input = {
+      ...openInput([]),
+      record: { id: 'opp1', reviewers: ['alice', 'dave'] },
+      config: { approvers: [{ type: 'field', value: 'reviewers' }], behavior: 'unanimous', lockRecord: true },
+    };
+    const req = await svc.openNodeRequest(input as any, CTX);
+    expect(req.pending_approvers.sort()).toEqual(['bob', 'dave']);
   });
 
   it('type:manager — reroutes when the resolved manager is out of office', async () => {

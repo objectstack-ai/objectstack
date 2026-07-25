@@ -443,7 +443,15 @@ export class ApprovalService implements IApprovalService {
       return this.applyOooDelegation(String(a.value), now, organizationId, substitutions);
     }
     if (type === 'field' && record) {
-      return this.applyOooDelegation(String((record as any)[a.value] ?? ''), now, organizationId, substitutions);
+      // #3447: a record field can name MANY approvers — a multi-select user
+      // field arrives as an array (or a legacy CSV string). Fan each out into
+      // its own slot and OOO-substitute per person; collapsing to `String(...)`
+      // (→ `'u1,u2'`) would mint one bogus approver id and skip every delegate.
+      const out: string[] = [];
+      for (const id of csvSplit((record as any)[a.value])) {
+        out.push(...await this.applyOooDelegation(id, now, organizationId, substitutions));
+      }
+      return out;
     }
     try {
       if (type === 'team') {
@@ -662,6 +670,45 @@ export class ApprovalService implements IApprovalService {
     }
   }
 
+  /**
+   * Re-read a business record's CURRENT state by id so approver resolution binds
+   * to live data at node entry, not the trigger snapshot the flow froze into
+   * `$record` at submit time (#3447). A `field` / `manager` approver names *who*
+   * decides, and an earlier node — or the approver of an earlier step — may have
+   * written that routing field after submit (e.g. a lead reviewer picking which
+   * departments co-review). Graph approvers (team / position / …) already query
+   * live; this brings the in-record types into line.
+   *
+   * Read under system identity: approver routing is a platform concern and the
+   * record is the flow's own subject, so the submitter's RLS/FLS must not narrow
+   * it. Degrades to `fallback` (the snapshot) when the record can't be re-read —
+   * hard-deleted between submit and node entry, or an object whose backend can't
+   * serve a point read — warning rather than throwing so a transient miss can't
+   * wedge an approval. That "warn but proceed" stance matches the
+   * no-concrete-approver guard (#3424) and the "record is gone" enrichment path
+   * that already falls back to the payload snapshot.
+   */
+  private async loadLiveRecord(object: string, recordId: string, fallback?: any): Promise<any> {
+    try {
+      const rows = await this.engine.find(object, {
+        where: { id: recordId }, limit: 1, context: SYSTEM_CTX,
+      } as any);
+      const live = Array.isArray(rows) ? rows[0] : rows;
+      if (live) return live;
+      this.logger?.warn?.(
+        `[approvals] live record ${object}/${recordId} not found at node entry — `
+        + 'resolving approvers against the trigger snapshot (#3447 fallback).',
+        { object, recordId },
+      );
+    } catch (err: any) {
+      this.logger?.warn?.(
+        `[approvals] live record re-read failed for ${object}/${recordId}: ${err?.message ?? err} — `
+        + 'resolving approvers against the trigger snapshot (#3447 fallback).',
+      );
+    }
+    return fallback ?? {};
+  }
+
   // ── ADR-0019: Approval-as-flow-node ──────────────────────────
   //
   // A flow's Approval node opens a request via `openNodeRequest` (carrying its
@@ -715,8 +762,12 @@ export class ApprovalService implements IApprovalService {
     // per_group finalization is decided against the slate resolved at OPEN time
     // (OOO-substituted), not re-resolved live at each decision.
     const groups: Record<string, string[]> = {};
+    // #3447: resolve approvers against the record's LIVE state at node entry, not
+    // the trigger snapshot carried in `input.record`. This is the whole fix — an
+    // earlier step may have written the field this node routes on.
+    const liveRecord = await this.loadLiveRecord(input.object, input.recordId, input.record);
     const approvers = await this.expandApprovers(
-      { approvers: input.config.approvers }, input.record, ctxOrg, { now: nowDate.getTime(), substitutions, groups },
+      { approvers: input.config.approvers }, liveRecord, ctxOrg, { now: nowDate.getTime(), substitutions, groups },
     );
 
     // #3424: an approval routed to a target with no holders (e.g. an unstaffed
