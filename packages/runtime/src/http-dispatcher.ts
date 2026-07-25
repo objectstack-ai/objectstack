@@ -14,6 +14,7 @@ import { validateActionParams, type ResolvedActionParam } from '@objectstack/spe
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { setPackageDisabled } from './package-state-store.js';
 import { checkApiExposure } from './api-exposure.js';
+import { DomainHandlerRegistry, type DomainRoute } from './domain-handler-registry.js';
 
 /** Minimal local interface — full EnvironmentScopeManager was removed in Phase R. */
 interface EnvironmentScopeManager {
@@ -169,6 +170,11 @@ export class HttpDispatcher {
     private kernelResolver?: KernelResolver;
     private scopeManager?: EnvironmentScopeManager;
     /**
+     * ADR-0076 D11 step ③ decomposition seam — consulted by `dispatch()`
+     * before the legacy if-chain. See {@link DomainHandlerRegistry}.
+     */
+    private readonly domainRegistry = new DomainHandlerRegistry();
+    /**
      * When `true`, scoped data-plane routes enforce a
      * `sys_environment_member` lookup and return 403 for non-members.
      * Defaults to `true` when a environmentId is resolvable — legacy callers
@@ -217,6 +223,75 @@ export class HttpDispatcher {
         // Single-project default is resolved lazily on first request — the
         // plugin that registers it (`createSingleEnvironmentPlugin`) may run
         // its `init()` after the HttpDispatcher is constructed.
+        this.registerBuiltinDomains();
+    }
+
+    /**
+     * ADR-0076 D11 step ③ — seed the domain registry with the first domains
+     * lifted out of the `dispatch()` if-chain. Handler BODIES stay as
+     * dispatcher methods in this PR (registry first, code moves later,
+     * ownership last — see {@link DomainHandlerRegistry}); each entry
+     * faithfully reproduces its legacy branch's matching + argument
+     * convention, so behavior is unchanged.
+     */
+    private registerBuiltinDomains(): void {
+        // GET /health — liveness probe (was branch "0b").
+        this.domainRegistry.register({
+            prefix: '/health', match: 'exact', methods: ['GET'],
+            handler: async () => ({
+                handled: true,
+                response: this.success({
+                    status: 'ok',
+                    timestamp: new Date().toISOString(),
+                    version: '1.0.0',
+                    uptime: typeof process !== 'undefined' ? process.uptime() : undefined,
+                }),
+            }),
+        });
+        // GET /ready — k8s / load-balancer readiness probe (was branch "0b2").
+        // 200 only when the kernel is fully running; 503 while booting
+        // (idle/initializing) or shutting down (stopping/stopped) so a load
+        // balancer stops routing to this replica BEFORE in-flight requests
+        // are drained and the server closes (graceful rolling restart).
+        this.domainRegistry.register({
+            prefix: '/ready', match: 'exact', methods: ['GET'],
+            handler: async () => {
+                const state: string = typeof (this.kernel as any)?.getState === 'function'
+                    ? (this.kernel as any).getState()
+                    : 'running';
+                return state === 'running'
+                    ? { handled: true, response: this.success({ status: 'ready', state }) }
+                    : { handled: true, response: this.error('Service not ready', 503, { state }) };
+            },
+        });
+        // /analytics — bridge to the `analytics` service. NOTE: the fallback
+        // vs service-replace semantics live in the SERVICE layer
+        // (ObjectQLPlugin fallback + service-analytics `replaceService`, see
+        // ADR-0076 D10/D12) — this route entry must keep working whether the
+        // real engine or the degraded fallback is registered, which is why
+        // its handler registration stays dispatcher-owned for now.
+        this.domainRegistry.register({
+            prefix: '/analytics',
+            handler: (req, context) =>
+                this.handleAnalytics(req.path.substring(10), req.method, req.body, context),
+        });
+        // /i18n — translations / locales / labels, served by the `i18n`
+        // service (501 inside the handler when the service is absent).
+        this.domainRegistry.register({
+            prefix: '/i18n',
+            handler: (req, context) =>
+                this.handleI18n(req.path.substring(5), req.method, req.query, context),
+        });
+    }
+
+    /**
+     * Public registration seam for follow-up D11 domain PRs: an owning
+     * service package registers its normalized handler here instead of the
+     * dispatcher hard-coding another if-branch. Entries are consulted before
+     * the legacy if-chain, first match wins.
+     */
+    registerDomainHandler(route: DomainRoute): void {
+        this.domainRegistry.register(route);
     }
 
     private resolveDefaultProject(): { environmentId: string; orgId?: string } | undefined {
@@ -4525,43 +4600,27 @@ export class HttpDispatcher {
             cleanPath = scopedMatch[1] ?? '';
         }
 
+        try {
+        // ── Domain registry (ADR-0076 D11 step ③) ──
+        // Domains lifted out of the if-chain below resolve here first;
+        // unmigrated domains fall through to the legacy branches. The four
+        // seeded prefixes (/health /ready /analytics /i18n) are disjoint from
+        // every remaining branch prefix, so consulting the registry first is
+        // order-equivalent to their original chain positions.
+        const domainRoute = this.domainRegistry.resolve(cleanPath, method);
+        if (domainRoute) {
+            return domainRoute.handler({ path: cleanPath, method, body, query }, context);
+        }
+
         // 0. Discovery Endpoint (GET /discovery or GET /)
         // Standard route: /discovery (protocol-compliant)
         // Legacy route: / (empty path, for backward compatibility — MSW strips base URL)
-        try {
         if ((cleanPath === '/discovery' || cleanPath === '') && method === 'GET') {
              const info = await this.getDiscoveryInfo(prefix ?? '');
-             return { 
-                 handled: true, 
-                 response: this.success(info) 
+             return {
+                 handled: true,
+                 response: this.success(info)
              };
-        }
-
-        // 0b. Health Endpoint (GET /health)
-        if (cleanPath === '/health' && method === 'GET') {
-            return {
-                handled: true,
-                response: this.success({
-                    status: 'ok',
-                    timestamp: new Date().toISOString(),
-                    version: '1.0.0',
-                    uptime: typeof process !== 'undefined' ? process.uptime() : undefined,
-                }),
-            };
-        }
-
-        // 0b2. Readiness Endpoint (GET /ready) — k8s / load-balancer readiness probe.
-        // 200 only when the kernel is fully running; 503 while booting
-        // (idle/initializing) or shutting down (stopping/stopped) so a load
-        // balancer stops routing to this replica BEFORE in-flight requests are
-        // drained and the server closes (graceful rolling restart).
-        if (cleanPath === '/ready' && method === 'GET') {
-            const state: string = typeof (this.kernel as any)?.getState === 'function'
-                ? (this.kernel as any).getState()
-                : 'running';
-            return state === 'running'
-                ? { handled: true, response: this.success({ status: 'ready', state }) }
-                : { handled: true, response: this.error('Service not ready', 503, { state }) };
         }
 
         // 0c. Plan-A diagnostics removed; the seed-replay and oauth2/callback
@@ -4616,10 +4675,8 @@ export class HttpDispatcher {
         if (cleanPath.startsWith('/actions')) {
              return this.handleActions(cleanPath.substring(8), method, body, context);
         }
-        
-        if (cleanPath.startsWith('/analytics')) {
-             return this.handleAnalytics(cleanPath.substring(10), method, body, context);
-        }
+
+        // /analytics moved to the domain registry (D11 step ③).
 
         // In-app notifications (ADR-0030) — inbox list + receipt mark-read,
         // backed by the messaging service registered under the `notification` slot.
@@ -4637,9 +4694,7 @@ export class HttpDispatcher {
              return this.handlePackages(cleanPath.substring(9), method, body, query, context);
         }
 
-        if (cleanPath.startsWith('/i18n')) {
-             return this.handleI18n(cleanPath.substring(5), method, query, context);
-        }
+        // /i18n moved to the domain registry (D11 step ③).
 
         // AI Service — delegate to the registered AI route handlers
         if (cleanPath.startsWith('/ai')) {

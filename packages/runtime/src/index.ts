@@ -45,6 +45,10 @@ export type { HttpProtocolContext, HttpDispatcherResult } from './http-dispatche
 // ADR-0006 generic kernel-resolution seam (retained framework contract; the
 // multi-tenant implementation lives in cloud `@objectstack/objectos-runtime`).
 export type { KernelResolver } from './http-dispatcher.js';
+// ADR-0076 D11 step ③ — thin domain-handler registry seam; owning service
+// packages register normalized handlers via HttpDispatcher.registerDomainHandler.
+export { DomainHandlerRegistry } from './domain-handler-registry.js';
+export type { DomainRoute, DomainHandler, DomainRequest } from './domain-handler-registry.js';
 export { MiddlewareManager } from './middleware.js';
 
 // ── Security primitives ───────────────────────────────────────────────
