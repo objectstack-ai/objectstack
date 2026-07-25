@@ -25,11 +25,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * (ADR-0018 M3 — `sys_http_delivery`, drained by the messaging dispatcher).
  *
  * Ownership (ADR-0029 K2.a): this object is **owned by
- * `@objectstack/plugin-webhooks`** — the plugin that consumes these rows —
- * alongside its sibling `sys_webhook_delivery`. It used to live in the
- * `@objectstack/platform-objects` monolith and be imported here; the
- * definition now lives with its owner so the plugin ships both data and
- * behavior as one unit.
+ * `@objectstack/plugin-webhooks`** — the plugin that consumes these rows. It
+ * used to live in the `@objectstack/platform-objects` monolith and be imported
+ * here; the definition now lives with its owner so the plugin ships both data
+ * and behavior as one unit.
  *
  * Platform-wide on purpose: every project (standalone, single-tenant,
  * cloud) can integrate with external systems (Slack, Stripe, internal
