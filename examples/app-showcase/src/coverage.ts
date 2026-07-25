@@ -254,8 +254,8 @@ export const COVERAGE = {
       'security/* — positions + permission sets (CRUD + FLS + RLS + depth + VAMA + system/tab permissions + adminScope) + sharing rules (position & BU-subtree recipients) + per-object OWD/externalSharingModel + seeded sys_business_unit tree + access-matrix.json gate (ADR-0090)',
     automation: 'automation/flows/index.ts (incl. approval nodes) + automation/webhooks/index.ts + automation/jobs/index.ts + system/emails/index.ts',
   },
-  i18nThemingPortals: {
-    coveredBy: 'system/translations/index.ts (en + zh-CN), ui/themes/index.ts (light + dark), ui/portals/index.ts',
+  i18nAndTheming: {
+    coveredBy: 'system/translations/index.ts (en + zh-CN), ui/themes/index.ts (light + dark)',
   },
   docs: {
     source: 'ADR-0046 (doc metadata)',

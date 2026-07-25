@@ -43,7 +43,6 @@ import {
 } from './src/security/index.js';
 import { allThemes } from './src/ui/themes/index.js';
 import { ShowcaseTranslationBundle } from './src/system/translations/index.js';
-import { allPortals } from './src/ui/portals/index.js';
 import { ShowcaseSeedData } from './src/data/seed/index.js';
 import { allCubes } from './src/data/analytics/showcase.cube.js';
 import { allObjectExtensions } from './src/data/extensions/account.extension.js';
@@ -193,7 +192,6 @@ export default defineStack({
 
   // UI
   apps: [ShowcaseApp],
-  portals: allPortals,
   views: [TaskViews, ProjectViews, InquiryViews, BusinessUnitViews],
   pages: [CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage, TaskBoardPage, TaskCalendarPage, TaskGalleryPage, TaskSchedulePage, TaskTimelinePage, TaskMapPage, TaskAllViewsPage, ActiveProjectsPage, TaskDetailPage, ReviewQueuePage, NewProjectWizardPage, MyWorkPage, SettingsPage, StylingGalleryPage, CommandCenterPage, CommandCenterJsxPage, CrmWorkbenchPage, TaskDeskPage, PageVariablesPage, ContactFormPage, RenewalsPipelinePage],
   dashboards: [ChartGalleryDashboard, OpsDashboard, RevenuePulseDashboard],

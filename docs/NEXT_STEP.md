@@ -55,7 +55,7 @@
 | 13.2 | Document Generation Templates (PDF, DOCX) | 🟡 High | `ui/document-template.zod.ts` |
 | 13.3 | Report Scheduling & Subscriptions | 🟡 High | Enhance `ui/report.zod.ts` |
 | 13.4 | Dashboard Drill-Down & Drill-Through | 🟡 High | Enhance `ui/dashboard.zod.ts` |
-| 13.5 | Portal / Community Protocol | 🟡 High | `ui/portal.zod.ts` |
+| 13.5 | Portal / Community Protocol | 🟡 High | `ui/portal.zod.ts` (rebuild **with a runtime**; the prior no-op stub was pruned per #3464) |
 | 13.6 | Advanced Report Features (formulas, conditional formatting, snapshots) | 🟡 Medium | Enhance `ui/report.zod.ts` |
 
 **Checklist:**

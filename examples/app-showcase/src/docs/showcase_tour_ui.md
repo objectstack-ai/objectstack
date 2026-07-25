@@ -58,10 +58,9 @@ canonical example of each linked from that page.
 - `src/ui/actions/` — the ActionType × location matrix (script / url /
   modal / flow / api / form), visible as buttons across Task screens.
 
-## Themes & portals
+## Themes
 
-`src/ui/themes/` ships light + dark; `src/ui/portals/` exposes the public
-library portal that serves this very manual.
+`src/ui/themes/` ships light + dark theme variants.
 
 Continue with the [Automation tour](./showcase_tour_automation.md), or go
 back to the [overview](./showcase_index.md).

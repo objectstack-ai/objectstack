@@ -491,7 +491,7 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     { section: 'Content & Collaboration', pages: ['doc', 'book', 'collaboration'] },
   ],
   ui: [
-    { section: 'Apps & Navigation', pages: ['app', 'page', 'portal', 'view', 'action'] },
+    { section: 'Apps & Navigation', pages: ['app', 'page', 'view', 'action'] },
     { section: 'Visualization', pages: ['chart', 'dashboard', 'dataset', 'report', 'widget', 'component'] },
     { section: 'Interaction & Layout', pages: ['animation', 'dnd', 'keyboard', 'touch', 'responsive', 'theme', 'offline'] },
     { section: 'Platform', pages: ['i18n', 'notification', 'sharing', 'http'] },

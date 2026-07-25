@@ -1,6 +1,6 @@
 ---
 title: UI Engine
-description: Apps, views, dashboards, themes, and public portals — server-driven UI declared as metadata and rendered by the ObjectUI runtime.
+description: Apps, views, dashboards, themes, and public forms — server-driven UI declared as metadata and rendered by the ObjectUI runtime.
 ---
 
 # UI Engine
@@ -32,7 +32,7 @@ export const CrmApp = App.create({
 - **Views** present object records as `grid` (the standard data table), `kanban`, `gallery`, `calendar`, `timeline`, `gantt`, `map`, `chart`, or `tree`. Forms are their own view kind with per-mode layouts ([Views](/docs/ui/views)).
 - **Pages** compose free-form layouts from widgets; **Dashboards** combine charts, reports, and datasets for analytics.
 - **Themes** define palettes, typography, and spacing as metadata — the showcase example ships light and dark theme variants.
-- **Portals** open a scoped slice of the app to external audiences, including **anonymous entry routes** for public data collection ([Forms](/docs/ui/forms), [public data collection](/docs/ui/public-data-collection)).
+- **Public forms** expose a scoped slice of an object to external audiences through **anonymous entry routes** for public data collection ([Forms](/docs/ui/forms), [public data collection](/docs/ui/public-data-collection)).
 - The **Setup App** — the platform's built-in administration UI — is itself rendered from the same protocol ([Setup App](/docs/ui/setup-app)).
 
 ## What's in this module
@@ -53,7 +53,7 @@ export const CrmApp = App.create({
   <Card href="/docs/ui/create-vs-edit-form" title="Create form ≠ edit form" description="Different layouts per form mode" />
   <Card href="/docs/ui/field-grouping-and-order" title="Field grouping & order" description="Control form structure" />
   <Card href="/docs/ui/audience-based-interfaces" title="Audience-based interfaces" description="Different UIs per audience" />
-  <Card href="/docs/ui/public-data-collection" title="Collect data from the public" description="Anonymous portal routes end to end" />
+  <Card href="/docs/ui/public-data-collection" title="Collect data from the public" description="Anonymous public form routes end to end" />
 </Cards>
 
 ## Related

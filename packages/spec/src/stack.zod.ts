@@ -17,7 +17,6 @@ import { SeedSchema } from './data/seed.zod';
 
 // UI Protocol
 import { AppSchema } from './ui/app.zod';
-import { PortalSchema } from './ui/portal.zod';
 import { ViewSchema } from './ui/view.zod';
 import { PageSchema } from './ui/page.zod';
 import { DashboardSchema } from './ui/dashboard.zod';
@@ -207,7 +206,10 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    * Apps, Menus, Pages, and Visualizations.
    */
   apps: z.array(AppSchema).optional().describe('Applications'),
-  portals: z.array(PortalSchema).optional().describe('External-user UI portals (projections of apps/views/actions)'),
+  // #3464: the top-level `portals` collection was removed — PortalSchema was a
+  // never-enforced, no-op projection (no dispatcher route family, auth scope,
+  // LayoutDispatcher, NavigationBuilder or ThemeProvider ever consumed it).
+  // Author external-user UI with apps/views + positions & permission sets.
   views: z.array(ViewSchema).optional().describe('List Views'),
   pages: z.array(PageSchema).optional().describe('Custom Pages'),
   dashboards: z.array(DashboardSchema).optional().describe('Dashboards'),
