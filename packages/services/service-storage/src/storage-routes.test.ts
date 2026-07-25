@@ -140,6 +140,9 @@ describe('Storage REST Routes', () => {
       expect(completeRes._status).toBe(200);
       expect(completeRes._json.data.name).toBe('test.txt');
       expect(completeRes._json.data.mimeType).toBe('text/plain');
+      // ADR-0104 D3 PR-1: the commit response surfaces the opaque sys_file id
+      // so a caller can persist it in a file field.
+      expect(completeRes._json.data.fileId).toBe(fileId);
     });
 
     it('should 404 for unknown fileId', async () => {

@@ -303,6 +303,86 @@ describe('state_machine initialStates enforcement on INSERT (#3165)', () => {
   });
 });
 
+// #3433 — seed writes are curated end-state facts, not lifecycle events, so the
+// engine passes `skipStateMachine` for them: the `state_machine` rule is skipped
+// on BOTH insert (initialStates) and update (transitions), while every OTHER
+// rule still runs. Each case pairs the exempted call with an un-flagged control
+// so the exemption can't silently become always-on.
+describe('skipStateMachine exemption for seed writes (#3433)', () => {
+  const flowSchema = {
+    validations: [
+      {
+        type: 'state_machine' as const,
+        name: 'approval_flow',
+        field: 'approval_status',
+        message: 'A request must start as draft.',
+        initialStates: ['draft'],
+        transitions: {
+          draft: ['pending'],
+          pending: ['approved', 'rejected'],
+        },
+      },
+    ],
+  };
+
+  it('bypasses the initialStates entry check on INSERT (born mid-flow)', () => {
+    // Control: enforced without the flag.
+    expect(() =>
+      evaluateValidationRules(flowSchema, { approval_status: 'approved' }, 'insert'),
+    ).toThrow(ValidationError);
+    expect(() =>
+      evaluateValidationRules(flowSchema, { approval_status: 'approved' }, 'insert', {
+        skipStateMachine: true,
+      }),
+    ).not.toThrow();
+  });
+
+  it('bypasses the transition check on UPDATE (illegal hop draft → approved)', () => {
+    // Control: draft → approved is not a declared transition.
+    expect(() =>
+      evaluateValidationRules(flowSchema, { approval_status: 'approved' }, 'update', {
+        previous: { approval_status: 'draft' },
+      }),
+    ).toThrow(ValidationError);
+    expect(() =>
+      evaluateValidationRules(flowSchema, { approval_status: 'approved' }, 'update', {
+        previous: { approval_status: 'draft' },
+        skipStateMachine: true,
+      }),
+    ).not.toThrow();
+  });
+
+  it('skips ONLY state_machine — other rules (script) still fire under the flag', () => {
+    const guardedSchema = {
+      validations: [
+        flowSchema.validations[0],
+        {
+          type: 'script' as const,
+          name: 'amount_non_negative',
+          condition: { dialect: 'cel' as const, source: 'record.amount < 0' },
+          message: 'amount must be non-negative',
+        },
+      ],
+    };
+    // FSM skipped + script satisfied → clean.
+    expect(() =>
+      evaluateValidationRules(guardedSchema, { approval_status: 'approved', amount: 5 }, 'insert', {
+        skipStateMachine: true,
+      }),
+    ).not.toThrow();
+    // FSM skipped but script violated → still rejected (exemption is scoped).
+    try {
+      evaluateValidationRules(guardedSchema, { approval_status: 'approved', amount: -1 }, 'insert', {
+        skipStateMachine: true,
+      });
+      throw new Error('expected throw');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      expect((e as ValidationError).fields[0].message).toBe('amount must be non-negative');
+    }
+  });
+});
+
 describe('execution control', () => {
   it('skips inactive rules', () => {
     const schema = {

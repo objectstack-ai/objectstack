@@ -1623,9 +1623,13 @@ export class AutomationEngine implements IAutomationService {
                 if (!variables.has(k)) variables.set(k, v);
             }
         }
-        if (context?.previous) {
-            variables.set('previous', context.previous);
-        }
+        // Always bind `previous` — to `null` on the create/insert leg (there is no
+        // prior row) — so a start condition can DISCRIMINATE create vs update on a
+        // `record-after-write` flow: `previous == null` is the create leg (#3427).
+        // Binding only-when-truthy left `previous` an unknown CEL variable on
+        // insert, so ANY reference to it (even `previous == null`) threw
+        // "Unknown variable: previous" and failed the whole condition.
+        variables.set('previous', context?.previous ?? null);
 
         const runId = this.nextRunId();
         // Expose the run id to executors (ADR-0019): a pausing node (e.g. Approval)

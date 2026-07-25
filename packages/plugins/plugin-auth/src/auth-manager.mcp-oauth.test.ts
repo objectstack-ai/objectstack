@@ -302,6 +302,16 @@ describe('oauthProvider plugin wiring (DCR + scopes + audiences)', () => {
     expect(opts.validAudiences).toContain('https://acme.example.com/api/v1/auth');
   });
 
+  it('silences the false-positive oauthAuthServerConfig warning (#3420)', async () => {
+    // registerOidcDiscoveryRoutes mounts /.well-known/oauth-authorization-server
+    // (and the /api/v1/auth path-insertion variant) at the issuer ROOT ourselves,
+    // so better-auth's boot-time "Please ensure … exists" reminder is a false
+    // positive. It must be silenced via the documented option, or the stock
+    // showcase prints it (twice) on every `os dev`. Regression guard for the fix.
+    const opts = await capturePluginOpts({ OS_MCP_SERVER_ENABLED: 'true' });
+    expect(opts.silenceWarnings).toEqual({ oauthAuthServerConfig: true });
+  });
+
   it('OS_OIDC_DCR_ENABLED=false forces DCR off even with MCP on', async () => {
     const opts = await capturePluginOpts({ OS_MCP_SERVER_ENABLED: 'true', OS_OIDC_DCR_ENABLED: 'false' });
     expect(opts.allowDynamicClientRegistration).toBe(false);

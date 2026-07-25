@@ -147,6 +147,7 @@ const result = Address.parse(data);
 | **hidden** | `boolean` | optional | Hidden from default UI |
 | **readonly** | `boolean` | optional | Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`; system-context writes (import, seed replay, migration) are exempt. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D3] Capabilities required to read/edit this field (mask on read, deny on write; AND-gate). |
+| **ackPlaintextMasking** | `boolean` | optional | [ADR-0100] Affirm a generic `password` field's plaintext-at-rest / masked-on-read contract is intended, silencing the author-time warning (#3420). No effect on non-password fields. |
 | **system** | `boolean` | optional | Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag. |
 | **sortable** | `boolean` | optional | Whether field is sortable in list views |
 | **inlineHelpText** | `string` | optional | Help text displayed below the field in forms |

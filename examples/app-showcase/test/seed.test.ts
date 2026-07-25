@@ -36,14 +36,20 @@ describe('showcase stack', () => {
 });
 
 /**
- * Static shadow of what SeedLoader + validation do at boot (#3415): for every
- * object whose state_machine gates INSERT (`initialStates`), replay the seed
- * datasets in declaration order and assert each record enters through a legal
- * initial state and only moves along declared transitions. The fixture that
- * silently lost 4/5 projects (target status written directly on insert) can
- * never come back green.
+ * Static shadow of the seed contract after #3433: a seed write is a curated
+ * end-state fact, so the platform EXEMPTS it from the object's `state_machine`
+ * rule — a project is seeded directly `active` / `on_hold` / `completed`
+ * without walking the FSM up from `planned` (the three-phase walk workaround
+ * of #3415 is gone). This guard pins the new contract for every object whose
+ * state_machine gates INSERT (`initialStates`):
+ *   1. every seeded value is still a state the FSM DECLARES (a curated fact,
+ *      not a typo — the exemption is not a license to write garbage); and
+ *   2. the fixture actually EXERCISES the exemption by seeding ≥1 non-initial
+ *      state, so a regression back to "all rows enter as the initial state"
+ *      (a re-introduced walk, or a fixture that collapses the board to one
+ *      column) fails here. The #3433 failure was 1/5 projects surviving.
  */
-describe('seed data vs state machines (#3415)', () => {
+describe('seed data vs state machines (#3433)', () => {
   const gated = (stack.objects ?? []).flatMap((o: any) =>
     (o.validations ?? [])
       .filter(
@@ -56,40 +62,46 @@ describe('seed data vs state machines (#3415)', () => {
       .map((v: any) => ({ object: o, rule: v })),
   );
 
-  it('covers the project status flow (the #3415 gate)', () => {
+  it('covers the project status flow (the #3433 gate)', () => {
     expect(gated.map((g: any) => `${g.object.name}.${g.rule.field}`)).toContain('showcase_project.status');
   });
 
   for (const { object, rule } of gated) {
-    it(`${object.name}: seeded '${rule.field}' respects initialStates and transitions — including on replay`, () => {
+    it(`${object.name}: seeded '${rule.field}' is FSM-exempt but stays within declared states (#3433)`, () => {
       const datasets = ShowcaseSeedData.filter((d: any) => d.object === object.name);
       expect(datasets.length).toBeGreaterThan(0);
-      const current = new Map<string, string>();
-      // Round 1 = fresh boot; round 2 = replay against the walked state.
-      // Replay must also be violation-free (#3415 follow-up): `ignore`
-      // datasets skip existing rows wholesale, and re-walked hops must be
-      // legal transitions (which is what the reopen edge guarantees).
-      for (const round of [1, 2]) {
-        for (const ds of datasets as any[]) {
-          for (const rec of ds.records as any[]) {
-            const key = String(rec[ds.externalId ?? 'name']);
-            const next = rec[rule.field];
-            if (!current.has(key)) {
-              // First appearance = INSERT. Seed inserts do NOT apply select
-              // defaults, so a gated field must be explicit AND legal.
-              expect(next, `'${key}' (round ${round}) must seed '${rule.field}' explicitly`).toBeDefined();
-              expect(rule.initialStates, `'${key}' enters as '${next}'`).toContain(next);
-              current.set(key, next);
-            } else {
-              if (ds.mode === 'ignore') continue; // existing rows untouched
-              if (next === undefined || next === current.get(key)) continue; // no-op replay skips
-              const from = current.get(key)!;
-              expect(rule.transitions?.[from] ?? [], `'${key}' (round ${round}) ${from} → ${next}`).toContain(next);
-              current.set(key, next);
-            }
-          }
+
+      // Every state the FSM knows about — the legal value universe, derived
+      // from the rule itself (no dependency on the field's option shape).
+      const fsmStates = new Set<string>(
+        [
+          ...rule.initialStates,
+          ...Object.keys(rule.transitions ?? {}),
+          ...Object.values(rule.transitions ?? {}).flat(),
+        ].map(String),
+      );
+
+      const seeded = new Set<string>();
+      for (const ds of datasets as any[]) {
+        for (const rec of ds.records as any[]) {
+          const v = rec[rule.field];
+          if (v === undefined || v === null) continue;
+          const key = String(rec[ds.externalId ?? 'name']);
+          // #3433: a seed value need NOT be an initialState (the FSM entry
+          // guard is exempt), but it must be a state the machine declares.
+          expect(fsmStates, `'${key}' seeds '${rule.field}=${String(v)}'`).toContain(String(v));
+          seeded.add(String(v));
         }
       }
+
+      // The exemption must actually be used: seed at least one state the FSM
+      // entry point would reject on INSERT. Guards against a silent regression
+      // to a planned-only fixture (or a re-introduced FSM walk).
+      const nonInitial = [...seeded].filter((v) => !rule.initialStates.includes(v));
+      expect(
+        nonInitial.length,
+        `${object.name} seeds only initial states (${[...seeded].join(', ')}) — #3433 exemption unused`,
+      ).toBeGreaterThan(0);
     });
   }
 });

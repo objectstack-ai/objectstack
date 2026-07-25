@@ -99,6 +99,7 @@ transitions: {
 - **On update**, if the state field changed and the new value is **not** in `transitions[oldValue]`, the write is rejected.
 - The check is **lenient where it cannot reason**: if the prior state is not described by the table (e.g. legacy or externally-written data), it does not block.
 - Only a rule with `severity: 'error'` (the default) blocks the write; `warning`/`info` are logged.
+- **Seed writes are exempt** (#3433). Curated seed data — package bootstrap fixtures, marketplace templates, per-org replay, all loaded by `SeedLoaderService` — is a snapshot of established facts, not a record walking its lifecycle, so it bypasses the `state_machine` rule entirely: a seed may be born mid-lifecycle (a `completed` project, a `closed_won` opportunity) and neither `initialStates` (insert) nor `transitions` (update) is enforced. Every *other* validation still runs, so a seed must still satisfy field shape, `format`, `script`, and the rest. `os lint` warns when a seeded value is not a state the machine declares, so a typo is still caught before boot.
 
 ### Conditional transitions
 

@@ -95,6 +95,23 @@ describe('app-crm minimal metadata bundle', () => {
     expect(rules.some((r) => r.type === 'owner')).toBe(true);
   });
 
+  // #3420 — official examples must boot warning-free. A generic (non-better-auth)
+  // `password` field trips the ADR-0100 author-time warning unless it affirms
+  // intent with `ackPlaintextMasking: true`. crm ships none today; this guard
+  // fails loudly if one is ever added without the acknowledgment.
+  it('has no un-acknowledged generic password fields (#3420)', () => {
+    const offenders: string[] = [];
+    for (const obj of (stack.objects ?? []) as any[]) {
+      if (obj?.managedBy === 'better-auth') continue;
+      for (const [fieldName, def] of Object.entries((obj?.fields ?? {}) as Record<string, any>)) {
+        if (def?.type === 'password' && def?.ackPlaintextMasking !== true) {
+          offenders.push(`${obj.name}.${fieldName}`);
+        }
+      }
+    }
+    expect(offenders, `un-acknowledged generic password field(s): ${offenders.join(', ')}`).toEqual([]);
+  });
+
 });
 
 describe('Pipeline dashboard', () => {

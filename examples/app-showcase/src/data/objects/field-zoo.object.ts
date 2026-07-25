@@ -35,7 +35,10 @@ export const FieldZoo = ObjectSchema.create({
     f_email: Field.email({ label: 'Email', searchable: true }),
     f_url: Field.url({ label: 'URL' }),
     f_phone: Field.phone({ label: 'Phone' }),
-    f_password: Field.password({ label: 'Password (masked on read)' }),
+    // field-zoo intentionally exercises every field type, so the generic
+    // `password` contract (plaintext at rest, masked on read — ADR-0100) is
+    // deliberate here. Affirm it so the official example boots warning-free (#3420).
+    f_password: Field.password({ label: 'Password (masked on read)', ackPlaintextMasking: true }),
     f_secret: Field.secret({ label: 'Secret (encrypted at rest)' }),
 
     // ── Rich content ─────────────────────────────────────────────────────

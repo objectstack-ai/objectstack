@@ -163,6 +163,17 @@ export interface EvaluateRulesOptions {
    * and fail-open (see {@link evaluateOptionVisibility}).
    */
   currentUser?: { id?: string; roles?: string[]; organizationId?: string | null; [k: string]: unknown } | null;
+  /**
+   * When true, `state_machine` rules are skipped entirely — both the
+   * `initialStates` entry-point check on insert (#3165) and the transition
+   * check on update. Set by the engine for CURATED SEED writes
+   * (`ExecutionContext.seedReplay`, #3433): a seed is a snapshot of established
+   * facts, not a record flowing through its lifecycle, so FSM entry/transition
+   * guards do not apply to it. ONLY `state_machine` is skipped; every other
+   * rule type still runs (a seed must still satisfy `format`, `cross_field`,
+   * `script`, `json_schema`, `conditional`).
+   */
+  skipStateMachine?: boolean;
 }
 
 /**
@@ -543,6 +554,11 @@ export function evaluateValidationRules(
   const ordered = (hasRules ? rules! : [])
     .filter((r): r is BaseRule => r != null && typeof r === 'object')
     .filter((r) => r.active !== false)
+    // Seed writes (#3433) skip `state_machine` entirely: curated seed data is a
+    // snapshot of established facts, not a record flowing through its lifecycle,
+    // so neither the `initialStates` entry-point (insert) nor the transition
+    // (update) guard applies. Every other rule type still runs.
+    .filter((r) => !(opts.skipStateMachine && r.type === 'state_machine'))
     .filter((r) => {
       const events = r.events ?? ['insert', 'update'];
       return events.includes(mode);

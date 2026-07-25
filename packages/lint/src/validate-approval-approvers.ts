@@ -20,6 +20,7 @@
  * | approval-approver-type-deprecated          | warning  | ADR-0090 D3 (#3133)        |
  * | approval-approver-type-unknown             | warning  | contract-first (PD #12)    |
  * | approval-escalation-reassign-no-target     | warning  | silent notify degradation  |
+ * | approval-approvers-may-resolve-empty       | info     | empty-position dead-end (#3424) |
  *
  * The first two are mutually exclusive by construction — a bad *value* wins,
  * because its fix (`position`) differs from the deprecation's fix
@@ -44,6 +45,19 @@ export const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER = 'approval-approver-not-memb
 export const APPROVAL_APPROVER_TYPE_DEPRECATED = 'approval-approver-type-deprecated';
 export const APPROVAL_APPROVER_TYPE_UNKNOWN = 'approval-approver-type-unknown';
 export const APPROVAL_ESCALATION_REASSIGN_NO_TARGET = 'approval-escalation-reassign-no-target';
+export const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY = 'approval-approvers-may-resolve-empty';
+
+/**
+ * Approver types that route to a GROUP whose membership is runtime data and can
+ * be empty (an unstaffed position, an empty team/department). When EVERY
+ * approver on a node is one of these, the node can resolve to an empty slate at
+ * runtime — the framework#3424 dead-end. Individually-routed types
+ * (`user`/`field`/`manager`), the guaranteed-staffed `org_membership_level`
+ * tiers, and the opaque `queue` are deliberately excluded: any of them present
+ * signals the author has a non-group route, so the node isn't purely
+ * group-gated.
+ */
+const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
 
 export type ApprovalApproverSeverity = 'error' | 'warning' | 'info';
 
@@ -169,6 +183,38 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             hint: `Author { type: '${fix}', value: '${value}' }. It resolves identically today.`,
           });
         }
+      }
+
+      // Empty-slate dead-end (#3424): when EVERY approver on the node routes to
+      // a group whose membership can be empty (an unstaffed position, an empty
+      // team/department), the request can resolve to an empty `pending_approvers`
+      // at runtime — no concrete user can act, and with `lockRecord` the record
+      // stays locked with no recovery except a platform/tenant admin override.
+      // Advisory (`info`): staffing is runtime data a linter can't see, so this
+      // flags the risky SHAPE and prescribes a guaranteed-staffed fallback.
+      const routable = approvers.filter(
+        (a) => a && typeof a === 'object' && typeof (a as AnyRec).type === 'string',
+      );
+      if (
+        routable.length > 0 &&
+        routable.every((a) => GROUP_ROUTED_TYPES.has(canonicalApproverType(String((a as AnyRec).type))))
+      ) {
+        const locks = (cfg as AnyRec).lockRecord !== false; // default true
+        findings.push({
+          severity: 'info',
+          rule: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
+          where,
+          path: `flows[${fi}].nodes[${ni}].config.approvers`,
+          message:
+            `every approver on this node routes to a group (position/team/department) whose ` +
+            `members are runtime data — if none is staffed, the request resolves to an empty ` +
+            `slate and waits forever` +
+            (locks ? `, and (lockRecord) the record stays locked with no in-product recovery.` : `.`),
+          hint:
+            `Make sure at least one target is always staffed, or add a guaranteed-staffed ` +
+            `fallback approver, e.g. { type: 'org_membership_level', value: 'owner' }. A request ` +
+            `that still lands empty is recoverable only by a platform/tenant admin override (#3424).`,
+        });
       }
 
       // escalation.action 'reassign' with no escalateTo silently degrades to a

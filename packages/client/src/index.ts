@@ -2048,8 +2048,15 @@ export class ObjectStackClient {
             method: 'POST',
             body: JSON.stringify(completeReq)
         });
-        
-        return completeRes.json();
+
+        // Surface the opaque sys_file id so the caller can store it in a file
+        // field (ADR-0104 D3). The server now returns it; fall back to the
+        // presigned id for an older server that does not.
+        const completeJson = (await completeRes.json()) as FileUploadResponse;
+        if (completeJson?.data && completeJson.data.fileId == null) {
+            completeJson.data.fileId = presigned.fileId;
+        }
+        return completeJson;
     },
     
     getDownloadUrl: async (fileId: string): Promise<string> => {

@@ -95,6 +95,15 @@ rest but masked on read**:
    would be self-inflicted breakage. Raw `.parse()` stays silent, since it also
    loads persisted metadata and `create()` is the authoring surface (ADR-0077).
 
+   **Opt-out — `ackPlaintextMasking: true` (#3420).** A deliberate `password`
+   field (like field-zoo's `f_password`) can affirm intent with a field-level
+   `ackPlaintextMasking: true`; the warning then skips that field. The original
+   text said the warning was "safe to ignore" but offered no way to *express*
+   that intent, so the official showcase booted with an unavoidable warning —
+   training users to ignore warnings. The flag is the documented affirmation and
+   lets the stock example start warning-free. It is diagnostic-only: masking,
+   the echoed-mask guard, and the better-auth exemption are all unchanged by it.
+
 ### C. Shared mechanism
 
 Both channels share one read-mask collector — `collectMaskedReadFields`

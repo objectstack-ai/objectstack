@@ -195,6 +195,30 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   skipAutomations: z.boolean().optional(),
 
   /**
+   * True when this write is CURATED SEED data being (re)loaded by the seed
+   * loader — a package's bootstrap/demo dataset, not a user-initiated event.
+   * Set only by `SeedLoaderService` (server-constructed, never client-supplied,
+   * exactly like {@link isSystem}).
+   *
+   * A seed is a Salesforce-sandbox-style snapshot of established facts: an
+   * opportunity that is already `closed_won`, a case already `closed`, a
+   * project already `completed`. It is NOT the record flowing through its
+   * lifecycle. So the object's `state_machine` validation rule — the FSM
+   * ENTRY-POINT check on insert (`initialStates`, #3165) and the TRANSITION
+   * check on update — does not apply and is skipped for these writes. Without
+   * this exemption a declared `initialStates` silently rejects every
+   * mid-lifecycle seed row (and cascades its master-detail children), which is
+   * why marketplace templates and heal/replay "installed but no data" (#3433).
+   *
+   * SCOPE: skips ONLY the `state_machine` rule. Every other validation
+   * (field shape, `format`, `json_schema`, `cross_field`, `script`,
+   * `conditional`) still runs — a seed with a malformed email or an
+   * over-budget spend is a genuine bug worth catching. Automation is a
+   * SEPARATE concern handled by {@link skipTriggers} (also set for seeds).
+   */
+  seedReplay: z.boolean().optional(),
+
+  /**
    * OAuth 2.1 scopes granted to the access token that authenticated this
    * request, when the principal was resolved from an OAuth bearer token
    * (the MCP surface's human-client track, #2698). UNDEFINED for every

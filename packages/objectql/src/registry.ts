@@ -121,6 +121,11 @@ function mergeObjectDefinitions(base: ServiceObject, extension: Partial<ServiceO
  */
 export type RegistryLogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
 
+/** All valid {@link RegistryLogLevel} values — used to validate `OS_REGISTRY_LOG`. */
+export const REGISTRY_LOG_LEVELS: readonly RegistryLogLevel[] = [
+  'debug', 'info', 'warn', 'error', 'silent',
+];
+
 /**
  * Construction options for {@link SchemaRegistry}.
  */
@@ -172,6 +177,19 @@ export interface SchemaRegistryOptions {
    * package ids are always disambiguable by package-scoped resolution.)
    */
   collisionPolicy?: 'error' | 'warn';
+
+  /**
+   * Verbosity of the registry's own `[Registry] …` log lines. Sourced from the
+   * `OS_REGISTRY_LOG` env var when not set explicitly (default `'info'`).
+   *
+   * The point of the env seam is discoverability (#3420): expected-but-noisy
+   * housekeeping — re-registering an owned object / overwriting a package
+   * manifest on a rebuild/HMR/seed-replay — is emitted at `'debug'`, so it stays
+   * out of a stock `info` boot log but a developer chasing a registration issue
+   * can surface it with `OS_REGISTRY_LOG=debug`. An unrecognized value falls
+   * back to `'info'`.
+   */
+  logLevel?: RegistryLogLevel;
 }
 
 /**
@@ -529,6 +547,16 @@ export class SchemaRegistry {
     this.collisionPolicy =
       options.collisionPolicy ??
       ((process.env.OS_METADATA_COLLISION ?? '').toLowerCase() === 'warn' ? 'warn' : 'error');
+
+    // #3420 — env-driven verbosity so debug-level registry housekeeping
+    // (re-register / package overwrite) is discoverable without a code change.
+    // Unrecognized OS_REGISTRY_LOG values fall back to the 'info' default.
+    const envLevel = (process.env.OS_REGISTRY_LOG ?? '').toLowerCase();
+    this._logLevel =
+      options.logLevel ??
+      (REGISTRY_LOG_LEVELS.includes(envLevel as RegistryLogLevel)
+        ? (envLevel as RegistryLogLevel)
+        : this._logLevel);
   }
 
   get logLevel(): RegistryLogLevel { return this._logLevel; }
@@ -537,6 +565,17 @@ export class SchemaRegistry {
   private log(msg: string): void {
     if (this._logLevel === 'silent' || this._logLevel === 'error' || this._logLevel === 'warn') return;
     console.log(msg);
+  }
+
+  /**
+   * Debug-only diagnostic: emitted solely when `logLevel === 'debug'`, so it
+   * stays out of the default (`'info'`) boot log. Use for expected-but-noisy
+   * housekeeping — e.g. re-registration on a metadata rebuild / HMR reload,
+   * which looks like an error (`console.warn`) but is a normal path (#3420).
+   */
+  private debug(msg: string): void {
+    if (this._logLevel !== 'debug') return;
+    console.debug(msg);
   }
 
   // ==========================================
@@ -731,7 +770,10 @@ export class SchemaRegistry {
       const idx = contributors.findIndex(c => c.packageId === packageId && c.ownership === 'own');
       if (idx !== -1) {
         contributors.splice(idx, 1);
-        console.warn(`[Registry] Re-registering owned object: ${fqn} from ${packageId}`);
+        // Normal path (metadata rebuild / HMR / multi-project seed replays the
+        // same owned object), not an error — keep it at debug so a stock boot
+        // stays warning-free (#3420).
+        this.debug(`[Registry] Re-registering owned object: ${fqn} from ${packageId}`);
       }
     } else {
       // extend mode: remove existing extension from same package
@@ -1329,7 +1371,9 @@ export class SchemaRegistry {
     }
     const collection = this.metadata.get('package')!;
     if (collection.has(manifest.id)) {
-      console.warn(`[Registry] Overwriting package: ${manifest.id}`);
+      // Re-install of an already-registered package manifest (rebuild / HMR) is
+      // a normal path, not an error — keep it at debug (#3420).
+      this.debug(`[Registry] Overwriting package: ${manifest.id}`);
     }
     collection.set(manifest.id, pkg);
     this.log(`[Registry] Installed package: ${manifest.id} (${manifest.name})`);

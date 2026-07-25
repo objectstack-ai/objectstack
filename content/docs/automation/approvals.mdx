@@ -281,7 +281,7 @@ service attaches to every request it returns:
 
 ```jsonc
 // getRequest / listRequests responses carry, per the calling user:
-"viewer": { "can_act": true, "is_submitter": false }
+"viewer": { "can_act": true, "is_submitter": false, "can_override": false }
 ```
 
 - `can_act` — the caller is a **current pending approver** (their id is in the
@@ -289,12 +289,30 @@ service attaches to every request it returns:
   check the decision routes authorize with, so it already reflects
   position/team/manager resolution.
 - `is_submitter` — the caller submitted the request.
+- `can_override` — the caller is a **platform or tenant admin** who may act on a
+  `pending` request despite holding no slot (see the admin-override callout
+  below).
 
 Approver actions gate on `record.viewer.can_act`, submitter levers
-(remind/recall/resubmit) on `record.viewer.is_submitter`. So a submitter viewing
+(remind/recall/resubmit) on `record.viewer.is_submitter`, and Approve/Reject/
+Reassign additionally OR in `record.viewer.can_override`. So a submitter viewing
 their own pending request never sees Approve/Reject/Reassign (buttons the server
-would 403 anyway), and a position-addressed approver is never wrongly hidden.
-The service stays the sole authority — the predicate only trims the UI.
+would 403 anyway), a position-addressed approver is never wrongly hidden, and an
+admin can rescue a stuck request. The service stays the sole authority — the
+predicate only trims the UI.
+
+<Callout type="info">
+**Admin override — recovering a stuck request.** An approval routed to a
+`position` / `team` / `department` with **no holders** resolves to only an
+unresolvable `position:<name>` literal in `pending_approvers`: no concrete user
+can act, and (with `lockRecord`) the record stays locked. A **platform admin**
+(`admin_full_access`) or **tenant admin** (`organization_admin`, org-scoped) may
+act on any `pending` request — **approve, reject, reassign** it to a real
+approver, or **recall** it — releasing the lock. An admin decision is
+authoritative: it finalizes the node even under `unanimous`/`quorum`/`per_group`,
+and is audited under the admin's own id. Prefer a guaranteed-staffed fallback
+approver so the set is never empty in the first place.
+</Callout>
 
 ### Progress and notification deep links
 

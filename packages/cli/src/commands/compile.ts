@@ -14,6 +14,7 @@ import { validateWidgetBindings } from '@objectstack/lint';
 import { validateDashboardActionRefs } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateSecurityPosture, buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
+import { validateReadonlyFlowWrites } from '@objectstack/lint';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
 import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
 import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
@@ -445,6 +446,39 @@ export default class Compile extends Command {
       if (securityAdvisories.length > 0 && !flags.json) {
         console.log('');
         for (const f of securityAdvisories) {
+          printWarning(`${f.where}: ${f.message}`);
+          console.log(chalk.dim(`    ${f.hint}`));
+          console.log(chalk.dim(`    rule: ${f.rule}`));
+        }
+      }
+
+      // 3e2. [#3425] Readonly flow-write guardrail. A `runAs:user` update_record
+      //      writing a static-`readonly` field is a silent no-op — the engine
+      //      strips it from the UPDATE payload (#2948) while the step reports
+      //      success. This GATES the build (shift-left of the #3407/#3413
+      //      run-time strip warning); `readonlyWhen` writes are per-record-state,
+      //      so they are advisory, printed dimmed and never fatal.
+      if (!flags.json) printStep('Checking readonly flow writes (#3425)...');
+      const readonlyWriteFindings = validateReadonlyFlowWrites(result.data as Record<string, unknown>);
+      const readonlyWriteErrors = readonlyWriteFindings.filter((f) => f.severity === 'error');
+      const readonlyWriteAdvisories = readonlyWriteFindings.filter((f) => f.severity !== 'error');
+      if (readonlyWriteErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({ success: false, error: 'readonly flow-write validation failed', issues: readonlyWriteErrors }));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Readonly flow-write check failed (${readonlyWriteErrors.length} issue${readonlyWriteErrors.length > 1 ? 's' : ''})`);
+        for (const f of readonlyWriteErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+        }
+        this.exit(1);
+      }
+      if (readonlyWriteAdvisories.length > 0 && !flags.json) {
+        console.log('');
+        for (const f of readonlyWriteAdvisories) {
           printWarning(`${f.where}: ${f.message}`);
           console.log(chalk.dim(`    ${f.hint}`));
           console.log(chalk.dim(`    rule: ${f.rule}`));

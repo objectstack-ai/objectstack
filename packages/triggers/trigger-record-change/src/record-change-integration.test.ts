@@ -133,6 +133,41 @@ function mirrorWriteFlow(name: string, object: string) {
   };
 }
 
+/**
+ * A `record-after-write` flow whose START CONDITION uses the create/update
+ * discrimination the write trigger enables (mirrors the showcase
+ * `UrgentTaskAlertFlow`): fire when a record is created urgent (`previous == null`)
+ * OR escalated to urgent (`previous.priority != 'urgent'`) — but NOT on a later
+ * save while already urgent. Validates that `previous == null` is truthy on the
+ * afterInsert leg (previous is absent on create) and that the engine's start-node
+ * condition gate short-circuits before touching `previous.priority` there.
+ */
+function urgentAlertFlow(name: string, object: string) {
+  return {
+    name,
+    label: name,
+    type: 'record_change',
+    nodes: [
+      {
+        id: 'start',
+        type: 'start',
+        label: 'Start',
+        config: {
+          objectName: object,
+          triggerType: 'record-after-write',
+          condition: "priority == 'urgent' && (previous == null || previous.priority != 'urgent')",
+        },
+      },
+      { id: 'alert', type: 'update_record', label: 'Alert', config: { objectName: object, filter: { id: '{record.id}' }, fields: { alerted: 'yes' } } },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'alert' },
+      { id: 'e2', source: 'alert', target: 'end' },
+    ],
+  };
+}
+
 const objectDef = (name: string) => ({
   name,
   label: name,
@@ -140,6 +175,8 @@ const objectDef = (name: string) => ({
     status: { name: 'status', label: 'S', type: 'text' },
     stamp: { name: 'stamp', label: 'St', type: 'text' },
     mirror: { name: 'mirror', label: 'M', type: 'text' },
+    priority: { name: 'priority', label: 'P', type: 'text' },
+    alerted: { name: 'alerted', label: 'A', type: 'text' },
   },
 });
 
@@ -249,5 +286,41 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     await data.update('wid3', { id, status: 'b' });
     await sleep(200);
     expect((await data.findOne('wid3', { where: { id } }))?.mirror).toBe('b');
+  }, 15000);
+
+  it('record-after-write start condition uses `previous == null` to discriminate create vs update (#3427)', async () => {
+    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AutomationServicePlugin());
+    await kernel.use(new RecordChangeTriggerPlugin());
+    await kernel.bootstrap();
+
+    const objectql = kernel.getService('objectql') as any;
+    const data = kernel.getService('data') as any;
+    const automation = kernel.getService<AutomationEngine>('automation');
+
+    objectql.registerDriver(makeMemoryDriver(), true);
+    objectql.registry.registerObject(objectDef('wid5'), 'test', 'test');
+    automation.registerFlow('urgent_alert', urgentAlertFlow('urgent_alert', 'wid5') as any);
+
+    // Create leg — a brand-new URGENT record: `previous == null` makes the
+    // condition true, so the flow fires on afterInsert (the create-discrimination
+    // pattern the docs/showcase advertise).
+    const urgent = await data.insert('wid5', { priority: 'urgent' });
+    const urgentId = Array.isArray(urgent) ? urgent[0]?.id : urgent?.id ?? urgent;
+    await sleep(200);
+    expect((await data.findOne('wid5', { where: { id: urgentId } }))?.alerted).toBe('yes');
+
+    // Create leg — a NON-urgent record: the condition is false, no fire.
+    const low = await data.insert('wid5', { priority: 'low' });
+    const lowId = Array.isArray(low) ? low[0]?.id : low?.id ?? low;
+    await sleep(200);
+    expect((await data.findOne('wid5', { where: { id: lowId } }))?.alerted).toBeFalsy();
+
+    // Update leg — escalate that low record to urgent: `previous.priority` was
+    // 'low', so the transition guard fires the flow on afterUpdate.
+    await data.update('wid5', { id: lowId, priority: 'urgent' });
+    await sleep(200);
+    expect((await data.findOne('wid5', { where: { id: lowId } }))?.alerted).toBe('yes');
   }, 15000);
 });

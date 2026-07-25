@@ -74,6 +74,19 @@ describe('sys_approval_request declared actions', () => {
     }
   });
 
+  it('the core decision levers OR in the admin override (#3424) so a stuck request is recoverable', () => {
+    // approve / reject / reassign additionally show for a platform/tenant admin
+    // (`record.viewer.can_override`) so an approval routed to an unstaffed
+    // position — otherwise undecidable, locking the record forever — can be
+    // rescued in-product. The secondary approver levers stay slot-only.
+    for (const name of ['approval_approve', 'approval_reject', 'approval_reassign']) {
+      expect(vis(name)).toContain('record.viewer.can_override');
+    }
+    for (const name of ['approval_send_back', 'approval_request_info']) {
+      expect(vis(name)).not.toContain('can_override');
+    }
+  });
+
   it('recall stays available while a returned request is still the submitter\'s to abandon', () => {
     expect(vis('approval_recall')).toContain('record.status == "returned"');
     expect(byName('approval_recall').confirmText).toBeTruthy();

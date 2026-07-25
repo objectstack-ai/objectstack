@@ -7,6 +7,7 @@ import {
   APPROVAL_APPROVER_TYPE_DEPRECATED,
   APPROVAL_APPROVER_TYPE_UNKNOWN,
   APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
+  APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
 } from './validate-approval-approvers.js';
 
 function stackWithApprovers(approvers: unknown[]): Record<string, unknown> {
@@ -118,6 +119,56 @@ describe('validateApprovalApprovers', () => {
     expect(validateApprovalApprovers(stack)).toEqual([]);
     node.config.escalation = { enabled: true, timeoutHours: 24, action: 'notify' };
     expect(validateApprovalApprovers(stack)).toEqual([]);
+  });
+
+  // ── empty-slate dead-end (#3424) ─────────────────────────────────────────
+
+  it('flags a node routed only to a single group (unstaffed-position dead-end)', () => {
+    const findings = validateApprovalApprovers(stackWithApprovers([
+      { type: 'position', value: 'exec' },
+    ]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY);
+    expect(findings[0].severity).toBe('info');
+    expect(findings[0].path).toBe('flows[0].nodes[1].config.approvers');
+    expect(findings[0].message).toContain('locked'); // lockRecord defaults true
+    expect(findings[0].hint).toContain("org_membership_level', value: 'owner'");
+  });
+
+  it('flags a node routed only to groups (all position/team/department)', () => {
+    const findings = validateApprovalApprovers(stackWithApprovers([
+      { type: 'position', value: 'finance' },
+      { type: 'team', value: 't1' },
+      { type: 'department', value: 'bu_sales' },
+    ]));
+    expect(findings.filter(f => f.rule === APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY)).toHaveLength(1);
+  });
+
+  it('does NOT flag when a guaranteed-staffed or individual fallback is present', () => {
+    // position + owner tier — the prescribed fallback.
+    expect(validateApprovalApprovers(stackWithApprovers([
+      { type: 'position', value: 'exec' },
+      { type: 'org_membership_level', value: 'owner' },
+    ]))).toEqual([]);
+    // position + a specific user.
+    expect(validateApprovalApprovers(stackWithApprovers([
+      { type: 'position', value: 'exec' },
+      { type: 'user', value: 'u1' },
+    ]))).toEqual([]);
+    // position + the submitter's manager.
+    expect(validateApprovalApprovers(stackWithApprovers([
+      { type: 'position', value: 'exec' },
+      { type: 'manager' },
+    ]))).toEqual([]);
+  });
+
+  it('drops the record-lock clause when lockRecord is false', () => {
+    const stack = stackWithApprovers([{ type: 'position', value: 'exec' }]);
+    (stack.flows as any)[0].nodes[1].config.lockRecord = false;
+    const findings = validateApprovalApprovers(stack);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY);
+    expect(findings[0].message).not.toContain('locked');
   });
 
   it('only scans approval nodes and tolerates malformed shapes', () => {

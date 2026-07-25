@@ -75,6 +75,17 @@ export interface ApprovalRequestRow {
    */
   pending_approver_names?: Record<string, string>;
   /**
+   * Group membership of each STILL-PENDING approver, for `per_group` (会签)
+   * requests only (objectui#2807). Maps an approver id in `pending_approvers`
+   * to the group key(s) it fills — e.g. `{ "u_devadmin": ["finance", "legal"] }`
+   * — so a client can label each "waiting on" chip with the group it represents
+   * instead of showing duplicate, context-free names. Resolved from the same
+   * open-time `__approverGroups` snapshot the `decision_progress` groups use, so
+   * the two never disagree. Absent for non-`per_group` behaviors and for slots
+   * whose group was synthetic (unnamed). Display-only.
+   */
+  pending_approver_groups?: Record<string, string[]>;
+  /**
    * Display values for lookup fields in `payload` (field key → referenced
    * record's display name), so inbox summaries never show foreign-key ids.
    */
@@ -126,6 +137,13 @@ export interface ApprovalRequestRow {
    *   it is strictly more accurate than a client-side identity guess (it already
    *   reflects position/team/manager resolution baked into `pending_approvers`).
    * - `is_submitter` — the caller submitted the request.
+   * - `can_override` (#3424) — the caller is a platform/tenant admin who may act
+   *   on a *pending* request (approve / reject / reassign / recall it) despite
+   *   holding no approver slot. The in-product recovery path for an approval
+   *   routed to an unstaffed position, or whose approvers have all since left,
+   *   which would otherwise leave the request undecidable and the record locked
+   *   forever. Clients OR it into the decision actions' `visible` gate; the
+   *   service re-checks the same privilege before applying any override.
    *
    * Absent when the row is surfaced outside a service read with a user context
    * (e.g. a raw data-API grid); a `record.viewer.*` predicate then fails closed.
@@ -133,6 +151,7 @@ export interface ApprovalRequestRow {
   viewer?: {
     can_act: boolean;
     is_submitter: boolean;
+    can_override: boolean;
   };
 }
 

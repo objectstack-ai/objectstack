@@ -5,6 +5,7 @@ import {
   validateFlowTriggerReadiness,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
+  FLOW_TRIGGER_UNKNOWN_EVENT,
 } from './validate-flow-trigger-readiness.js';
 
 function recordFlow(overrides: Record<string, unknown> = {}) {
@@ -173,6 +174,78 @@ describe('validateFlowTriggerReadiness', () => {
     expect(findings[0].rule).toBe(FLOW_TRIGGER_UNKNOWN_OBJECT);
     expect(findings[0].message).toContain("'contract'");
     expect(findings[0].path).toBe('flows[0].nodes[0].config.timeRelative.object');
+  });
+
+  it('passes the record-after-write (create-OR-update) token (#3427)', () => {
+    const flow = recordFlow({ status: 'active' });
+    (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = 'record-after-write';
+    const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+    expect(findings).toEqual([]);
+  });
+
+  it('flags a record-lifecycle-shaped token with a typo op that never fires', () => {
+    const flow = recordFlow({ status: 'active' });
+    (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = 'record-after-updated';
+    const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TRIGGER_UNKNOWN_EVENT);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain("'record-after-updated'");
+    expect(findings[0].message).toMatch(/never fires/i);
+    expect(findings[0].path).toBe('flows[0].nodes[0].config.triggerType');
+  });
+
+  it('flags any invalid op on either phase (before/after)', () => {
+    const mk = (tt: string) => {
+      const flow = recordFlow({ status: 'active' });
+      (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = tt;
+      return validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+    };
+    expect(mk('record-before-frobnicate').map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNKNOWN_EVENT]);
+    expect(mk('record-after-writes').map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNKNOWN_EVENT]);
+  });
+
+  it('does not flag the canonical firing tokens (incl. insert synonym)', () => {
+    for (const tt of [
+      'record-after-create',
+      'record-after-insert',
+      'record-after-update',
+      'record-before-update',
+      'record-after-delete',
+      'record-after-write',
+      'record-before-write',
+    ]) {
+      const flow = recordFlow({ status: 'active' });
+      (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = tt;
+      const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+      expect(findings, `${tt} should not be flagged`).toEqual([]);
+    }
+  });
+
+  it('flags the phase-less `record-change` bare noun — it never fires', () => {
+    // `record-change` (once offered by the Studio picker as "Record changed
+    // (any)") has no before/after phase, so it maps to no hook and never fires.
+    const flow = recordFlow({ status: 'active' });
+    (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = 'record-change';
+    const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+    expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNKNOWN_EVENT]);
+    expect(findings[0].message).toContain("'record-change'");
+  });
+
+  it('flags a bad-phase token (record-during-update)', () => {
+    const flow = recordFlow({ status: 'active' });
+    (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = 'record-during-update';
+    const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+    expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNKNOWN_EVENT]);
+  });
+
+  it('does not flag non-record triggerTypes (schedule/api/manual)', () => {
+    for (const tt of ['schedule', 'api', 'manual']) {
+      const flow = recordFlow({ status: 'active' });
+      (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = tt;
+      const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+      expect(findings.some((f) => f.rule === FLOW_TRIGGER_UNKNOWN_EVENT)).toBe(false);
+    }
   });
 
   it('handles map-keyed flows/objects and stacks with no flows', () => {

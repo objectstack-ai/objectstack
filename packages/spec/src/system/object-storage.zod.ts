@@ -53,6 +53,11 @@ export const FileMetadataSchema = lazySchema(() => z.object({
   lastModified: z.string().datetime().describe('Last modified timestamp'),
   created: z.string().datetime().describe('Creation timestamp'),
   etag: z.string().optional().describe('Entity tag'),
+  // The opaque `sys_file` id (ADR-0104 D3): the value a file/image/avatar/
+  // video/audio field will store as a reference. Surfaced on the upload-complete
+  // response so a caller can persist it; optional because generic file-metadata
+  // reads (getInfo/list) do not always carry it.
+  fileId: z.string().optional().describe('Opaque sys_file id (ADR-0104 D3 file-as-reference)'),
 }));
 
 export type FileMetadata = z.infer<typeof FileMetadataSchema>;

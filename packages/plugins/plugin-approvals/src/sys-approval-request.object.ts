@@ -240,8 +240,13 @@ export const SysApprovalRequest = ObjectSchema.create({
   // per-viewer block (#3310): approver actions on `record.viewer.can_act`
   // (the caller is a current pending approver — same check the service
   // authorizes a decision with, so position/team approvers resolve correctly),
-  // submitter actions on `record.viewer.is_submitter`. `viewer` is attached by
-  // getRequest/listRequests; where it is absent the predicate fails closed.
+  // submitter actions on `record.viewer.is_submitter`. The core decision levers
+  // (approve/reject/reassign) additionally OR in `record.viewer.can_override`
+  // (#3424) so a platform/tenant admin can rescue a request routed to an
+  // unstaffed position — otherwise undecidable, locking the record forever — by
+  // approving, rejecting, or reassigning it to a real approver. `viewer` is
+  // attached by getRequest/listRequests; where it is absent the predicate fails
+  // closed.
   actions: [
     {
       name: 'approval_approve',
@@ -261,7 +266,7 @@ export const SysApprovalRequest = ObjectSchema.create({
         // string[]`; the decision route persists them on `sys_approval_action`.
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
       ],
-      visible: 'record.viewer.can_act',
+      visible: 'record.viewer.can_act || record.viewer.can_override',
       locations: ['record_section', 'list_item'],
       successMessage: 'Approved.',
       refreshAfter: true,
@@ -280,7 +285,7 @@ export const SysApprovalRequest = ObjectSchema.create({
         { name: 'comment', label: 'Comment', type: 'textarea', required: false },
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
       ],
-      visible: 'record.viewer.can_act',
+      visible: 'record.viewer.can_act || record.viewer.can_override',
       confirmText: 'Reject this request? A rejection is final for every approver.',
       locations: ['record_section', 'list_item'],
       successMessage: 'Rejected.',
@@ -302,7 +307,7 @@ export const SysApprovalRequest = ObjectSchema.create({
         { field: 'submitter_id', name: 'to', label: 'New approver', required: true, helpText: 'User to hand this step to' },
         { name: 'comment', label: 'Comment', type: 'textarea', required: false },
       ],
-      visible: 'record.viewer.can_act',
+      visible: 'record.viewer.can_act || record.viewer.can_override',
       locations: ['record_section'],
       successMessage: 'Reassigned.',
       refreshAfter: true,

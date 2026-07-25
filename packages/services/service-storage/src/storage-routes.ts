@@ -230,6 +230,10 @@ export function registerStorageRoutes(
 
       res.json({
         data: {
+          // The opaque sys_file id — the value a file field stores as a
+          // reference (ADR-0104 D3). Previously omitted, so a caller could not
+          // learn the id to persist after committing an upload.
+          fileId: updated!.id ?? fileId,
           path: updated!.key,
           name: updated!.name,
           size: updated!.size ?? 0,

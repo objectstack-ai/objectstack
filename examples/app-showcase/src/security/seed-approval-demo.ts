@@ -41,8 +41,16 @@ const SYS = { isSystem: true } as const;
 
 const ADMIN_EMAIL = 'admin@objectos.ai';
 
-/** Positions the admin is granted so they resolve as an approver on the demos. */
-const ADMIN_APPROVAL_POSITIONS = ['manager', 'finance', 'legal'] as const;
+/**
+ * Positions the admin is granted so they resolve as an approver on the demos.
+ * Covers every `{ type: 'position' }` the showcase approval flows route to and
+ * expect the admin to hold — including `exec`, the SECOND tier of
+ * `showcase_budget_approval` (manager → exec). Without `exec` a budget approval
+ * that a user drives to step 2 routes to an unstaffed position and dead-ends
+ * (framework#3424): undecidable request, record locked. Keep this in sync with
+ * the position values authored in `automation/flows`.
+ */
+const ADMIN_APPROVAL_POSITIONS = ['manager', 'finance', 'legal', 'exec'] as const;
 
 /** A phone-based demo persona (§6 "phone sign-in surfaces"). */
 const PHONE_DEMO_USER = {

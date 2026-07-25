@@ -1534,8 +1534,67 @@ export const TaskDueReminderFlow = defineFlow({
   ],
 });
 
+/**
+ * Urgent Task Alert — a single `record-after-write` flow that fires on BOTH
+ * create and update (#3427), so "a task was created urgent OR just escalated to
+ * urgent" is one flow, not two near-identical copies.
+ *
+ * `record-after-write` binds afterInsert + afterUpdate; exactly one fires per
+ * mutation. The start condition uses the create/update discrimination the write
+ * trigger enables: `previous == null` is the create leg (no prior row), so the
+ * `||` also matches a brand-new urgent task; on the update leg it fires only when
+ * priority actually crosses INTO 'urgent' (not on every later save while urgent).
+ */
+export const UrgentTaskAlertFlow = defineFlow({
+  name: 'showcase_urgent_task_alert',
+  label: 'Alert on Urgent Task (created or escalated)',
+  description:
+    'One record-after-write flow: notifies when a task is created as Urgent or its priority is raised to Urgent.',
+  type: 'record_change',
+  status: 'active',
+  nodes: [
+    {
+      id: 'start',
+      type: 'start',
+      label: 'On Task Created or Updated',
+      config: {
+        objectName: 'showcase_task',
+        // create OR update in one flow (#3427)
+        triggerType: 'record-after-write',
+        // Fire on the transition into 'urgent': a freshly-created urgent task
+        // (previous == null) OR an escalation (previous.priority != 'urgent').
+        condition: "priority == 'urgent' && (previous == null || previous.priority != 'urgent')",
+      },
+    },
+    {
+      id: 'alert',
+      type: 'notify',
+      label: 'Notify Assignee',
+      config: {
+        topic: 'task.urgent',
+        // Notify the assignee; fall back to whoever raised the priority
+        // (`{$User.Id}` = the triggering user) so an as-yet-unassigned urgent task
+        // still pings someone. Empty recipients are dropped, so the fallback only
+        // applies when `assignee` is unset.
+        recipients: ['{record.assignee}', '{$User.Id}'],
+        channels: ['inbox'],
+        severity: 'warning',
+        title: 'Urgent task: {record.title}',
+        message: 'Task "{record.title}" is now Urgent — it needs attention.',
+        actionUrl: '/showcase_task',
+      },
+    },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'alert' },
+    { id: 'e2', source: 'alert', target: 'end' },
+  ],
+});
+
 export const allFlows = [
   TaskCompletedFlow,
+  UrgentTaskAlertFlow,
   ExpenseSignoffFlow,
   CommitteeQuorumFlow,
   TaskDueReminderFlow,

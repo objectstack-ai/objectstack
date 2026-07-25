@@ -1486,4 +1486,38 @@ describe('ObjectSchema.create() password-field author warning (ADR-0100)', () =>
     });
     expect(warn).not.toHaveBeenCalled();
   });
+
+  it('does NOT warn when the field affirms intent with ackPlaintextMasking (#3420)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ObjectSchema.create({
+      name: 'adr0100_acked_pw',
+      fields: { admin_password: { type: 'password', ackPlaintextMasking: true } },
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('still warns about un-acknowledged password fields when only some opt in', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ObjectSchema.create({
+      name: 'adr0100_partial_ack',
+      fields: {
+        acked_pw: { type: 'password', ackPlaintextMasking: true },
+        raw_pw: { type: 'password' },
+      },
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const msg = warn.mock.calls[0]?.[0] as string;
+    expect(msg).toContain('raw_pw');
+    expect(msg).not.toContain('acked_pw');
+  });
+
+  it('points authors at the ackPlaintextMasking opt-out in the warning text', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ObjectSchema.create({
+      name: 'adr0100_hint_pw',
+      fields: { pw: { type: 'password' } },
+    });
+    const msg = warn.mock.calls[0]?.[0] as string;
+    expect(msg).toContain('ackPlaintextMasking');
+  });
 });

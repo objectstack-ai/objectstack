@@ -12,7 +12,7 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import { IDataDriver, IDataEngine, Logger, createLogger, withTransientRetry, type RetryOptions } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
@@ -2120,6 +2120,112 @@ export class ObjectQL implements IDataEngine {
     return records;
   }
 
+  /**
+   * Whether a value is an opaque `sys_file` id token — the minted uuid/nanoid
+   * form (letters, digits, `_`, `-`, bounded length), and crucially NOT a URL:
+   * a `https://…` / `/api/…` / `data:…` / `blob:…` file value carries `:`, `/`
+   * or `.` and is left untouched (it is a legacy/external URL, not a reference).
+   */
+  private static readonly FILE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+  /**
+   * Resolve file-field id references to their expanded `FileValueSchema` form
+   * (ADR-0104 D3 wave 2). A `file`/`image`/`avatar`/`video`/`audio` value
+   * stored as an opaque `sys_file` id string is enriched, in place, to
+   * `{ id, name, size, mimeType, url }` — `url` derived from the stable
+   * `/files/:fileId` resolver, never stored.
+   *
+   * DUAL-MODE SAFE: an inline-blob value (an object) and a string that does
+   * NOT match a committed `sys_file` row (e.g. an external url) pass through
+   * unchanged, so a field may hold either form during the pre-v17 window.
+   *
+   * Batched: at most one `sys_file` `id $in […]` read per call (no N+1); and
+   * zero reads when no field holds a string value (the blob-only case), so the
+   * step is free for objects that have not adopted references.
+   */
+  private async resolveFileReferences(
+    objectName: string,
+    records: any[],
+    execCtx?: ExecutionContext,
+  ): Promise<any[]> {
+    if (!records || records.length === 0) return records;
+    const objectSchema = this._registry.getObject(objectName);
+    if (!objectSchema || !objectSchema.fields) return records;
+    // Nothing to resolve against if the file object is not even registered
+    // (e.g. the storage plugin is absent) — skip without a failing query.
+    if (!this._registry.getObject('sys_file')) return records;
+
+    const fileFields = Object.entries(objectSchema.fields)
+      .filter(([, def]: [string, any]) => def && FILE_REFERENCE_TYPES.has(def.type))
+      .map(([name]) => name);
+    if (fileFields.length === 0) return records;
+
+    // Collect candidate ids. A file field legitimately holds either an inline
+    // blob (an object — already the rich form, skipped) OR, in the dual-mode /
+    // legacy world, a URL string (`https://…`, `/api/…`, `data:…`, `blob:…`).
+    // Only an OPAQUE id token — the minted uuid/nanoid form, never url-shaped —
+    // is a `sys_file` reference to resolve. Filtering out url-shaped strings is
+    // what keeps a seeded `data:`/CDN image value from firing a bogus lookup.
+    const candidateIds: string[] = [];
+    const addCandidate = (v: unknown) => {
+      if (typeof v === 'string' && ObjectQL.FILE_ID_RE.test(v)) candidateIds.push(v);
+    };
+    for (const record of records) {
+      for (const fieldName of fileFields) {
+        const val = record[fieldName];
+        if (val == null) continue;
+        if (Array.isArray(val)) {
+          for (const v of val) addCandidate(v);
+        } else {
+          addCandidate(val);
+        }
+      }
+    }
+    const uniqueIds = [...new Set(candidateIds)];
+    if (uniqueIds.length === 0) return records; // blob-only / empty → zero cost
+
+    // One batched sys_file read. `__expandRead` mirrors the lookup-expansion
+    // sub-read (a system-built marker, never from client input). Metadata only —
+    // byte-download authorization is enforced at the /files/:fileId resolver.
+    let fileRows: any[] = [];
+    try {
+      fileRows = (await this.find(
+        'sys_file',
+        { where: { id: { $in: uniqueIds } }, context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext },
+      )) ?? [];
+    } catch {
+      return records; // sys_file unregistered / unreadable — leave ids as-is
+    }
+
+    const fileMap = new Map<string, any>();
+    for (const row of fileRows) {
+      if (row?.id != null && row.status === 'committed') fileMap.set(String(row.id), row);
+    }
+    if (fileMap.size === 0) return records;
+
+    const toValue = (row: any) => ({
+      id: String(row.id),
+      ...(row.name != null ? { name: row.name } : {}),
+      ...(row.size != null ? { size: row.size } : {}),
+      ...(row.mime_type != null ? { mimeType: row.mime_type } : {}),
+      url: `/api/v1/storage/files/${row.id}`,
+    });
+
+    for (const record of records) {
+      for (const fieldName of fileFields) {
+        const val = record[fieldName];
+        if (val == null) continue;
+        if (Array.isArray(val)) {
+          record[fieldName] = val.map((v: any) =>
+            typeof v === 'string' && fileMap.has(v) ? toValue(fileMap.get(v)) : v);
+        } else if (typeof val === 'string' && fileMap.has(val)) {
+          record[fieldName] = toValue(fileMap.get(val));
+        }
+      }
+    }
+    return records;
+  }
+
   // ============================================
   // Data Access Methods (IDataEngine Interface)
   // ============================================
@@ -2240,7 +2346,14 @@ export class ObjectQL implements IDataEngine {
           if (ast.expand && Object.keys(ast.expand).length > 0 && Array.isArray(result)) {
             result = await this.expandRelatedRecords(object, result, ast.expand, 0, opCtx.context);
           }
-          
+
+          // Post-process: resolve file-field id references to their expanded
+          // FileValueSchema form (ADR-0104 D3). Always-on but free unless a file
+          // field holds an id string; dual-mode-safe (blobs pass through).
+          if (Array.isArray(result)) {
+            result = await this.resolveFileReferences(object, result, opCtx.context);
+          }
+
           hookContext.event = 'afterFind';
           hookContext.result = result;
           await this.triggerHooks('afterFind', hookContext);
@@ -2322,6 +2435,12 @@ export class ObjectQL implements IDataEngine {
       if (ast.expand && Object.keys(ast.expand).length > 0 && result != null) {
         const expanded = await this.expandRelatedRecords(objectName, [result], ast.expand, 0, opCtx.context);
         result = expanded[0];
+      }
+
+      // Post-process: resolve file-field id references (ADR-0104 D3).
+      if (result != null) {
+        const resolved = await this.resolveFileReferences(objectName, [result], opCtx.context);
+        result = resolved[0];
       }
 
       hookContext.event = 'afterFind';
@@ -2450,7 +2569,7 @@ export class ObjectQL implements IDataEngine {
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
             validateRecord(schemaForValidation, rows[i], 'insert');
-            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context) });
+            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: opCtx.context?.seedReplay === true });
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
@@ -2740,7 +2859,7 @@ export class ObjectQL implements IDataEngine {
                    hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedKeys, this.logger) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
-               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context) });
+               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: opCtx.context?.seedReplay === true });
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
@@ -2808,7 +2927,7 @@ export class ObjectQL implements IDataEngine {
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser });
+                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: opCtx.context?.seedReplay === true });
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -2817,7 +2936,7 @@ export class ObjectQL implements IDataEngine {
                        }
                    }
                } else {
-                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser });
+                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: opCtx.context?.seedReplay === true });
                }
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else {

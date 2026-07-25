@@ -182,6 +182,8 @@ Enforce allowed state transitions:
 
 `transitions` governs updates; `initialStates` governs the create. A rule may declare either or both.
 
+**Seed data is exempt from the state machine** (#3433). Curated fixtures loaded by `SeedLoaderService` may be born in any declared state — a project seeded `completed`, an opportunity `closed_won` — without `initialStates` or `transitions` being enforced. Seeds are established facts, not lifecycle events. Every other validation still applies, and `os lint` warns if a seeded value is not a state the machine declares, so typos surface before boot.
+
 ### Cross-Field Validation
 
 Validate relationships between multiple fields:

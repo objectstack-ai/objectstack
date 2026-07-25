@@ -65,7 +65,7 @@ record (matched by `externalId`).
 | Mode | Behavior | Use Case |
 |:-----|:---------|:---------|
 | `upsert` | Create if new, update if found | Default — idempotent for most data |
-| `insert` | Create only, throw on duplicate | Append-only tables, audit logs |
+| `insert` | Insert **every** record unconditionally — no existing-row check, so it **duplicates the table on each replay boot** ([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)). Rarely what you want | Append-only rows loaded exactly once (never re-run) |
 | `update` | Update only, skip if not found | Migration patches on existing rows |
 | `ignore` | Create if new, silently skip duplicates | Bootstrap data that must not overwrite user edits |
 | `replace` | Insert without checking for an existing match — the seed loader does **not** delete anything itself; the target table must already be empty (or cleared by the caller) | Cache / lookup tables rebuilt from an already-truncated table |
@@ -114,6 +114,34 @@ defineSeed(ExchangeRateCache, {
   ],
 });
 ```
+
+### `insert` — Not Idempotent (Avoid for Replayed Seeds)
+
+Seeds are **replayed** — they re-load on every dev-server boot and every package
+re-publish, not applied once. `insert` writes every record with **no existing-row
+check**, so a replayed `insert` dataset duplicates its table on each restart
+(a 3-row fixture becomes 6, then 9 — [#3434](https://github.com/objectstack-ai/objectstack/issues/3434)).
+It is almost never the right mode: reach for `upsert` (or `ignore`) with a stable
+`externalId` instead. `os validate` warns on any `mode: 'insert'` seed.
+
+---
+
+## Seeds and State Machines
+
+A seed is a curated snapshot of **established facts** — a project already
+`completed`, an opportunity already `closed_won` — not a record walking its
+lifecycle. So a seed write is **exempt from the object's `state_machine` rule**
+([#3433](https://github.com/objectstack-ai/objectstack/issues/3433)): it may be
+born in any state, and neither `initialStates` (the insert entry guard) nor
+`transitions` (the update guard) is enforced. Without this exemption a fixture
+that seeds a mid-lifecycle status would be silently rejected on the first boot,
+taking its lookup children down with it — the "installed but no data" trap.
+
+The exemption is scoped to the state machine **only**. Every other validation
+still runs, so a seeded value must still be a valid field option and pass
+`format`, `cross_field`, and the rest. And `os validate` warns when a seeded
+value is not a state the machine declares (`seed-value-outside-state-machine`),
+so a typo like `'complete'` for `'completed'` still surfaces before boot.
 
 ---
 
@@ -209,6 +237,31 @@ const contactsSeed = defineSeed(Contact, {
 // Export in dependency order — parents before children
 export const SeedData = [accountsSeed, contactsSeed];
 ```
+
+### Composite `externalId` — Join / Junction Tables
+
+A join (junction) table linking two objects many-to-many has **no single-field
+natural key** — the *pair* of foreign keys is what makes a row unique. Pass a
+**list** of field names as the `externalId` so the seed runner can match existing
+rows on the composite key and stay idempotent across replays. The foreign keys are
+compared by their *resolved* record ids, which are stable between boots.
+
+```typescript
+// A team can staff many projects; a project can have many teams.
+// `showcase_project_membership` is the join row — unique on (team, project).
+const membershipsSeed = defineSeed(ProjectMembership, {
+  mode: 'ignore',                     // skip pairs that already exist
+  externalId: ['team', 'project'],    // composite natural key — both FKs
+  records: [
+    { team: 'Experience', project: 'Website Relaunch', engagement: 'owner' },
+    { team: 'Platform',   project: 'Data Platform',    engagement: 'owner' },
+    { team: 'Platform',   project: 'Website Relaunch', engagement: 'contributor' },
+  ],
+});
+```
+
+Without a composite key such a table can only fall back to `mode: 'insert'`, which
+duplicates on every replay boot ([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)).
 
 ---
 
@@ -353,6 +406,7 @@ databases.
 | User records | `'email'` |
 | Generic named records | `'name'` (default) |
 | Externally sourced data | `'external_id'` |
+| Join / junction tables (no single natural key) | a composite list, e.g. `['team', 'project']` |
 
 ### Scope demo data with `env`
 
@@ -391,7 +445,7 @@ function defineSeed<
 >(
   objectDef: TObj,
   config: {
-    externalId?: string;                    // default: 'name'
+    externalId?: string | string[];         // single field, or a composite list (join tables); default: 'name'
     mode?: 'insert' | 'update' | 'upsert' | 'replace' | 'ignore'; // default: 'upsert'
     env?: Array<'prod' | 'dev' | 'test'>;  // default: ['prod','dev','test']
     records: Array<Partial<Record<keyof TObj['fields'], unknown>>>;

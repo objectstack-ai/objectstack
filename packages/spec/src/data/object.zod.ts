@@ -1262,7 +1262,10 @@ const warnedPasswordObjects = new Set<string>();
  * A warning, not an error: `password` now has a defined generic-path contract,
  * and the field-zoo example intentionally exercises every field type — a hard
  * error would be self-inflicted breakage. Deduped per object name so a schema
- * imported many times warns once. `managedBy: 'better-auth'` objects are exempt.
+ * imported many times warns once. `managedBy: 'better-auth'` objects are exempt,
+ * as are fields that opt in with `ackPlaintextMasking: true` — the author's
+ * explicit "this is intended" acknowledgment (#3420), which lets a deliberate
+ * demo/design (e.g. the showcase field-zoo) start with zero warnings.
  */
 function warnGenericPasswordFields(
   objectName: unknown,
@@ -1271,8 +1274,10 @@ function warnGenericPasswordFields(
 ): void {
   if (managedBy === 'better-auth') return;
   if (!fields || typeof fields !== 'object') return;
-  const passwordFields = Object.entries(fields as Record<string, { type?: string }>)
-    .filter(([, def]) => def && def.type === 'password')
+  const passwordFields = Object.entries(
+    fields as Record<string, { type?: string; ackPlaintextMasking?: boolean }>,
+  )
+    .filter(([, def]) => def && def.type === 'password' && def.ackPlaintextMasking !== true)
     .map(([fieldName]) => fieldName);
   if (passwordFields.length === 0) return;
   const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : '<unnamed>';
@@ -1285,7 +1290,7 @@ function warnGenericPasswordFields(
     'it is NOT one-way hashed (that is owned by the auth subsystem, for its identity ' +
     "tables only). Use `Field.secret(...)` for reversible machine credentials, or model " +
     'login credentials on the auth user object. If this is intended, the masking contract ' +
-    'now applies and this warning is safe to ignore.',
+    'applies — affirm it with `ackPlaintextMasking: true` on the field to silence this warning.',
   );
 }
 

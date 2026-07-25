@@ -40,8 +40,20 @@ export interface FlowTriggerReadinessFinding {
 // Rule ids (registry entries).
 export const FLOW_TRIGGER_UNKNOWN_OBJECT = 'flow-trigger-unknown-object';
 export const FLOW_DRAFT_STATUS_AMBIGUOUS = 'flow-draft-status-ambiguous';
+export const FLOW_TRIGGER_UNKNOWN_EVENT = 'flow-trigger-unknown-event';
 
 type AnyRec = Record<string, unknown>;
+
+/**
+ * The record-change trigger fires only for a `triggerType` matching this exact
+ * grammar — the same set its `triggerTypeToHookEvents` maps to ObjectQL hooks.
+ * `insert` is a synonym for `create`; `write` is the create-OR-update union
+ * (#3427). Any OTHER `record-`-prefixed token — a typo (`record-after-updated`),
+ * a phase-less bare noun (`record-change`), or a bad phase (`record-during-update`)
+ * — binds to the trigger but maps to NO hook and never fires. Kept in sync with
+ * that trigger (one small, stable contract).
+ */
+const VALID_RECORD_TRIGGER = /^record-(?:before|after)-(?:create|insert|update|delete|write)$/;
 
 /** Coerce an array-or-name-keyed-map collection to an array (name injected). */
 function asArray(v: unknown): AnyRec[] {
@@ -128,6 +140,27 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
             `If the object comes from another installed package, this warning can be ignored.`,
         });
       }
+    }
+
+    // 1c. A `record-`-prefixed triggerType the trigger cannot map to any hook —
+    //     a typo (`record-after-updated`), a phase-less bare noun (`record-change`,
+    //     which the Studio picker once offered as "Record changed (any)"), or a bad
+    //     phase (`record-during-update`). The engine routes any `record-` token to
+    //     the record-change trigger, which then binds to NO hook and never fires
+    //     (only a runtime warn). Surface the never-fire defect at authoring time.
+    if (start && isRecordTriggered && !VALID_RECORD_TRIGGER.test((triggerType ?? '').trim())) {
+      findings.push({
+        severity: 'warning',
+        rule: FLOW_TRIGGER_UNKNOWN_EVENT,
+        where: `flow "${flowName}" › start node`,
+        path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
+        message:
+          `triggerType '${triggerType}' is not a recognized record trigger — the flow binds to the ` +
+          `record-change trigger but never fires (the runtime stays silent about it).`,
+        hint:
+          `Use record-{before,after}-{create,update,delete,write}. 'write' fires on create OR update in one ` +
+          `flow (#3427); create/insert are synonyms. There is no "any change" token — pick the specific event(s).`,
+      });
     }
 
     // 2. Auto-triggered flow whose status is 'draft' — authored or defaulted

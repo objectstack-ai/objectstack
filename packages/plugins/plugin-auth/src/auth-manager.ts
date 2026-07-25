@@ -1849,6 +1849,23 @@ export class AuthManager {
         loginPage: this.getConsolePageUrl('/login'),
         consentPage: this.getConsolePageUrl('/oauth/consent'),
         schema: buildOauthProviderPluginSchema(),
+        // better-auth's oauth-provider cannot see the well-known documents we
+        // mount ourselves at the issuer ROOT (RFC 8414 §3 requires them there,
+        // not under the auth basePath) — registerOidcDiscoveryRoutes serves
+        // /.well-known/oauth-authorization-server AND the path-insertion variant
+        // (`…/api/v1/auth`) the notice names. Its "Please ensure … exists"
+        // reminder is therefore a false positive on every stock example.
+        //
+        // #3420 root cause of the DOUBLE print: the notice fires in the
+        // oauth-provider plugin's `init(ctx)`, which better-auth runs once per
+        // `betterAuth()` construction — and the instance is built more than once
+        // at boot (an initial lazy build, then a rebuild once boot-time auth
+        // *settings* are applied — applyConfigPatch() nulls the cached instance
+        // so the next request rebuilds with the new policy). Gating the emitter
+        // here silences the one requirement we've already satisfied across every
+        // build path, independent of how many times auth is constructed, so an
+        // official dev boot stays warning-free.
+        silenceWarnings: { oauthAuthServerConfig: true },
         // ── MCP OAuth track (#2698) ────────────────────────────────
         // Coarse tool-family scopes for the platform's own MCP endpoint,
         // advertised alongside the standard OIDC scopes. Names are

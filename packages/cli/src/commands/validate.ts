@@ -20,6 +20,7 @@ import { validateVisibilityPredicates } from '@objectstack/lint';
 import { validateSecurityPosture } from '@objectstack/lint';
 import { validateFlowTriggerReadiness } from '@objectstack/lint';
 import { validateFlowTemplatePaths } from '@objectstack/lint';
+import { validateReadonlyFlowWrites } from '@objectstack/lint';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import {
   printHeader,
@@ -441,6 +442,41 @@ export default class Validate extends Command {
         for (const w of flowTemplateWarnings.slice(0, 50)) {
           console.log(chalk.yellow(`  ⚠ ${w.where}: ${w.message}`));
           console.log(chalk.dim(`      ${w.hint}`));
+        }
+      }
+
+      // 3e2. [#3425] Readonly flow-write guardrail. A `runAs:user` update_record
+      //      that writes a static-`readonly` field is a SILENT no-op — the engine
+      //      strips it from the UPDATE payload (#2948) yet the step reports
+      //      success. This is the shift-left of the run-time strip warning
+      //      (#3407/#3413): a static readonly + literal field is a certain no-op
+      //      → error (gates); a `readonlyWhen` field is per-record-state → advisory.
+      if (!flags.json) printStep('Checking readonly flow writes (#3425)...');
+      const readonlyWriteFindings = validateReadonlyFlowWrites(normalized as Record<string, unknown>);
+      const readonlyWriteErrors = readonlyWriteFindings.filter((f) => f.severity === 'error');
+      const readonlyWriteWarnings = readonlyWriteFindings.filter((f) => f.severity === 'warning');
+      if (readonlyWriteErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({
+            valid: false,
+            errors: readonlyWriteErrors,
+            duration: timer.elapsed(),
+          }, null, 2));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Readonly flow-write check failed (${readonlyWriteErrors.length} issue${readonlyWriteErrors.length > 1 ? 's' : ''})`);
+        for (const f of readonlyWriteErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+        }
+        this.exit(1);
+      }
+      if (!flags.json) {
+        for (const f of readonlyWriteWarnings.slice(0, 50)) {
+          console.log(chalk.yellow(`  ⚠ ${f.where}: ${f.message}`));
+          console.log(chalk.dim(`      ${f.hint}`));
         }
       }
 

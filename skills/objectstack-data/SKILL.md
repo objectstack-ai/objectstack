@@ -186,6 +186,16 @@ export const Invoice = ObjectSchema.create({
 - Use `visibleWhen` to hide irrelevant fields in ObjectUI forms.
 - Use `readonlyWhen` for state-locked fields; the ObjectQL write path ignores
   incoming changes when the predicate is `TRUE`.
+- **`readonly: true` governs the end-user surface, not trusted system writers.**
+  A non-system write (REST/UI, and any `runAs:'user'` flow — the default) has
+  the field **silently stripped** from an UPDATE payload; the write reports
+  success but the value never lands (#2948). System-context writes —
+  `runAs:'system'` flows, system hooks, seeds, imports, migrations — are exempt
+  and DO write it. So the pattern "users can't edit this, but automation
+  maintains it" is expressed by declaring the field `readonly` **and** running
+  the maintaining flow `runAs:'system'` (see **objectstack-automation**), not by
+  removing `readonly`. Writing a `readonly` field from a `runAs:'user'`
+  `update_record` node is a build-time **error** (`os validate` / `os build`).
 - Use `requiredWhen` for conditional requiredness; the ObjectQL validator
   enforces it on submit. `conditionalRequired` is a deprecated compatibility
   alias, not the preferred authoring field.

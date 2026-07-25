@@ -511,6 +511,18 @@ export const FieldSchema = lazySchema(() => z.object({
    * over permission-set field grants. Enforced by plugin-security's FieldMasker.
    */
   requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D3] Capabilities required to read/edit this field (mask on read, deny on write; AND-gate).'),
+
+  /**
+   * [ADR-0100] Author's explicit acknowledgment that a generic (non-auth)
+   * `password` field is stored PLAINTEXT at rest and masked to SECRET_MASK on
+   * read — it is NOT one-way hashed (that lives only in the auth subsystem).
+   * Set `true` to affirm the masking contract is intended; this is the
+   * documented way to express "this is intended" and silences the non-fatal
+   * `ObjectSchema.create()` author-time warning so a deliberate demo/design
+   * starts clean (#3420). No runtime effect beyond the diagnostic; ignored on
+   * non-`password` fields.
+   */
+  ackPlaintextMasking: z.boolean().optional().describe("[ADR-0100] Affirm a generic `password` field's plaintext-at-rest / masked-on-read contract is intended, silencing the author-time warning (#3420). No effect on non-password fields."),
   system: z.boolean().optional().describe('Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag.'),
   sortable: z.boolean().optional().default(true).describe('Whether field is sortable in list views'),
   inlineHelpText: z.string().optional().describe('Help text displayed below the field in forms'),

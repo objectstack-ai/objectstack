@@ -136,9 +136,7 @@ export const Project = ObjectSchema.create({
         active: ['on_hold', 'completed', 'cancelled'],
         on_hold: ['active', 'cancelled'],
         // `completed → active` is reopen — a real PM affordance (cancelled can
-        // already be revived via `planned`). It also keeps the seed's FSM walk
-        // (#3415) replayable: the walk re-runs on every boot, and a dead-end
-        // terminal state would reject the hop back through `active`.
+        // already be revived via `planned`), so no status is a dead end.
         completed: ['active'],
         cancelled: ['planned'],
       },

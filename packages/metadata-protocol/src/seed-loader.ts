@@ -870,8 +870,19 @@ export class SeedLoaderService implements ISeedLoaderService {
    * approvals) for it is semantically wrong and dangerous — a self-triggering
    * flow can loop and wedge the whole first-boot (2026-07-06 incident).
    * Lifecycle HOOKS (derived/default fields, validation) still run.
+   *
+   * `seedReplay` (#3433) tells the engine this is curated seed data so the
+   * object's `state_machine` validation rule is skipped — both the
+   * `initialStates` entry-point check on insert and the transition check on
+   * update. A seed is a snapshot of established facts (a `completed` project, a
+   * `closed_won` opportunity), not a record walking its lifecycle, so the FSM
+   * entry/transition guards do not apply. Without this a declared
+   * `initialStates` silently rejects every mid-lifecycle seed row and cascades
+   * its master-detail children — the "installed but no data" failure for
+   * showcase and every marketplace template. All OTHER validation (field
+   * shape, `format`, `cross_field`, `script`, `json_schema`) still runs.
    */
-  private static readonly SEED_OPTIONS = { context: { isSystem: true, skipTriggers: true } } as const;
+  private static readonly SEED_OPTIONS = { context: { isSystem: true, skipTriggers: true, seedReplay: true } } as const;
 
   /**
    * Run an engine write; if it fails ONLY because a post-write roll-up summary

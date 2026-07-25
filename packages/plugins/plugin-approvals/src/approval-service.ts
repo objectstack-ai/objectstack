@@ -6,6 +6,13 @@ import {
   canonicalApproverType,
   type ApprovalNodeConfig,
 } from '@objectstack/spec/automation';
+import {
+  ADMIN_FULL_ACCESS,
+  ORGANIZATION_ADMIN,
+  BUILTIN_IDENTITY_PLATFORM_ADMIN,
+  BUILTIN_IDENTITY_ORG_OWNER,
+  BUILTIN_IDENTITY_ORG_ADMIN,
+} from '@objectstack/spec/identity';
 import type {
   IApprovalService,
   ApprovalRequestRow,
@@ -305,6 +312,45 @@ export class ApprovalService implements IApprovalService {
     if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
     if (raw.status !== 'pending') throw new Error(`INVALID_STATE: request is ${raw.status}`);
     return raw;
+  }
+
+  /**
+   * Privileged-override gate (#3424). A stuck approval — one routed to a
+   * position/team with no holders (so its `pending_approvers` is only an
+   * unresolvable `type:value` literal) or to approvers who have all since left —
+   * is otherwise undecidable: no concrete user is in the slate, so every normal
+   * `decide` / `reassign` / `recall` is `FORBIDDEN` and (with `lockRecord`) the
+   * record stays locked forever with no in-product recovery. A platform or
+   * tenant admin — the same posture the engine's superuser bypass already
+   * trusts — may always act on a PENDING request to release it: approve, reject,
+   * reassign it to a real approver, or recall it.
+   *
+   * A platform admin crosses the tenant wall (matching the unscoped
+   * `admin_full_access` evidence); a tenant admin may override only within their
+   * own org (or an org-less request). A system context always passes. Signals are
+   * read defensively off the resolved exec context (`permissions` / `positions` /
+   * the derived `posture`, ADR-0095) so any transport that resolves through the
+   * shared authz resolver lights this up without extra wiring.
+   */
+  private isOverrideActor(context: SharingExecutionContext, requestOrg?: string | null): boolean {
+    if (!context) return false;
+    if (context.isSystem) return true;
+    const perms = Array.isArray(context.permissions) ? context.permissions : [];
+    const positions = Array.isArray(context.positions) ? context.positions : [];
+    const posture = (context as any).posture;
+    const isPlatformAdmin = posture === 'PLATFORM_ADMIN'
+      || perms.includes(ADMIN_FULL_ACCESS)
+      || positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN);
+    if (isPlatformAdmin) return true;
+    const isTenantAdmin = posture === 'TENANT_ADMIN'
+      || perms.includes(ORGANIZATION_ADMIN)
+      || positions.includes(BUILTIN_IDENTITY_ORG_OWNER)
+      || positions.includes(BUILTIN_IDENTITY_ORG_ADMIN);
+    if (!isTenantAdmin) return false;
+    // A tenant admin's authority stops at their own org; a null-org request is
+    // global and any admin may release it.
+    const actorTenant = (context as any).tenantId ?? (context as any).organizationId ?? null;
+    return requestOrg == null || (actorTenant != null && String(requestOrg) === String(actorTenant));
   }
 
   /**
@@ -673,6 +719,20 @@ export class ApprovalService implements IApprovalService {
       { approvers: input.config.approvers }, input.record, ctxOrg, { now: nowDate.getTime(), substitutions, groups },
     );
 
+    // #3424: an approval routed to a target with no holders (e.g. an unstaffed
+    // `position`) resolves to only unresolvable `type:value` literals — no
+    // concrete user can act. The request is still opened (a privileged admin can
+    // override it, and legacy 15.x literal slots stay queryable), but warn
+    // loudly so the misconfiguration surfaces instead of silently locking the
+    // record with no obvious cause.
+    if (!approvers.some(a => a && !a.includes(':'))) {
+      this.logger?.warn?.(
+        `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no concrete approver`
+        + ' — the request is decidable only by a privileged admin. Check that the approver target(s) are staffed.',
+        { object: input.object, recordId: input.recordId, node: input.nodeId, resolved: approvers },
+      );
+    }
+
     const now = nowDate.toISOString();
     const id = uid('areq');
     const processName = `flow:${input.flowName ?? input.nodeId}`;
@@ -832,7 +892,12 @@ export class ApprovalService implements IApprovalService {
     if (raw.status !== 'pending') throw new Error(`INVALID_STATE: request is ${raw.status}`);
 
     const pendingApprovers = csvSplit(raw.pending_approvers);
-    if (!context.isSystem && !pendingApprovers.includes(input.actorId)) {
+    // A privileged admin may override a stuck request (#3424) even when they
+    // hold no slot — the escape hatch for an approval routed to an unstaffed
+    // position or to approvers who have all left.
+    const isOverride = this.isOverrideActor(context, raw.organization_id ?? null);
+    const isSlotHolder = pendingApprovers.includes(input.actorId);
+    if (!isSlotHolder && !isOverride) {
       throw new Error(`FORBIDDEN: actor '${input.actorId}' is not a pending approver`);
     }
 
@@ -855,7 +920,12 @@ export class ApprovalService implements IApprovalService {
     // finalizes the node (one veto), so only the approve path can hold it open.
     // `first_response` finalizes on the first approval (falls straight through).
     const behavior = config.behavior ?? 'first_response';
-    if (input.decision === 'approve' && behavior !== 'first_response') {
+    // A privileged override (an admin rescuing a stuck request, #3424) is an
+    // authoritative decision, not one vote among the resolved slate — it
+    // finalizes the node immediately, regardless of `unanimous`/`quorum`/
+    // `per_group`. Only a real slot holder's approval feeds the multi-approver
+    // tally below.
+    if (input.decision === 'approve' && behavior !== 'first_response' && isSlotHolder) {
       const acts = await this.engine.find('sys_approval_action', {
         where: { request_id: requestId, step_index: 0, action: 'approve' }, limit: 1000, context: SYSTEM_CTX,
       });
@@ -969,7 +1039,10 @@ export class ApprovalService implements IApprovalService {
     if (raw.status !== 'pending' && !inReviseWindow) {
       throw new Error(`INVALID_STATE: request is ${raw.status}`);
     }
-    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(input.actorId)) {
+    // The submitter withdraws their own request; a privileged admin may recall
+    // any pending request to release a stuck record (#3424).
+    if (!this.isOverrideActor(context, raw.organization_id ?? null)
+      && raw.submitter_id && String(raw.submitter_id) !== String(input.actorId)) {
       throw new Error(`FORBIDDEN: only the submitter may recall this request`);
     }
     // A returned request is only recallable while it is still the run's live
@@ -1288,7 +1361,10 @@ export class ApprovalService implements IApprovalService {
   /**
    * Hand a pending-approver slot to someone else. `from` defaults to the
    * actor itself; the actor must hold the slot being handed over (or be a
-   * system caller). Audits `reassign` and notifies the new approver.
+   * system caller). A privileged admin (#3424) may reassign a request whose
+   * slate holds no real user — an unstaffed-position literal — by handing the
+   * whole request to a real approver, rescuing it from the locked dead-end.
+   * Audits `reassign` and notifies the new approver.
    */
   async reassign(
     requestId: string,
@@ -1301,18 +1377,27 @@ export class ApprovalService implements IApprovalService {
     const raw = await this.loadPendingRow(requestId);
 
     const pending = csvSplit(raw.pending_approvers);
-    const from = String(input.from ?? input.actorId).trim();
-    if (!pending.includes(from)) {
-      throw new Error(`FORBIDDEN: '${from}' is not a pending approver on this request`);
-    }
-    if (!context.isSystem && input.actorId !== from && !pending.includes(input.actorId)) {
-      throw new Error(`FORBIDDEN: actor '${input.actorId}' is not a pending approver`);
-    }
     if (pending.includes(to)) {
       throw new Error(`VALIDATION_FAILED: '${to}' is already a pending approver`);
     }
-
-    const next = pending.map(a => (a === from ? to : a));
+    const isOverride = this.isOverrideActor(context, raw.organization_id ?? null);
+    const from = String(input.from ?? input.actorId).trim();
+    let next: string[];
+    if (pending.includes(from)) {
+      // Normal hand-off: the actor holds the slot being moved (or is a
+      // system/admin caller acting on a real holder's slot).
+      if (!context.isSystem && !isOverride && input.actorId !== from && !pending.includes(input.actorId)) {
+        throw new Error(`FORBIDDEN: actor '${input.actorId}' is not a pending approver`);
+      }
+      next = pending.map(a => (a === from ? to : a));
+    } else if (isOverride) {
+      // Admin rescue (#3424): the caller holds no slot — the slate is an
+      // unstaffed-position literal or a set of departed approvers. Reassign the
+      // whole request to a real approver so the normal decision flow can resume.
+      next = [to];
+    } else {
+      throw new Error(`FORBIDDEN: '${from}' is not a pending approver on this request`);
+    }
     const now = this.clock.now().toISOString();
     // Audit first, then mutate — mirrors decideNode(), so a failed audit
     // write can never leave a moved slot without a trail.
@@ -2267,6 +2352,21 @@ export class ApprovalService implements IApprovalService {
         });
         progress.got = progress.groups.filter((g: any) => g.satisfied).length;
         progress.need = progress.groups.length;
+
+        // Approver→group(s) for the STILL-PENDING slots (objectui#2807), so the
+        // console can label each "waiting on" chip with the group it represents
+        // rather than showing duplicate, context-free names. Only pending slots
+        // matter — a resolved approver has dropped out of `pending_approvers`.
+        // Synthetic (unnamed, `#N`) group keys are dropped: a `· #0` sub-tag is
+        // noise, and the client would have to filter it anyway.
+        const pendingGroups: Record<string, string[]> = {};
+        for (const a of (row.pending_approvers ?? [])) {
+          const named = (snapshot[a] ?? []).filter((g) => !/^#\d+$/.test(g));
+          if (named.length) pendingGroups[a] = named;
+        }
+        if (Object.keys(pendingGroups).length) {
+          (row as any).pending_approver_groups = pendingGroups;
+        }
       }
       (row as any).decision_progress = progress;
     } catch { /* display-only enrichment */ }
@@ -2278,8 +2378,13 @@ export class ApprovalService implements IApprovalService {
    * caller's user id is in the resolved `pending_approvers` while the request is
    * still `pending` (position/team/manager approvers are already resolved to
    * concrete user ids at open time, so a plain membership test is faithful).
-   * `is_submitter` is a straight owner check. System/tokenless contexts get a
-   * both-false block. Cheap + synchronous — safe on list reads.
+   * `is_submitter` is a straight owner check. `can_override` (#3424) is true for
+   * a platform/tenant admin on a PENDING request — the recovery path for an
+   * approval routed to an unstaffed position or to approvers who have all left;
+   * clients OR it into the decision actions' `visible` gate so an admin can act
+   * even when they hold no slot. System/tokenless contexts get a both-false
+   * `can_act`/`is_submitter` block (system gets `can_override` too — it may act
+   * on anything). Cheap + synchronous — safe on list reads.
    */
   private attachViewers(rows: ApprovalRequestRow[], context: SharingExecutionContext): void {
     const uid = (context as any)?.userId != null ? String((context as any).userId) : null;
@@ -2288,6 +2393,8 @@ export class ApprovalService implements IApprovalService {
       (row as any).viewer = {
         can_act: row.status === 'pending' && !!uid && pending.includes(uid),
         is_submitter: !!uid && row.submitter_id != null && String(row.submitter_id) === uid,
+        can_override: row.status === 'pending'
+          && this.isOverrideActor(context, (row as any).organization_id ?? null),
       };
     }
   }

@@ -138,6 +138,18 @@ variables: [
 > (a single call updates *every* matching row — no per-row loop needed).
 > `label` is **required** on the flow and on every node.
 
+> **Writing a `readonly` field? Set `runAs: 'system'`.** `readonly: true`
+> governs the end-user surface: under the default `runAs: 'user'`, the engine
+> **silently strips** a `readonly` field from an `update_record` payload
+> (#2948) — the step reports success but the value never lands. A flow that
+> maintains a `readonly` field (approval stamps, conversion flags, SLA
+> markers, rollups) must run `runAs: 'system'`, the trusted-writer channel.
+> `os validate` / `os build` fail a `runAs:'user'` `update_record` that writes
+> a `readonly` field, so the mismatch surfaces at build time, not as wrong data
+> days later. (`readonlyWhen` fields are the same story, per record state —
+> flagged as a warning.) Do **not** work around this by removing `readonly`;
+> that loses the field's edit protection.
+
 ```typescript
 {
   name: 'escalate_overdue_cases',

@@ -418,11 +418,11 @@ describe('ApprovalService (node era)', () => {
   it('getRequest: viewer.can_act is true for a pending approver, false for the submitter', async () => {
     const req = await svc.openNodeRequest(openInput(['u9']), CTX); // submitter u1, approver u9
     const asApprover = await svc.getRequest(req.id, { userId: 'u9', tenantId: 't1' } as any);
-    expect(asApprover!.viewer).toEqual({ can_act: true, is_submitter: false });
+    expect(asApprover!.viewer).toEqual({ can_act: true, is_submitter: false, can_override: false });
     const asSubmitter = await svc.getRequest(req.id, { userId: 'u1', tenantId: 't1' } as any);
-    expect(asSubmitter!.viewer).toEqual({ can_act: false, is_submitter: true });
+    expect(asSubmitter!.viewer).toEqual({ can_act: false, is_submitter: true, can_override: false });
     const asOther = await svc.getRequest(req.id, { userId: 'u_stranger', tenantId: 't1' } as any);
-    expect(asOther!.viewer).toEqual({ can_act: false, is_submitter: false });
+    expect(asOther!.viewer).toEqual({ can_act: false, is_submitter: false, can_override: false });
   });
 
   it('getRequest: viewer.can_act drops to false once the request is finalized', async () => {
@@ -1034,6 +1034,117 @@ describe('ApprovalService (node era)', () => {
   });
 });
 
+// ── Admin / privileged override (#3424) ──────────────────────────────
+//
+// An approval routed to a position/team with NO holders resolves to only the
+// unresolvable `position:<name>` literal — no concrete user is in the slate, so
+// every normal decision is FORBIDDEN and (with lockRecord) the record stays
+// locked forever with no in-product recovery. A platform or tenant admin may
+// act on the pending request to release it: approve, reject, reassign it to a
+// real approver, or recall it. Privilege is org-scoped for tenant admins.
+describe('ApprovalService — admin override (#3424)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+  const baseTime = new Date('2026-01-15T10:00:00Z').getTime();
+
+  // Admin exec contexts, shaped like the resolved authz envelope (permissions
+  // carry the permission-set names the shared resolver aggregates).
+  const PLATFORM_ADMIN = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+  const TENANT_ADMIN = { userId: 'owner', tenantId: 't1', positions: [], permissions: ['organization_admin'] } as any;
+  const OTHER_TENANT_ADMIN = { userId: 'owner2', tenantId: 't2', positions: [], permissions: ['organization_admin'] } as any;
+  const MEMBER = { userId: 'nobody', tenantId: 't1', positions: [], permissions: [] } as any;
+
+  // A request routed to an UNSTAFFED position → `pending_approvers` falls back to
+  // the `position:sales_manager` literal, undecidable by any normal user.
+  const stuckInput = (extra: Record<string, any> = {}) => ({
+    object: 'opportunity', recordId: 'opp1', runId: 'run_1', nodeId: 'approve_step',
+    flowName: 'deal_approval',
+    config: { approvers: [{ type: 'position' as const, value: 'sales_manager' }], behavior: 'first_response' as const, lockRecord: true },
+    record: { id: 'opp1', amount: 100 },
+    ...extra,
+  });
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    n = 0;
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
+  });
+
+  it('the stuck request is undecidable by any normal user (repro)', async () => {
+    const req = await svc.openNodeRequest(stuckInput(), CTX);
+    expect(req.pending_approvers).toEqual(['position:sales_manager']);
+    // Even the org owner-by-id is not in the resolved (empty) slate.
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'nobody' }, MEMBER))
+      .rejects.toThrow(/FORBIDDEN/);
+  });
+
+  it('a tenant admin can approve a stuck request, finalizing it (which releases the lock)', async () => {
+    const req = await svc.openNodeRequest(stuckInput(), CTX);
+    const out = await svc.decide(req.id, { decision: 'approve', actorId: 'owner' }, TENANT_ADMIN);
+    expect(out.finalized).toBe(true);
+    expect(out.request.status).toBe('approved');
+    // No pending request remains → the record-lock hook no longer blocks edits.
+    const fresh = await svc.getRequest(req.id, SYS);
+    expect(fresh?.status).toBe('approved');
+    expect(fresh?.pending_approvers).toEqual([]);
+    // Audited under the admin's own id — never spoofed as an approver.
+    const acts = await svc.listActions(req.id, SYS);
+    expect(acts.at(-1)).toMatchObject({ action: 'approve', actor_id: 'owner' });
+  });
+
+  it('a platform admin can reject a stuck request', async () => {
+    const req = await svc.openNodeRequest(stuckInput(), CTX);
+    const out = await svc.decide(req.id, { decision: 'reject', actorId: 'root' }, PLATFORM_ADMIN);
+    expect(out.finalized).toBe(true);
+    expect(out.request.status).toBe('rejected');
+  });
+
+  it('an admin override finalizes even a unanimous request immediately (not one vote among the slate)', async () => {
+    const req = await svc.openNodeRequest(stuckInput({
+      config: { approvers: [{ type: 'position' as const, value: 'sales_manager' }], behavior: 'unanimous' as const, lockRecord: true },
+    }), CTX);
+    const out = await svc.decide(req.id, { decision: 'approve', actorId: 'owner' }, TENANT_ADMIN);
+    expect(out.finalized).toBe(true);
+    expect(out.request.status).toBe('approved');
+  });
+
+  it('an admin can reassign a stuck request to a real approver, who then decides normally', async () => {
+    const req = await svc.openNodeRequest(stuckInput(), CTX);
+    const out = await svc.reassign(req.id, { actorId: 'owner', to: 'u7' }, TENANT_ADMIN);
+    expect(out.request.pending_approvers).toEqual(['u7']);
+    const decided = await svc.decideNode(
+      req.id, { decision: 'approve', actorId: 'u7' },
+      { userId: 'u7', tenantId: 't1', positions: [], permissions: [] } as any,
+    );
+    expect(decided.finalized).toBe(true);
+  });
+
+  it('an admin can recall (withdraw) a stuck request', async () => {
+    const req = await svc.openNodeRequest(stuckInput(), CTX);
+    const out = await svc.recall(req.id, { actorId: 'owner', comment: 'unstaffed role' }, TENANT_ADMIN);
+    expect(out.request.status).toBe('recalled');
+    expect(out.request.pending_approvers).toEqual([]);
+  });
+
+  it('a tenant admin of a DIFFERENT org cannot override (privilege is org-scoped)', async () => {
+    const req = await svc.openNodeRequest(stuckInput(), CTX); // organization_id = t1
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'owner2' }, OTHER_TENANT_ADMIN))
+      .rejects.toThrow(/FORBIDDEN/);
+  });
+
+  it('viewer.can_override reflects the privilege, and drops once finalized', async () => {
+    const req = await svc.openNodeRequest(stuckInput(), CTX);
+    const asAdmin = await svc.getRequest(req.id, TENANT_ADMIN);
+    expect(asAdmin!.viewer).toMatchObject({ can_act: false, can_override: true });
+    const asMember = await svc.getRequest(req.id, MEMBER);
+    expect(asMember!.viewer!.can_override).toBe(false);
+    await svc.decide(req.id, { decision: 'approve', actorId: 'owner' }, TENANT_ADMIN);
+    const after = await svc.getRequest(req.id, TENANT_ADMIN);
+    expect(after!.viewer!.can_override).toBe(false);
+  });
+});
+
 describe('record-lock hook (node era)', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let svc: ApprovalService;
@@ -1449,6 +1560,33 @@ describe('ApprovalService — decision_progress & deep links (#2678 P1.5)', () =
     expect(row.decision_progress.got).toBe(1);
     expect(row.decision_progress.groups.find((g: any) => g.group === 'legal')).toMatchObject({ got: 1, satisfied: true });
     expect(row.decision_progress.groups.find((g: any) => g.group === 'finance')).toMatchObject({ got: 0, satisfied: false });
+  });
+
+  it('per_group: pending_approver_groups maps each pending approver to its group (objectui#2807)', async () => {
+    const req = await svc.openNodeRequest(cfg([U('l1', 'legal'), U('f1', 'finance')], 'per_group'), CTX);
+    let row: any = await svc.getRequest(req.id, SYS);
+    // Every pending slot is labeled with the group it fills.
+    expect(row.pending_approver_groups).toEqual({ l1: ['legal'], f1: ['finance'] });
+    // Once legal signs off, l1 drops out of pending — and out of the map.
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'l1' }, SYS);
+    row = await svc.getRequest(req.id, SYS);
+    expect(row.pending_approver_groups).toEqual({ f1: ['finance'] });
+  });
+
+  it('per_group with unnamed groups omits synthetic keys; non-per_group omits the map (objectui#2807)', async () => {
+    // Distinct (record, run) so the two opens aren't a duplicate-pending clash.
+    const mk = (approvers: any[], behavior: string, recordId: string, runId: string, extra: Record<string, any> = {}) => ({
+      ...openInput([], { recordId, runId }),
+      config: { approvers, behavior, lockRecord: true, ...extra },
+    });
+    // Unnamed approvers → synthetic `#N` group keys, which are not surfaced.
+    const unnamed = await svc.openNodeRequest(mk([U('u1'), U('u2')], 'per_group', 'opp_u', 'run_u'), CTX);
+    const uRow: any = await svc.getRequest(unnamed.id, SYS);
+    expect(uRow.pending_approver_groups).toBeUndefined();
+    // Quorum aggregates approvals, not groups — no approver→group map.
+    const q = await svc.openNodeRequest(mk([U('a1'), U('a2')], 'quorum', 'opp_q', 'run_q', { minApprovals: 2 }), CTX);
+    const qRow: any = await svc.getRequest(q.id, SYS);
+    expect(qRow.pending_approver_groups).toBeUndefined();
   });
 
   it('quorum: progress reports approvals against the clamped threshold', async () => {

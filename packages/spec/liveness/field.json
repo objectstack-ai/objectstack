@@ -104,6 +104,11 @@
       "evidence": "packages/plugins/plugin-security/src/security-plugin.ts",
       "note": "ADR-0066 D3 field-level capability gate. getObjectSecurityMeta reads field.requiredPermissions; foldFieldRequiredPermissions forces non-readable+non-editable when the caller's systemPermissions don't cover them, so FieldMasker masks on read + detectForbiddenWrites denies on write (AND-gate). Unit-proven in packages/plugins/plugin-security/src/security-plugin.test.ts."
     },
+    "ackPlaintextMasking": {
+      "status": "live",
+      "evidence": "packages/spec/src/data/object.zod.ts",
+      "note": "ADR-0100 author-time diagnostic gate (#3420). warnGenericPasswordFields (object.zod.ts) reads field.ackPlaintextMasking and skips the generic-password plaintext-at-rest/masked-on-read warning for a field that affirms intent, so a deliberate demo (showcase field-zoo f_password, which exercises every field type) boots warning-free instead of printing an un-actionable 'safe to ignore'. Diagnostic-only: masking, the echoed-mask write guard, and the better-auth exemption are unchanged. Proven in packages/spec/src/data/object.test.ts (ADR-0100 password-field author warning suite: ackPlaintextMasking suppresses, partial-ack still warns about the un-acked field, warning text names the flag)."
+    },
     "system": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts"
