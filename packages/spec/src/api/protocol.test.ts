@@ -201,6 +201,15 @@ describe('ObjectStack Protocol', () => {
       objects: { account: { allowRead: true } },
       systemPermissions: ['manage_users', 'view_reports'],
     }).success).toBe(true);
+    // #3391: the effective response carries per-object apiOperations.
+    const withOps = GetEffectivePermissionsResponseSchema.safeParse({
+      objects: { account: { allowRead: true, apiOperations: ['get', 'list', 'export'] } },
+      systemPermissions: [],
+    });
+    expect(withOps.success).toBe(true);
+    if (withOps.success) {
+      expect((withOps.data.objects.account as any).apiOperations).toEqual(['get', 'list', 'export']);
+    }
   });
 
   it('validates Workflow operations', () => {

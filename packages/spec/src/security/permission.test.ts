@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PermissionSetSchema,
   ObjectPermissionSchema,
+  EffectiveObjectPermissionSchema,
   FieldPermissionSchema,
   AdminScopeSchema,
   type PermissionSet,
@@ -95,6 +96,46 @@ describe('ObjectPermissionSchema', () => {
     const result = ObjectPermissionSchema.parse(permission);
     expect(result.allowRead).toBe(true);
     expect(result.allowCreate).toBe(false);
+  });
+});
+
+describe('EffectiveObjectPermissionSchema (#3391 response-side)', () => {
+  it('carries every ObjectPermission field plus optional apiOperations', () => {
+    const parsed = EffectiveObjectPermissionSchema.parse({
+      allowRead: true,
+      allowCreate: true,
+      apiOperations: ['get', 'list', 'create', 'update', 'delete', 'bulk'],
+    });
+    expect(parsed.allowRead).toBe(true);
+    expect(parsed.apiOperations).toEqual(['get', 'list', 'create', 'update', 'delete', 'bulk']);
+  });
+
+  it('apiOperations is optional (absent = client default-allow)', () => {
+    const parsed = EffectiveObjectPermissionSchema.parse({ allowRead: true });
+    expect(parsed.apiOperations).toBeUndefined();
+    expect(parsed.allowRead).toBe(true);
+  });
+
+  it('rejects an apiOperations value outside the ApiMethod enum', () => {
+    expect(
+      EffectiveObjectPermissionSchema.safeParse({ allowRead: true, apiOperations: ['frobnicate'] }).success,
+    ).toBe(false);
+  });
+
+  it('accepts the derived legacy operations (import/export/aggregate/…)', () => {
+    expect(
+      EffectiveObjectPermissionSchema.safeParse({
+        allowRead: true,
+        apiOperations: ['get', 'list', 'aggregate', 'search', 'export', 'import', 'upsert'],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('does not leak apiOperations onto the authoring ObjectPermissionSchema', () => {
+    // The authoring schema stays unextended — a stray apiOperations key is
+    // stripped (or rejected) there, never a valid authoring field.
+    const parsed = ObjectPermissionSchema.parse({ allowRead: true, apiOperations: ['get'] } as any);
+    expect((parsed as any).apiOperations).toBeUndefined();
   });
 });
 

@@ -9,6 +9,11 @@ import {
     RestServerConfig,
 } from '@objectstack/spec/api';
 import { ADMIN_FULL_ACCESS, ORGANIZATION_ADMIN } from '@objectstack/spec';
+import {
+    resolveEffectiveApiMethods,
+    effectiveOperationsArray,
+    type EnableLike,
+} from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { HonoHttpServer, HonoCorsOptions } from './adapter';
 import { cors } from 'hono/cors';
@@ -280,6 +285,68 @@ export function clampManagedObjectWrites(
         if (!isWriteOptedIn(ua.edit)) acc.allowEdit = false;
         if (ua.create !== true) acc.allowCreate = false;
         if (!isWriteOptedIn(ua.delete)) acc.allowDelete = false;
+    }
+}
+
+/** The API-exposure-relevant slice of a registered object schema. */
+export interface ApiExposureSchemaLike {
+    name?: string;
+    enable?: EnableLike | null;
+}
+
+/**
+ * [#3391] Seed false-initialized per-object entries for a MODIFY-ALL super-user,
+ * for every registered object whose `apiMethods` whitelist tightens exposure.
+ *
+ * A super-user's grant is usually the `'*'` wildcard, not explicit per-object
+ * entries — so restricting objects never appear in the merged `objects` map and
+ * would miss their `apiOperations` annotation. Seeding a `{allow*: false}` entry
+ * lets {@link foldWildcardSuperUser} pull it true (super-user reads/writes
+ * everything) and lets {@link annotateEffectiveApiOperations} attach the effective
+ * set. Runs BEFORE fold.
+ *
+ * Guarded to `modifyAllRecords` super-users ONLY: for a viewAll-only caller,
+ * materializing a `false` entry would flip the client's `check('edit')` from
+ * "undefined → default-allow" to "explicit false → deny" — a scope-exceeding
+ * behavior change. A modify-all caller is folded to `true` anyway, so seeding is
+ * harmless there. Unrestricted objects are skipped (they carry no annotation).
+ */
+export function seedSuperUserRestrictedObjects(
+    objects: Record<string, any>,
+    allSchemas: readonly ApiExposureSchemaLike[],
+): void {
+    if (objects?.['*']?.modifyAllRecords !== true) return;
+    for (const schema of allSchemas) {
+        const name = schema?.name;
+        if (!name || name === '*' || objects[name]) continue;
+        const eff = resolveEffectiveApiMethods(schema.enable ?? undefined);
+        if (eff.mode === 'unrestricted') continue; // only restricting objects
+        objects[name] = { allowCreate: false, allowRead: false, allowEdit: false, allowDelete: false };
+    }
+}
+
+/**
+ * [#3391] Annotate each per-object `/me/permissions` entry with the SERVER's
+ * effective API operation set (`apiOperations`), mutating the map in place.
+ *
+ * This is the single "effective" channel the frontend consumes — it renders the
+ * operations the server hands down here, never the raw `apiMethods` whitelist.
+ * Only objects whose whitelist actually tightens exposure are annotated (a
+ * `deny-all` object gets an empty array; an unrestricted object gets nothing, so
+ * the client keeps its default-allow behavior). Runs AFTER fold + clamp so the
+ * annotation sits alongside the final CRUD affordances.
+ */
+export function annotateEffectiveApiOperations(
+    objects: Record<string, any>,
+    schemaOf: (objectName: string) => ApiExposureSchemaLike | undefined,
+): void {
+    for (const [obj, acc] of Object.entries(objects) as Array<[string, any]>) {
+        if (obj === '*' || !acc) continue;
+        const schema = schemaOf(obj);
+        if (!schema) continue; // schema missing → no annotation (client falls back)
+        const eff = resolveEffectiveApiMethods(schema.enable ?? undefined);
+        if (eff.mode === 'unrestricted') continue; // open object → no annotation
+        acc.apiOperations = effectiveOperationsArray(eff);
     }
 }
 
@@ -1131,11 +1198,36 @@ export class HonoServerPlugin implements Plugin {
                 // (sys_user → edit). Together these remove both the false-negative
                 // (admin sees sys_user editable) and the false-positive (admin does
                 // NOT see sys_member editable, matching the guard).
+                // [#3391] For a modify-all super-user, seed restricting objects
+                // absent from the merged map so fold pulls them true and annotate
+                // can attach their effective apiOperations. Guarded — a failure
+                // here must never drop the whole response.
+                try {
+                    const allSchemas: ApiExposureSchemaLike[] = (() => {
+                        try { return (ql as any)?.registry?.getAllObjects?.() ?? []; }
+                        catch { return []; }
+                    })();
+                    seedSuperUserRestrictedObjects(objects, allSchemas);
+                } catch (e: any) {
+                    ctx.logger.warn('[hono] effective apiOperations seed failed', { err: e?.message });
+                }
                 foldWildcardSuperUser(objects);
                 clampManagedObjectWrites(objects, (name) => {
                     try { return ql?.getSchema?.(name) as ManagedSchemaLike | undefined; }
                     catch { return undefined; }
                 });
+                // [#3391] Annotate the per-object effective API operation set —
+                // the single channel the frontend consumes for effective ops.
+                // Guarded: on failure we simply omit apiOperations and the client
+                // falls back to its default-allow behavior.
+                try {
+                    annotateEffectiveApiOperations(objects, (name) => {
+                        try { return ql?.getSchema?.(name) as ApiExposureSchemaLike | undefined; }
+                        catch { return undefined; }
+                    });
+                } catch (e: any) {
+                    ctx.logger.warn('[hono] effective apiOperations annotate failed', { err: e?.message });
+                }
                 return c.json({
                     authenticated: true,
                     userId: execCtx.userId,

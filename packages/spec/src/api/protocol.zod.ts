@@ -14,7 +14,7 @@ import {
   AnalyticsMetadataResponseSchema 
 } from './analytics.zod';
 import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
-import { ObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
+import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { StateMachineSchema } from '../automation/state-machine.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
 import { TranslationDataSchema } from '../system/translation.zod';
@@ -665,7 +665,10 @@ export const GetObjectPermissionsResponseSchema = lazySchema(() => z.object({
 export const GetEffectivePermissionsRequestSchema = lazySchema(() => z.object({}));
 
 export const GetEffectivePermissionsResponseSchema = lazySchema(() => z.object({
-  objects: z.record(z.string(), ObjectPermissionSchema).describe('Effective object permissions keyed by object name'),
+  // [#3391] The effective response carries the server-resolved API operation set
+  // per object (`apiOperations`) — the single "effective" channel the frontend
+  // consumes. Authoring `ObjectPermissionSchema` stays unextended.
+  objects: z.record(z.string(), EffectiveObjectPermissionSchema).describe('Effective object permissions keyed by object name'),
   systemPermissions: z.array(z.string()).describe('Effective system-level permissions'),
 }));
 

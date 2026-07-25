@@ -1183,6 +1183,7 @@
     "security/AuthzPosture",
     "security/CapabilityDeclaration",
     "security/CriteriaSharingRule",
+    "security/EffectiveObjectPermission",
     "security/ExplainDecision",
     "security/ExplainLayer",
     "security/ExplainMatchedRule",

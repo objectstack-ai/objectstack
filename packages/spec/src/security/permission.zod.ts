@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { RowLevelSecurityPolicySchema } from './rls.zod';
+import { ApiMethod } from '../data/object.zod';
 
 /**
  * Entity (Object) Level Permissions
@@ -83,6 +84,31 @@ export const ObjectPermissionSchema = lazySchema(() => z.object({
   /** [ADR-0057 D1] Write (edit/delete) access DEPTH — same enum as readScope. */
   writeScope: ObjectAccessScopeSchema.optional().describe('[ADR-0057 D1] Write depth: own|unit|unit_and_below|org'),
 }));
+
+/**
+ * RESPONSE-side extension of {@link ObjectPermissionSchema} carrying the
+ * server-resolved effective API operation set for one object (#3391).
+ *
+ * This lives on the *response* surface only (e.g. `/me/permissions`,
+ * `GetEffectivePermissionsResponse`) — the authoring `ObjectPermissionSchema`
+ * is deliberately NOT extended, so a permission-set author can never declare a
+ * meaningless `apiOperations` key (the server is the only adjudicator; the
+ * frontend consumes the effective set it hands down, never a raw whitelist).
+ *
+ * The field is named `apiOperations` (not `operations`) to avoid colliding with
+ * the view schema's `operations`. It is the enum-ordered closure produced by
+ * `@objectstack/spec/data` `effectiveOperationsArray`, present only for objects
+ * whose `apiMethods` whitelist actually tightens exposure; absent = the client
+ * falls back to its default-allow behavior (old backend / unrestricted object).
+ */
+export const EffectiveObjectPermissionSchema = lazySchema(() =>
+  (ObjectPermissionSchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
+    apiOperations: z.array(ApiMethod).optional().describe(
+      'Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist.',
+    ),
+  }),
+);
+export type EffectiveObjectPermission = z.infer<typeof EffectiveObjectPermissionSchema>;
 
 /**
  * [ADR-0090 D12] Delegated-administration scope.
