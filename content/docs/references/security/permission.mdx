@@ -24,8 +24,8 @@ Refined with enterprise data lifecycle controls:
 ## TypeScript Usage
 
 ```typescript
-import { AdminScope, FieldPermission, ObjectAccessScope, ObjectPermission, PermissionSet } from '@objectstack/spec/security';
-import type { AdminScope, FieldPermission, ObjectAccessScope, ObjectPermission, PermissionSet } from '@objectstack/spec/security';
+import { AdminScope, EffectiveObjectPermission, FieldPermission, ObjectAccessScope, ObjectPermission, PermissionSet } from '@objectstack/spec/security';
+import type { AdminScope, EffectiveObjectPermission, FieldPermission, ObjectAccessScope, ObjectPermission, PermissionSet } from '@objectstack/spec/security';
 
 // Validate data
 const result = AdminScope.parse(data);
@@ -45,6 +45,28 @@ const result = AdminScope.parse(data);
 | **manageBindings** | `boolean` | ✅ | Manage position↔permission-set bindings within the subtree |
 | **authorEnvironmentSets** | `boolean` | ✅ | Author environment-owned permission sets |
 | **assignablePermissionSets** | `string[]` | ✅ | Allowlist of permission-set names the delegate may hand out |
+
+
+---
+
+## EffectiveObjectPermission
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowCreate** | `boolean` | ✅ | Create permission |
+| **allowRead** | `boolean` | ✅ | Read permission |
+| **allowEdit** | `boolean` | ✅ | Edit permission |
+| **allowDelete** | `boolean` | ✅ | Delete permission |
+| **allowTransfer** | `boolean` | ✅ | [RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id) |
+| **allowRestore** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
+| **allowPurge** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
+| **viewAllRecords** | `boolean` | ✅ | View All Data (Bypass Sharing) |
+| **modifyAllRecords** | `boolean` | ✅ | Modify All Data (Bypass Sharing) |
+| **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
+| **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
+| **apiOperations** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| 'aggregate' \| 'history' \| 'search' \| 'restore' \| 'purge' \| 'import' \| 'export'>[]` | optional | Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. |
 
 
 ---
