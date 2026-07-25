@@ -52,6 +52,12 @@ export const ENGINE_OWNED_BUCKETS: ReadonlySet<string> = new Set(['system', 'eng
  * Read ops (`find`/`findOne`/`count`/`aggregate`/…) are absent and always pass.
  * Aligned with the `DelegatedAdminGate` governed-operation set and the registry's
  * `MANAGED_WRITE_VERB_AFFORDANCE`.
+ *
+ * ⚠️ This is the UI-intent axis (verb → *affordance*), NOT the API-tightening
+ * axis. What the automatic API *admits* is decided by the verb → *primitive*
+ * derivation in `@objectstack/spec/data` (`resolveEffectiveApiMethods`, #3391) —
+ * a separate table on a separate axis (ADR-0103). Merging the two is deferred to
+ * the enum-shrink (P2 of #3391); keep them distinct until then.
  */
 const WRITE_OP_AFFORDANCE: Record<string, 'create' | 'edit' | 'delete'> = {
   insert: 'create',

@@ -4,6 +4,9 @@ export * from './query.zod';
 export * from './filter.zod';
 export * from './date-macros.zod';
 export * from './object.zod';
+// API-method derivation — the single source of truth turning an object's
+// `enable.apiMethods` whitelist into its effective operation set (#3391).
+export * from './api-derivation';
 export * from './field.zod';
 // Field runtime value-shape contract (ADR-0104 D1)
 export * from './field-value.zod';

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, isTenancyDisabled } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, isTenancyDisabled, LEGACY_API_METHODS } from '@objectstack/spec/data';
 import { resolveMultiOrgEnabled, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { provisionSearchCompanion } from './search-companion.js';
 import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema } from '@objectstack/spec/kernel';
@@ -389,6 +389,16 @@ export function applySystemFields(
  * Generic-write `apiMethods` verbs mapped to the {@link resolveCrudAffordances}
  * flag each one needs. Read verbs (`get`/`list`/`search`/`history`/…) are
  * always permitted, so they are absent here and never stripped.
+ *
+ * ⚠️ Two orthogonal axes — do NOT merge this with the API-tightening table.
+ * This table (verb → *affordance*) is the UI-intent axis: it strips write verbs
+ * a managed bucket does not *offer* from the whitelist. The verb → *primitive*
+ * derivation that decides what the automatic API *admits* lives in
+ * `@objectstack/spec/data` `API_METHOD_DERIVATION` / `resolveEffectiveApiMethods`
+ * (#3391). The identical-shaped `WRITE_OP_AFFORDANCE` in plugin-security
+ * `system-write-guard.ts` is the runtime enforcement of this same UI-intent
+ * axis. Unifying the three is deferred to the enum-shrink (P2 of #3391); until
+ * then keep the axes separate — see ADR-0103.
  */
 const MANAGED_WRITE_VERB_AFFORDANCE: Record<string, 'create' | 'edit' | 'delete'> = {
   create: 'create',
@@ -461,6 +471,43 @@ export function reconcileManagedApiMethods(
     ...schema,
     enable: { ...(schema as any).enable, apiMethods: kept },
   };
+}
+
+/** Objects already warned about explicit legacy `apiMethods` (once per object). */
+const warnedDeprecatedApiMethods = new Set<string>();
+
+/**
+ * Registration-time deprecation warning for standalone LEGACY `apiMethods`
+ * values (#3391). The 8 legacy verbs (`upsert`/`aggregate`/`history`/`search`/
+ * `restore`/`purge`/`import`/`export`) are DERIVED from the six primitives; an
+ * object that declares one explicitly is honored verbatim for one release
+ * ("explicit wins"), then the value is removed in the enum-shrink (P2 of #3391).
+ *
+ * Emitted once per object (not per request — the hot path stays free), mirroring
+ * the {@link reconcileManagedApiMethods} warning format and pointing at P2. Pure
+ * observation: it never mutates the schema.
+ */
+export function warnDeprecatedExplicitApiMethods(
+  schema: ServiceObject,
+  opts?: { warn?: (msg: string) => void },
+): void {
+  const methods = (schema as any).enable?.apiMethods;
+  if (!Array.isArray(methods) || methods.length === 0) return;
+  const legacy = methods.filter((m: string) => (LEGACY_API_METHODS as readonly string[]).includes(m));
+  if (legacy.length === 0) return;
+  const name = String((schema as any).name ?? '');
+  if (warnedDeprecatedApiMethods.has(name)) return;
+  warnedDeprecatedApiMethods.add(name);
+  const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
+  warn(
+    `[Registry] Object "${name}" declares derived legacy apiMethods value(s) ` +
+      `[${legacy.join(', ')}] in enable.apiMethods — these derive from the six ` +
+      `primitives (get/list/create/update/delete/bulk) and are honored verbatim ` +
+      `for now, but standalone declaration is deprecated and will be removed in ` +
+      `the enum-shrink (P2 of #3391). Declare the underlying primitives instead ` +
+      `(e.g. ['create','update'] grants upsert/import; ['list'] grants ` +
+      `aggregate/export/search).`,
+  );
 }
 
 /**
@@ -713,6 +760,11 @@ export class SchemaRegistry {
     // answers a clean 405 and the metadata can't contradict itself. No-op for
     // every non-`better-auth` object.
     schema = reconcileManagedApiMethods(schema);
+
+    // [#3391] One-shot deprecation warning for standalone LEGACY apiMethods
+    // values (the derived 8) — honored this release, removed in the enum-shrink.
+    // Runs after reconcile so we warn about what actually ships.
+    warnDeprecatedExplicitApiMethods(schema);
 
     // [ADR-0079] Object-materialization seam — DESIGNATE-ONLY primary-title
     // provisioning. Runs AFTER `applySystemFields` (so any designated field
