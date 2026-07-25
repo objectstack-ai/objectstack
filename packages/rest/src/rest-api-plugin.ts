@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
-import { RestServer, RestKernelManager, RestProtocol } from './rest-server.js';
+import { RestServer, RestKernelManager, RestProtocol, RestRequestEnvResolver } from './rest-server.js';
 import { RestServerConfig } from '@objectstack/spec/api';
 import { registerPackageRoutes } from './package-routes.js';
 import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
@@ -94,6 +94,44 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 envRegistry = ctx.getService<any>('env-registry');
             } catch (e) {
                 // Not running in runtime/multi-environment mode — fine.
+            }
+
+            // ADR-0076 D11 step ④ — request→environment resolution unified on
+            // the host's ADR-0006 `kernel-resolver` seam. When the host
+            // registers one (cloud runtime does, next to `env-registry`), the
+            // REST server resolves a request's environment through the SAME
+            // strategy instance the HTTP dispatcher uses — session fallbacks
+            // included — instead of its own parallel hostname/header chain.
+            // The legacy chain remains as the fallback when no resolver is
+            // registered (OSS single-environment boots) or the resolver throws.
+            let requestEnvResolver: RestRequestEnvResolver | undefined;
+            try {
+                const kernelResolver = ctx.getService<any>('kernel-resolver');
+                if (kernelResolver && typeof kernelResolver.resolveKernel === 'function') {
+                    // The resolver's session/default-project fallback levels
+                    // resolve services from its `defaultKernel` argument —
+                    // bind the hosting kernel's service surface. `getService`
+                    // may throw on a missing service; the resolver handles
+                    // that itself.
+                    const hostKernelFacade = {
+                        getService: (name: string) => ctx.getService(name),
+                        getServiceAsync: async (name: string) => ctx.getService(name),
+                    };
+                    requestEnvResolver = {
+                        async resolveRequestEnvironmentId(req: unknown): Promise<string | undefined> {
+                            // No `routePath` hint: the REST consumers of this
+                            // seam are all data-plane routes, never the
+                            // resolver's control-plane skip prefixes. If a
+                            // resolver strategy starts keying off routePath,
+                            // add prefix-stripped assembly here.
+                            const context: { request: unknown; environmentId?: string } = { request: req };
+                            await kernelResolver.resolveKernel(context, hostKernelFacade);
+                            return context.environmentId;
+                        },
+                    };
+                }
+            } catch (e) {
+                // No kernel-resolver registered — legacy chain only. Fine.
             }
 
             // Optional default-project provider — registered by
@@ -219,7 +257,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 try { return ctx.getService<any>(name) != null; } catch { return false; }
             };
             try {
-                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider);
+                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');

@@ -1,0 +1,302 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * ADR-0076 D11 step ④ (#2462) — request→environment resolution unified on the
+ * host's ADR-0006 `kernel-resolver` seam.
+ *
+ * Locks the resolution-chain contract of `resolveRequestEnvironmentId`:
+ *   explicit id → host-injected RestRequestEnvResolver (normal return is
+ *   FINAL, throw degrades) → legacy hostname/header chain → single-project
+ *   default — and the RestApiPlugin adapter that binds the host's
+ *   `kernel-resolver` service into that seam.
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import { RestServer, RestRequestEnvResolver, RestEnvRegistry } from './rest-server';
+import { createRestApiPlugin } from './rest-api-plugin';
+
+// ---------------------------------------------------------------------------
+// Mocks & Helpers
+// ---------------------------------------------------------------------------
+
+function createMockServer() {
+  return {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+    patch: vi.fn(),
+    use: vi.fn(),
+    listen: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function createMockProtocol() {
+  return {
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: {} }),
+    getMetaTypes: vi.fn().mockResolvedValue([]),
+    getMetaItems: vi.fn().mockResolvedValue([]),
+    getMetaItem: vi.fn().mockResolvedValue({}),
+    findData: vi.fn().mockResolvedValue([]),
+    getData: vi.fn().mockResolvedValue({}),
+    createData: vi.fn().mockResolvedValue({ id: '1' }),
+    updateData: vi.fn().mockResolvedValue({}),
+    deleteData: vi.fn().mockResolvedValue({ success: true }),
+  };
+}
+
+const ANON_API = { api: { requireAuth: false } };
+
+/** Node-style request with a Host header + optional X-Environment-Id. */
+function mockReq(headers: Record<string, string> = {}): any {
+  return { headers: { host: 'tenant-a.example.com', ...headers }, url: '/api/v1/data/account' };
+}
+
+type RestServerArgs = {
+  envRegistry?: RestEnvRegistry;
+  defaultEnvironmentIdProvider?: () => string | undefined;
+  requestEnvResolver?: RestRequestEnvResolver;
+  kernelManager?: { getOrCreate: (id: string) => Promise<any> };
+};
+
+/** Build a RestServer with only the seams under test wired. */
+function buildRest(args: RestServerArgs = {}) {
+  const server = createMockServer();
+  const protocol = createMockProtocol();
+  const kernelManager =
+    args.kernelManager ??
+    ({
+      getOrCreate: vi.fn().mockResolvedValue({
+        getServiceAsync: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as any);
+  const rest = new RestServer(
+    server as any,
+    protocol as any,
+    ANON_API as any,
+    kernelManager as any,
+    args.envRegistry,
+    args.defaultEnvironmentIdProvider,
+    undefined, // authServiceProvider
+    undefined, // objectQLProvider
+    undefined, // emailServiceProvider
+    undefined, // sharingServiceProvider
+    undefined, // reportsServiceProvider
+    undefined, // approvalsServiceProvider
+    undefined, // sharingRulesServiceProvider
+    undefined, // i18nServiceProvider
+    undefined, // analyticsServiceProvider
+    undefined, // settingsServiceProvider
+    undefined, // serviceExistsProvider
+    undefined, // securityServiceProvider
+    args.requestEnvResolver,
+  );
+  const resolve = (environmentId?: string, req?: any): Promise<string | undefined> =>
+    (rest as any).resolveRequestEnvironmentId(environmentId, req);
+  return { rest, server, protocol, kernelManager, resolve };
+}
+
+/** Legacy registry that resolves every hostname to `legacy-env`. */
+function legacyRegistry(): RestEnvRegistry & { resolveByHostname: ReturnType<typeof vi.fn> } {
+  return {
+    resolveByHostname: vi.fn().mockResolvedValue({ environmentId: 'legacy-env' }),
+    resolveById: vi.fn().mockResolvedValue({}),
+  } as any;
+}
+
+// ---------------------------------------------------------------------------
+// Resolution-chain contract
+// ---------------------------------------------------------------------------
+
+describe('resolveRequestEnvironmentId (D11④ seam)', () => {
+  it('returns an explicit environmentId without consulting any resolver', async () => {
+    const resolver: RestRequestEnvResolver = {
+      resolveRequestEnvironmentId: vi.fn().mockResolvedValue('resolver-env'),
+    };
+    const registry = legacyRegistry();
+    const { resolve } = buildRest({ requestEnvResolver: resolver, envRegistry: registry });
+
+    await expect(resolve('explicit-env', mockReq())).resolves.toBe('explicit-env');
+    expect(resolver.resolveRequestEnvironmentId).not.toHaveBeenCalled();
+    expect(registry.resolveByHostname).not.toHaveBeenCalled();
+  });
+
+  it('prefers the injected resolver over the legacy envRegistry chain', async () => {
+    const resolver: RestRequestEnvResolver = {
+      resolveRequestEnvironmentId: vi.fn().mockResolvedValue('resolver-env'),
+    };
+    const registry = legacyRegistry();
+    const { resolve } = buildRest({ requestEnvResolver: resolver, envRegistry: registry });
+
+    await expect(resolve(undefined, mockReq())).resolves.toBe('resolver-env');
+    // The legacy chain must not even be consulted — one authority per host.
+    expect(registry.resolveByHostname).not.toHaveBeenCalled();
+  });
+
+  it("treats the resolver's undefined as FINAL — legacy chain and default do not second-guess it", async () => {
+    const resolver: RestRequestEnvResolver = {
+      resolveRequestEnvironmentId: vi.fn().mockResolvedValue(undefined),
+    };
+    const registry = legacyRegistry();
+    const { resolve } = buildRest({
+      requestEnvResolver: resolver,
+      envRegistry: registry,
+      defaultEnvironmentIdProvider: () => 'default-env',
+    });
+
+    // Both fallbacks COULD produce an id; the resolver's verdict wins anyway
+    // (e.g. it deliberately skipped a control-plane route).
+    await expect(resolve(undefined, mockReq())).resolves.toBeUndefined();
+    expect(registry.resolveByHostname).not.toHaveBeenCalled();
+  });
+
+  it('degrades to the legacy chain when the resolver throws', async () => {
+    const resolver: RestRequestEnvResolver = {
+      resolveRequestEnvironmentId: vi.fn().mockRejectedValue(new Error('resolver down')),
+    };
+    const registry = legacyRegistry();
+    const { resolve } = buildRest({ requestEnvResolver: resolver, envRegistry: registry });
+
+    await expect(resolve(undefined, mockReq())).resolves.toBe('legacy-env');
+  });
+
+  it('runs the legacy hostname chain unchanged when no resolver is injected', async () => {
+    const registry = legacyRegistry();
+    const { resolve } = buildRest({ envRegistry: registry });
+
+    await expect(resolve(undefined, mockReq())).resolves.toBe('legacy-env');
+    expect(registry.resolveByHostname).toHaveBeenCalledWith('tenant-a.example.com');
+  });
+
+  it('falls back to X-Environment-Id header, then the single-project default, when hostname misses', async () => {
+    const registry: RestEnvRegistry = {
+      resolveByHostname: vi.fn().mockResolvedValue(null),
+      resolveById: vi.fn().mockImplementation(async (id: string) => (id === 'header-env' ? {} : null)),
+    };
+    const { resolve } = buildRest({
+      envRegistry: registry,
+      defaultEnvironmentIdProvider: () => 'default-env',
+    });
+
+    await expect(
+      resolve(undefined, mockReq({ 'x-environment-id': 'header-env' })),
+    ).resolves.toBe('header-env');
+    await expect(resolve(undefined, mockReq())).resolves.toBe('default-env');
+  });
+
+  it('routes resolver-provided environments into kernelManager.getOrCreate via resolveProtocol', async () => {
+    const resolver: RestRequestEnvResolver = {
+      resolveRequestEnvironmentId: vi.fn().mockResolvedValue('resolver-env'),
+    };
+    const perEnvProtocol = createMockProtocol();
+    const kernelManager = {
+      getOrCreate: vi.fn().mockResolvedValue({
+        getServiceAsync: vi.fn().mockResolvedValue(perEnvProtocol),
+      }),
+    };
+    const { rest } = buildRest({ requestEnvResolver: resolver, kernelManager });
+
+    const resolved = await (rest as any).resolveProtocol(undefined, mockReq());
+    expect(kernelManager.getOrCreate).toHaveBeenCalledWith('resolver-env');
+    expect(resolved).toBe(perEnvProtocol);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RestApiPlugin adapter — binds the host's `kernel-resolver` service
+// ---------------------------------------------------------------------------
+
+describe('RestApiPlugin kernel-resolver adapter (D11④)', () => {
+  function createMockPluginContext(services: Record<string, any>) {
+    return {
+      registerService: vi.fn(),
+      getService: vi.fn((name: string) => {
+        if (services[name]) return services[name];
+        throw new Error(`Service '${name}' not found`);
+      }),
+      getServices: vi.fn(() => new Map(Object.entries(services))),
+      hook: vi.fn(),
+      trigger: vi.fn().mockResolvedValue(undefined),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      getKernel: vi.fn(),
+    };
+  }
+
+  /** Base services every plugin boot needs. */
+  function baseServices() {
+    return {
+      'http.server': createMockServer(),
+      protocol: createMockProtocol(),
+      objectql: { registerObject: vi.fn(), find: vi.fn().mockResolvedValue([]) },
+    };
+  }
+
+  it('wires the kernel-resolver service into the REST env seam (context.environmentId read-back)', async () => {
+    const resolveKernel = vi.fn().mockImplementation(async (context: any) => {
+      context.environmentId = 'cloud-env';
+      return undefined;
+    });
+    const services: Record<string, any> = {
+      ...baseServices(),
+      'kernel-resolver': { resolveKernel },
+      'kernel-manager': {
+        getOrCreate: vi.fn().mockResolvedValue({
+          getServiceAsync: vi.fn().mockResolvedValue(undefined),
+        }),
+      },
+    };
+    const ctx = createMockPluginContext(services);
+    const plugin = createRestApiPlugin({ api: ANON_API as any });
+    await plugin.init?.(ctx as any);
+    await (plugin as any).start(ctx as any);
+
+    // Pull the registered GET /api/v1/data/:object handler and drive one
+    // unscoped request through it — the adapter must consult resolveKernel.
+    const server = services['http.server'];
+    expect(server.get.mock.calls.map((c: any[]) => c[0])).toContain('/api/v1/data/:object');
+    const listRoute = server.get.mock.calls.find((c: any[]) => c[0] === '/api/v1/data/:object');
+    const handler = listRoute![1];
+    const res = {
+      json: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      send: vi.fn(),
+      setHeader: vi.fn(),
+      headersSent: false,
+    };
+    await handler({ params: { object: 'account' }, query: {}, headers: { host: 'x.example.com' } }, res);
+
+    expect(resolveKernel).toHaveBeenCalled();
+    const [context, hostKernel] = resolveKernel.mock.calls[0];
+    expect(context.request).toBeDefined();
+    // The facade must expose the hosting kernel's service surface (the
+    // resolver's session/default-project levels resolve services off it).
+    expect(hostKernel.getService('protocol')).toBe(services.protocol);
+    await expect(hostKernel.getServiceAsync('protocol')).resolves.toBe(services.protocol);
+    // The resolver's answer must reach kernelManager.getOrCreate — the REST
+    // request is served from the SAME environment the dispatcher would pick.
+    expect(services['kernel-manager'].getOrCreate).toHaveBeenCalledWith('cloud-env');
+  });
+
+  it('boots and serves without a kernel-resolver service (OSS single-environment mode)', async () => {
+    const services: Record<string, any> = { ...baseServices() };
+    const ctx = createMockPluginContext(services);
+    const plugin = createRestApiPlugin({ api: ANON_API as any });
+    await plugin.init?.(ctx as any);
+    await (plugin as any).start(ctx as any);
+
+    const server = services['http.server'];
+    const listRoute = server.get.mock.calls.find((c: any[]) => c[0] === '/api/v1/data/:object');
+    expect(listRoute).toBeDefined();
+    const res = {
+      json: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      send: vi.fn(),
+      setHeader: vi.fn(),
+      headersSent: false,
+    };
+    await listRoute![1]({ params: { object: 'account' }, query: {}, headers: {} }, res);
+    // Served by the boot-time control protocol — no resolver, no crash.
+    expect(services.protocol.findData).toHaveBeenCalled();
+  });
+});

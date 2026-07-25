@@ -777,12 +777,39 @@ export interface RestEnvRegistry {
     resolveById?(environmentId: string): Promise<unknown | null>;
 }
 
+/**
+ * Request → environment resolution seam (ADR-0076 D11 step ④, #2462).
+ *
+ * When the host registers a `kernel-resolver` service (the ADR-0006 seam the
+ * HTTP dispatcher already consumes), `RestApiPlugin` wraps it in this shape so
+ * the REST server resolves a request's environment through the SAME strategy
+ * as the dispatcher — one answer per host for "which environment does this
+ * request belong to" — instead of the REST server's own parallel
+ * hostname/header chain.
+ *
+ * Contract: a normal return is FINAL — `undefined` means the resolver decided
+ * the request is unscoped (e.g. a control-plane route), and the legacy
+ * built-in chain must NOT second-guess it. Only a thrown error falls back to
+ * the legacy chain, so a misbehaving resolver degrades to pre-seam behavior
+ * instead of taking down REST routing.
+ */
+export interface RestRequestEnvResolver {
+    resolveRequestEnvironmentId(req: unknown): Promise<string | undefined>;
+}
+
 export class RestServer {
     private protocol: RestProtocol;
     private config: NormalizedRestServerConfig;
     private routeManager: RouteManager;
     private kernelManager?: RestKernelManager;
     private envRegistry?: RestEnvRegistry;
+    /**
+     * Host-injected request→environment resolver (ADR-0076 D11 step ④). When
+     * present it is the AUTHORITY for unscoped-route environment resolution;
+     * the legacy `envRegistry` chain below only runs when this is absent or
+     * throws. See {@link RestRequestEnvResolver}.
+     */
+    private requestEnvResolver?: RestRequestEnvResolver;
     /**
      * Short-TTL cache for `hostname → environmentId` (P1-4). `resolveByHostname`
      * is a control-plane lookup (typically a DB query) that otherwise runs on
@@ -851,6 +878,7 @@ export class RestServer {
         settingsServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         serviceExistsProvider?: (name: string) => boolean,
         securityServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
+        requestEnvResolver?: RestRequestEnvResolver,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -870,6 +898,7 @@ export class RestServer {
         this.settingsServiceProvider = settingsServiceProvider;
         this.serviceExistsProvider = serviceExistsProvider;
         this.securityServiceProvider = securityServiceProvider;
+        this.requestEnvResolver = requestEnvResolver;
     }
 
     /**
@@ -911,14 +940,30 @@ export class RestServer {
     }
 
     /**
-     * Resolve the environment a request targets: explicit id → tenant hostname
-     * → `X-Environment-Id` header → single-project default. Returns undefined
-     * for control-plane requests. Shared by every per-environment service
-     * resolution (protocol, analytics, …) so they can never disagree about
-     * which kernel a request belongs to.
+     * Resolve the environment a request targets. THE single entry point for
+     * every unscoped-route environment decision (protocol, i18n, exec-ctx,
+     * analytics, …) so they can never disagree about which kernel a request
+     * belongs to.
+     *
+     * Chain: explicit id → host-injected {@link RestRequestEnvResolver}
+     * (ADR-0076 D11 step ④ — the dispatcher's ADR-0006 `kernel-resolver`
+     * strategy; its normal return, including `undefined`, is final) → legacy
+     * built-in chain (tenant hostname → `X-Environment-Id` header) → single-
+     * project default. Returns undefined for control-plane requests.
      */
     private async resolveRequestEnvironmentId(environmentId?: string, req?: any): Promise<string | undefined> {
         if (environmentId) return environmentId;
+        // 1. Host-injected resolver seam. Where wired (cloud runtime), this is
+        //    the SAME strategy instance the HTTP dispatcher uses, so REST and
+        //    dispatcher routes always agree on a request's environment —
+        //    including the session-driven fallbacks the legacy chain below
+        //    never had. Normal returns are final; only a throw degrades to
+        //    the legacy chain.
+        if (req && this.requestEnvResolver) {
+            try {
+                return await this.requestEnvResolver.resolveRequestEnvironmentId(req);
+            } catch { /* resolver failure → legacy chain */ }
+        }
         if (req && this.envRegistry && this.kernelManager) {
             const host = this.extractHostname(req);
             if (host) {
@@ -982,33 +1027,10 @@ export class RestServer {
      */
     private async resolveI18nService(environmentId?: string, req?: any): Promise<any | undefined> {
         if (environmentId === 'platform') return undefined;
-        // Mirror resolveProtocol's fallback chain so unscoped routes (single-
-        // project dev servers, hostname-routed multi-tenants, X-Environment-Id
-        // headers) can still pick up per-project translation bundles.
-        if (!environmentId && req && this.envRegistry && this.kernelManager) {
-            const host = this.extractHostname(req);
-            if (host) {
-                try {
-                    const result = await this.resolveHostnameCached(host);
-                    if (result?.environmentId) environmentId = result.environmentId;
-                } catch { /* fall through */ }
-            }
-            if (!environmentId && typeof this.envRegistry.resolveById === 'function') {
-                const headerVal = this.extractProjectIdHeader(req);
-                if (headerVal) {
-                    try {
-                        const driver = await this.envRegistry.resolveById(headerVal);
-                        if (driver) environmentId = headerVal;
-                    } catch { /* fall through */ }
-                }
-            }
-        }
-        if (!environmentId && this.defaultEnvironmentIdProvider) {
-            try {
-                const def = this.defaultEnvironmentIdProvider();
-                if (def) environmentId = def;
-            } catch { /* fall through */ }
-        }
+        // Shared resolution entry point (D11④) — previously this method
+        // hand-copied the hostname/header/default chain; now every consumer
+        // gets the one answer from resolveRequestEnvironmentId.
+        environmentId = await this.resolveRequestEnvironmentId(environmentId, req);
         // Multi-tenant kernel lookup first; falls back to the single-kernel
         // provider supplied by RestApiPlugin in dev / standalone mode.
         if (environmentId && this.kernelManager) {
@@ -1205,30 +1227,13 @@ export class RestServer {
         try {
             // For multi-tenant hosts (objectos), incoming requests on unscoped
             // URLs like `/api/v1/data/:object` arrive with `environmentId === undefined`.
-            // The route's protocol resolver already maps hostname → environmentId
-            // (see resolveProtocol). We mirror that here so getSession() can
-            // find the right per-project auth service. Without this, the
-            // hostname-routed requests fall through to defaultEnvironmentIdProvider/
+            // Resolve through the shared entry point (D11④) so getSession()
+            // finds the right per-project auth service — the same answer the
+            // route's protocol resolver got. Without this, hostname-routed
+            // requests fall through to defaultEnvironmentIdProvider/
             // authServiceProvider (neither of which is wired in objectos) and
             // every authenticated user sees 401.
-            if (!environmentId && req && this.envRegistry && this.kernelManager) {
-                const host = this.extractHostname(req);
-                if (host) {
-                    try {
-                        const result = await this.resolveHostnameCached(host);
-                        if (result?.environmentId) environmentId = result.environmentId;
-                    } catch { /* fall through */ }
-                }
-                if (!environmentId && typeof this.envRegistry.resolveById === 'function') {
-                    const headerVal = this.extractProjectIdHeader(req);
-                    if (headerVal) {
-                        try {
-                            const driver = await this.envRegistry.resolveById(headerVal);
-                            if (driver) environmentId = headerVal;
-                        } catch { /* fall through */ }
-                    }
-                }
-            }
+            environmentId = await this.resolveRequestEnvironmentId(environmentId, req);
             // Look up the auth service in the right kernel. For unscoped
             // single-environment apps the kernelManager will hand us the lone
             // tenant kernel; for multi-environment hosts we use the resolved
