@@ -7,7 +7,7 @@ import { FilterConditionSchema } from '../data/filter.zod';
 import { ChartConfigSchema } from './chart.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
-import { ResponsiveConfigSchema, PerformanceConfigSchema } from './responsive.zod';
+import { PerformanceConfigSchema } from './responsive.zod';
 
 /**
  * Report Type Enum
@@ -19,37 +19,6 @@ export const ReportType = z.enum([
   'matrix',    // Grouped by row and column
   'joined'     // Joined multiple blocks
 ]);
-
-/**
- * Report Column Schema
- *
- * @deprecated Unreferenced by the single-form (ADR-0021) report shape — a
- * dataset-bound report selects `values` (measure names) and `rows`/`columns`
- * (dimension names) as `z.array(z.string())`, not `ReportColumn` objects. Kept
- * only as a public type export (objectui re-exports it as `SpecReportColumn`);
- * slated for removal in a future governed prune (liveness #1878/#1890).
- */
-export const ReportColumnSchema = lazySchema(() => z.object({
-  field: z.string().describe('Field name'),
-  label: I18nLabelSchema.optional().describe('Override label'),
-  aggregate: z.enum(['sum', 'avg', 'max', 'min', 'count', 'unique']).optional().describe('Aggregation function'),
-  /** Responsive visibility/priority per breakpoint */
-  responsive: ResponsiveConfigSchema.optional().describe('Responsive visibility for this column'),
-}));
-
-/**
- * Report Grouping Schema
- *
- * @deprecated Unreferenced by the single-form (ADR-0021) report shape —
- * grouping is expressed by dataset dimension names in `rows`/`columns`. Kept
- * only as a public type export (objectui re-exports it as `SpecReportGrouping`);
- * slated for removal in a future governed prune (liveness #1878/#1890).
- */
-export const ReportGroupingSchema = lazySchema(() => z.object({
-  field: z.string().describe('Field to group by'),
-  sortOrder: z.enum(['asc', 'desc']).default('asc'),
-  dateGranularity: z.enum(['day', 'week', 'month', 'quarter', 'year']).optional().describe('For date fields'),
-}));
 
 /**
  * Report Chart Schema
@@ -64,13 +33,6 @@ export const ReportChartSchema = lazySchema(() => ChartConfigSchema.extend({
   xAxis: z.string().describe('Dataset dimension name for the X-axis (bound-dataset dimension, not a raw field)'),
   /** Dataset **measure** name for the Y-axis (from the report's bound dataset). */
   yAxis: z.string().describe('Dataset measure name for the Y-axis (bound-dataset measure, not a raw field)'),
-  /**
-   * ⚠️ EXPERIMENTAL — NOT ENFORCED (liveness #1878/#1890). An additional
-   * series-split grouping. The dataset-bound `DatasetReportRenderer` plots a
-   * single `xAxis`×`yAxis` series and does not read this; only the legacy
-   * `ReportViewer` fallback consumed a top-level `groupBy`.
-   */
-  groupBy: z.string().optional().describe('[EXPERIMENTAL — not enforced] Additional series-split grouping; not read by the dataset-bound report renderer (liveness #1878/#1890)'),
 }));
 
 /**
@@ -223,8 +185,6 @@ export type JoinedReportBlockInput = z.input<typeof JoinedReportBlockSchema>;
  * which allow optional fields with defaults to be omitted.
  */
 export type Report = z.infer<typeof ReportSchema>;
-export type ReportColumn = z.infer<typeof ReportColumnSchema>;
-export type ReportGrouping = z.infer<typeof ReportGroupingSchema>;
 export type ReportChart = z.infer<typeof ReportChartSchema>;
 
 /**
@@ -232,8 +192,6 @@ export type ReportChart = z.infer<typeof ReportChartSchema>;
  * Use these when defining reports in configuration files.
  */
 export type ReportInput = z.input<typeof ReportSchema>;
-export type ReportColumnInput = z.input<typeof ReportColumnSchema>;
-export type ReportGroupingInput = z.input<typeof ReportGroupingSchema>;
 export type ReportChartInput = z.input<typeof ReportChartSchema>;
 
 /**

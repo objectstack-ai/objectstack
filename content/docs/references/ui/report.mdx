@@ -14,8 +14,8 @@ Report Type Enum
 ## TypeScript Usage
 
 ```typescript
-import { JoinedReportBlock, Report, ReportChart, ReportColumn, ReportGrouping, ReportType } from '@objectstack/spec/ui';
-import type { JoinedReportBlock, Report, ReportChart, ReportColumn, ReportGrouping, ReportType } from '@objectstack/spec/ui';
+import { JoinedReportBlock, Report, ReportChart, ReportType } from '@objectstack/spec/ui';
+import type { JoinedReportBlock, Report, ReportChart, ReportType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = JoinedReportBlock.parse(data);
@@ -95,34 +95,6 @@ const result = JoinedReportBlock.parse(data);
 | **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional |  |
 | **interaction** | `{ tooltips: boolean; zoom: boolean; brush: boolean; clickAction?: string }` | optional |  |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
-| **groupBy** | `string` | optional | [EXPERIMENTAL — not enforced] Additional series-split grouping; not read by the dataset-bound report renderer (liveness #1878/#1890) |
-
-
----
-
-## ReportColumn
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name |
-| **label** | `string` | optional | Override label |
-| **aggregate** | `Enum<'sum' \| 'avg' \| 'max' \| 'min' \| 'count' \| 'unique'>` | optional | Aggregation function |
-| **responsive** | `{ breakpoint?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>; hiddenOn?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>[]; columns?: object; order?: object }` | optional | Responsive visibility for this column |
-
-
----
-
-## ReportGrouping
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field to group by |
-| **sortOrder** | `Enum<'asc' \| 'desc'>` | ✅ |  |
-| **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | For date fields |
 
 
 ---

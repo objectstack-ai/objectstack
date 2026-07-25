@@ -1751,8 +1751,6 @@
     "ui/RecordRelatedListProps",
     "ui/Report",
     "ui/ReportChart",
-    "ui/ReportColumn",
-    "ui/ReportGrouping",
     "ui/ReportNavItem",
     "ui/ReportType",
     "ui/ResponsiveConfig",
