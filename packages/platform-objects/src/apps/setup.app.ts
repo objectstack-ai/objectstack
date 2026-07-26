@@ -14,7 +14,7 @@
  *   alongside this app.
  * - Items owned by a capability plugin are contributed by that plugin — e.g.
  *   `@objectstack/plugin-webhooks` fills `group_integrations` with its
- *   `sys_webhook` / `sys_webhook_delivery` entries (ADR-0029 K2.a).
+ *   `sys_webhook` entry (ADR-0029 K2.a).
  *
  * The runtime merges all contributions into this app's `navigation` tree by
  * group id + priority on read, so the rendered Setup nav is identical to the

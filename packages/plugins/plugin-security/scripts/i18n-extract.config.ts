@@ -13,7 +13,11 @@
  */
 
 import { defineStack } from '@objectstack/spec';
-import { SysPosition, SysPermissionSet, SysUserPermissionSet, SysPositionPermissionSet } from '../src/objects/index.js';
+// SysCapability carries curated translations already present in the bundles; it
+// must stay in this list so `os i18n extract` keeps emitting it (dropping it
+// here silently deletes those strings on the next run — the sys_audit_log
+// incident). Enforced by src/translations/bundle-ownership.test.ts.
+import { SysPosition, SysCapability, SysPermissionSet, SysUserPermissionSet, SysPositionPermissionSet } from '../src/objects/index.js';
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
@@ -21,7 +25,7 @@ import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
 
 export default defineStack({
   name: 'plugin-security-i18n-extract',
-  objects: [SysPosition, SysPermissionSet, SysUserPermissionSet, SysPositionPermissionSet] as any,
+  objects: [SysPosition, SysCapability, SysPermissionSet, SysUserPermissionSet, SysPositionPermissionSet] as any,
   translations: [
     { en: { objects: enObjects } },
     { 'zh-CN': { objects: zhCNObjects } },
