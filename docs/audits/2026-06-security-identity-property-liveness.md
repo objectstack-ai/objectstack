@@ -1,5 +1,12 @@
 # Audit: Security/Identity metadata liveness & necessity
 
+> **⚠️ SUPERSEDED — 2026-07-25.** This point-in-time snapshot is now factually
+> wrong in several places (notably "PolicySchema is 100% dead" — it was *deleted*
+> in #2387 and its capabilities *rebuilt as enforced settings* by ADR-0069). For
+> the current per-property status and the genuine remaining loose ends, see
+> [`2026-07-security-props-liveness-recheck.md`](./2026-07-security-props-liveness-recheck.md).
+> The body below is retained as the historical record.
+
 **Date**: 2026-06-15 · **Scope**: `packages/spec/src/{identity,security}/*.zod.ts` — RoleSchema, PermissionSetSchema, PolicySchema, SharingRuleSchema. **Consumers**: `plugin-security`, `plugin-sharing`, `plugin-auth`, `objectql`. No dedicated Studio designers — generic metadata-admin forms only. **⚠️ This layer is security-critical: "parsed but unenforced" = latent access-control gap.**
 
 ## 🔴🔴 PolicySchema is 100% DEAD (highest impact)

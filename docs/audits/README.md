@@ -37,6 +37,8 @@ The most serious cluster — properties that imply a security boundary but enfor
 - **Action `disabled`** (CEL form) — silently ignored (renderer reads non-spec `enabled`).
 - **Role `parent`** / **SharingRuleSchema** — manager rollup & spec sharing rules disconnected from the live engine.
 
+**✅ Rechecked 2026-07-25 — this cluster is largely closed.** `PolicySchema` was *deleted* (#2387) and its capabilities *rebuilt as enforced settings* (ADR-0069: password/MFA/lockout/session/IP); `allowTransfer`, `apiEnabled`/`apiMethods`, flow `runAs`, ADR-0057 scope and criteria-type SharingRules are all **enforced**; agent `visibility` and `role.parent` were pruned (the latter never existed — positions are flat, ADR-0090). Remaining: prune `AuditRetentionPolicySchema`, enforce-or-prune SharingRule owner/group/guest recipients, per-org IP allow-list (#2571). Full per-property evidence: [`2026-07-security-props-liveness-recheck.md`](./2026-07-security-props-liveness-recheck.md).
+
 ### 2. 🔴 ADR-0021 analytics migration debt
 Spec moved to `dataset`+`values`/`dimensions`, but: the **chart view variant** + **dashboard renderer + Studio WidgetConfigPanel** still read the *removed* legacy `object/valueField/categoryField/aggregate` shape. (Same debt that invalidated the showcase dashboard/report seeds.)
 
