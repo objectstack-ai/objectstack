@@ -91,6 +91,15 @@ export interface ApprovalRequestRow {
    */
   payload_display?: Record<string, string>;
   /**
+   * Display labels for `payload` fields (field key → target object's field
+   * label), so inbox summaries show the human field name (e.g. "考核状态")
+   * instead of a title-cased machine key ("Assessment Status"). Resolved from
+   * the target object's schema — for a single-locale project the schema label
+   * IS the localized string; symmetric with `payload_display` (which resolves
+   * the values). Absent keys fall back to the client's prettified key.
+   */
+  payload_labels?: Record<string, string>;
+  /**
    * SLA deadline, when the node config carries `escalation.timeoutHours`:
    * `created_at + timeoutHours`. Display-only for now — automatic escalation
    * needs a scheduler pass and is not yet wired.

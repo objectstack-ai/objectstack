@@ -598,6 +598,27 @@ describe('ApprovalService (node era)', () => {
     expect(rows[0].payload_display).toEqual({ account: 'Acme Corp' });
   });
 
+  it('enrichment maps snapshot field keys to the object field labels', async () => {
+    (engine as any).getSchema = (name: string) =>
+      name === 'opportunity'
+        ? {
+            label: 'Opportunity',
+            fields: {
+              id: {}, // no label → excluded from payload_labels
+              name: { label: 'Deal Name' },
+              amount: { label: 'Deal Amount' },
+            },
+          }
+        : undefined;
+    await svc.openNodeRequest(
+      openInput(['u9'], { record: { id: 'opp1', name: 'Acme Renewal', amount: 100 } }), CTX,
+    );
+    const rows = await svc.listRequests({ status: 'pending' }, SYS);
+    // Only keys present in the snapshot AND carrying a schema label are mapped;
+    // `id` (unlabeled) is dropped.
+    expect(rows[0].payload_labels).toEqual({ name: 'Deal Name', amount: 'Deal Amount' });
+  });
+
   it('enrichment maps user-id approvers to display names', async () => {
     engine._tables['sys_user'] = [{ id: 'u9', name: 'Grace Hopper', email: 'grace@example.com' }];
     await svc.openNodeRequest(openInput(['u9']), CTX);

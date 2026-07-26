@@ -1969,10 +1969,30 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * Field key → display label for an object's schema. Lets the inbox summary
+   * show a human field name ("考核状态") instead of a title-cased machine key
+   * ("Assessment Status"). For a single-locale project the schema label already
+   * IS the localized string; symmetric with `resolveDisplayField`/lookup
+   * resolution that power `payload_display`.
+   */
+  private resolveFieldLabels(object: string): Record<string, string> {
+    try {
+      const schema: any = (this.engine as any).getSchema?.(object);
+      const fields = schema?.fields ?? {};
+      const out: Record<string, string> = {};
+      for (const [key, f] of Object.entries<any>(fields)) {
+        if (f?.label) out[key] = String(f.label);
+      }
+      return out;
+    } catch { return {}; }
+  }
+
+  /**
    * Attach inbox display fields to rows so clients never render a raw
    * identifier: `record_title`, `submitter_name`, `object_label`,
-   * `pending_approver_names` (user-id approvers), and `payload_display`
-   * (lookup foreign keys in the snapshot → referenced record titles).
+   * `pending_approver_names` (user-id approvers), `payload_display`
+   * (lookup foreign keys in the snapshot → referenced record titles), and
+   * `payload_labels` (snapshot field keys → the target object's field labels).
    * Batched: one query per distinct object (target + referenced) plus one
    * `sys_user` lookup. Best-effort — a deleted record falls back to the
    * payload snapshot, and any failure leaves the field unset rather than
@@ -2011,9 +2031,13 @@ export class ApprovalService implements IApprovalService {
 
     // Lookup foreign keys inside payload snapshots → referenced record titles.
     const lookupFieldsByObject = new Map<string, Array<{ key: string; reference: string }>>();
+    // Field key → label per object, for the snapshot summary's field names.
+    const fieldLabelsByObject = new Map<string, Record<string, string>>();
     for (const object of byObject.keys()) {
       const lookups = this.resolveLookupFields(object);
       if (lookups.length) lookupFieldsByObject.set(object, lookups);
+      const labels = this.resolveFieldLabels(object);
+      if (Object.keys(labels).length) fieldLabelsByObject.set(object, labels);
     }
     const refIds = new Map<string, Set<string>>();
     for (const r of rows) {
@@ -2080,6 +2104,18 @@ export class ApprovalService implements IApprovalService {
           if (t) display[key] = t;
         }
         if (Object.keys(display).length) r.payload_display = display;
+      }
+
+      // Field labels for the snapshot keys the summary renders (only keys
+      // actually present in the payload — a deleted field's label is noise).
+      const fieldLabels = fieldLabelsByObject.get(r.object_name);
+      if (fieldLabels && r.payload && typeof r.payload === 'object') {
+        const labels: Record<string, string> = {};
+        for (const key of Object.keys(r.payload as Record<string, unknown>)) {
+          const l = fieldLabels[key];
+          if (l) labels[key] = l;
+        }
+        if (Object.keys(labels).length) r.payload_labels = labels;
       }
     }
   }
