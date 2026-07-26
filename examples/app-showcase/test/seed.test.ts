@@ -22,9 +22,9 @@ describe('showcase stack', () => {
     expect((stack.views ?? []).length).toBeGreaterThan(0);
     expect((stack.dashboards ?? []).length).toBeGreaterThan(0);
     // ADR-0021 single-form: the former flat `tabular` TaskListReport was
-    // reclassified as a ListView (a flat list is a row lens, not analytics),
-    // leaving 3 dataset-bound analytics reports.
-    expect((stack.reports ?? []).length).toBe(3);
+    // reclassified as a ListView (a flat list is a row lens, not analytics).
+    // Four dataset-bound analytics reports: summary, chart, matrix, joined.
+    expect((stack.reports ?? []).length).toBe(4);
     expect((stack.flows ?? []).length).toBeGreaterThan(0);
     // Nine flat positions (contributor/manager/exec/auditor/ops/
     // field_ops_delegate/client_portal_user, plus finance/legal for the v16
