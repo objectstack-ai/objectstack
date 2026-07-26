@@ -6,6 +6,7 @@ import type {
   StorageUploadOptions,
   PresignedUploadDescriptor,
   PresignedDownloadDescriptor,
+  PresignedDownloadOptions,
 } from '@objectstack/spec/contracts';
 
 /**
@@ -77,11 +78,11 @@ export class SwappableStorageService implements IStorageService {
     return this.inner.list(prefix);
   }
 
-  getSignedUrl(key: string, expiresIn: number): Promise<string> {
+  getSignedUrl(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<string> {
     if (typeof this.inner.getSignedUrl !== 'function') {
       return Promise.reject(new Error('Active storage adapter does not support getSignedUrl()'));
     }
-    return this.inner.getSignedUrl(key, expiresIn);
+    return this.inner.getSignedUrl(key, expiresIn, options);
   }
 
   getPresignedUpload(
@@ -95,11 +96,11 @@ export class SwappableStorageService implements IStorageService {
     return this.inner.getPresignedUpload(key, expiresIn, options);
   }
 
-  getPresignedDownload(key: string, expiresIn: number): Promise<PresignedDownloadDescriptor> {
+  getPresignedDownload(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<PresignedDownloadDescriptor> {
     if (typeof this.inner.getPresignedDownload !== 'function') {
       return Promise.reject(new Error('Active storage adapter does not support getPresignedDownload()'));
     }
-    return this.inner.getPresignedDownload(key, expiresIn);
+    return this.inner.getPresignedDownload(key, expiresIn, options);
   }
 
   initiateChunkedUpload(key: string, options?: StorageUploadOptions): Promise<string> {

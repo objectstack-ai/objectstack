@@ -1948,7 +1948,7 @@ describe('ApprovalService — decision_progress & deep links (#2678 P1.5)', () =
 // listActions must surface decision attachments through the contract mapping
 // (#3266 — the column existed but rowFromAction dropped it; caught in browser).
 describe('ApprovalService — listActions attachments mapping (#3266)', () => {
-  it('returns the attachments recorded on a decision', async () => {
+  it('normalizes a bare fileId string into an attachment descriptor', async () => {
     const engine = makeFakeEngine();
     let n = 0;
     const svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
@@ -1956,6 +1956,28 @@ describe('ApprovalService — listActions attachments mapping (#3266)', () => {
     await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9', attachments: ['file_a'] }, SYS);
     const acts = await svc.listActions(req.id, SYS);
     const approve = acts.find(a => a.action === 'approve');
-    expect(approve?.attachments).toEqual(['file_a']);
+    expect(approve?.attachments).toEqual([{ id: 'file_a' }]);
+  });
+
+  // The real column value: `attachments` is a `Field.file` (multiple), which
+  // stores rich descriptors — NOT fileId strings. The old `.map(String)` turned
+  // each into "[object Object]", so the inbox chip had no name and 404'd on open.
+  // The mapping must pass the descriptor (id + name + url) through unmangled.
+  it('passes a stored file descriptor object through with its name and url', async () => {
+    const engine = makeFakeEngine();
+    let n = 0;
+    const svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    // Simulate the Field.file column's real shape (what the engine returns).
+    const row = engine._tables['sys_approval_action'].find((a: any) => a.action === 'approve');
+    row.attachments = [
+      { id: 'file_a', name: 'signed-contract.pdf', mimeType: 'application/pdf', size: 24, url: '/api/v1/storage/files/file_a' },
+    ];
+    const acts = await svc.listActions(req.id, SYS);
+    const approve = acts.find(a => a.action === 'approve');
+    expect(approve?.attachments).toEqual([
+      { id: 'file_a', name: 'signed-contract.pdf', mimeType: 'application/pdf', size: 24, url: '/api/v1/storage/files/file_a' },
+    ]);
   });
 });

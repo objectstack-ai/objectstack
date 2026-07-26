@@ -19,6 +19,7 @@ import type {
   IApprovalService,
   ApprovalRequestRow,
   ApprovalActionRow,
+  ApprovalActionAttachment,
   ApprovalDecisionInput,
   ApprovalDecisionResult,
   ApprovalRecallInput,
@@ -255,7 +256,42 @@ function slaDueAt(createdAt: unknown, cfg: any): string | undefined {
   return new Date(t + hours * 3600_000).toISOString();
 }
 
+/**
+ * Normalize one raw `attachments` entry into an {@link ApprovalActionAttachment}.
+ *
+ * The `sys_approval_action.attachments` file field stores **rich descriptors**
+ * (`{ id, name, url, mimeType, size }`), not bare fileId strings — even when the
+ * decision was recorded with a fileId, the field resolves it on write. The
+ * original mapping did `String(entry)`, which turned each descriptor object into
+ * the literal `"[object Object]"` — so the inbox timeline showed a nameless,
+ * un-openable attachment chip (#3266 follow-up; caught by browser verification).
+ * We pass the descriptor through, tolerating a bare-string fileId for safety.
+ */
+function normalizeActionAttachment(entry: any): ApprovalActionAttachment | undefined {
+  if (entry == null) return undefined;
+  if (typeof entry === 'string') {
+    const id = entry.trim();
+    return id ? { id } : undefined;
+  }
+  if (typeof entry === 'object') {
+    const id = entry.id ?? entry.fileId ?? entry.file_id;
+    if (id == null || String(id) === '') return undefined;
+    const mimeType = entry.mimeType ?? entry.mime_type;
+    return {
+      id: String(id),
+      name: typeof entry.name === 'string' ? entry.name : undefined,
+      url: typeof entry.url === 'string' ? entry.url : undefined,
+      mimeType: typeof mimeType === 'string' ? mimeType : undefined,
+      size: typeof entry.size === 'number' ? entry.size : undefined,
+    };
+  }
+  return undefined;
+}
+
 function rowFromAction(row: any): ApprovalActionRow {
+  const attachments = Array.isArray(row.attachments)
+    ? row.attachments.map(normalizeActionAttachment).filter((a: ApprovalActionAttachment | undefined): a is ApprovalActionAttachment => !!a)
+    : [];
   return {
     id: String(row.id),
     request_id: String(row.request_id),
@@ -264,10 +300,9 @@ function rowFromAction(row: any): ApprovalActionRow {
     action: row.action,
     actor_id: row.actor_id ?? undefined,
     comment: row.comment ?? undefined,
-    // Decision attachments (#3266). The column shipped in #3268 but this
-    // contract mapping didn't — the raw engine row carried the fileIds while
-    // every consumer of listActions saw none (caught by browser verification).
-    attachments: Array.isArray(row.attachments) && row.attachments.length ? row.attachments.map(String) : undefined,
+    // Decision attachments (#3266): rich descriptors carrying the display name +
+    // download URL, so consumers label/open them without reading `sys_file`.
+    attachments: attachments.length ? attachments : undefined,
     created_at: row.created_at ?? undefined,
   };
 }

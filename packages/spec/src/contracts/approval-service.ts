@@ -199,6 +199,24 @@ export type ApprovalActionKind =
   /** #1322 M1: an out-of-office approver's slot was auto-rerouted to their delegate at resolution time. */
   | 'ooo_substitute';
 
+/**
+ * A file attached to a decision action (#3266). Resolved from the
+ * `sys_approval_action.attachments` file field, which stores rich descriptors
+ * (not bare fileIds) — so the row carries the display name and a download URL
+ * directly, and consumers never need read access to the system `sys_file`
+ * object to label or open an attachment.
+ */
+export interface ApprovalActionAttachment {
+  /** The `sys_file` id — pass to `GET /storage/files/:id/url` for a signed URL. */
+  id: string;
+  /** Original filename, for the chip label. */
+  name?: string;
+  /** Stable download URL (`/api/v1/storage/files/:id`); may be relative. */
+  url?: string;
+  mimeType?: string;
+  size?: number;
+}
+
 /** Audit row. */
 export interface ApprovalActionRow {
   id: string;
@@ -208,8 +226,8 @@ export interface ApprovalActionRow {
   action: ApprovalActionKind;
   actor_id?: string;
   comment?: string;
-  /** File references attached to this action (decision attachments, #3266). */
-  attachments?: string[];
+  /** Files attached to this action (decision attachments, #3266). */
+  attachments?: ApprovalActionAttachment[];
   created_at?: string;
   /** Display name of the actor (`sys_user.name`), when resolvable. */
   actor_name?: string;

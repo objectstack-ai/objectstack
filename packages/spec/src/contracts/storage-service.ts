@@ -71,6 +71,22 @@ export interface PresignedDownloadDescriptor {
     expiresIn: number;
 }
 
+/**
+ * Presentation hints for a presigned download. Without these the served bytes
+ * default to `application/octet-stream` with no filename, so a browser saves
+ * the file under the opaque URL token instead of its real name. Callers that
+ * know the file's metadata (e.g. the REST download routes, which have the
+ * `sys_file` record) should pass it so the download carries a real name + type.
+ */
+export interface PresignedDownloadOptions {
+    /** Original filename → `Content-Disposition` (the browser's save-as name). */
+    filename?: string;
+    /** Content type → `Content-Type` (defaults to `application/octet-stream`). */
+    contentType?: string;
+    /** `inline` previews in the browser (default); `attachment` forces a download. */
+    disposition?: 'inline' | 'attachment';
+}
+
 export interface IStorageService {
     /**
      * Upload a file to storage
@@ -120,7 +136,7 @@ export interface IStorageService {
      * @param expiresIn - URL expiration time in seconds
      * @returns Pre-signed URL string
      */
-    getSignedUrl?(key: string, expiresIn: number): Promise<string>;
+    getSignedUrl?(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<string>;
 
     // ==========================================
     // Presigned Upload / Download (browser-direct)
@@ -155,7 +171,7 @@ export interface IStorageService {
      * @param key - Storage key/path
      * @param expiresIn - URL expiration time in seconds
      */
-    getPresignedDownload?(key: string, expiresIn: number): Promise<PresignedDownloadDescriptor>;
+    getPresignedDownload?(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<PresignedDownloadDescriptor>;
 
     // ==========================================
     // Chunked / Multipart Upload Methods
