@@ -286,8 +286,21 @@ jobs:
         run: |
           result="${{ needs.dogfood.result }}"
           echo "dogfood matrix aggregate result: $result"
+          # cancelled is a run-lifecycle state, not a shard verdict (#3668):
+          # with cancel-in-progress on, every superseded push cancelled the
+          # in-flight dogfood matrix — the longest job, so almost always the
+          # one still running — and the old `*)` fallthrough painted a false
+          # red on the old SHA. Verified experimentally (run 30271824408, a
+          # fail-fast matrix with one real failure + one cancelled sibling):
+          # a real shard failure DOMINATES the aggregate — it reads "failure",
+          # never "cancelled" — so "cancelled" here can only mean the whole
+          # run was stopped from outside (supersession, or a manual cancel —
+          # accepted trade-off), and passing it masks no regression.
+          # Deliberately NOT `if: !cancelled()` on the job instead: a skipped
+          # gate publishes no required-check context on the SHA, which is the
+          # #3622 merge-deadlock all over again.
           case "$result" in
-            success|skipped) echo "Dogfood gate satisfied." ;;
+            success|skipped|cancelled) echo "Dogfood gate satisfied ($result)." ;;
             *) echo "::error::Dogfood shards did not pass (aggregate result: $result)"; exit 1 ;;
           esac
 
