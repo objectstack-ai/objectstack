@@ -36,6 +36,12 @@ const LAZY_DEPS = ['typescript', 'sucrase'];
 const depLoaded = (cache: Record<string, unknown> | undefined, dep: string) =>
   Object.keys(cache ?? {}).some((p) => p.split(/[/\\]/).join('/').includes(`/node_modules/${dep}/`));
 
+// Every case below cold-loads sucrase + typescript (~1.5 MB / ~9 MB) — in-process
+// for the behavioral case, in a spawned child `node` for the dist probes. On a
+// loaded runner (dozens of parallel turbo tasks) that alone takes >5s, so vitest's
+// default 5s timeout flakes while the assertion set is pure contract, not latency.
+const COLD_LOAD_TIMEOUT_MS = 30_000;
+
 describe('lazy dependency loading (kernel boot-path contract)', () => {
   it('no src file eagerly imports a lazy dep (import type only)', () => {
     // Static `import`/`export ... from '<dep>'` executes at module init in
@@ -85,7 +91,7 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       { encoding: 'utf8' },
     );
     expect(out).toContain('OK');
-  });
+  }, COLD_LOAD_TIMEOUT_MS);
 
   it.skipIf(!existsSync(join(distDir, 'index.js')))('built ESM dist does not load a lazy dep until a react page is validated', () => {
     const out = execFileSync(
@@ -101,7 +107,7 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       { encoding: 'utf8' },
     );
     expect(out).toContain('OK');
-  });
+  }, COLD_LOAD_TIMEOUT_MS);
 
   it('loads each dep lazily in-process and the gates still work', async () => {
     const req = createRequire(import.meta.url);
@@ -129,8 +135,5 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
     });
     expect(depLoaded(req.cache, 'typescript')).toBe(true);
     expect(props.some((f) => f.rule === 'react-prop-missing-required' && /objectName/.test(f.message))).toBe(true);
-    // Cold-loading sucrase + typescript in-process takes >5s on a loaded CI
-    // runner (dozens of parallel turbo tasks) — the default 5s timeout flakes
-    // there while the assertion set is pure contract, not latency.
-  }, 30_000);
+  }, COLD_LOAD_TIMEOUT_MS);
 });
