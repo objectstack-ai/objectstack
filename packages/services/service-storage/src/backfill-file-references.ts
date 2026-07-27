@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { randomUUID } from 'node:crypto';
-import { FILE_REFERENCE_TYPES, isFileIdToken } from '@objectstack/spec/data';
+import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import type { IStorageService } from '@objectstack/spec/contracts';
 
 /**
@@ -38,7 +38,12 @@ import type { IStorageService } from '@objectstack/spec/contracts';
  * and left alone, so a partially-completed run is safe to repeat.
  */
 
-const SYSTEM_CTX = { isSystem: true } as const;
+// Raw-form reads: the backfill's subject is the STORED value. Without the
+// raw marker, a live kernel's read resolver would re-expand every id this
+// run (or a previous one) already wrote, so each pass would re-report the
+// same values as freshly converted instead of `already_id` — the run would
+// never converge to zero.
+const SYSTEM_CTX = { isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true } as const;
 const SCAN_PAGE_SIZE = 200;
 
 /** `data:<mime>;base64,<payload>` — the only inline form carrying real bytes. */

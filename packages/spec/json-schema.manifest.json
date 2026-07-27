@@ -1319,6 +1319,7 @@
     "system/CursorUpdate",
     "system/DataClassification",
     "system/DataClassificationPolicy",
+    "system/DataMigrationFlag",
     "system/DatabaseLevelIsolationStrategy",
     "system/DatabaseProvider",
     "system/DeadLetterQueue",

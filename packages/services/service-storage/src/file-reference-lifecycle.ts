@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { randomUUID } from 'node:crypto';
-import { FILE_REFERENCE_TYPES, isFileIdToken } from '@objectstack/spec/data';
+import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import type { IStorageService } from '@objectstack/spec/contracts';
 
 /**
@@ -53,7 +53,10 @@ import type { IStorageService } from '@objectstack/spec/contracts';
  */
 
 const PACKAGE_ID = 'com.objectstack.service.storage';
-const SYSTEM_CTX = { isSystem: true } as const;
+// Bookkeeping reads want the STORED form — never the read resolver's expanded
+// shape (and skipping resolution also saves a batched sys_file sub-read on
+// every internal page). Inert on write contexts.
+const SYSTEM_CTX = { isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true } as const;
 
 /** Bound on records resolved per where-shaped multi-delete — matches the
  * attachment lifecycle's posture: bound one pass, converge across sweeps. */

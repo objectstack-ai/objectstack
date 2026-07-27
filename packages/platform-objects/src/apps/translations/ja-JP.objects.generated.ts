@@ -3042,5 +3042,46 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "Recent"
       }
     }
+  },
+  sys_migration: {
+    label: "",
+    pluralLabel: "",
+    description: "",
+    fields: {
+      id: {
+        label: "",
+        help: ""
+      },
+      last_run_at: {
+        label: "",
+        help: ""
+      },
+      verified_at: {
+        label: "",
+        help: ""
+      },
+      applied_at: {
+        label: "",
+        help: ""
+      },
+      blocking: {
+        label: "",
+        help: ""
+      },
+      advisory: {
+        label: "",
+        help: ""
+      },
+      details: {
+        label: "",
+        help: ""
+      },
+      created_at: {
+        label: ""
+      },
+      updated_at: {
+        label: ""
+      }
+    }
   }
 };
