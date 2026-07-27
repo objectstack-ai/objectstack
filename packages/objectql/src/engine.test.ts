@@ -572,6 +572,23 @@ describe('ObjectQL Engine', () => {
             await engine.count('task', {}, { context: { tenantId: 't-cnt' } as any });
             expect((mockDriver.count as any).mock.calls.at(-1)?.[2]).toMatchObject({ tenantId: 't-cnt' });
         });
+
+        // #3493 — a historical import sets `preserveAudit` on the write context;
+        // `buildDriverOptions` must thread it into the DRIVER options so the SQL
+        // driver keeps a supplied `updated_at` instead of force-stamping now. It
+        // is the SAME shared builder on read and write, so `find` is the cheap
+        // observable of the wire (as with `tenantId` above); the driver's actual
+        // honoring of the option lives in @objectstack/driver-sql, and the audit
+        // hook + readonly whitelist in plugin.integration.test.ts.
+        it('threads preserveAudit from the context into the driver options (#3493)', async () => {
+            await engine.find('task', { filters: [] }, { context: { preserveAudit: true } as any });
+            expect(lastFindOpts()).toMatchObject({ preserveAudit: true });
+        });
+
+        it('does NOT set preserveAudit when the context omits it (opt-in)', async () => {
+            await engine.find('task', { filters: [] }, { context: { tenantId: 't' } as any });
+            expect(lastFindOpts()?.preserveAudit).toBeUndefined();
+        });
     });
 
     describe('tenancy.enabled:false objects are platform-global (#3249, ADR-0066)', () => {
