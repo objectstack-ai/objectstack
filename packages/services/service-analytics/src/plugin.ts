@@ -371,29 +371,17 @@ export class AnalyticsServicePlugin implements Plugin {
     };
     const labelResolver: DimensionLabelDeps = {
       getObjectFields: (objectName) => dataEngine()?.getObject?.(objectName)?.fields,
-      fetchRecordLabels: async (targetObject, ids, context) => {
+      fetchRecordLabels: async (targetObject, ids, scope, context) => {
         const map = new Map<unknown, string>();
         const displayField = pickDisplayField(dataEngine()?.getObject?.(targetObject)?.fields);
         if (!displayField || !executeAggregate || ids.length === 0) return map;
-        // #3602 — this call is row-granular, not aggregate-granular: grouping by
-        // (id, displayField) returns the REAL display name of every matched
-        // record. Today the `ids` are already confined to what the caller can
-        // see (they come out of a scoped aggregate, #3601), so it leaks nothing
-        // — but that is an invariant of the current caller, not of this bridge.
-        // Widen the id source (a new strategy, a new caller) and it becomes a
-        // row-level read with nothing between it and the table. So scope it
-        // here, on both belts, the same way the aggregate path is scoped.
-        //
-        // Fail-closed: a throwing provider propagates out of `fetchRecordLabels`
-        // rather than degrading to an unscoped read. `resolveDimensionLabels`'
-        // caller catches it and leaves the raw ids in place — labels are lost,
-        // rows are not exposed.
-        const scope = await getReadScope?.(targetObject, context);
-        // `$and`, never a key merge: the scope may name `id` too, and a spread
-        // would let the id list overwrite the security predicate.
-        const filter: Record<string, unknown> = scope
-          ? { $and: [{ id: { $in: ids } }, scope as Record<string, unknown>] }
-          : { id: { $in: ids } };
+        // #3602 — AND the referenced object's own read scope into the id filter,
+        // with `$and` (never key-merge) so it cannot be displaced by the id
+        // predicate — the same composition the strategy uses for the aggregate.
+        // Without it this per-record read leaks display names the target's RLS
+        // would hide (fires when the referenced object is stricter than the base).
+        const idFilter: Record<string, unknown> = { id: { $in: ids } };
+        const filter = scope ? { $and: [idFilter, scope] } : idFilter;
         // Group by (id, displayField) — one row per record — reusing the aggregate
         // bridge rather than adding a record-fetch capability. A count keeps engines
         // that require ≥1 aggregation happy; the count itself is unused.
@@ -401,6 +389,9 @@ export class AnalyticsServicePlugin implements Plugin {
           groupBy: ['id', displayField],
           aggregations: [{ field: 'id', method: 'count', alias: '_c' }],
           filter,
+          // #3602 second belt — `scope` above is the analytics layer's own
+          // predicate on this per-record read; the context makes the engine's
+          // middleware scope it as well.
           context,
         });
         for (const r of rows) {

@@ -359,6 +359,16 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
   // ─── Catch-all: delegate to dispatcher.dispatch() ─────────────────────────
   // Handles meta, data, packages, analytics, automation, i18n, ui, openapi,
   // custom API endpoints, and any future routes added to HttpDispatcher.
+  //
+  // DELIBERATE SHAPE — read before "improving" this into explicit per-prefix
+  // mounts (ADR-0076 OQ#9 verdict, #3576 / #3608): dispatch() is a thin
+  // gates+registry pipeline (env resolution → identity → auth gate →
+  // membership → scope strip, then a first-match DomainHandlerRegistry
+  // lookup — enumerable via registry.list()). A naive split into
+  // `app.all(prefix + domain + '/*')` mounts bypasses those cross-cutting
+  // gate stages (the #2852 RLS-leak class: handlers running without an
+  // ExecutionContext). Revisit only if the gate stages are middleware-ized
+  // for an independent reason — reopen conditions are archived on #3608.
   app.all(`${prefix}/*`, async (c) => {
     try {
       const subPath = c.req.path.substring(prefix.length);

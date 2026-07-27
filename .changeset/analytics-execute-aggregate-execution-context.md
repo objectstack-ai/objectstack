@@ -28,8 +28,9 @@ plugin-security has only the analytics layer. This is depth, not a replacement.
   ExecutionContext`. **Custom bridges should forward it** to their engine; the
   built-in auto-bridge does. Purely additive — an existing bridge that ignores
   it keeps working exactly as before.
-- `DimensionLabelDeps.fetchRecordLabels` gains an optional trailing `context`,
-  and `resolveDimensionLabels` an optional trailing `context`.
+- `DimensionLabelDeps.fetchRecordLabels` and `resolveDimensionLabels` each gain
+  an optional trailing `context`, beside the `scope` / `resolveScope` that
+  #3639 added — the same two-belt split as the aggregate path.
 - `BootOptions.analytics` (`@objectstack/verify`) overrides the
   AnalyticsServicePlugin instance, so a gate can boot with the analytics belt
   off and assert the engine-side belt alone still scopes.
@@ -37,10 +38,9 @@ plugin-security has only the analytics layer. This is depth, not a replacement.
 **Also fixed on the same seam:**
 
 - `fetchRecordLabels` — the dimension display-label lookup — is row-granular
-  (one row per record, real display names) and ran with neither read scope nor
-  context. Its `ids` are confined to a scoped aggregate's output today, so it
-  leaked nothing, but that was the caller's invariant, not the bridge's. It now
-  ANDs the target object's read scope in and forwards the context.
+  (one row per record, real display names). #3639 gave it the analytics-layer
+  belt (the referenced object's own read scope); it now also carries the
+  context, so the engine scopes the same read independently.
 - `ObjectQLStrategy.generateSql` emitted no `WHERE` at all, so the
   `/analytics/sql` preview read as an unscoped table scan while the real
   aggregate was scoped. It now renders the caller's filters and the read scope.

@@ -269,6 +269,33 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   }) => void | Promise<void>;
 
   /**
+   * [ADR-0105 D8] Optional callback invoked AFTER an invitation is accepted
+   * via better-auth (`organizationHooks.afterAcceptInvitation`) — the seam a
+   * host uses to apply an invitation's PLACEMENT INTENT (business-unit
+   * membership + position assignments, carried as extension fields on
+   * `sys_invitation` per the ADR-0092 whitelist) the moment the better-auth
+   * membership lands. Same rationale as {@link onOrganizationCreated}: the
+   * org-plugin models don't fire core `databaseHooks`, so this is the only
+   * server-side seam for accept-time side effects.
+   *
+   * `invitation` / `member` are the full better-auth rows, so a host reads
+   * its own extension columns without a second query. Failure-isolated: the
+   * acceptance is never rolled back on a side-effect miss — a host that
+   * needs placement to be effectively atomic should make the callback
+   * idempotent and reconcile on retry.
+   */
+  onInvitationAccepted?: (data: {
+    invitationId?: string;
+    organizationId?: string;
+    userId?: string;
+    memberId?: string;
+    role?: string;
+    email?: string;
+    invitation?: Record<string, unknown>;
+    member?: Record<string, unknown>;
+  }) => void | Promise<void>;
+
+  /**
    * D5.1 — OIDC OP authorization gate (cloud-as-IdP app-assignment).
    * When set, it is called for an AUTHENTICATED subject on
    * `/oauth2/authorize` before an authorization code is issued, with the
@@ -1575,6 +1602,29 @@ export class AuthManager {
               });
             } catch (err: any) {
               console.warn('[auth] onOrganizationCreated callback failed:', err?.message ?? String(err));
+            }
+          },
+          // [ADR-0105 D8] Accept-time seam — the host applies the invitation's
+          // placement intent (BU membership + positions, extension fields on
+          // sys_invitation) as soon as the better-auth membership lands. Same
+          // shape and failure isolation as afterCreateOrganization above:
+          // acceptance never rolls back on a side-effect miss.
+          afterAcceptInvitation: async ({ invitation, member, user, organization }: any) => {
+            const cb = this.config.onInvitationAccepted;
+            if (typeof cb !== 'function') return;
+            try {
+              await cb({
+                invitationId: invitation?.id,
+                organizationId: organization?.id ?? invitation?.organizationId ?? member?.organizationId,
+                userId: user?.id ?? member?.userId,
+                memberId: member?.id,
+                role: member?.role ?? invitation?.role,
+                email: invitation?.email,
+                invitation,
+                member,
+              });
+            } catch (err: any) {
+              console.warn('[auth] onInvitationAccepted callback failed:', err?.message ?? String(err));
             }
           },
           beforeUpdateOrganization: async ({ organization, member }: any) => {

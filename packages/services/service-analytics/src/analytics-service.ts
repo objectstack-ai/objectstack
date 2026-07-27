@@ -619,17 +619,26 @@ export class AnalyticsService implements IAnalyticsService {
         .filter((d) => !!d.field)
         .map((d) => ({ name: d.name, field: d.field, type: d.type, dateGranularity: d.dateGranularity }));
       if (dims.length) {
+        // #3602 — bind the referenced object's read scope to THIS request so the
+        // label lookup (a per-record read of the related object) cannot surface a
+        // record the referenced object's RLS would hide. Same provider the
+        // aggregate path uses; `undefined` when no provider is configured, in
+        // which case labels fetch unscoped exactly as before.
+        const provider = this.readScopeProvider;
+        const resolveScope = provider
+          ? (targetObject: string) => provider(targetObject, context)
+          : undefined;
         try {
-          // #3602 — hand the resolver the request's context: its lookup label
-          // pass reads ONE ROW PER RECORD from the related object, so it must be
-          // scoped to the caller like any other read.
-          await resolveDimensionLabels(dataset.object, dims, result.rows, this.labelResolver, context);
+          // `context` rides alongside `resolveScope` — the label lookup's SECOND
+          // belt. `resolveScope` is this layer's own predicate; the context lets
+          // the engine's middleware scope the same per-record read itself.
+          await resolveDimensionLabels(dataset.object, dims, result.rows, this.labelResolver, resolveScope, context);
           // Totals rows (#1753) carry dimension values too (a row subtotal is
           // keyed by its row bucket) — resolve each grouping's own subset.
           for (const total of result.totals ?? []) {
             const subset = dims.filter((d) => total.dimensions.includes(d.name));
             if (subset.length) {
-              await resolveDimensionLabels(dataset.object, subset, total.rows, this.labelResolver, context);
+              await resolveDimensionLabels(dataset.object, subset, total.rows, this.labelResolver, resolveScope, context);
             }
           }
         } catch (e) {

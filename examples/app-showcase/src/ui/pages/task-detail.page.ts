@@ -61,7 +61,10 @@ export const TaskDetailPage = definePage({
           properties: {
             location: 'record_section',
             align: 'start',
-            actionNames: ['showcase_mark_done', 'showcase_log_time'],
+            // showcase_archive_task is the `disabled`-predicate specimen:
+            // visible on every task, greyed until `record.done` (contrast with
+            // showcase_mark_done's `visible`, which HIDES once done).
+            actionNames: ['showcase_mark_done', 'showcase_log_time', 'showcase_archive_task'],
           },
         },
         {

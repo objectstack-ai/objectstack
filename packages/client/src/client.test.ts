@@ -664,29 +664,42 @@ describe('i18n namespace', () => {
         expect(url).toContain('/api/v1/i18n/locales');
     });
 
-    it('should get translations', async () => {
+    it('i18n.getTranslations speaks the path-param dialect every surface mounts (#3636)', async () => {
         const { client, fetchMock } = createMockClient({
             success: true,
             data: { locale: 'zh-CN', translations: { hello: '你好' } }
         });
-        const result = await client.i18n.getTranslations('zh-CN', { namespace: 'common' });
+        const result = await client.i18n.getTranslations('zh-CN');
         expect(result.locale).toBe('zh-CN');
-        const url = fetchMock.mock.calls[0][0] as string;
-        expect(url).toContain('/api/v1/i18n/translations');
-        expect(url).toContain('locale=zh-CN');
-        expect(url).toContain('namespace=common');
+        // NOT `/translations?locale=zh-CN` — no server mounts a bare
+        // /translations, so the old query dialect 404'd everywhere.
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/i18n/translations/zh-CN',
+        );
     });
 
-    it('should get field labels', async () => {
+    it('i18n.getTranslations keeps namespace/keys as query params on the path form', async () => {
+        const { client, fetchMock } = createMockClient({
+            success: true,
+            data: { locale: 'zh-CN', translations: { hello: '你好' } }
+        });
+        await client.i18n.getTranslations('zh-CN', { namespace: 'common', keys: ['a', 'b'] });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/i18n/translations/zh-CN?namespace=common&keys=a%2Cb',
+        );
+    });
+
+    it('i18n.getFieldLabels puts both object and locale on the path (#3636)', async () => {
         const { client, fetchMock } = createMockClient({
             success: true,
             data: { object: 'customer', labels: { name: '名前' } }
         });
         const result = await client.i18n.getFieldLabels('customer', 'ja');
         expect(result.object).toBe('customer');
-        const url = fetchMock.mock.calls[0][0] as string;
-        expect(url).toContain('/api/v1/i18n/labels/customer');
-        expect(url).toContain('locale=ja');
+        // NOT `/labels/customer?locale=ja` — the mount is /labels/:object/:locale.
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/i18n/labels/customer/ja',
+        );
     });
 });
 

@@ -393,4 +393,52 @@ describe('AnalyticsService.queryDataset', () => {
     expect(result.totals[1].dimensions).toEqual([]);
     expect(result.drillRawTotals[1]).toEqual([{}]);
   });
+
+  // ── #3602 — the lookup label read is scoped to the REFERENCED object's RLS ──
+  it('threads the referenced object read scope (not the base object) into the label fetch', async () => {
+    const byAccount = DatasetSchema.parse({
+      name: 'sales_acct_scoped', label: 'Sales', object: 'opportunity', include: [],
+      dimensions: [{ name: 'account', field: 'account', type: 'lookup', label: 'Account' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+    });
+    const labelScopes: Array<{ target: string; scope: unknown }> = [];
+    const svc = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      executeRawSql: async () => [{ account: 'acc1', revenue: 1000 }],
+      // Per-object scope: opportunity and crm_account get DIFFERENT predicates, so
+      // the assertion proves the label fetch used the referenced object's scope,
+      // not the base object's.
+      getReadScope: (object, ctx?: ExecutionContext) => {
+        if (!ctx?.tenantId) return undefined;
+        return object === 'crm_account'
+          ? { organization_id: ctx.tenantId, is_public: true }
+          : { organization_id: ctx.tenantId };
+      },
+      labelResolver: {
+        getObjectFields: (obj) => ({
+          opportunity: { account: { type: 'lookup', reference: 'crm_account' } },
+          crm_account: { name: { type: 'text' } },
+        } as Record<string, Record<string, { type?: string; reference?: string }>>)[obj],
+        fetchRecordLabels: async (target, ids, scope) => {
+          labelScopes.push({ target, scope });
+          const m = new Map<unknown, string>();
+          for (const id of ids) m.set(id, `name-${String(id)}`);
+          return m;
+        },
+      },
+    });
+
+    const result = await svc.queryDataset(
+      byAccount,
+      { dimensions: ['account'], measures: ['revenue'] },
+      { tenantId: 'org_A' } as ExecutionContext,
+    ) as any;
+
+    // The label fetch ran against the referenced object, carrying ITS scope.
+    expect(labelScopes).toEqual([
+      { target: 'crm_account', scope: { organization_id: 'org_A', is_public: true } },
+    ]);
+    // And the label actually resolved (end-to-end sanity).
+    expect(result.rows).toEqual([{ account: 'name-acc1', revenue: 1000 }]);
+  });
 });

@@ -228,22 +228,34 @@ async function runLabelLookup(opts: {
   return { seen, result };
 }
 
-describe('fetchRecordLabels is scoped like any other read (#3602 item 2)', () => {
-  it('ANDs the target object read scope into the id lookup', async () => {
+/**
+ * #3639 gave this lookup the analytics-layer belt (the referenced object's own
+ * read scope) and covers that belt's own behaviour in `dimension-labels.test.ts`
+ * / `query-dataset.test.ts`. What is asserted here is the SECOND belt on the
+ * same hook, and — the part neither change covers alone — that the two arrive
+ * together on one engine call. Two PRs touching one hook is exactly how one of
+ * them quietly stops being wired.
+ */
+describe('fetchRecordLabels carries BOTH belts (#3602)', () => {
+  it('lands the read scope and the context on the same engine call', async () => {
     const { seen } = await runLabelLookup({ scope: readScope, context: ctxA });
 
-    // [0] is the dataset aggregate; [1] is the id→label lookup. That second
-    // call returns ONE ROW PER RECORD with real display names — row-granular,
-    // so it needs the same scoping as any other read.
+    // [0] is the dataset aggregate; [1] is the id→label lookup — one row per
+    // record, real display names, so it is row-granular and needs both belts.
     expect(seen[1].object).toBe('crm_account');
     expect(seen[1].where).toEqual({
       $and: [{ id: { $in: ['acc1'] } }, { organization_id: 'org_A' }],
     });
+    expect(seen[1].context).toBe(ctxA);
   });
 
-  it('forwards the context so the engine scopes it too', async () => {
-    const { seen } = await runLabelLookup({ scope: readScope, context: ctxA });
+  it('carries the context even when the target object has no read scope', async () => {
+    // The depth case for this hook: scope resolves to nothing, so the engine's
+    // own RLS is all that is left. Dropping the context here would make an
+    // unscoped-at-the-analytics-layer label read also unscoped at the engine.
+    const { seen } = await runLabelLookup({ scope: () => undefined, context: ctxA });
 
+    expect(seen[1].where).toEqual({ id: { $in: ['acc1'] } });
     expect(seen[1].context).toBe(ctxA);
   });
 
@@ -251,23 +263,6 @@ describe('fetchRecordLabels is scoped like any other read (#3602 item 2)', () =>
     const { result } = await runLabelLookup({ scope: readScope, context: ctxA });
 
     expect(result.rows[0].account).toBe('Acme Corp');
-  });
-
-  it('leaves the raw id when the scope provider fails — never an unscoped read', async () => {
-    // Fail-closed: the throw propagates out of `fetchRecordLabels`, the caller
-    // catches it and rows keep their ids. Labels are lost; rows are not exposed.
-    // Only the LOOKUP target fails here — the dataset's own query must still
-    // run, or this would just be re-testing `resolveReadScopes` (#3601).
-    const { seen, result } = await runLabelLookup({
-      scope: (o) => {
-        if (o === 'crm_account') throw new Error('security service unavailable');
-        return { organization_id: 'org_A' };
-      },
-      context: ctxA,
-    });
-
-    expect(seen).toHaveLength(1); // the lookup never reached the engine
-    expect(result.rows[0].account).toBe('acc1');
   });
 });
 

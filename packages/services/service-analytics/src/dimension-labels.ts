@@ -42,18 +42,40 @@ export interface DimensionLabelDeps {
    * The implementation chooses the target's display field. Returning an empty
    * map (e.g. no display field, no data access) leaves the ids unresolved.
    *
-   * `context` is the request's ExecutionContext (#3602). This lookup returns
-   * one row PER RECORD — real display names, at row granularity, not aggregate
-   * granularity — so the implementation MUST scope it to what the caller may
-   * see. Passing it is not optional in production wiring; the parameter is
-   * optional only so unit fakes can ignore it.
+   * `scope` (ADR-0021 D-C, #3602) is the TARGET object's own read scope — the
+   * RLS/tenant `FilterCondition` the implementation must AND into the label
+   * lookup so this never reveals a related record the target object's RLS would
+   * hide. The label lookup is a per-record read (`group by id`) dressed as an
+   * aggregate; without the scope it leaks display names whenever the referenced
+   * object is more restricted than the base object whose rows carry the id.
+   * `undefined` means "no scope for this object" (global table / unrestricted
+   * caller) — the same contract as the read-scope provider.
+   *
+   * `context` is the request's ExecutionContext — the SECOND belt on the same
+   * read (#3602). `scope` is the analytics layer's own predicate; forwarding the
+   * context lets the ENGINE's middleware chain scope this per-record read
+   * itself, so it stays scoped even if a caller ever reaches this hook without
+   * a resolved `scope`. Implementations bridging to an ObjectQL engine MUST
+   * forward it; a bridge with nowhere to put it may ignore it.
    */
   fetchRecordLabels(
     targetObject: string,
     ids: unknown[],
+    scope?: Record<string, unknown>,
     context?: ExecutionContext,
   ): Promise<Map<unknown, string>>;
 }
+
+/**
+ * Resolve the TARGET object's read scope for a label lookup (#3602). Returns the
+ * object's RLS/tenant `FilterCondition`, `null`/`undefined` when the object is
+ * unscoped, or a rejected promise when the scope cannot be resolved — in which
+ * case the resolver fails CLOSED (skips that dimension's labels) rather than
+ * fetching unscoped names.
+ */
+export type LabelScopeResolver = (
+  targetObject: string,
+) => Promise<Record<string, unknown> | null | undefined> | Record<string, unknown> | null | undefined;
 
 const LOOKUP_TYPES = new Set(['lookup', 'master_detail']);
 
@@ -112,15 +134,22 @@ export function formatDateBucket(value: unknown, granularity?: DateGranularity |
  *   (row key = `name`)
  * @param rows - result rows, mutated in place
  * @param deps - injected runtime capabilities
+ * @param resolveScope - (ADR-0021 D-C, #3602) resolves the referenced object's
+ *   own read scope for a lookup/master_detail dimension's label fetch. When it
+ *   throws, that dimension's labels are SKIPPED (fail-closed — the raw id renders
+ *   instead) rather than fetched unscoped. Omit when no read-scope provider is
+ *   configured (labels then fetch unscoped, as before — no security in play).
  * @param context - the request's ExecutionContext, forwarded to
- *   {@link DimensionLabelDeps.fetchRecordLabels} so the per-record label lookup
- *   is scoped to the caller's visibility (#3602)
+ *   {@link DimensionLabelDeps.fetchRecordLabels} so the engine's own middleware
+ *   scopes the per-record label read too — the second belt beside `resolveScope`
+ *   (#3602)
  */
 export async function resolveDimensionLabels(
   baseObject: string,
   dims: Array<{ name: string; field: string; type?: string; dateGranularity?: DateGranularity | string }>,
   rows: Record<string, unknown>[],
   deps: DimensionLabelDeps,
+  resolveScope?: LabelScopeResolver,
   context?: ExecutionContext,
 ): Promise<void> {
   if (!rows.length || !dims.length) return;
@@ -164,7 +193,20 @@ export async function resolveDimensionLabels(
         new Set(rows.map((r) => r[dim.name]).filter((v) => v != null)),
       );
       if (ids.length === 0) continue;
-      const labelById = await deps.fetchRecordLabels(meta.reference, ids, context);
+      // #3602 — the label lookup reads the REFERENCED object by id. Scope it to
+      // that object's own RLS so it never surfaces a related record the target's
+      // RLS would hide (leak fires when the referenced object is stricter than
+      // the base). Fail closed: if the scope can't be resolved, skip this
+      // dimension's labels (raw id renders) rather than fetch unscoped.
+      let scope: Record<string, unknown> | null | undefined;
+      if (resolveScope) {
+        try {
+          scope = await resolveScope(meta.reference);
+        } catch {
+          continue;
+        }
+      }
+      const labelById = await deps.fetchRecordLabels(meta.reference, ids, scope ?? undefined, context);
       if (!labelById || labelById.size === 0) continue;
       for (const row of rows) {
         const label = labelById.get(row[dim.name]);

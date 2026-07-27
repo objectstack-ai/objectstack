@@ -157,6 +157,49 @@ expression exists for: `GET /search`, `POST /email/send`, `forms/:slug`
 `external-datasource-routes.ts`). Auditing that surface with the same
 three-column method is the next tranche of #3563.
 
+**Closed in #3587** — `packages/rest/src/rest-route-ledger.ts` plus its
+conformance guard; the 43 audited gaps and 2 mismatches both ratchet at zero.
+
+## 9. The third surface: autonomous service mounts (#3636)
+
+Neither ledger sees a service that reaches for the `http-server` service and
+registers straight on `IHttpServer` — it bypasses `RouteManager` and
+`RestServer.getRoutes()` alike. Two do: `service-storage`
+(`storage-routes.ts`, 10 routes — the SDK's entire storage surface) and
+`service-i18n` (`i18n-service-plugin.ts`, 3 routes). Both now carry a
+per-package ledger next to the registrar, enumerated by driving the real
+registrar against a capturing mock `IHttpServer`, with the client half in
+`packages/client/src/service-route-ledger-coverage.test.ts` (no
+service→client package edge — the tranche-1 lesson).
+
+Dispositions: storage audited clean at 7 `sdk` / 3 `server-only` (the
+browser-facing `/files/:fileId` redirect objectql stamps into file-field
+payloads, and the two `_local/raw/:token` local-driver loopbacks). The chunked
+upload family — flagged in #3636 as needing triage — turned out fully
+SDK-expressed (`initChunkedUpload` / `uploadPart` / `completeChunkedUpload` /
+`resumeUpload`), so no gap to close.
+
+i18n audited at **two mismatches**, both fixed in the same PR:
+`i18n.getTranslations` sent `/translations?locale=xx` and
+`i18n.getFieldLabels` sent `/labels/:object?locale=xx`, while every serving
+surface — service-i18n's mounts, the dispatcher's HTTP mounts, and the
+`plugin-rest-api.zod.ts` contract — mounts only the path form. Both were
+wire-level 404s, and both had carried a green `sdk` row in
+`route-ledger.ts` since tranche 1: **§1 coverage rows assert the client method
+exists, not that it speaks a URL anything mounts.** The same audit found
+service-i18n omitting the `success` flag from its `{ data }` bodies, so
+`unwrapResponse` returned the raw wrapper against that provider while
+returning the declared shape against the dispatcher — one method, two shapes,
+decided by which plugin mounted the route.
+
+Also filed, not fixed: `GET {base}/_local/file/:key` is built by three call
+sites and mounted by none (#3641).
+
+**The gap all three ledgers still share** is the reverse direction — no guard
+compares the URL a client method *builds* against the patterns any surface
+*mounts*. Four instances of that class have now been found one at a time
+(#3584 ×2, #3611, #3636 ×2). Mechanizing it is the capstone, #3642.
+
 ## Follow-up slicing (proposed)
 
 1. **`client.actions.invoke(...)`** — closes the largest hole (3 routes).
@@ -166,7 +209,9 @@ three-column method is the next tranche of #3563.
 5. **Mismatch reconciliation** (§4) — done in #3584: analytics client aligned to the dispatcher, storage protocol documented as canonical (see §4 Resolution).
 6. **Docs**: delete or regenerate README surface table + CLIENT_SPEC_COMPLIANCE.md; extend client-sdk.mdx.
 7. **Deprecate `DEFAULT_DISPATCHER_ROUTES`**; point at the ledger.
-8. **REST-surface tranche** (§8) with the same ledger+guard treatment.
+8. **REST-surface tranche** (§8) with the same ledger+guard treatment — done in #3587.
+9. **Autonomous service mounts** (§9) — done in #3636.
+10. **Cross-surface URL conformance** (§9, the reverse direction) — #3642.
 
 Each gap closed must flip its ledger row to `sdk` and lower the ratchet bound
 in the conformance test — the guard enforces both directions from PR-1 onward.

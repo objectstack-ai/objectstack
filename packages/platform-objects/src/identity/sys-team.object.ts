@@ -140,6 +140,26 @@ export const SysTeam = ObjectSchema.create({
     }),
 
     // ── System ───────────────────────────────────────────────────
+    // better-auth's own durable seat counter (`team.memberCount`, added in
+    // 1.7.0-rc.1). It is NOT a derived convenience column: the organization
+    // plugin reserves a seat by guard-incrementing this row BEFORE inserting
+    // the membership row (`reserveTeamSeat` → `incrementOne`), so it is the
+    // aggregate capacity boundary `maximumMembersPerTeam` is enforced against.
+    // better-auth maintains it end to end (create = 0, add = +1, remove = −1,
+    // plus a `syncTeamMemberCount` reconcile) and strips it from every API
+    // response — nothing on the ObjectStack side may write it. Provisioned
+    // here (and mapped in `AUTH_TEAM_SCHEMA`) because better-auth writes the
+    // column on every team insert; without it, `organization/create` 500s the
+    // moment teams are enabled. See #3624.
+    member_count: Field.number({
+      label: 'Member Count',
+      required: false,
+      defaultValue: 0,
+      readonly: true,
+      group: 'System',
+      description: 'Seat counter maintained by better-auth; do not write directly.',
+    }),
+
     id: Field.text({
       label: 'Team ID',
       required: true,
