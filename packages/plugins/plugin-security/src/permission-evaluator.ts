@@ -104,36 +104,33 @@ function resolveObjectPermission(
 /**
  * [#3544] Fold the user-level EXPORT axis across the resolved permission sets.
  *
- * `allowExport` is deliberately absent from {@link OPERATION_TO_PERMISSION}:
- * that map's semantics are "the bit must be truthy", which would deny export to
- * every permission set authored before the axis existed. The bit is a TRI-state
- * instead, and this is its merge rule:
+ * `allowExport` is an OPT-IN grant: export is allowed only where a set says
+ * `true`. Unset and `false` both mean "no grant" — permission sets are additive
+ * capability containers (ADR-0090), so nothing in them is a deny, and `false`
+ * is authoring intent rather than a veto another set must respect.
  *
- *   - any set `true`   → `true`  (an explicit grant outranks another set's deny)
- *   - else any `false` → `false` (an explicit opt-out outranks silence)
- *   - else all unset   → `undefined` (inherit read — the pre-#3544
- *     "can-list ⇒ can-export" behaviour, so existing sets are unaffected)
+ * The bit stays out of {@link OPERATION_TO_PERMISSION} even so, because export
+ * is not a plain bit lookup: it is `read ∧ grant` (`export ⊆ list` in the
+ * spec's `API_METHOD_DERIVATION`), and that conjunction lives in
+ * {@link PermissionEvaluator.checkObjectPermission}'s `export` branch.
  *
- * This is the same answer the `/me/permissions` per-object merge produces
- * (`if (v === true) acc[k] = true; else if (acc[k] === undefined) acc[k] = v`,
- * read back as `acc.allowExport !== false`). That equality is load-bearing, not
- * incidental: the client hides its Export button on the merged map while this
- * decides the server's 403, and the two disagreeing is exactly the
- * `declared ≠ enforced` gap the axis exists to close.
+ * This must stay identical to what the `/me/permissions` per-object merge
+ * yields (`if (v === true) acc[k] = true; …`, read back as
+ * `acc.allowExport === true`). That equality is load-bearing, not incidental:
+ * the client hides its Export button on the merged map while this decides the
+ * server's 403, and the two disagreeing is exactly the `declared ≠ enforced`
+ * gap the axis exists to close.
  */
 export function resolveUserExportAllowed(
   objectName: string,
   permissionSets: PermissionSet[],
   opts: { isPrivate?: boolean } = {},
-): boolean | undefined {
-  let denied = false;
+): boolean {
   for (const ps of permissionSets) {
     const objPerm = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
-    const bit = objPerm?.allowExport;
-    if (bit === true) return true;
-    if (bit === false) denied = true;
+    if (objPerm?.allowExport === true) return true;
   }
-  return denied ? false : undefined;
+  return false;
 }
 
 /**
@@ -154,14 +151,15 @@ export class PermissionEvaluator {
     /** [ADR-0066 D2] When the object is `private`, the `'*'` wildcard only covers it if it is a super-user grant. */
     opts: { isPrivate?: boolean } = {},
   ): boolean {
-    // [#3544] User-level export axis. `export` is NOT a bit lookup: per the
-    // spec's derivation table (`API_METHOD_DERIVATION`) it is `list ∧
-    // userExportAllowed`, so it requires READ and is then vetoed by an explicit
-    // `allowExport: false`. Handled here rather than in OPERATION_TO_PERMISSION
-    // so an UNSET bit keeps inheriting read — otherwise every permission set
-    // written before the axis existed would silently lose export.
+    // [#3544] User-level export axis — `read ∧ grant`, not a bit lookup. Per
+    // the spec's derivation table (`API_METHOD_DERIVATION`) export is
+    // `list ∧ userExportAllowed`, so BOTH halves must hold: the caller must be
+    // able to read the object at all, and some set must opt them into bulk
+    // egress. Kept out of OPERATION_TO_PERMISSION because that map checks one
+    // bit and would miss the read half — granting export to a caller who cannot
+    // even list the object.
     if (operation === 'export') {
-      if (resolveUserExportAllowed(objectName, permissionSets, opts) === false) return false;
+      if (!resolveUserExportAllowed(objectName, permissionSets, opts)) return false;
       return this.checkObjectPermission('find', objectName, permissionSets, opts);
     }
 

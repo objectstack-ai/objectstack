@@ -82,11 +82,28 @@ export class ReportsServicePlugin implements Plugin {
         ctx.logger.warn('ReportsServicePlugin: no email service — schedules will fire without delivery');
       }
 
+      // [#3544 / #3710] The user-level export axis. A `csv`/`json` report is a
+      // bulk machine-readable copy of its object — the same privilege
+      // `GET /data/:object/export` gates — so the reports surface must ask the
+      // SAME question of the SAME authority, or it is a side door around the
+      // axis. Resolved lazily per call rather than captured here: `security` is
+      // registered by plugin-security's own `kernel:ready` hook and may not
+      // exist yet at construction time. Absent service (no plugin-security ⇒ no
+      // permission sets anywhere) → the axis does not apply, matching the REST
+      // export route's fail-open.
+      const canExport = async (object: string, context: unknown): Promise<boolean> => {
+        let security: any;
+        try { security = ctx.getService<any>('security'); } catch { return true; }
+        if (!security || typeof security.canExport !== 'function') return true;
+        return await security.canExport(object, context);
+      };
+
       this.service = new ReportService({
         engine: engine as ReportEngine,
         email,
         logger: ctx.logger,
         maxRows: this.options.maxRows,
+        canExport,
         // Scheduled reports run under the owner's resolved RLS context, not a
         // system bypass (#2980). No owner-context resolver is wired yet — that
         // is the reports-surface consumer of ADR-0073's user-less identity

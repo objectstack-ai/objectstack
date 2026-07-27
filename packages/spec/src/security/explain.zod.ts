@@ -32,9 +32,22 @@ import { lazySchema } from '../shared/lazy-schema';
  * (PLATFORM_ADMIN > TENANT_ADMIN > MEMBER > EXTERNAL) on the resolved principal.
  */
 
-/** Operations the explain API accepts (the CRUD + lifecycle classes the evaluator maps). */
+/**
+ * Operations the explain API accepts (the CRUD + lifecycle classes the
+ * evaluator maps, plus the bulk-egress axis).
+ *
+ * [#3544] `export` is here because it is the one operation whose answer cannot
+ * be inferred from `read`: since the axis went opt-in, a principal can be fully
+ * able to read an object and still be refused a bulk copy of it. Without an
+ * explainable `export`, an admin facing a 403 `EXPORT_NOT_PERMITTED` would have
+ * no way to ask WHY — `explain(read)` would come back `allowed`, which is true
+ * and useless. It explains as `read ∧ the export grant`: the object_crud layer
+ * reports the conjunction, while every data-shaped layer (requiredPermissions,
+ * OWD/depth/sharing, RLS, record attribution) is computed as the `find` the
+ * export actually performs.
+ */
 export const ExplainOperationSchema = z.enum([
-  'read', 'create', 'update', 'delete', 'transfer', 'restore', 'purge',
+  'read', 'create', 'update', 'delete', 'transfer', 'restore', 'purge', 'export',
 ]);
 export type ExplainOperation = z.infer<typeof ExplainOperationSchema>;
 

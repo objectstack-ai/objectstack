@@ -15,8 +15,12 @@ import {
 describe('annotateEffectiveApiOperations (#3391)', () => {
   const schemaOf = (map: Record<string, ApiExposureSchemaLike>) => (name: string) => map[name];
 
+  // [#3544] These pin the `apiMethods` DERIVATION, so they grant `allowExport`
+  // explicitly — since the export axis went opt-in, a perm entry without it
+  // strips `export` from the effective set and would mask what is under test.
+  // The axis itself is covered in its own describe block below.
   it('annotates a restricting object with its effective operation set', () => {
-    const objects: Record<string, any> = { widget: { allowRead: true } };
+    const objects: Record<string, any> = { widget: { allowRead: true, allowExport: true } };
     annotateEffectiveApiOperations(objects, schemaOf({
       widget: { name: 'widget', enable: { apiMethods: ['get', 'list'] } },
     }));
@@ -25,7 +29,7 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
   });
 
   it('does NOT annotate an unrestricted object (client keeps default-allow)', () => {
-    const objects: Record<string, any> = { widget: { allowRead: true } };
+    const objects: Record<string, any> = { widget: { allowRead: true, allowExport: true } };
     annotateEffectiveApiOperations(objects, schemaOf({
       widget: { name: 'widget', enable: {} }, // no apiMethods → unrestricted
     }));
@@ -57,7 +61,7 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
   });
 
   it('reverse-derived import/export appear in the effective set for a CRUD whitelist', () => {
-    const objects: Record<string, any> = { deal: { allowRead: true } };
+    const objects: Record<string, any> = { deal: { allowRead: true, allowExport: true } };
     annotateEffectiveApiOperations(objects, schemaOf({
       deal: { name: 'deal', enable: { apiMethods: ['get', 'list', 'create', 'update', 'delete'] } },
     }));
@@ -68,10 +72,10 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
   });
 
   // [#3544] user-level export axis: allowExport on the per-object perm entry
-  // drives userExportAllowed → export derives from list ∧ that bit.
+  // drives userExportAllowed → export derives from list ∧ that GRANT (opt-in).
   describe('user-level export axis (#3544)', () => {
-    it('allowExport:false removes export from a restricting object', () => {
-      const objects: Record<string, any> = { deal: { allowRead: true, allowExport: false } };
+    it('no export grant strips export from a restricting object', () => {
+      const objects: Record<string, any> = { deal: { allowRead: true } };
       annotateEffectiveApiOperations(objects, schemaOf({
         deal: { name: 'deal', enable: { apiMethods: ['get', 'list'] } },
       }));
@@ -79,26 +83,26 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
       expect(objects.deal.apiOperations).not.toContain('export');
     });
 
-    it('allowExport:false removes export even from an otherwise-open object (annotation forced)', () => {
-      const objects: Record<string, any> = { deal: { allowRead: true, allowExport: false } };
+    it('no export grant forces an annotation even on an otherwise-open object', () => {
+      const objects: Record<string, any> = { deal: { allowRead: true } };
       annotateEffectiveApiOperations(objects, schemaOf({
         deal: { name: 'deal', enable: {} }, // no apiMethods → unrestricted
       }));
-      // Even though unrestricted, the export axis forces an annotation that
-      // excludes export while keeping the rest.
+      // Unrestricted, but the axis still forces an annotation that excludes
+      // export while keeping the rest — otherwise the client's default-allow
+      // path would show an Export button the server refuses.
       expect(objects.deal.apiOperations).toBeDefined();
       expect(objects.deal.apiOperations).not.toContain('export');
       expect(objects.deal.apiOperations).toContain('create');
       expect(objects.deal.apiOperations).toContain('import');
     });
 
-    it('unset allowExport inherits read — export kept; unrestricted object still unannotated', () => {
-      const objects: Record<string, any> = { deal: { allowRead: true } }; // allowExport unset
+    it('allowExport:false is annotated the same as silence', () => {
+      const objects: Record<string, any> = { deal: { allowRead: true, allowExport: false } };
       annotateEffectiveApiOperations(objects, schemaOf({
-        deal: { name: 'deal', enable: {} },
+        deal: { name: 'deal', enable: { apiMethods: ['get', 'list'] } },
       }));
-      // Unrestricted + export allowed → no annotation (client default-allow).
-      expect('apiOperations' in objects.deal).toBe(false);
+      expect(objects.deal.apiOperations).not.toContain('export');
     });
 
     it('allowExport:true keeps export on a list-derived restricting object', () => {
@@ -109,29 +113,25 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
       expect(objects.deal.apiOperations).toContain('export');
     });
 
+    it('allowExport:true on an unrestricted object needs no annotation', () => {
+      // Nothing is being taken away, so the client keeps its default-allow path.
+      const objects: Record<string, any> = { deal: { allowRead: true, allowExport: true } };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        deal: { name: 'deal', enable: {} },
+      }));
+      expect('apiOperations' in objects.deal).toBe(false);
+    });
+
     // The merge keeps `'*'` and named objects as independent keys, but the
     // SERVER evaluator does not — `resolveObjectPermission` falls back to the
     // wildcard for any object a set has no explicit entry for. Reading it here
-    // too is what keeps the hidden button and the refused request the same
-    // decision; without it a `'*': {allowExport:false}` set would still be
-    // offered an Export button that then 403s.
-    it("inherits the '*' export bit when the object entry declares none", () => {
+    // too is what keeps the shown button and the accepted request the same
+    // decision; without it an admin's `'*': {allowExport:true}` would have its
+    // Export button hidden on every object it never names explicitly.
+    it("inherits the '*' export grant when the object entry declares none", () => {
       const objects: Record<string, any> = {
-        '*': { allowRead: true, allowExport: false },
+        '*': { allowRead: true, allowExport: true },
         deal: { allowRead: true }, // no allowExport of its own
-      };
-      annotateEffectiveApiOperations(objects, schemaOf({
-        deal: { name: 'deal', enable: {} }, // unrestricted
-      }));
-      expect(objects.deal.apiOperations).toBeDefined();
-      expect(objects.deal.apiOperations).not.toContain('export');
-      expect(objects.deal.apiOperations).toContain('list');
-    });
-
-    it("an explicit per-object allowExport:true overrides a '*' deny", () => {
-      const objects: Record<string, any> = {
-        '*': { allowRead: true, allowExport: false },
-        deal: { allowRead: true, allowExport: true },
       };
       annotateEffectiveApiOperations(objects, schemaOf({
         deal: { name: 'deal', enable: { apiMethods: ['get', 'list'] } },
@@ -139,7 +139,19 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
       expect(objects.deal.apiOperations).toContain('export');
     });
 
-    it("a '*' carrying no export bit changes nothing", () => {
+    it("an explicit per-object allowExport:false overrides a '*' grant", () => {
+      const objects: Record<string, any> = {
+        '*': { allowRead: true, allowExport: true },
+        deal: { allowRead: true, allowExport: false },
+      };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        deal: { name: 'deal', enable: { apiMethods: ['get', 'list'] } },
+      }));
+      expect(objects.deal.apiOperations).not.toContain('export');
+    });
+
+    it("a '*' carrying no export grant does not confer export", () => {
+      // The super-user bits specifically do NOT imply export.
       const objects: Record<string, any> = {
         '*': { modifyAllRecords: true },
         deal: { allowRead: true },
@@ -147,7 +159,8 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
       annotateEffectiveApiOperations(objects, schemaOf({
         deal: { name: 'deal', enable: {} },
       }));
-      expect('apiOperations' in objects.deal).toBe(false);
+      expect(objects.deal.apiOperations).toBeDefined();
+      expect(objects.deal.apiOperations).not.toContain('export');
     });
   });
 });
@@ -188,7 +201,18 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
     const objects: Record<string, any> = { '*': { modifyAllRecords: true } };
     seedSuperUserRestrictedObjects(objects, schemas);
     annotateEffectiveApiOperations(objects, (name) => schemas.find((s) => s.name === name));
-    expect(objects.widget.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
+    // [#3544] NO `export`: modifyAllRecords is a record-visibility bypass, not
+    // an export grant, and the axis is opt-in. A super-user who should also be
+    // able to take bulk copies carries `allowExport: true` explicitly — which
+    // is exactly what the built-in admin sets now do.
+    expect(objects.widget.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
     expect(objects.locked.apiOperations).toEqual([]);
+  });
+
+  it('end-to-end: a super-user wildcard CARRYING the export grant keeps export', () => {
+    const objects: Record<string, any> = { '*': { modifyAllRecords: true, allowExport: true } };
+    seedSuperUserRestrictedObjects(objects, schemas);
+    annotateEffectiveApiOperations(objects, (name) => schemas.find((s) => s.name === name));
+    expect(objects.widget.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
   });
 });

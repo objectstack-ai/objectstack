@@ -469,3 +469,89 @@ describe('buildContextForUser', () => {
     ]);
   });
 });
+
+// ─── [#3544] the export axis is explainable ────────────────────────────────
+//
+// Without this the axis is undiagnosable: a caller hits 403
+// EXPORT_NOT_PERMITTED, an admin runs explain(read), gets `allowed: true`, and
+// has nowhere left to look. The answer must be a first-class operation.
+describe('explainAccess — export axis (#3544)', () => {
+  const READER = PermissionSetSchema.parse({
+    name: 'reader',
+    objects: { leave_request: { allowRead: true } },
+  });
+  const EXPORTER = PermissionSetSchema.parse({
+    name: 'exporter',
+    objects: { leave_request: { allowRead: true, allowExport: true } },
+  });
+
+  it('denies export for a reader without the grant, while read is allowed', async () => {
+    const readDecision = await explainAccess(makeDeps({ sets: [READER] }), {
+      object: 'leave_request', operation: 'read', context: CTX,
+    });
+    expect(readDecision.allowed).toBe(true);
+
+    const exportDecision = await explainAccess(makeDeps({ sets: [READER] }), {
+      object: 'leave_request', operation: 'export', context: CTX,
+    });
+    expect(exportDecision.allowed).toBe(false);
+    const crud = exportDecision.layers.find((l) => l.layer === 'object_crud');
+    expect(crud?.verdict).toBe('denies');
+    expect(crud?.detail).toMatch(/export/);
+  });
+
+  it('allows export when a set carries the grant, and attributes WHICH set', async () => {
+    const d = await explainAccess(makeDeps({ sets: [READER, EXPORTER] }), {
+      object: 'leave_request', operation: 'export', context: CTX,
+    });
+    expect(d.allowed).toBe(true);
+    const crud = d.layers.find((l) => l.layer === 'object_crud');
+    // The attribution is the point: it names the granting set, so an admin can
+    // see which grant to remove (or which one is missing).
+    expect(crud?.contributors.map((c) => c.name)).toContain('exporter');
+    expect(crud?.contributors.map((c) => c.name)).not.toContain('reader');
+  });
+
+  it('surfaces the readFilter — an export streams the same filtered rows a read does', async () => {
+    const d = await explainAccess(makeDeps({ sets: [EXPORTER], rls: { owner_id: 'u1' } }), {
+      object: 'leave_request', operation: 'export', context: CTX,
+    });
+    expect(d.readFilter).toEqual({ owner_id: 'u1' });
+  });
+
+  it('computes RLS as a find, not as an "export" the compiler has no policy for', async () => {
+    // The bug this pins: asking the RLS compiler about an `export` operation
+    // matches no select policy, so the report would claim "No RLS policy
+    // applies" for a principal whose rows ARE filtered.
+    const seen: string[] = [];
+    const d = await explainAccess(
+      makeDeps({
+        sets: [EXPORTER],
+        computeRlsFilter: async (_s: any, _o: string, op: string) => { seen.push(op); return { owner_id: 'u1' }; },
+      }),
+      { object: 'leave_request', operation: 'export', context: CTX },
+    );
+    expect(seen).toContain('find');
+    expect(seen).not.toContain('export');
+    expect(d.layers.find((l) => l.layer === 'rls')?.verdict).toBe('narrows');
+  });
+
+  it('resolves requiredPermissions against the READ bucket', async () => {
+    const seen: string[] = [];
+    await explainAccess(
+      makeDeps({
+        sets: [EXPORTER],
+        requiredCaps: (_m: any, op: string) => { seen.push(op); return []; },
+      }),
+      { object: 'leave_request', operation: 'export', context: CTX },
+    );
+    expect(seen).toEqual(['find']);
+  });
+
+  it('a super-user wildcard does not confer export', async () => {
+    const d = await explainAccess(makeDeps({ sets: [ADMIN] }), {
+      object: 'leave_request', operation: 'export', context: CTX,
+    });
+    expect(d.allowed).toBe(false);
+  });
+});

@@ -71,7 +71,18 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 ```
 
 `operation` is one of `read | create | update | delete | transfer | restore |
-purge` (defaults to `read`); omit `userId` to explain **yourself**.
+purge | export` (defaults to `read`); omit `userId` to explain **yourself**.
+
+`export` is the one operation whose answer you cannot infer from `read`. Since
+the [export axis](/docs/permissions/permission-sets#allowexport--the-export-axis)
+is opt-in, a user can be fully able to read an object and still be refused a
+bulk copy of it — so when someone hits `403 EXPORT_NOT_PERMITTED`, ask with
+`operation: 'export'`. Asking with `read` will answer `allowed` and tell you
+nothing, because reading is precisely what they may still do. The `object_crud`
+layer reports the conjunction (`read ∧ the export grant`) and names the set that
+supplies it; every other layer is computed as the `find` the export performs, so
+the `readFilter` you get back is the real row filter the export would stream
+through.
 
 ## Who may ask
 

@@ -50,7 +50,7 @@ export const SalesUser = definePermissionSet({
 | Permission | Description |
 |------------|-------------|
 | `allowCreate` / `allowRead` / `allowEdit` / `allowDelete` | CRUD on records the user can see |
-| `allowExport` | Bulk data egress — narrows read, see below |
+| `allowExport` | Bulk data egress — an opt-in grant on top of read, see below |
 | `allowTransfer` / `allowRestore` / `allowPurge` | Lifecycle class (RBAC-gated ahead of the M2 operations) |
 | `viewAllRecords` | Read ALL records regardless of ownership (super-user read) |
 | `modifyAllRecords` | Edit ALL records regardless of ownership (super-user write) |
@@ -63,27 +63,49 @@ Salesforce ("Export Reports"), Dynamics ("Export to Excel"), NetSuite
 ("Export Lists") and SAP (`S_GUI` 61) all carry a separate export permission.
 `allowExport` is that axis here: `export = list ∧ allowExport`.
 
-It is a **tri-state**, and unset is not the same as `false`:
+It is an **opt-in grant**, like every other `allow*` bit:
 
 | Value | Meaning |
 |------------|-------------|
-| unset | Inherit read — anyone who can list can export. The default, so adding the key changes nothing for existing permission sets. |
-| `false` | Deny export while **keeping** read. The reason the axis exists. |
-| `true` | Explicitly granted. |
+| `true` | Export granted — still bounded by read. |
+| unset | **No export.** Read alone never confers it. |
+| `false` | No export. Same outcome as unset; write it when you want the intent on the record. |
 
-Across several permission sets the merge is most-permissive with an explicit
-deny in the middle: any set saying `true` wins, otherwise any set saying `false`
-wins, otherwise the bit stays unset and inherits read.
+Across several permission sets the merge is most-permissive, exactly like the
+CRUD bits: any set granting `true` grants export. `false` is therefore
+documentation rather than a veto — permission sets are additive capability
+containers, and nothing in them is a deny.
 
-It narrows read — it never widens it. A set granting `allowExport: true` without
-a read grant exports nothing, and a `modifyAllRecords` super-user wildcard does
-**not** override an explicit per-object `allowExport: false`.
+Two consequences worth stating plainly:
 
-Enforcement is server-side: `GET /api/v1/data/:object/export` answers
-`403 EXPORT_NOT_PERMITTED` before it reads the first row. The same decision is
-published on `/me/permissions` as the object's effective `apiOperations`, which
-is what makes the client hide its Export button — the button and the refusal are
-one decision, not two.
+- **It narrows read; it never widens it.** A set granting `allowExport: true`
+  without a read grant exports nothing — `export = list ∧ allowExport`.
+- **`viewAllRecords` / `modifyAllRecords` do not imply it.** Separating "may see
+  all data" from "may take a bulk copy of it" is the segregation-of-duties case
+  the axis exists for. The built-in `admin_full_access` and `organization_admin`
+  sets carry `allowExport: true` explicitly; remove that line to get the
+  separation. `member_default` deliberately does not carry it, so ordinary
+  authenticated users have no export by default.
+
+A set carrying `allowExport` is treated as **high-privilege** and cannot be
+bound to the `everyone` or `guest` audience anchors — binding it there would
+hand bulk egress to every authenticated user (or every visitor) and undo the
+opt-in. Grant it through an ordinary position-distributed set instead.
+
+Enforcement is server-side and covers both egress doors:
+
+- `GET /api/v1/data/:object/export` answers `403 EXPORT_NOT_PERMITTED` before it
+  reads the first row.
+- A **report** rendered as `csv` or `json` is the same bulk copy and is gated the
+  same way, whether run interactively or delivered by a schedule. `html_table`
+  is a rendered view and stays a read.
+
+The same decision is published on `/me/permissions` as the object's effective
+`apiOperations`, which is what makes the client hide its Export button — the
+button and the refusal are one decision, not two. To ask why a particular user
+was refused, use [`explain`](/docs/permissions/explain) with
+`operation: 'export'`; `operation: 'read'` will answer `allowed` and tell you
+nothing, because reading is exactly what they are still permitted to do.
 
 ## Access depth — `readScope` / `writeScope` (ADR-0057 D1)
 

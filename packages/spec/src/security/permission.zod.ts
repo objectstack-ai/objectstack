@@ -37,20 +37,36 @@ export const ObjectPermissionSchema = lazySchema(() => z.object({
    *
    * `export` derives from `list` AND this bit
    * (`@objectstack/spec/data` `resolveEffectiveApiMethods` →
-   * `ResolveApiOptions.userExportAllowed`). Deliberately OPTIONAL with no
-   * default so it is a backward-compatible **opt-out**, not an opt-in:
-   *   - UNSET (undefined) → inherits read — the current "anyone who can list can
-   *     one-click export" behavior — so adding this key changes nothing for
-   *     existing permission sets.
-   *   - `false` → deny export while KEEPING read (Salesforce "Export Reports",
-   *     Dynamics "Export to Excel", NetSuite "Export Lists", SAP S_GUI 61 parity).
-   *   - `true` → explicitly granted.
+   * `ResolveApiOptions.userExportAllowed`). It is an **OPT-IN GRANT**, like
+   * every other `allow*` bit:
+   *   - `true` → export granted (still bounded by read: `export ⊆ list`).
+   *   - UNSET or `false` → NO export. Reading a record on screen and pulling
+   *     the whole table down as a CSV are different privileges (Salesforce
+   *     "Export Reports", Dynamics "Export to Excel", NetSuite "Export Lists",
+   *     SAP S_GUI 61 all separate them), so read alone never implies export.
+   *
+   * Merged most-permissively across a caller's permission sets, exactly like
+   * the CRUD bits: ANY set granting `true` grants export. `false` is therefore
+   * documentation of intent rather than a veto — permission sets are additive
+   * capability containers (ADR-0090), and no bit in them is a deny.
+   *
+   * NOT implied by the `viewAllRecords` / `modifyAllRecords` super-user bits.
+   * That is deliberate: separating "may see all data" from "may take a bulk
+   * copy of it" is the segregation-of-duties case the axis exists for. The
+   * built-in admin sets carry the grant explicitly instead.
+   *
+   * Deliberately OPTIONAL (no Zod default) so the resolved value stays
+   * three-valued at the AUTHORING layer — a set that says nothing about export
+   * is distinguishable from one that says `false`, which is what lets Setup
+   * render "inherited / explicitly off" instead of collapsing both to a blank
+   * checkbox. Enforcement collapses them: only `true` grants.
    *
    * The server resolves this into the per-object effective operation set
-   * (`apiOperations` on `/me/permissions`); the frontend renders that set and
-   * never reads this bit directly.
+   * (`apiOperations` on `/me/permissions`) and enforces it at the export door
+   * (`GET /data/:object/export` → 403 `EXPORT_NOT_PERMITTED`); the frontend
+   * renders that set and never reads this bit directly.
    */
-  allowExport: z.boolean().optional().describe('[#3544] User-level export axis over read. Unset = inherit read (can-list ⇒ can-export, backward-compatible); false = deny export while keeping read; true = granted.'),
+  allowExport: z.boolean().optional().describe('[#3544] User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords.'),
 
   /**
    * Lifecycle Operations.

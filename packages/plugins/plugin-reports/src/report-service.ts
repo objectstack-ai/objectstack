@@ -197,7 +197,34 @@ export interface ReportServiceOptions {
    * closed instead of running with RLS bypassed (#2980).
    */
   resolveOwnerContext?: OwnerContextResolver;
+  /**
+   * [#3544 / #3710] The user-level export axis —
+   * `ISecurityService.canExport(object, context)`, wired by the reports plugin
+   * from `getService('security')`.
+   *
+   * A report rendered as `csv`/`json` IS a bulk machine-readable copy of the
+   * object, so it is the same privilege `GET /data/:object/export` gates.
+   * Without this the axis had a side door: a caller refused at that route could
+   * save a report on the same object, run it as CSV — or schedule one to their
+   * own inbox — and receive the identical rows.
+   *
+   * Omitted (no `plugin-security`, so no permission sets exist anywhere) → the
+   * axis does not apply, matching the REST export route's own fail-open.
+   */
+  canExport?: (object: string, context: unknown) => Promise<boolean>;
 }
+
+/**
+ * [#3544 / #3710] Report formats that constitute a BULK EXPORT rather than a
+ * rendering.
+ *
+ * `csv`/`json` are machine-readable copies — re-importable elsewhere, and
+ * exactly what `GET /data/:object/export` serves. `html_table` is a PRESENTED
+ * view: the report equivalent of reading rows on screen, which any caller
+ * holding `allowRead` may already do. Gating it would restrict reading rather
+ * than exporting and would take the axis past what it is for.
+ */
+const BULK_EXPORT_FORMATS: ReadonlySet<string> = new Set(['csv', 'json']);
 
 export class ReportService implements IReportService {
   private readonly engine: ReportEngine;
@@ -206,6 +233,7 @@ export class ReportService implements IReportService {
   private readonly logger: NonNullable<ReportServiceOptions['logger']>;
   private readonly maxRows: number;
   private readonly resolveOwnerContext?: OwnerContextResolver;
+  private readonly canExportFn?: (object: string, context: unknown) => Promise<boolean>;
 
   constructor(opts: ReportServiceOptions) {
     this.engine = opts.engine;
@@ -214,6 +242,48 @@ export class ReportService implements IReportService {
     this.logger = opts.logger ?? {};
     this.maxRows = Math.max(1, opts.maxRows ?? 5000);
     this.resolveOwnerContext = opts.resolveOwnerContext;
+    this.canExportFn = opts.canExport;
+  }
+
+  /**
+   * [#3544 / #3710] Gate a report rendering on the user-level export axis.
+   *
+   * Throws `EXPORT_NOT_PERMITTED` when the principal behind `context` may not
+   * take a bulk copy of `object`. A no-op for non-bulk formats (`html_table`),
+   * for a system context, and when no `canExport` is wired.
+   *
+   * Deliberately checked HERE — one place — rather than at each of the three
+   * callers (`runReport`, the ad-hoc run, and the scheduled dispatch): a gate
+   * per call site is how a fourth call site later ships ungated. `dispatchDue`
+   * routes through `executeReport` too, so the scheduled CSV is covered by the
+   * same line. (`scheduleReport` additionally pre-checks, so an author is
+   * refused when they create the schedule rather than silently at 3am — but
+   * that is UX, and THIS is the enforcement: a grant revoked after the schedule
+   * was created must still stop the delivery.)
+   *
+   * Fails CLOSED on a throw — it resolves permission sets to decide, and a
+   * resolution failure must never read as a grant (ADR-0049).
+   */
+  private async assertExportAllowed(
+    object: string,
+    format: string,
+    context: SharingExecutionContext | undefined,
+  ): Promise<void> {
+    if (!BULK_EXPORT_FORMATS.has(format)) return;
+    if (context?.isSystem) return;
+    if (!this.canExportFn) return;
+    let allowed: boolean;
+    try {
+      allowed = await this.canExportFn(object, context);
+    } catch (err) {
+      this.logger.warn?.('ReportService: canExport check failed — denying export', err);
+      allowed = false;
+    }
+    if (!allowed) {
+      throw new Error(
+        `EXPORT_NOT_PERMITTED: exporting '${object}' as ${format} is not permitted for this user`,
+      );
+    }
   }
 
   // ── Access control ─────────────────────────────────────────────
@@ -361,6 +431,9 @@ export class ReportService implements IReportService {
     context: SharingExecutionContext,
     stamp = true,
   ): Promise<ReportRunResult> {
+    // [#3544 / #3710] The export axis, BEFORE any row is read — a refusal must
+    // not be reachable after the data has already been pulled.
+    await this.assertExportAllowed(report.object_name, report.format, context);
     const q = report.query ?? {};
     const limit = Math.min(q.limit ?? DEFAULT_LIMIT, this.maxRows);
     const rows = await this.engine.find(report.object_name, {
@@ -415,6 +488,12 @@ export class ReportService implements IReportService {
     }
     const report = await this.getReport(input.reportId, context);
     if (!report) throw new Error(`REPORT_NOT_FOUND: ${input.reportId}`);
+
+    // [#3544 / #3710] Refuse a bulk-format schedule the author could not run
+    // themselves, at CREATE time — otherwise the refusal only surfaces on the
+    // first silent 3am sweep. Advisory only: `executeReport` re-checks on every
+    // dispatch, which is what catches a grant revoked after this point.
+    await this.assertExportAllowed(report.object_name, input.format ?? 'html_table', context);
 
     const now = this.clock.now();
     const interval = input.intervalMinutes ?? DEFAULT_INTERVAL_MIN;

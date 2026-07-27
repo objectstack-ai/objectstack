@@ -109,6 +109,12 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         allowDelete: true,
         viewAllRecords: true,
         modifyAllRecords: true,
+        // [#3544] Export is an OPT-IN grant and is deliberately NOT implied by
+        // the super-user bits — "may see all data" and "may take a bulk copy of
+        // it" are separable on purpose (SAP S_GUI 61 / segregation of duties).
+        // Stated explicitly so the platform administrator keeps export, and so
+        // a deployment wanting that separation has one obvious line to remove.
+        allowExport: true,
       },
     },
     systemPermissions: [
@@ -163,6 +169,10 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         allowDelete: true,
         viewAllRecords: true,
         modifyAllRecords: true,
+        // [#3544] Explicit — the super-user bits do not imply export. Bounded
+        // by this set's organization wall (the `tenant_isolation` RLS below),
+        // so it is an org-scoped export, never a cross-tenant one.
+        allowExport: true,
       },
       // Identity tables — go through better-auth endpoints (invite,
       // accept, remove-member, transfer, …) rather than raw CRUD.
@@ -308,6 +318,13 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // ordinary (position-distributed) set where the domain calls for it.
       // The owner-scoped delete RLS below is KEPT as a narrowing defense for
       // members who receive a delete bit from such a set.
+      //
+      // [#3544] NO `allowExport` either, for the same reason and deliberately:
+      // this set is the `everyone` baseline, so granting export here would hand
+      // bulk egress to every authenticated user and make the opt-in axis a
+      // no-op. Bulk export is not a baseline right — grant it per object via an
+      // ordinary position-distributed set where the domain calls for it. Do not
+      // "fix" its absence.
       '*': {
         allowRead: true,
         allowCreate: true,

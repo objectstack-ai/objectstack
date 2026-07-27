@@ -120,7 +120,7 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | :--- | :--- | :--- | :--- |
 | **allowed** | `boolean` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge'>` | ✅ |  |
+| **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge' \| 'export'>` | ✅ |  |
 | **principal** | `{ userId: string \| null; positions: string[]; permissionSets: string[]; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>; … }` | ✅ |  |
 | **layers** | `{ layer: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| 'fls' \| 'owd_baseline' \| 'depth' \| 'sharing' \| 'vama_bypass' \| 'rls'>; kernelTier?: Enum<'layer_0_tenant' \| 'layer_1_business'>; verdict: Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>; detail: string; … }[]` | ✅ |  |
 | **readFilter** | `any` | optional |  |
@@ -172,6 +172,7 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 * `transfer`
 * `restore`
 * `purge`
+* `export`
 
 
 ---
@@ -198,7 +199,7 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ |  |
-| **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge'>` | ✅ |  |
+| **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge' \| 'export'>` | ✅ |  |
 | **recordId** | `string` | optional | Optional id of one concrete record to explain at row granularity; omitted = object-level (pre-C2) request. |
 | **userId** | `string` | optional |  |
 

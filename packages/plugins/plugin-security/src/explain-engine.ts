@@ -116,7 +116,26 @@ const EXPLAIN_TO_ENGINE_OP: Record<ExplainOperation, string> = {
   transfer: 'transfer',
   restore: 'restore',
   purge: 'purge',
+  // [#3544] Not a copy-paste slip: `export` IS its own evaluator operation
+  // (`read ∧ the export grant`). It is also the only entry whose data path
+  // differs from its gate — see {@link dataOpOf}.
+  export: 'export',
 };
+
+/**
+ * [#3544] The operation every DATA-shaped layer must be computed as.
+ *
+ * `export` is gated as its own operation but performs an ordinary `find` to
+ * fetch its rows, so requiredPermissions, OWD/depth/sharing, RLS and record
+ * attribution all have to resolve as a READ. Asking the RLS compiler about an
+ * `export` operation would match no policy and report "no RLS applies" for a
+ * principal whose rows are in fact filtered — an explanation that contradicts
+ * the export it is explaining. Only `object_crud` uses the gate operation,
+ * because that is the only layer the axis changes.
+ */
+function dataOpOf(operation: ExplainOperation, engineOp: string): string {
+  return operation === 'export' ? 'find' : engineOp;
+}
 
 export interface ExplainEngineDeps {
   ql: any;
@@ -691,6 +710,9 @@ async function applyRecordAttribution(
 export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput): Promise<ExplainDecision> {
   const { object, operation, context } = input;
   const engineOp = EXPLAIN_TO_ENGINE_OP[operation];
+  // [#3544] The gate operation (`engineOp`) and the data operation may differ —
+  // today only for `export`, which is gated as itself but reads as a `find`.
+  const dataOp = dataOpOf(operation, engineOp);
   const layers: ExplainLayer[] = [];
 
   // ── 1. principal ──────────────────────────────────────────────────────
@@ -779,7 +801,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   try { schema = deps.ql?.getSchema?.(object) ?? null; } catch { schema = null; }
 
   // ── 2. required_permissions AND-gate ──────────────────────────────────
-  const required = deps.requiredCaps(secMeta.requiredPermissions, engineOp);
+  const required = deps.requiredCaps(secMeta.requiredPermissions, dataOp);
   let capsDeny = false;
   if (required.length > 0) {
     const held = deps.evaluator.getSystemPermissions(sets);
@@ -871,7 +893,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   });
 
   // ── 6. depth ───────────────────────────────────────────────────────────
-  const opClass = engineOp === 'find' ? 'read' : 'write';
+  const opClass = dataOp === 'find' ? 'read' : 'write';
   const agentScope = deps.evaluator.getEffectiveScope(opClass as 'read' | 'write', object, sets, { isPrivate: secMeta.isPrivate });
   // [ADR-0090 D10] The delegated principal sees the NARROWER of the two depths.
   const scope = delegatorSets
@@ -932,7 +954,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   // ── 9. rls — the composed machine artifact ─────────────────────────────
   let agentFilter: Record<string, unknown> | null | undefined;
   try {
-    agentFilter = await deps.computeRlsFilter(sets, object, engineOp, context);
+    agentFilter = await deps.computeRlsFilter(sets, object, dataOp, context);
   } catch {
     agentFilter = { id: '__deny_all__' };
   }
@@ -941,7 +963,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   let delegatorFilter: Record<string, unknown> | null | undefined;
   if (delegatorSets && delegatorContextForRls) {
     try {
-      delegatorFilter = await deps.computeRlsFilter(delegatorSets, object, engineOp, delegatorContextForRls);
+      delegatorFilter = await deps.computeRlsFilter(delegatorSets, object, dataOp, delegatorContextForRls);
     } catch {
       delegatorFilter = { id: '__deny_all__' };
     }
@@ -972,7 +994,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   let posture: AuthzPosture | undefined;
   if (input.recordId) {
     const out = await applyRecordAttribution({
-      deps, object, recordId: input.recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed,
+      deps, object, recordId: input.recordId, engineOp: dataOp, context, sets, layers, owd, capsDeny, crudAllowed,
     });
     recordVerdict = out.record;
     posture = out.posture;
@@ -991,7 +1013,10 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
       ...(posture ? { posture } : {}),
     },
     layers,
-    ...(operation === 'read' ? { readFilter: readFilter ?? null } : {}),
+    // [#3544] `export` surfaces the read filter too — it streams the same
+    // rows through the same filter, so omitting it would hide the very
+    // narrowing that explains a short export.
+    ...(operation === 'read' || operation === 'export' ? { readFilter: readFilter ?? null } : {}),
     ...(recordVerdict ? { record: recordVerdict } : {}),
   };
   return decision;

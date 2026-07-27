@@ -84,6 +84,33 @@ describe('describeHighPrivilegeBits (anchor-binding predicate)', () => {
     expect(describeHighPrivilegeBits({ system_permissions: ['setup.access'] })).toMatch(/system permissions/);
     expect(describeHighPrivilegeBits({ objects: JSON.stringify({ a: { allowRead: true } }) })).toBeNull();
   });
+
+  // [#3544] Bulk export joined the list when the axis went opt-in. Making
+  // export a deliberate grant accomplishes nothing if a set carrying it can
+  // still be bound to `everyone` — that would hand bulk egress back to every
+  // authenticated user and restore the "can-list ⇒ can-export" posture the
+  // axis exists to end.
+  it('flags bulk export (#3544)', () => {
+    expect(describeHighPrivilegeBits({ objects: { a: { allowRead: true, allowExport: true } } }))
+      .toMatch(/bulk export/);
+    expect(describeHighPrivilegeBits({ objects: { '*': { allowRead: true, allowExport: true } } }))
+      .toMatch(/bulk export/);
+    // Row shape too — the gate reads seeded `sys_permission_set` rows.
+    expect(describeHighPrivilegeBits({ objects: JSON.stringify({ a: { allowExport: true } }) }))
+      .toMatch(/bulk export/);
+  });
+
+  it('allowExport:false / unset stays anchor-safe (member_default keeps binding)', () => {
+    // The platform baseline deliberately carries no export grant, so the
+    // everyone anchor must still accept it.
+    expect(describeHighPrivilegeBits({ objects: { a: { allowRead: true, allowExport: false } } })).toBeNull();
+    expect(describeHighPrivilegeBits({ objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true } } })).toBeNull();
+  });
+
+  it('a guest anchor refuses an export grant too', () => {
+    expect(describeAnchorForbiddenBits({ objects: { a: { allowRead: true, allowExport: true } } }, 'guest'))
+      .toMatch(/bulk export/);
+  });
 });
 
 describe('describeAnchorForbiddenBits (ADR-0090 D9 anchor tiers)', () => {

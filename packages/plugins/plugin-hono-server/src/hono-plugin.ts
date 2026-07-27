@@ -340,26 +340,26 @@ export function annotateEffectiveApiOperations(
     objects: Record<string, any>,
     schemaOf: (objectName: string) => ApiExposureSchemaLike | undefined,
 ): void {
-    // [#3544] The `'*'` entry's export bit is the FALLBACK for objects that do
-    // not declare one of their own. The merge keeps `'*'` and named objects as
+    // [#3544] The `'*'` entry's export grant is the FALLBACK for objects that do
+    // not carry one of their own. The merge keeps `'*'` and named objects as
     // independent keys, but the server evaluator does not: its
     // `resolveObjectPermission` falls back to the wildcard whenever a set has no
-    // explicit entry for the object, so a set that denies export wholesale via
-    // `'*': { allowExport: false }` really does deny it per-object. Reading the
-    // wildcard here keeps the button the client hides and the request the server
-    // refuses in agreement — the same class of client/server divergence
+    // explicit entry for the object, so an admin set granting export wholesale
+    // via `'*': { allowExport: true }` really does grant it per-object. Reading
+    // the wildcard here keeps the button the client shows and the request the
+    // server accepts in agreement — the same class of client/server divergence
     // `foldWildcardSuperUser` exists to close, on the export axis.
     const wildExport = objects?.['*']?.allowExport;
     for (const [obj, acc] of Object.entries(objects) as Array<[string, any]>) {
         if (obj === '*' || !acc) continue;
         const schema = schemaOf(obj);
         if (!schema) continue; // schema missing → no annotation (client falls back)
-        // [#3544] User-level export axis: `export` derives from `list ∧ this bit`.
-        // Unset → inherit the wildcard, then read (backward-compatible:
-        // can-list ⇒ can-export); explicit `false` → export removed from the
-        // effective set.
+        // [#3544] User-level export axis: `export` derives from `list ∧ this
+        // grant`. OPT-IN — only an explicit `true` (on the object entry, else
+        // inherited from `'*'`) allows export; unset and `false` both withhold
+        // it, and the super-user bits do NOT imply it.
         const exportBit = acc.allowExport ?? wildExport;
-        const userExportAllowed = exportBit !== false;
+        const userExportAllowed = exportBit === true;
         const eff = resolveEffectiveApiMethods(schema.enable ?? undefined, { userExportAllowed });
         // Annotate when the object tightens via `apiMethods`, OR when the export
         // axis removes `export` from an otherwise-open object (so the client

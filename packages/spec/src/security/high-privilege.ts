@@ -27,8 +27,9 @@ function coerceRecord(v: unknown): Record<string, unknown> | undefined {
  * anchor (`everyone` / `guest`)? Returns a human-readable description of the
  * first offending bit, or `null` when the set is anchor-safe.
  *
- * Offending bits — exactly the ADR-0090 D5 list: any `systemPermissions`,
- * View/Modify All Data (VAMA), or delete/purge/transfer on any object.
+ * Offending bits — the ADR-0090 D5 list: any `systemPermissions`,
+ * View/Modify All Data (VAMA), or delete/purge/transfer on any object, plus
+ * bulk `export` (#3544).
  * A plain `'*'` wildcard grant is NOT high-privilege by itself (D5 permits
  * a read/create/edit-own baseline to cover all objects — the platform's own
  * `member_default` is exactly that shape); the wildcard ban is the GUEST
@@ -36,6 +37,16 @@ function coerceRecord(v: unknown): Record<string, unknown> | undefined {
  * {@link describeAnchorForbiddenBits}. Fixes #2753: the former blanket
  * wildcard rejection made the default baseline unbindable to `everyone`,
  * forcing it through the separate fallback channel D5 explicitly rejected.
+ *
+ * [#3544] `allowExport` joins the list because the export axis is an OPT-IN
+ * grant: making export deliberate at the permission-set layer accomplishes
+ * nothing if a set carrying it can still be bound to `everyone` (or `guest`),
+ * which would hand bulk table egress back to every authenticated user — or to
+ * anonymous visitors — and quietly restore the "can-list ⇒ can-export" posture
+ * the axis exists to end. It sits in the same class as delete/purge/transfer:
+ * not a baseline right, and never something an anchor should confer wholesale.
+ * (`member_default` deliberately carries no `allowExport`, so the platform's
+ * own baseline stays anchor-bindable.)
  */
 export function describeHighPrivilegeBits(def: any): string | null {
   if (!def || typeof def !== 'object') return null;
@@ -50,6 +61,7 @@ export function describeHighPrivilegeBits(def: any): string | null {
       const p: any = rawPerm ?? {};
       if (p.viewAllRecords || p.modifyAllRecords) return `View/Modify All Data on '${objName}'`;
       if (p.allowDelete || p.allowPurge || p.allowTransfer) return `delete/purge/transfer on '${objName}'`;
+      if (p.allowExport) return `bulk export on '${objName}'`;
     }
   }
   return null;
