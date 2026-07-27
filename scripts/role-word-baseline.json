@@ -15,6 +15,7 @@
   "content/docs/kernel/services-checklist.mdx": 4,
   "content/docs/permissions/authentication.mdx": 2,
   "content/docs/permissions/authorization.mdx": 3,
+  "content/docs/permissions/delegated-administration.mdx": 11,
   "content/docs/permissions/index.mdx": 1,
   "content/docs/permissions/permission-metadata.mdx": 2,
   "content/docs/permissions/permission-sets.mdx": 1,
