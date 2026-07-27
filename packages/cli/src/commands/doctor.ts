@@ -321,9 +321,12 @@ const DEPRECATED_PATTERNS: Array<{
     replacement: 'Use minLength (camelCase)',
   },
   {
-    pattern: /\breference_filters\b/,
-    description: 'snake_case config key: reference_filters',
-    replacement: 'Use referenceFilters (camelCase)',
+    // `referenceFilters` was REMOVED from FieldSchema (#2377 / ADR-0049); its
+    // successor is `lookupFilters` (read by the objectui LookupField picker).
+    // Pointing at the removed key sent authors to a silently-stripped spelling.
+    pattern: /\breference_filters\b|\breferenceFilters\b/,
+    description: 'retired lookup-scoping key: reference_filters / referenceFilters',
+    replacement: 'Use lookupFilters (camelCase) — `referenceFilters` was removed in #2377',
   },
   {
     pattern: /\bunique_name\b/,
