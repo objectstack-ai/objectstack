@@ -150,6 +150,10 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'query transport of the same ExplainRequestSchema contract; the SDK speaks the POST form' },
   { route: 'POST /api/v1/security/explain', family: 'security-explain', source: 'route-manager', disposition: 'sdk', client: 'security.explain' },
 
+  // ── delegable scope (ADR-0090 D12 / ADR-0105 D8) ──────────────────────────
+  { route: 'GET /api/v1/security/my-delegable-scope', family: 'security-explain', source: 'route-manager', disposition: 'sdk', client: 'security.describeDelegableScope',
+    note: "read half of the delegated-admin gate; strictly self-scoped (no target-user parameter), so a scoped-invitation picker can narrow to what the caller may actually delegate" },
+
   // ── per-record shares ─────────────────────────────────────────────────────
   { route: 'GET /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.list' },
   { route: 'POST /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.grant' },
