@@ -1404,3 +1404,36 @@ describe('data.batchTransaction', () => {
         expect(body.atomic).toBe(true);
     });
 });
+
+// [#3584] The analytics surface speaks the DISPATCHER dialect. The previous
+// shapes (`GET /analytics/meta/:cube`, `POST /analytics/explain`) were served
+// by nothing — not the dispatcher, not @objectstack/rest — and 404ed against
+// every deployment. These pin the reconciled URLs so they cannot drift back.
+describe('Analytics namespace (#3584 dispatcher alignment)', () => {
+    it('meta() lists all cubes via GET /analytics/meta', async () => {
+        const { client, fetchMock } = createMockClient({ data: [] });
+        await client.analytics.meta();
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost:3000/api/v1/analytics/meta',
+            expect.anything(),
+        );
+    });
+
+    it('meta(cube) filters with ?cube=, URL-encoded', async () => {
+        const { client, fetchMock } = createMockClient({ data: [] });
+        await client.analytics.meta('sales leads');
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost:3000/api/v1/analytics/meta?cube=sales%20leads',
+            expect.anything(),
+        );
+    });
+
+    it('explain() dry-runs via POST /analytics/sql', async () => {
+        const { client, fetchMock } = createMockClient({ data: { sql: 'SELECT 1', params: [] } });
+        await client.analytics.explain({ cube: 'leads' });
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost:3000/api/v1/analytics/sql',
+            expect.objectContaining({ method: 'POST', body: JSON.stringify({ cube: 'leads' }) }),
+        );
+    });
+});

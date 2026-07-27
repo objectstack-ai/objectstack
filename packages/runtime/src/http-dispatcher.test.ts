@@ -504,6 +504,25 @@ describe('HttpDispatcher', () => {
                 expect(result.response?.body?.data?.tables).toEqual(['users', 'orders']);
             });
 
+            // [#3584] GET /analytics/meta?cube=<name> — the optional single-cube
+            // filter the client's analytics.meta(cube) sends. The cube name must
+            // reach AnalyticsService.getMeta(cubeName?); absent/empty stays a
+            // full listing (getMeta called with undefined).
+            it('threads the ?cube= filter into getMeta, full dispatch path included', async () => {
+                const mockAnalytics = {
+                    getMeta: vi.fn().mockResolvedValue([{ name: 'leads' }]),
+                };
+                (kernel as any).getService = vi.fn().mockResolvedValue(mockAnalytics);
+
+                const viaDispatch = await dispatcher.dispatch('GET', '/analytics/meta', undefined, { cube: 'leads' }, { request: {} });
+                expect(viaDispatch.handled).toBe(true);
+                expect(mockAnalytics.getMeta).toHaveBeenCalledWith('leads');
+
+                mockAnalytics.getMeta.mockClear();
+                await dispatcher.handleAnalytics('meta', 'GET', undefined, { request: {} }, { cube: '' });
+                expect(mockAnalytics.getMeta).toHaveBeenCalledWith(undefined);
+            });
+
             it('should return unhandled when analytics service is not registered', async () => {
                 (kernel as any).getService = vi.fn().mockResolvedValue(null);
                 (kernel as any).services = new Map();

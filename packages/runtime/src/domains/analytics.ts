@@ -16,7 +16,7 @@ export function createAnalyticsDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
         prefix: '/analytics',
         handler: (req, context) =>
-            handleAnalyticsRequest(deps, req.path.substring(10), req.method, req.body, context),
+            handleAnalyticsRequest(deps, req.path.substring(10), req.method, req.body, context, req.query),
     };
 }
 
@@ -27,6 +27,7 @@ export async function handleAnalyticsRequest(
     method: string,
     body: any,
     context: HttpProtocolContext,
+    query?: any,
 ): Promise<HttpDispatcherResult> {
     const analyticsService = await deps.getService(CoreServiceName.enum.analytics);
     if (!analyticsService) return { handled: false }; // 404 handled by caller if unhandled
@@ -45,9 +46,13 @@ export async function handleAnalyticsRequest(
         return { handled: true, response: deps.success(result) };
     }
 
-    // GET /analytics/meta
+    // GET /analytics/meta[?cube=<name>]
     if (subPath === 'meta' && m === 'GET') {
-        const result = await analyticsService.getMeta();
+        // [#3584] Optional single-cube filter. `AnalyticsService.getMeta`
+        // already accepts `cubeName?`; degraded fallbacks that ignore the
+        // argument keep returning the full listing, which is still correct.
+        const cube = typeof query?.cube === 'string' && query.cube !== '' ? query.cube : undefined;
+        const result = await analyticsService.getMeta(cube);
         return { handled: true, response: deps.success(result) };
     }
 

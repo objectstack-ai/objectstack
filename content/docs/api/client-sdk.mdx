@@ -243,10 +243,10 @@ const result = await client.analytics.query({
   limit: 100,
 });
 
-// Get cube metadata for a specific cube
+// Get cube metadata — all cubes, or one with meta('account')
 const meta = await client.analytics.meta('account');
 
-// Explain a query plan
+// Dry-run a query to its generated SQL (POST /analytics/sql)
 const explained = await client.analytics.explain({
   cube: 'account',
   measures: ['revenue.sum'],

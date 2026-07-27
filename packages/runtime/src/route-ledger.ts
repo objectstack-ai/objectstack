@@ -80,10 +80,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
 
   // ── analytics ─────────────────────────────────────────────────────────────
   { route: 'POST /analytics/query', domain: '/analytics', disposition: 'sdk', client: 'analytics.query' },
-  { route: 'GET /analytics/meta', domain: '/analytics', disposition: 'mismatch', client: 'analytics.meta',
-    note: 'dispatcher serves GET /analytics/meta; client calls GET /analytics/meta/:cube — extra path segment only the REST server understands' },
-  { route: 'POST /analytics/sql', domain: '/analytics', disposition: 'mismatch', client: 'analytics.explain',
-    note: 'dispatcher serves POST /analytics/sql; client calls POST /analytics/explain — different route name entirely' },
+  { route: 'GET /analytics/meta', domain: '/analytics', disposition: 'sdk', client: 'analytics.meta',
+    note: 'optional ?cube= filter honored server-side; was mismatch — the client called /meta/:cube, a shape no server ever mounted (#3584)' },
+  { route: 'POST /analytics/sql', domain: '/analytics', disposition: 'sdk', client: 'analytics.explain',
+    note: 'client keeps the explain name but calls /sql; the /explain route it used to call was served by nothing (#3584)' },
 
   // ── i18n ──────────────────────────────────────────────────────────────────
   { route: 'GET /i18n/locales', domain: '/i18n', disposition: 'sdk', client: 'i18n.getLocales' },
@@ -105,10 +105,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: 'raw secret returned once; user_id pinned server-side' },
 
   // ── storage ───────────────────────────────────────────────────────────────
-  { route: 'POST /storage/upload', domain: '/storage', disposition: 'mismatch', client: 'storage.upload',
-    note: 'dispatcher serves plain POST /storage/upload; client speaks the REST presigned/chunked protocol (/upload/presigned, /upload/complete, /upload/chunked/*)' },
-  { route: 'GET /storage/file/:id', domain: '/storage', disposition: 'mismatch', client: 'storage.getDownloadUrl',
-    note: 'dispatcher serves /storage/file/:id; client calls /storage/files/:id/url (REST shape)' },
+  { route: 'POST /storage/upload', domain: '/storage', disposition: 'server-only',
+    note: 'low-level compat surface; the SDK deliberately speaks the storage protocol (/upload/presigned, /upload/complete, /upload/chunked/*) that service-storage registers autonomously on any http-server — direct-to-cloud, chunked/resumable, auth-gated (#3584)' },
+  { route: 'GET /storage/file/:id', domain: '/storage', disposition: 'server-only',
+    note: 'ditto — the SDK downloads via /storage/files/:id/url from the service-storage protocol (authorization-gated signed URLs); this route stays as the low-level redirect/stream path (#3584)' },
 
   // ── ui ────────────────────────────────────────────────────────────────────
   { route: 'GET /ui/view/:object/:type?', domain: '/ui', disposition: 'sdk', client: 'meta.getView',

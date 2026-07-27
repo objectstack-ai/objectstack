@@ -897,8 +897,8 @@ export class HttpDispatcher {
      * path: sub-path after /analytics/
      */
     /** Thin delegate — body extracted to `./domains/analytics.ts` (D11③ PR-2). */
-    async handleAnalytics(path: string, method: string, body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        return handleAnalyticsRequest(this.domainDeps, path, method, body, context);
+    async handleAnalytics(path: string, method: string, body: any, context: HttpProtocolContext, query?: any): Promise<HttpDispatcherResult> {
+        return handleAnalyticsRequest(this.domainDeps, path, method, body, context, query);
     }
 
     /**
