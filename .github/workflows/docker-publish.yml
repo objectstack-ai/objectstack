@@ -71,7 +71,7 @@ jobs:
 
       - name: Compute image tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           # Tag = CLI version. Rolling minor/major/latest tags move with every
