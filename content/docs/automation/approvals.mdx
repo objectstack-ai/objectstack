@@ -245,6 +245,20 @@ Other filters: `status`, `object`, `recordId`, `submitterId`, `q`, `limit`,
 `offset`.
 
 <Callout type="warn">
+**`approverId` is a filter, not authorization.** What you may see is decided
+separately: a request is visible to its **participants** — the submitter, a
+current approver, and anyone who has already acted on it (a past approver whose
+slot has moved on, a commenter). So omitting `approverId` returns *your*
+requests, not every request in the tenant. Admins with override authority
+(`admin_full_access`, or `organization_admin` within their org) see all of them
+— that is what the "all requests" view is for.
+
+The same rule governs a decision's files: an attachment is exactly as readable
+as the decision it hangs off, never more (`sys_approval_action` delegates that
+question back to this service via `fileAccessDelegate`).
+</Callout>
+
+<Callout type="warn">
 **Opening a request notifies nobody.** There is no built-in "you have an
 approval waiting" message today — an approver only discovers it by looking at
 the queue. If people need to be told, do one of: add a `notify` node next to
