@@ -291,7 +291,7 @@ describe('Storage REST Routes', () => {
       for (const p of ['/api/v1/storage/files/:fileId/url', '/api/v1/storage/files/:fileId']) {
         const res = await hit(server, p, 'a1');
         expect(res._status, p).toBe(401);
-        expect(res._json?.code, p).toBe('AUTH_REQUIRED');
+        expect(res._json?.error?.code, p).toBe('AUTH_REQUIRED');
       }
     });
 
@@ -300,7 +300,7 @@ describe('Storage REST Routes', () => {
       await commit(s, { id: 'a2' });
       const res = await hit(server, '/api/v1/storage/files/:fileId/url', 'a2');
       expect(res._status).toBe(403);
-      expect(res._json?.code).toBe('ATTACHMENT_DOWNLOAD_DENIED');
+      expect(res._json?.error?.code).toBe('ATTACHMENT_DOWNLOAD_DENIED');
     });
 
     it('allows the download when authorized, minting a short-lived signed URL', async () => {
@@ -354,7 +354,7 @@ describe('Storage REST Routes', () => {
         expect(res._status).toBe(403);
         // Distinct from the attachments code — this file BELONGS to one
         // record, it is not attached to several.
-        expect(res._json?.code).toBe('FILE_DOWNLOAD_DENIED');
+        expect(res._json?.error?.code).toBe('FILE_DOWNLOAD_DENIED');
         expect(authorizeFileRead).toHaveBeenCalledOnce();
       });
 
@@ -363,7 +363,7 @@ describe('Storage REST Routes', () => {
         await commit(s, owned('fo2'));
         const res = await hit(server, '/api/v1/storage/files/:fileId', 'fo2');
         expect(res._status).toBe(401);
-        expect(res._json?.code).toBe('AUTH_REQUIRED');
+        expect(res._json?.error?.code).toBe('AUTH_REQUIRED');
       });
 
       it('allows an authorized field-owned download', async () => {
@@ -466,7 +466,7 @@ describe('Storage REST Routes', () => {
         const res = createMockRes();
         await server._getHandler(method, path)!(createMockReq(reqOpts as any), res);
         expect(res._status, `${method} ${path}`).toBe(401);
-        expect(res._json?.code, `${method} ${path}`).toBe('AUTH_REQUIRED');
+        expect(res._json?.error?.code, `${method} ${path}`).toBe('AUTH_REQUIRED');
       }
     });
 

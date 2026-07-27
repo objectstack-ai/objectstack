@@ -234,7 +234,10 @@ describe('I18nServicePlugin', () => {
       await handler(req, res);
 
       expect(res._status).toBe(400);
-      expect(res._data).toEqual({ error: 'Missing locale parameter' });
+      expect(res._data).toEqual({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Missing locale parameter' },
+      });
     });
 
     it('GET /labels/:object/:locale should derive field labels from translation bundle', async () => {
@@ -266,7 +269,10 @@ describe('I18nServicePlugin', () => {
       await handler(req, res);
 
       expect(res._status).toBe(400);
-      expect(res._data).toEqual({ error: 'Missing object or locale parameter' });
+      expect(res._data).toEqual({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Missing object or locale parameter' },
+      });
     });
   });
 

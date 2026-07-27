@@ -8,6 +8,27 @@ import { FileI18nAdapter } from './file-i18n-adapter.js';
 import type { FileI18nAdapterOptions } from './file-i18n-adapter.js';
 
 /**
+ * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
+ * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
+ * `{ success: false, error: { code, message } }` with `code` a semantic
+ * STRING.
+ *
+ * These routes used to emit a bare `{ error: '<message>' }`, so the same SDK
+ * method handed callers a string against this provider and an object against
+ * the dispatcher's `/i18n` domain — the error-path twin of the success-path
+ * asymmetry #3636 fixed (#3675). `ObjectStackClient` tolerates both shapes by
+ * sniffing, which is the consumer-side shim Prime Directive #12 says to
+ * delete by fixing the producer.
+ *
+ * Shape borrowed from the sibling services that already nest the error object
+ * (`settings-routes.ts`, `share-link-routes.ts`); the `success` flag is what
+ * those two still omit and the contract requires.
+ */
+function sendError(res: IHttpResponse, status: number, code: string, message: string): void {
+  res.status(status).json({ success: false, error: { code, message } });
+}
+
+/**
  * Configuration options for the I18nServicePlugin.
  */
 export interface I18nServicePluginOptions {
@@ -144,6 +165,11 @@ export class I18nServicePlugin implements Plugin {
    * returning the declared unwrapped shape against the dispatcher. Same
    * method, two shapes, decided by which plugin happened to mount the route
    * (#3636). `data` did not move, so direct body readers are unaffected.
+   *
+   * Error bodies now carry the matching `{ success: false, error: { code,
+   * message } }` half via `sendError` (#3675). That was left out of #3636
+   * because only the success bodies broke `unwrapResponse`, and unlike the
+   * success fix it is NOT additive — `error` goes from string to object.
    */
   private registerI18nRoutes(httpServer: IHttpServer, ctx: PluginContext): void {
     if (!this.i18n) return;
@@ -167,7 +193,7 @@ export class I18nServicePlugin implements Plugin {
           },
         });
       } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        sendError(res, 500, 'INTERNAL', error?.message ?? 'Internal error');
       }
     });
 
@@ -176,13 +202,13 @@ export class I18nServicePlugin implements Plugin {
       try {
         const locale = req.params.locale;
         if (!locale) {
-          res.status(400).json({ error: 'Missing locale parameter' });
+          sendError(res, 400, 'INVALID_REQUEST', 'Missing locale parameter');
           return;
         }
         const translations = i18n.getTranslations(locale);
         res.json({ success: true, data: { locale, translations } });
       } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        sendError(res, 500, 'INTERNAL', error?.message ?? 'Internal error');
       }
     });
 
@@ -192,7 +218,7 @@ export class I18nServicePlugin implements Plugin {
         const objectName = req.params.object;
         const locale = req.params.locale;
         if (!objectName || !locale) {
-          res.status(400).json({ error: 'Missing object or locale parameter' });
+          sendError(res, 400, 'INVALID_REQUEST', 'Missing object or locale parameter');
           return;
         }
         // Some implementations may provide a dedicated getFieldLabels method
@@ -215,7 +241,7 @@ export class I18nServicePlugin implements Plugin {
           res.json({ success: true, data: { object: objectName, locale, labels } });
         }
       } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        sendError(res, 500, 'INTERNAL', error?.message ?? 'Internal error');
       }
     });
 

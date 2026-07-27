@@ -157,7 +157,7 @@ describe('attachments permission matrix (#2755)', () => {
       body: JSON.stringify({ filename: 'x.txt', mimeType: 'text/plain', size: 1, scope: 'attachments' }),
     });
     expect(res.status).toBe(401);
-    expect(((await res.json()) as any).code).toBe('AUTH_REQUIRED');
+    expect(((await res.json()) as any).error?.code).toBe('AUTH_REQUIRED');
   });
 
   it('(e) authenticated upload succeeds and sys_file.owner_id is server-stamped', async () => {
@@ -319,13 +319,13 @@ describe('attachments permission matrix (#2755)', () => {
     // Anonymous → 401 (was a 200 capability URL before #2970).
     const anon = await stack.api(`/storage/files/${adminFile}/url`);
     expect(anon.status).toBe(401);
-    expect(((await anon.json()) as any).code).toBe('AUTH_REQUIRED');
+    expect(((await anon.json()) as any).error?.code).toBe('AUTH_REQUIRED');
 
     // memberB is authenticated but cannot read att_secret and is not the
     // owner → 403.
     const denied = await stack.apiAs(memberBTok, 'GET', `/storage/files/${adminFile}/url`);
     expect(denied.status).toBe(403);
-    expect(((await denied.json()) as any).code).toBe('ATTACHMENT_DOWNLOAD_DENIED');
+    expect(((await denied.json()) as any).error?.code).toBe('ATTACHMENT_DOWNLOAD_DENIED');
 
     // The owner (admin) → 200 with a signed URL.
     const owner = await stack.apiAs(adminTok, 'GET', `/storage/files/${adminFile}/url`);

@@ -10,6 +10,28 @@ import { contentDispositionValue } from './content-disposition.js';
 export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
 
 /**
+ * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
+ * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
+ * `{ success: false, error: { code, message } }` with `code` a semantic
+ * STRING.
+ *
+ * These routes used to emit a bare `{ error: '<message>' }`, with the code —
+ * where one existed at all — as a SIBLING of `error` rather than a field of
+ * it. So a caller reading `body.error.message` got `undefined` here and the
+ * real message from the dispatcher (#3675). `ObjectStackClient` papers over
+ * the difference by sniffing four shapes; that shim is the consumer-side
+ * symptom Prime Directive #12 says to cure at the producer.
+ *
+ * Only the ERROR path is normalized here. The success bodies are still three
+ * shapes of their own (`{ data }`, bare `{ url }`, `{ ok, key }`, none with
+ * `success: true`) — a separate, non-additive change, tracked as its own
+ * issue rather than smuggled into this one.
+ */
+function sendError(res: IHttpResponse, status: number, code: string, message: string): void {
+  res.status(status).json({ success: false, error: { code, message } });
+}
+
+/**
  * Options for the storage route registration helper.
  */
 export interface StorageRoutesOptions {
@@ -117,21 +139,15 @@ export function registerStorageRoutes(
       verdict = 'deny'; // a failed authz check must never fall open
     }
     if (verdict === 'unauthenticated') {
-      res.status(401).json({ error: 'Authentication required to download this file', code: 'AUTH_REQUIRED' });
+      sendError(res, 401, 'AUTH_REQUIRED', 'Authentication required to download this file');
       return false;
     }
     if (verdict === 'deny') {
-      res.status(403).json(
-        fieldOwned
-          ? {
-              error: 'You do not have access to the record this file belongs to',
-              code: 'FILE_DOWNLOAD_DENIED',
-            }
-          : {
-              error: 'You do not have access to a record this file is attached to',
-              code: 'ATTACHMENT_DOWNLOAD_DENIED',
-            },
-      );
+      if (fieldOwned) {
+        sendError(res, 403, 'FILE_DOWNLOAD_DENIED', 'You do not have access to the record this file belongs to');
+      } else {
+        sendError(res, 403, 'ATTACHMENT_DOWNLOAD_DENIED', 'You do not have access to a record this file is attached to');
+      }
       return false;
     }
     return downloadTtl;
@@ -161,7 +177,7 @@ export function registerStorageRoutes(
       session = null;
     }
     if (!session?.userId) {
-      res.status(401).json({ error: 'Authentication required to upload files', code: 'AUTH_REQUIRED' });
+      sendError(res, 401, 'AUTH_REQUIRED', 'Authentication required to upload files');
       return false;
     }
     return session;
@@ -176,7 +192,7 @@ export function registerStorageRoutes(
       if (session === false) return;
       const { filename, mimeType, size, scope, bucket } = req.body ?? {};
       if (!filename || !mimeType || size == null) {
-        res.status(400).json({ error: 'filename, mimeType, and size are required' });
+        sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and size are required');
         return;
       }
 
@@ -225,7 +241,7 @@ export function registerStorageRoutes(
         },
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message ?? 'Internal error' });
+      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
     }
   });
 
@@ -237,13 +253,13 @@ export function registerStorageRoutes(
       if ((await requireUploadSession(req, res)) === false) return;
       const { fileId, eTag } = req.body ?? {};
       if (!fileId) {
-        res.status(400).json({ error: 'fileId is required' });
+        sendError(res, 400, 'INVALID_REQUEST', 'fileId is required');
         return;
       }
 
       const file = await store.getFile(fileId);
       if (!file) {
-        res.status(404).json({ error: 'File not found' });
+        sendError(res, 404, 'FILE_NOT_FOUND', 'File not found');
         return;
       }
 
@@ -268,7 +284,7 @@ export function registerStorageRoutes(
         },
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message ?? 'Internal error' });
+      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
     }
   });
 
@@ -281,7 +297,7 @@ export function registerStorageRoutes(
       if (session === false) return;
       const { filename, mimeType, totalSize, chunkSize: reqChunkSize, scope, bucket, metadata } = req.body ?? {};
       if (!filename || !mimeType || !totalSize) {
-        res.status(400).json({ error: 'filename, mimeType, and totalSize are required' });
+        sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and totalSize are required');
         return;
       }
 
@@ -349,7 +365,7 @@ export function registerStorageRoutes(
         },
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message ?? 'Internal error' });
+      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
     }
   });
 
@@ -362,20 +378,20 @@ export function registerStorageRoutes(
       const { uploadId, chunkIndex: chunkIndexStr } = req.params;
       const chunkIndex = parseInt(chunkIndexStr, 10);
       if (!uploadId || isNaN(chunkIndex)) {
-        res.status(400).json({ error: 'uploadId and chunkIndex are required' });
+        sendError(res, 400, 'INVALID_REQUEST', 'uploadId and chunkIndex are required');
         return;
       }
 
       const session = await store.getSession(uploadId);
       if (!session) {
-        res.status(404).json({ error: 'Upload session not found' });
+        sendError(res, 404, 'UPLOAD_SESSION_NOT_FOUND', 'Upload session not found');
         return;
       }
 
       // Verify resume token
       const token = (req.headers['x-resume-token'] ?? '') as string;
       if (session.resume_token && token !== session.resume_token) {
-        res.status(403).json({ error: 'Invalid resume token' });
+        sendError(res, 403, 'INVALID_RESUME_TOKEN', 'Invalid resume token');
         return;
       }
 
@@ -388,7 +404,7 @@ export function registerStorageRoutes(
       } else if (req.body instanceof ArrayBuffer) {
         data = Buffer.from(req.body);
       } else {
-        res.status(400).json({ error: 'Binary body required' });
+        sendError(res, 400, 'INVALID_REQUEST', 'Binary body required');
         return;
       }
 
@@ -417,7 +433,7 @@ export function registerStorageRoutes(
         },
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message ?? 'Internal error' });
+      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
     }
   });
 
@@ -430,7 +446,7 @@ export function registerStorageRoutes(
       const { uploadId } = req.params;
       const session = await store.getSession(uploadId);
       if (!session) {
-        res.status(404).json({ error: 'Upload session not found' });
+        sendError(res, 404, 'UPLOAD_SESSION_NOT_FOUND', 'Upload session not found');
         return;
       }
 
@@ -461,7 +477,7 @@ export function registerStorageRoutes(
         },
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message ?? 'Internal error' });
+      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
     }
   });
 
@@ -474,7 +490,7 @@ export function registerStorageRoutes(
       const { uploadId } = req.params;
       const session = await store.getSession(uploadId);
       if (!session) {
-        res.status(404).json({ error: 'Upload session not found' });
+        sendError(res, 404, 'UPLOAD_SESSION_NOT_FOUND', 'Upload session not found');
         return;
       }
 
@@ -500,7 +516,7 @@ export function registerStorageRoutes(
         },
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message ?? 'Internal error' });
+      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
     }
   });
 
@@ -512,7 +528,7 @@ export function registerStorageRoutes(
       const { fileId } = req.params;
       const file = await store.getFile(fileId);
       if (!file || file.status !== 'committed') {
-        res.status(404).json({ error: 'File not found or not committed' });
+        sendError(res, 404, 'FILE_NOT_FOUND', 'File not found or not committed');
         return;
       }
 
@@ -532,7 +548,7 @@ export function registerStorageRoutes(
 
       res.json({ url });
     } catch (err: any) {
-      res.status(500).json({ error: err.message ?? 'Internal error' });
+      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
     }
   });
 
@@ -552,7 +568,7 @@ export function registerStorageRoutes(
       const { fileId } = req.params;
       const file = await store.getFile(fileId);
       if (!file || file.status !== 'committed') {
-        res.status(404).json({ error: 'File not found or not committed' });
+        sendError(res, 404, 'FILE_NOT_FOUND', 'File not found or not committed');
         return;
       }
 
@@ -572,7 +588,7 @@ export function registerStorageRoutes(
 
       res.status(302).header('Location', url).send('');
     } catch (err: any) {
-      res.status(500).json({ error: err.message ?? 'Internal error' });
+      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
     }
   });
 
@@ -584,7 +600,7 @@ export function registerStorageRoutes(
       const { token } = req.params;
       const localAdapter = storage as LocalStorageAdapter;
       if (!localAdapter.verifyToken) {
-        res.status(501).json({ error: 'Presigned raw upload not supported by this adapter' });
+        sendError(res, 501, 'NOT_IMPLEMENTED', 'Presigned raw upload not supported by this adapter');
         return;
       }
 
@@ -595,15 +611,20 @@ export function registerStorageRoutes(
       } else if (Buffer.isBuffer(req.body)) {
         data = req.body;
       } else {
-        res.status(400).json({ error: 'Binary body required' });
+        sendError(res, 400, 'INVALID_REQUEST', 'Binary body required');
         return;
       }
 
       await storage.upload(payload.k, data, { contentType: payload.ct });
       res.json({ ok: true, key: payload.k });
     } catch (err: any) {
-      const statusCode = err.message?.includes('expired') || err.message?.includes('signature') ? 403 : 500;
-      res.status(statusCode).json({ error: err.message ?? 'Upload failed' });
+      const invalidToken = err?.message?.includes('expired') || err?.message?.includes('signature');
+      sendError(
+        res,
+        invalidToken ? 403 : 500,
+        invalidToken ? 'INVALID_TOKEN' : 'INTERNAL',
+        err?.message ?? 'Upload failed',
+      );
     }
   });
 
@@ -615,7 +636,7 @@ export function registerStorageRoutes(
       const { token } = req.params;
       const localAdapter = storage as LocalStorageAdapter;
       if (!localAdapter.verifyToken) {
-        res.status(501).json({ error: 'Presigned download not supported by this adapter' });
+        sendError(res, 501, 'NOT_IMPLEMENTED', 'Presigned download not supported by this adapter');
         return;
       }
 
@@ -631,8 +652,13 @@ export function registerStorageRoutes(
       }
       res.send(data);
     } catch (err: any) {
-      const statusCode = err.message?.includes('expired') || err.message?.includes('signature') ? 403 : 500;
-      res.status(statusCode).json({ error: err.message ?? 'Download failed' });
+      const invalidToken = err?.message?.includes('expired') || err?.message?.includes('signature');
+      sendError(
+        res,
+        invalidToken ? 403 : 500,
+        invalidToken ? 'INVALID_TOKEN' : 'INTERNAL',
+        err?.message ?? 'Download failed',
+      );
     }
   });
 }

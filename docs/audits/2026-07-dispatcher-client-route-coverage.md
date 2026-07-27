@@ -271,6 +271,37 @@ capstone also had to prefer exact rows over wildcard families when matching —
 otherwise every `/auth/*` URL would still have been absorbed by `* /auth/**`
 and the new ledger would have changed nothing.
 
+## 12. What the ledgers cannot see: response bodies (#3675)
+
+Worth recording as a **boundary of this audit family**, not an oversight in it.
+Every guard from §1 to §11 answers one question — does this route exist, and
+can the SDK address it? None of them looks at what comes back. That is how
+service-i18n and service-storage carried green `sdk` rows for surfaces that
+emitted a bare `{ error: '<message>' }` against a contract declaring
+`{ success: false, error: { code, message } }`.
+
+Four error dialects were live in-repo at the time:
+
+| Producer | Shape |
+|---|---|
+| `contract.zod.ts` (declared) | `{ success, error: { code: string, message, … } }` |
+| `http-dispatcher.ts` | `{ success: false, error: { message, code: <HTTP number>, details } }` |
+| `rest-server.ts` | `{ error: <string>, code: <SEMANTIC_STRING> }` |
+| `settings-routes.ts`, `share-link-routes.ts` | `{ error: { code, message } }` — no `success` |
+| service-i18n, service-storage | `{ error: <string> }`, sometimes `+ code` at the top level |
+
+#3675 moved the last row to the contract. The rest are unchanged, and the
+dispatcher's deviation is now pinned to exactly one field (`error.code` carries
+the HTTP status where a semantic string is declared) by a test rather than by
+prose — it parks the real code in `details` to work around its own occupied
+field, which is the tell.
+
+The generalisable lesson matches §11's: a guard only covers the question it
+asks. "The route exists" and "the route answers in the declared shape" are two
+questions, and the second one needs the contract imported into the assertion —
+`BaseResponseSchema.safeParse(body)`, not a hand-copied restatement that drifts
+from the schema it claims to check.
+
 ## Follow-up slicing (proposed)
 
 1. **`client.actions.invoke(...)`** — closes the largest hole (3 routes).
@@ -286,6 +317,9 @@ and the new ledger would have changed nothing.
 11. **Control-plane surface** (§10) — #3655, needs a ledger in the `cloud` repo.
 12. **Enumerate `/auth/**`** (§11) — done in #3656; wildcard ratchet 60 → 3.
 13. **Enumerate `/ai/**`** — the last dynamic family, 3 SDK methods.
+14. **Response-shape conformance** (§12) — error path done in #3675 for both
+    services; the storage **success** bodies (three shapes, none carrying
+    `success: true`) and the dispatcher's numeric `error.code` remain.
 
 Each gap closed must flip its ledger row to `sdk` and lower the ratchet bound
 in the conformance test — the guard enforces both directions from PR-1 onward.

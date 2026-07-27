@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { ObjectKernel } from '@objectstack/core';
+import { ApiErrorSchema } from '@objectstack/spec/api';
 
 describe('HttpDispatcher', () => {
     let kernel: ObjectKernel;
@@ -1835,6 +1836,35 @@ describe('HttpDispatcher', () => {
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(400);
             expect(result.response?.body?.error?.message).toBe('Missing locale parameter');
+        });
+
+        /**
+         * The dispatcher's error body is the SHAPE the autonomously-mounted
+         * i18n/storage services were aligned to in #3675 — nested `error`, with
+         * the `success` flag. It is not yet the CONTRACT: `ApiErrorSchema`
+         * declares `code` as a semantic string ('validation_error'), and this
+         * emits the HTTP status as a number. The dispatcher already works
+         * around its own field being occupied — `this.error(msg, 403, { code:
+         * 'PERMISSION_DENIED' })` parks the real code in `details` — which is
+         * the tell that the number is in the wrong place.
+         *
+         * Pinned rather than fixed: `error.code` is read across the SDK, the
+         * console and the dogfood suite, so moving it is its own change.
+         * `toEqual(['code'])` is deliberately exact — if a second field starts
+         * deviating this fails, and if the dispatcher is fixed it also fails
+         * and this pin should be deleted.
+         */
+        it('pins the ONE field where the dispatcher deviates from ApiErrorSchema (#3675)', async () => {
+            const result = await dispatcher.handleI18n('/translations', 'GET', {}, { request: {} });
+            const body = result.response?.body as { success?: boolean; error?: unknown };
+
+            expect(body.success).toBe(false);
+            expect(typeof body.error).toBe('object');
+
+            const parsed = ApiErrorSchema.safeParse(body.error);
+            expect(parsed.success).toBe(false);
+            expect(parsed.error!.issues.map((i) => i.path.join('.'))).toEqual(['code']);
+            expect((body.error as { code: unknown }).code).toBe(400);
         });
 
         it('should fallback to deriving labels from translations when getFieldLabels is missing', async () => {
