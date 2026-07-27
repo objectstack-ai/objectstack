@@ -92,8 +92,16 @@ if [[ "$NO_CHANGESET" -eq 0 ]]; then
 
   BUMP="${CONSOLE_BUMP:-}"
   if [[ -z "$BUMP" ]]; then
-    if [[ "$RANGE_OK" -eq 1 ]] && \
-       git -C "$OBJECTUI_ROOT" log --format=%s "${OLD_SHA}..${NEW_SHA}" | grep -qiE '^feat'; then
+    # NOTE: count, don't `grep -q`. Under `set -o pipefail`, `grep -q` exits on
+    # the first match and the still-writing `git log` takes SIGPIPE, so the
+    # pipeline returns 141 and this test ALWAYS took the else branch — every
+    # refresh was silently stamped `patch`, feature ranges included. `grep -c`
+    # drains its input, so no signal and a truthful count.
+    FEAT_COUNT=0
+    if [[ "$RANGE_OK" -eq 1 ]]; then
+      FEAT_COUNT="$(git -C "$OBJECTUI_ROOT" log --format=%s "${OLD_SHA}..${NEW_SHA}" | grep -ciE '^feat' || true)"
+    fi
+    if [[ "$FEAT_COUNT" -gt 0 ]]; then
       BUMP=minor
     else
       BUMP=patch
