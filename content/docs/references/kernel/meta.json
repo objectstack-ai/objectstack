@@ -27,7 +27,6 @@
     "context",
     "dev-plugin",
     "execution-context",
-    "feature",
     "metadata-customization",
     "metadata-loader",
     "metadata-persistence",

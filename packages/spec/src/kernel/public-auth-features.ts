@@ -18,10 +18,12 @@ import type { z } from 'zod';
  * where each flag's consumption surface, default semantics, and gated spec
  * inputs (or exemption rationale) are recorded and CI-enforced.
  *
- * NOT to be confused with `kernel/feature.zod.ts` (`FeatureFlagSchema`) —
- * that schema models tenant-scoped runtime rollout toggles (strategies,
- * expiry, conditions). This registry classifies the fixed, deployment-level
- * capability flags that plugin-auth advertises to anonymous clients.
+ * NOT to be confused with runtime rollout toggles — those live on the
+ * `feature_flags` settings manifest (ADR-0007), not in the spec (the former
+ * `kernel/feature.zod.ts` `FeatureFlagSchema` was removed as an orphan: zero
+ * runtime consumers once its dead capabilities-descriptor home went, #3605).
+ * This registry classifies the fixed, deployment-level capability flags that
+ * plugin-auth advertises to anonymous clients.
  *
  * Consumers:
  * - `ui/action.zod.ts` — `requiresFeature` sugar on actions/params is lowered

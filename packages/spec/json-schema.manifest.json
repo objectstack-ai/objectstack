@@ -979,8 +979,6 @@
     "kernel/EventWebhookConfig",
     "kernel/ExecutionContext",
     "kernel/ExtensionPoint",
-    "kernel/FeatureFlag",
-    "kernel/FeatureStrategy",
     "kernel/FieldChange",
     "kernel/GetPackageRequest",
     "kernel/GetPackageResponse",
