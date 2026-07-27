@@ -290,6 +290,7 @@ export class AnalyticsServicePlugin implements Plugin {
     }
     let getReadScope = this.options.getReadScope;
     let autoBridgedReadScope = false;
+    let securityPresentAtInit = false;
     if (!getReadScope) {
       const trySecurity = (): SecurityReadFilter | undefined => {
         try {
@@ -299,10 +300,17 @@ export class AnalyticsServicePlugin implements Plugin {
           return undefined;
         }
       };
-      if (trySecurity()) {
-        getReadScope = (object, context) => trySecurity()?.getReadFilter(object, context);
-        autoBridgedReadScope = true;
-      }
+      // ALWAYS wire the bridge — resolution happens at call time, mirroring the
+      // executeAggregate / executeRawSql auto-bridges above. Gating the
+      // ASSIGNMENT on an init-time probe (as this did) made analytics RLS
+      // silently plugin-ORDER-DEPENDENT: a kernel that registers this plugin
+      // before the security plugin got NO read-scope provider at all, so every
+      // strategy ran unscoped and only a WARN marked it. The repo's own
+      // `bootStack` harness registers in exactly that order, which is why no
+      // dogfood test could ever observe analytics RLS.
+      securityPresentAtInit = !!trySecurity();
+      getReadScope = (object, context) => trySecurity()?.getReadFilter(object, context);
+      autoBridgedReadScope = true;
     }
 
     // ADR-0021 — relationship → target-object resolver. A dataset's `include`
@@ -457,12 +465,20 @@ export class AnalyticsServicePlugin implements Plugin {
       draftRowsResolver,
     };
 
-    if (autoBridgedReadScope) {
+    if (autoBridgedReadScope && securityPresentAtInit) {
       ctx.logger.info('[Analytics] Auto-bridged getReadScope → "security" service (getReadFilter)');
+    } else if (autoBridgedReadScope) {
+      // The bridge IS wired and will resolve at call time — this is only a
+      // heads-up that security had not registered yet at our init. It becomes a
+      // real problem only if no security service ever appears.
+      ctx.logger.info(
+        '[Analytics] getReadScope bridged to the "security" service; that service is not ' +
+        'registered yet at init and will be resolved per query (plugin order is not significant).',
+      );
     } else if (!getReadScope) {
       ctx.logger.warn(
         '[Analytics] No getReadScope configured and no "security" service with getReadFilter found — ' +
-        'the raw-SQL analytics path will NOT enforce tenant/RLS scoping on joined objects (ADR-0021 D-C). ' +
+        'analytics queries will NOT enforce tenant/RLS scoping (ADR-0021 D-C). ' +
         'Supply getReadScope or register a security service in multi-tenant deployments.',
       );
     }
