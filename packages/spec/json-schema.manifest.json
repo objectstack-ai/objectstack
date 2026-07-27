@@ -673,6 +673,8 @@
     "data/ComputedFieldCache",
     "data/ConditionalValidation",
     "data/ConsistencyLevel",
+    "data/ContextToken",
+    "data/ContextTokenPlaceholder",
     "data/CrossFieldValidation",
     "data/Cube",
     "data/CubeJoin",

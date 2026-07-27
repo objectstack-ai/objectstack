@@ -1500,6 +1500,58 @@ Both `{token}` and `${token}` forms are accepted.
   semantics (`'{today}-{tomorrow}'` is fine; `{today_or_tomorrow}` is
   not — there is no such token).
 
+## Context Tokens — `{current_user_id}` / `{current_org_id}`
+
+The session-scoped sibling of date macros, resolved by the same client pass
+(`resolveFilterPlaceholders` in `@object-ui/core`). Contract: `CONTEXT_TOKENS`
+in `@objectstack/spec/data`. These are the **only two** tokens that resolve
+inside a filter value:
+
+| Token | Resolves to |
+|:--|:--|
+| `{current_user_id}` | the signed-in user's id (`sys_user.id`) |
+| `{current_org_id}` | the active organization id |
+
+They work in **every** filter value — list-view filters, dashboard widget
+filters, report `runtimeFilter`, dataset filters, SDUI component filters, and
+nav-item `filters` — in both authoring shapes:
+
+```typescript
+// Widget filter (object shape)
+filter: { owner_id: '{current_user_id}', created_at: { $gte: '{week_start}' } }
+
+// List view (array shape)
+filter: [{ field: 'owner', operator: 'equals', value: '{current_user_id}' }]
+```
+
+### DO / DON'T
+
+* **DO** use exactly these spellings. Three near-misses are common because
+  each is a correct spelling *somewhere else* in the platform — all three
+  resolve to nothing in a filter:
+
+  | You might write | Because | Correct token |
+  |:--|:--|:--|
+  | `{current_user}` | `current_user.id` is the RLS expression root | `{current_user_id}` |
+  | `{user_id}` | `{user_id}` is valid `titleFormat` field interpolation | `{current_user_id}` |
+  | `{organization_id}` | that is the real column name | `{current_org_id}` |
+
+* **DO** remember these are **presentation scope, not security**. They decide
+  what a surface *shows*; RLS decides what a caller may *read*. Removing a
+  `{current_user_id}` filter widens a view — it must never be the thing
+  standing between a user and someone else's data.
+* **DON'T** embed a token in a larger string (`'user-{current_user_id}'`).
+  Ids are opaque; only whole-value placeholders are substituted.
+* **DON'T** use `AppContextSelector` ids (e.g. `{active_package}`) in a
+  filter. Those resolve in navigation `recordId` / `params` only — filters are
+  not evaluated with the sidebar's selector state.
+
+`os validate` fails the build on an unresolvable placeholder in any filter
+(rule `filter-token-unknown`) and names the token it thinks you meant. That
+gate exists because the runtime failure is silent: an unresolved token reaches
+SQL as a literal, matches nothing, and the widget renders `0` —
+indistinguishable from a genuine zero.
+
 ---
 
 ## Analytics Cubes — Semantic Layer
