@@ -102,6 +102,23 @@ export interface DomainHandlerDeps {
     error(message: string, code?: number, details?: any): { status: number; body: any };
     /** Standard ROUTE_NOT_FOUND envelope (404 + discovery hint). */
     routeNotFound(route: string): { status: number; body: any };
+    /**
+     * Error envelope derived from a thrown value: honours `.status` /
+     * `.statusCode`, carries spec-validation `issues` and `.code` through as
+     * details (the ADR-0033 publish surface relies on field-anchored 422s).
+     */
+    errorFromThrown(e: any, fallbackStatus?: number): { status: number; body: any };
+    /** Active organization id from the request session (undefined if anonymous / no auth). */
+    resolveActiveOrganizationId(context: HttpProtocolContext): Promise<string | undefined>;
+    /**
+     * Fire a kernel-context event on the request's resolved kernel (no-op
+     * when the kernel exposes no trigger). Used by the packages domain to
+     * announce `metadata:reloaded` after a publish so boot-cached consumers
+     * (the automation engine above all) re-sync without a restart.
+     */
+    announceKernelEvent(event: string, payload: unknown): Promise<void>;
+    /** Host logger when one is attached to the dispatcher; domains fall back to console. */
+    logger?: any;
 }
 
 /**

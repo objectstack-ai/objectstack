@@ -358,3 +358,52 @@ describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
         expect(result.response?.body?.error?.type).toBe('ROUTE_NOT_FOUND');
     });
 });
+
+// ---------------------------------------------------------------------------
+// PR-5 — packages extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-5: packages)', () => {
+    function qlWithRegistry(extra: Partial<Record<string, any>> = {}) {
+        return {
+            find: vi.fn().mockResolvedValue([]),
+            getObjects: vi.fn().mockReturnValue({}),
+            registry: {
+                getObject: vi.fn().mockReturnValue(null),
+                getRegisteredTypes: vi.fn().mockReturnValue([]),
+                getAllPackages: vi.fn().mockReturnValue([{ id: 'pkg-a', status: 'active' }]),
+                getPackage: vi.fn().mockReturnValue(undefined),
+                installPackage: vi.fn().mockImplementation((m: any) => ({ id: m.id, manifest: m })),
+                ...extra,
+            },
+        };
+    }
+
+    it('GET /packages lists packages from the ObjectQL registry', async () => {
+        const objectql = qlWithRegistry();
+        const result = await makeDispatcher({ objectql }).dispatch('GET', '/packages', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.total).toBe(1);
+    });
+
+    it('responds 503 when no ObjectQL registry is available', async () => {
+        const objectql = { find: vi.fn(), getObjects: vi.fn() }; // no .registry → getObjectQL returns null
+        const result = await makeDispatcher({ objectql }).dispatch('GET', '/packages', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(503);
+    });
+
+    it('POST /packages rejects a duplicate id with 409 unless ?overwrite=true (data-loss footgun guard)', async () => {
+        const objectql = qlWithRegistry({ getPackage: vi.fn().mockReturnValue({ id: 'pkg-a' }) });
+        const dispatcher = makeDispatcher({ objectql });
+        const dup = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, {}, {} as any);
+        expect(dup.response?.status).toBe(409);
+        const forced = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, { overwrite: 'true' }, {} as any);
+        expect(forced.response?.status).toBe(201);
+    });
+
+    it('POST /packages without an id is rejected with 400', async () => {
+        const objectql = qlWithRegistry();
+        const result = await makeDispatcher({ objectql }).dispatch('POST', '/packages', { name: 'no-id' }, {}, {} as any);
+        expect(result.response?.status).toBe(400);
+    });
+});
