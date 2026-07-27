@@ -419,8 +419,12 @@ Therefore the target end-state is **two enforcement points, each with one job**:
 - **Build/validate time → hard reject.** Net-new metadata (the AI's output)
   must fail loudly at authoring. This is the primary defence against AI error.
 - **Runtime → warn-first, then flip.** Deployed data keeps working through the
-  warn window; the flip to strict-by-default (tracked in #3438) closes it once
-  telemetry is quiet.
+  warn window; the flip to strict-by-default (tracked in #3438) closes it.
+  *(Amended by the second 2026-07-27 addendum: "once telemetry is quiet" was
+  our telemetry deciding for their deployments. The **media** half now flips
+  per deployment, when that deployment's own file-as-reference migration has
+  verified. The reference and structured-JSON halves still await an evidence
+  source of their own — the file migration does not vouch for them.)*
 
 This refines D2 (today runtime-only) and reshapes the #3438 flip: the priority
 is adding the **build-time** rejection for value shapes and action params, not
@@ -669,6 +673,28 @@ Both therefore read the **same** flag. Strict enforcement becomes effective for
 a deployment when that deployment has completed and verified its migration —
 not when a version number arrives. One flag, not two gates that can disagree:
 they are gating on the same fact.
+
+**Amendment while implementing this (2026-07-27, later still).** "#3438 reads
+the flag" was too broad: #3438 is three things, and the flag only covers one.
+The flag asserts *this deployment's file-field values have been migrated and
+reconciled*. That is evidence about **media** value shapes and nothing else —
+it says nothing about whether a `lookup` id or a `location` payload is well
+formed, and nothing at all about D2's action parameters. Gating those on it
+would be borrowing evidence for a fact it does not cover, which is the same
+error one layer down: an authority answering a question it was not asked.
+
+So the split is:
+
+| | evidence | status |
+|---|---|---|
+| D1 media (`file`/`image`/`avatar`/`video`/`audio`) | the `adr-0104-file-references` flag | flips per deployment |
+| D1 references + structured JSON | none yet — needs its own | stays warn-first |
+| D2 action params | unrelated to any data migration | stays warn-first |
+
+The last two are not blocked on the mechanism — it exists and works. They are
+blocked on someone deciding what would constitute evidence that a deployment's
+`location` values are sound, which is a different question from the one this
+addendum answers.
 
 ### What cannot be automated, and does not block
 

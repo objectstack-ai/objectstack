@@ -253,7 +253,9 @@ export default class MigrateFilesToReferences extends Command {
         if (apply) {
           printSuccess(
             'Self-check passed — deployment flag recorded (adr-0104-file-references). ' +
-              'This deployment is now eligible for strict media enforcement and, once shipped, file collection.',
+              'Media value shapes are now ENFORCED on this deployment: a malformed ' +
+              'file/image value is rejected rather than warned about. ' +
+              '(Set OS_ALLOW_LAX_MEDIA_VALUES=1 to re-open leniency while diagnosing.)',
           );
         } else if (result.backfill.converted > 0) {
           printInfo(

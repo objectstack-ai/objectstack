@@ -417,3 +417,93 @@ describe('validateRecord — ADR-0104 value shapes (warn-first / strict)', () =>
     });
   });
 });
+
+/**
+ * #3617 / #3438 — media value shapes enforce per DEPLOYMENT, not per release.
+ *
+ * A verified deployment has RUN the file-as-reference migration and had its
+ * ownership ledger reconciled, so it has been shown to hold no legacy media
+ * values. Nothing about that migration vouches for a `lookup` or `location`
+ * value, so those classes keep their own (unchanged) warn-first rollout —
+ * gating them on this flag would borrow evidence for a fact it does not cover.
+ */
+describe('validateRecord — media value shapes gate on the deployment flag (#3617)', () => {
+  const schema = {
+    fields: {
+      doc: { type: 'file' },
+      cover: { type: 'image' },
+      account: { type: 'lookup', reference: 'accounts' },
+      geo: { type: 'location' },
+    },
+  };
+  // A legacy inline blob — precisely what the migration converts.
+  const legacyMedia = { doc: { url: 'https://cdn/f.pdf', name: 'f.pdf' } };
+  const malformedNonMedia = { geo: { latitude: 1, longitude: 2 } };
+
+  const strict = { mediaValueShapeStrict: true };
+
+  const withEnv = (key: string, fn: () => void) => {
+    process.env[key] = '1';
+    try { fn(); } finally { delete process.env[key]; }
+  };
+
+  it('unverified deployment (the default): media stays warn-first', () => {
+    expect(() => validateRecord(schema, { ...legacyMedia }, 'update')).not.toThrow();
+    expect(() => validateRecord(schema, { ...legacyMedia }, 'update', {})).not.toThrow();
+    expect(() =>
+      validateRecord(schema, { ...legacyMedia }, 'update', { mediaValueShapeStrict: false }),
+    ).not.toThrow();
+  });
+
+  it('verified deployment: a malformed media value rejects with invalid_type', () => {
+    try {
+      validateRecord(schema, { ...legacyMedia }, 'update', strict);
+      expect.unreachable('expected ValidationError');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      const err = e as ValidationError;
+      expect(err.fields[0]?.field).toBe('doc');
+      expect(err.fields[0]?.code).toBe('invalid_type');
+    }
+    // and the conformant reference form still passes
+    expect(() => validateRecord(schema, { doc: 'file_01HXYZ', cover: 'file_02' }, 'update', strict)).not.toThrow();
+  });
+
+  /**
+   * The whole reason for splitting #3438: a verified file migration is not
+   * evidence about lookup/location values, so it must not start rejecting them.
+   */
+  it('verified deployment does NOT flip non-media classes', () => {
+    expect(() => validateRecord(schema, { ...malformedNonMedia }, 'update', strict)).not.toThrow();
+    expect(() => validateRecord(schema, { account: { id: 'acc_1' } }, 'update', strict)).not.toThrow();
+  });
+
+  it('the blanket opt-in still forces media strict on an unverified deployment', () => {
+    withEnv('OS_DATA_VALUE_SHAPE_STRICT_ENABLED', () => {
+      expect(() => validateRecord(schema, { ...legacyMedia }, 'update')).toThrow(ValidationError);
+    });
+  });
+
+  it('OS_ALLOW_LAX_MEDIA_VALUES re-opens media on a verified deployment', () => {
+    withEnv('OS_ALLOW_LAX_MEDIA_VALUES', () => {
+      expect(() => validateRecord(schema, { ...legacyMedia }, 'update', strict)).not.toThrow();
+    });
+  });
+
+  /**
+   * A contradictory configuration lands on the lenient side: a warning nobody
+   * reads costs less than an app that stops writing.
+   */
+  it('opt-out beats opt-in when both are set', () => {
+    withEnv('OS_DATA_VALUE_SHAPE_STRICT_ENABLED', () => {
+      withEnv('OS_ALLOW_LAX_MEDIA_VALUES', () => {
+        expect(() => validateRecord(schema, { ...legacyMedia }, 'update', strict)).not.toThrow();
+      });
+    });
+  });
+
+  it('applies on insert too, not only update', () => {
+    expect(() => validateRecord(schema, { ...legacyMedia }, 'insert', strict)).toThrow(ValidationError);
+    expect(() => validateRecord(schema, { ...legacyMedia }, 'insert')).not.toThrow();
+  });
+});

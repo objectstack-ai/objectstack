@@ -13,6 +13,11 @@ import {
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
+import {
+  DATA_MIGRATION_FLAG_OBJECT,
+  FILE_REFERENCES_MIGRATION_ID,
+  isDataMigrationFlagVerified,
+} from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import { IDataDriver, IDataEngine, Logger, createLogger, withTransientRetry, type RetryOptions } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
@@ -1878,6 +1883,96 @@ export class ObjectQL implements IDataEngine {
     this.logger.info('ObjectQL engine initialization complete');
   }
 
+  /**
+   * Does this object declare a media field at all? Cached per schema object —
+   * the registry hands back the same instance per object, so this scans a
+   * field map once rather than on every write.
+   */
+  private objectHasMediaField(objectSchema: any): boolean {
+    if (!objectSchema?.fields) return false;
+    const cached = ObjectQL.mediaFieldPresence.get(objectSchema);
+    if (cached !== undefined) return cached;
+    const present = Object.values(objectSchema.fields).some(
+      (def: any) => def && FILE_REFERENCE_TYPES.has(def.type),
+    );
+    ObjectQL.mediaFieldPresence.set(objectSchema, present);
+    return present;
+  }
+  private static readonly mediaFieldPresence = new WeakMap<object, boolean>();
+
+  /**
+   * The media value-shape verdict for a write against `objectSchema`.
+   *
+   * Dormant by design, mirroring the storage module's own rule: an object with
+   * no file-class field can hold no malformed media value, so it must not pay
+   * even one query to learn that. Only objects that actually declare media
+   * consult the deployment flag — and that read is itself memoized, so the
+   * whole mechanism costs one query per process, and zero for an app that
+   * stores no files.
+   */
+  private async mediaValueShapeStrictFor(objectSchema: any): Promise<boolean> {
+    if (!this.objectHasMediaField(objectSchema)) return false;
+    return this.isFileReferencesMigrationVerified();
+  }
+
+  /**
+   * Has this deployment completed AND verified the ADR-0104 file-as-reference
+   * migration (#3617)? Read once per process from the `sys_migration` flag.
+   *
+   * Every way of not knowing answers `false` — no storage service (so no
+   * `sys_migration` object registered), no row, an unreadable table, a
+   * malformed row. That is the same posture the flag's other consumer takes:
+   * enforcement derives from evidence, and absent evidence is not permission.
+   * Here "no" means media value shapes keep warning instead of rejecting, so
+   * a deployment that cannot be asked keeps writing.
+   *
+   * Costs nothing on a kernel without the storage objects: the registry lookup
+   * short-circuits before any query.
+   */
+  private async isFileReferencesMigrationVerified(): Promise<boolean> {
+    if (!this.fileReferencesMigrationVerified) {
+      this.fileReferencesMigrationVerified = (async () => {
+        if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return false;
+        try {
+          const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
+            where: { id: FILE_REFERENCES_MIGRATION_ID },
+            limit: 1,
+            context: { isSystem: true } as ExecutionContext,
+          });
+          const row: any = rows?.[0];
+          if (!row || row.id !== FILE_REFERENCES_MIGRATION_ID) return false;
+          const verified = isDataMigrationFlagVerified({
+            id: FILE_REFERENCES_MIGRATION_ID,
+            last_run_at: String(row.last_run_at ?? ''),
+            verified_at: row.verified_at == null ? null : String(row.verified_at),
+            // A non-numeric count must read as "not zero", not as 0 — a bad
+            // coercion lands on NaN, which fails the === 0 test.
+            blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
+          });
+          if (verified) {
+            this.logger.info(
+              '[value-shape] this deployment has verified the file-as-reference migration — ' +
+                'media value shapes are enforced (ADR-0104 D1 / #3617)',
+            );
+          }
+          return verified;
+        } catch {
+          return false; // unreadable evidence → stay lenient
+        }
+      })();
+    }
+    return this.fileReferencesMigrationVerified;
+  }
+
+  /**
+   * Drop the memoized deployment migration flags so the next write re-reads
+   * them. For a host that runs a data migration in-process and wants its
+   * effect without a restart.
+   */
+  invalidateDataMigrationFlags(): void {
+    this.fileReferencesMigrationVerified = null;
+  }
+
   async destroy() {
     this.logger.info('Destroying ObjectQL engine', { driverCount: this.drivers.size });
     
@@ -1902,6 +1997,20 @@ export class ObjectQL implements IDataEngine {
   /** In-memory next-value cache per `object.field` for autonumber generation,
    *  lazily seeded from the current max in the store. */
   private readonly autonumberCounters = new Map<string, number>();
+
+  /**
+   * Memoized answer to "has THIS deployment completed and verified the
+   * ADR-0104 file-as-reference migration?" (#3617) — the fact that decides
+   * whether a malformed media value rejects or merely warns.
+   *
+   * Memoized as a PROMISE so concurrent first writes share one read rather
+   * than racing several. Deliberately not refreshed on a timer: the flag is
+   * written by `os migrate files-to-references --apply`, a deliberate
+   * operator action, and a process that has not seen it yet simply stays
+   * lenient — the safe direction. A host that migrates in-process can call
+   * {@link invalidateDataMigrationFlags} instead of waiting for a restart.
+   */
+  private fileReferencesMigrationVerified: Promise<boolean> | null = null;
 
   /** Lazily-built index: child object name → roll-up summary descriptors on
    *  parent objects that aggregate it. Invalidated when packages register. */
@@ -2618,11 +2727,14 @@ export class ObjectQL implements IDataEngine {
             rowErrors[i] = e;
           }
         }
+        // Resolved once for the whole batch; dormant unless the object declares
+        // a media field, and memoized after the first object that does.
+        const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(schemaForValidation);
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
-            validateRecord(schemaForValidation, rows[i], 'insert');
+            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context) });
           } catch (e) {
             if (!partialMode) throw e;
@@ -2889,10 +3001,11 @@ export class ObjectQL implements IDataEngine {
            // which silently fails when `previous` is absent.
            let priorRecord: Record<string, unknown> | null = null;
            const updateSchema = this._registry.getObject(object);
+           const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(updateSchema);
            if (hookContext.input.id) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update');
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict });
                if (needsPriorRecord(updateSchema as any) || (this.hooks.get('afterUpdate')?.length ?? 0) > 0) {
                    const priorAst: QueryAST = { object, where: { id: hookContext.input.id }, limit: 1 };
                    priorRecord = await driver.findOne(object, priorAst, hookContext.input.options as any);
@@ -2918,7 +3031,7 @@ export class ObjectQL implements IDataEngine {
            } else if (options?.multi && driver.updateMany) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update');
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict });
                // [#2982] Consume the middleware-composed AST seeded above, so
                // the injected row-scoping (RLS write filter, sharing's
                // editable-rows filter) actually binds the driver operation. Fail

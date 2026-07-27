@@ -2075,3 +2075,132 @@ describe('ObjectQL Engine', () => {
         });
     });
 });
+
+/**
+ * #3617 / #3438 — the engine carries the deployment's own migration evidence
+ * into the (synchronous, per-write) value-shape validator.
+ *
+ * The fact lives in `sys_migration`, so it needs a database read; the write
+ * path needs it on every insert/update. These prove the read happens once,
+ * and that every way of NOT knowing lands on lenient — a deployment whose
+ * evidence cannot be read keeps writing rather than starting to reject.
+ */
+describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
+  let engine: ObjectQL;
+  let driver: IDataDriver;
+
+  const verifiedRow = {
+    id: 'adr-0104-file-references',
+    last_run_at: '2026-07-27T00:00:00.000Z',
+    verified_at: '2026-07-27T00:00:00.000Z',
+    blocking: 0,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    driver = {
+      name: 'default-driver',
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      find: vi.fn().mockResolvedValue([]),
+      findOne: vi.fn(),
+      create: vi.fn().mockResolvedValue({ id: '1' }),
+      update: vi.fn().mockResolvedValue({ id: '1' }),
+      delete: vi.fn(),
+      count: vi.fn(),
+      capabilities: {} as any,
+    } as unknown as IDataDriver;
+    engine = new ObjectQL();
+    engine.registerDriver(driver, true);
+  });
+
+  /** `doc` holds a legacy inline blob — exactly what the migration converts. */
+  const withMediaObject = () => {
+    vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => {
+      if (name === 'note') return { name: 'note', fields: { doc: { type: 'file' } } } as any;
+      if (name === 'sys_migration') return { name: 'sys_migration', fields: { id: { type: 'text' } } } as any;
+      return undefined;
+    });
+  };
+  const legacyBlob = { doc: { url: 'https://cdn/f.pdf', name: 'f.pdf' } };
+
+  it('a verified flag makes a malformed media value reject', async () => {
+    withMediaObject();
+    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+
+    await expect(engine.insert('note', { ...legacyBlob })).rejects.toThrow(/invalid file value/i);
+  });
+
+  it('no flag row → lenient (the write goes through)', async () => {
+    withMediaObject();
+    vi.mocked(driver.find).mockResolvedValue([]);
+
+    await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
+  });
+
+  it('a failed run (verified_at cleared) → lenient', async () => {
+    withMediaObject();
+    vi.mocked(driver.find).mockResolvedValue([{ ...verifiedRow, verified_at: null, blocking: 3 }] as any);
+
+    await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
+  });
+
+  it('an unreadable sys_migration → lenient, and the write is not failed by the probe', async () => {
+    withMediaObject();
+    vi.mocked(driver.find).mockRejectedValue(new Error('no such table: sys_migration'));
+
+    await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
+  });
+
+  /**
+   * Dormancy, mirroring the storage module's own rule: an object with no
+   * file-class field can hold no malformed media value, so it must not pay
+   * even one query to learn that. Nearly every object is in this case.
+   */
+  it('costs no query for an object that declares no media field', async () => {
+    vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => {
+      if (name === 'invoice') return { name: 'invoice', fields: { amount: { type: 'number' } } } as any;
+      if (name === 'sys_migration') return { name: 'sys_migration', fields: { id: { type: 'text' } } } as any;
+      return undefined;
+    });
+    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+
+    await expect(engine.insert('invoice', { amount: 10 })).resolves.toBeDefined();
+    expect(vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration')).toHaveLength(0);
+  });
+
+  /** No storage service → no sys_migration object → not even a query. */
+  it('costs no query on a kernel without the storage objects', async () => {
+    vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) =>
+      name === 'note' ? ({ name: 'note', fields: { doc: { type: 'file' } } } as any) : undefined,
+    );
+    vi.mocked(driver.find).mockResolvedValue([]);
+
+    await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
+    expect(driver.find).not.toHaveBeenCalled();
+  });
+
+  it('reads the flag once per process, not once per write', async () => {
+    withMediaObject();
+    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+
+    await expect(engine.insert('note', { doc: 'file_01' })).resolves.toBeDefined();
+    await expect(engine.insert('note', { doc: 'file_02' })).resolves.toBeDefined();
+    await expect(engine.insert('note', { doc: 'file_03' })).resolves.toBeDefined();
+
+    const flagReads = vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration');
+    expect(flagReads).toHaveLength(1);
+  });
+
+  it('invalidateDataMigrationFlags forces a re-read', async () => {
+    withMediaObject();
+    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+
+    await engine.insert('note', { doc: 'file_01' });
+    engine.invalidateDataMigrationFlags();
+    await engine.insert('note', { doc: 'file_02' });
+
+    const flagReads = vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration');
+    expect(flagReads).toHaveLength(2);
+  });
+});

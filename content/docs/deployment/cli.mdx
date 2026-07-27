@@ -545,18 +545,31 @@ field instead.
 
 The run then reconciles what records actually hold against what `sys_file`
 records as each file's owner. Zero blocking discrepancies is what records the
-flag — and that flag, not the version number, is what later enables features
-that act irreversibly on migrated data (reclaiming the bytes of released files;
-rejecting rather than warning about legacy media values). Never running it is
-safe: files are simply retained forever.
+flag — and that flag, not the version number, is what enables behaviour that
+depends on the data actually being migrated. Never running it is safe: files
+are simply retained forever, and media values keep warning instead of failing.
 
 Exit status is `0` only when the self-check passes, so CI can gate on it.
+
+#### What the flag turns on
+
+| Once verified | Effect |
+| :--- | :--- |
+| **Media value shapes** | A malformed `file` / `image` / `avatar` / `video` / `audio` value is **rejected** (`400 invalid_type`) instead of warned about. Set `OS_ALLOW_LAX_MEDIA_VALUES=1` to re-open leniency while diagnosing. |
+| **Released-file collection** | Not yet shipped — the flag is the gate it will read. |
+
+Other value classes are unaffected: a `lookup` or `location` value keeps its own
+warn-first rollout, because this migration is evidence about *file* values and
+says nothing about theirs.
 
 <Callout type="warn">
 A dry run writes **nothing** — not the conversions, and not the flag either,
 even when the self-check would pass. `--apply` is the only writing mode. A
 later run that *fails* its self-check clears the flag's verified state, so a
 database that has drifted closes its own gate.
+
+A running server reads the flag once; after migrating, **restart it** for
+enforcement to take effect.
 </Callout>
 
 ### Scaffolding
