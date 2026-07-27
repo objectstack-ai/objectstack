@@ -28,5 +28,14 @@ export type {
   VerifyReferencesEngine,
   VerifyReferencesOptions,
 } from './verify-file-references.js';
+export { backfillFileReferences, formatBackfillReport } from './backfill-file-references.js';
+export type {
+  BackfillAction,
+  BackfillActionKind,
+  BackfillEngine,
+  BackfillLogger,
+  BackfillOptions,
+  BackfillReport,
+} from './backfill-file-references.js';
 export { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 export type { AttachmentSharingLike } from './attachment-access-hooks.js';
