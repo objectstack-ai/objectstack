@@ -221,6 +221,30 @@ export const TranslationDataSchema = lazySchema(() => z.object({
   })).optional().describe('Dashboard translations keyed by dashboard name'),
 
   /**
+   * Page translations keyed by page name (`Page.name`).
+   *
+   * Convention (auto-resolved by `translatePage`):
+   *   pages.<name>.label        → the page document's own `label`
+   *   pages.<name>.description  → the page document's own `description`
+   *   pages.<name>.title        → the page's `page:header` `properties.title`
+   *   pages.<name>.subtitle     → the page's `page:header` `properties.subtitle`
+   *
+   * `title` falls back to `label` when omitted, since a page's header title
+   * and its nav/breadcrumb label are usually the same string — translators
+   * only author `title` separately when the two genuinely differ.
+   *
+   * Header copy lives here rather than under a per-component key because
+   * `page:header` instances carry no stable `id`; the page name is the only
+   * addressable identifier on the metadata document.
+   */
+  pages: z.record(z.string(), z.object({
+    label: z.string().optional().describe('Translated page label (nav / breadcrumb)'),
+    description: z.string().optional().describe('Translated page description'),
+    title: z.string().optional().describe('Translated `page:header` title (defaults to `label`)'),
+    subtitle: z.string().optional().describe('Translated `page:header` subtitle'),
+  })).optional().describe('Page translations keyed by page name'),
+
+  /**
    * Settings manifest translations keyed by settings namespace
    * (matches `SettingsManifest.namespace`, e.g. "mail", "branding").
    *

@@ -29,7 +29,28 @@ export type CompareTo = DatasetCompareTo;
  *     attaches `<measure>__compare` columns,
  *   - computes server-side totals (`selection.totals.groupings`, #1753) by
  *     re-running the selection per dimension subset, so matrix subtotals and
- *     the grand total use each measure's true aggregate.
+ *     the grand total use each measure's true aggregate,
+ *   - orders and windows the final grid (`order` / `limit` / `offset`, #3588).
+ *
+ * **Where ordering happens, and why here.** `order`/`limit`/`offset` are applied
+ * to the ASSEMBLED grid — after measure-scoped sub-queries are merged in, after
+ * `compareTo` columns are attached, and after derived measures are computed —
+ * never by forwarding them blindly to every sub-query. Two reasons:
+ *
+ *  1. **Correctness.** A supplementary measure-scoped query selects ONE measure;
+ *     forwarding `ORDER BY <other_measure>` to it emits SQL referencing a column
+ *     that query never selects, and forwarding `LIMIT` truncates it before the
+ *     merge, so rows silently vanish from the grid. A derived measure has no SQL
+ *     column at all, yet is a perfectly reasonable sort key.
+ *  2. **Coverage.** Only `NativeSQLStrategy` honours `order`/`limit`; the
+ *     ObjectQL aggregate path has nowhere to put them (`EngineAggregateOptions`
+ *     has no ordering grammar), and date-bucketed queries are *forced* down that
+ *     path because native SQL declines granularity. Sorting here makes ordering
+ *     work identically on every driver and strategy.
+ *
+ * The single-query case still pushes `order`/`limit`/`offset` DOWN into the SQL
+ * (see `canPushDownWindow`) so the database does the work and the echoed `sql`
+ * shows it; the post-pass is then a no-op re-sort of already-sorted rows.
  *
  * RLS/tenant scoping is NOT handled here — it is enforced inside the strategy
  * via the StrategyContext read-scope hook (D-C). This layer is pure query
@@ -87,6 +108,120 @@ function computeDerived(d: DerivedMeasureSpec, row: Record<string, unknown>): nu
     default:
       return null;
   }
+}
+
+// ── ordering + windowing (#3588) ─────────────────────────────────────────────
+
+/**
+ * Compare two grouped-cell values for ORDER BY, ascending.
+ *
+ * Nulls sort LAST regardless of direction (the SQL `NULLS LAST` convention, and
+ * the one users expect: an empty bucket shouldn't win a "top 10 by revenue").
+ * The caller negates the result for `desc`, so the null branch deliberately
+ * returns its verdict BEFORE that negation can flip it — see `compareRows`.
+ *
+ * Numbers (and numeric strings, which is how some drivers return SUM results)
+ * compare numerically so 9 sorts below 10; everything else compares as a string.
+ * Dates arrive here already bucketed to sort-stable keys ("2026-04", "2026-Q2"),
+ * so lexicographic ordering is chronological for them too.
+ */
+function compareValues(a: unknown, b: unknown): number {
+  const aNull = a == null || a === '';
+  const bNull = b == null || b === '';
+  if (aNull || bNull) return aNull && bNull ? 0 : aNull ? 1 : -1;
+  if (a instanceof Date || b instanceof Date) {
+    return Number(a instanceof Date ? a.getTime() : a) - Number(b instanceof Date ? b.getTime() : b);
+  }
+  if (typeof a === 'boolean' || typeof b === 'boolean') {
+    return Number(a) - Number(b);
+  }
+  const an = typeof a === 'number' ? a : Number(a);
+  const bn = typeof b === 'number' ? b : Number(b);
+  if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+  return String(a).localeCompare(String(b));
+}
+
+/**
+ * Order rows by each key in `order`, in the object's own key order (first key is
+ * the primary sort). Returns a NEW array; the input is not mutated. Null/empty
+ * cells stay last in both directions (see {@link compareValues}).
+ */
+export function applyOrdering(
+  rows: Record<string, unknown>[],
+  order: Record<string, 'asc' | 'desc'> | undefined,
+): Record<string, unknown>[] {
+  const keys = Object.entries(order ?? {});
+  if (keys.length === 0 || rows.length < 2) return rows;
+  // Array.prototype.sort is stable (ES2019+), so equal rows keep the order the
+  // grouping produced — an important property for reproducible LIMITs.
+  return [...rows].sort((ra, rb) => {
+    for (const [key, dir] of keys) {
+      const av = ra[key];
+      const bv = rb[key];
+      const aNull = av == null || av === '';
+      const bNull = bv == null || bv === '';
+      // Nulls last in BOTH directions — decided before `desc` negation.
+      if (aNull || bNull) {
+        if (aNull && bNull) continue;
+        return aNull ? 1 : -1;
+      }
+      const c = compareValues(av, bv);
+      if (c !== 0) return dir === 'desc' ? -c : c;
+    }
+    return 0;
+  });
+}
+
+/** Apply `offset`/`limit` to an already-ordered grid. */
+export function applyWindow(
+  rows: Record<string, unknown>[],
+  limit?: number,
+  offset?: number,
+): Record<string, unknown>[] {
+  const start = offset != null && offset > 0 ? offset : 0;
+  if (start === 0 && limit == null) return rows;
+  return rows.slice(start, limit != null ? start + limit : undefined);
+}
+
+/**
+ * Validate `order` keys and resolve the EFFECTIVE ordering for a selection.
+ *
+ * A key must name something the caller actually selected — a dimension, a
+ * measure, or a `<measure>__compare` column. An unknown key throws rather than
+ * being dropped: silently ignoring `sortBy` is precisely the failure mode this
+ * change exists to remove (#3588), and a mistyped sort key that quietly returns
+ * arbitrarily-ordered rows is worse than a loud 400.
+ *
+ * When `limit`/`offset` is requested WITHOUT an order, the selected dimensions
+ * ascending become the implicit ordering, so the truncated window is
+ * reproducible instead of "whatever the group-by happened to emit".
+ */
+export function resolveOrdering(
+  selection: DatasetSelection,
+  dimensions: string[],
+): Record<string, 'asc' | 'desc'> | undefined {
+  const order = selection.order;
+  if (order && Object.keys(order).length > 0) {
+    const selectable = new Set<string>([
+      ...dimensions,
+      ...selection.measures,
+      ...selection.measures.map((m) => `${m}__compare`),
+    ]);
+    const unknown = Object.keys(order).filter((k) => !selectable.has(k));
+    if (unknown.length) {
+      throw new Error(
+        `[dataset-executor] order key(s) ${unknown.map((k) => `"${k}"`).join(', ')} — ` +
+        `not a selected dimension or measure. Selectable here: ` +
+        `${[...selectable].join(', ') || '(none)'}.`,
+      );
+    }
+    return order;
+  }
+  // Implicit, deterministic ordering so a bare `limit` is reproducible.
+  if ((selection.limit != null || selection.offset != null) && dimensions.length > 0) {
+    return Object.fromEntries(dimensions.map((d) => [d, 'asc' as const]));
+  }
+  return undefined;
 }
 
 // ── compareTo date math (deterministic — no Date.now) ────────────────────────
@@ -205,6 +340,24 @@ export class DatasetExecutor {
     const baseFilter = combineFilters(compiled.filter, selection.runtimeFilter);
     const dimensions = selection.dimensions ?? [];
 
+    // Effective ordering — validated against what this selection projects, with
+    // a deterministic dimension order synthesized for a bare `limit` (#3588).
+    const order = resolveOrdering(selection, dimensions);
+
+    // Push `order`/`limit`/`offset` down into the SQL only when this selection
+    // is ONE query whose columns can satisfy them. With supplementary
+    // measure-scoped queries, a compareTo pass, or derived measures in play, the
+    // grid is assembled from several results — a sub-query LIMIT would drop rows
+    // before the merge and an ORDER BY would name a column that sub-query never
+    // selects. Those cases order in memory below instead.
+    const singleQuery = filtered.length === 0 && !selection.compareTo && selectedDerived.length === 0;
+    const pushDownKeys = new Set<string>([...dimensions, ...unfiltered]);
+    const canPushDownWindow =
+      singleQuery && Object.keys(order ?? {}).every((k) => pushDownKeys.has(k));
+    const windowQuery = canPushDownWindow
+      ? { order, limit: selection.limit, offset: selection.offset }
+      : undefined;
+
     // Primary query: all unfiltered base measures in one pass. When every base
     // measure is filter-scoped, the supplementary queries below build the grid.
     let result: AnalyticsResult;
@@ -215,6 +368,7 @@ export class DatasetExecutor {
         where: baseFilter,
         selection,
         contextTimezone: context?.timezone,
+        window: windowQuery,
       }), context);
     } else {
       result = { rows: [], fields: [] };
@@ -247,6 +401,16 @@ export class DatasetExecutor {
     result.rows = evaluateDerivedMeasures(result.rows, selectedDerived);
     for (const d of selectedDerived) result.fields.push({ name: d.name, type: 'number' });
 
+    // Order + window the assembled grid (#3588). Every column the caller may
+    // sort by exists by now — merged measure-scoped values, `__compare`
+    // columns, and derived measures included. When the window was already
+    // pushed into SQL this re-sorts an already-sorted grid (a no-op) and
+    // re-slices an already-sliced one; when it could not be (the ObjectQL
+    // aggregate path has no ordering grammar, and date-bucketed queries are
+    // forced down it), this is what makes `sortBy` work at all.
+    result.rows = applyOrdering(result.rows, order);
+    result.rows = applyWindow(result.rows, selection.limit, selection.offset);
+
     return result;
   }
 
@@ -258,6 +422,13 @@ export class DatasetExecutor {
       where?: FilterCondition;
       selection: DatasetSelection;
       contextTimezone?: string;
+      /**
+       * Ordering/window to push DOWN into this query. Set only for a selection
+       * the caller proved is a single self-sufficient query (see
+       * `canPushDownWindow`); omitted for supplementary/compare sub-queries,
+       * which must return their full grid for the merge.
+       */
+      window?: { order?: Record<string, 'asc' | 'desc'>; limit?: number; offset?: number };
     },
   ): AnalyticsQuery {
     const q: AnalyticsQuery = {
@@ -269,25 +440,56 @@ export class DatasetExecutor {
       timezone: opts.selection.timezone ?? opts.contextTimezone ?? 'UTC',
     };
     if (opts.where) q.where = opts.where as Record<string, unknown>;
-    // Bucket selected date dimensions that declare an explicit `dateGranularity`
-    // (the dataset compiled a single-entry `granularities`). Without this a date
-    // dimension groups by the raw timestamp — one bucket per row, rendering epoch
-    // millis on trend charts. A dimension already carried by `selection.timeDimensions`
-    // (e.g. compareTo) keeps its entry; we never override it.
+    // Bucket selected date dimensions. Without this a date dimension groups by
+    // the raw timestamp — one bucket per ROW, which is why a "new accounts by
+    // month" bar chart drew one bar per account instead of one per month
+    // (#3588).
+    //
+    // Granularity precedence, per dimension:
+    //   1. a `granularity` already stated on that dimension's
+    //      `selection.timeDimensions` entry — never overridden;
+    //   2. `selection.dateGranularity` — the PRESENTATION's choice, so a widget
+    //      can bucket by month without the dataset committing every consumer to
+    //      that granularity;
+    //   3. the dataset dimension's own default (the compiler lowers an explicit
+    //      `dateGranularity` to a single-entry `granularities`; the 5-entry
+    //      "all granularities" list means the dataset stated no default).
+    //
+    // Note the unit of precedence is the GRANULARITY, not the entry. A
+    // `timeDimensions` entry that only carries a `dateRange` (which is exactly
+    // what `compareTo` needs) states a WINDOW, not a bucket size — letting its
+    // mere presence suppress bucketing left the compared pass grouping raw
+    // timestamps while the primary pass grouped months, so the two grids shared
+    // no dimension key and every `__compare` column came back empty.
     const selTimeDims = opts.selection.timeDimensions ?? [];
     const selDims = new Set(selTimeDims.map((t) => t.dimension));
+    const selectionGranularity = opts.selection.dateGranularity;
+    const granularityFor = (name: string): string | undefined => {
+      const cd = compiled.cube.dimensions[name];
+      if (cd?.type !== 'time') return undefined;
+      const datasetDefault = cd.granularities?.length === 1 ? String(cd.granularities[0]) : undefined;
+      return selectionGranularity ?? datasetDefault;
+    };
+    // Fill in a bucket size for caller-supplied entries that named none.
+    const resolvedTimeDims = selTimeDims.map((t) => {
+      if (t.granularity) return t;
+      const granularity = granularityFor(t.dimension);
+      return granularity ? { ...t, granularity } : t;
+    });
     const explicitTimeDims: Array<{ dimension: string; granularity: string }> = [];
     for (const name of opts.dimensions) {
-      const cd = compiled.cube.dimensions[name];
-      if (cd?.type === 'time' && cd.granularities?.length === 1 && !selDims.has(name)) {
-        explicitTimeDims.push({ dimension: name, granularity: String(cd.granularities[0]) });
-      }
+      if (selDims.has(name)) continue;
+      const granularity = granularityFor(name);
+      if (granularity) explicitTimeDims.push({ dimension: name, granularity });
     }
-    const mergedTimeDims = [...selTimeDims, ...explicitTimeDims];
+    const mergedTimeDims = [...resolvedTimeDims, ...explicitTimeDims];
     if (mergedTimeDims.length > 0) q.timeDimensions = mergedTimeDims as AnalyticsQuery['timeDimensions'];
-    if (opts.selection.order) q.order = opts.selection.order;
-    if (opts.selection.limit != null) q.limit = opts.selection.limit;
-    if (opts.selection.offset != null) q.offset = opts.selection.offset;
+    // Ordering/window: pushed down ONLY when the caller vouched for it. The
+    // executor always re-applies both over the assembled grid, so omitting them
+    // here costs correctness nothing — it only moves the work to memory.
+    if (opts.window?.order && Object.keys(opts.window.order).length > 0) q.order = opts.window.order;
+    if (opts.window?.limit != null) q.limit = opts.window.limit;
+    if (opts.window?.offset != null) q.offset = opts.window.offset;
     return q;
   }
 
@@ -313,14 +515,21 @@ export class DatasetExecutor {
     const shiftedTd = (selection.timeDimensions ?? []).map((t) =>
       t.dimension === cmp.dimension ? { ...t, dateRange: shifted } : t,
     );
-    const sub = await this.service.query({
-      cube: compiled.cube.name,
+    // Built through `buildQuery` so the comparison pass buckets its date
+    // dimensions EXACTLY like the primary pass. Hand-rolling the query here
+    // skipped granularity resolution, so a bucketed primary grid ("2026-04")
+    // was merged against raw-timestamp comparison rows and no dimension key
+    // ever matched — every `__compare` column came back empty. The shifted
+    // `timeDimensions` still win for their own dimension (rule 1 of the
+    // precedence chain); `window` is deliberately omitted — the comparison grid
+    // must stay whole for the merge.
+    const sub = await this.service.query(this.buildQuery(compiled, {
       measures,
       dimensions,
-      where: baseFilter as Record<string, unknown> | undefined,
-      timeDimensions: shiftedTd,
-      timezone: selection.timezone ?? context?.timezone ?? 'UTC',
-    }, context);
+      where: baseFilter,
+      selection: { ...selection, timeDimensions: shiftedTd },
+      contextTimezone: context?.timezone,
+    }), context);
     // Rename measure columns to `<measure>__compare` so they merge alongside primary.
     return sub.rows.map((row) => {
       const out: Record<string, unknown> = {};

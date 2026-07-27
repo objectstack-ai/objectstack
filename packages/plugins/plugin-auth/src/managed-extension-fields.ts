@@ -58,6 +58,16 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     'parent_organization_id',
     'sort_order',
   ]),
+  sys_invitation: new Set([
+    // ADR-0105 D8 — placement intent. NOT generically editable (absent from
+    // the editable map below): these decide RBAC placement, so they are set
+    // ONLY at issuance through better-auth's invite endpoint, where the
+    // `invitation-placement` service authorizes them against the issuer's
+    // adminScope (ADR-0090 D12). A generic edit surface would be an
+    // escalation path around that gate.
+    'business_unit_id',
+    'positions',
+  ]),
 };
 
 /**

@@ -591,10 +591,13 @@ legacy values would reject any update that rewrites such a field, breaking
 working apps until the backfill catches up. Backfilling first leaves the cutover
 nothing legacy to reject.
 
-R4's acceptance gate is now executable rather than aspirational: step 6 may not
-merge until step 5 reports **zero blocking discrepancies for ≥7 consecutive
-days** on real tenant data. R5 (public-posture inventory) and R6 (sub-key read
-scan) stand.
+R4's acceptance gate is now executable rather than aspirational: step 5's
+reconciliation must report **zero blocking discrepancies** before step 6 may
+act. (The original wording — "for ≥7 consecutive days on real tenant data" —
+assumed a tenant we operate and observe; see the 2026-07-27 platform-form
+addendum below, which relocates the same evidence requirement to the one place
+that can satisfy it.) R5 (public-posture inventory) and R6 (sub-key read scan)
+stand.
 
 Steps 4 and 6 are the two that can break something. Step 4 is a declared
 protocol major and breaks *loudly* — a rejected write, recoverable. Step 6
@@ -604,15 +607,86 @@ adoption that consumes the new form, while step 6 additionally requires the
 reconciliation evidence above, and neither the enable nor the migration run
 should be performed without an explicit human decision.
 
+## Addendum (2026-07-27, later) — the evidence gate is per deployment, not per release
+
+The gate above was written as an operations runbook: *run the backfill on the
+tenant, watch `verifyFileReferences` stay clean for a week, then flip the
+switch.* Every clause of that sentence assumes **we** run the tenant, **we**
+observe it, and **we** flip.
+
+ObjectStack is a development platform. Third-party developers build metadata
+apps on it and ship versions onward; each deployment decides for itself when to
+upgrade, and its data is not visible to us — nor should it be. **There is no
+observation window of ours that anyone else's data can wait inside.** A gate
+phrased as one is not strict, merely unlocatable: it can be satisfied by no
+deployment at all, including the deployments whose bytes are at stake.
+
+### What survives, and what moves
+
+R4's substance is unchanged: **a ledger may not be given the power to delete
+bytes until it has been shown to agree with reality.** What changes is *who
+produces the evidence* — from us, once, to each deployment, for itself.
+
+That rules out a one-shot script (a script whose output nobody must read is not
+a gate) and rules in a **data-migration step with a self-check, whose passing
+result is recorded on the deployment**:
+
+```
+os migrate files-to-references
+  1. backfill                 (dry run by default; --apply writes)
+  2. verifyFileReferences     (reconcile the ledger against what records hold)
+  3. zero blocking findings →  record sys_migration { id: 'adr-0104-file-references',
+                                 verified_at, blocking: 0 }
+  4. collection + strict enforcement read THAT ROW, never the version number
+```
+
+### The properties this buys
+
+- **Upgrading does not start deleting.** Installing a new version is not
+  consent; running the migration and passing its self-check is.
+- **A third-party developer need not understand R4.** They run one command.
+  Green means done; red names the record holding a file nobody owns.
+- **Not run, or not passed → files live forever.** Wasted storage, zero data
+  loss: "fail toward retention" holds on the *deployment* axis too. The same
+  rule applies to a regression — a later failing run clears `verified_at`, so a
+  deployment whose data has drifted closes its own gate.
+- **Each deployment gets its own 30-day tombstone window.** Nobody waits inside
+  anyone else's soak. The irreversible moment is day 30 after *that* deployment
+  enabled collection, not release day.
+- **A dry run changes nothing** — not the data, and not the flag either, even
+  when the self-check would pass. `--apply` is the only writing mode, so
+  "did this run change my posture" never depends on what the run found.
+
+### D1/D2 carry the identical error, and the identical fix
+
+The strict-by-default flip for value-shape and action-param validation (#3438)
+was scheduled as "flip in a later minor once telemetry is quiet" — again
+*our* telemetry, deciding for *their* deployments. A deployment that has not
+finished backfilling would have every media-field update rejected the moment it
+upgraded: a working app broken by a decision made on its behalf.
+
+Both therefore read the **same** flag. Strict enforcement becomes effective for
+a deployment when that deployment has completed and verified its migration —
+not when a version number arrives. One flag, not two gates that can disagree:
+they are gating on the same fact.
+
+### What cannot be automated, and does not block
+
+Whether an **external URL** (`https://cdn…`) should become an explicit `url`
+field is a modelling decision only the app's author can make (R7). It also
+cannot block: an external URL is not a `sys_file` and can never enter
+collection. It is reported as advisory, never as a gate failure.
+
 ### Why this stays inside ADR-0104 rather than a new ADR
 
 D3 is already this ADR's third phase; the two-wave split and the
 enforcement-point principle are a **refinement of the D4 rollout**, not a new
 decision, so they live here. Wave 2's migration mechanics (dual-read window,
 `os migrate` backfill, the R4/R5/R6 gates) are specified in §D3 above and need
-no separate record. Wave 2's implementation did surface one genuinely new
-decision — the exclusive-ownership model — and it is recorded as the 2026-07-27
-addendum above rather than a separate ADR, because it settles *how* D3's
-already-accepted "field values point into `sys_file`" behaves rather than
-revisiting whether to do it. A future choice that stands on its own (say, a
-chunked-migration protocol, or byte-layer content dedup) would earn its own ADR.
+no separate record. Wave 2's implementation did surface two genuinely new
+decisions — the exclusive-ownership model, and relocating the evidence gate to
+the deployment — and both are recorded as 2026-07-27 addenda above rather than
+separate ADRs, because each settles *how* D3's already-accepted "field values
+point into `sys_file`" reaches production rather than revisiting whether to do
+it. A future choice that stands on its own (say, a chunked-migration protocol,
+or byte-layer content dedup) would earn its own ADR.

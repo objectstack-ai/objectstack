@@ -1321,6 +1321,23 @@ describe('ObjectQL Engine', () => {
             expect(mockDriver.find).toHaveBeenCalledTimes(1); // primary read only
         });
 
+        it('[#3617] the raw-file-values context marker skips resolution: stored ids come back verbatim', async () => {
+            // The ADR-0104 backfill/reconciliation audits the STORED form; if
+            // this marker stopped being honoured, the reconciliation would see
+            // expanded objects, report every held reference as absent, and a
+            // missed unowned_reference would falsely pass the collection gate.
+            withSchema();
+            vi.mocked(mockDriver.find).mockResolvedValueOnce([
+                { id: 'd1', cover: 'file_a', attachments: ['file_b'] },
+            ]);
+
+            const result = await engine.find('doc', { context: { __rawFileValues: true } } as any);
+
+            expect(result[0].cover).toBe('file_a');
+            expect(result[0].attachments).toEqual(['file_b']);
+            expect(mockDriver.find).toHaveBeenCalledTimes(1); // no sys_file sub-read either
+        });
+
         it('does NOT fire a sys_file query for url-shaped values (external url, /api path, data: URI)', async () => {
             // Regression: a file field legitimately holds a URL string in the
             // legacy/dual-mode world; only an opaque id token is a reference.

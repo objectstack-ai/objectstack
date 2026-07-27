@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
+import { DateGranularity } from '../data/query.zod';
 import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -123,6 +124,60 @@ const strictWidgetAnalyticsError: z.core.$ZodErrorMap = (issue) => {
 };
 
 /**
+ * Widget `options` — the renderer-extras escape hatch, with the keys that
+ * reach the ANALYTICS QUERY declared explicitly (framework#3588).
+ *
+ * The bag stays open (`passthrough`): presentation-only settings the renderer
+ * understands — `icon`, `trend`, `columns`, `striped`, `density`, … — are
+ * carried through untouched and are none of the spec's business. What the
+ * declared keys below buy is a real contract for the four that are NOT
+ * presentation-only: they change the SQL the dataset query compiles to, so a
+ * typo (`sortDirection`, `granularity`) is now an author-time type error
+ * instead of an option that reads as if it works and silently does nothing.
+ *
+ * The dashboard/report renderer lowers these into the `DatasetSelection` it
+ * posts (`dateGranularity`, `order`, `limit`); see the field docs on
+ * `DatasetSelection` in `contracts/analytics-service.ts` for their exact
+ * runtime semantics and precedence.
+ */
+export const DashboardWidgetOptionsSchema = lazySchema(() => z.object({
+  /**
+   * Bucket this widget's selected DATE dimensions (e.g. group a daily
+   * `close_date` into months for a trend line). Overrides the dataset
+   * dimension's own `dateGranularity` default for this widget only.
+   */
+  dateGranularity: DateGranularity.optional()
+    .describe('Bucket selected date dimensions (day/week/month/quarter/year)'),
+
+  /**
+   * Order rows by this dimension or measure name — must be one this widget
+   * actually selects (a `dimensions` entry or a `values` entry).
+   */
+  sortBy: z.string().optional().describe('Dimension/measure name to order by'),
+
+  /** Sort direction for `sortBy` (default ascending). */
+  sortOrder: z.enum(['asc', 'desc']).optional().describe('Sort direction for sortBy'),
+
+  /**
+   * Max rows to render. Applied AFTER ordering, so a "top 10" needs `sortBy`
+   * to be meaningful; without one the runtime orders by the selected
+   * dimensions so the truncated window is at least deterministic.
+   */
+  limit: z.number().int().positive().optional().describe('Max rows (applied after ordering)'),
+
+  /**
+   * Explicit category order for ordered-sequence charts — `funnel` / `pyramid`
+   * stages above all. Values are the dimension's STORED values (e.g.
+   * `['qualification', 'needs_analysis', 'proposal', 'negotiation']`), not
+   * display labels. Omit to let the renderer fall back to the dimension
+   * field's own picklist option order, which is the pipeline order an author
+   * already declared on the object.
+   */
+  stageOrder: z.array(z.union([z.string(), z.number(), z.boolean()])).optional()
+    .describe('Explicit category order for funnel/pyramid stages (stored values)'),
+}).passthrough().describe('Widget configuration — declared query keys + open renderer extras'));
+
+/**
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
  */
@@ -235,8 +290,8 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
     h: z.number(),
   }).optional().describe('Grid layout position (auto-flowed when omitted)'),
   
-  /** Widget specific options (colors, legend, etc.) */
-  options: z.unknown().optional().describe('Widget specific configuration'),
+  /** Widget specific options (colors, legend, etc.) — see {@link DashboardWidgetOptionsSchema}. */
+  options: DashboardWidgetOptionsSchema.optional().describe('Widget specific configuration'),
 
   /**
    * Per-widget bindings from a dashboard-level filter (referenced by its
@@ -420,6 +475,7 @@ export const DashboardSchema = lazySchema(() => z.object({
 export type Dashboard = z.infer<typeof DashboardSchema>;
 export type DashboardInput = z.input<typeof DashboardSchema>;
 export type DashboardWidget = z.infer<typeof DashboardWidgetSchema>;
+export type DashboardWidgetOptions = z.infer<typeof DashboardWidgetOptionsSchema>;
 export type DashboardHeader = z.infer<typeof DashboardHeaderSchema>;
 export type DashboardHeaderAction = z.infer<typeof DashboardHeaderActionSchema>;
 export type WidgetColorVariant = z.infer<typeof WidgetColorVariantSchema>;

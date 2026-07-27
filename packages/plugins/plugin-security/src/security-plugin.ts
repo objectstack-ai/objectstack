@@ -7,6 +7,10 @@ import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
 import {
+  INVITATION_PLACEMENT_SERVICE,
+  createInvitationPlacementService,
+} from './invitation-placement.js';
+import {
   explainAccess,
   buildContextForUser,
   resolveDelegatorContext,
@@ -594,6 +598,21 @@ export class SecurityPlugin implements Plugin {
       resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
       logger: ctx.logger,
     });
+
+    // [ADR-0105 D8] Scoped-invitation placement. Registered HERE because the
+    // authority it enforces is this plugin's: issuance dry-runs the very same
+    // DelegatedAdminGate above against the `sys_user_position` rows the
+    // acceptance would write, so an invitation can never place what its issuer
+    // could not have assigned directly. plugin-auth consumes the service and
+    // REFUSES placement intent when it is missing — no gate, no placement.
+    ctx.registerService(
+      INVITATION_PLACEMENT_SERVICE,
+      createInvitationPlacementService({
+        ql,
+        gate: this.delegatedAdminGate,
+        logger: ctx.logger,
+      }),
+    );
 
     // ADR-0021 D-C — expose the per-request READ scope as a reusable service.
     // The analytics raw-SQL path (which bypasses this engine middleware)

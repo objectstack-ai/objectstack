@@ -60,6 +60,7 @@ export const en: TranslationData = {
         // Apps / Marketplace
         nav_marketplace_browse: { label: 'Browse Marketplace' },
         nav_marketplace_installed: { label: 'Installed Apps' },
+        nav_cloud_connection: { label: 'Cloud Connection' },
 
         // People & Organization
         nav_users: { label: 'Users' },
@@ -75,6 +76,7 @@ export const en: TranslationData = {
         nav_sharing_rules: { label: 'Sharing Rules' },
         nav_record_shares: { label: 'Record Shares' },
         nav_api_keys: { label: 'API Keys' },
+        nav_connect_agent: { label: 'Connect an Agent' },
 
         // Approvals
         nav_approval_processes: { label: 'Processes' },
@@ -193,6 +195,29 @@ export const en: TranslationData = {
           description: 'Latest platform events (login, permission, config, …)',
         },
       },
+    },
+  },
+
+  // Setup pages contributed as metadata by capability plugins. The English
+  // entries mirror the literals authored in the plugins' page metadata
+  // (@objectstack/cloud-connection, @objectstack/mcp) and exist so the other
+  // locales have a complete key set to translate against.
+  pages: {
+    marketplace_installed: {
+      label: 'Installed Apps',
+      subtitle: "Marketplace packages currently installed into this runtime's kernel.",
+    },
+    cloud_connection_settings: {
+      label: 'Cloud Connection',
+      subtitle:
+        'Connect this runtime to an ObjectStack control plane to browse your '
+        + "organization's private packages and install them here.",
+    },
+    connect_agent: {
+      label: 'Connect an Agent',
+      subtitle:
+        'Give any MCP-capable AI client governed access to this environment — '
+        + "every call runs under the caller's own permissions and row-level security.",
     },
   },
 };

@@ -376,6 +376,7 @@ export function translateMetadataDocument(
   if (type === 'object') return translateObject(doc, bundle, opts);
   if (type === 'app') return translateApp(doc, bundle, opts);
   if (type === 'dashboard') return translateDashboard(doc, bundle, opts);
+  if (type === 'page') return translatePage(doc, bundle, opts);
   return doc;
 }
 
@@ -561,6 +562,110 @@ export function translateDashboard<T extends DashboardLike>(
     ...(label !== undefined ? { label } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(widgets !== undefined ? { widgets } : {}),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Page metadata resolvers (label / description / page:header title + subtitle)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal page-component shape consumed by `translatePage`. */
+export interface PageComponentLike {
+  type?: string;
+  properties?: Record<string, any>;
+  [key: string]: any;
+}
+
+/** Minimal page-region shape consumed by `translatePage`. */
+export interface PageRegionLike {
+  name?: string;
+  components?: PageComponentLike[];
+  [key: string]: any;
+}
+
+/** Minimal page metadata shape consumed by `translatePage`. */
+export interface PageLike {
+  name: string;
+  label?: string;
+  description?: string;
+  regions?: PageRegionLike[];
+  [key: string]: any;
+}
+
+/** The component type whose header copy `translatePage` localizes. */
+const PAGE_HEADER_COMPONENT = 'page:header';
+
+function lookupPageAttr(
+  bundle: TranslationBundle | undefined,
+  name: string,
+  attr: 'label' | 'description' | 'title' | 'subtitle',
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.pages?.[name]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Apply the active locale to a page metadata document — translates the page's
+ * own `label` / `description` and the `properties.title` / `properties.subtitle`
+ * of every `page:header` component in its regions, against
+ * `pages.<name>.{label,description,title,subtitle}`. The input document is not
+ * mutated.
+ *
+ * Header copy is addressed by **page name** rather than by component id because
+ * `page:header` instances carry no stable id in practice. `title` falls back to
+ * `pages.<name>.label` so translators need not repeat a string that is normally
+ * identical to the page's nav label.
+ *
+ * Only region-level components are visited: `page:header` is a top-level
+ * layout block by convention, and components nested inside another component's
+ * `properties` (tabs, sections) are untyped free-form props.
+ */
+export function translatePage<T extends PageLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const name = doc.name;
+  if (!name || !bundle) return doc;
+
+  const label = lookupPageAttr(bundle, name, 'label', opts) ?? doc.label;
+  const description = lookupPageAttr(bundle, name, 'description', opts) ?? doc.description;
+  const headerTitle = lookupPageAttr(bundle, name, 'title', opts)
+    ?? lookupPageAttr(bundle, name, 'label', opts);
+  const headerSubtitle = lookupPageAttr(bundle, name, 'subtitle', opts);
+
+  const translateComponent = (component: PageComponentLike): PageComponentLike => {
+    if (!component || typeof component !== 'object') return component;
+    if (component.type !== PAGE_HEADER_COMPONENT) return component;
+    if (headerTitle === undefined && headerSubtitle === undefined) return component;
+    return {
+      ...component,
+      properties: {
+        ...component.properties,
+        ...(headerTitle !== undefined ? { title: headerTitle } : {}),
+        ...(headerSubtitle !== undefined ? { subtitle: headerSubtitle } : {}),
+      },
+    };
+  };
+
+  const regions = Array.isArray(doc.regions)
+    ? doc.regions.map((region) => {
+        if (!region || typeof region !== 'object' || !Array.isArray(region.components)) return region;
+        return { ...region, components: region.components.map(translateComponent) };
+      })
+    : doc.regions;
+
+  return {
+    ...doc,
+    ...(label !== undefined ? { label } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(regions !== undefined ? { regions } : {}),
   };
 }
 

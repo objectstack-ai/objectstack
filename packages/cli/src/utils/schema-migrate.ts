@@ -75,7 +75,18 @@ function redactUrl(url: string): string {
 }
 
 /** Boot the schema stack. Caller MUST call `shutdown()` when done. */
-export async function bootSchemaStack(opts: { databaseUrl?: string } = {}): Promise<SchemaStack> {
+export async function bootSchemaStack(
+  opts: {
+    databaseUrl?: string;
+    /**
+     * Service plugins to register after the data stack (driver/metadata/
+     * objectql/app) and before start — e.g. `os migrate files-to-references`
+     * adds settings + storage so `sys_file` and the deployment's real storage
+     * adapter are present. Plain schema commands pass nothing.
+     */
+    extraPlugins?: unknown[];
+  } = {},
+): Promise<SchemaStack> {
   const { createStandaloneStack, Runtime } = await import('@objectstack/runtime');
 
   const stack = await createStandaloneStack({
@@ -88,6 +99,9 @@ export async function bootSchemaStack(opts: { databaseUrl?: string } = {}): Prom
   const kernel = runtime.getKernel();
   for (const plugin of stack.plugins) {
     await kernel.use(plugin);
+  }
+  for (const plugin of opts.extraPlugins ?? []) {
+    await kernel.use(plugin as any);
   }
   await runtime.start();
 

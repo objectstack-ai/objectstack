@@ -128,43 +128,100 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     });
 
     const fields = this.buildFieldMeta(query, cube);
-    return { rows: mappedRows, fields };
+    // Echo a representative SQL alongside the rows (#3588). `NativeSQLStrategy`
+    // returns the statement it actually ran, and dataset responses surface that
+    // string — it is how an author checks what their widget compiled to. This
+    // path builds an AST, so it had nothing to echo, and the `sql` field simply
+    // vanished from the response whenever a query was date-bucketed (native SQL
+    // declines granularity, handing those queries here). An author reading the
+    // response then couldn't tell "bucketing is not implemented" from "this
+    // strategy doesn't report". Best-effort: rendering is a debugging aid and
+    // must never fail a query that already ran.
+    let sql: string | undefined;
+    try {
+      sql = (await this.generateSql(query, ctx)).sql;
+    } catch {
+      sql = undefined;
+    }
+    return sql ? { rows: mappedRows, fields, sql } : { rows: mappedRows, fields };
   }
 
+  /**
+   * Render a REPRESENTATIVE SQL string for an ObjectQL aggregate query.
+   *
+   * This path executes through `engine.aggregate()`, not raw SQL, so the string
+   * is documentation rather than the literal statement — but it must be an
+   * honest account of what the query does, because dataset responses echo it
+   * and authors read it to verify their widget options landed (#3588). It
+   * therefore renders date bucketing (`date_trunc`), the WHERE predicate,
+   * ordering, and the row window.
+   *
+   * Filter VALUES are rendered as `$n` placeholders and returned in `params`,
+   * never inlined: the echoed statement travels to the browser, and a filter
+   * comparand can carry tenant data.
+   */
   async generateSql(query: AnalyticsQuery, ctx: StrategyContext): Promise<{ sql: string; params: unknown[] }> {
     const cube = ctx.getCube(query.cube!);
     if (!cube) {
       throw new Error(`Cube not found: ${query.cube}`);
     }
 
-    // Generate a representative SQL even though ObjectQL uses AST internally
     const selectParts: string[] = [];
     const groupByParts: string[] = [];
+    const params: unknown[] = [];
+
+    // Date-bucketed dimensions render as `date_trunc('<granularity>', col)` —
+    // the SQL shape the driver's own bucketing implements — so a `month` trend
+    // no longer reads as if it grouped by the raw column.
+    const granByDim = new Map<string, string>();
+    for (const td of query.timeDimensions ?? []) {
+      if (td.granularity) granByDim.set(td.dimension, td.granularity);
+    }
+    const dimExpr = (dim: string): string => {
+      const col = this.resolveFieldName(cube, dim, 'dimension');
+      const gran = granByDim.get(dim);
+      return gran ? `date_trunc('${gran}', ${col})` : col;
+    };
 
     if (query.dimensions) {
       for (const dim of query.dimensions) {
-        const col = this.resolveFieldName(cube, dim, 'dimension');
-        selectParts.push(`${col} AS "${dim}"`);
-        groupByParts.push(col);
+        const expr = dimExpr(dim);
+        selectParts.push(`${expr} AS "${dim}"`);
+        groupByParts.push(expr);
       }
+    }
+    // A time dimension that is bucketed but not also listed in `dimensions`
+    // still groups (see `execute`), so it belongs in the rendered GROUP BY too.
+    for (const [dim] of granByDim) {
+      if (query.dimensions?.includes(dim)) continue;
+      const expr = dimExpr(dim);
+      selectParts.push(`${expr} AS "${dim}"`);
+      groupByParts.push(expr);
     }
     if (query.measures) {
       for (const m of query.measures) {
         const { field, method } = this.resolveMeasureAggregation(cube, m);
-        const aggSql = method === 'count' ? 'COUNT(*)' : `${method.toUpperCase()}(${field})`;
+        const aggSql = method === 'count'
+          ? 'COUNT(*)'
+          : method === 'count_distinct'
+            ? `COUNT(DISTINCT ${field})`
+            : `${method.toUpperCase()}(${field})`;
         selectParts.push(`${aggSql} AS "${m}"`);
       }
     }
 
     const tableName = this.extractObjectName(cube);
 
-    // ADR-0021 D-C (#3602) — the preview carries the SAME predicate the query
-    // actually runs with. Emitting only SELECT/GROUP BY made `/analytics/sql`
-    // read as an unscoped full-table scan while the real aggregate was scoped
-    // (#3601), so anyone debugging a "why is this row missing" was handed SQL
-    // that could not reproduce the result. Nothing leaked — this string is
-    // never executed — but a preview that contradicts execution is worse than
-    // no preview.
+    // ADR-0021 D-C (#3602) — render the READ SCOPE too, not just the caller's
+    // own filters (#3652 added those). Without it this string still reads as an
+    // unscoped table scan while the real aggregate is scoped (#3601), so anyone
+    // debugging a "why is this row missing" gets SQL that cannot reproduce the
+    // result. Nothing leaks — the string is never executed, and scope VALUES
+    // stay in `params`, which `execute()`'s echo discards — but a rendering
+    // that contradicts execution is worse than no rendering.
+    //
+    // The joined-scope guard runs here for the same reason: this must not
+    // render SQL for a query `execute()` would reject outright.
     //
     // Faithfulness cuts both ways: `execute()` does NOT apply
     // `timeDimensions[].dateRange` on this path (only `where` reaches the
@@ -173,7 +230,6 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // — filed as #3650, not papered over here.
     this.assertJoinedScopesEnforceable(cube, query, ctx);
 
-    const params: unknown[] = [];
     const whereParts: string[] = [];
     for (const f of normalizeAnalyticsFilters(query)) {
       const clause = this.buildFilterClauseSql(
@@ -209,6 +265,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (groupByParts.length > 0) {
       sql += ` GROUP BY ${groupByParts.join(', ')}`;
     }
+    if (query.order && Object.keys(query.order).length > 0) {
+      const orderClauses = Object.entries(query.order).map(([f, d]) => `"${f}" ${d.toUpperCase()}`);
+      sql += ` ORDER BY ${orderClauses.join(', ')}`;
+    }
+    if (query.limit != null) sql += ` LIMIT ${query.limit}`;
+    if (query.offset != null) sql += ` OFFSET ${query.offset}`;
 
     return { sql, params };
   }

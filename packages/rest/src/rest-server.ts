@@ -48,7 +48,7 @@ const logWarn = (...args: unknown[]) => ((globalThis as any).console?.warn ?? (g
  * via `translateMetadataDocument`. Keep in sync with the type dispatch in
  * `@objectstack/spec/system`'s `translateMetadataDocument`.
  */
-const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'dashboard']);
+const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'dashboard', 'page']);
 
 
 /**
@@ -5291,7 +5291,7 @@ export class RestServer {
                     const msg = String(error?.message ?? error ?? '');
                     // Dataset-compiler D-C / unsupported-aggregate / read-scope
                     // errors are client-side mistakes — surface as 400.
-                    if (/not declared in the dataset|not backed by a declared relationship|not supported by the v1 dataset runtime|read-scope-sql/.test(msg)) {
+                    if (/not declared in the dataset|not backed by a declared relationship|not supported by the v1 dataset runtime|read-scope-sql|not a selected dimension or measure|is not a subset of the selected dimensions/.test(msg)) {
                         return res.status(400).json({ code: 'DATASET_INVALID', message: msg.slice(0, 1000) });
                     }
                     logError('[REST] Analytics dataset query error:', error);

@@ -12,7 +12,7 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, isFileIdToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import { IDataDriver, IDataEngine, Logger, createLogger, withTransientRetry, type RetryOptions } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
@@ -2199,6 +2199,10 @@ export class ObjectQL implements IDataEngine {
     execCtx?: ExecutionContext,
   ): Promise<any[]> {
     if (!records || records.length === 0) return records;
+    // A caller whose subject is the STORED form — the ADR-0104 backfill /
+    // reconciliation (#3617) — opts out of resolution entirely; expanding
+    // ids before that scan would hide the very state it exists to audit.
+    if ((execCtx as any)?.[RAW_FILE_VALUES_CONTEXT_KEY] === true) return records;
     const objectSchema = this._registry.getObject(objectName);
     if (!objectSchema || !objectSchema.fields) return records;
     // Nothing to resolve against if the file object is not even registered
