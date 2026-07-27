@@ -129,7 +129,35 @@ export interface DatasetSelection {
     runtimeFilter?: FilterCondition;
     /** Optional time-dimension windows passed through to the runtime. */
     timeDimensions?: AnalyticsQuery['timeDimensions'];
+    /**
+     * Presentation-scope date bucketing (framework#3588). Applies to every
+     * selected dimension the dataset declares as a `date` dimension, so a
+     * widget can bucket a trend by month without the dataset having to declare
+     * that granularity for every consumer.
+     *
+     * Precedence, per dimension: an explicit `timeDimensions` entry for that
+     * dimension wins, then this selection-level granularity, then the dataset
+     * dimension's own `dateGranularity` default. Unset leaves each dimension on
+     * its dataset default (which may be no bucketing at all — grouping by the
+     * raw column).
+     */
+    dateGranularity?: 'day' | 'week' | 'month' | 'quarter' | 'year';
+    /**
+     * Result ordering, applied by key in insertion order (`{ revenue: 'desc' }`).
+     *
+     * Every key must be a selected dimension, a selected measure, or a
+     * `<measure>__compare` column; anything else is rejected rather than
+     * silently ignored. Ordering is applied AFTER measure-scoped filters are
+     * merged, `compareTo` columns are attached, and derived measures are
+     * evaluated — so a derived measure (e.g. a win-rate ratio) is a valid sort
+     * key even though no single SQL statement computes it.
+     */
     order?: Record<string, 'asc' | 'desc'>;
+    /**
+     * Max rows to return, applied after `order`. When `limit` is set without
+     * `order`, rows are ordered by the selected dimensions ascending first, so
+     * the truncated window is deterministic rather than an arbitrary subset.
+     */
     limit?: number;
     offset?: number;
     /** Compare-to directive — runs a shifted query and attaches `<measure>__compare`. */

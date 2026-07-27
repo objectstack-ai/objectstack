@@ -746,6 +746,143 @@ describe('translateDashboard', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// translatePage — page label/description + `page:header` title/subtitle
+// ────────────────────────────────────────────────────────────────────────────
+
+import { translatePage } from './i18n-resolver';
+
+describe('translatePage', () => {
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      pages: {
+        connect_agent: {
+          label: '连接智能体',
+          subtitle: '让任意支持 MCP 的 AI 客户端受控访问此环境。',
+        },
+        cloud_connection_settings: {
+          label: '云连接',
+          title: '云连接设置',
+          description: '绑定控制平面',
+        },
+      },
+    },
+  };
+
+  const page = {
+    name: 'connect_agent',
+    label: 'Connect an Agent',
+    regions: [
+      {
+        name: 'header',
+        components: [
+          {
+            type: 'page:header',
+            properties: { title: 'Connect an Agent', subtitle: 'Give any MCP-capable client…', icon: 'bot' },
+          },
+        ],
+      },
+      {
+        name: 'main',
+        components: [{ type: 'mcp:connect-agent', properties: {} }],
+      },
+    ],
+  };
+
+  it('translates the page label and its page:header title/subtitle', () => {
+    const out = translatePage(page, bundle, { locale: 'zh-CN' });
+    expect(out.label).toBe('连接智能体');
+    expect(out.regions[0].components[0].properties.title).toBe('连接智能体');
+    expect(out.regions[0].components[0].properties.subtitle).toBe('让任意支持 MCP 的 AI 客户端受控访问此环境。');
+  });
+
+  it('preserves non-translatable header properties such as icon', () => {
+    const out = translatePage(page, bundle, { locale: 'zh-CN' });
+    expect(out.regions[0].components[0].properties.icon).toBe('bot');
+  });
+
+  it('leaves non-header components untouched', () => {
+    const out = translatePage(page, bundle, { locale: 'zh-CN' });
+    expect(out.regions[1].components[0]).toEqual({ type: 'mcp:connect-agent', properties: {} });
+  });
+
+  it('prefers an explicit title over the label fallback', () => {
+    const settingsPage = {
+      name: 'cloud_connection_settings',
+      label: 'Cloud Connection',
+      regions: [
+        { name: 'header', components: [{ type: 'page:header', properties: { title: 'Cloud Connection' } }] },
+      ],
+    };
+    const out = translatePage(settingsPage, bundle, { locale: 'zh-CN' });
+    expect(out.label).toBe('云连接');
+    expect(out.description).toBe('绑定控制平面');
+    expect(out.regions[0].components[0].properties.title).toBe('云连接设置');
+  });
+
+  it('leaves pages without a translation entry unchanged', () => {
+    const other = {
+      name: 'some_other_page',
+      label: 'Other',
+      regions: [{ name: 'header', components: [{ type: 'page:header', properties: { title: 'Other' } }] }],
+    };
+    const out = translatePage(other, bundle, { locale: 'zh-CN' });
+    expect(out.label).toBe('Other');
+    expect(out.regions[0].components[0].properties.title).toBe('Other');
+  });
+
+  it('does not mutate the input page', () => {
+    const snapshot = JSON.parse(JSON.stringify(page));
+    translatePage(page, bundle, { locale: 'zh-CN' });
+    expect(page).toEqual(snapshot);
+  });
+
+  it('falls back to literal copy when no bundle is present', () => {
+    const out = translatePage(page, undefined, { locale: 'zh-CN' });
+    expect(out.label).toBe('Connect an Agent');
+    expect(out.regions[0].components[0].properties.title).toBe('Connect an Agent');
+  });
+
+  it('handles pages with no regions', () => {
+    const bare = { name: 'connect_agent', label: 'Connect an Agent' };
+    const out = translatePage(bare, bundle, { locale: 'zh-CN' });
+    expect(out.label).toBe('连接智能体');
+    expect(out).not.toHaveProperty('regions');
+  });
+
+  it('works through translateMetadataDocument with page type', () => {
+    const out = translateMetadataDocument('page', page, bundle, { locale: 'zh-CN' });
+    expect(out.regions[0].components[0].properties.title).toBe('连接智能体');
+  });
+
+  it('falls back through the BCP-47 locale chain (zh → zh-CN)', () => {
+    const out = translatePage(page, bundle, { locale: 'zh' });
+    expect(out.label).toBe('连接智能体');
+  });
+});
+
+describe('TranslationDataSchema pages', () => {
+  it('accepts a fully-populated pages entry', () => {
+    const data = TranslationDataSchema.parse({
+      pages: {
+        connect_agent: {
+          label: '连接智能体',
+          description: '为 MCP 客户端授予访问权限',
+          title: '连接智能体',
+          subtitle: '每次调用都在调用者自身的权限范围内执行。',
+        },
+      },
+    });
+    expect(data.pages?.connect_agent?.title).toBe('连接智能体');
+    expect(data.pages?.connect_agent?.subtitle).toBe('每次调用都在调用者自身的权限范围内执行。');
+  });
+
+  it('all pages fields are optional', () => {
+    expect(() => TranslationDataSchema.parse({ pages: {} })).not.toThrow();
+    expect(() => TranslationDataSchema.parse({ pages: { connect_agent: {} } })).not.toThrow();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // translateObject — built-in system-field label fallback
 // ────────────────────────────────────────────────────────────────────────────
 

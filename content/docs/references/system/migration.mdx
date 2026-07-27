@@ -5,6 +5,28 @@ description: Migration protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
+Migration protocol — the two kinds of migration, kept apart on purpose.
+
+A **schema migration** (`ChangeSet` + its atomic operations) reshapes the
+
+physical database to match metadata: add a field, change a type, create an
+
+object, run SQL. It is derivable from the metadata and applied by
+
+`os migrate plan` / `os migrate apply`.
+
+A **data migration** rewrites the rows themselves, and whether it is done is
+
+a property of ONE DEPLOYMENT's database rather than of the installed code
+
+version — so it cannot be expressed as a ChangeSet, and its completion cannot
+
+be inferred from a release. `DataMigrationFlag` is the per-deployment record
+
+that one ran here and its self-check passed; consumers that would act
+
+irreversibly on migrated data gate on the flag instead of the version.
+
 <Callout type="info">
 **Source:** `packages/spec/src/system/migration.zod.ts`
 </Callout>
@@ -12,8 +34,8 @@ description: Migration protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { AddFieldOperation, ChangeSet, CreateObjectOperation, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependency, MigrationOperation, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
-import type { AddFieldOperation, ChangeSet, CreateObjectOperation, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependency, MigrationOperation, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
+import { AddFieldOperation, ChangeSet, CreateObjectOperation, DataMigrationFlag, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependency, MigrationOperation, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
+import type { AddFieldOperation, ChangeSet, CreateObjectOperation, DataMigrationFlag, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependency, MigrationOperation, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
 
 // Validate data
 const result = AddFieldOperation.parse(data);
@@ -67,6 +89,25 @@ Create a new object
 | :--- | :--- | :--- | :--- |
 | **type** | `'create_object'` | ✅ |  |
 | **object** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }` | ✅ | Full object definition to create |
+
+
+---
+
+## DataMigrationFlag
+
+Deployment-level record that a data migration ran here and its self-check passed — the evidence gate consumers read instead of the platform version
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Migration id (e.g. adr-0104-file-references) — one row per data migration |
+| **last_run_at** | `string` | ✅ | When this migration last completed a gated (apply-mode) run on this deployment |
+| **verified_at** | `string \| null` | optional | When the self-check last PASSED. Null/absent until it does — and cleared again by a later failing run, so a regression closes the gate |
+| **applied_at** | `string \| null` | optional | When the backfill last ran in apply mode (writes enabled) |
+| **blocking** | `integer` | ✅ | Blocking discrepancies reported by the last self-check. The gate requires 0 |
+| **advisory** | `integer` | optional | Advisory findings from the last run (external URLs, stale owners, …) — cost storage or need a modelling decision, never block the gate |
+| **details** | `string` | optional | JSON-encoded counts from the last run, for diagnostics |
 
 
 ---

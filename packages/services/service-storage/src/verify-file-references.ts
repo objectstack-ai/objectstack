@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { FILE_REFERENCE_TYPES, isFileIdToken } from '@objectstack/spec/data';
+import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 
 /**
  * File-reference reconciliation (ADR-0104 D3 wave 2) — the executable form of
@@ -33,7 +33,11 @@ import { FILE_REFERENCE_TYPES, isFileIdToken } from '@objectstack/spec/data';
  * The scan is read-only. It never writes, never tombstones, and never deletes.
  */
 
-const SYSTEM_CTX = { isSystem: true } as const;
+// Raw-form reads: on a live kernel the engine's read resolver expands stored
+// ids to `{ id, url, … }` in place, which would hide every held reference
+// from this scan (false stale_owner noise — and a missed unowned_reference
+// would falsely pass the gate). The scan's subject is the stored form.
+const SYSTEM_CTX = { isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true } as const;
 
 /** Records read per page while scanning an object. */
 const SCAN_PAGE_SIZE = 500;

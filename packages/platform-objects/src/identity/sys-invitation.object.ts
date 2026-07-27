@@ -230,6 +230,27 @@ export const SysInvitation = ObjectSchema.create({
       required: false,
       description: 'Optional team to assign upon acceptance',
     }),
+
+    // ── [ADR-0105 D8] Placement intent (ObjectStack extension fields) ──
+    // Carried on the invitation and applied WITH the better-auth membership
+    // on acceptance, so a delegated (plant) admin's invitee arrives already
+    // in the right unit and role instead of waiting on a platform admin.
+    // Issuance is authorized against the issuer's `adminScope` (ADR-0090
+    // D12) by the `invitation-placement` service — an invitation can never
+    // place what its issuer could not have assigned directly.
+    business_unit_id: Field.lookup('sys_business_unit', {
+      label: 'Placement Business Unit',
+      required: false,
+      description:
+        'Business unit the invitee is placed under on acceptance (ADR-0105 D8). Must lie inside the issuer\'s delegated subtree.',
+    }),
+
+    positions: Field.json({
+      label: 'Placement Positions',
+      required: false,
+      description:
+        'sys_position names assigned on acceptance (ADR-0105 D8). Every position\'s permission sets must be allowlisted by the issuer\'s adminScope.',
+    }),
   },
   
   indexes: [

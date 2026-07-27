@@ -226,6 +226,33 @@ export const AUTH_INVITATION_SCHEMA = {
     createdAt: 'created_at',
     teamId: 'team_id',
   },
+  /**
+   * [ADR-0105 D8] Placement intent rides the invitation better-auth already
+   * creates, so acceptance can apply it atomically with the membership
+   * (`additionalFields` is better-auth's own extension seam — no shadow
+   * table, no second write to keep in sync).
+   *
+   * These ARE client-suppliable (input stays on) because a placement intent
+   * is a REQUEST, not an authority: the `beforeCreateInvitation` hook runs
+   * unconditionally and authorizes the pair against the ISSUER's `adminScope`
+   * (ADR-0090 D12) via the `invitation-placement` service, rejecting the whole
+   * invitation when the unit is outside their subtree or a position
+   * distributes a set they may not hand out. Marking them `input: false`
+   * instead would not add safety — it would simply make the feature
+   * unreachable, since the hook has no other channel to receive the request.
+   */
+  additionalFields: {
+    businessUnitId: {
+      type: 'string',
+      required: false,
+      fieldName: 'business_unit_id',
+    },
+    positions: {
+      type: 'string[]',
+      required: false,
+      fieldName: 'positions',
+    },
+  },
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -252,13 +279,23 @@ export const AUTH_ORG_SESSION_FIELDS = {
  * | camelCase (better-auth) | snake_case (ObjectStack) |
  * |:------------------------|:-------------------------|
  * | organizationId          | organization_id          |
+ * | memberCount             | member_count             |
  * | createdAt               | created_at               |
  * | updatedAt               | updated_at               |
+ *
+ * better-auth 1.7.0-rc.1 added `memberCount` — the durable seat counter the
+ * plugin guard-increments to reserve capacity before inserting a membership
+ * row. It is written on EVERY team insert (`memberCount: 0`), so leaving it
+ * unmapped made the adapter emit a camelCase `memberCount` column that
+ * `sys_team` never provisioned: `organization/create` auto-creates a default
+ * team when `teams.enabled`, so org creation 500'd after the org row had
+ * already committed. See #3624.
  */
 export const AUTH_TEAM_SCHEMA = {
   modelName: SystemObjectName.TEAM, // 'sys_team'
   fields: {
     organizationId: 'organization_id',
+    memberCount: 'member_count',
     createdAt: 'created_at',
     updatedAt: 'updated_at',
   },
@@ -275,13 +312,21 @@ export const AUTH_TEAM_SCHEMA = {
  * |:------------------------|:-------------------------|
  * | teamId                  | team_id                  |
  * | userId                  | user_id                  |
+ * | membershipKey           | membership_key           |
  * | createdAt               | created_at               |
+ *
+ * `membershipKey` landed with `team.memberCount` in 1.7.0-rc.1: a SHA-256
+ * digest of [teamId, userId] the plugin writes on every membership insert and
+ * whose UNIQUE constraint collapses concurrent adds. Same failure mode as
+ * `memberCount` if left unmapped — a camelCase column no table provisions —
+ * so add-team-member 500s. See #3624.
  */
 export const AUTH_TEAM_MEMBER_SCHEMA = {
   modelName: SystemObjectName.TEAM_MEMBER, // 'sys_team_member'
   fields: {
     teamId: 'team_id',
     userId: 'user_id',
+    membershipKey: 'membership_key',
     createdAt: 'created_at',
   },
 } as const;
@@ -293,16 +338,27 @@ export const AUTH_TEAM_MEMBER_SCHEMA = {
 /**
  * better-auth Two-Factor plugin `twoFactor` model mapping.
  *
- * | camelCase (better-auth) | snake_case (ObjectStack) |
- * |:------------------------|:-------------------------|
- * | backupCodes             | backup_codes             |
- * | userId                  | user_id                  |
+ * | camelCase (better-auth) | snake_case (ObjectStack)  |
+ * |:------------------------|:--------------------------|
+ * | backupCodes             | backup_codes              |
+ * | userId                  | user_id                   |
+ * | failedVerificationCount | failed_verification_count |
+ * | lockedUntil             | locked_until              |
+ *
+ * 1.7 added the lockout pair `failedVerificationCount` / `lockedUntil`: the
+ * verify endpoint guard-increments the counter on every wrong code and stamps
+ * `lockedUntil` once it crosses `maxFailedAttempts`. Unmapped, those writes
+ * addressed camelCase columns `sys_two_factor` never provisioned, so a wrong
+ * 2FA code 500'd on the failure path instead of being counted. Found by
+ * `better-auth-schema-parity.test.ts` while closing #3624.
  */
 export const AUTH_TWO_FACTOR_SCHEMA = {
   modelName: SystemObjectName.TWO_FACTOR, // 'sys_two_factor'
   fields: {
     backupCodes: 'backup_codes',
     userId: 'user_id',
+    failedVerificationCount: 'failed_verification_count',
+    lockedUntil: 'locked_until',
   },
 } as const;
 

@@ -117,6 +117,71 @@ describe('resolveDimensionLabels', () => {
     expect(calls).toBe(1);
     expect(rows.map((r) => r.account)).toEqual(['Acme Corp', 'Acme Corp', 'Globex']);
   });
+
+  // ── #3602 — the label lookup must carry the REFERENCED object's read scope ──
+  describe('lookup label read scope (#3602)', () => {
+    it('passes the referenced object scope through to fetchRecordLabels', async () => {
+      let seenScope: unknown = 'UNSET';
+      let seenTarget: string | undefined;
+      const d = deps({
+        fetchRecordLabels: async (target, ids, scope) => {
+          seenTarget = target;
+          seenScope = scope;
+          return new Map<unknown, string>(ids.map((id) => [id, `name-${String(id)}`]));
+        },
+      });
+      const rows = [{ account: 'acc1', n: 1 }];
+      // resolveScope returns the referenced object's own RLS predicate.
+      await resolveDimensionLabels('task', [{ name: 'account', field: 'account' }], rows, d, (target) => {
+        expect(target).toBe('crm_account'); // the REFERENCED object, not the base
+        return { organization_id: 'org_A' };
+      });
+      expect(seenTarget).toBe('crm_account');
+      expect(seenScope).toEqual({ organization_id: 'org_A' });
+    });
+
+    it('fails CLOSED: when the scope cannot be resolved, the id is left raw (no unscoped fetch)', async () => {
+      let fetched = false;
+      const d = deps({
+        fetchRecordLabels: async (_t, ids) => {
+          fetched = true;
+          return new Map<unknown, string>(ids.map((id) => [id, 'LEAKED NAME']));
+        },
+      });
+      const rows = [{ account: 'acc1', n: 1 }];
+      await resolveDimensionLabels('task', [{ name: 'account', field: 'account' }], rows, d, () => {
+        throw new Error('security service unavailable');
+      });
+      // The label fetch must NOT have run, and the raw id must survive.
+      expect(fetched).toBe(false);
+      expect(rows).toEqual([{ account: 'acc1', n: 1 }]);
+    });
+
+    it('a select dimension is unaffected by scope resolution (no referenced object)', async () => {
+      let scopeCalls = 0;
+      const rows = [{ status: 'backlog', n: 1 }];
+      await resolveDimensionLabels('task', [{ name: 'status', field: 'status' }], rows, deps(), () => {
+        scopeCalls++;
+        return undefined;
+      });
+      expect(scopeCalls).toBe(0); // scope is only resolved for lookup/master_detail dims
+      expect(rows).toEqual([{ status: 'Backlog', n: 1 }]);
+    });
+
+    it('no resolver (no security configured) → unscoped fetch, unchanged behaviour', async () => {
+      let seenScope: unknown = 'UNSET';
+      const d = deps({
+        fetchRecordLabels: async (_t, ids, scope) => {
+          seenScope = scope;
+          return new Map<unknown, string>(ids.map((id) => [id, 'Acme Corp']));
+        },
+      });
+      const rows = [{ account: 'acc1', n: 1 }];
+      await resolveDimensionLabels('task', [{ name: 'account', field: 'account' }], rows, d /* no resolveScope */);
+      expect(seenScope).toBeUndefined();
+      expect(rows).toEqual([{ account: 'Acme Corp', n: 1 }]);
+    });
+  });
 });
 
 describe('formatDateBucket', () => {

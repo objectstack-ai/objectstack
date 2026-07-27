@@ -35,6 +35,8 @@
  *   apps.<app>.navigation.<id>.label
  *   dashboards.<dash>.label / .description
  *   dashboards.<dash>.widgets.<w>.title / .description
+ *   pages.<page>.label / .description
+ *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -72,6 +74,7 @@ export interface ExpectedEntry {
     | 'navigation'
     | 'dashboard'
     | 'widget'
+    | 'page'
     | 'metadataType'
     | 'metadataFormSection'
     | 'metadataFormField';
@@ -392,6 +395,36 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
       if (w.title) pushEntry(out, ['dashboards', name, 'widgets', wid, 'title'], w.title, 'widget');
       if (w.description) {
         pushEntry(out, ['dashboards', name, 'widgets', wid, 'description'], w.description, 'widget');
+      }
+    }
+  }
+
+  // ── Pages + their `page:header` copy ──────────────────────────────
+  const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
+  for (const page of pages) {
+    if (!page?.name) continue;
+    const name = page.name as string;
+    if (page.label) pushEntry(out, ['pages', name, 'label'], page.label, 'page');
+    if (page.description) {
+      pushEntry(out, ['pages', name, 'description'], page.description, 'page');
+    }
+    // Header copy is authored inside the page's `page:header` component but
+    // is addressed by page name — `translatePage` overlays it back onto every
+    // header in the page's regions.
+    const regions: any[] = Array.isArray(page.regions) ? page.regions : [];
+    for (const region of regions) {
+      const components: any[] = Array.isArray(region?.components) ? region.components : [];
+      for (const component of components) {
+        if (component?.type !== 'page:header') continue;
+        const props = component.properties ?? {};
+        // `title` duplicating `label` is the common case and resolves via the
+        // label fallback — only emit it when the two genuinely differ.
+        if (typeof props.title === 'string' && props.title && props.title !== page.label) {
+          pushEntry(out, ['pages', name, 'title'], props.title, 'page');
+        }
+        if (typeof props.subtitle === 'string' && props.subtitle) {
+          pushEntry(out, ['pages', name, 'subtitle'], props.subtitle, 'page');
+        }
       }
     }
   }

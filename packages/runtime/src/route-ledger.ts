@@ -18,8 +18,23 @@
  * path). The REST server (`@objectstack/rest`) mounts a second, larger surface
  * (search, forms, reports, sharing rules, …) that the client also reaches;
  * that surface has its own ledger + guard since #3587 —
- * `packages/rest/src/rest-route-ledger.ts`. Background:
+ * `packages/rest/src/rest-route-ledger.ts`. A third surface — services that
+ * mount autonomously on the host `IHttpServer` (`service-storage`,
+ * `service-i18n`) — carries per-package ledgers since #3636. Background:
  * `docs/audits/2026-07-dispatcher-client-route-coverage.md`.
+ *
+ * A ROW HERE IS NOT A WIRE GUARANTEE. This ledger pairs a dispatcher-internal
+ * path pattern with a client method that exists; it does not check that the
+ * client builds a URL any server actually mounts. The three `/i18n` rows below
+ * looked healthy for exactly that reason while two of the three SDK methods
+ * spoke a `?locale=` dialect nothing routed (#3636). That direction is covered
+ * since #3642 by `packages/client/src/client-url-conformance.test.ts`, which
+ * drives every SDK method and matches the URL it builds against the UNION of
+ * all four ledgers — so the `route` strings below are now load-bearing for the
+ * client half too, not just for dispatcher enumeration. Note what that guard
+ * can and cannot do with a `dynamic` row: `* /ai/**` and `* /auth/**` claim a
+ * prefix family, not a resolvable route, and 60 SDK methods match on nothing
+ * stronger than that (ratcheted in the guard; #3656 tracks enumerating them).
  *
  * This module is runtime-internal (not exported from the package index): it is
  * the guard's data, not public API. Promotion to `@objectstack/spec` is a

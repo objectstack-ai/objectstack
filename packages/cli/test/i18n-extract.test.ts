@@ -171,6 +171,61 @@ describe('collectExpectedEntries', () => {
     // Fields without a label emit nothing.
     expect(byPath[`${base}.fields.unlabeled`]).toBeUndefined();
   });
+
+  it('walks pages and their page:header copy (objectstack#3589)', () => {
+    const pageConfig: any = {
+      pages: [
+        {
+          name: 'connect_agent',
+          label: 'Connect an Agent',
+          description: 'Agent onboarding',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                {
+                  type: 'page:header',
+                  // `title` duplicates `label` — resolved by the label
+                  // fallback, so it must NOT emit its own entry.
+                  properties: { title: 'Connect an Agent', subtitle: 'Governed MCP access.', icon: 'bot' },
+                },
+              ],
+            },
+            { name: 'main', components: [{ type: 'mcp:connect-agent', properties: {} }] },
+          ],
+        },
+        {
+          name: 'renamed_header',
+          label: 'Nav Label',
+          regions: [
+            { name: 'header', components: [{ type: 'page:header', properties: { title: 'Different Title' } }] },
+          ],
+        },
+        { name: 'bare_page', label: 'Bare' },
+      ],
+    };
+    const entries = collectExpectedEntries(pageConfig);
+    const byPath = Object.fromEntries(entries.map((e) => [e.path.join('.'), e.sourceValue]));
+
+    expect(byPath['pages.connect_agent.label']).toBe('Connect an Agent');
+    expect(byPath['pages.connect_agent.description']).toBe('Agent onboarding');
+    expect(byPath['pages.connect_agent.subtitle']).toBe('Governed MCP access.');
+    // title === label → no redundant entry for translators to fill twice.
+    expect(byPath['pages.connect_agent.title']).toBeUndefined();
+    // A header title that genuinely differs from the label does emit.
+    expect(byPath['pages.renamed_header.title']).toBe('Different Title');
+    // Non-header components and non-translatable props (icon) contribute
+    // nothing — the page namespace holds only the four translatable keys.
+    const pagePaths = Object.keys(byPath).filter((p) => p.startsWith('pages.'));
+    expect(pagePaths.sort()).toEqual([
+      'pages.bare_page.label',
+      'pages.connect_agent.description',
+      'pages.connect_agent.label',
+      'pages.connect_agent.subtitle',
+      'pages.renamed_header.label',
+      'pages.renamed_header.title',
+    ]);
+  });
 });
 
 describe('extractTranslations', () => {

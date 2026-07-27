@@ -99,11 +99,33 @@ export const SysTeamMember = ObjectSchema.create({
       label: 'User',
       required: true,
     }),
+
+    // better-auth's own single-column uniqueness boundary for a membership
+    // (`teamMember.membershipKey`, added alongside `team.memberCount` in
+    // 1.7.0-rc.1): a SHA-256 digest of [teamId, userId]. The organization
+    // plugin writes it on every membership insert and relies on the UNIQUE
+    // constraint to collapse concurrent adds — it catches the insert error
+    // and re-reads the winner. Declared `input: false, returned: false`
+    // upstream, so it never crosses the API boundary in either direction.
+    // Nullable so legacy rows provisioned before the upgrade stay valid;
+    // better-auth falls back to the (team_id, user_id) pair when the key
+    // lookup misses. See #3624.
+    membership_key: Field.text({
+      label: 'Membership Key',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'Derived membership digest maintained by better-auth; do not write directly.',
+    }),
   },
-  
+
   indexes: [
     { fields: ['team_id', 'user_id'], unique: true },
     { fields: ['user_id'] },
+    // UNIQUE mirrors better-auth's own declaration — the constraint is what
+    // makes its concurrent-add recovery work. Nullable columns admit repeated
+    // NULLs on sqlite / postgres / mysql, so pre-upgrade rows are unaffected.
+    { fields: ['membership_key'], unique: true },
   ],
   
   enable: {

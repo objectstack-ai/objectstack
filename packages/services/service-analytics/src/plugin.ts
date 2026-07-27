@@ -353,17 +353,24 @@ export class AnalyticsServicePlugin implements Plugin {
     };
     const labelResolver: DimensionLabelDeps = {
       getObjectFields: (objectName) => dataEngine()?.getObject?.(objectName)?.fields,
-      fetchRecordLabels: async (targetObject, ids) => {
+      fetchRecordLabels: async (targetObject, ids, scope) => {
         const map = new Map<unknown, string>();
         const displayField = pickDisplayField(dataEngine()?.getObject?.(targetObject)?.fields);
         if (!displayField || !executeAggregate || ids.length === 0) return map;
+        // #3602 — AND the referenced object's own read scope into the id filter,
+        // with `$and` (never key-merge) so it cannot be displaced by the id
+        // predicate — the same composition the strategy uses for the aggregate.
+        // Without it this per-record read leaks display names the target's RLS
+        // would hide (fires when the referenced object is stricter than the base).
+        const idFilter: Record<string, unknown> = { id: { $in: ids } };
+        const filter = scope ? { $and: [idFilter, scope] } : idFilter;
         // Group by (id, displayField) — one row per record — reusing the aggregate
         // bridge rather than adding a record-fetch capability. A count keeps engines
         // that require ≥1 aggregation happy; the count itself is unused.
         const rows = await executeAggregate(targetObject, {
           groupBy: ['id', displayField],
           aggregations: [{ field: 'id', method: 'count', alias: '_c' }],
-          filter: { id: { $in: ids } },
+          filter,
         });
         for (const r of rows) {
           if (r.id != null && r[displayField] != null) map.set(r.id, String(r[displayField]));

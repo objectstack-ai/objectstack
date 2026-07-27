@@ -29,6 +29,12 @@ import { SystemFile, SystemUploadSession } from './objects/index.js';
 // storage domain, not the audit/compliance ledger. Definition stays in
 // platform-objects; storage now contributes (registers) it instead of audit.
 import { SysAttachment } from '@objectstack/platform-objects/audit';
+// Deployment-level data-migration flags (#3617). The table is platform-generic
+// (defined in platform-objects, contract in spec/system), registered here by
+// its first consuming domain: the ADR-0104 file-as-reference row gates this
+// service's released-file collection (#3459 PR-5b) and the strict media
+// value-shape default (#3438).
+import { SysMigration } from '@objectstack/platform-objects/system';
 import { SwappableStorageService } from './swappable-storage-service.js';
 
 /**
@@ -185,7 +191,7 @@ export class StorageServicePlugin implements Plugin {
         version: '1.0.0',
         type: 'plugin',
         scope: 'system',
-        objects: [SystemFile, SystemUploadSession, SysAttachment],
+        objects: [SystemFile, SystemUploadSession, SysAttachment, SysMigration],
       });
     } catch {
       // manifest service may not be available in all environments

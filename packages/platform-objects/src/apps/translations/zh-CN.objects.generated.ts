@@ -507,6 +507,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "强制多因素认证",
         help: "为 true 时，该组织的每位成员都必须注册身份验证器 App 才能访问数据。"
       },
+      parent_organization_id: {
+        label: "Parent Organization",
+        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
+      },
+      sort_order: {
+        label: "Sort Order",
+        help: "Display order among sibling organizations. Presentation only."
+      },
       id: {
         label: "组织 ID"
       },
@@ -709,6 +717,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "组织",
         help: "该团队所属的上级组织"
       },
+      member_count: {
+        label: "Member Count",
+        help: "Seat counter maintained by better-auth; do not write directly."
+      },
       id: {
         label: "团队 ID"
       },
@@ -759,6 +771,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       user_id: {
         label: "用户"
+      },
+      membership_key: {
+        label: "Membership Key",
+        help: "Derived membership digest maintained by better-auth; do not write directly."
       }
     },
     _actions: {
@@ -993,6 +1009,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       verified: {
         label: "Verified",
         help: "Whether the enrollment was confirmed with a valid TOTP code (managed by better-auth)"
+      },
+      failed_verification_count: {
+        label: "Failed Verification Count",
+        help: "Consecutive failed 2FA verifications; reset on success. Maintained by better-auth."
+      },
+      locked_until: {
+        label: "Locked Until",
+        help: "Set when failed 2FA verifications cross the lockout threshold. Maintained by better-auth."
       }
     },
     _views: {
@@ -3044,6 +3068,47 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       recent: {
         label: "Recent"
+      }
+    }
+  },
+  sys_migration: {
+    label: "数据迁移",
+    pluralLabel: "数据迁移",
+    description: "部署级数据迁移标记:本部署跑过哪些带门禁的数据迁移,以及各自的自检是否通过。",
+    fields: {
+      id: {
+        label: "迁移 ID",
+        help: "约定的迁移标识(如 adr-0104-file-references)。每个迁移一行。"
+      },
+      last_run_at: {
+        label: "最近运行时间",
+        help: "本部署最近一次完成带门禁运行(apply 模式)的时间。"
+      },
+      verified_at: {
+        label: "通过自检时间",
+        help: "自检最近一次通过的时间。未通过前为空;之后若有运行未通过会被清空——数据回退即自行关闭门禁。消费方要求本字段有值且阻断项为 0。"
+      },
+      applied_at: {
+        label: "写入执行时间",
+        help: "回填最近一次以 apply 模式(允许写入)运行的时间。"
+      },
+      blocking: {
+        label: "阻断项",
+        help: "最近一次自检报告的阻断项数量。门禁要求为 0。"
+      },
+      advisory: {
+        label: "提示项",
+        help: "最近一次运行的提示项(外部 URL、失效所有者等)——只涉及存储成本或需要建模决定,绝不阻断门禁。"
+      },
+      details: {
+        label: "详情(JSON)",
+        help: "最近一次运行的计数,JSON 编码,供诊断用。"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
       }
     }
   }

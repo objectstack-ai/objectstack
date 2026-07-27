@@ -122,6 +122,25 @@ export function isFileIdToken(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
 }
 
+/**
+ * ExecutionContext key that makes a read return file-field values in their
+ * STORED form (the bare `sys_file` id) instead of the expanded
+ * `{ id, name, url, … }` shape the engine's read resolver derives in place.
+ *
+ * Exists for the callers whose subject is the stored form itself — the
+ * ADR-0104 backfill and `verifyFileReferences` reconciliation (#3617). On a
+ * live kernel the resolver otherwise rewrites every resolvable id before the
+ * scan sees it, so the reconciliation would report held references as absent:
+ * false `stale_owner` noise, and — worse — a missed `unowned_reference` is a
+ * false pass of the very gate that authorises irreversible behaviour.
+ *
+ * A spec-level constant for the same reason `isFileIdToken` is one: the
+ * engine (which honours the key) and the storage service (which sends it)
+ * must agree on the exact string, and two hand-copied literals drifting by a
+ * character would silently re-enable expansion mid-scan.
+ */
+export const RAW_FILE_VALUES_CONTEXT_KEY = '__rawFileValues';
+
 /** Structured JSON payloads persisted in JSON columns. */
 export const STRUCTURED_JSON_TYPES: ReadonlySet<string> = new Set([
   'json', 'composite', 'repeater', 'record', 'location', 'address', 'vector',

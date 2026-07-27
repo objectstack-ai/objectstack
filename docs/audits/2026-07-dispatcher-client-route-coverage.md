@@ -157,6 +157,86 @@ expression exists for: `GET /search`, `POST /email/send`, `forms/:slug`
 `external-datasource-routes.ts`). Auditing that surface with the same
 three-column method is the next tranche of #3563.
 
+**Closed in #3587** — `packages/rest/src/rest-route-ledger.ts` plus its
+conformance guard; the 43 audited gaps and 2 mismatches both ratchet at zero.
+
+## 9. The third surface: autonomous service mounts (#3636)
+
+Neither ledger sees a service that reaches for the `http-server` service and
+registers straight on `IHttpServer` — it bypasses `RouteManager` and
+`RestServer.getRoutes()` alike. Two do: `service-storage`
+(`storage-routes.ts`, 10 routes — the SDK's entire storage surface) and
+`service-i18n` (`i18n-service-plugin.ts`, 3 routes). Both now carry a
+per-package ledger next to the registrar, enumerated by driving the real
+registrar against a capturing mock `IHttpServer`, with the client half in
+`packages/client/src/service-route-ledger-coverage.test.ts` (no
+service→client package edge — the tranche-1 lesson).
+
+Dispositions: storage audited clean at 7 `sdk` / 3 `server-only` (the
+browser-facing `/files/:fileId` redirect objectql stamps into file-field
+payloads, and the two `_local/raw/:token` local-driver loopbacks). The chunked
+upload family — flagged in #3636 as needing triage — turned out fully
+SDK-expressed (`initChunkedUpload` / `uploadPart` / `completeChunkedUpload` /
+`resumeUpload`), so no gap to close.
+
+i18n audited at **two mismatches**, both fixed in the same PR:
+`i18n.getTranslations` sent `/translations?locale=xx` and
+`i18n.getFieldLabels` sent `/labels/:object?locale=xx`, while every serving
+surface — service-i18n's mounts, the dispatcher's HTTP mounts, and the
+`plugin-rest-api.zod.ts` contract — mounts only the path form. Both were
+wire-level 404s, and both had carried a green `sdk` row in
+`route-ledger.ts` since tranche 1: **§1 coverage rows assert the client method
+exists, not that it speaks a URL anything mounts.** The same audit found
+service-i18n omitting the `success` flag from its `{ data }` bodies, so
+`unwrapResponse` returned the raw wrapper against that provider while
+returning the declared shape against the dispatcher — one method, two shapes,
+decided by which plugin mounted the route.
+
+Also filed, not fixed: `GET {base}/_local/file/:key` is built by three call
+sites and mounted by none (#3641).
+
+**The gap all three ledgers shared** was the reverse direction — no guard
+compared the URL a client method *builds* against the patterns any surface
+*mounts*. Four instances of that class were found one at a time
+(#3584 ×2, #3611, #3636 ×2). Mechanized in #3642, below.
+
+## 10. The reverse direction, mechanized (#3642)
+
+`packages/client/src/client-url-conformance.test.ts` drives **every** method on
+a real `ObjectStackClient` with a recording `fetch` and matches each captured
+URL against the **union** of all four ledgers (a union, not an intersection —
+a route mounted by one surface is still reachable). A real drive, not a
+declaration table: "method X targets route Y" written by hand is an assertion
+*about* the code that the code can drift away from, which is the very failure
+being fixed.
+
+Result at landing: 196 of ~219 methods matched; the only unmatched family was
+`projects.*`, which targets the control plane (below). Mutation-checked — the
+#3636 dialect bug, re-injected, fails the suite.
+
+**The sweep's own completeness is asserted**, because that is the part that
+rots silently:
+
+| Assertion | What it stops |
+|---|---|
+| every method is driven or declared `NON_HTTP` **with a reason** | a new SDK method escaping coverage |
+| a driven method emitting **zero** requests fails | placeholder args going stale, so the method throws before fetching and the guard passes while covering nothing |
+| a URL containing `undefined` / `[object Object]` fails | a placeholder that is accepted but wrong masquerading as coverage |
+| `(unmatched)` is excluded from the pattern set | the `__api-endpoint` catch-all matching everything and making the suite vacuous |
+
+**Two bounds, both explicit rather than papered over:**
+
+- **The control plane.** `/api/v1/cloud/*` (23 `projects.*` methods) is served
+  by the sibling `cloud` repo — this repo's dispatcher explicitly refuses those
+  paths — so no in-repo ledger can vouch for them. Exempt by prefix and bounded
+  from both ends: a non-`projects` method reaching `/cloud/` fails. Tracked as
+  #3655.
+- **Dynamic families.** A `**` row claims a prefix, not a resolvable route.
+  **60 of ~196 matched calls (~31%) rest on nothing stronger** — 54 of them on
+  `* /auth/**`, where the routes come from a third-party dependency on its own
+  release cadence. The guard counts and ratchets this, so it can only shrink.
+  Tracked as #3656.
+
 ## Follow-up slicing (proposed)
 
 1. **`client.actions.invoke(...)`** — closes the largest hole (3 routes).
@@ -166,7 +246,11 @@ three-column method is the next tranche of #3563.
 5. **Mismatch reconciliation** (§4) — done in #3584: analytics client aligned to the dispatcher, storage protocol documented as canonical (see §4 Resolution).
 6. **Docs**: delete or regenerate README surface table + CLIENT_SPEC_COMPLIANCE.md; extend client-sdk.mdx.
 7. **Deprecate `DEFAULT_DISPATCHER_ROUTES`**; point at the ledger.
-8. **REST-surface tranche** (§8) with the same ledger+guard treatment.
+8. **REST-surface tranche** (§8) with the same ledger+guard treatment — done in #3587.
+9. **Autonomous service mounts** (§9) — done in #3636.
+10. **Cross-surface URL conformance** (§10, the reverse direction) — done in #3642.
+11. **Control-plane surface** (§10) — #3655, needs a ledger in the `cloud` repo.
+12. **Enumerate `/auth/**`** (§10) — #3656, lowers the wildcard ratchet.
 
 Each gap closed must flip its ledger row to `sdk` and lower the ratchet bound
 in the conformance test — the guard enforces both directions from PR-1 onward.

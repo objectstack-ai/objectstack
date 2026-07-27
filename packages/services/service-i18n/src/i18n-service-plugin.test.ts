@@ -196,6 +196,7 @@ describe('I18nServicePlugin', () => {
       await handler(req, res);
 
       expect(res._data).toEqual({
+        success: true,
         data: {
           locales: [
             { code: 'en', label: 'en', isDefault: true },
@@ -216,6 +217,7 @@ describe('I18nServicePlugin', () => {
       await handler(req, res);
 
       expect(res._data).toEqual({
+        success: true,
         data: {
           locale: 'en',
           translations: { greeting: 'Hello', 'o.account.fields.name': 'Account Name' },
@@ -246,6 +248,7 @@ describe('I18nServicePlugin', () => {
       await handler(req, res);
 
       expect(res._data).toEqual({
+        success: true,
         data: {
           object: 'account',
           locale: 'en',

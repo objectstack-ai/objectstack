@@ -43,3 +43,9 @@ export type {
 } from './backfill-file-references.js';
 export { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 export type { AttachmentSharingLike } from './attachment-access-hooks.js';
+export { runFilesToReferencesMigration } from './files-to-references-migration.js';
+export type {
+  FilesToReferencesEngine,
+  FilesToReferencesOptions,
+  FilesToReferencesResult,
+} from './files-to-references-migration.js';

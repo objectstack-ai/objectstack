@@ -247,6 +247,35 @@ jobs:
             echo "::endgroup::"
           done
 
+  dogfood-gate:
+    # Stable required-check name for a SHARDED job (#3622 follow-up).
+    #
+    # Branch protection requires the context "Dogfood Regression Gate". Once
+    # the job became a 2-way matrix its checks publish as "Dogfood Regression
+    # Gate (1/2)" / "(2/2)" — the bare context could never appear again, so
+    # EVERY pull request in the repo sat permanently BLOCKED (mergeable, all
+    # checks green, merge button dead). #3622's own comment called for updating
+    # branch protection; keeping the contract HERE instead means a future
+    # shard-count change cannot deadlock the repo a second time.
+    #
+    # `if: always()` + result inspection so a legitimately skipped matrix (the
+    # `filter` job says no core paths changed) still satisfies the gate.
+    name: Dogfood Regression Gate
+    needs: dogfood
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify dogfood shard results
+        run: |
+          result="${{ needs.dogfood.result }}"
+          echo "dogfood matrix aggregate result: $result"
+          case "$result" in
+            success|skipped) echo "Dogfood gate satisfied." ;;
+            *) echo "::error::Dogfood shards did not pass (aggregate result: $result)"; exit 1 ;;
+          esac
+
   build-core:
     name: Build Core
     needs: filter

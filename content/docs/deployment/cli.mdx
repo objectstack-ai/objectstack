@@ -517,6 +517,48 @@ first. It never drops a table that is absent from your metadata, and on SQLite
 it reconciles via a table rebuild (copy → swap) that preserves your data.
 </Callout>
 
+#### Data migrations
+
+The commands above reconcile **schema**. A *data* migration rewrites rows, and
+whether it is done is a fact about **your** database, not about the platform
+version you installed — so each deployment runs it, and its result is recorded
+where the data lives.
+
+| Command | Description |
+|---------|-------------|
+| `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
+
+```bash
+os migrate files-to-references            # Dry run: full report, writes nothing
+os migrate files-to-references --apply    # Convert, verify, record the flag (prompts)
+os migrate files-to-references --apply --yes --json   # CI / scripts
+os migrate files-to-references --object product       # Restrict to one object (repeatable)
+```
+
+A `file` / `image` / `avatar` / `video` / `audio` field value is an opaque
+`sys_file` id that the platform owns. Values written before that (an inline
+`{url, name, …}` blob, or a URL naming this platform's own
+`…/storage/files/:id` resolver) are converted in place; **external URLs are
+reported, never re-hosted** — re-hosting third-party content is a licensing and
+privacy decision, and the right fix is usually to model the field as a `url`
+field instead.
+
+The run then reconciles what records actually hold against what `sys_file`
+records as each file's owner. Zero blocking discrepancies is what records the
+flag — and that flag, not the version number, is what later enables features
+that act irreversibly on migrated data (reclaiming the bytes of released files;
+rejecting rather than warning about legacy media values). Never running it is
+safe: files are simply retained forever.
+
+Exit status is `0` only when the self-check passes, so CI can gate on it.
+
+<Callout type="warn">
+A dry run writes **nothing** — not the conversions, and not the flag either,
+even when the self-check would pass. `--apply` is the only writing mode. A
+later run that *fails* its self-check clears the flag's verified state, so a
+database that has drifted closes its own gate.
+</Callout>
+
 ### Scaffolding
 
 | Command | Alias | Description |

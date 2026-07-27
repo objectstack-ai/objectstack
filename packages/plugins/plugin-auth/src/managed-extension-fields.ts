@@ -33,6 +33,12 @@
  * derives better-auth's real field surface from `getAuthTables()` at the PINNED
  * version and fails the build on any overlap, so the upgrade that would cause
  * this is the moment someone finds out.
+ *
+ * D7 catches only the OVERLAP — a field on both sides. A better-auth upgrade
+ * that adds a field we have nothing named like sails straight through it and
+ * fails at runtime instead (`team.memberCount`, #3624). That complementary
+ * direction — every column better-auth writes must be provisioned — is gated
+ * by `better-auth-schema-parity.test.ts`.
  */
 
 /** Object name → the extension fields ObjectStack declares on it. */
@@ -51,6 +57,16 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     // inheritance walks this reference (lint-enforced).
     'parent_organization_id',
     'sort_order',
+  ]),
+  sys_invitation: new Set([
+    // ADR-0105 D8 — placement intent. NOT generically editable (absent from
+    // the editable map below): these decide RBAC placement, so they are set
+    // ONLY at issuance through better-auth's invite endpoint, where the
+    // `invitation-placement` service authorizes them against the issuer's
+    // adminScope (ADR-0090 D12). A generic edit surface would be an
+    // escalation path around that gate.
+    'business_unit_id',
+    'positions',
   ]),
 };
 
