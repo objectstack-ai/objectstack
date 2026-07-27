@@ -240,6 +240,55 @@ export function isOAuthEligibleBaseUrl(url: string): boolean {
 /**
  * Extended options for AuthManager
  */
+/**
+ * [ADR-0105 D8] The slice of `@objectstack/plugin-security`'s
+ * `invitation-placement` service plugin-auth depends on. Structural, so
+ * plugin-auth gains no dependency on plugin-security.
+ */
+export interface InvitationPlacementServiceLike {
+  assertIssuable(args: {
+    intent: { businessUnitId: string; positions: string[] };
+    actorContext: unknown;
+    organizationId?: string | null;
+  }): Promise<void>;
+  apply(args: {
+    intent: { businessUnitId: string; positions: string[] };
+    userId: string;
+    organizationId?: string | null;
+    grantedBy?: string | null;
+  }): Promise<{ created: number; skipped: number }>;
+}
+
+/**
+ * [ADR-0105 D8] Normalize placement intent off an invitation draft/row.
+ * Accepts better-auth's camelCase draft shape and the snake_case persisted
+ * row, and a `positions` value that survived a JSON round-trip as a string.
+ * Returns `null` when there is no usable intent — an invitation WITHOUT
+ * placement is the ordinary case, not an error.
+ */
+export function readInvitationPlacementIntent(
+  row: unknown,
+): { businessUnitId: string; positions: string[] } | null {
+  const r = (row ?? {}) as Record<string, unknown>;
+  const buRaw = r.businessUnitId ?? r.business_unit_id;
+  const businessUnitId = typeof buRaw === 'string' && buRaw !== '' ? buRaw : null;
+
+  let posRaw: unknown = r.positions;
+  if (typeof posRaw === 'string') {
+    try {
+      posRaw = JSON.parse(posRaw);
+    } catch {
+      posRaw = [posRaw];
+    }
+  }
+  const positions = Array.isArray(posRaw)
+    ? posRaw.filter((p): p is string => typeof p === 'string' && p !== '')
+    : [];
+
+  if (!businessUnitId || positions.length === 0) return null;
+  return { businessUnitId, positions };
+}
+
 export interface AuthManagerOptions extends Partial<AuthConfig> {
   /**
    * Better-Auth instance (for advanced use cases)
@@ -284,6 +333,20 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * needs placement to be effectively atomic should make the callback
    * idempotent and reconcile on retry.
    */
+  /**
+   * [ADR-0105 D8] Lazy accessor for the `invitation-placement` service
+   * (registered by `@objectstack/plugin-security`). Wired by `AuthPlugin`;
+   * lazy because plugin-security starts after plugin-auth.
+   *
+   * It carries the authority for scoped invitations: issuance authorizes the
+   * requested placement against the ISSUER's `adminScope`, acceptance applies
+   * it. Absent (an embedding without plugin-security) ⇒ an invitation that
+   * requests placement is REFUSED — there is no gate to check it against, and
+   * an unchecked placement would hand `organization_admin` the RBAC-write
+   * authority it is deliberately denied elsewhere.
+   */
+  invitationPlacement?: () => Promise<InvitationPlacementServiceLike | undefined>;
+
   onInvitationAccepted?: (data: {
     invitationId?: string;
     organizationId?: string;
@@ -1604,12 +1667,74 @@ export class AuthManager {
               console.warn('[auth] onOrganizationCreated callback failed:', err?.message ?? String(err));
             }
           },
-          // [ADR-0105 D8] Accept-time seam — the host applies the invitation's
-          // placement intent (BU membership + positions, extension fields on
-          // sys_invitation) as soon as the better-auth membership lands. Same
-          // shape and failure isolation as afterCreateOrganization above:
-          // acceptance never rolls back on a side-effect miss.
+          // [ADR-0105 D8] Issuance gate. A placement intent on an invitation
+          // is a REQUEST; the authority to honour it is the ISSUER's
+          // `adminScope` (ADR-0090 D12), judged HERE — at issuance, while the
+          // actor is the inviter — not at acceptance, when the actor is the
+          // invitee. Rejecting throws out of the endpoint, so no invitation
+          // row is created.
+          //
+          // Fail closed on a missing service: without plugin-security there
+          // is no gate, and honouring an unchecked placement would hand
+          // `organization_admin` the RBAC-write authority it is deliberately
+          // denied (auto-org-admin-grant.ts keeps it read-only on those
+          // tables precisely so a fresh org admin cannot rebind themselves).
+          beforeCreateInvitation: async ({ invitation, inviter, organization }: any) => {
+            const intent = readInvitationPlacementIntent(invitation);
+            if (!intent) return;
+
+            const svc = await this.config.invitationPlacement?.().catch(() => undefined);
+            if (!svc) {
+              const { APIError } = await import('better-auth/api');
+              throw new APIError('FORBIDDEN', {
+                message:
+                  'Invitation placement (business unit + positions) requires the delegated-administration runtime; this deployment cannot authorize it.',
+              });
+            }
+
+            const organizationId = organization?.id ?? invitation?.organizationId;
+            try {
+              await svc.assertIssuable({
+                intent,
+                // The gate resolves the issuer's permission sets from this
+                // context, exactly as the CRUD middleware would.
+                actorContext: { userId: inviter?.id, tenantId: organizationId },
+                organizationId,
+              });
+            } catch (err: any) {
+              const { APIError } = await import('better-auth/api');
+              throw new APIError('FORBIDDEN', {
+                message: err?.message ?? 'Invitation placement is outside your delegated administration scope.',
+              });
+            }
+          },
+          // [ADR-0105 D8] Accept-time application + host seam. The placement
+          // the issuance gate approved lands WITH the better-auth membership,
+          // so the invitee arrives already in the right unit and role. The
+          // apply is idempotent (a replayed acceptance converges) and
+          // failure-isolated — a placement miss must not undo a valid
+          // membership; the host seam still fires either way.
           afterAcceptInvitation: async ({ invitation, member, user, organization }: any) => {
+            const intent = readInvitationPlacementIntent(invitation);
+            if (intent) {
+              try {
+                const svc = await this.config.invitationPlacement?.();
+                if (svc) {
+                  await svc.apply({
+                    intent,
+                    userId: String(user?.id ?? member?.userId),
+                    organizationId: organization?.id ?? invitation?.organizationId ?? member?.organizationId,
+                    grantedBy: invitation?.inviterId ?? invitation?.inviter_id ?? null,
+                  });
+                }
+              } catch (err: any) {
+                console.warn(
+                  '[auth] invitation placement failed (membership kept):',
+                  err?.message ?? String(err),
+                );
+              }
+            }
+
             const cb = this.config.onInvitationAccepted;
             if (typeof cb !== 'function') return;
             try {

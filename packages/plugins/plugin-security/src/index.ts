@@ -25,6 +25,16 @@ export {
   backfillOrgAdminGrants,
 } from './auto-org-admin-grant.js';
 export { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
+// [ADR-0105 D8] Scoped-invitation placement — issuance gate + accept-time apply.
+export {
+  INVITATION_PLACEMENT_SERVICE,
+  createInvitationPlacementService,
+  readPlacementIntent,
+} from './invitation-placement.js';
+export type {
+  InvitationPlacementIntent,
+  InvitationPlacementService,
+} from './invitation-placement.js';
 export { bootstrapDeclaredPermissions } from './bootstrap-declared-permissions.js';
 // [ADR-0094] sys_permission_set pure-projection machinery.
 export {

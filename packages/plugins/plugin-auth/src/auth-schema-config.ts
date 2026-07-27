@@ -226,6 +226,33 @@ export const AUTH_INVITATION_SCHEMA = {
     createdAt: 'created_at',
     teamId: 'team_id',
   },
+  /**
+   * [ADR-0105 D8] Placement intent rides the invitation better-auth already
+   * creates, so acceptance can apply it atomically with the membership
+   * (`additionalFields` is better-auth's own extension seam — no shadow
+   * table, no second write to keep in sync).
+   *
+   * These ARE client-suppliable (input stays on) because a placement intent
+   * is a REQUEST, not an authority: the `beforeCreateInvitation` hook runs
+   * unconditionally and authorizes the pair against the ISSUER's `adminScope`
+   * (ADR-0090 D12) via the `invitation-placement` service, rejecting the whole
+   * invitation when the unit is outside their subtree or a position
+   * distributes a set they may not hand out. Marking them `input: false`
+   * instead would not add safety — it would simply make the feature
+   * unreachable, since the hook has no other channel to receive the request.
+   */
+  additionalFields: {
+    businessUnitId: {
+      type: 'string',
+      required: false,
+      fieldName: 'business_unit_id',
+    },
+    positions: {
+      type: 'string[]',
+      required: false,
+      fieldName: 'positions',
+    },
+  },
 } as const;
 
 // ---------------------------------------------------------------------------

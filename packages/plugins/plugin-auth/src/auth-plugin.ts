@@ -256,6 +256,23 @@ export class AuthPlugin implements Plugin {
       ? { ...authConfig.socialProviders }
       : undefined;
 
+    // [ADR-0105 D8] Lazy handle to plugin-security's `invitation-placement`
+    // service. LAZY on purpose: plugin-security starts after plugin-auth, so
+    // an eager lookup here would always miss and silently disable scoped
+    // invitations. Resolved per hook invocation instead; `undefined` (no
+    // plugin-security) makes a placement-carrying invitation fail closed.
+    authConfig.invitationPlacement = async () => {
+      try {
+        const svc =
+          (await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> }).getServiceAsync?.(
+            'invitation-placement',
+          )) ?? ctx.getService?.('invitation-placement');
+        return svc as never;
+      } catch {
+        return undefined;
+      }
+    };
+
     // Initialize auth manager with data engine
     this.authManager = new AuthManager(authConfig);
     // ADR-0092 D6 — remember the storage better-auth will actually use so the

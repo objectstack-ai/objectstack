@@ -706,6 +706,161 @@ describe('AuthManager', () => {
       ).resolves.toBeUndefined();
     });
 
+    // ── [ADR-0105 D8] Scoped invitations: issuance gate + accept-time apply ──
+    //
+    // The security property: authority is judged at ISSUANCE (actor = the
+    // inviter) and only the already-approved placement is applied at
+    // acceptance (actor = the invitee, who holds no RBAC-write authority).
+    const bootWithPlacement = async (placement?: any) => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        plugins: { organization: true },
+        ...(placement !== undefined ? { invitationPlacement: async () => placement } : {}),
+      });
+      await manager.getAuthInstance();
+      const orgPlugin = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+      return { hooks: orgPlugin._opts.organizationHooks, warnSpy };
+    };
+
+    const PLACEMENT_INVITE = {
+      id: 'inv-1',
+      organizationId: 'org-42',
+      email: 'p@x.test',
+      role: 'member',
+      businessUnitId: 'bu_plant_a',
+      positions: ['qc_inspector'],
+    };
+
+    it('issuance: authorizes placement intent against the ISSUER, not the invitee', async () => {
+      const assertIssuable = vi.fn(async () => {});
+      const { hooks, warnSpy } = await bootWithPlacement({ assertIssuable, apply: vi.fn() });
+      warnSpy.mockRestore();
+
+      await hooks.beforeCreateInvitation({
+        invitation: PLACEMENT_INVITE,
+        inviter: { id: 'u_issuer' },
+        organization: { id: 'org-42' },
+      });
+
+      expect(assertIssuable).toHaveBeenCalledTimes(1);
+      expect(assertIssuable).toHaveBeenCalledWith({
+        intent: { businessUnitId: 'bu_plant_a', positions: ['qc_inspector'] },
+        actorContext: { userId: 'u_issuer', tenantId: 'org-42' },
+        organizationId: 'org-42',
+      });
+    });
+
+    it('issuance: a refused placement REJECTS the whole invitation (no row is created)', async () => {
+      const assertIssuable = vi.fn(async () => {
+        throw new Error("business unit 'bu_plant_b' is outside the delegated subtree");
+      });
+      const { hooks, warnSpy } = await bootWithPlacement({ assertIssuable, apply: vi.fn() });
+      warnSpy.mockRestore();
+
+      await expect(
+        hooks.beforeCreateInvitation({
+          invitation: PLACEMENT_INVITE,
+          inviter: { id: 'u_issuer' },
+          organization: { id: 'org-42' },
+        }),
+      ).rejects.toThrow(/outside the delegated subtree/);
+    });
+
+    it('issuance: NO placement runtime ⇒ a placement-carrying invitation is refused (fail closed)', async () => {
+      // Without plugin-security there is no gate; honouring the request would
+      // hand org_admin the RBAC-write authority it is deliberately denied.
+      const { hooks, warnSpy } = await bootWithPlacement(undefined);
+      warnSpy.mockRestore();
+
+      await expect(
+        hooks.beforeCreateInvitation({
+          invitation: PLACEMENT_INVITE,
+          inviter: { id: 'u_issuer' },
+          organization: { id: 'org-42' },
+        }),
+      ).rejects.toThrow(/requires the delegated-administration runtime/);
+    });
+
+    it('issuance: an ordinary invitation (no placement) never consults the gate', async () => {
+      const assertIssuable = vi.fn(async () => {});
+      const { hooks, warnSpy } = await bootWithPlacement({ assertIssuable, apply: vi.fn() });
+      warnSpy.mockRestore();
+
+      await expect(
+        hooks.beforeCreateInvitation({
+          invitation: { id: 'inv-2', organizationId: 'org-42', email: 'e@x.test', role: 'member' },
+          inviter: { id: 'u_issuer' },
+          organization: { id: 'org-42' },
+        }),
+      ).resolves.toBeUndefined();
+      expect(assertIssuable).not.toHaveBeenCalled();
+    });
+
+    it('acceptance: applies the approved placement, stamping the issuer as grantor', async () => {
+      const apply = vi.fn(async () => ({ created: 1, skipped: 0 }));
+      const { hooks, warnSpy } = await bootWithPlacement({ assertIssuable: vi.fn(), apply });
+      warnSpy.mockRestore();
+
+      await hooks.afterAcceptInvitation({
+        invitation: { ...PLACEMENT_INVITE, inviterId: 'u_issuer' },
+        member: { id: 'mem-9', userId: 'u-3', organizationId: 'org-42' },
+        user: { id: 'u-3' },
+        organization: { id: 'org-42' },
+      });
+
+      expect(apply).toHaveBeenCalledWith({
+        intent: { businessUnitId: 'bu_plant_a', positions: ['qc_inspector'] },
+        userId: 'u-3',
+        organizationId: 'org-42',
+        grantedBy: 'u_issuer',
+      });
+    });
+
+    it('acceptance: a placement failure keeps the membership and still fires the host seam', async () => {
+      const apply = vi.fn(async () => {
+        throw new Error('bu vanished');
+      });
+      const onInvitationAccepted = vi.fn();
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        plugins: { organization: true },
+        invitationPlacement: async () => ({ assertIssuable: vi.fn(), apply }) as never,
+        onInvitationAccepted,
+      });
+      await manager.getAuthInstance();
+      const orgPlugin = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+
+      await expect(
+        orgPlugin._opts.organizationHooks.afterAcceptInvitation({
+          invitation: PLACEMENT_INVITE,
+          member: { id: 'mem-9', userId: 'u-3' },
+          user: { id: 'u-3' },
+          organization: { id: 'org-42' },
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(
+        warnSpy.mock.calls.some((c) => String(c[0]).includes('invitation placement failed')),
+      ).toBe(true);
+      warnSpy.mockRestore();
+      // The host seam is independent of placement — it still runs.
+      expect(onInvitationAccepted).toHaveBeenCalledTimes(1);
+    });
+
     it('should register twoFactor plugin with schema mapping when enabled', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
