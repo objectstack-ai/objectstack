@@ -31,7 +31,7 @@ stale. Three real problems remain, two of them a coupled pair that produces
 | 5 | **page `label` → `title`** | **🔴 FORWARD-DRIFT — live** | spec `label` is required (`page.zod.ts:303`); the region/SDUI renderer reads `schema.title` with no fallback (`page.tsx:503-507`). Zero `schema.label` reads in `page.tsx` |
 | 6 | page `visibility` | **ALIGNED** (item stale) | spec folds `visibility` → `visibleWhen` (`page.zod.ts:116,126`); `react/src/SchemaRenderer.tsx:285` consumes `visibleWhen`, `:294` still honors raw `visibility` |
 | 7 | dashboard `title` vs `label` | **ALIGNED** (item stale) | renderer dual-reads `title \|\| label` (`plugin-dashboard/.../DashboardRenderer.tsx:782`, `DashboardGridLayout.tsx:278`). Widget-level keys additionally hard-fail via a `.strict()` schema + naming error map (`dashboard.zod.ts:273,98-123`, #1894) |
-| 8 | app `accentColor` / `badgeVariant` / `separator` | **SPLIT** — `accentColor` aligned; the other two **decayed** | #1894 declared all three in the spec to match objectui's `NavigationRenderer`. `accentColor` is still consumed (`app-shell/src/layout/ConsoleLayout.tsx:171`, `PageHeader.tsx:46`, `apps/console/src/hooks/useBranding.ts:25`). But **`NavigationRenderer` no longer exists** — the live nav is `UnifiedSidebar`, which renders neither `badgeVariant` **nor `badge` itself**, and has no `separator` branch (`separator` is only recognized as "no href" by `AppContent.tsx:849` and excluded by `nav-target.ts:17`) |
+| 8 | app `accentColor` / `badgeVariant` / `separator` | **SPLIT** — `accentColor` aligned; the other two are **surface-conditional** | #1894 declared all three to match objectui's `NavigationRenderer`. `accentColor` is consumed on the live path (`app-shell/src/layout/ConsoleLayout.tsx:171`, `PageHeader.tsx:46`, `apps/console/src/hooks/useBranding.ts:25`). `badge`/`badgeVariant`/`separator` **are fully implemented** — but only in `layout/src/NavigationRenderer.tsx` (`:906` separator, `:983-985`/`:1024-1025` badge), which is a *publicly exported, SDUI-registered* component (`navigation-renderer`), **not** the console's own app sidebar. `UnifiedSidebar` — the component that actually renders `app.navigation` in the console — renders no badge and has no separator branch (`separator` is merely recognized as "no href" by `AppContent.tsx:849` and excluded by `nav-target.ts:17`) |
 | 9 | action `disabled` → `enabled` | **RESOLVED 2026-07** | fixed across all six rendering surfaces (objectui#2863); showcase specimen `showcase_archive_task` (#3643) |
 | — | flow `http` vs `http_request` | **ALIGNED** (item stale) | spec enum carries `http` marked canonical (`automation/flow.zod.ts:32`); the runtime registers `HTTP_TYPE = 'http'` (`service-automation/src/builtin/http-nodes.ts:48`) |
 | — | skill `requiredPermissions` vs `permissions` | **NOT A DRIFT** — mis-filed | `requiredPermissions` **never existed** on `SkillSchema`; the spec key is and was `permissions` (`ai/skill.zod.ts:121`). The original audit described prose/label drift in the docs, not a spec-vs-runtime mismatch |
@@ -87,11 +87,15 @@ fix for this whole class; the per-item wiring below is the tactical one.
    instead of the live `lookupFilters` — corrected (framework).
 
 **Recorded, not fixed (each needs an owner decision):**
-4. **app `badgeVariant` + nav `separator`** — a #1894 reverse-drift fix that
-   **decayed** when `NavigationRenderer` was replaced by `UnifiedSidebar`.
-   Enforce-or-prune: either the sidebar renders nav badges + separators (they are
-   ordinary nav affordances), or both keys leave the spec. Note `badge` itself is
-   also unrendered, so this is "nav badges are gone", not merely a variant key.
+4. **app `badge`/`badgeVariant` + nav `separator` — surface-conditional, do NOT
+   prune.** The capability is fully built in `NavigationRenderer` (public export
+   + SDUI `navigation-renderer`); what is missing is the same three affordances
+   in `UnifiedSidebar`, the component that actually renders `app.navigation` in
+   the console. So an author's `badge: '3'` works if the nav is rendered through
+   the SDUI component and silently vanishes in the console shell — a
+   *surface-dependent* no-op, the hardest kind to diagnose. Disposition: port the
+   three branches into `UnifiedSidebar` (reference implementations already exist
+   at `NavigationRenderer.tsx:906,983-985`), not prune the keys.
 5. **`skill.permissions` has no gate** — mis-filed as naming drift; it is an
    aspirational-config item (§4). The ledger marks it `live` on the evidence of a
    *preview renderer* while the identically-unenforced `tool.permissions` is
