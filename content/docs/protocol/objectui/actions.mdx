@@ -55,7 +55,7 @@ The `type` field selects how an action is dispatched. The complete enum is **`sc
 
 ### Script Actions
 
-Run logic with no server round trip via `body` (an L1 CEL expression or L2 sandboxed JS). `body` is only meaningful when `type` is `script`.
+Run logic with no server round trip via `body` (an L1 CEL expression or L2 sandboxed JS). `body` is only meaningful when `type` is `script`, and declaring one on any other type is a parse-time error — those types dispatch on `target`, so the body would never be invoked.
 
 ```yaml
 name: greet_user
@@ -142,7 +142,7 @@ target: customer_quick_edit
 
 ### Modal Actions
 
-Open a modal/page by name:
+Open a modal/page by name. `target` is resolved as a **page** first, then as an object (which opens that object's create/edit form); when it names neither, the action falls through to its server-side handler.
 
 ```yaml
 name: edit_customer
@@ -150,6 +150,8 @@ label: Edit Customer
 type: modal
 target: customer_edit_modal
 ```
+
+A modal action may also declare `params` — the renderer collects them in a dialog before opening the target. It may **not** declare a `body`: see [Script Actions](#script-actions) above, and use `type: script` when the goal is to collect input and then run logic.
 
 ## Action Configuration
 
