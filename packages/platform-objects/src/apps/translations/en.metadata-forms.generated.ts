@@ -248,12 +248,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "capabilities.activities": {
         label: "Activities"
       },
-      "capabilities.trash": {
-        label: "Trash"
-      },
-      "capabilities.mru": {
-        label: "Mru"
-      },
       "capabilities.clone": {
         label: "Clone"
       },
@@ -427,6 +421,26 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       summaryOperations: {
         label: "Summary Operations",
         helpText: "Roll-up summary configuration (for parent-child relationships)"
+      },
+      "summaryOperations.object": {
+        label: "Object",
+        helpText: "Child object to aggregate"
+      },
+      "summaryOperations.function": {
+        label: "Function",
+        helpText: "Aggregation function"
+      },
+      "summaryOperations.field": {
+        label: "Field",
+        helpText: "Child field to aggregate (ignored for count)"
+      },
+      "summaryOperations.relationshipField": {
+        label: "Relationship Field",
+        helpText: "Child FK back to this parent (auto-detected when omitted)"
+      },
+      "summaryOperations.filter": {
+        label: "Filter",
+        helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
       },
       externalId: {
         label: "External Id",
@@ -1611,10 +1625,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       knowledge: {
         label: "Knowledge",
         helpText: "RAG knowledge access configuration"
-      },
-      visibility: {
-        label: "Visibility",
-        helpText: "Scope: global, organization, or private"
       },
       access: {
         label: "Access",

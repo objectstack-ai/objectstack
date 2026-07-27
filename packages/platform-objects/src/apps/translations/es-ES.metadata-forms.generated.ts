@@ -248,12 +248,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "capabilities.activities": {
         label: "Actividades"
       },
-      "capabilities.trash": {
-        label: "Papelera"
-      },
-      "capabilities.mru": {
-        label: "Uso reciente"
-      },
       "capabilities.clone": {
         label: "Clonar"
       },
@@ -427,6 +421,26 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       summaryOperations: {
         label: "Operaciones de resumen",
         helpText: "Configuración de resumen roll-up (para relaciones padre-hijo)"
+      },
+      "summaryOperations.object": {
+        label: "Object",
+        helpText: "Child object to aggregate"
+      },
+      "summaryOperations.function": {
+        label: "Function",
+        helpText: "Aggregation function"
+      },
+      "summaryOperations.field": {
+        label: "Field",
+        helpText: "Child field to aggregate (ignored for count)"
+      },
+      "summaryOperations.relationshipField": {
+        label: "Relationship Field",
+        helpText: "Child FK back to this parent (auto-detected when omitted)"
+      },
+      "summaryOperations.filter": {
+        label: "Filter",
+        helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
       },
       externalId: {
         label: "ID externo",
@@ -1611,10 +1625,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       knowledge: {
         label: "Conocimiento",
         helpText: "Configuración de acceso a conocimiento RAG"
-      },
-      visibility: {
-        label: "Visibilidad",
-        helpText: "Ámbito: global, organization o private"
       },
       access: {
         label: "Acceso",

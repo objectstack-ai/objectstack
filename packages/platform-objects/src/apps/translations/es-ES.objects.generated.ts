@@ -664,6 +664,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       team_id: {
         label: "Equipo",
         help: "Equipo opcional que se asignará al aceptar."
+      },
+      business_unit_id: {
+        label: "Placement Business Unit",
+        help: "Business unit the invitee is placed under on acceptance (ADR-0105 D8). Must lie inside the issuer's delegated subtree."
+      },
+      positions: {
+        label: "Placement Positions",
+        help: "sys_position names assigned on acceptance (ADR-0105 D8). Every position's permission sets must be allowlisted by the issuer's adminScope."
       }
     },
     _views: {
@@ -3072,43 +3080,43 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_migration: {
-    label: "",
-    pluralLabel: "",
-    description: "",
+    label: "Data Migration",
+    pluralLabel: "Data Migrations",
+    description: "Deployment-level data-migration flags: which gated data migrations ran here and whether their self-check passed.",
     fields: {
       id: {
-        label: "",
-        help: ""
+        label: "Migration ID",
+        help: "Well-known migration id (e.g. adr-0104-file-references). One row per migration."
       },
       last_run_at: {
-        label: "",
-        help: ""
+        label: "Last Run At",
+        help: "When this migration last completed a gated (apply-mode) run on this deployment."
       },
       verified_at: {
-        label: "",
-        help: ""
+        label: "Verified At",
+        help: "When the self-check last PASSED. Null until it does, and cleared again by a later failing run — a regression closes the gate. Consumers require this to be set AND blocking = 0."
       },
       applied_at: {
-        label: "",
-        help: ""
+        label: "Applied At",
+        help: "When the backfill last ran in apply mode (writes enabled)."
       },
       blocking: {
-        label: "",
-        help: ""
+        label: "Blocking Discrepancies",
+        help: "Blocking discrepancies reported by the last self-check. The gate requires 0."
       },
       advisory: {
-        label: "",
-        help: ""
+        label: "Advisory Findings",
+        help: "Advisory findings from the last run (external URLs, stale owners, …) — cost storage or need a modelling decision, never block the gate."
       },
       details: {
-        label: "",
-        help: ""
+        label: "Details (JSON)",
+        help: "JSON-encoded counts from the last run, for diagnostics."
       },
       created_at: {
-        label: ""
+        label: "Created At"
       },
       updated_at: {
-        label: ""
+        label: "Updated At"
       }
     }
   }

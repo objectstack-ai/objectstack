@@ -248,12 +248,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "capabilities.activities": {
         label: "活動"
       },
-      "capabilities.trash": {
-        label: "ごみ箱"
-      },
-      "capabilities.mru": {
-        label: "最近使用"
-      },
       "capabilities.clone": {
         label: "複製"
       },
@@ -427,6 +421,26 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       summaryOperations: {
         label: "集計操作",
         helpText: "ロールアップ集計設定（親子関係用）"
+      },
+      "summaryOperations.object": {
+        label: "Object",
+        helpText: "Child object to aggregate"
+      },
+      "summaryOperations.function": {
+        label: "Function",
+        helpText: "Aggregation function"
+      },
+      "summaryOperations.field": {
+        label: "Field",
+        helpText: "Child field to aggregate (ignored for count)"
+      },
+      "summaryOperations.relationshipField": {
+        label: "Relationship Field",
+        helpText: "Child FK back to this parent (auto-detected when omitted)"
+      },
+      "summaryOperations.filter": {
+        label: "Filter",
+        helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
       },
       externalId: {
         label: "外部 ID",
@@ -1611,10 +1625,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       knowledge: {
         label: "ナレッジ",
         helpText: "RAG ナレッジアクセス設定"
-      },
-      visibility: {
-        label: "可視範囲",
-        helpText: "スコープ: global, organization, または private"
       },
       access: {
         label: "アクセス",

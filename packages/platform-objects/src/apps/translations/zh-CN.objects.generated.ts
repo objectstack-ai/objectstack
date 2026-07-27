@@ -664,6 +664,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       team_id: {
         label: "团队",
         help: "接受邀请后可选分配的团队"
+      },
+      business_unit_id: {
+        label: "Placement Business Unit",
+        help: "Business unit the invitee is placed under on acceptance (ADR-0105 D8). Must lie inside the issuer's delegated subtree."
+      },
+      positions: {
+        label: "Placement Positions",
+        help: "sys_position names assigned on acceptance (ADR-0105 D8). Every position's permission sets must be allowlisted by the issuer's adminScope."
       }
     },
     _views: {
