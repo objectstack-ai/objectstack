@@ -1667,6 +1667,203 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_sso_provider: {
+    label: "SSO Provider",
+    pluralLabel: "SSO Providers",
+    description: "External SSO identity providers (OIDC / SAML) this environment federates login to",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      provider_id: {
+        label: "Provider ID",
+        help: "Stable provider identifier (unique within the environment)"
+      },
+      issuer: {
+        label: "Issuer",
+        help: "IdP issuer URL"
+      },
+      domain: {
+        label: "Email Domain",
+        help: "Email domain routed to this IdP (e.g. acme.com)"
+      },
+      domain_verified: {
+        label: "Domain Verified",
+        help: "Whether DNS ownership of the email domain has been proven (ADR-0024 ②). Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment."
+      },
+      oidc_config: {
+        label: "OIDC Config",
+        help: "JSON: clientId, clientSecret, endpoints, scopes, mapping, pkce (managed by better-auth)"
+      },
+      saml_config: {
+        label: "SAML Config",
+        help: "JSON: entryPoint, cert, identifierFormat, mapping (managed by better-auth)"
+      },
+      user_id: {
+        label: "Registered By",
+        help: "User who registered this provider"
+      },
+      organization_id: {
+        label: "Organization",
+        help: "Organization scope (when org-scoped SSO is used)"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All",
+        emptyState: {
+          title: "No SSO providers yet",
+          message: "Register your organization’s external IdP — OIDC (Okta, Entra, Auth0, …) with “Register SSO Provider”, or SAML 2.0 with “Register SAML Provider”. Members whose email domain matches can then sign in through it."
+        }
+      }
+    },
+    _actions: {
+      register_sso_provider: {
+        label: "Register SSO Provider",
+        params: {
+          providerId: {
+            label: "Provider ID",
+            helpText: "Stable identifier, e.g. \"okta\" or \"acme-entra\"."
+          },
+          issuer: {
+            label: "Issuer URL",
+            helpText: "IdP issuer, e.g. https://acme.okta.com. Discovery is fetched from here unless an explicit URL is given below."
+          },
+          domain: {
+            label: "Email Domain",
+            helpText: "Users with this email domain are routed to this IdP, e.g. acme.com."
+          },
+          clientId: {
+            label: "Client ID",
+            helpText: "OAuth client ID issued by the IdP for this environment."
+          },
+          clientSecret: {
+            label: "Client Secret",
+            helpText: "OAuth client secret (stored encrypted by better-auth)."
+          },
+          discoveryEndpoint: {
+            label: "Discovery URL",
+            helpText: "Optional. OIDC discovery document URL. Leave blank to derive `<issuer>/.well-known/openid-configuration`."
+          },
+          scopes: {
+            label: "Scopes",
+            helpText: "Optional. Space- or comma-separated OAuth scopes. Defaults to \"openid email profile\".",
+            placeholder: "openid email profile"
+          },
+          mapId: {
+            label: "Map: User ID claim",
+            helpText: "Optional. ID-token claim mapped to the user ID. Defaults to \"sub\".",
+            placeholder: "sub"
+          },
+          mapEmail: {
+            label: "Map: Email claim",
+            helpText: "Optional. Claim mapped to email. Defaults to \"email\".",
+            placeholder: "email"
+          },
+          mapName: {
+            label: "Map: Name claim",
+            helpText: "Optional. Claim mapped to display name. Defaults to \"name\".",
+            placeholder: "name"
+          }
+        }
+      },
+      register_saml_provider: {
+        label: "Register SAML Provider",
+        params: {
+          providerId: {
+            label: "Provider ID",
+            helpText: "Stable identifier, e.g. \"acme-saml\"."
+          },
+          issuer: {
+            label: "IdP Entity ID",
+            helpText: "The IdP’s SAML EntityID (issuer), e.g. https://saml.acme.com/entityid."
+          },
+          domain: {
+            label: "Email Domain",
+            helpText: "Users with this email domain are routed to this IdP, e.g. acme.com."
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "The IdP’s SAML single sign-on (redirect) endpoint that receives the SAMLRequest."
+          },
+          cert: {
+            label: "IdP Signing Certificate",
+            helpText: "The IdP’s X.509 signing certificate (PEM body). Used to verify assertion signatures."
+          },
+          identifierFormat: {
+            label: "NameID Format",
+            helpText: "Optional. Requested SAML NameID format. Defaults to the IdP’s configured format.",
+            placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          }
+        }
+      },
+      request_domain_verification: {
+        label: "Request Domain Verification",
+        resultDialog: {
+          title: "Verify your domain",
+          description: "Add the DNS TXT record below at your domain’s DNS provider, then run “Verify Domain”. The token is shown once.",
+          acknowledge: "Done",
+          fields: {
+            dnsRecordType: "Record type",
+            dnsRecordName: "Name / Host",
+            dnsRecordValue: "Value"
+          }
+        }
+      },
+      verify_domain: {
+        label: "Verify Domain",
+        successMessage: "Domain ownership verified"
+      },
+      delete_sso_provider: {
+        label: "Delete SSO Provider",
+        confirmText: "Delete this SSO provider? Users from its domain will no longer be able to sign in through it.",
+        successMessage: "SSO provider deleted"
+      }
+    }
+  },
+  sys_scim_provider: {
+    label: "SCIM Provider",
+    pluralLabel: "SCIM Providers",
+    description: "SCIM 2.0 connections (bearer tokens) external IdPs use to provision/deprovision this environment's users",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      provider_id: {
+        label: "Provider ID",
+        help: "Stable SCIM provider identifier (e.g. \"okta-scim\")"
+      },
+      scim_token: {
+        label: "SCIM Token (hash)",
+        help: "Hashed bearer credential for this SCIM connection — the plaintext is shown once at generate-token. Sensitive; do not expose."
+      },
+      organization_id: {
+        label: "Organization",
+        help: "Organization scope of this token (org-scoped tokens restrict provisioning to that org)"
+      },
+      user_id: {
+        label: "Owned By",
+        help: "User who generated this token (when provider-ownership is enabled)"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
   sys_notification: {
     label: "Notification",
     pluralLabel: "Notifications",
@@ -2233,6 +2430,92 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Updated At"
+      }
+    }
+  },
+  sys_import_job: {
+    label: "Import Job",
+    pluralLabel: "Import Jobs",
+    description: "Asynchronous bulk-import job state, progress, and history",
+    fields: {
+      id: {
+        label: "Job ID"
+      },
+      object_name: {
+        label: "Object",
+        help: "API name of the object being imported into"
+      },
+      status: {
+        label: "Status",
+        options: {
+          pending: "pending",
+          running: "running",
+          succeeded: "succeeded",
+          failed: "failed",
+          cancelled: "cancelled"
+        }
+      },
+      total_rows: {
+        label: "Total Rows"
+      },
+      processed_rows: {
+        label: "Processed Rows"
+      },
+      created_count: {
+        label: "Created"
+      },
+      updated_count: {
+        label: "Updated"
+      },
+      skipped_count: {
+        label: "Skipped"
+      },
+      error_count: {
+        label: "Errors"
+      },
+      write_mode: {
+        label: "Write Mode",
+        options: {
+          insert: "insert",
+          update: "update",
+          upsert: "upsert"
+        }
+      },
+      dry_run: {
+        label: "Dry Run"
+      },
+      run_automations: {
+        label: "Run Automations"
+      },
+      treat_as_historical: {
+        label: "Treat As Historical"
+      },
+      error: {
+        label: "Fatal Error"
+      },
+      results: {
+        label: "Row Results (sample)",
+        help: "Capped sample of per-row results (failures first) for the UI"
+      },
+      undo_log: {
+        label: "Undo Log",
+        help: "Reversal instructions ({created:[ids], updated:[{id,before}]}) captured for small non-dry-run jobs so the import can be undone"
+      },
+      reverted_at: {
+        label: "Reverted At",
+        help: "Set when the import was undone (created records deleted, updated records restored)"
+      },
+      started_at: {
+        label: "Started At"
+      },
+      completed_at: {
+        label: "Completed At"
+      },
+      created_by: {
+        label: "Created By"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },
