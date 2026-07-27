@@ -319,6 +319,19 @@ await client.i18n.getFieldLabels('account', 'zh-CN');
 // Automation — Trigger workflows and automations
 await client.automation.trigger('send_welcome_email', { userId });
 
+// Screen flows pause for user input instead of completing. `execute()` returns
+// `{ status: 'paused', runId, screen }`; render the screen, then resume the run
+// with the collected values. A wizard pauses again for each further step.
+const run = await client.automation.execute('convert_lead', { params: { recordId } });
+if (run.status === 'paused') {
+  await client.automation.resume('convert_lead', run.runId, {
+    inputs: { account_name: 'Radium Labs' },
+  });
+}
+// Re-fetch the pending screen when the client did not launch the run itself
+// (a page reload, another tab, an inbox):
+await client.automation.getScreen('convert_lead', runId);
+
 // Storage — File upload and management
 await client.storage.upload(fileData, 'user');
 await client.storage.getDownloadUrl('file-123');
