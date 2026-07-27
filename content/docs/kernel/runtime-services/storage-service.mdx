@@ -17,14 +17,14 @@ services.storage.delete(key: string): Promise<void>
 services.storage.exists(key: string): Promise<boolean>
 services.storage.getInfo(key: string): Promise<StorageFileInfo>
 services.storage.list?(prefix: string): Promise<StorageFileInfo[]>
-services.storage.getSignedUrl?(key: string, expiresIn: number): Promise<string>
+services.storage.getSignedUrl?(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<string>
 ```
 
 ## Presigned / Chunked (optional)
 
 ```ts
 services.storage.getPresignedUpload?(key: string, expiresIn: number, options?: StorageUploadOptions): Promise<PresignedUploadDescriptor>
-services.storage.getPresignedDownload?(key: string, expiresIn: number): Promise<PresignedDownloadDescriptor>
+services.storage.getPresignedDownload?(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<PresignedDownloadDescriptor>
 services.storage.initiateChunkedUpload?(key: string, options?: StorageUploadOptions): Promise<string>
 services.storage.uploadChunk?(uploadId: string, partNumber: number, data: Buffer): Promise<string>
 services.storage.completeChunkedUpload?(uploadId: string, parts: Array<{ partNumber: number; eTag: string }>): Promise<string>
