@@ -210,6 +210,12 @@ The node writes a `sys_approval_request` row: `status: 'pending'`,
 record is **locked** against edits while pending (`lockRecord`, default `true`),
 and the flow run parks until a decision arrives.
 
+The lock applies to everyone *except the run that opened the request*. A flow may
+still write its own target record while its own approval is pending, so it can
+never deadlock against itself. The exemption is keyed on run identity rather than
+elevation, so a `runAs:'user'` run stays row-level-security scoped while it
+writes — it does not become a system write.
+
 Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
 
@@ -381,6 +387,20 @@ approver, or **recall** it — releasing the lock. An admin decision is
 authoritative: it finalizes the node even under `unanimous`/`quorum`/`per_group`,
 and is audited under the admin's own id. Prefer a guaranteed-staffed fallback
 approver so the set is never empty in the first place.
+</Callout>
+
+<Callout type="info">
+**A dead run releases its own lock.** If the flow run that opened an approval
+reaches a terminal state without a decision — it failed, was cancelled, timed
+out, or the process hosting it crashed — nothing is left to decide the request,
+so a periodic sweep finalizes it as `recalled` and releases the record. The
+audit row records the actor `system:dead-run` and names the run and its status,
+so it reads distinctly from a submitter's own recall.
+
+The sweep only ever acts on a run it can positively confirm is terminal: a
+paused run (the normal state of a live approval), an unknown run, or an
+unreachable automation engine all count as *alive* and are left untouched. It
+frees orphaned records; it never cancels a live approval.
 </Callout>
 
 ### Progress and notification deep links
