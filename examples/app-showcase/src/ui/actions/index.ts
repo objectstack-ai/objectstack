@@ -235,6 +235,37 @@ export const ActionParamGalleryAction = defineAction({
   refreshAfter: false,
 });
 
+/**
+ * script — the `disabled` predicate specimen. Where `visible` HIDES an action
+ * (see MarkDoneAction), `disabled` keeps it ON SCREEN but greyed until its
+ * precondition holds: Archive stays visible on every task and only becomes
+ * clickable once the task is done. Same authoring rules as `visible`
+ * (`record.`-prefixed, single comparison; disabled when the CEL is TRUE).
+ * Exercises the renderer-side wiring (objectui: DeclaredActionsBar +
+ * action:button/group/icon/menu) that #1885's follow-through completed.
+ */
+export const ArchiveTaskAction = defineAction({
+  name: 'showcase_archive_task',
+  label: 'Archive',
+  icon: 'archive',
+  objectName: task,
+  type: 'script',
+  body: {
+    language: 'js',
+    // No destructive side effect — the specimen's value is the disabled
+    // behavior itself; echo which record would be archived.
+    source:
+      "var id = ctx.recordId || (ctx.record && ctx.record.id) || input.recordId;" +
+      "return { ok: true, archived: id };",
+    capabilities: [],
+  },
+  successMessage: 'Task archived (demo — no data changed).',
+  // Disabled while the task is not done — visible either way.
+  disabled: 'record.done != true',
+  locations: ['record_header', 'record_section'],
+  refreshAfter: false,
+});
+
 export const allActions = [
   MarkDoneAction,
   OpenDocsAction,
@@ -245,4 +276,5 @@ export const allActions = [
   NewTaskAction,
   SubmitForSignoffAction,
   ActionParamGalleryAction,
+  ArchiveTaskAction,
 ];
