@@ -64,6 +64,22 @@ export interface AutomationContext {
      * Callers do NOT set this — the engine derives it from the flow definition.
      */
     runAs?: 'system' | 'user';
+    /**
+     * Id of the run this context belongs to, stamped by the engine at run setup
+     * alongside {@link runAs} and carried into every data node's ObjectQL
+     * `context` (see `resolveRunDataContext` in @objectstack/service-automation).
+     * It is persisted with a suspended run, so it survives a pause/resume round
+     * trip — including a cold resume after a process restart.
+     *
+     * Provenance, not authorization: it grants nothing and no security
+     * middleware keys on it. A hook uses it to recognize writes made BY a given
+     * run — the approvals record lock (#3456) lets the run that opened a pending
+     * approval write its own target record, which it otherwise cannot tell apart
+     * from an unrelated user's edit.
+     *
+     * Callers do NOT set this — the engine derives it, exactly like {@link runAs}.
+     */
+    flowRunId?: string;
     /** Additional contextual data */
     params?: Record<string, unknown>;
 }

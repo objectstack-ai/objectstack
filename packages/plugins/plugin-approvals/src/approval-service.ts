@@ -73,6 +73,19 @@ export interface ApprovalResumeSurface {
    * which has no reject edge to resume down.
    */
   cancelRun?(runId: string, reason?: string): Promise<unknown>;
+  /**
+   * Look up a run's recorded outcome (#3456). Used by the dead-run sweep to ask
+   * "is the run behind this pending request still alive?".
+   *
+   * The contract that makes the sweep safe is the answer for a run that is
+   * merely SUSPENDED (the normal state of a run waiting on an approval): the
+   * engine writes no execution-log entry until a run reaches a terminal state,
+   * so a suspended run resolves to `null`, never to a status. The sweep
+   * therefore acts only on an explicit terminal-failure status and treats
+   * `null` — unknown run, evicted log, no durable store, no automation engine —
+   * as "still alive".
+   */
+  getRun?(runId: string): Promise<{ status?: string } | null>;
 }
 
 /**
@@ -101,6 +114,24 @@ export const ESCALATION_JOB_NAME = 'approvals-sla-escalation';
 export const ESCALATION_SCAN_INTERVAL_MS = 5 * 60 * 1000;
 /** Reserved actor id for machine decisions made by the SLA scanner. */
 export const SLA_ACTOR_ID = 'system:sla';
+/** Reserved actor id for requests abandoned because their run died (#3456). */
+export const DEAD_RUN_ACTOR_ID = 'system:dead-run';
+/**
+ * Run statuses that mean "this run will never resume", so a request still
+ * pending on it is orphaned (#3456). A CLOSED set, deliberately: the dead-run
+ * sweep treats every other answer — `paused` (a run waiting on its approval,
+ * the normal case), `running`, an unknown status, or no answer at all — as
+ * alive, so an unrecognised state can never cost someone a live approval.
+ *
+ * `completed` belongs here with the failure states. The approval node only
+ * writes a request row on the path where it also suspends the run, and every
+ * in-band transition (decide / recall / send-back / resubmit) finalises the
+ * request *before* it resumes the run — so a completed run with a still-pending
+ * request means the run was resumed out of band and left the request behind.
+ */
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
+  'completed', 'failed', 'cancelled', 'timed_out',
+]);
 
 /** Default lifetime of an actionable-link token (ADR-0043). */
 export const ACTION_TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
@@ -2193,6 +2224,120 @@ export class ApprovalService implements IApprovalService {
       this.logger?.info?.('[approvals] SLA escalation sweep', { scanned: rows.length, escalated });
     }
     return { scanned: rows.length, escalated };
+  }
+
+  // ── Dead-run release (#3456) ──────────────────────────────────
+
+  /**
+   * One dead-run sweep: a pending request whose owning flow run has reached a
+   * TERMINAL state can never be decided — nothing is left to resume — so the
+   * request is finalised as `recalled` and, with `lockRecord`, the record it was
+   * holding is released.
+   *
+   * This is the recovery half of #3456. The prevention half is the record lock's
+   * owning-run exemption (`lifecycle-hooks.ts`), which stops a run from killing
+   * itself on its own lock in the first place; this sweep cleans up the runs that
+   * still die — for any reason, including a process crash, which no in-band
+   * handler can catch because the process that would have run it is gone.
+   *
+   * **Fail-safe by construction.** It acts only on an explicit terminal status
+   * from a closed set. Every other answer — `paused` (the normal state of a run
+   * waiting on its approval), `running`, an unrecognised status, `null` (unknown
+   * run, evicted log, no durable store), a `getRun` that throws, or no automation
+   * engine at all — is read as "still alive" and left strictly alone. The failure
+   * mode is therefore "a dead run's lock survives until an admin recalls it"
+   * (today's behaviour, #3424), never "a live approval is destroyed".
+   *
+   * `recalled` is the finalisation because it is the platform's existing terminal
+   * state for *a live request that ended without a decision*; the audit row names
+   * the real cause and {@link DEAD_RUN_ACTOR_ID} the real actor, so a dead-run
+   * release is never mistaken for a submitter's withdrawal.
+   */
+  async releaseDeadRunRequests(): Promise<{ scanned: number; released: number }> {
+    // No liveness oracle → no basis to declare anything dead.
+    if (typeof this.automation?.getRun !== 'function') return { scanned: 0, released: 0 };
+
+    let rows: any[] = [];
+    try {
+      rows = await this.engine.find('sys_approval_request', {
+        where: { status: 'pending' }, limit: 500, context: SYSTEM_CTX,
+      }) ?? [];
+    } catch (err: any) {
+      this.logger?.warn?.('[approvals] dead-run sweep failed to list requests', {
+        error: err?.message ?? String(err),
+      });
+      return { scanned: 0, released: 0 };
+    }
+
+    let released = 0;
+    for (const raw of rows) {
+      try {
+        const runId = raw?.flow_run_id ? String(raw.flow_run_id) : '';
+        if (!runId) continue;   // not node-driven — no run owns it, nothing to check
+
+        let status: string | undefined;
+        try {
+          const run = await this.automation.getRun!(runId);
+          status = typeof run?.status === 'string' ? run.status : undefined;
+        } catch (err: any) {
+          // Unknown liveness is NOT death — leave the request pending.
+          this.logger?.warn?.('[approvals] dead-run sweep could not read run status', {
+            request: raw?.id, run: runId, error: err?.message ?? String(err),
+          });
+          continue;
+        }
+        if (!status || !TERMINAL_RUN_STATUSES.has(status)) continue;
+
+        await this.abandonForDeadRun(raw, runId, status);
+        released++;
+      } catch (err: any) {
+        // One bad row never stops the sweep (mirrors runEscalations).
+        this.logger?.warn?.('[approvals] dead-run release failed for request', {
+          request: raw?.id, error: err?.message ?? String(err),
+        });
+      }
+    }
+    if (released > 0) {
+      this.logger?.info?.('[approvals] dead-run sweep', { scanned: rows.length, released });
+    }
+    return { scanned: rows.length, released };
+  }
+
+  /**
+   * Finalise one pending request whose owning run is terminal. Mirrors the
+   * shape of {@link recall} — audit row first (so a crash mid-release leaves a
+   * trace of the intent), then the status transition, approver-index sync and
+   * the optional status-field mirror. No resume/cancel of the run: it is already
+   * terminal, which is precisely why we are here.
+   */
+  private async abandonForDeadRun(raw: any, runId: string, runStatus: string): Promise<void> {
+    const org = raw.organization_id ?? null;
+    const nodeId: string | null = raw.flow_node_id ?? raw.current_step ?? null;
+    const now = this.clock.now().toISOString();
+
+    await this.engine.insert('sys_approval_action', {
+      id: uid('aact'), request_id: raw.id, organization_id: org,
+      step_name: nodeId, step_index: 0, action: 'recall',
+      actor_id: DEAD_RUN_ACTOR_ID,
+      comment: `owning flow run ${runId} is ${runStatus} — request abandoned and record lock released`,
+      created_at: now,
+    }, { context: SYSTEM_CTX });
+
+    await this.engine.update('sys_approval_request', {
+      id: raw.id, status: 'recalled', pending_approvers: null, completed_at: now, updated_at: now,
+    }, { context: SYSTEM_CTX });
+    await this.syncApproverIndex(raw.id, [], org, now);
+
+    const config = parseJson<ApprovalNodeConfig>(
+      raw.node_config_json, { approvers: [], behavior: 'first_response' } as any,
+    );
+    if (config.approvalStatusField) {
+      await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'recalled');
+    }
+
+    this.logger?.warn?.('[approvals] released a record held by a dead approval run', {
+      request: raw.id, run: runId, runStatus, object: raw.object_name, record: raw.record_id,
+    });
   }
 
   /** Execute the configured escalation action for one overdue request. */

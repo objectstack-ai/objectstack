@@ -93,6 +93,22 @@ export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogg
     const pending = await pendingRequestFor(engine, object, id);
     if (!pending) return;
 
+    // The run that OPENED this approval may still write its own target record
+    // (#3456). Without this the lock cannot tell "the run that owns this pending
+    // request" from "an unrelated user edit", so a flow that touches the record
+    // between opening the approval and the decision — or a manual `resume` with
+    // no decision — dies on its own `RECORD_LOCKED` and leaves the record locked
+    // behind it.
+    //
+    // Keyed on run identity, NOT on elevation: a `runAs:'user'` run must stay
+    // RLS-scoped, so widening it to `isSystem` would be the wrong tool. The
+    // automation engine stamps `flowRunId` into the server-built ExecutionContext
+    // (never client-supplied, like `isSystem`) and it grants nothing by itself —
+    // the only write it permits is to the one record this very run already holds
+    // a pending request against.
+    const writerRun = (ctx?.session as any)?.flowRunId;
+    if (writerRun && pending.flow_run_id && String(writerRun) === String(pending.flow_run_id)) return;
+
     const config = parseJson<any>(pending.node_config_json, {});
     if (config?.lockRecord === false) return;
 

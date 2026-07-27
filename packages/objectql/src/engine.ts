@@ -778,6 +778,12 @@ export class ObjectQL implements IDataEngine {
       // Propagate system-elevated flag so hooks can distinguish engine
       // self-writes (e.g. approval status mirror) from genuine user writes.
       ...((execCtx as any).isSystem ? { isSystem: true } : {}),
+      // Propagate the owning flow run so a hook can recognize writes made BY a
+      // run it already knows about — the approvals record lock lets the run that
+      // opened a pending approval write its own target record (#3456). Pure
+      // provenance: it grants nothing, and unlike `isSystem` it does not widen
+      // the write's authorization, so a `runAs:'user'` run stays RLS-scoped.
+      ...((execCtx as any).flowRunId ? { flowRunId: String((execCtx as any).flowRunId) } : {}),
       // Propagate the automation-suppression flag so the record-change trigger
       // can skip flow dispatch for seed/bulk writes (ADR: seed loads end-state
       // data, not user events). `skipAutomations` implies `skipTriggers` —

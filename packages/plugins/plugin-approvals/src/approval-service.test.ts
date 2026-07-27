@@ -1561,9 +1561,175 @@ describe('record-lock hook (node era)', () => {
     ).resolves.toBeUndefined();
   });
 
+  // ── #3456 prevention half: the lock must not kill the run that owns it ──
+
+  it('allows the OWNING run to write its own target record', async () => {
+    await expect(
+      engine.fire('beforeUpdate', {
+        object: 'opportunity',
+        input: { id: 'opp1', data: { amount: 200 } },
+        // Neither elevated nor admin — the exemption rides on run identity
+        // alone, so a `runAs:'user'` run stays RLS-scoped while it writes.
+        session: { isSystem: false, positions: [], userId: 'u1', flowRunId: 'run_1' },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('still blocks a DIFFERENT run writing the locked record', async () => {
+    await expect(
+      engine.fire('beforeUpdate', {
+        object: 'opportunity',
+        input: { id: 'opp1', data: { amount: 200 } },
+        session: { isSystem: false, positions: [], userId: 'u1', flowRunId: 'run_other' },
+      }),
+    ).rejects.toThrow(/RECORD_LOCKED/);
+  });
+
+  it('does not exempt anyone when the pending request carries no run id', async () => {
+    // A request with no owning run has nothing to match against — a stray
+    // `flowRunId` must not become a skeleton key.
+    engine._tables['sys_approval_request'][0].flow_run_id = null;
+    await expect(
+      engine.fire('beforeUpdate', {
+        object: 'opportunity',
+        input: { id: 'opp1', data: { amount: 200 } },
+        session: { isSystem: false, positions: [], userId: 'u1', flowRunId: 'run_1' },
+      }),
+    ).rejects.toThrow(/RECORD_LOCKED/);
+  });
+
   it('unbindAllHooks removes the lock hook', () => {
     expect(unbindAllHooks(engine as any)).toBe(1);
     expect(engine._hooks['beforeUpdate']).toHaveLength(0);
+  });
+});
+
+// ── #3456 recovery half: release records held by a dead approval run ──
+//
+// The prevention half above stops a run from dying on its own lock. This sweep
+// covers the runs that die anyway — including a process crash, which no in-band
+// handler can clean up because the process that would run it is gone.
+//
+// The load-bearing property is what it must NOT do: a run merely *paused* on its
+// approval is the normal state of every live request, so anything short of an
+// explicit terminal status has to be read as "alive".
+describe('ApprovalService — dead-run release (#3456)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+  const baseTime = new Date('2026-01-15T10:00:00Z').getTime();
+
+  /** Attach an automation surface whose `getRun` answers with `status`. */
+  const withRunStatus = (status: string | null) =>
+    svc.attachAutomation({ getRun: async () => (status == null ? null : { status }) } as any);
+
+  const requestRow = () => engine._tables['sys_approval_request'][0];
+
+  beforeEach(async () => {
+    engine = makeFakeEngine();
+    n = 0;
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
+    bindApprovalLockHook(engine as any);
+    await svc.openNodeRequest(openInput(['u9'], {}, { approvalStatusField: 'approval_status' }), CTX);
+    engine._tables['opportunity'] = [{ id: 'opp1', amount: 100 }];
+  });
+
+  it('releases a pending request whose owning run failed', async () => {
+    withRunStatus('failed');
+    expect(await svc.releaseDeadRunRequests()).toEqual({ scanned: 1, released: 1 });
+    expect(requestRow().status).toBe('recalled');
+    expect(requestRow().pending_approvers).toBeNull();
+    expect(requestRow().completed_at).toBeTruthy();
+  });
+
+  it('audits the release as a dead-run abandonment, not a submitter recall', async () => {
+    withRunStatus('failed');
+    await svc.releaseDeadRunRequests();
+    const action = engine._tables['sys_approval_action'].find((a: any) => a.actor_id === 'system:dead-run');
+    expect(action).toBeTruthy();
+    expect(action.action).toBe('recall');
+    expect(action.comment).toMatch(/run_1/);
+    expect(action.comment).toMatch(/failed/);
+  });
+
+  it('actually unlocks the record — a plain user edit succeeds afterwards', async () => {
+    // The end-to-end point of the whole sweep.
+    const edit = () => engine.fire('beforeUpdate', {
+      object: 'opportunity',
+      input: { id: 'opp1', data: { amount: 200 } },
+      session: { isSystem: false, positions: [], userId: 'u1' },
+    });
+    await expect(edit()).rejects.toThrow(/RECORD_LOCKED/);   // held by the dead run
+    withRunStatus('failed');
+    await svc.releaseDeadRunRequests();
+    await expect(edit()).resolves.toBeUndefined();            // released
+  });
+
+  it('mirrors the configured status field on release', async () => {
+    withRunStatus('failed');
+    await svc.releaseDeadRunRequests();
+    expect(engine._tables['opportunity'][0].approval_status).toBe('recalled');
+  });
+
+  it('leaves a PAUSED run alone — that is a live approval', async () => {
+    withRunStatus('paused');
+    expect(await svc.releaseDeadRunRequests()).toEqual({ scanned: 1, released: 0 });
+    expect(requestRow().status).toBe('pending');
+  });
+
+  it.each([
+    ['an unknown run (null)', null],
+    ['an unrecognised status', 'reticulating_splines'],
+    ['a still-running run', 'running'],
+  ])('leaves the request pending for %s', async (_label, status) => {
+    withRunStatus(status as any);
+    expect(await svc.releaseDeadRunRequests()).toEqual({ scanned: 1, released: 0 });
+    expect(requestRow().status).toBe('pending');
+  });
+
+  it('leaves the request pending when getRun throws', async () => {
+    svc.attachAutomation({ getRun: async () => { throw new Error('engine unreachable'); } } as any);
+    expect(await svc.releaseDeadRunRequests()).toEqual({ scanned: 1, released: 0 });
+    expect(requestRow().status).toBe('pending');
+  });
+
+  it('is a no-op with no automation engine attached', async () => {
+    expect(await svc.releaseDeadRunRequests()).toEqual({ scanned: 0, released: 0 });
+    expect(requestRow().status).toBe('pending');
+  });
+
+  it('is a no-op when the surface has no getRun (older engine)', async () => {
+    svc.attachAutomation({ resume: async () => undefined } as any);
+    expect(await svc.releaseDeadRunRequests()).toEqual({ scanned: 0, released: 0 });
+    expect(requestRow().status).toBe('pending');
+  });
+
+  it('skips a request with no owning run', async () => {
+    requestRow().flow_run_id = null;
+    withRunStatus('failed');
+    expect(await svc.releaseDeadRunRequests()).toEqual({ scanned: 1, released: 0 });
+    expect(requestRow().status).toBe('pending');
+  });
+
+  it.each(['completed', 'cancelled', 'timed_out'])(
+    'releases on the other terminal status %s', async (status) => {
+      // A terminal run can never decide its request, whatever ended it — a
+      // `completed` one means someone resumed the run out of band.
+      withRunStatus(status);
+      expect(await svc.releaseDeadRunRequests()).toEqual({ scanned: 1, released: 1 });
+      expect(requestRow().status).toBe('recalled');
+    },
+  );
+
+  it('one unreadable request does not stop the sweep', async () => {
+    await svc.openNodeRequest(
+      { ...openInput(['u9']), recordId: 'opp2', runId: 'run_2' } as any, CTX,
+    );
+    let call = 0;
+    svc.attachAutomation({
+      getRun: async () => { call++; if (call === 1) throw new Error('boom'); return { status: 'failed' }; },
+    } as any);
+    expect(await svc.releaseDeadRunRequests()).toEqual({ scanned: 2, released: 1 });
   });
 });
 

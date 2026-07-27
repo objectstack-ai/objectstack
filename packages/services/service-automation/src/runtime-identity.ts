@@ -20,6 +20,13 @@ export interface RunDataContext {
   permissions: string[];
   /** Acting user's tenant/org id. */
   tenantId?: string;
+  /**
+   * The run performing this operation (#3456). Provenance only — it is not part
+   * of the identity the security middleware evaluates, so it neither widens nor
+   * narrows what the run may touch. Hooks use it to recognize a run's writes to
+   * state that run itself opened (the approvals record lock).
+   */
+  flowRunId?: string;
 }
 
 /**
@@ -44,9 +51,17 @@ export interface RunDataContext {
  * by every data-touching node so the policy can't drift between node types.
  */
 export function resolveRunDataContext(context: AutomationContext | undefined): RunDataContext | undefined {
+  const flowRunId = context?.flowRunId;
   if (context?.runAs === 'system') {
-    return { isSystem: true, positions: [], permissions: [] };
+    return { isSystem: true, positions: [], permissions: [], ...(flowRunId ? { flowRunId } : {}) };
   }
+  // NOTE (#3456): the identity-less case below returns `undefined`, so a
+  // schedule-triggered `runAs:'user'` run with no user carries NO context at all
+  // — and therefore no `flowRunId` either, leaving it subject to the approvals
+  // record lock on its own target record. Manufacturing a context here just to
+  // carry the run id would flip that run from the documented unscoped fail-open
+  // (#1888) to baseline-member RLS — a separate, larger behavior change. The
+  // dead-run sweep in plugin-approvals is what recovers this shape.
   if (!context?.userId) return undefined;
   // `context` is now narrowed to a defined AutomationContext with a userId.
   const out: RunDataContext = {
@@ -56,6 +71,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
     permissions: Array.isArray(context.permissions) ? context.permissions : [],
   };
   if (context.tenantId) out.tenantId = context.tenantId;
+  if (flowRunId) out.flowRunId = flowRunId;
   return out;
 }
 

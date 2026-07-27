@@ -228,6 +228,7 @@ export const HookContextSchema = lazySchema(() => z.object({
     roles: z.array(z.string()).optional(),
     accessToken: z.string().optional(),
     isSystem: z.boolean().optional().describe('True when the call was made with an elevated system context (engine self-writes)'),
+    flowRunId: z.string().optional().describe('Id of the automation flow run performing this write, when it originates from a flow data node. Provenance only — grants nothing, no security middleware keys on it. Lets a hook tell the run that OWNS some externalized state (e.g. a pending approval) from an unrelated caller (#3456).'),
     skipTriggers: z.boolean().optional().describe('True when record-change automation (flow triggers) must be suppressed for this write — e.g. package seed replay. Lifecycle hooks still run.'),
     skipAutomations: z.boolean().optional().describe('True when metadata-bound automation hooks must be suppressed for this write — e.g. data import with "run automations" unchecked, or import undo. Implies skipTriggers; code-registered system hooks (audit, security) still run.'),
   }).optional().describe('Current session context'),

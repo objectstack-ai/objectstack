@@ -120,6 +120,72 @@ describe('automation run history (durable observability)', () => {
         expect(await engine.getRun('run_nope')).toBeNull();
     });
 
+    // A run that pauses and later finishes records TWO log entries under the
+    // same run id ('paused', then the terminal one). getRun scanned forwards and
+    // returned the stale 'paused' entry, so every suspend-then-finish run — i.e.
+    // every approval / screen / wait flow — reported itself as still paused
+    // forever, on the Runs surface and to the #3456 dead-run sweep alike.
+    describe('getRun after a pause (latest entry wins)', () => {
+        function pausingFlow(name: string, tail: string) {
+            return {
+                name, label: name, type: 'autolaunched',
+                nodes: [
+                    { id: 'start', type: 'start', label: 's' },
+                    { id: 'hold', type: 'hold', label: 'h' },
+                    { id: 'tail', type: tail, label: 't' },
+                    { id: 'end', type: 'end', label: 'e' },
+                ],
+                edges: [
+                    { id: 'e1', source: 'start', target: 'hold' },
+                    { id: 'e2', source: 'hold', target: 'tail' },
+                    { id: 'e3', source: 'tail', target: 'end' },
+                ],
+            };
+        }
+
+        const holdExecutor = {
+            type: 'hold',
+            async execute() { return { success: true, suspend: true, correlation: 'held' }; },
+        } as never;
+
+        it('reports the terminal status once a paused run completes', async () => {
+            const engine = new AutomationEngine(silent, new InMemorySuspendedRunStore());
+            engine.registerNodeExecutor(holdExecutor);
+            engine.registerNodeExecutor({ type: 'noop', async execute() { return { success: true }; } } as never);
+            engine.registerFlow('held_ok', pausingFlow('held_ok', 'noop') as never);
+
+            const paused = await engine.execute('held_ok', { event: 'test' } as AutomationContext);
+            expect(paused.status).toBe('paused');
+            const runId = paused.runId!;
+            // Accurate while it really is paused — this is the signal the sweep
+            // reads as "alive", so it must not regress either.
+            expect((await engine.getRun(runId))!.status).toBe('paused');
+
+            expect((await engine.resume(runId)).success).toBe(true);
+            await flush();
+            expect((await engine.getRun(runId))!.status).toBe('completed');
+        });
+
+        it('reports failed once a paused run dies after resuming', async () => {
+            const engine = new AutomationEngine(silent, new InMemorySuspendedRunStore());
+            engine.registerNodeExecutor(holdExecutor);
+            engine.registerNodeExecutor({
+                type: 'boom', async execute() { throw new Error('kaboom'); },
+            } as never);
+            engine.registerFlow('held_bad', pausingFlow('held_bad', 'boom') as never);
+
+            const paused = await engine.execute('held_bad', { event: 'test' } as AutomationContext);
+            const runId = paused.runId!;
+            expect(paused.status).toBe('paused');
+
+            expect((await engine.resume(runId)).success).toBe(false);
+            await flush();
+            // The exact shape #3456's sweep needs: a dead approval run must be
+            // recognisable as dead, not as forever-paused.
+            expect((await engine.getRun(runId))!.status).toBe('failed');
+        });
+    });
+
     it('caps terminal history per flow (retention stop-gap, #2585)', async () => {
         const store = new InMemorySuspendedRunStore({ maxTerminalRunsPerFlow: 2 });
         const engine = new AutomationEngine(silent, store);

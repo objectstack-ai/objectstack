@@ -124,3 +124,46 @@ describe("AutomationServicePlugin bridges the runAs:'user' grant resolver (#3356
     await kernel.shutdown();
   });
 });
+
+// The provenance band #3456 rides on: a run's data writes must be attributable
+// to the run that made them, all the way down to the ObjectQL context — without
+// it the approvals record lock cannot tell the owning run from a stranger.
+describe('a run stamps its own id onto its data ops (#3456)', () => {
+  it.each([
+    ["runAs:'user'", 'user'],
+    ["runAs:'system'", 'system'],
+  ] as const)('%s carries flowRunId matching the run id', async (_label, runAs) => {
+    const { engine: ql, crud } = fakeObjectQl(AUTHZ_TABLES);
+    const kernel = await bootWithObjectQl(ql);
+    const automation = kernel.getService<AutomationEngine>('automation');
+    automation.registerFlow(`stamp_${runAs}`, updateFlow(`stamp_${runAs}`, runAs) as never);
+
+    const res = await automation.execute(`stamp_${runAs}`, { userId: 'u1', params: { noteId: 'n1' } });
+    expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
+
+    // `result.runId` is only surfaced for a PAUSED run, so cross-check against
+    // the engine's own run log — the id a later `getRun` would be asked about,
+    // which is exactly the join the dead-run sweep depends on.
+    const [logged] = await automation.listRuns(`stamp_${runAs}`, { limit: 1 });
+    const update = crud.find((c) => c.op === 'update' && c.obj === 'runas_thing');
+    expect(update!.ctx.flowRunId, 'the data op carried no run provenance').toBeTruthy();
+    expect(update!.ctx.flowRunId).toBe(logged.id);
+
+    await kernel.shutdown();
+  });
+
+  it('does not leak the stamp back onto the caller-supplied context', async () => {
+    const { engine: ql } = fakeObjectQl(AUTHZ_TABLES);
+    const kernel = await bootWithObjectQl(ql);
+    const automation = kernel.getService<AutomationEngine>('automation');
+    automation.registerFlow('nomutate', updateFlow('nomutate', 'user') as never);
+
+    // resolveRunContext copies rather than mutates, so a caller reusing one
+    // context object across runs can never inherit a stale run id.
+    const caller: any = { userId: 'u1', params: { noteId: 'n1' } };
+    await automation.execute('nomutate', caller);
+    expect(caller.flowRunId).toBeUndefined();
+
+    await kernel.shutdown();
+  });
+});

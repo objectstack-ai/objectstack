@@ -161,12 +161,29 @@ export class ApprovalsServicePlugin implements Plugin {
         if (!jobs || typeof jobs.schedule !== 'function' || !this.service) return;
         const svc = this.service;
         const intervalMs = this.options.escalationScanIntervalMs ?? ESCALATION_SCAN_INTERVAL_MS;
-        await jobs.schedule(ESCALATION_JOB_NAME, { type: 'interval', intervalMs }, async () => {
-          await svc.runEscalations();
-        });
+        // Both sweeps ride this one clock: they walk the same `pending` set, and
+        // the dead-run release (#3456) is reconciliation with the same "catch up
+        // after a restart" requirement — a run killed BY the restart is exactly
+        // the shape no in-band handler can clean up.
+        // Genuinely independent — an escalation failure must not strand locked
+        // records, and vice versa, so neither can short-circuit the other.
+        const sweep = async () => {
+          const results = await Promise.allSettled([
+            svc.runEscalations(),
+            svc.releaseDeadRunRequests(),
+          ]);
+          for (const r of results) {
+            if (r.status === 'rejected') {
+              ctx.logger.warn?.('[approvals] periodic sweep leg failed', {
+                error: (r.reason as any)?.message ?? String(r.reason),
+              });
+            }
+          }
+        };
+        await jobs.schedule(ESCALATION_JOB_NAME, { type: 'interval', intervalMs }, sweep);
         this.escalationJobScheduled = true;
-        void svc.runEscalations().catch((err: any) => {
-          ctx.logger.warn?.('[approvals] boot escalation sweep failed', { error: err?.message });
+        void sweep().catch((err: any) => {
+          ctx.logger.warn?.('[approvals] boot sweep failed', { error: err?.message });
         });
         ctx.logger.info('ApprovalsServicePlugin: SLA escalation scan scheduled', { intervalMs });
       } catch { /* job service not installed */ }

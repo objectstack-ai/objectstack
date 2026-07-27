@@ -1543,7 +1543,16 @@ export class AutomationEngine implements IAutomationService {
     }
 
     async getRun(runId: string): Promise<ExecutionLogEntry | null> {
-        const inMem = this.executionLogs.find(l => l.id === runId);
+        // LAST entry wins, not the first: a run that pauses and later finishes
+        // records TWO entries under the same run id ('paused', then
+        // 'completed'/'failed'/'cancelled'). Scanning forwards returned the stale
+        // 'paused' one, so every suspend-then-finish run — i.e. every approval,
+        // screen and wait flow — reported itself as still paused forever, both on
+        // the Runs surface and to the approvals dead-run sweep (#3456).
+        let inMem: ExecutionLogEntry | undefined;
+        for (let i = this.executionLogs.length - 1; i >= 0; i--) {
+            if (this.executionLogs[i].id === runId) { inMem = this.executionLogs[i]; break; }
+        }
         if (inMem) return inMem;
         // Durable fallback: after a restart (or ring-buffer eviction) the run's
         // terminal history row still answers "what happened, at which node?".
@@ -1578,8 +1587,17 @@ export class AutomationEngine implements IAutomationService {
      * `runAs:'system'` to make scheduled elevation explicit (the build-time lint
      * `flow-schedule-runas-unscoped` flags the same shape earlier).
      */
-    private async resolveRunContext(flow: FlowParsed, context?: AutomationContext): Promise<AutomationContext> {
-        const runContext: AutomationContext = { ...(context ?? {}), runAs: flow.runAs ?? 'user' };
+    private async resolveRunContext(flow: FlowParsed, context?: AutomationContext, runId?: string): Promise<AutomationContext> {
+        // `flowRunId` is stamped alongside `runAs` because it shares that field's
+        // lifetime and its single construction point: set once here, copied into
+        // every data node's ObjectQL context by `resolveRunDataContext`, and
+        // persisted with a suspended run so it survives pause/resume — including a
+        // cold resume after a restart (#3456). Provenance, not authorization.
+        const runContext: AutomationContext = {
+            ...(context ?? {}),
+            runAs: flow.runAs ?? 'user',
+            ...(runId ? { flowRunId: runId } : {}),
+        };
 
         // #3356 (follow-up to #1888) — a `runAs:'user'` run must enforce its data
         // ops as the TRIGGERING user's real authorization. Most trigger surfaces
@@ -1767,7 +1785,9 @@ export class AutomationEngine implements IAutomationService {
         // elevation is scoped to this run and the caller's identity is restored
         // when execute() returns). Surfaces the user-less fail-open (see helper)
         // and resolves the triggering user's real grants for `runAs:'user'` (#3356).
-        const runContext = await this.resolveRunContext(flow, context);
+        // Also stamps `flowRunId` so this run's data writes are attributable to it
+        // (#3456).
+        const runContext = await this.resolveRunContext(flow, context, runId);
 
         try {
             // Find the start node
@@ -3116,7 +3136,8 @@ export class AutomationEngine implements IAutomationService {
 
         // ADR-0049 / #1888 — establish the run's effective execution identity
         // from flow.runAs (see execute() / resolveRunContext); threaded below.
-        const runContext = await this.resolveRunContext(flow, context);
+        // `flowRunId` is stamped here too (#3456).
+        const runContext = await this.resolveRunContext(flow, context, runId);
 
         try {
             const startNode = flow.nodes.find(n => n.type === 'start');

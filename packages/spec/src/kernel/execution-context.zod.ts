@@ -193,6 +193,22 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   isSystem: z.boolean().default(false),
 
   /**
+   * Id of the automation flow RUN performing this operation, when the write
+   * originates from a flow's data node. Server-constructed by the automation
+   * engine at run setup and threaded through `resolveRunDataContext` — never
+   * client-supplied, exactly like {@link isSystem} (this envelope is built from
+   * the authenticated session, not from request input).
+   *
+   * Provenance, NOT authorization: it grants nothing on its own and no security
+   * middleware keys on it. It exists so a hook can tell "the run that owns this
+   * externalized state" from "an unrelated caller" — the approvals record lock
+   * (#3456) uses it to let the run that opened a pending approval still write
+   * its own target record, which `isSystem` cannot express for a
+   * `runAs:'user'` run without elevating it.
+   */
+  flowRunId: z.string().optional(),
+
+  /**
    * Suppress record-change AUTOMATION (autolaunched flow triggers:
    * record-after-insert / -update / -delete) for writes made under this
    * context. Lifecycle HOOKS still run (derived/default fields, validation).
