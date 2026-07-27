@@ -79,13 +79,18 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
     }
 
+    // ADR-0021 D-C — the read scope (tenant + RLS) MUST be ANDed in before the
+    // query leaves the strategy. Rejects the query outright when a joined object
+    // carries a scope this path cannot express (#3597).
+    this.assertJoinedScopesEnforceable(cube, query, groupBy, filter, ctx);
+
     const rows = await ctx.executeAggregate!(objectName, {
       // Structured groupBy items ({field, dateGranularity}) pass through the
       // executeAggregate bridge to engine.aggregate, which buckets them. The
       // contract types groupBy as string[]; the cast carries the richer shape.
       groupBy: groupBy.length > 0 ? (groupBy as unknown as string[]) : undefined,
       aggregations: aggregations.length > 0 ? aggregations : undefined,
-      filter: Object.keys(filter).length > 0 ? filter : undefined,
+      filter: this.withReadScope(objectName, filter, ctx),
       // ADR-0053 Phase 2 (D2): forward the reference tz so date buckets resolve
       // on that zone's calendar days. A non-UTC zone makes the engine bucket
       // in-memory (uniform across drivers); UTC/unset keeps the DB fast path.
@@ -149,6 +154,91 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────
+
+  /**
+   * ADR-0021 D-C (#3597) — AND the object's read scope (tenant + RLS) into the
+   * filter handed to `engine.aggregate`.
+   *
+   * This path used to drop the scope entirely, and the engine could not make up
+   * for it: the aggregate bridge passes no `ExecutionContext`, so the security
+   * middleware's principal-less fall-open skipped its own RLS injection. Both
+   * belts were off at once — an authenticated caller received aggregates
+   * computed over EVERY tenant's rows.
+   *
+   * Composed with `$and`, never by key merge: the query's own filter and the
+   * scope can name the SAME field (e.g. a dashboard filtering `organization_id`),
+   * and a spread would let caller input silently overwrite the security
+   * predicate. `$and` makes that structurally impossible.
+   */
+  private withReadScope(
+    objectName: string,
+    filter: Record<string, unknown>,
+    ctx: StrategyContext,
+  ): Record<string, unknown> | undefined {
+    const userFilter = Object.keys(filter).length > 0 ? filter : undefined;
+    if (typeof ctx.getReadScope !== 'function') return userFilter;
+    const scope = ctx.getReadScope(objectName);
+    if (scope === undefined || scope === null) return userFilter;
+    const scopeFilter = scope as Record<string, unknown>;
+    if (!userFilter) return scopeFilter;
+    return { $and: [userFilter, scopeFilter] };
+  }
+
+  /**
+   * Fail-closed guard for cross-object queries (#3597).
+   *
+   * `engine.aggregate`'s `where` addresses the BASE object. A dotted member
+   * (`account.region`) is traversed by the engine through the lookup field, but
+   * there is no place in this call shape to hang a predicate on the JOINED
+   * object — so a joined object's read scope cannot be enforced here.
+   *
+   * `NativeSQLStrategy` can express it (alias-qualified WHERE per join) and does.
+   * When this path cannot, we reject rather than run a partially-scoped query:
+   * the same posture as `resolveReadScopes` (throws rather than emit unscoped
+   * SQL) and `compileScopedFilterToSql` (throws rather than drop a predicate).
+   *
+   * Only joins the query ACTUALLY references are considered — the scope map is
+   * a deliberate superset of what gets scanned, so keying off the map alone
+   * would reject queries that never touch the joined table.
+   */
+  private assertJoinedScopesEnforceable(
+    cube: Cube,
+    query: AnalyticsQuery,
+    groupBy: Array<string | { field: string; dateGranularity: string }>,
+    filter: Record<string, unknown>,
+    ctx: StrategyContext,
+  ): void {
+    if (typeof ctx.getReadScope !== 'function') return;
+
+    // Field names as they will reach the engine. A dotted name is a relationship
+    // traversal; its first segment is the join alias.
+    const referenced = [
+      ...groupBy.map((g) => (typeof g === 'string' ? g : g.field)),
+      ...Object.keys(filter),
+      ...(query.measures ?? []).map((m) => this.resolveMeasureAggregation(cube, m).field),
+    ];
+
+    const offending = new Set<string>();
+    for (const fieldName of referenced) {
+      if (!fieldName.includes('.')) continue;
+      const alias = fieldName.split('.')[0];
+      const joinedObject = cube.joins?.[alias]?.name ?? alias;
+      if (joinedObject === this.extractObjectName(cube)) continue;
+      const scope = ctx.getReadScope(joinedObject);
+      if (scope !== undefined && scope !== null) offending.add(joinedObject);
+    }
+    if (offending.size === 0) return;
+
+    throw new Error(
+      `[Analytics] ObjectQLStrategy cannot enforce the read scope of joined ` +
+      `object(s) ${[...offending].map((o) => `"${o}"`).join(', ')} — denying the ` +
+      `query (fail-closed, ADR-0021 D-C). This path reaches the joined table ` +
+      `through the base object's lookup, where a per-join security predicate ` +
+      `cannot be expressed. Run this query on a driver that supports native SQL ` +
+      `(NativeSQLStrategy scopes each join), or drop the cross-object ` +
+      `dimension/measure from the query.`,
+    );
+  }
 
   /**
    * Resolve a member ref to a `{ sql, type? }` definition.
