@@ -13,10 +13,6 @@ import {
   DEFAULT_METADATA_ROUTES,
   DEFAULT_DATA_CRUD_ROUTES,
   DEFAULT_BATCH_ROUTES,
-  DEFAULT_PERMISSION_ROUTES,
-  DEFAULT_VIEW_ROUTES,
-  DEFAULT_WORKFLOW_ROUTES,
-  DEFAULT_REALTIME_ROUTES,
   DEFAULT_NOTIFICATION_ROUTES,
   DEFAULT_AI_ROUTES,
   DEFAULT_I18N_ROUTES,
@@ -508,54 +504,6 @@ describe('plugin-rest-api.zod', () => {
       });
     });
 
-    it('should validate DEFAULT_PERMISSION_ROUTES', () => {
-      expect(DEFAULT_PERMISSION_ROUTES.prefix).toBe('/api/v1/auth');
-      expect(DEFAULT_PERMISSION_ROUTES.service).toBe('auth');
-      expect(DEFAULT_PERMISSION_ROUTES.category).toBe('permission');
-      expect(DEFAULT_PERMISSION_ROUTES.methods).toContain('checkPermission');
-      expect(DEFAULT_PERMISSION_ROUTES.methods).toContain('getObjectPermissions');
-      expect(DEFAULT_PERMISSION_ROUTES.methods).toContain('getEffectivePermissions');
-      expect(DEFAULT_PERMISSION_ROUTES.endpoints).toHaveLength(3);
-    });
-
-    it('should validate DEFAULT_VIEW_ROUTES', () => {
-      expect(DEFAULT_VIEW_ROUTES.prefix).toBe('/api/v1/ui');
-      expect(DEFAULT_VIEW_ROUTES.service).toBe('ui');
-      expect(DEFAULT_VIEW_ROUTES.category).toBe('ui');
-      expect(DEFAULT_VIEW_ROUTES.methods).toContain('listViews');
-      expect(DEFAULT_VIEW_ROUTES.methods).toContain('getView');
-      expect(DEFAULT_VIEW_ROUTES.methods).toContain('createView');
-      expect(DEFAULT_VIEW_ROUTES.methods).toContain('updateView');
-      expect(DEFAULT_VIEW_ROUTES.methods).toContain('deleteView');
-      expect(DEFAULT_VIEW_ROUTES.endpoints).toHaveLength(5);
-    });
-
-    it('should validate DEFAULT_WORKFLOW_ROUTES', () => {
-      expect(DEFAULT_WORKFLOW_ROUTES.prefix).toBe('/api/v1/workflow');
-      expect(DEFAULT_WORKFLOW_ROUTES.service).toBe('workflow');
-      expect(DEFAULT_WORKFLOW_ROUTES.category).toBe('workflow');
-      expect(DEFAULT_WORKFLOW_ROUTES.methods).toContain('getWorkflowConfig');
-      expect(DEFAULT_WORKFLOW_ROUTES.methods).toContain('getWorkflowState');
-      expect(DEFAULT_WORKFLOW_ROUTES.methods).toContain('workflowTransition');
-      // ADR-0019: approve/reject are no longer workflow routes (moved to /approvals).
-      expect(DEFAULT_WORKFLOW_ROUTES.methods).not.toContain('workflowApprove');
-      expect(DEFAULT_WORKFLOW_ROUTES.methods).not.toContain('workflowReject');
-      expect(DEFAULT_WORKFLOW_ROUTES.endpoints).toHaveLength(3);
-    });
-
-    it('should validate DEFAULT_REALTIME_ROUTES', () => {
-      expect(DEFAULT_REALTIME_ROUTES.prefix).toBe('/api/v1/realtime');
-      expect(DEFAULT_REALTIME_ROUTES.service).toBe('realtime');
-      expect(DEFAULT_REALTIME_ROUTES.category).toBe('realtime');
-      expect(DEFAULT_REALTIME_ROUTES.methods).toContain('realtimeConnect');
-      expect(DEFAULT_REALTIME_ROUTES.methods).toContain('realtimeDisconnect');
-      expect(DEFAULT_REALTIME_ROUTES.methods).toContain('realtimeSubscribe');
-      expect(DEFAULT_REALTIME_ROUTES.methods).toContain('realtimeUnsubscribe');
-      expect(DEFAULT_REALTIME_ROUTES.methods).toContain('setPresence');
-      expect(DEFAULT_REALTIME_ROUTES.methods).toContain('getPresence');
-      expect(DEFAULT_REALTIME_ROUTES.endpoints).toHaveLength(6);
-    });
-
     it('should validate DEFAULT_NOTIFICATION_ROUTES', () => {
       expect(DEFAULT_NOTIFICATION_ROUTES.prefix).toBe('/api/v1/notifications');
       expect(DEFAULT_NOTIFICATION_ROUTES.service).toBe('notification');
@@ -620,23 +568,21 @@ describe('plugin-rest-api.zod', () => {
       expect(actionsEndpoint?.responseSchema).toBe('AutomationActionsResponseSchema');
     });
 
-    it('should return all 13 default registrations', () => {
+    it('should return all 9 default registrations', () => {
+      // Permission/View/Workflow/Realtime tables were deleted in #3612 —
+      // no server ever mounted those routes.
       const registrations = getDefaultRouteRegistrations();
-      
-      expect(registrations).toHaveLength(13);
+
+      expect(registrations).toHaveLength(9);
       expect(registrations[0]).toBe(DEFAULT_DISCOVERY_ROUTES);
       expect(registrations[1]).toBe(DEFAULT_METADATA_ROUTES);
       expect(registrations[2]).toBe(DEFAULT_DATA_CRUD_ROUTES);
       expect(registrations[3]).toBe(DEFAULT_BATCH_ROUTES);
-      expect(registrations[4]).toBe(DEFAULT_PERMISSION_ROUTES);
-      expect(registrations[5]).toBe(DEFAULT_VIEW_ROUTES);
-      expect(registrations[6]).toBe(DEFAULT_WORKFLOW_ROUTES);
-      expect(registrations[7]).toBe(DEFAULT_REALTIME_ROUTES);
-      expect(registrations[8]).toBe(DEFAULT_NOTIFICATION_ROUTES);
-      expect(registrations[9]).toBe(DEFAULT_AI_ROUTES);
-      expect(registrations[10]).toBe(DEFAULT_I18N_ROUTES);
-      expect(registrations[11]).toBe(DEFAULT_ANALYTICS_ROUTES);
-      expect(registrations[12]).toBe(DEFAULT_AUTOMATION_ROUTES);
+      expect(registrations[4]).toBe(DEFAULT_NOTIFICATION_ROUTES);
+      expect(registrations[5]).toBe(DEFAULT_AI_ROUTES);
+      expect(registrations[6]).toBe(DEFAULT_I18N_ROUTES);
+      expect(registrations[7]).toBe(DEFAULT_ANALYTICS_ROUTES);
+      expect(registrations[8]).toBe(DEFAULT_AUTOMATION_ROUTES);
     });
 
     it('should cover all protocol categories', () => {
@@ -647,15 +593,15 @@ describe('plugin-rest-api.zod', () => {
       expect(categories).toContain('metadata');
       expect(categories).toContain('data');
       expect(categories).toContain('batch');
-      expect(categories).toContain('permission');
-      expect(categories).toContain('ui');
-      expect(categories).toContain('workflow');
-      expect(categories).toContain('realtime');
       expect(categories).toContain('notification');
       expect(categories).toContain('ai');
       expect(categories).toContain('i18n');
       expect(categories).toContain('analytics');
       expect(categories).toContain('automation');
+      // permission/ui/workflow/realtime categories left with their tables (#3612).
+      expect(categories).not.toContain('permission');
+      expect(categories).not.toContain('workflow');
+      expect(categories).not.toContain('realtime');
     });
   });
 

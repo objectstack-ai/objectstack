@@ -112,10 +112,7 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | **meta** | ✅ | 11 | Metadata read/write, published versions & drafts (ADR-0033), FSM introspection (ADR-0020) |
 | **data** | ✅ | 10 | CRUD & query operations |
 | **auth** | ✅ | 5 | Authentication & user management |
-| **permissions** | ✅ | 3 | Access control checks |
 | **packages** | ✅ | 17 | Package lifecycle: install/enable, drafts (ADR-0033), commits & rollback (ADR-0067), export/duplicate (ADR-0070) |
-| **views** | ✅ | 5 | UI view definitions |
-| **workflow** | ✅ | 3 | Workflow state transitions |
 | **analytics** | ✅ | 3 | Analytics queries |
 | **automation** | ✅ | 18 | Flow CRUD, trigger/execute, runs, screen-flow resume, descriptor/status registries |
 | **actions** | ✅ | 2 | Server-registered action handlers (`engine.registerAction`) |
@@ -124,9 +121,12 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | **security** | ✅ | 3 | Suggested audience bindings (admin) |
 | **storage** | ✅ | 2 | File upload & download |
 | **i18n** | ✅ | 3 | Internationalization |
-| **notifications** | 🟡 | 7 | Legacy notification helpers; receipt/inbox cut-over pending |
-| **realtime** | ✅ | 6 | Connection/subscription/presence calls (server transport is plugin-provided) |
+| **notifications** | ✅ | 3 | List, mark-read, mark-all-read (inbox/receipt spine, ADR-0030) |
 | **ai** | ✅ | 3 | AI services (NLQ, suggest, insights) |
+
+The former `permissions`, `views`, `workflow`, and `realtime` namespaces (and
+the notifications device/preference helpers) were removed in #3612: no server
+surface ever mounted their routes, so every call was a guaranteed 404.
 
 <Callout type="info">
 **Coverage is CI-enforced, not hand-asserted**: the #3563 route ledger
@@ -275,16 +275,6 @@ await client.auth.me();
 await client.auth.logout();
 await client.auth.refreshToken('refresh-token-string');
 
-// Permissions — Access control checks
-await client.permissions.check({ object: 'account', action: 'create' });
-await client.permissions.getObjectPermissions('account');
-await client.permissions.getEffectivePermissions();
-
-// Workflow — State machine management
-await client.workflow.getConfig('approval');
-await client.workflow.getState('approval', recordId);
-await client.workflow.transition({ object: 'approval', recordId, transition: 'submit' });
-
 // Approvals — request-based decision API (ADR-0019)
 // Approval is a flow node, not a workflow step: decisions are keyed by request id.
 await client.approvals.listRequests({ status: 'pending' }); // "my approvals" inbox
@@ -293,19 +283,7 @@ await client.approvals.approve(requestId, { comment: 'Looks good' });
 await client.approvals.reject(requestId, { comment: 'Incomplete' });
 await client.approvals.listActions(requestId); // audit trail
 
-// Realtime — WebSocket subscriptions
-await client.realtime.connect({ transport: 'websocket' });
-await client.realtime.subscribe({ channel: 'account', events: ['record.updated'] });
-await client.realtime.unsubscribe('subscription-id');
-await client.realtime.setPresence('account', { userId: 'user-123', status: 'online', lastSeen: new Date().toISOString() });
-await client.realtime.getPresence('account');
-await client.realtime.disconnect();
-
-// Notifications — legacy helper surface
-await client.notifications.registerDevice({ token: 'device-token', platform: 'ios' });
-await client.notifications.unregisterDevice('device-id');
-await client.notifications.getPreferences();
-await client.notifications.updatePreferences({ email: true, push: false });
+// Notifications — inbox/receipt spine (ADR-0030)
 await client.notifications.list({ read: false });
 await client.notifications.markRead(['notif-1', 'notif-2']);
 await client.notifications.markAllRead();
@@ -374,17 +352,10 @@ await client.security.suggestedBindings.confirm(suggestions[0].id);
 // Storage — File upload and management
 await client.storage.upload(fileData, 'user');
 await client.storage.getDownloadUrl('file-123');
-
-// Views — UI view management
-await client.views.list('account');
-await client.views.get('account', viewId);
-await client.views.create('account', { name: 'my_view', ... });
-await client.views.update('account', viewId, { ... });
-await client.views.delete('account', viewId);
 ```
 
 <Callout type="info">
-**Service availability**: Optional services (workflow, ai, etc.) are only available when the corresponding plugin is installed on the server. Always check the `services` map on the discovery result returned by `client.connect()` (cache it yourself — the client has no `discovery` getter) to verify service availability before calling these methods.
+**Service availability**: Optional services (automation, ai, etc.) are only available when the corresponding plugin is installed on the server. Always check the `services` map on the discovery result returned by `client.connect()` (cache it yourself — the client has no `discovery` getter) to verify service availability before calling these methods.
 </Callout>
 
 ---

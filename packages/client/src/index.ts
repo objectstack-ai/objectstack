@@ -26,33 +26,6 @@ import {
   CompleteChunkedUploadRequest,
   CompleteChunkedUploadResponse,
   UploadProgress,
-  CheckPermissionRequest,
-  CheckPermissionResponse,
-  GetObjectPermissionsResponse,
-  GetEffectivePermissionsResponse,
-  RealtimeConnectRequest,
-  RealtimeConnectResponse,
-  RealtimeSubscribeRequest,
-  RealtimeSubscribeResponse,
-  SetPresenceRequest,
-  GetPresenceResponse,
-  GetWorkflowConfigResponse,
-  GetWorkflowStateResponse,
-  WorkflowTransitionRequest,
-  WorkflowTransitionResponse,
-  ListViewsResponse,
-  GetViewResponse,
-  CreateViewRequest,
-  CreateViewResponse,
-  UpdateViewRequest,
-  UpdateViewResponse,
-  DeleteViewResponse,
-  RegisterDeviceRequest,
-  RegisterDeviceResponse,
-  UnregisterDeviceResponse,
-  GetNotificationPreferencesResponse,
-  UpdateNotificationPreferencesRequest,
-  UpdateNotificationPreferencesResponse,
   ListNotificationsResponse,
   MarkNotificationsReadResponse,
   MarkAllNotificationsReadResponse,
@@ -93,10 +66,11 @@ import { RealtimeAPI } from './realtime-api';
 
 /**
  * Route types that the client can resolve.
- * Covers all keys from `ApiRoutes` (the discovery schema) plus
- * client-specific virtual routes (`views`, `permissions`).
+ * Covers all keys from `ApiRoutes` (the discovery schema). The former
+ * client-only virtual routes (`views`, `permissions`) were removed in #3612 —
+ * no server surface ever mounted them.
  */
-export type ApiRouteType = keyof ApiRoutes | 'views' | 'permissions';
+export type ApiRouteType = keyof ApiRoutes;
 
 export interface ClientConfig {
   baseUrl: string;
@@ -2771,151 +2745,13 @@ export class ObjectStackClient {
     return this.realtimeAPI;
   }
 
-  /**
-   * Permissions Services
-   */
-  permissions = {
-    /**
-     * Check if current user has permission for an action on an object
-     */
-    check: async (request: CheckPermissionRequest): Promise<CheckPermissionResponse> => {
-      const route = this.getRoute('permissions');
-      const params = new URLSearchParams({ object: request.object, action: request.action });
-      if (request.recordId !== undefined) params.set('recordId', request.recordId);
-      if (request.field !== undefined) params.set('field', request.field);
-      const res = await this.fetch(`${this.baseUrl}${route}/check?${params.toString()}`);
-      return this.unwrapResponse<CheckPermissionResponse>(res);
-    },
-
-    /**
-     * Get all permissions for a specific object
-     */
-    getObjectPermissions: async (object: string): Promise<GetObjectPermissionsResponse> => {
-      const route = this.getRoute('permissions');
-      const res = await this.fetch(`${this.baseUrl}${route}/objects/${encodeURIComponent(object)}`);
-      return this.unwrapResponse<GetObjectPermissionsResponse>(res);
-    },
-
-    /**
-     * Get effective permissions for the current user
-     */
-    getEffectivePermissions: async (): Promise<GetEffectivePermissionsResponse> => {
-      const route = this.getRoute('permissions');
-      const res = await this.fetch(`${this.baseUrl}${route}/effective`);
-      return this.unwrapResponse<GetEffectivePermissionsResponse>(res);
-    }
-  };
-
-  /**
-   * Realtime Services
-   */
-  realtime = {
-    /**
-     * Establish a realtime connection
-     */
-    connect: async (request?: RealtimeConnectRequest): Promise<RealtimeConnectResponse> => {
-      const route = this.getRoute('realtime');
-      const res = await this.fetch(`${this.baseUrl}${route}/connect`, {
-        method: 'POST',
-        body: JSON.stringify(request || {})
-      });
-      return this.unwrapResponse<RealtimeConnectResponse>(res);
-    },
-
-    /**
-     * Disconnect from realtime services
-     */
-    disconnect: async (): Promise<void> => {
-      const route = this.getRoute('realtime');
-      await this.fetch(`${this.baseUrl}${route}/disconnect`, {
-        method: 'POST'
-      });
-    },
-
-    /**
-     * Subscribe to a channel
-     */
-    subscribe: async (request: RealtimeSubscribeRequest): Promise<RealtimeSubscribeResponse> => {
-      const route = this.getRoute('realtime');
-      const res = await this.fetch(`${this.baseUrl}${route}/subscribe`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      });
-      return this.unwrapResponse<RealtimeSubscribeResponse>(res);
-    },
-
-    /**
-     * Unsubscribe from a channel
-     */
-    unsubscribe: async (subscriptionId: string): Promise<void> => {
-      const route = this.getRoute('realtime');
-      await this.fetch(`${this.baseUrl}${route}/unsubscribe`, {
-        method: 'POST',
-        body: JSON.stringify({ subscriptionId })
-      });
-    },
-
-    /**
-     * Set presence state on a channel
-     */
-    setPresence: async (channel: string, state: SetPresenceRequest['state']): Promise<void> => {
-      const route = this.getRoute('realtime');
-      await this.fetch(`${this.baseUrl}${route}/presence`, {
-        method: 'PUT',
-        body: JSON.stringify({ channel, state })
-      });
-    },
-
-    /**
-     * Get presence information for a channel
-     */
-    getPresence: async (channel: string): Promise<GetPresenceResponse> => {
-      const route = this.getRoute('realtime');
-      const res = await this.fetch(`${this.baseUrl}${route}/presence/${encodeURIComponent(channel)}`);
-      return this.unwrapResponse<GetPresenceResponse>(res);
-    }
-  };
-
-  /**
-   * Workflow Services
-   */
-  workflow = {
-    /**
-     * Get workflow configuration for an object
-     */
-    getConfig: async (object: string): Promise<GetWorkflowConfigResponse> => {
-      const route = this.getRoute('workflow');
-      const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(object)}/config`);
-      return this.unwrapResponse<GetWorkflowConfigResponse>(res);
-    },
-
-    /**
-     * Get current workflow state for a record
-     */
-    getState: async (object: string, recordId: string): Promise<GetWorkflowStateResponse> => {
-      const route = this.getRoute('workflow');
-      const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(recordId)}/state`);
-      return this.unwrapResponse<GetWorkflowStateResponse>(res);
-    },
-
-    /**
-     * Execute a workflow state transition
-     */
-    transition: async (request: WorkflowTransitionRequest): Promise<WorkflowTransitionResponse> => {
-      const route = this.getRoute('workflow');
-      const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(request.object)}/${encodeURIComponent(request.recordId)}/transition`, {
-        method: 'POST',
-        body: JSON.stringify({
-          transition: request.transition,
-          comment: request.comment,
-          data: request.data
-        })
-      });
-      return this.unwrapResponse<WorkflowTransitionResponse>(res);
-    }
-    // ADR-0019: approve/reject are no longer workflow operations. Approval is a
-    // flow node — see the `approvals` namespace below for recording decisions.
-  };
+  // The former `permissions`, `realtime`, and `workflow` namespaces were
+  // removed in #3612: every method targeted a route no server surface mounts
+  // (each family was underwritten only by an unconsumed spec DEFAULT_*_ROUTES
+  // table), so every call was a guaranteed 404. Server-backed state-machine
+  // reads live under `meta.getLegalNextStates`; approval decisions are the
+  // `approvals` namespace (ADR-0019); realtime events are the local `events`
+  // buffer until a real HTTP/WS session protocol exists.
 
   /**
    * Approval Services (ADR-0019)
@@ -3020,115 +2856,19 @@ export class ObjectStackClient {
     }
   };
 
-  /**
-   * Views CRUD Services
-   */
-  views = {
-    /**
-     * List views for an object
-     */
-    list: async (object: string, type?: 'list' | 'form'): Promise<ListViewsResponse> => {
-      const route = this.getRoute('views');
-      const params = new URLSearchParams();
-      if (type) params.set('type', type);
-      const qs = params.toString();
-      const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(object)}${qs ? `?${qs}` : ''}`);
-      return this.unwrapResponse<ListViewsResponse>(res);
-    },
-
-    /**
-     * Get a specific view
-     */
-    get: async (object: string, viewId: string): Promise<GetViewResponse> => {
-      const route = this.getRoute('views');
-      const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(viewId)}`);
-      return this.unwrapResponse<GetViewResponse>(res);
-    },
-
-    /**
-     * Create a new view
-     */
-    create: async (object: string, data: CreateViewRequest['data']): Promise<CreateViewResponse> => {
-      const route = this.getRoute('views');
-      const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(object)}`, {
-        method: 'POST',
-        body: JSON.stringify({ object, data })
-      });
-      return this.unwrapResponse<CreateViewResponse>(res);
-    },
-
-    /**
-     * Update an existing view
-     */
-    update: async (object: string, viewId: string, data: UpdateViewRequest['data']): Promise<UpdateViewResponse> => {
-      const route = this.getRoute('views');
-      const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(viewId)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ object, viewId, data })
-      });
-      return this.unwrapResponse<UpdateViewResponse>(res);
-    },
-
-    /**
-     * Delete a view
-     */
-    delete: async (object: string, viewId: string): Promise<DeleteViewResponse> => {
-      const route = this.getRoute('views');
-      const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(viewId)}`, {
-        method: 'DELETE'
-      });
-      return this.unwrapResponse<DeleteViewResponse>(res);
-    }
-  };
+  // The former `views` CRUD namespace was removed in #3612 — no server
+  // surface mounts /ui/views (both surfaces serve only /ui/view/:object…).
+  // View definitions are metadata: read and save them via `meta.*`.
 
   /**
    * Notification Services
+   *
+   * Device registration and preference methods were removed in #3612 — the
+   * /notifications/devices and /notifications/preferences server routes that
+   * ADR-0012 describes were never built. They return together with the server
+   * (and a route-ledger row keeps them honest).
    */
   notifications = {
-    /**
-     * Register a device for push notifications
-     */
-    registerDevice: async (request: RegisterDeviceRequest): Promise<RegisterDeviceResponse> => {
-      const route = this.getRoute('notifications');
-      const res = await this.fetch(`${this.baseUrl}${route}/devices`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      });
-      return this.unwrapResponse<RegisterDeviceResponse>(res);
-    },
-
-    /**
-     * Unregister a device from push notifications
-     */
-    unregisterDevice: async (deviceId: string): Promise<UnregisterDeviceResponse> => {
-      const route = this.getRoute('notifications');
-      const res = await this.fetch(`${this.baseUrl}${route}/devices/${encodeURIComponent(deviceId)}`, {
-        method: 'DELETE'
-      });
-      return this.unwrapResponse<UnregisterDeviceResponse>(res);
-    },
-
-    /**
-     * Get notification preferences for the current user
-     */
-    getPreferences: async (): Promise<GetNotificationPreferencesResponse> => {
-      const route = this.getRoute('notifications');
-      const res = await this.fetch(`${this.baseUrl}${route}/preferences`);
-      return this.unwrapResponse<GetNotificationPreferencesResponse>(res);
-    },
-
-    /**
-     * Update notification preferences
-     */
-    updatePreferences: async (preferences: UpdateNotificationPreferencesRequest['preferences']): Promise<UpdateNotificationPreferencesResponse> => {
-      const route = this.getRoute('notifications');
-      const res = await this.fetch(`${this.baseUrl}${route}/preferences`, {
-        method: 'PUT',
-        body: JSON.stringify({ preferences })
-      });
-      return this.unwrapResponse<UpdateNotificationPreferencesResponse>(res);
-    },
-
     /**
      * List notifications for the current user
      */
@@ -3731,11 +3471,9 @@ export class ObjectStackClient {
       storage: '/api/v1/storage',
       automation: '/api/v1/automation',
       packages: '/api/v1/packages',
-      permissions: '/api/v1/permissions',
       realtime: '/api/v1/realtime',
       workflow: '/api/v1/workflow',
       approvals: '/api/v1/approvals',
-      views: '/api/v1/ui/views',
       notifications: '/api/v1/notifications',
       ai: '/api/v1/ai',
       i18n: '/api/v1/i18n',

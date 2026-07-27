@@ -92,25 +92,6 @@ async function main() {
     console.log('Using cached metadata');
   }
 
-  // 8. View Storage (New!)
-  const view = await client.views.create('todo_task', {
-    name: 'active_tasks',
-    label: 'Active Tasks',
-    type: 'list',
-    visibility: 'public',
-    query: {
-      object: 'todo_task',
-      where: { status: 'active' },
-      orderBy: [{ field: 'priority', order: 'desc' }],
-      limit: 50
-    },
-    layout: {
-      columns: [
-        { field: 'subject', label: 'Task', width: 200 },
-        { field: 'priority', label: 'Priority', width: 100 }
-      ]
-    }
-  });
 }
 ```
 
@@ -136,13 +117,6 @@ Initializes the client by fetching the system discovery manifest from `/api/v1`.
 - `updateMany<T>(object, records[], options?)`: Batch update records (convenience method).
 - `delete(object, id)`: Delete record.
 - `deleteMany(object, ids[], options?)`: Batch delete records (convenience method).
-
-### `client.views`
-- `create(object, data)`: Create a new saved view.
-- `get(object, viewId)`: Get a saved view by ID.
-- `list(object, type?)`: List saved views.
-- `update(object, viewId, data)`: Update an existing view.
-- `delete(object, viewId)`: Delete a saved view.
 
 ### Query Options
 The `find` method accepts an options object with canonical field names:
@@ -224,15 +198,18 @@ const data = await retryableRequest(() =>
 
 ## Protocol Compliance
 
-The SDK ships 20 top-level surfaces: `meta`, `data`, `auth`, `oauth`,
-`organizations`, `projects`, `packages`, `views`, `permissions`, `workflow`,
+The SDK ships these top-level surfaces: `meta`, `data`, `auth`, `oauth`,
+`organizations`, `projects`, `packages`, `keys`, `security`, `shareLinks`,
 `approvals`, `analytics`, `automation`, `actions`, `storage`, `i18n`,
-`notifications`, `realtime`, `ai`, and `events`.
+`notifications`, `ai`, and `events`. (The former `views`, `permissions`,
+`workflow`, and `realtime` namespaces were removed in #3612 — no server
+surface ever mounted their routes.)
 
 Coverage against the server's actual route surface is no longer asserted by a
-hand-written table — it is audited and CI-enforced by the #3563 route ledger
-(`packages/runtime/src/route-ledger.ts` + its conformance tests, one half in
-runtime, one half in this package). See
+hand-written table — it is audited and CI-enforced by the route ledgers
+(`packages/runtime/src/route-ledger.ts` for the dispatcher, #3563;
+`packages/rest/src/rest-route-ledger.ts` for the REST surface, #3587 — each
+with conformance tests, one half server-side, one half in this package). See
 `docs/audits/2026-07-dispatcher-client-route-coverage.md` for the audit.
 
 ## Available Namespaces
@@ -271,27 +248,11 @@ await client.packages.install({
 });
 await client.packages.enable('plugin-id');
 
-// Permissions
-await client.permissions.check({ object: 'contact', action: 'create' });
-await client.permissions.getObjectPermissions('contact');
-await client.permissions.getEffectivePermissions();
-
-// Workflow
-await client.workflow.getConfig('approval');
-await client.workflow.getState('approval', recordId);
-await client.workflow.transition({ object: 'approval', recordId, transition: 'submit' });
-
-// Approvals (approve/reject live here, not on workflow)
+// Approvals (approval is a flow node — decisions are keyed by request id)
 await client.approvals.approve(requestId, 'LGTM');
 await client.approvals.reject(requestId, 'Incomplete');
 
-// Realtime
-await client.realtime.connect({ protocol: 'websocket' });
-await client.realtime.subscribe({ channel: 'contact', event: 'update' });
-await client.realtime.setPresence({ status: 'online' });
-
 // Notifications
-await client.notifications.registerDevice({ token: 'device-token', platform: 'ios' });
 await client.notifications.list({ unreadOnly: true });
 await client.notifications.markRead(['notif-1', 'notif-2']);
 

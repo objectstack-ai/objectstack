@@ -14,7 +14,7 @@ This document defines comprehensive integration tests for validating `@objectsta
    - ObjectStack server instance running
    - Test database (SQLite/Postgres) with sample data
    - All core services enabled (metadata, data, auth)
-   - Optional services enabled (workflow, ai, realtime, etc.)
+   - Optional services enabled (automation, ai, etc.)
 
 2. **Client Configuration:**
    ```typescript
@@ -43,17 +43,13 @@ packages/client/tests/integration/
 ├── 04-data-crud.test.ts           # Basic CRUD operations
 ├── 05-data-batch.test.ts          # Batch operations
 ├── 06-data-query.test.ts          # Advanced queries
-├── 07-permissions.test.ts         # Permission checking
-├── 08-workflow.test.ts            # Workflow operations
-├── 09-realtime.test.ts            # Realtime subscriptions
-├── 10-notifications.test.ts       # Notifications
-├── 11-ai.test.ts                  # AI services
-├── 12-i18n.test.ts                # Internationalization
-├── 13-analytics.test.ts           # Analytics queries
-├── 14-packages.test.ts            # Package management
-├── 15-views.test.ts               # View management
-├── 16-storage.test.ts             # File storage
-├── 17-automation.test.ts          # Automation triggers
+├── 07-notifications.test.ts       # Notifications
+├── 08-ai.test.ts                  # AI services
+├── 09-i18n.test.ts                # Internationalization
+├── 10-analytics.test.ts           # Analytics queries
+├── 11-packages.test.ts            # Package management
+├── 12-storage.test.ts             # File storage
+├── 13-automation.test.ts          # Automation triggers
 └── helpers/
     ├── test-server.ts             # Mock/stub server helpers
     ├── test-data.ts               # Test data generators
@@ -608,145 +604,15 @@ test('should execute aggregation query', async () => {
 
 ---
 
-### 7. Permissions (`07-permissions.test.ts`)
+### 7-8. Permissions & Workflow — removed (#3612)
 
-#### TC-PERM-001: Check Create Permission
-```typescript
-test('should check if user can create records', async () => {
-  const client = await createAuthenticatedClient();
-  
-  const result = await client.permissions.check({
-    object: 'test_contact',
-    action: 'create'
-  });
-  
-  expect(result.allowed).toBe(true);
-  expect(result.deniedFields).toBeUndefined();
-});
-```
+The `permissions` and `workflow` client namespaces were deleted: no server
+surface ever mounted their routes. State-machine reads live on
+`meta.getLegalNextStates`; approval decisions are `client.approvals` (ADR-0019).
 
-#### TC-PERM-002: Get Object Permissions
-```typescript
-test('should retrieve object-level permissions', async () => {
-  const client = await createAuthenticatedClient();
-  
-  const perms = await client.permissions.getObjectPermissions('test_contact');
-  
-  expect(perms.object).toBe('test_contact');
-  expect(perms.permissions).toBeDefined();
-  expect(perms.fieldPermissions).toBeDefined();
-});
-```
+### 9-13. Additional Test Categories
 
-#### TC-PERM-003: Get Effective Permissions
-```typescript
-test('should get effective permissions for current user', async () => {
-  const client = await createAuthenticatedClient();
-  
-  const effective = await client.permissions.getEffectivePermissions('test_contact');
-  
-  expect(effective.canCreate).toBeDefined();
-  expect(effective.canRead).toBeDefined();
-  expect(effective.canEdit).toBeDefined();
-  expect(effective.canDelete).toBeDefined();
-  expect(effective.fields).toBeDefined();
-});
-```
-
----
-
-### 8. Workflow (`08-workflow.test.ts`)
-
-#### TC-WF-001: Get Workflow Configuration
-```typescript
-test('should retrieve workflow rules for object', async () => {
-  const client = await createAuthenticatedClient();
-  
-  const config = await client.workflow.getConfig('test_approval');
-  
-  expect(config.object).toBe('test_approval');
-  expect(config.states).toBeDefined();
-  expect(config.transitions).toBeDefined();
-});
-```
-
-#### TC-WF-002: Get Workflow State
-```typescript
-test('should get current workflow state and available transitions', async () => {
-  const client = await createAuthenticatedClient();
-  
-  const record = await client.data.create('test_approval', {
-    title: 'Test Approval',
-    status: 'draft'
-  });
-  
-  const state = await client.workflow.getState('test_approval', record.id);
-  
-  expect(state.currentState).toBe('draft');
-  expect(state.availableTransitions).toContain('submit');
-});
-```
-
-#### TC-WF-003: Execute Workflow Transition
-```typescript
-test('should execute workflow state transition', async () => {
-  const client = await createAuthenticatedClient();
-  
-  const record = await client.data.create('test_approval', {
-    title: 'Test',
-    status: 'draft'
-  });
-  
-  const result = await client.workflow.transition({
-    object: 'test_approval',
-    recordId: record.id,
-    transition: 'submit',
-    comment: 'Submitting for approval'
-  });
-  
-  expect(result.success).toBe(true);
-  expect(result.newState).toBe('pending');
-});
-```
-
-#### TC-WF-004: Approve Workflow
-```typescript
-test('should approve workflow transition', async () => {
-  const client = await createAuthenticatedClient();
-  
-  const result = await client.workflow.approve({
-    object: 'test_approval',
-    recordId: testRecordId,
-    comment: 'Approved by manager'
-  });
-  
-  expect(result.success).toBe(true);
-  expect(result.newState).toBe('approved');
-});
-```
-
-#### TC-WF-005: Reject Workflow
-```typescript
-test('should reject workflow transition', async () => {
-  const client = await createAuthenticatedClient();
-  
-  const result = await client.workflow.reject({
-    object: 'test_approval',
-    recordId: testRecordId,
-    reason: 'Insufficient documentation',
-    comment: 'Please provide more details'
-  });
-  
-  expect(result.success).toBe(true);
-  expect(result.newState).toBe('rejected');
-});
-```
-
----
-
-### 9-17. Additional Test Categories
-
-*(Similar detailed test cases for remaining namespaces: Realtime, Notifications, AI, i18n, Analytics, Packages, Views, Storage, Automation)*
+*(Similar detailed test cases for remaining namespaces: Notifications, AI, i18n, Analytics, Packages, Storage, Automation)**
 
 ---
 
