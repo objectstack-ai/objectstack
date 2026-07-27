@@ -136,7 +136,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`auth-config.zod.ts`](src/system/auth-config.zod.ts) | | **Auth Configuration**. SSO, OIDC, SAML settings. |
 | [`http-server.zod.ts`](src/system/http-server.zod.ts) | | **HTTP Server**. Server port, CORS, and middleware settings. |
 | [`logging.zod.ts`](src/system/logging.zod.ts) | | **Logging**. Log levels and output formats. |
-| [`audit.zod.ts`](src/system/audit.zod.ts) | | **Audit Trail**. Audit logging configuration. |
 | [`cache.zod.ts`](src/system/cache.zod.ts) | | **Caching**. Redis/Memory cache strategies. |
 | [`metrics.zod.ts`](src/system/metrics.zod.ts) | | **Observability**. Prometheus/OpenTelemetry metrics. |
 | [`tracing.zod.ts`](src/system/tracing.zod.ts) | | **Tracing**. Distributed tracing configuration. |

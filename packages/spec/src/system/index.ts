@@ -19,7 +19,14 @@ export * from './search-engine.zod';
 export * from './http-server.zod';
 
 // Observability & Operations
-export * from './audit.zod';
+// audit.zod (AuditConfig/AuditStorageConfig/AuditRetentionPolicy/AuditEventFilter/
+// SuspiciousActivityRule + the AuditEvent* shape schemas) was REMOVED per ADR-0056
+// D8 "design+enforce or remove": the whole module had zero consumers — the LIVE
+// audit path (plugin-audit) captures unconditionally via engine hooks and defines
+// its own sys_audit_log row shape, and `AuditConfigSchema.enabled` contradicted
+// the always-on compliance-ledger contract (object.zod `trackHistory`). The
+// enforced authoring surface is object/field `trackHistory` + the object
+// `lifecycle` `audit` category (retention), with per-org overrides in settings.
 export * from './logging.zod';
 export * from './metrics.zod';
 export * from './tracing.zod';

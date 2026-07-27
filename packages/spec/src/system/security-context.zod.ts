@@ -10,11 +10,14 @@ import { z } from 'zod';
  * Unified Security Context Protocol
  *
  * Provides a central governance layer that correlates and unifies
- * the four independent security subsystems:
- * - **Audit** (audit.zod.ts): Event logging and suspicious activity detection
+ * the four independent security subsystems it was designed against. Three of
+ * the four have since been REMOVED per ADR-0056 D8 (declared-but-never-enforced;
+ * see system/index.ts notes) — only encryption survives, marked experimental:
+ * - **Audit** (audit.zod.ts — REMOVED): the live audit path is plugin-audit's
+ *   always-on capture + object/field `trackHistory` + lifecycle `audit` retention
  * - **Encryption** (encryption.zod.ts): Field-level encryption and key management
- * - **Compliance** (compliance.zod.ts): Regulatory framework enforcement (GDPR/HIPAA/SOX/PCI-DSS)
- * - **Masking** (masking.zod.ts): PII data masking and tokenization
+ * - **Compliance** (compliance.zod.ts — REMOVED): GDPR/HIPAA/SOX/PCI-DSS configs
+ * - **Masking** (masking.zod.ts — REMOVED): PII data masking and tokenization
  *
  * This schema enforces cross-cutting security policies, ensuring compliance
  * frameworks drive encryption requirements, masking rules respect role-based

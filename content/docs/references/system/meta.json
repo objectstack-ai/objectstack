@@ -29,7 +29,6 @@
     "translation",
     "worker",
     "---Observability---",
-    "audit",
     "logging",
     "metrics",
     "tracing",
