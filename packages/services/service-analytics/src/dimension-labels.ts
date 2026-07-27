@@ -22,6 +22,8 @@
  * {@link DimensionLabelDeps} so this module stays free of any engine dependency.
  */
 
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+
 /** The minimal field shape this resolver needs. */
 export interface FieldMetaLite {
   type?: string;
@@ -39,8 +41,18 @@ export interface DimensionLabelDeps {
    * Fetch a map of `id → display label` for the given ids of a target object.
    * The implementation chooses the target's display field. Returning an empty
    * map (e.g. no display field, no data access) leaves the ids unresolved.
+   *
+   * `context` is the request's ExecutionContext (#3602). This lookup returns
+   * one row PER RECORD — real display names, at row granularity, not aggregate
+   * granularity — so the implementation MUST scope it to what the caller may
+   * see. Passing it is not optional in production wiring; the parameter is
+   * optional only so unit fakes can ignore it.
    */
-  fetchRecordLabels(targetObject: string, ids: unknown[]): Promise<Map<unknown, string>>;
+  fetchRecordLabels(
+    targetObject: string,
+    ids: unknown[],
+    context?: ExecutionContext,
+  ): Promise<Map<unknown, string>>;
 }
 
 const LOOKUP_TYPES = new Set(['lookup', 'master_detail']);
@@ -100,12 +112,16 @@ export function formatDateBucket(value: unknown, granularity?: DateGranularity |
  *   (row key = `name`)
  * @param rows - result rows, mutated in place
  * @param deps - injected runtime capabilities
+ * @param context - the request's ExecutionContext, forwarded to
+ *   {@link DimensionLabelDeps.fetchRecordLabels} so the per-record label lookup
+ *   is scoped to the caller's visibility (#3602)
  */
 export async function resolveDimensionLabels(
   baseObject: string,
   dims: Array<{ name: string; field: string; type?: string; dateGranularity?: DateGranularity | string }>,
   rows: Record<string, unknown>[],
   deps: DimensionLabelDeps,
+  context?: ExecutionContext,
 ): Promise<void> {
   if (!rows.length || !dims.length) return;
   const fields = deps.getObjectFields(baseObject);
@@ -148,7 +164,7 @@ export async function resolveDimensionLabels(
         new Set(rows.map((r) => r[dim.name]).filter((v) => v != null)),
       );
       if (ids.length === 0) continue;
-      const labelById = await deps.fetchRecordLabels(meta.reference, ids);
+      const labelById = await deps.fetchRecordLabels(meta.reference, ids, context);
       if (!labelById || labelById.size === 0) continue;
       for (const row of rows) {
         const label = labelById.get(row[dim.name]);

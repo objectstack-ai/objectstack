@@ -23,6 +23,12 @@ interface DataEngineLike {
     aggregations?: Array<{ function: string; field: string; alias: string }>;
     /** Reference timezone (IANA) for date bucketing — ADR-0053 Phase 2. */
     timezone?: string;
+    /**
+     * `BaseEngineOptions.context` — identity/tenant of the request. The engine
+     * merges it into the operation context (`mergeReadContext`), which is what
+     * lets its middleware chain inject RLS into `opCtx.ast.where` (#3602).
+     */
+    context?: ExecutionContext;
   }): Promise<unknown[]>;
   execute?(command: unknown, options?: Record<string, unknown>): Promise<unknown>;
   /** Return the registered object schema (relationship → target + display-label resolution). */
@@ -81,6 +87,12 @@ export interface AnalyticsServicePluginOptions {
     filter?: Record<string, unknown>;
     /** Reference timezone (IANA) for date bucketing — ADR-0053 Phase 2. */
     timezone?: string;
+    /**
+     * ADR-0021 D-C (#3602) — the request's ExecutionContext. A custom bridge
+     * MUST forward it to its engine so engine-side RLS applies; dropping it is
+     * what made the built-in bridge fall open in #3597.
+     */
+    context?: ExecutionContext;
   }) => Promise<Record<string, unknown>[]>;
   /**
    * ADR-0021 D-C — context-aware per-object read scope (tenant + RLS). The
@@ -186,7 +198,7 @@ export class AnalyticsServicePlugin implements Plugin {
           'will retry per-query. Register ObjectQLPlugin or pass executeAggregate.',
         );
       }
-      executeAggregate = async (objectName, { groupBy, aggregations, filter, timezone }) => {
+      executeAggregate = async (objectName, { groupBy, aggregations, filter, timezone, context }) => {
         const engine = tryGetDataEngine();
         if (!engine) {
           throw new Error(
@@ -205,6 +217,12 @@ export class AnalyticsServicePlugin implements Plugin {
           // ADR-0053 Phase 2: thread the reference tz so date buckets resolve on
           // that zone's calendar days (engine buckets in-memory when non-UTC).
           timezone,
+          // ADR-0021 D-C (#3602): thread the caller's identity so the engine's
+          // middleware chain scopes the read itself. `BaseEngineOptions.context`
+          // is `.optional()`, so nothing ever forced this bridge to pass it —
+          // and it did not, which is how an authenticated aggregate reached the
+          // engine with no principal and plugin-security fell open (#3597).
+          context,
         });
         return rows as Record<string, unknown>[];
       };
@@ -353,17 +371,37 @@ export class AnalyticsServicePlugin implements Plugin {
     };
     const labelResolver: DimensionLabelDeps = {
       getObjectFields: (objectName) => dataEngine()?.getObject?.(objectName)?.fields,
-      fetchRecordLabels: async (targetObject, ids) => {
+      fetchRecordLabels: async (targetObject, ids, context) => {
         const map = new Map<unknown, string>();
         const displayField = pickDisplayField(dataEngine()?.getObject?.(targetObject)?.fields);
         if (!displayField || !executeAggregate || ids.length === 0) return map;
+        // #3602 — this call is row-granular, not aggregate-granular: grouping by
+        // (id, displayField) returns the REAL display name of every matched
+        // record. Today the `ids` are already confined to what the caller can
+        // see (they come out of a scoped aggregate, #3601), so it leaks nothing
+        // — but that is an invariant of the current caller, not of this bridge.
+        // Widen the id source (a new strategy, a new caller) and it becomes a
+        // row-level read with nothing between it and the table. So scope it
+        // here, on both belts, the same way the aggregate path is scoped.
+        //
+        // Fail-closed: a throwing provider propagates out of `fetchRecordLabels`
+        // rather than degrading to an unscoped read. `resolveDimensionLabels`'
+        // caller catches it and leaves the raw ids in place — labels are lost,
+        // rows are not exposed.
+        const scope = await getReadScope?.(targetObject, context);
+        // `$and`, never a key merge: the scope may name `id` too, and a spread
+        // would let the id list overwrite the security predicate.
+        const filter: Record<string, unknown> = scope
+          ? { $and: [{ id: { $in: ids } }, scope as Record<string, unknown>] }
+          : { id: { $in: ids } };
         // Group by (id, displayField) — one row per record — reusing the aggregate
         // bridge rather than adding a record-fetch capability. A count keeps engines
         // that require ≥1 aggregation happy; the count itself is unused.
         const rows = await executeAggregate(targetObject, {
           groupBy: ['id', displayField],
           aggregations: [{ field: 'id', method: 'count', alias: '_c' }],
-          filter: { id: { $in: ids } },
+          filter,
+          context,
         });
         for (const r of rows) {
           if (r.id != null && r[displayField] != null) map.set(r.id, String(r[displayField]));
