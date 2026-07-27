@@ -55,13 +55,14 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   if (context?.runAs === 'system') {
     return { isSystem: true, positions: [], permissions: [], ...(flowRunId ? { flowRunId } : {}) };
   }
-  // NOTE (#3456): the identity-less case below returns `undefined`, so a
-  // schedule-triggered `runAs:'user'` run with no user carries NO context at all
-  // — and therefore no `flowRunId` either, leaving it subject to the approvals
-  // record lock on its own target record. Manufacturing a context here just to
-  // carry the run id would flip that run from the documented unscoped fail-open
-  // (#1888) to baseline-member RLS — a separate, larger behavior change. The
-  // dead-run sweep in plugin-approvals is what recovers this shape.
+  // NOTE (#3456 residual, tracked as #3712): the identity-less case below returns
+  // `undefined`, so a schedule-triggered `runAs:'user'` run with no user carries
+  // NO context at all — and therefore no `flowRunId` either, leaving it subject
+  // to the approvals record lock on its own target record. Manufacturing a
+  // context here just to carry the run id would flip that run from the
+  // documented unscoped fail-open (#1888) to baseline-member RLS — a separate,
+  // larger behavior change. The dead-run sweep in plugin-approvals is what
+  // recovers this shape.
   if (!context?.userId) return undefined;
   // `context` is now narrowed to a defined AutomationContext with a userId.
   const out: RunDataContext = {

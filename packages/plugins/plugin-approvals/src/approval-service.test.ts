@@ -2390,3 +2390,124 @@ describe('ApprovalService — participant visibility (#3590)', () => {
     expect(res.request.status).toBe('approved');
   });
 });
+
+// ── The ordering invariant the dead-run sweep rests on (#3456) ─────────
+//
+// `releaseDeadRunRequests` recalls a PENDING request whose owning run has
+// reached a TERMINAL state, on the premise that such a pair can only be an
+// orphan. That premise is not self-evident — it holds only because every
+// in-band transition moves the request OUT of `pending` before it hands the run
+// back. Resume first and a run that finishes promptly afterwards would be
+// indistinguishable from an orphan, so the sweep would cancel a LIVE approval —
+// precisely the one failure mode it is built never to have.
+//
+// Nothing enforces that ordering: it is a convention spread across four public
+// methods and seven resume/cancelRun call sites, any of which a refactor could
+// reorder without a single existing test going red. So pin the invariant
+// itself rather than the call order of any one method — at the instant the run
+// is handed back, no request owned by that run may still be `pending`.
+describe('in-band transitions finalise before they resume (#3456 invariant)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+  const baseTime = new Date('2026-01-15T10:00:00Z').getTime();
+  /** One entry per hand-back, with any still-pending requests owned by the run. */
+  let handoffs: Array<{ hook: string; stillPending: string[] }>;
+
+  /** A flow whose approval node declares the `revise` out-edge send-back needs. */
+  const REVISE_FLOW = {
+    name: 'deal_approval',
+    edges: [{ id: 'e_rev', source: 'approve_step', target: 'wait_revision', label: 'revise' }],
+  };
+
+  function recordHandoff(hook: string) {
+    const rows = (engine._tables['sys_approval_request'] ?? []) as any[];
+    handoffs.push({
+      hook,
+      stillPending: rows
+        .filter(r => String(r.flow_run_id ?? '') === 'run_1' && r.status === 'pending')
+        .map(r => String(r.id)),
+    });
+  }
+
+  /** Assert every hand-back this scenario made was clean. */
+  function expectCleanHandoffs() {
+    expect(
+      handoffs.length,
+      'the run was never handed back — this scenario did not exercise the invariant',
+    ).toBeGreaterThan(0);
+    for (const h of handoffs) {
+      expect(
+        h.stillPending,
+        `${h.hook}() handed run_1 back while it still owned a pending request — `
+        + 'the dead-run sweep would treat that as an orphan and cancel a live approval',
+      ).toEqual([]);
+    }
+  }
+
+  beforeEach(async () => {
+    engine = makeFakeEngine();
+    n = 0;
+    handoffs = [];
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
+    svc.attachAutomation({
+      async resume() { recordHandoff('resume'); },
+      async cancelRun() { recordHandoff('cancelRun'); },
+      async getFlow() { return REVISE_FLOW; },
+    } as any);
+    engine._tables['opportunity'] = [{ id: 'opp1', amount: 100 }];
+  });
+
+  const open = (configExtra: Record<string, any> = {}) =>
+    svc.openNodeRequest(openInput(['u9'], {}, configExtra), CTX);
+
+  it('decide(approve) finalises before resuming', async () => {
+    const req = await open();
+    await svc.decide(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    expectCleanHandoffs();
+  });
+
+  it('decide(reject) finalises before resuming', async () => {
+    const req = await open();
+    await svc.decide(req.id, { decision: 'reject', actorId: 'u9' }, SYS);
+    expectCleanHandoffs();
+  });
+
+  it('recall finalises before resuming', async () => {
+    const req = await open();
+    await svc.recall(req.id, { actorId: 'u1' }, CTX);
+    expectCleanHandoffs();
+  });
+
+  it('sendBack finalises before resuming', async () => {
+    const req = await open();
+    await svc.sendBack(req.id, { actorId: 'u9', comment: 'fix the totals' }, CTX);
+    expectCleanHandoffs();
+  });
+
+  it('sendBack past the revision budget auto-rejects before resuming', async () => {
+    // `maxRevisions: 0` takes the ADR-0044 loop-guard branch on the first
+    // send-back — a separate resume site from the normal path above.
+    const req = await open({ maxRevisions: 0 });
+    const out = await svc.sendBack(req.id, { actorId: 'u9' }, CTX);
+    expect(out.autoRejected, 'expected the auto-reject branch').toBe(true);
+    expectCleanHandoffs();
+  });
+
+  it('recall inside the revise window cancels the run without a pending request', async () => {
+    const req = await open();
+    await svc.sendBack(req.id, { actorId: 'u9' }, CTX);
+    handoffs = [];                                   // isolate the recall's own hand-back
+    await svc.recall(req.id, { actorId: 'u1' }, CTX);
+    expect(handoffs.map(h => h.hook)).toContain('cancelRun');
+    expectCleanHandoffs();
+  });
+
+  it('resubmit re-enters the node without leaving the old request pending', async () => {
+    const req = await open();
+    await svc.sendBack(req.id, { actorId: 'u9' }, CTX);
+    handoffs = [];                                   // isolate the resubmit's own hand-back
+    await svc.resubmit(req.id, { actorId: 'u1' }, CTX);
+    expectCleanHandoffs();
+  });
+});
