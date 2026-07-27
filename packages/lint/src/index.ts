@@ -203,4 +203,7 @@ export {
 } from './validate-chart-bindings.js';
 export type { ChartBindingFinding, ChartBindingSeverity } from './validate-chart-bindings.js';
 
+export { validateNavAccess, NAV_OBJECT_UNGRANTED } from './validate-nav-access.js';
+export type { NavAccessFinding, NavAccessSeverity } from './validate-nav-access.js';
+
 export { buildAccessMatrix, diffAccessMatrix } from './build-access-matrix.js';

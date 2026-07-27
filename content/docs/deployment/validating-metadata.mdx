@@ -159,6 +159,24 @@ An axis naming a measure the dataset declares but this chart does not *select*
 nothing. The react `<ObjectChart>` block is object-bound rather than
 dataset-bound and is not checked here.
 
+### 7. Navigation exposing objects nobody can read
+
+Navigation and permissions are separate metadata, each valid on its own — so an
+app can put an object in its menu that no permission set grants read on. The
+entry renders; opening it fails permission-denied for everyone except a holder
+of the platform's built-in wildcard admin set. It works while you browse as an
+administrator and breaks for the users the app ships permission sets for.
+
+```ts
+navigation: [{ id: 'nav_forecast', type: 'object', objectName: 'crm_forecast' }]
+// …and no permission set lists `crm_forecast` under `objects` → warning
+```
+
+Advisory: the grant may come from a permission set another installed package
+ships. Skipped for platform-provided objects (whose own packages grant them),
+for stacks that declare no permission sets at all, and when any set carries a
+wildcard (`objects: { '*': … }`) grant.
+
 ## The one gate, two entry points
 
 `os validate` and `os build` (alias of `os compile`) run the **same** validator:
@@ -172,6 +190,7 @@ dataset-bound and is not checked here.
 | Object & action name references (#3583) | ✓ | ✓ |
 | Page-component field bindings (#3583) | ✓ | ✓ |
 | Chart bindings outside dashboards (#3583) | ✓ | ✓ |
+| Navigation vs. granted access (ADR-0090 D6) | ✓ | ✓ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ |
 | Emits `dist/objectstack.json` | — | ✓ |
 

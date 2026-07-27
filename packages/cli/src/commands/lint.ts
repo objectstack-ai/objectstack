@@ -12,6 +12,7 @@ import { validateWidgetBindings } from '@objectstack/lint';
 import { validateRecordTitle, validateSemanticRoles, validateCapabilityReferences, validateSecurityPosture, validateOrgAxisRedLines, validateApprovalApprovers, validateSeedReplaySafety, validateSeedStateMachine } from '@objectstack/lint';
 import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
 import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
+import { validateNavAccess } from '@objectstack/lint';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
@@ -542,6 +543,21 @@ export function lintConfig(config: any): LintIssue[] {
   // semantic layer, where an axis naming a raw field instead of a dataset
   // measure renders an empty series (ADR-0021).
   for (const t of validateChartBindings(config)) {
+    issues.push({
+      severity: t.severity,
+      rule: t.rule,
+      message: `${t.where}: ${t.message}`,
+      path: t.path,
+      fix: t.hint,
+    });
+  }
+
+  // ── Navigation reachability vs. granted access (ADR-0090 D6, issue #3583) ──
+  // Navigation and permissions are separate metadata, so an app can expose an
+  // object no permission set grants read on: the entry renders and the click
+  // fails permission-denied for every user, including admins. Advisory — the
+  // grant may come from a set another installed package ships.
+  for (const t of validateNavAccess(config)) {
     issues.push({
       severity: t.severity,
       rule: t.rule,

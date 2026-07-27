@@ -16,6 +16,7 @@ import { validateDashboardActionRefs } from '@objectstack/lint';
 import { validateFilterTokens } from '@objectstack/lint';
 import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
 import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
+import { validateNavAccess } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
@@ -302,6 +303,7 @@ export default class Validate extends Command {
         ...validateActionNameRefs(result.data as Record<string, unknown>),
         ...validatePageFieldBindings(result.data as Record<string, unknown>),
         ...validateChartBindings(result.data as Record<string, unknown>),
+        ...validateNavAccess(result.data as Record<string, unknown>),
       ];
       const refErrors = refFindings.filter((f) => f.severity === 'error');
       const refWarnings = refFindings.filter((f) => f.severity === 'warning');
