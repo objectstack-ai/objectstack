@@ -2411,6 +2411,140 @@ export class ObjectStackClient {
   };
 
   /**
+   * API Keys (#3563 gap closure)
+   *
+   * `POST /api/v1/keys` mints a `sys_api_key` for the CALLER — `user_id` is
+   * pinned server-side and never read from the body, and the raw secret is
+   * returned exactly once (only its hash is stored; it is never
+   * re-displayable). Until this surface existed the SDK had no way to create
+   * an API key at all. Fixed path — `keys` is not in `ApiRoutesSchema`
+   * (same precedent as `actions` / `projects`).
+   */
+  keys = {
+      /**
+       * Mint an API key. Returns `{ id, name, prefix, key, expires_at? }` —
+       * `key` is the raw secret, shown ONCE; store it immediately.
+       * `expiresAt` accepts an ISO string or epoch (ms or s); the server
+       * rejects past dates.
+       */
+      create: async (opts?: {
+          name?: string;
+          expiresAt?: string | number;
+      }): Promise<{ id: string; name: string; prefix: string; key: string; expires_at?: string }> => {
+          const res = await this.fetch(`${this.baseUrl}/api/v1/keys`, {
+              method: 'POST',
+              body: JSON.stringify({
+                  ...(opts?.name != null ? { name: opts.name } : {}),
+                  ...(opts?.expiresAt != null ? { expires_at: opts.expiresAt } : {}),
+              }),
+          });
+          return this.unwrapResponse(res);
+      },
+  };
+
+  /**
+   * Share Links (#3563 gap closure)
+   *
+   * Authenticated management of record share links (`sys_share_link`).
+   * The public consumption routes (`GET /share-links/:token/resolve`,
+   * `GET /share-links/:token/messages`) are browser-facing token URLs and
+   * deliberately stay out of the SDK. Listing is server-constrained to links
+   * the CALLER created — a guessed recordId can never enumerate another
+   * user's tokens. Fixed path — `share-links` is not in `ApiRoutesSchema`.
+   */
+  shareLinks = {
+      /** Create a share link for a record. Returns the link row (incl. `token`). */
+      create: async (
+          object: string,
+          recordId: string,
+          opts?: {
+              permission?: string;
+              audience?: string;
+              expiresAt?: string | null;
+              emailAllowlist?: string[];
+              password?: string;
+              redactFields?: string[];
+              label?: string;
+          },
+      ): Promise<any> => {
+          const res = await this.fetch(`${this.baseUrl}/api/v1/share-links`, {
+              method: 'POST',
+              body: JSON.stringify({ object, recordId, ...(opts ?? {}) }),
+          });
+          return this.unwrapResponse(res);
+      },
+
+      /** List the caller's own share links, optionally filtered. */
+      list: async (opts?: {
+          object?: string;
+          recordId?: string;
+          includeRevoked?: boolean;
+      }): Promise<any[]> => {
+          const params = new URLSearchParams();
+          if (opts?.object) params.set('object', opts.object);
+          if (opts?.recordId) params.set('recordId', opts.recordId);
+          if (opts?.includeRevoked) params.set('includeRevoked', 'true');
+          const qs = params.toString();
+          const res = await this.fetch(`${this.baseUrl}/api/v1/share-links${qs ? `?${qs}` : ''}`);
+          return this.unwrapResponse(res);
+      },
+
+      /** Revoke a share link by id or token. */
+      revoke: async (idOrToken: string): Promise<{ ok: boolean }> => {
+          const res = await this.fetch(
+              `${this.baseUrl}/api/v1/share-links/${encodeURIComponent(idOrToken)}`,
+              { method: 'DELETE' },
+          );
+          return this.unwrapResponse(res);
+      },
+  };
+
+  /**
+   * Security Admin (#3563 gap closure)
+   *
+   * ADR-0090 D5/D9 suggested audience bindings: a package's
+   * `isDefault: true` permission set is an install-time SUGGESTION to bind
+   * it to the `everyone` position; these calls let an admin see and resolve
+   * those suggestions. Anonymous callers are denied unconditionally
+   * server-side, and confirm/dismiss run under the audience-anchor +
+   * delegated-admin gates with the caller's own context. Fixed path —
+   * `security` is not in `ApiRoutesSchema`.
+   */
+  security = {
+      suggestedBindings: {
+          /** List suggestions, optionally by `status` / `packageId` (reconciles first). */
+          list: async (opts?: { status?: string; packageId?: string }): Promise<any> => {
+              const params = new URLSearchParams();
+              if (opts?.status) params.set('status', opts.status);
+              if (opts?.packageId) params.set('packageId', opts.packageId);
+              const qs = params.toString();
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/security/suggested-bindings${qs ? `?${qs}` : ''}`,
+              );
+              return this.unwrapResponse(res);
+          },
+
+          /** Confirm a suggestion — creates the anchor binding. */
+          confirm: async (id: string): Promise<any> => {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/security/suggested-bindings/${encodeURIComponent(id)}/confirm`,
+                  { method: 'POST' },
+              );
+              return this.unwrapResponse(res);
+          },
+
+          /** Dismiss (decline) a suggestion. */
+          dismiss: async (id: string): Promise<any> => {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/security/suggested-bindings/${encodeURIComponent(id)}/dismiss`,
+                  { method: 'POST' },
+              );
+              return this.unwrapResponse(res);
+          },
+      },
+  };
+
+  /**
    * Event Subscription API
    * Provides real-time event subscriptions for metadata and data changes
    */

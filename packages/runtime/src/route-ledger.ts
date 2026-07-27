@@ -96,13 +96,13 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /notifications/read/all', domain: '/notifications', disposition: 'sdk', client: 'notifications.markAllRead' },
 
   // ── security (ADR-0090 suggested audience bindings) ───────────────────────
-  { route: 'GET /security/suggested-bindings', domain: '/security', disposition: 'gap', note: 'no client expression for the whole domain' },
-  { route: 'POST /security/suggested-bindings/:id/confirm', domain: '/security', disposition: 'gap', note: 'no client expression' },
-  { route: 'POST /security/suggested-bindings/:id/dismiss', domain: '/security', disposition: 'gap', note: 'no client expression' },
+  { route: 'GET /security/suggested-bindings', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.list' },
+  { route: 'POST /security/suggested-bindings/:id/confirm', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.confirm' },
+  { route: 'POST /security/suggested-bindings/:id/dismiss', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.dismiss' },
 
   // ── keys ──────────────────────────────────────────────────────────────────
-  { route: 'POST /keys', domain: '/keys', disposition: 'gap',
-    note: 'mints a sys_api_key (secret returned once); there is NO SDK path to create an API key' },
+  { route: 'POST /keys', domain: '/keys', disposition: 'sdk', client: 'keys.create',
+    note: 'raw secret returned once; user_id pinned server-side' },
 
   // ── storage ───────────────────────────────────────────────────────────────
   { route: 'POST /storage/upload', domain: '/storage', disposition: 'mismatch', client: 'storage.upload',
@@ -115,9 +115,9 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: 'the one ui-route call in the SDK is filed under client.meta, not a ui surface' },
 
   // ── share-links ───────────────────────────────────────────────────────────
-  { route: 'POST /share-links', domain: '/share-links', disposition: 'gap', note: 'create a link — no client expression for the whole domain' },
-  { route: 'GET /share-links', domain: '/share-links', disposition: 'gap', note: 'list own links — no client expression' },
-  { route: 'DELETE /share-links/:idOrToken', domain: '/share-links', disposition: 'gap', note: 'revoke — no client expression' },
+  { route: 'POST /share-links', domain: '/share-links', disposition: 'sdk', client: 'shareLinks.create' },
+  { route: 'GET /share-links', domain: '/share-links', disposition: 'sdk', client: 'shareLinks.list' },
+  { route: 'DELETE /share-links/:idOrToken', domain: '/share-links', disposition: 'sdk', client: 'shareLinks.revoke' },
   { route: 'GET /share-links/:token/resolve', domain: '/share-links', disposition: 'public', note: 'unauthenticated token resolution for shared-record pages' },
   { route: 'GET /share-links/:token/messages', domain: '/share-links', disposition: 'public', note: 'unauthenticated shared-conversation messages' },
 

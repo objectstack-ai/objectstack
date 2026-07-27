@@ -82,9 +82,10 @@ describe('route ledger hygiene', () => {
 
   it('gap count only shrinks — update the ledger (and this number) when closing gaps', () => {
     // Ratchet, not aspiration: 27 audited gaps at #3563 PR-1; 24 after PR-2
-    // (actions surface). Closing a gap = reclassify to `sdk` AND lower this
-    // bound. Raising it demands an explicit, reviewed decision.
+    // (actions surface); 17 after PR-3 (keys / share-links / security).
+    // Closing a gap = reclassify to `sdk` AND lower this bound. Raising it
+    // demands an explicit, reviewed decision.
     const gaps = ROUTE_LEDGER.filter((e) => e.disposition === 'gap').length;
-    expect(gaps).toBeLessThanOrEqual(24);
+    expect(gaps).toBeLessThanOrEqual(17);
   });
 });

@@ -119,6 +119,9 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | **analytics** | ✅ | 3 | Analytics queries |
 | **automation** | ✅ | 15 | Flow CRUD, trigger/execute, runs, screen-flow resume |
 | **actions** | ✅ | 2 | Server-registered action handlers (`engine.registerAction`) |
+| **keys** | ✅ | 1 | API key minting (one-time secret) |
+| **shareLinks** | ✅ | 3 | Record share-link management |
+| **security** | ✅ | 3 | Suggested audience bindings (admin) |
 | **storage** | ✅ | 2 | File upload & download |
 | **i18n** | ✅ | 3 | Internationalization |
 | **notifications** | 🟡 | 7 | Legacy notification helpers; receipt/inbox cut-over pending |
@@ -351,6 +354,22 @@ const res = await client.actions.invoke('crm_lead', 'convert', {
 if (!res.success) console.warn(res.error);
 // Global (object-less) actions dispatch to the wildcard handler:
 await client.actions.invokeGlobal('nightly_cleanup', { params: { dryRun: true } });
+
+// API Keys — the raw secret is returned exactly ONCE; store it immediately.
+const apiKey = await client.keys.create({ name: 'CI key', expiresAt: '2027-01-01' });
+console.log(apiKey.key); // never re-displayable
+
+// Share Links — manage record share links (public token URLs stay browser-only)
+const link = await client.shareLinks.create('crm_account', recordId, {
+  permission: 'view',
+  expiresAt: '2026-12-31',
+});
+await client.shareLinks.list({ object: 'crm_account' });
+await client.shareLinks.revoke(link.token);
+
+// Security (admin) — resolve package audience-binding suggestions (ADR-0090)
+const { suggestions } = await client.security.suggestedBindings.list({ status: 'pending' });
+await client.security.suggestedBindings.confirm(suggestions[0].id);
 
 // Storage — File upload and management
 await client.storage.upload(fileData, 'user');
