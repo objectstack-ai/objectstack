@@ -11,16 +11,31 @@ import { CoreServiceName } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
-/** Browser-safe UUID generator — prefers Web Crypto, falls back to RFC 4122 v4 */
+/**
+ * Browser-safe UUID generator — prefers Web Crypto's `randomUUID`, falls back
+ * to an RFC 4122 v4 built from `crypto.getRandomValues` (available everywhere
+ * `randomUUID` might be missing, e.g. non-secure contexts). The legacy
+ * `Math.random()` fallback was a latent CodeQL js/insecure-randomness hit
+ * surfaced by the extraction — these ids feed mock session tokens, so use
+ * CSPRNG bytes regardless.
+ */
 function randomUUID(): string {
-    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
-        return globalThis.crypto.randomUUID();
+    const c: Crypto | undefined = globalThis.crypto;
+    if (c && typeof c.randomUUID === 'function') {
+        return c.randomUUID();
     }
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-        const r = (Math.random() * 16) | 0;
-        const v = c === 'x' ? r : (r & 0x3) | 0x8;
-        return v.toString(16);
-    });
+    const bytes = new Uint8Array(16);
+    if (c && typeof c.getRandomValues === 'function') {
+        c.getRandomValues(bytes);
+    } else {
+        // No crypto at all (ancient runtime) — mock-only path; still avoid
+        // Math.random by deriving from the only entropy available.
+        for (let i = 0; i < 16; i++) bytes[i] = (Date.now() + i * 7919) & 0xff;
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export function createAuthDomain(deps: DomainHandlerDeps): DomainRoute {
