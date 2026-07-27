@@ -11,17 +11,21 @@
  * is the decomposition seam: `dispatch()` consults it FIRST, and domains are
  * migrated out of the if-chain one PR at a time.
  *
- * Migration discipline (registry first, code moves later, ownership last):
- *   1. This PR: the dispatcher wraps its existing `handleXxx` methods into
+ * Migration discipline (registry first, then extract bodies):
+ *   1. PR-1: the dispatcher wraps its existing `handleXxx` methods into
  *      registry entries at construction time — same matching semantics, same
  *      handler bodies, zero behavior change (locked by the http-conformance
  *      cross-adapter suite).
- *   2. Follow-up PRs: a domain's handler body moves into its owning service
- *      package, which registers the entry itself (via
- *      {@link HttpDispatcher.registerDomainHandler}). Service-absence
- *      semantics (today's in-handler 501 vs route-not-mounted 404) are decided
- *      per-domain at THAT point, together with the D12 honest-capabilities
- *      discovery contract.
+ *   2. PR-2..N: each domain's handler BODY moves to a module under
+ *      `./domains/`, depending only on the explicit {@link DomainHandlerDeps}
+ *      contract. Registration stays dispatcher-owned on purpose: most service
+ *      slots are multi-provider (e.g. `i18n` is served by I18nServicePlugin
+ *      OR the AppPlugin in-memory fallback; `analytics` by service-analytics
+ *      OR the ObjectQLPlugin fallback), so a route is the bridge to a SLOT,
+ *      not the property of any one providing package — moving registration
+ *      into one provider would 404 the others. External packages that DO own
+ *      a slot exclusively can still self-register via
+ *      {@link HttpDispatcher.registerDomainHandler}.
  *
  * Matching semantics are deliberately faithful to the legacy if-chain,
  * INCLUDING its rough edges (`match: 'prefix'` on `/i18n` also matches
@@ -56,11 +60,30 @@ export interface DomainRoute {
     /**
      * `'prefix'` — legacy `startsWith(prefix)` semantics (default).
      * `'exact'` — the path must equal the prefix exactly.
+     * `'segment'` — exact, or followed by `'/'` (the legacy
+     * `=== p || startsWith(p + '/')` branch shape; does NOT claim `/i18nxx`).
      */
-    match?: 'prefix' | 'exact';
+    match?: 'prefix' | 'exact' | 'segment';
     /** Restrict to these UPPERCASE HTTP methods. Omit = all methods. */
     methods?: string[];
     handler: DomainHandler;
+}
+
+/**
+ * The dispatcher facilities an extracted domain body is allowed to use — the
+ * WHOLE dependency contract, made explicit. Growing this interface is a
+ * design decision, not a convenience: every addition couples all domains to
+ * more dispatcher surface.
+ */
+export interface DomainHandlerDeps {
+    /** Environment-scoped service resolution (per-request kernel aware). */
+    resolveService(name: string, environmentId?: string): any;
+    /** Unscoped service lookup on the current kernel (may return a Promise). */
+    getService(name: string): any;
+    /** Standard success envelope. */
+    success(data: any, meta?: any): { status: number; body: any };
+    /** Standard error envelope. */
+    error(message: string, code?: number, details?: any): { status: number; body: any };
 }
 
 /**
@@ -83,11 +106,20 @@ export class DomainHandlerRegistry {
         const m = method.toUpperCase();
         for (const route of this.routes) {
             if (route.methods && !route.methods.includes(m)) continue;
-            if (route.match === 'exact' ? path === route.prefix : path.startsWith(route.prefix)) {
-                return route;
-            }
+            if (DomainHandlerRegistry.matches(route, path)) return route;
         }
         return undefined;
+    }
+
+    private static matches(route: DomainRoute, path: string): boolean {
+        switch (route.match) {
+            case 'exact':
+                return path === route.prefix;
+            case 'segment':
+                return path === route.prefix || path.startsWith(route.prefix + '/');
+            default:
+                return path.startsWith(route.prefix);
+        }
     }
 
     /** Registered routes, in match order (introspection / tests). */

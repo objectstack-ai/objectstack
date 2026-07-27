@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import {
-    ObjectKernel, getEnv, resolveLocale, evaluateAuthGate, isAuthGateAllowlisted,
+    ObjectKernel, getEnv, evaluateAuthGate, isAuthGateAllowlisted,
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 import { isMcpServerEnabled } from '@objectstack/types';
@@ -14,7 +14,11 @@ import { validateActionParams, type ResolvedActionParam } from '@objectstack/spe
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { setPackageDisabled } from './package-state-store.js';
 import { checkApiExposure } from './api-exposure.js';
-import { DomainHandlerRegistry, type DomainRoute } from './domain-handler-registry.js';
+import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
+import { createAnalyticsDomain, handleAnalyticsRequest } from './domains/analytics.js';
+import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
+import { createNotificationsDomain, handleNotificationRequest } from './domains/notifications.js';
+import { createSecurityDomain, handleSecurityRequest } from './domains/security.js';
 
 /** Minimal local interface — full EnvironmentScopeManager was removed in Phase R. */
 interface EnvironmentScopeManager {
@@ -227,12 +231,27 @@ export class HttpDispatcher {
     }
 
     /**
-     * ADR-0076 D11 step ③ — seed the domain registry with the first domains
-     * lifted out of the `dispatch()` if-chain. Handler BODIES stay as
-     * dispatcher methods in this PR (registry first, code moves later,
-     * ownership last — see {@link DomainHandlerRegistry}); each entry
-     * faithfully reproduces its legacy branch's matching + argument
-     * convention, so behavior is unchanged.
+     * The explicit dispatcher-facility contract extracted domain bodies run
+     * against (ADR-0076 D11 step ③ PR-2). One instance per dispatcher;
+     * methods bound here are the ONLY dispatcher surface a domain module may
+     * touch — see {@link DomainHandlerDeps}.
+     */
+    private readonly domainDeps: DomainHandlerDeps = {
+        resolveService: (name, environmentId) => this.resolveService(name, environmentId),
+        // Deps take plain strings (domain modules pass CoreServiceName enum
+        // values anyway); the dispatcher method's parameter is the enum type.
+        getService: (name) => this.getService(name as Parameters<HttpDispatcher['getService']>[0]),
+        success: (data, meta) => this.success(data, meta),
+        error: (message, code, details) => this.error(message, code, details),
+    };
+
+    /**
+     * ADR-0076 D11 step ③ — seed the domain registry with the domains lifted
+     * out of the `dispatch()` if-chain. Bodies of the four service-backed
+     * domains live under `./domains/` (PR-2); `/health` + `/ready` stay
+     * inline because their "body" IS dispatcher state (kernel lifecycle).
+     * Registration stays dispatcher-owned for multi-provider service slots —
+     * see {@link DomainHandlerRegistry} for the rationale.
      */
     private registerBuiltinDomains(): void {
         // GET /health — liveness probe (was branch "0b").
@@ -264,24 +283,10 @@ export class HttpDispatcher {
                     : { handled: true, response: this.error('Service not ready', 503, { state }) };
             },
         });
-        // /analytics — bridge to the `analytics` service. NOTE: the fallback
-        // vs service-replace semantics live in the SERVICE layer
-        // (ObjectQLPlugin fallback + service-analytics `replaceService`, see
-        // ADR-0076 D10/D12) — this route entry must keep working whether the
-        // real engine or the degraded fallback is registered, which is why
-        // its handler registration stays dispatcher-owned for now.
-        this.domainRegistry.register({
-            prefix: '/analytics',
-            handler: (req, context) =>
-                this.handleAnalytics(req.path.substring(10), req.method, req.body, context),
-        });
-        // /i18n — translations / locales / labels, served by the `i18n`
-        // service (501 inside the handler when the service is absent).
-        this.domainRegistry.register({
-            prefix: '/i18n',
-            handler: (req, context) =>
-                this.handleI18n(req.path.substring(5), req.method, req.query, context),
-        });
+        this.domainRegistry.register(createAnalyticsDomain(this.domainDeps));
+        this.domainRegistry.register(createI18nDomain(this.domainDeps));
+        this.domainRegistry.register(createNotificationsDomain(this.domainDeps));
+        this.domainRegistry.register(createSecurityDomain(this.domainDeps));
     }
 
     /**
@@ -2563,39 +2568,9 @@ export class HttpDispatcher {
      * Handles Analytics requests
      * path: sub-path after /analytics/
      */
+    /** Thin delegate — body extracted to `./domains/analytics.ts` (D11③ PR-2). */
     async handleAnalytics(path: string, method: string, body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        const analyticsService = await this.getService(CoreServiceName.enum.analytics);
-        if (!analyticsService) return { handled: false }; // 404 handled by caller if unhandled
-
-        const m = method.toUpperCase();
-        const subPath = path.replace(/^\/+/, '');
-
-        // POST /analytics/query
-        if (subPath === 'query' && m === 'POST') {
-            // [#2852] Pass the request's execution context so the analytics
-            // service scopes each object by its per-object read filter (tenant +
-            // RLS). Without it, `getReadScope(object, undefined)` returned no
-            // filter and the query ran UNSCOPED — an authenticated caller saw
-            // rows RLS would otherwise hide.
-            const result = await analyticsService.query(body, context?.executionContext);
-            return { handled: true, response: this.success(result) };
-        }
-
-        // GET /analytics/meta
-        if (subPath === 'meta' && m === 'GET') {
-            const result = await analyticsService.getMeta();
-             return { handled: true, response: this.success(result) };
-        }
-
-        // POST /analytics/sql (Dry-run or debug)
-        if (subPath === 'sql' && m === 'POST') {
-             // [#2852] Scope the generated SQL to the caller too, so a preview
-             // reflects the same per-object read filter the real query applies.
-             const result = await analyticsService.generateSql(body, context?.executionContext);
-             return { handled: true, response: this.success(result) };
-        }
-
-        return { handled: false };
+        return handleAnalyticsRequest(this.domainDeps, path, method, body, context);
     }
 
     /**
@@ -2611,41 +2586,9 @@ export class HttpDispatcher {
      *   POST /read       → markRead     (body: { ids: string[] })
      *   POST /read/all   → markAllRead
      */
+    /** Thin delegate — body extracted to `./domains/notifications.ts` (D11③ PR-2). */
     async handleNotification(path: string, method: string, body: any, query: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        const service = await this.resolveService(CoreServiceName.enum.notification, context.environmentId) as any;
-        if (!service || typeof service.listInbox !== 'function') return { handled: false };
-
-        const userId: string | undefined = context.executionContext?.userId;
-        if (!userId) {
-            return { handled: true, response: this.error('Authentication required', 401) };
-        }
-
-        const m = method.toUpperCase();
-        const subPath = path.replace(/^\/+/, '').replace(/\/+$/, '');
-
-        // GET /notifications — list the user's inbox joined with read-state.
-        if (subPath === '' && m === 'GET') {
-            const read = query?.read === undefined ? undefined : String(query.read) === 'true';
-            const limit = query?.limit ? Number(query.limit) : undefined;
-            const type = query?.type ? String(query.type) : undefined;
-            const result = await service.listInbox(userId, { read, type, limit });
-            return { handled: true, response: this.success(result) };
-        }
-
-        // POST /notifications/read — mark specific notifications read.
-        if (subPath === 'read' && m === 'POST') {
-            const ids: string[] = Array.isArray(body?.ids) ? body.ids.map((x: unknown) => String(x)) : [];
-            const result = await service.markRead(userId, ids);
-            return { handled: true, response: this.success(result) };
-        }
-
-        // POST /notifications/read/all — mark all of the user's inbox read.
-        if (subPath === 'read/all' && m === 'POST') {
-            const result = await service.markAllRead(userId);
-            return { handled: true, response: this.success(result) };
-        }
-
-        return { handled: false };
+        return handleNotificationRequest(this.domainDeps, path, method, body, query, context);
     }
 
     /**
@@ -2662,61 +2605,9 @@ export class HttpDispatcher {
      *   POST /security/suggested-bindings/:id/confirm          → create the anchor binding
      *   POST /security/suggested-bindings/:id/dismiss          → decline the suggestion
      */
+    /** Thin delegate — body extracted to `./domains/security.ts` (D11③ PR-2). */
     async handleSecurity(path: string, method: string, _body: any, query: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        const service = await this.resolveService('security', context.environmentId) as any;
-        if (!service || typeof service.listAudienceBindingSuggestions !== 'function') {
-            return { handled: true, response: this.error('Security service not available', 503) };
-        }
-
-        const ec = context.executionContext;
-        // Admin surface — anonymous is denied UNCONDITIONALLY (`requireAuth:
-        // true` hardcoded), independent of the deployment posture: even a
-        // `requireAuth: false` demo must not let anonymous callers list or
-        // confirm audience bindings. Shares the decision + body with every
-        // other HTTP seam (#2567).
-        if (shouldDenyAnonymous({ requireAuth: true, userId: ec?.userId, isSystem: ec?.isSystem })) {
-            return {
-                handled: true,
-                response: this.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
-            };
-        }
-
-        const m = method.toUpperCase();
-        // split+filter drops leading/trailing/duplicate slashes without a
-        // regex over request-controlled input (CodeQL js/polynomial-redos).
-        const parts = path.split('/').filter(Boolean);
-        if (parts[0] !== 'suggested-bindings') return { handled: false };
-
-        try {
-            // GET /security/suggested-bindings
-            if (parts.length === 1 && m === 'GET') {
-                const status = query?.status ? String(query.status) : undefined;
-                const packageId = query?.packageId ? String(query.packageId) : undefined;
-                const result = await service.listAudienceBindingSuggestions(ec, { status, packageId });
-                return { handled: true, response: this.success(result) };
-            }
-
-            // POST /security/suggested-bindings/:id/confirm|dismiss
-            if (parts.length === 3 && m === 'POST') {
-                const id = decodeURIComponent(parts[1]);
-                if (parts[2] === 'confirm') {
-                    const result = await service.confirmAudienceBindingSuggestion(ec, id);
-                    return { handled: true, response: this.success(result) };
-                }
-                if (parts[2] === 'dismiss') {
-                    const result = await service.dismissAudienceBindingSuggestion(ec, id);
-                    return { handled: true, response: this.success(result) };
-                }
-            }
-
-            return { handled: false };
-        } catch (err: any) {
-            // The service throws typed errors carrying their HTTP status:
-            // PermissionDeniedError → 403, SuggestionNotFoundError → 404,
-            // SuggestionStateError → 409.
-            const status = typeof err?.statusCode === 'number' ? err.statusCode : 500;
-            return { handled: true, response: this.error(err?.message ?? 'Security operation failed', status) };
-        }
+        return handleSecurityRequest(this.domainDeps, path, method, _body, query, context);
     }
 
     /**
@@ -2730,72 +2621,9 @@ export class HttpDispatcher {
      *   GET /labels/:object/:locale     → getFieldLabels  (both from path)
      *   GET /labels/:object?locale=xx   → getFieldLabels  (locale from query)
      */
+    /** Thin delegate — body extracted to `./domains/i18n.ts` (D11③ PR-2). */
     async handleI18n(path: string, method: string, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        const i18nService = await this.getService(CoreServiceName.enum.i18n);
-        if (!i18nService) return { handled: true, response: this.error('i18n service not available', 501) };
-
-        const m = method.toUpperCase();
-        const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
-
-        if (m !== 'GET') return { handled: false };
-
-        // GET /i18n/locales
-        if (parts[0] === 'locales' && parts.length === 1) {
-            const locales = i18nService.getLocales();
-            return { handled: true, response: this.success({ locales }) };
-        }
-
-        // GET /i18n/translations/:locale  OR  /i18n/translations?locale=xx
-        if (parts[0] === 'translations') {
-            const locale = parts[1] ? decodeURIComponent(parts[1]) : query?.locale;
-            if (!locale) return { handled: true, response: this.error('Missing locale parameter', 400) };
-
-            let translations = i18nService.getTranslations(locale);
-
-            // Locale fallback: try resolving to an available locale when
-            // the exact code yields empty translations (e.g. zh → zh-CN).
-            if (Object.keys(translations).length === 0) {
-                const availableLocales = typeof i18nService.getLocales === 'function'
-                    ? i18nService.getLocales() : [];
-                const resolved = resolveLocale(locale, availableLocales);
-                if (resolved && resolved !== locale) {
-                    translations = i18nService.getTranslations(resolved);
-                    return { handled: true, response: this.success({ locale: resolved, requestedLocale: locale, translations }) };
-                }
-            }
-
-            return { handled: true, response: this.success({ locale, translations }) };
-        }
-
-        // GET /i18n/labels/:object/:locale  OR  /i18n/labels/:object?locale=xx
-        if (parts[0] === 'labels' && parts.length >= 2) {
-            const objectName = decodeURIComponent(parts[1]);
-            let locale = parts[2] ? decodeURIComponent(parts[2]) : query?.locale;
-            if (!locale) return { handled: true, response: this.error('Missing locale parameter', 400) };
-
-            // Locale fallback for labels endpoint
-            const availableLocales = typeof i18nService.getLocales === 'function'
-                ? i18nService.getLocales() : [];
-            const resolved = resolveLocale(locale, availableLocales);
-            if (resolved) locale = resolved;
-
-            if (typeof i18nService.getFieldLabels === 'function') {
-                const labels = i18nService.getFieldLabels(objectName, locale);
-                return { handled: true, response: this.success({ object: objectName, locale, labels }) };
-            }
-            // Fallback: derive field labels from full translation bundle
-            const translations = i18nService.getTranslations(locale);
-            const prefix = `o.${objectName}.fields.`;
-            const labels: Record<string, string> = {};
-            for (const [key, value] of Object.entries(translations)) {
-                if (key.startsWith(prefix)) {
-                    labels[key.substring(prefix.length)] = value as string;
-                }
-            }
-            return { handled: true, response: this.success({ object: objectName, locale, labels }) };
-        }
-
-        return { handled: false };
+        return handleI18nRequest(this.domainDeps, path, method, query, _context);
     }
 
     /**
@@ -4678,17 +4506,7 @@ export class HttpDispatcher {
 
         // /analytics moved to the domain registry (D11 step ③).
 
-        // In-app notifications (ADR-0030) — inbox list + receipt mark-read,
-        // backed by the messaging service registered under the `notification` slot.
-        if (cleanPath.startsWith('/notifications')) {
-             return this.handleNotification(cleanPath.substring(14), method, body, query, context);
-        }
-
-        // Security admin surface (ADR-0090 D5/D9) — suggested audience
-        // bindings, dispatched to the `security` service (plugin-security).
-        if (cleanPath === '/security' || cleanPath.startsWith('/security/')) {
-             return this.handleSecurity(cleanPath.substring(9), method, body, query, context);
-        }
+        // /notifications and /security moved to the domain registry (D11 step ③).
 
         if (cleanPath.startsWith('/packages')) {
              return this.handlePackages(cleanPath.substring(9), method, body, query, context);

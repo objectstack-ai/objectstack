@@ -152,3 +152,79 @@ describe('HttpDispatcher domain registry (D11 step ③)', () => {
         expect(result.response?.body?.echo).toBe('/custom-domain/thing');
     });
 });
+
+// ---------------------------------------------------------------------------
+// PR-2 — segment matching + extracted notification/security domains
+// ---------------------------------------------------------------------------
+
+describe('DomainHandlerRegistry segment matching (PR-2)', () => {
+    it("match: 'segment' claims the prefix and slash-separated sub-paths, but not lexical extensions", () => {
+        const registry = new DomainHandlerRegistry();
+        registry.register({ prefix: '/security', match: 'segment', handler: okHandler('s') });
+        expect(registry.resolve('/security', 'GET')).toBeDefined();
+        expect(registry.resolve('/security/suggested-bindings', 'GET')).toBeDefined();
+        // The legacy `=== p || startsWith(p + '/')` shape: '/securityfoo' is NOT claimed.
+        expect(registry.resolve('/securityfoo', 'GET')).toBeUndefined();
+    });
+});
+
+describe('HttpDispatcher extracted domains (PR-2)', () => {
+    it('/notifications requires an authenticated user (401) when the service is wired', async () => {
+        const notification = { listInbox: vi.fn().mockResolvedValue([]), markRead: vi.fn(), markAllRead: vi.fn() };
+        const result = await makeDispatcher({ notification }).dispatch('GET', '/notifications', undefined, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(401);
+    });
+
+    it('/notifications lists the inbox for an authenticated user (thin delegate carries the extracted body)', async () => {
+        const notification = { listInbox: vi.fn().mockResolvedValue([{ id: 'n1' }]), markRead: vi.fn(), markAllRead: vi.fn() };
+        // Call the public delegate directly: dispatch() re-resolves identity
+        // from the (mock, auth-less) kernel and would overwrite the seeded
+        // executionContext with an anonymous one.
+        const context: any = { executionContext: { userId: 'u1' } };
+        const result = await makeDispatcher({ notification }).handleNotification('', 'GET', undefined, { limit: '5' }, context);
+        expect(result.response?.status).toBe(200);
+        expect(notification.listInbox).toHaveBeenCalledWith('u1', expect.objectContaining({ limit: 5 }));
+    });
+
+    it('/security responds 503 when no security service is wired (legacy in-handler semantics)', async () => {
+        const result = await makeDispatcher().dispatch('GET', '/security/suggested-bindings', undefined, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(503);
+    });
+
+    it('/security denies anonymous callers unconditionally when the service is wired', async () => {
+        const security = {
+            listAudienceBindingSuggestions: vi.fn().mockResolvedValue([]),
+            confirmAudienceBindingSuggestion: vi.fn(),
+            dismissAudienceBindingSuggestion: vi.fn(),
+        };
+        const result = await makeDispatcher({ security }).dispatch('GET', '/security/suggested-bindings', undefined, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(401);
+        expect(security.listAudienceBindingSuggestions).not.toHaveBeenCalled();
+    });
+
+    it('/security lists suggestions for an authenticated caller (thin delegate carries the extracted body)', async () => {
+        const security = {
+            listAudienceBindingSuggestions: vi.fn().mockResolvedValue([{ id: 's1' }]),
+            confirmAudienceBindingSuggestion: vi.fn(),
+            dismissAudienceBindingSuggestion: vi.fn(),
+        };
+        // Direct delegate call for the same reason as the notifications case.
+        const context: any = { executionContext: { userId: 'admin-1' } };
+        const result = await makeDispatcher({ security }).handleSecurity('/suggested-bindings', 'GET', undefined, { status: 'open' }, context);
+        expect(result.response?.status).toBe(200);
+        expect(security.listAudienceBindingSuggestions).toHaveBeenCalledWith(
+            expect.objectContaining({ userId: 'admin-1' }),
+            expect.objectContaining({ status: 'open' }),
+        );
+    });
+
+    it('/securityfoo is NOT claimed by the security domain (segment semantics preserved from the if-chain)', async () => {
+        const security = { listAudienceBindingSuggestions: vi.fn() };
+        const result = await makeDispatcher({ security }).dispatch('GET', '/securityfoo', undefined, {}, {} as any);
+        expect(security.listAudienceBindingSuggestions).not.toHaveBeenCalled();
+        expect(result.response?.status ?? 404).not.toBe(200);
+    });
+});
