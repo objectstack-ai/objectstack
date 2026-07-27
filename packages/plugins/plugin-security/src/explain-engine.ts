@@ -21,7 +21,7 @@
 
 import { isGrantActive, isGrantExpired, derivePosture as deriveAdminPosture } from '@objectstack/core';
 import { matchesFilterCondition } from '@objectstack/formula';
-import { BUILTIN_IDENTITY_PLATFORM_ADMIN, ADMIN_FULL_ACCESS, ORGANIZATION_ADMIN } from '@objectstack/spec';
+import { BUILTIN_IDENTITY_PLATFORM_ADMIN, ADMIN_FULL_ACCESS, ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type {
   AuthzPosture,
@@ -98,7 +98,7 @@ function derivePosture(context: any): AuthzPosture {
   return deriveAdminPosture({
     isPlatformAdmin:
       context?.hasPlatformAdminGrant === true || positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN),
-    isTenantAdmin: permissions.includes(ORGANIZATION_ADMIN),
+    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n)),
   });
 }
 
@@ -274,7 +274,24 @@ export async function buildContextForUser(ql: any, userId: string, nowMs: number
   } catch { /* ignore */ }
   // [ADR-0090 D5] Authenticated principals implicitly hold the everyone anchor.
   if (!positions.includes('everyone')) positions.push('everyone');
-  return { userId, positions, permissions, expiredGrants, delegatedPositions, hasPlatformAdminGrant };
+  // [ADR-0105 D2] The user's OWN org access set. Resolved here rather than
+  // inherited from the live principal: under the `group` posture this is the
+  // Layer 0 read reach, and a delegated read must be bounded by the DELEGATOR's
+  // memberships. Absent → empty → the group wall denies (fail-closed), which is
+  // the safe direction for an unresolvable delegator.
+  const accessible_org_ids: string[] = [];
+  try {
+    const rows = await ql.find('sys_member', { where: { user_id: userId }, limit: 200, context: SYSTEM_CTX });
+    for (const m of Array.isArray(rows) ? rows : []) {
+      if (!isGrantActive(m, nowMs)) continue;
+      const org = (m as any)?.organization_id ?? (m as any)?.organizationId;
+      if (typeof org === 'string' && org && !accessible_org_ids.includes(org)) {
+        accessible_org_ids.push(org);
+      }
+    }
+  } catch { /* table unavailable → empty set → fails closed under `group` */ }
+
+  return { userId, positions, permissions, accessible_org_ids, expiredGrants, delegatedPositions, hasPlatformAdminGrant };
 }
 
 /**
@@ -308,6 +325,10 @@ export type DelegatorResolution =
  *    its delegator are, by construction, in the same org, so `tenantId` /
  *    `org_user_ids` carry over — delegator-side RLS that substitutes them then
  *    compiles faithfully instead of collapsing to the deny sentinel.
+ *    `accessible_org_ids` (ADR-0105 D2) is the exception: it is resolved from
+ *    the DELEGATOR's own memberships by `buildContextForUser`, never inherited,
+ *    because inheriting it would widen a delegated read past the organizations
+ *    the delegator actually belongs to.
  *  - **Person-specific membership bags (`rlsMembership`) are left unresolved**
  *    for the first cut. Absent → the RLS compiler's fail-closed substitution
  *    NARROWS the delegator's row set, never widens it — safe by construction.
@@ -342,6 +363,10 @@ export async function resolveDelegatorContext(
   // Inherit tenant-scoped substitution bags from the live principal (same org).
   if (context?.tenantId != null) dctx.tenantId = context.tenantId;
   if (context?.org_user_ids != null) dctx.org_user_ids = context.org_user_ids;
+  // [ADR-0105 D2] The delegator's own org access set is NOT inherited — it is
+  // the delegator's membership that bounds a delegated read, and
+  // `buildContextForUser` resolves it for them. Inheriting the live principal's
+  // set would widen the delegator past their own memberships.
   if (user.email != null && user.email !== '') dctx.email = user.email;
   return { kind: 'resolved', context: dctx };
 }

@@ -12,6 +12,8 @@ export default defineConfig({
     alias: {
       '@objectstack/spec/contracts': path.resolve(__dirname, '../../spec/src/contracts/index.ts'),
       '@objectstack/spec/shared': path.resolve(__dirname, '../../spec/src/shared/index.ts'),
+      // [ADR-0105 D1] Reached transitively via `@objectstack/types` (tenancy posture).
+      '@objectstack/spec/security': path.resolve(__dirname, '../../spec/src/security/index.ts'),
       '@objectstack/spec': path.resolve(__dirname, '../../spec/src/index.ts'),
     },
   },

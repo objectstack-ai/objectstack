@@ -37,6 +37,18 @@ import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
+import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
+import {
+  normalizeTenancyPosture,
+  postureEnforcesWall,
+  postureStampsOrganization,
+  type TenancyPosture,
+} from '@objectstack/spec/security';
+import {
+  RLS_MEMBERSHIP_RESOLVER_SERVICE,
+  RESERVED_RLS_MEMBERSHIP_KEYS,
+  type IRlsMembershipResolver,
+} from '@objectstack/spec/contracts';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
@@ -246,11 +258,13 @@ export interface SecurityPluginOptions {
  * `@objectstack/organizations` package** (auto-stamps
  * `organization_id` on insert, per-org seed replay, default-org
  * bootstrap). When that plugin is installed, SecurityPlugin detects
- * it via `getService('org-scoping')` and keeps the wildcard
- * `current_user.organization_id` RLS policies that ship with the
- * default permission sets. Without it, those policies are stripped so
- * single-tenant deployments don't pay the field-existence safety-net
- * cost on every find.
+ * it via `getService('org-scoping')` and keeps the tenant-scoped RLS
+ * policies that ship with the default permission sets. Without it,
+ * *those shipped policies* are stripped so single-tenant deployments
+ * don't pay the field-existence safety-net cost on every find —
+ * app-authored policies are never stripped (ADR-0105 D3; they are
+ * retained and fail closed at compile time, see
+ * `platform-tenant-policies.ts`).
  *
  * Dependencies:
  * - objectql service (ObjectQL engine with middleware support)
@@ -276,13 +290,35 @@ export class SecurityPlugin implements Plugin {
   private readonly fallbackPermissionSet: string | null;
   /**
    * Runtime probe — set in `start()` from
-   * `ctx.getService('org-scoping')`. When `false`, wildcard RLS
-   * policies that reference `current_user.organization_id` are
-   * stripped from the per-request policy set (saves the
-   * field-existence safety net cost on every find in single-tenant
-   * deployments). When `true`, the policies apply normally.
+   * `ctx.getService('org-scoping')`. When `false`, the PLATFORM's own
+   * tenant-scoped RLS policies are stripped from the per-request
+   * policy set (saves the field-existence safety net cost on every
+   * find in single-tenant deployments); app-authored policies are
+   * retained and fail closed (ADR-0105 D3). When `true`, every policy
+   * applies normally.
    */
-  private orgScopingEnabled = false;
+  private tenancyPosture: TenancyPosture = 'single';
+  /**
+   * [ADR-0105 D11] The registered membership resolver, probed at `start()`.
+   * `null` when none is installed — the overwhelmingly common case, and the
+   * reason {@link stageRlsMembership} costs nothing when unused.
+   */
+  private rlsMembershipResolver: IRlsMembershipResolver | null = null;
+  /**
+   * [ADR-0105 D1] Back-compat view of {@link tenancyPosture}: "is an
+   * organization wall enforced at all?" — the exact question the pre-spectrum
+   * boolean answered. Layer 0 reads the posture itself; this stays for the
+   * strip decision and the boot log, which only care wall / no wall.
+   */
+  private get orgScopingEnabled(): boolean {
+    return postureEnforcesWall(this.tenancyPosture);
+  }
+  /**
+   * [ADR-0105 D3] `object|policy` keys already reported by
+   * {@link warnAuthoredTenantPolicyOnce}, so a retained authored tenant policy
+   * is explained once per boot instead of on every find.
+   */
+  private readonly warnedAuthoredTenantPolicies = new Set<string>();
   /**
    * Per-object field-name cache. Populated lazily from the metadata
    * service / ObjectQL registry on first access per object. Schemas are
@@ -454,32 +490,51 @@ export class SecurityPlugin implements Plugin {
       });
     }
 
-    // Probe whether org-scoping (auto-stamp + tenant RLS) is active. We capture
-    // the boolean once at start time (plugin DI graph is static after start)
-    // and let `collectRLSPolicies` consult it on every request.
+    // Resolve the tenancy POSTURE once at start time (the plugin DI graph is
+    // static after start); Layer 0 and `collectRLSPolicies` consult it on every
+    // request.
     //
-    // ADR-0093 D4 — prefer the `tenancy` service, the single source of truth.
-    // It derives `isolationActive` from the very same `org-scoping` presence
-    // probe, so this is behavior-identical while centralizing the fact. Fall
-    // back to probing `org-scoping` directly when the tenancy service isn't
-    // wired (e.g. an embedding without plugin-auth), preserving prior behavior.
+    // ADR-0093 D4 / ADR-0105 D1 — prefer the `tenancy` service, the single
+    // source of truth for which of `single` | `group` | `isolated` is in force
+    // (a requested-but-unenforceable wall already resolves to `single` there).
+    // Fall back to probing `org-scoping` directly when the tenancy service
+    // isn't wired (e.g. an embedding without plugin-auth): its presence means
+    // the historical `isolated` posture, preserving prior behavior exactly.
     try {
-      const tenancy = ctx.getService<{ isolationActive?: boolean }>('tenancy');
-      this.orgScopingEnabled = !!tenancy?.isolationActive;
+      const tenancy = ctx.getService<{ posture?: TenancyPosture; isolationActive?: boolean }>('tenancy');
+      this.tenancyPosture =
+        normalizeTenancyPosture(tenancy?.posture) ?? (tenancy?.isolationActive ? 'isolated' : 'single');
     } catch {
       try {
-        this.orgScopingEnabled = !!ctx.getService('org-scoping');
+        this.tenancyPosture = ctx.getService('org-scoping') ? 'isolated' : 'single';
       } catch {
-        this.orgScopingEnabled = false;
+        this.tenancyPosture = 'single';
       }
     }
+    // [ADR-0105 D11] Optional app/plugin membership resolver for the §7.3.1
+    // `IN (current_user.<key>)` sets. Absent is the norm — probe once.
+    try {
+      this.rlsMembershipResolver =
+        ctx.getService<IRlsMembershipResolver>(RLS_MEMBERSHIP_RESOLVER_SERVICE) ?? null;
+    } catch {
+      this.rlsMembershipResolver = null;
+    }
+    if (this.rlsMembershipResolver) {
+      ctx.logger.info('[security] rls-membership-resolver registered', {
+        keys: this.rlsMembershipResolver.keys,
+      });
+    }
+
     if (this.orgScopingEnabled) {
       ctx.logger.info(
-        '[security] org-scoping plugin detected — wildcard `organization_id` RLS policies will apply',
+        `[security] tenancy posture '${this.tenancyPosture}' — the Layer 0 organization wall is ACTIVE ` +
+          `(${this.tenancyPosture === 'group'
+            ? 'organization_id IN accessible_org_ids — union access across the caller\'s memberships'
+            : 'organization_id = active organization'})`,
       );
     } else {
       ctx.logger.info(
-        '[security] org-scoping plugin not present — wildcard `organization_id` RLS policies will be stripped (single-tenant mode)',
+        "[security] tenancy posture 'single' — Layer 0 is inert; the platform's own tenant-scoped RLS policies are stripped (app-authored ones are retained and fail closed, ADR-0105 D3)",
       );
     }
 
@@ -1363,16 +1418,58 @@ export class SecurityPlugin implements Plugin {
       // (import engine, migrations, plugin SYSTEM_CTX) are unaffected. A true
       // platform admin on a posture-permitting object is exempt via Layer 0 (same
       // rule as reads/insert).
+      //
+      // [ADR-0105 D5] Two changes here, both closing gaps in the above:
+      //
+      //   • STAMPING moved into the engine. `organization_id` used to be filled
+      //     only by the enterprise organizations plugin, so the `group` posture —
+      //     which the open engine now enforces — would have written NULL-org rows
+      //     that its own wall then hides. Under any wall-enforcing posture the
+      //     engine stamps the caller's ACTIVE organization onto an insert that
+      //     carries no value, then lets the check below validate it like any
+      //     other. Idempotent w.r.t. the enterprise auto-stamp: whoever runs
+      //     first sets it, and neither overwrites a supplied value.
+      //   • BULK inserts are now covered. The check previously required a
+      //     non-array payload, so an `insert` of an ARRAY of rows could carry a
+      //     forged `organization_id` per row and never meet the wall — the same
+      //     defect #2937 closed for the single-row shape, one call-site down
+      //     (AGENTS.md #10: a `case` label is not enforcement, check the call site).
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
         typeof opCtx.data === 'object' &&
-        !Array.isArray(opCtx.data) &&
         !!opCtx.context?.userId
       ) {
-        const data = opCtx.data as Record<string, unknown>;
-        const suppliedOrg = data.organization_id;
-        if (suppliedOrg != null && suppliedOrg !== '') {
+        const writeRows: Record<string, unknown>[] = (
+          Array.isArray(opCtx.data) ? (opCtx.data as unknown[]) : [opCtx.data as unknown]
+        ).filter((r: unknown): r is Record<string, unknown> =>
+          !!r && typeof r === 'object' && !Array.isArray(r),
+        );
+
+        if (
+          opCtx.operation === 'insert' &&
+          postureStampsOrganization(this.tenancyPosture) &&
+          writeRows.some((r) => r.organization_id == null || r.organization_id === '') &&
+          (await this.isTenantScopedObject(opCtx.object))
+        ) {
+          const activeOrg = opCtx.context?.tenantId;
+          if (activeOrg != null && activeOrg !== '') {
+            for (const row of writeRows) {
+              if (row.organization_id == null || row.organization_id === '') {
+                row.organization_id = activeOrg;
+              }
+            }
+          }
+          // No active organization under a walled posture: leave the value
+          // absent. The row would be unreachable behind its own wall, and the
+          // read-side Layer 0 already fails such a context closed — inventing a
+          // tenant here is the one thing that could smuggle a row past it.
+        }
+
+        const suppliedRows = writeRows.filter(
+          (r) => r.organization_id != null && r.organization_id !== '',
+        );
+        if (suppliedRows.length > 0) {
           const tenantCheck = await this.computeWriteTenantCheckFilter(
             permissionSets,
             opCtx.object,
@@ -1386,17 +1483,19 @@ export class SecurityPlugin implements Plugin {
             ? await this.computeWriteTenantCheckFilter(delegatorSets, opCtx.object, opCtx.operation, delegatorContext)
             : null;
           const tenantParts = [tenantCheck, delTenantCheck].filter(Boolean) as Record<string, unknown>[];
+          // EVERY supplied row must clear the wall — one forged row in a bulk
+          // payload denies the whole write (fail closed, no partial landing).
           if (
             tenantParts.length > 0 &&
-            !tenantParts.every((f) => matchesFilterCondition(data as any, f as any))
+            !suppliedRows.every((row) => tenantParts.every((f) => matchesFilterCondition(row as any, f as any)))
           ) {
             this.logger.warn?.(
               `[Security] Layer 0 tenant CHECK FAILED on ${opCtx.operation} '${opCtx.object}' — write denied ` +
-                `(fail-closed); a supplied organization_id does not match the active organization`,
+                `(fail-closed); a supplied organization_id is outside the caller's organization scope`,
             );
             throw new PermissionDeniedError(
               `[Security] Access denied: the ${opCtx.operation} would place '${opCtx.object}' in another tenant ` +
-                `(organization_id does not match the active organization)`,
+                `(organization_id is outside the caller's organization scope)`,
               { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
             );
           }
@@ -1842,7 +1941,7 @@ export class SecurityPlugin implements Plugin {
       const pairs = extractMemberPairs(opCtx);
       for (const { userId, orgId } of pairs) {
         try {
-          await reconcileOrgAdminGrant(ql, userId, orgId, { logger: ctx.logger });
+          await reconcileOrgAdminGrant(ql, userId, orgId, { logger: ctx.logger, posture: this.tenancyPosture });
         } catch (e) {
           ctx.logger.warn?.('[security] org_admin reconcile failed', {
             userId,
@@ -1858,7 +1957,7 @@ export class SecurityPlugin implements Plugin {
     // missing rows and revokes orphaned ones, never duplicates.
     const runOrgAdminBackfill = async () => {
       try {
-        await backfillOrgAdminGrants(ql, { logger: ctx.logger });
+        await backfillOrgAdminGrants(ql, { logger: ctx.logger, posture: this.tenancyPosture });
       } catch (e) {
         ctx.logger.warn?.('[security] organization_admin backfill failed', {
           error: (e as Error).message,
@@ -2515,6 +2614,12 @@ export class SecurityPlugin implements Plugin {
     const objectFields = await this.getObjectFieldNames(this.metadata, object, this.ql);
     const tenancyDisabled = this.tenancyDisabledCache.get(object) === true || meta.tenancyDisabled;
 
+    // [ADR-0105 D11] Stage app-resolved membership sets before Layer 1 compiles,
+    // so `field IN (current_user.<key>)` predicates can resolve. Lazy (only when
+    // a resolver is registered) and memoized per request — resolution is I/O and
+    // the same context is reused across every object touched by one request.
+    await this.stageRlsMembership(context);
+
     // ── Layer 1: business RLS (ownership / unit depth / sharing / _self carve-outs).
     // The wildcard tenant policy has LEFT this layer (retired from the seeds), so
     // this superuser short-circuit now governs BUSINESS RLS only — it can no
@@ -2552,8 +2657,11 @@ export class SecurityPlugin implements Plugin {
     // via extractTargetField's `=`-only shape match), so a `tenancy.enabled:false`
     // global object correctly contributes nothing (ADR-0095 delta c).
     const layer0 = computeTenantLayer0Filter({
-      isolationActive: this.orgScopingEnabled,
+      tenancyPosture: this.tenancyPosture,
       organizationId: context?.tenantId,
+      // [ADR-0105 D2] The `group` wall's predicate. Resolved by
+      // `resolveAuthzContext` and carried on the context — never re-derived here.
+      accessibleOrgIds: context?.accessible_org_ids,
       objectHasOrgIdField: objectFields ? objectFields.has('organization_id') : undefined,
       tenancyDisabled,
       posturePermitsCrossTenant: posturePermits,
@@ -2605,6 +2713,81 @@ export class SecurityPlugin implements Plugin {
    * applied to the write post-image (that path is governed by explicit `check`
    * clauses via {@link computeWriteCheckFilter}).
    */
+  /**
+   * [ADR-0105 D11] Populate `context.rlsMembership` from the registered
+   * membership resolver, once per request.
+   *
+   * The RLS compiler has merged this bag since ADR-0056, but nothing in
+   * production ever filled it — a declared capability with no producer, the
+   * ADR-0049 defect. This is the producer: apps and plugins register an
+   * {@link IRlsMembershipResolver} under `rls-membership-resolver` and own the
+   * keys they declare.
+   *
+   * Fail-closed by construction: a throwing or partial resolver leaves keys
+   * unset, which makes the policies referencing them drop out — narrowing
+   * access, never widening it. Reserved kernel keys can never be overwritten,
+   * so an app cannot redefine the org wall's own vocabulary.
+   */
+  private async stageRlsMembership(context: any): Promise<void> {
+    if (!this.rlsMembershipResolver || !context || typeof context !== 'object') return;
+    // One resolution per request: the same context object is threaded through
+    // every object the operation touches.
+    if (context.__rlsMembershipStaged) return;
+    context.__rlsMembershipStaged = true;
+
+    let resolved: Record<string, string[]> = {};
+    try {
+      resolved = (await this.rlsMembershipResolver.resolve({
+        userId: context.userId,
+        tenantId: context.tenantId,
+        accessible_org_ids: context.accessible_org_ids,
+        positions: context.positions,
+        permissions: context.permissions,
+      })) ?? {};
+    } catch (e) {
+      this.logger.warn?.(
+        '[security/ADR-0105] rls-membership-resolver threw — its keys stay unresolved and the ' +
+          'policies referencing them will fail closed',
+        { error: (e as Error)?.message },
+      );
+      return;
+    }
+
+    const bag: Record<string, string[]> = { ...(context.rlsMembership ?? {}) };
+    for (const [key, value] of Object.entries(resolved)) {
+      if (RESERVED_RLS_MEMBERSHIP_KEYS.includes(key)) {
+        this.logger.warn?.(
+          '[security/ADR-0105] rls-membership-resolver tried to supply a RESERVED context key — ignored',
+          { key },
+        );
+        continue;
+      }
+      if (!Array.isArray(value)) continue;
+      // An already-staged key wins: a caller-supplied bag is closer to the
+      // request than a generic resolver.
+      if (bag[key] === undefined) bag[key] = value.filter((v) => typeof v === 'string');
+    }
+    if (Object.keys(bag).length > 0) context.rlsMembership = bag;
+  }
+
+  /**
+   * [ADR-0105 D5] Is this object subject to the organization wall — i.e. does it
+   * carry an `organization_id` column and NOT opt out of tenancy?
+   *
+   * Uses the SAME two facts Layer 0 decides with (field set + tenancy posture),
+   * so the write-side stamp can never disagree with the read-side wall about
+   * what counts as a tenant object. An unresolvable field set (boot window)
+   * answers `false`: stamping is an additive convenience, and guessing a column
+   * onto an object that may not have one would fail the insert outright — the
+   * #2937 post-image check still guards any value that IS supplied.
+   */
+  private async isTenantScopedObject(object: string): Promise<boolean> {
+    const meta = await this.getObjectSecurityMeta(object);
+    if (this.tenancyDisabledCache.get(object) === true || meta.tenancyDisabled) return false;
+    const objectFields = await this.getObjectFieldNames(this.metadata, object, this.ql);
+    return objectFields ? objectFields.has('organization_id') : false;
+  }
+
   private async computeWriteTenantCheckFilter(
     permissionSets: PermissionSet[],
     object: string,
@@ -2772,22 +2955,21 @@ export class SecurityPlugin implements Plugin {
     for (const ps of permissionSets) {
       if (ps.rowLevelSecurity) {
         for (const policy of ps.rowLevelSecurity) {
-          // When the org-scoping plugin is NOT installed, strip any
-          // policy that filters on `current_user.organization_id` —
-          // there is no meaningful tenant to compare against, so the
-          // policy would either drop every row (when the field exists
-          // on the object) or be dropped by the field-existence safety
-          // net. Either way it's pure overhead. Substring match is
-          // sufficient: every wildcard tenant policy in the default
-          // permission sets uses exactly this token. Install
-          // `@objectstack/organizations` to enable the
-          // multi-tenant behavior.
-          if (
-            !this.orgScopingEnabled &&
-            policy.using &&
-            policy.using.includes('current_user.organization_id')
-          ) {
+          // [ADR-0105 D3] When org isolation is NOT active, strip the tenant
+          // policies the PLATFORM itself ships — there is no meaningful active
+          // organization to compare against, so they would match zero rows (or
+          // be dropped by the field-existence safety net) for no benefit.
+          //
+          // Provenance, not pattern-matching (finding F1): the former substring
+          // test on `current_user.organization_id` also swallowed app-authored
+          // policies, silently unenforcing a declared security property. An
+          // authored policy now always reaches the compiler and fails closed
+          // there, where the operator can see it.
+          if (!this.orgScopingEnabled && isPlatformTenantPolicy(policy)) {
             continue;
+          }
+          if (!this.orgScopingEnabled && isAuthoredTenantPolicy(policy)) {
+            this.warnAuthoredTenantPolicyOnce(policy, objectName);
           }
           allPolicies.push(policy);
         }
@@ -2795,6 +2977,29 @@ export class SecurityPlugin implements Plugin {
     }
 
     return this.rlsCompiler.getApplicablePolicies(objectName, operation, allPolicies, heldPositions);
+  }
+
+  /**
+   * [ADR-0105 D3] Explain, once per policy, why an app-authored tenant-scoped
+   * policy will match zero rows: it references the active organization but this
+   * deployment has no org isolation, so `current_user.organization_id` resolves
+   * to nothing and the policy fails closed at compile time. The policy is NOT
+   * dropped — a declared security property stays declared (ADR-0049); this is
+   * the operator-visible half of that contract.
+   */
+  private warnAuthoredTenantPolicyOnce(
+    policy: RowLevelSecurityPolicy,
+    objectName: string,
+  ): void {
+    const key = `${objectName} ${policy.name ?? ''}`;
+    if (this.warnedAuthoredTenantPolicies.has(key)) return;
+    this.warnedAuthoredTenantPolicies.add(key);
+    this.logger.warn?.(
+      '[security/ADR-0105] authored RLS policy references the active organization but org isolation ' +
+        'is inactive — it is retained and will fail closed (zero rows). Install ' +
+        '@objectstack/organizations (or drop the policy) if this is not intended.',
+      { object: objectName, policy: policy.name, using: policy.using },
+    );
   }
 
   /**

@@ -2735,13 +2735,15 @@ export class AuthManager {
     const pluginConfig: Partial<AuthPluginConfig> = this.config.plugins ?? {};
     // Multi-org capability (UI org-switcher, "create org" action, etc.).
     // `OS_MULTI_ORG_ENABLED` (default `'false'` → single-org / per-env runtime).
-    // ADR-0093 D4 — the `tenancy` service is the single source of truth. Prefer
-    // it; fall back to the raw env flag only when it isn't wired (e.g. a lean
-    // embedding). `multiOrgEnabled` now reflects ACTUAL capability
-    // (`mode === 'multi'`), so a degraded deployment (requested but no isolation)
+    // ADR-0093 D4 / ADR-0105 D1 — the `tenancy` service is the single source of
+    // truth. Prefer it; fall back to the raw env flag only when it isn't wired
+    // (e.g. a lean embedding). `multiOrgEnabled` reflects ACTUAL capability —
+    // any posture that enforces an organization wall (`group` or `isolated`) —
+    // so a degraded deployment (requested but no isolation resolves to `single`)
     // reports `false` and the org-management UI hides instead of rendering broken.
     const tenancy = this.config.getTenancy?.();
-    const multiOrgEnabled = tenancy ? tenancy.mode === 'multi' : resolveMultiOrgEnabled();
+    const tenancyPosture = tenancy?.posture ?? (resolveMultiOrgEnabled() ? 'isolated' : 'single');
+    const multiOrgEnabled = tenancyPosture !== 'single';
     const degradedTenancy = tenancy?.degraded ?? false;
 
     // Legal links shown beneath the login / register cards. Defaults to
@@ -2772,6 +2774,11 @@ export class AuthManager {
       magicLink: pluginConfig.magicLink ?? false,
       organization: pluginConfig.organization ?? true,
       multiOrgEnabled,
+      // ADR-0105 D1 — WHICH posture is in force. `multiOrgEnabled` stays the
+      // capability gate; this tells the console how to render org context: under
+      // `group` the org switcher picks the WRITE target while reads span every
+      // organization the member belongs to ("all my organizations" views).
+      tenancyPosture,
       // ADR-0093 D5 — brand the degraded state everywhere an operator looks.
       // True iff multi-org was requested but tenant isolation is inactive
       // (booted only because OS_ALLOW_DEGRADED_TENANCY=1). The console can

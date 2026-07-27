@@ -133,7 +133,6 @@ const result = AdminScope.parse(data);
 | **systemPermissions** | `string[]` | optional | System level capabilities |
 | **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional | App/tab visibility: visible, hidden, default_on (shown by default), default_off (available but hidden initially) |
 | **rowLevelSecurity** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | Row-level security policies (see rls.zod.ts for full spec) |
-| **contextVariables** | `Record<string, any>` | optional | Context variables for RLS evaluation |
 | **adminScope** | `{ businessUnit: string; includeSubtree: boolean; manageAssignments: boolean; manageBindings: boolean; … }` | optional | [ADR-0090 D12] Scoped delegated-administration grant (BU subtree + assignable-set allowlist) |
 
 

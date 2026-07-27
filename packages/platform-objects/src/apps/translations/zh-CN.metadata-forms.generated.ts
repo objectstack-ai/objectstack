@@ -1515,10 +1515,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       rowLevelSecurity: {
         label: "行级安全",
         helpText: "基于记录条件的访问规则"
-      },
-      contextVariables: {
-        label: "上下文变量",
-        helpText: "可在规则中引用的变量"
       }
     }
   },

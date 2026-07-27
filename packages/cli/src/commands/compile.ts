@@ -13,7 +13,7 @@ import { validateVisibilityPredicates } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateDashboardActionRefs } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
-import { validateSecurityPosture, buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
+import { validateSecurityPosture, validateOrgAxisRedLines, buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
 import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
@@ -426,7 +426,14 @@ export default class Compile extends Command {
       //     Errors GATE the build (per ADR-0049 this is not advisory
       //     security); `info` findings are printed dimmed and never fatal.
       if (!flags.json) printStep('Checking security posture (ADR-0090 D7)...');
-      const securityFindings = validateSecurityPosture(result.data as Record<string, unknown>);
+      const securityFindings = [
+        ...validateSecurityPosture(result.data as Record<string, unknown>),
+        // [ADR-0105 D6] Organization-axis red lines: no permission inheritance
+        // along the org tree, and business-unit trees stay org-internal. Same
+        // finding shape, same gate — an `error` here blocks exactly as a
+        // security-posture error does.
+        ...validateOrgAxisRedLines(result.data as Record<string, unknown>),
+      ];
       const securityErrors = securityFindings.filter((f) => f.severity === 'error');
       const securityAdvisories = securityFindings.filter((f) => f.severity !== 'error');
       if (securityErrors.length > 0) {

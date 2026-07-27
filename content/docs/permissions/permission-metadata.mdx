@@ -67,7 +67,6 @@ const salesUserPermission = {
 | `systemPermissions` | `string[]` | optional | System-level capabilities |
 | `tabPermissions` | `Record<string, TabVisibility>` | optional | Tab/app visibility |
 | `rowLevelSecurity` | `RowLevelSecurityPolicy[]` | optional | Row-level security policies |
-| `contextVariables` | `Record<string, any>` | optional | **Not implemented** — declared but ignored; the RLS engine reads only the `current_user.*` built-ins (see note below) |
 
 ## Object Permissions
 
@@ -185,11 +184,13 @@ rowLevelSecurity: [
 
 ### Context Variables
 
-**Note:** The `contextVariables` field is **not yet implemented** — the RLS
-compiler never reads it, so custom context values are **not** injected into
-row-level conditions. Conditions can only reference the built-in `current_user.*`
-variables described below; authoring `contextVariables` raises a build-time
-liveness warning.
+**Note:** A permission set cannot declare its own context values. The
+`contextVariables` field was removed in ADR-0105 D11 (enforce-or-remove) because
+the RLS compiler never read it. Conditions reference the built-in
+`current_user.*` variables described below, plus any set a registered membership
+resolver stages into `ExecutionContext.rlsMembership` (referenced as
+`field IN (current_user.<key>)`); a constant belongs in the policy itself as a
+literal (`status = 'published'`).
 
 The built-in context variables available in RLS `using`/`check` clauses include
 `current_user.id`, `current_user.organization_id`, and `current_user.positions`

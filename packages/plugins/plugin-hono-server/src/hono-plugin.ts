@@ -8,7 +8,7 @@ import {
 import {
     RestServerConfig,
 } from '@objectstack/spec/api';
-import { ADMIN_FULL_ACCESS, ORGANIZATION_ADMIN } from '@objectstack/spec';
+import { ADMIN_FULL_ACCESS, ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
 import {
     resolveEffectiveApiMethods,
     effectiveOperationsArray,
@@ -919,6 +919,31 @@ export class HonoServerPlugin implements Plugin {
                         /* fall back to self-only */
                     }
                 }
+                // [ADR-0105 D2] The caller's org access set — the `group`
+                // posture's Layer 0 wall is `organization_id IN (...)`, so a
+                // context without it fails every read closed on this surface.
+                // Resolved from the user's OWN memberships (all organizations,
+                // not the active one). This standalone resolver duplicates the
+                // canonical `resolveAuthzContext` by design (see the posture
+                // note below); the duplication is tracked by
+                // `scripts/check-single-authz-resolver.mjs`.
+                let accessibleOrgIds: string[] = [];
+                try {
+                    const ql = getObjectQL();
+                    const sysCtx = { context: { isSystem: true } };
+                    const myMemberships = await ql?.find?.(
+                        'sys_member',
+                        { where: { user_id: userId }, limit: 200, ...sysCtx } as any,
+                    ).catch(() => []);
+                    const orgIds = new Set<string>();
+                    for (const m of (myMemberships ?? []) as any[]) {
+                        const oid = m.organization_id ?? m.organizationId;
+                        if (typeof oid === 'string' && oid.length > 0) orgIds.add(oid);
+                    }
+                    accessibleOrgIds = Array.from(orgIds);
+                } catch {
+                    /* no memberships resolvable → empty set → fails closed */
+                }
                 // Env-side AI-seat marker (simple model). The single-org env
                 // DB has no permission-set/org dimension for this — the seat is
                 // the boolean `sys_user.ai_access`. Read it with a GUARDED system
@@ -957,7 +982,7 @@ export class HonoServerPlugin implements Plugin {
                 // set it. A no-op when perf-tuning is off (no ambient gate).
                 const disclosurePosture = derivePosture({
                     isPlatformAdmin: permissions.includes(ADMIN_FULL_ACCESS),
-                    isTenantAdmin: permissions.includes(ORGANIZATION_ADMIN),
+                    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n)),
                 });
                 if (isPerfDisclosurePrincipal({ isSystem: false, posture: disclosurePosture } as ExecutionContext)) {
                     allowPerfDisclosure();
@@ -969,6 +994,7 @@ export class HonoServerPlugin implements Plugin {
                     permissions,
                     isSystem: false,
                     org_user_ids: orgUserIds,
+                    accessible_org_ids: accessibleOrgIds,
                 } as any;
             } catch {
                 return undefined;

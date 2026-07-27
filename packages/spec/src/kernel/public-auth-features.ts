@@ -148,8 +148,9 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_organization.actions.change_slug',
     ],
     notes:
-      'Reflects ACTUAL multi-tenancy capability (tenancy.mode === "multi", ' +
-      'ADR-0093 D4), not just the requested mode.',
+      'Reflects ACTUAL multi-tenancy capability (the tenancy posture enforces ' +
+      'an organization wall — `group` or `isolated`, ADR-0093 D4 / ADR-0105 D1), ' +
+      'not just the requested posture.',
   },
   degradedTenancy: {
     surface: 'status',
@@ -251,11 +252,19 @@ export const PUBLIC_AUTH_FEATURE_NAMES = Object.keys(PUBLIC_AUTH_FEATURES) as [
 ];
 
 /**
- * Non-boolean keys `getPublicConfig()` may conditionally spread into
- * `features` (legal-link URLs). Exempt from flag classification; the drift
- * guard asserts no OTHER non-boolean key sneaks in.
+ * Non-boolean keys `getPublicConfig()` may spread into `features` (legal-link
+ * URLs; the tenancy posture). Exempt from FLAG classification — a flag is a
+ * boolean capability gate, and these are values — but the drift guard still
+ * asserts no OTHER non-boolean key sneaks in.
+ *
+ * `tenancyPosture` (ADR-0105 D1) reports WHICH of `single` | `group` |
+ * `isolated` is in force. It gates nothing: `multiOrgEnabled` remains the
+ * boolean capability gate ("is an organization wall enforced at all?"), while
+ * this tells the console how to render org context — under `group` the org
+ * switcher picks the WRITE target and reads span every organization the member
+ * belongs to.
  */
-export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl'] as const;
+export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture'] as const;
 
 /**
  * The canonical CEL gate for a flag, per its default semantics:

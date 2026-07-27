@@ -158,13 +158,6 @@
           "note": "organizational."
         }
       }
-    },
-    "contextVariables": {
-      "status": "dead",
-      "evidence": "rls-compiler.ts never reads it",
-      "note": "RLS uses only current_user.* built-ins.",
-      "authorWarn": true,
-      "authorHint": "The RLS compiler never reads it — row-level conditions can only use the current_user.* built-ins. Custom context variables are not injected."
     }
   }
 }

@@ -284,28 +284,16 @@ export const PermissionSetSchema = lazySchema(() => z.object({
     .describe('Row-level security policies (see rls.zod.ts for full spec)'),
   
   /**
-   * Context-Based Access Control Variables
-   * 
-   * Custom context variables that can be referenced in RLS rules.
-   * These variables are evaluated at runtime based on the user's session.
-   * 
-   * Common context variables:
-   * - `current_user.id` - Current user ID
-   * - `current_user.organization_id` - Active organization id
-   * - `current_user.department` - User's department
-   * - `current_user.positions` - Held positions (ADR-0090 D3)
-   * - `current_user.region` - User's geographic region
-   * 
-   * @example Custom context
-   * ```typescript
-   * contextVariables: {
-   *   allowed_regions: ['US', 'EU'],
-   *   access_level: 2,
-   *   custom_attribute: 'value'
-   * }
-   * ```
+   * [ADR-0105 D11] `contextVariables` was REMOVED (enforce-or-remove, ADR-0049):
+   * it was authorable but had zero runtime consumers — the RLS compiler resolves
+   * only the `current_user.*` built-ins plus the runtime-staged
+   * `ExecutionContext.rlsMembership` sets, never a value declared here.
+   *
+   * Migration: a custom set that a policy needs as `field IN (current_user.<key>)`
+   * is staged by a registered membership resolver (see
+   * {@link ExecutionContextSchema.rlsMembership}); a constant is written as a
+   * literal in the policy's `using` (`status = 'published'`).
    */
-  contextVariables: z.record(z.string(), z.unknown()).optional().describe('Context variables for RLS evaluation'),
 
   /**
    * [ADR-0090 D12] Delegated-administration scope carried by this set.

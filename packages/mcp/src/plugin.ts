@@ -38,6 +38,10 @@ async function resolveStdioExecutionContext(
   if (authz.email) ec.email = authz.email;
   if (authz.posture) ec.posture = authz.posture;
   (ec as unknown as { org_user_ids?: string[] }).org_user_ids = authz.org_user_ids;
+  // [ADR-0105 D2] The caller's org access set — the `group` posture's Layer 0
+  // wall reads it directly, so every transport must carry it.
+  (ec as unknown as { accessible_org_ids?: string[] }).accessible_org_ids =
+    authz.accessible_org_ids;
   return ec;
 }
 

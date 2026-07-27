@@ -7,8 +7,7 @@ import { lintLivenessProperties } from './lint-liveness-properties.js';
  * These run against the REAL ledgers shipped by `@objectstack/spec` (the same
  * files the gate enforces), so they double as a contract test: if an
  * `authorWarn` annotation is removed from a still-dead prop (e.g. tool
- * `permissions`, permission `contextVariables`, flow `nodes.outputSchema`),
- * the matching assertion fails.
+ * `permissions`, flow `nodes.outputSchema`), the matching assertion fails.
  */
 
 const objStack = (obj: Record<string, unknown>) => ({ objects: [{ name: 'widget', ...obj }] });
@@ -99,7 +98,7 @@ describe('lintLivenessProperties', () => {
     expect(paths(findings).some((m) => m.includes('`undoable`'))).toBe(true);
   });
 
-  it('warns on the security-shaped dead props (tool.permissions / permission.contextVariables)', () => {
+  it('warns on the security-shaped dead props (tool.permissions)', () => {
     // tenancy.strategy/crossTenantAccess left this list after spec 15.0 (#2763):
     // the schema now REJECTS them (strict tenancy block), so the ledger entries
     // are gone and the live tenancy knobs must not warn.
@@ -109,8 +108,11 @@ describe('lintLivenessProperties', () => {
     const tool = lintLivenessProperties({ tools: [{ name: 't1', permissions: ['crm.admin'] }] });
     expect(paths(tool).some((m) => m.includes('`permissions`'))).toBe(true);
 
+    // permission.contextVariables left this list with ADR-0105 D11: the prop was
+    // REMOVED outright (enforce-or-remove), so its ledger entry is gone and the
+    // lint no longer has anything to warn about.
     const perm = lintLivenessProperties({ permissions: [{ name: 'p1', contextVariables: { region: 'emea' } }] });
-    expect(paths(perm).some((m) => m.includes('contextVariables'))).toBe(true);
+    expect(paths(perm).some((m) => m.includes('contextVariables'))).toBe(false);
   });
 
   it('stays silent on clean flat-collection items', () => {

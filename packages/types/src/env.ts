@@ -17,6 +17,12 @@
  * operators to rename it.
  */
 
+import {
+  normalizeTenancyPosture,
+  TENANCY_POSTURES,
+  type TenancyPosture,
+} from '@objectstack/spec/security';
+
 const _warnedKeys = new Set<string>();
 
 /**
@@ -101,6 +107,46 @@ export function readEnvWithDeprecation(
 export function resolveMultiOrgEnabled(): boolean {
   const raw = readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', []);
   return String(raw ?? 'false').toLowerCase() !== 'false';
+}
+
+/**
+ * [ADR-0105 D1] Resolve the deployment's REQUESTED tenancy posture —
+ * `single` | `group` | `isolated`.
+ *
+ * `OS_TENANCY_POSTURE` is the canonical knob and generalizes the boolean
+ * `OS_MULTI_ORG_ENABLED` it supersedes:
+ *
+ * - set → that posture (the legacy spelling `multi` normalizes to `isolated`)
+ * - unset → derived from `OS_MULTI_ORG_ENABLED`: `true` ⇒ `isolated`, else `single`
+ *
+ * so every existing deployment keeps its current posture with no config change.
+ *
+ * An unrecognized value THROWS rather than falling back. A typo'd posture that
+ * quietly resolved to `single` would silently remove the organization wall —
+ * the deployment-layer form of the "declared but unenforced" defect ADR-0049
+ * forbids, and the same reasoning behind ADR-0093 D5's refusal to boot into
+ * undeclared degradation.
+ *
+ * This resolves what the operator ASKED FOR. Whether the posture is actually
+ * enforced is the `tenancy` service's answer (`isolationActive` / `degraded`).
+ */
+export function resolveTenancyPosture(): TenancyPosture {
+  // Read through `globalThis` like `readEnvWithDeprecation` does — this package
+  // targets non-Node runtimes too, where a bare `process` reference throws.
+  const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.OS_TENANCY_POSTURE;
+  if (raw != null && String(raw).trim() !== '') {
+    const posture = normalizeTenancyPosture(raw);
+    if (!posture) {
+      throw new Error(
+        `Invalid OS_TENANCY_POSTURE=${JSON.stringify(String(raw))}. ` +
+          `Expected one of: ${TENANCY_POSTURES.join(', ')} (or the legacy alias 'multi' = 'isolated'). ` +
+          'Refusing to boot rather than silently falling back to a posture with no organization wall.',
+      );
+    }
+    return posture;
+  }
+  return resolveMultiOrgEnabled() ? 'isolated' : 'single';
 }
 
 /**

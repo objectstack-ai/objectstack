@@ -402,6 +402,11 @@ describe('buildContextForUser', () => {
       userId: 'u2',
       positions: ['hr_specialist', 'everyone'],
       permissions: ['payroll_reader'],
+      // [ADR-0105 D2] The DELEGATOR's own org access set, resolved here rather
+      // than inherited — a delegated read is bounded by the delegator's own
+      // memberships. This fixture's `ql` serves no `sys_member` rows, so it is
+      // empty, which fails the `group` wall closed.
+      accessible_org_ids: [],
       expiredGrants: [],
       delegatedPositions: [],
       hasPlatformAdminGrant: false,

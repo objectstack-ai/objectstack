@@ -1362,6 +1362,10 @@ export class RestServer {
                 ...(authz.posture ? { posture: authz.posture } : {}),
                 isSystem: false,
                 org_user_ids: authz.org_user_ids,
+                // [ADR-0105 D2] The caller's org access set — the `group`
+                // posture's Layer 0 wall reads it directly, so it must reach
+                // enforcement on every transport, not just this one.
+                accessible_org_ids: authz.accessible_org_ids,
                 ...(authGate ? { authGate } : {}),
                 ...(localization.timezone ? { timezone: localization.timezone } : {}),
                 ...(localization.locale ? { locale: localization.locale } : {}),

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
+import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
 import {
   MCP_AGENT_PERMISSION_SET_READ,
   MCP_AGENT_PERMISSION_SET_WRITE,
@@ -96,7 +97,7 @@ const denyWritesOnManagedObjects = (): Record<string, {
  * step or `tenantField` indirection in SecurityPlugin. Schemas with a
  * different physical tenant column should fork these defaults.
  */
-export const defaultPermissionSets: PermissionSet[] = [
+const baseDefaultPermissionSets: PermissionSet[] = [
   PermissionSetSchema.parse({
     name: 'admin_full_access',
     label: 'Administrator — Full Access',
@@ -145,9 +146,14 @@ export const defaultPermissionSets: PermissionSet[] = [
   // permitted so the Roles / Permission Sets nav entries still render.
   //
   // Auto-granted to every `sys_member` whose role contains `owner` or
-  // `admin` by `plugin-security/src/auto-org-admin-grant.ts`.
+  // `admin` by `plugin-security/src/auto-org-admin-grant.ts` — but ONLY under a
+  // posture that enforces an organization wall. A wall-less deployment gets the
+  // derived `organization_admin_no_bypass` variant instead, because nothing
+  // would bound the `viewAllRecords`/`modifyAllRecords` bits below
+  // (ADR-0105 D4 / finding F2). See `deriveWallLessOrgAdmin` at the end of this
+  // file — the variant is derived from THIS declaration, never copied.
   PermissionSetSchema.parse({
-    name: 'organization_admin',
+    name: ORGANIZATION_ADMIN,
     label: 'Organization Administrator',
     objects: {
       '*': {
@@ -603,3 +609,51 @@ export const defaultPermissionSets: PermissionSet[] = [
     objects: {},
   }),
 ];
+
+/**
+ * [ADR-0105 D4] Derive the wall-less org-admin variant
+ * ({@link ORGANIZATION_ADMIN_NO_BYPASS}) from `organization_admin` by dropping
+ * the wildcard `viewAllRecords`/`modifyAllRecords` bits — everything else
+ * (object grants, managed-write denies, anti-escalation RBAC read-only rules,
+ * system permissions, the 15 identity RLS carve-outs) is carried over verbatim.
+ *
+ * DERIVED, never a second literal: two hand-maintained copies of a
+ * high-privilege set are a drift waiting to happen, and the drift would be a
+ * silent privilege difference. The only intended delta is the superuser bits,
+ * so the only thing this function may do is remove them.
+ *
+ * `auto-org-admin-grant` picks between the two by posture: a wall-enforcing
+ * posture bounds the bits (grant `organization_admin`); a wall-less one does
+ * not (grant this).
+ */
+function deriveWallLessOrgAdmin(base: PermissionSet): PermissionSet {
+  const objects: Record<string, any> = { ...(base.objects ?? {}) };
+  const { viewAllRecords: _v, modifyAllRecords: _m, ...wildcardWithoutBypass } =
+    (objects['*'] ?? {}) as Record<string, unknown>;
+  objects['*'] = wildcardWithoutBypass;
+  return PermissionSetSchema.parse({
+    ...base,
+    name: ORGANIZATION_ADMIN_NO_BYPASS,
+    label: 'Organization Administrator (no record bypass)',
+    description:
+      'Organization administration WITHOUT blanket record visibility. Granted instead of ' +
+      '`organization_admin` when the tenancy posture enforces no organization wall, where nothing ' +
+      'would bound the superuser bits (ADR-0105 D4 / finding F2). Ownership, sharing and business ' +
+      'RLS still apply; grant `admin_full_access` (or an explicit set carrying the bits) when a ' +
+      'deployment-wide data superuser is genuinely intended.',
+    objects,
+  });
+}
+
+export const defaultPermissionSets: PermissionSet[] = (() => {
+  const orgAdmin = baseDefaultPermissionSets.find((ps) => ps.name === ORGANIZATION_ADMIN);
+  if (!orgAdmin) return baseDefaultPermissionSets;
+  // Placed directly after its parent so the seeded row order stays stable and
+  // the two variants read as a pair.
+  const idx = baseDefaultPermissionSets.indexOf(orgAdmin);
+  return [
+    ...baseDefaultPermissionSets.slice(0, idx + 1),
+    deriveWallLessOrgAdmin(orgAdmin),
+    ...baseDefaultPermissionSets.slice(idx + 1),
+  ];
+})();

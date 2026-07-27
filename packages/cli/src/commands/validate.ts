@@ -17,7 +17,7 @@ import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
 import { validateVisibilityPredicates } from '@objectstack/lint';
-import { validateSecurityPosture } from '@objectstack/lint';
+import { validateSecurityPosture, validateOrgAxisRedLines } from '@objectstack/lint';
 import { validateFlowTriggerReadiness } from '@objectstack/lint';
 import { validateFlowTemplatePaths } from '@objectstack/lint';
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
@@ -486,7 +486,14 @@ export default class Validate extends Command {
       //     breaking this command's contract of being the artifact-free run of
       //     the same gates. Errors gate; advisories print dimmed.
       if (!flags.json) printStep('Checking security posture (ADR-0090 D7)...');
-      const securityFindings = validateSecurityPosture(result.data as Record<string, unknown>);
+      const securityFindings = [
+        ...validateSecurityPosture(result.data as Record<string, unknown>),
+        // [ADR-0105 D6] Organization-axis red lines: no permission inheritance
+        // along the org tree, and business-unit trees stay org-internal. Same
+        // finding shape, same gate — an `error` here blocks exactly as a
+        // security-posture error does.
+        ...validateOrgAxisRedLines(result.data as Record<string, unknown>),
+      ];
       const securityErrors = securityFindings.filter((f) => f.severity === 'error');
       const securityAdvisories = securityFindings.filter((f) => f.severity !== 'error');
       if (securityErrors.length > 0) {

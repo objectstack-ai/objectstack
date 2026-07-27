@@ -69,6 +69,31 @@ export const ADMIN_FULL_ACCESS = 'admin_full_access';
  */
 export const ORGANIZATION_ADMIN = 'organization_admin';
 
+/**
+ * [ADR-0105 D4] The wall-less variant of {@link ORGANIZATION_ADMIN}: identical
+ * administration rights, WITHOUT the `viewAllRecords`/`modifyAllRecords`
+ * superuser bits.
+ *
+ * `organization_admin` is safe because Layer 0 bounds its superuser bits to the
+ * caller's organization scope. Under the `single` posture there is no wall to
+ * bound them — and a wall-less deployment that accumulates organizations (the
+ * personal-org-on-signup shape) would make every owner/admin an
+ * ENVIRONMENT-WIDE superuser (ADR-0105 finding F2). So the auto-grant hands out
+ * THIS set instead whenever no wall is enforced: an org admin still administers
+ * their organization, but blanket record visibility must be granted
+ * deliberately (`admin_full_access`, or an explicit set carrying the bits) —
+ * never as a side effect of a better-auth membership role.
+ *
+ * It resolves the `TENANT_ADMIN` rung exactly like `organization_admin` does.
+ */
+export const ORGANIZATION_ADMIN_NO_BYPASS = 'organization_admin_no_bypass';
+
+/** Both org-admin capability grants — either one resolves the `TENANT_ADMIN` rung. */
+export const ORGANIZATION_ADMIN_GRANTS: readonly string[] = [
+  ORGANIZATION_ADMIN,
+  ORGANIZATION_ADMIN_NO_BYPASS,
+] as const;
+
 /** Human-readable metadata for the built-in identity names (seeded into `sys_position`; AI grounding). */
 export const BUILTIN_IDENTITY_METADATA: Record<BuiltinIdentityName, { label: string; description: string }> = {
   [BUILTIN_IDENTITY_PLATFORM_ADMIN]: { label: 'Platform Admin', description: 'Platform operator (SaaS admin). NOT a tenant user role.' },

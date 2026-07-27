@@ -23,6 +23,8 @@ export default defineConfig({
       '@objectstack/spec/system': path.resolve(__dirname, '../../spec/src/system/index.ts'),
       '@objectstack/spec/api': path.resolve(__dirname, '../../spec/src/api/index.ts'),
       '@objectstack/spec/kernel': path.resolve(__dirname, '../../spec/src/kernel/index.ts'),
+      // [ADR-0105 D1] Reached transitively via `@objectstack/types` (tenancy posture).
+      '@objectstack/spec/security': path.resolve(__dirname, '../../spec/src/security/index.ts'),
       '@objectstack/spec': path.resolve(__dirname, '../../spec/src/index.ts'),
       '@objectstack/types': path.resolve(__dirname, '../../types/src/index.ts'),
     },

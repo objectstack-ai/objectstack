@@ -162,6 +162,13 @@ export {
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
 
 export {
+  validateOrgAxisRedLines,
+  ORG_AXIS_PERMISSION_INHERITANCE,
+  ORG_AXIS_CROSS_ORG_BU_GRANT,
+} from './validate-org-axis-red-lines.js';
+export type { OrgAxisFinding, OrgAxisSeverity } from './validate-org-axis-red-lines.js';
+
+export {
   validateDashboardActionRefs,
   DASHBOARD_ACTION_TARGET_UNDEFINED,
   DASHBOARD_ACTION_ROUTE_UNRESOLVED,

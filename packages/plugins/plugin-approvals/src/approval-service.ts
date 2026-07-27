@@ -9,7 +9,7 @@ import {
 import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
 import {
   ADMIN_FULL_ACCESS,
-  ORGANIZATION_ADMIN,
+  ORGANIZATION_ADMIN_GRANTS,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
   BUILTIN_IDENTITY_ORG_OWNER,
   BUILTIN_IDENTITY_ORG_ADMIN,
@@ -381,7 +381,7 @@ export class ApprovalService implements IApprovalService {
       || positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN);
     if (isPlatformAdmin) return true;
     const isTenantAdmin = posture === 'TENANT_ADMIN'
-      || perms.includes(ORGANIZATION_ADMIN)
+      || ORGANIZATION_ADMIN_GRANTS.some((n) => perms.includes(n))
       || positions.includes(BUILTIN_IDENTITY_ORG_OWNER)
       || positions.includes(BUILTIN_IDENTITY_ORG_ADMIN);
     if (!isTenantAdmin) return false;

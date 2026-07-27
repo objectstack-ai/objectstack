@@ -10,7 +10,7 @@ import {
   SystemOverviewDatasets,
 } from '@objectstack/platform-objects/apps';
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
-import { resolveMultiOrgEnabled } from '@objectstack/types';
+import { resolveTenancyPosture } from '@objectstack/types';
 import {
   AuthManager,
   resolveOidcProviderEnabled,
@@ -26,6 +26,7 @@ import {
   type SecondaryStorageLike,
 } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
+import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
@@ -263,16 +264,18 @@ export class AuthPlugin implements Plugin {
     // Register auth service
     ctx.registerService('auth', this.authManager);
 
-    // ADR-0093 D4 — register the `tenancy` service (single source of truth for
-    // tenancy mode). Registered AFTER `auth` so `auth` stays the plugin's first
-    // service registration (consumers and tests rely on that ordering). Baseline
-    // derives `isolationActive` from the presence of the `org-scoping` service
-    // (registered by @objectstack/organizations when installed), so the
-    // enterprise package needs no change to light it up. `getService` is a cheap
-    // registry lookup and org-scoping registers AFTER plugin-auth, so the probe
-    // is deferred to first read (start()/request time).
+    // ADR-0093 D4 / ADR-0105 D1 — register the `tenancy` service (single source
+    // of truth for the tenancy POSTURE). Registered AFTER `auth` so `auth` stays
+    // the plugin's first service registration (consumers and tests rely on that
+    // ordering). The `isolated` posture derives `isolationActive` from the
+    // presence of the `org-scoping` service (registered by
+    // @objectstack/organizations when installed), so the enterprise package
+    // needs no change to light it up; `group` is enforced by the open engine and
+    // never probes. `getService` is a cheap registry lookup and org-scoping
+    // registers AFTER plugin-auth, so the probe is deferred to first read
+    // (start()/request time).
     const tenancy: TenancyService = createTenancyService({
-      requested: resolveMultiOrgEnabled(),
+      requested: resolveTenancyPosture(),
       probeIsolation: () => {
         try {
           return !!ctx.getService('org-scoping');
@@ -549,11 +552,18 @@ export class AuthPlugin implements Plugin {
       await this.maybeSeedDevAdmin(ctx);
     });
 
-    // ADR-0081 D1 — single-org default-organization bootstrap. Multi-org
-    // keeps its existing owner (the enterprise organizations package, which
-    // runs the same idempotent helper with the seed-ownership step injected);
-    // one crisp owner per mode.
-    if (this.options.autoDefaultOrganization !== false && !resolveMultiOrgEnabled()) {
+    // ADR-0081 D1 — default-organization bootstrap, owned here for every posture
+    // the OPEN engine enforces (`single` and, per ADR-0105 D12, `group`).
+    // `isolated` keeps its existing owner (the enterprise organizations package,
+    // which runs the same idempotent helper with the seed-ownership step
+    // injected); one crisp owner per posture.
+    //
+    // `group` needs this as much as `single` does: the union wall resolves an
+    // EMPTY access set for a member of no organization and fails closed, so an
+    // open group deployment with no first organization could not admit its own
+    // admin. The bootstrap creates exactly one org and binds the first platform
+    // admin as owner; every further organization is created deliberately.
+    if (this.options.autoDefaultOrganization !== false && resolveTenancyPosture() !== 'isolated') {
       const runEnsure = async () => {
         try {
           const ql: any = ctx.getService<any>('objectql');
@@ -697,6 +707,16 @@ export class AuthPlugin implements Plugin {
         const engine: any = ctx.getService<any>('objectql');
         if (!engine || typeof engine.registerHook !== 'function') return;
         registerManagedUpdateWhitelist(SystemObjectName.USER, SYS_USER_PROFILE_EDIT_FIELDS);
+        // [ADR-0105 D7] Extension fields ObjectStack adds to better-auth-managed
+        // tables ride the SAME whitelist — no second mechanism. better-auth
+        // neither reads nor writes them, so they are editable through the
+        // ordinary path under normal FLS / requiredPermissions; its own protocol
+        // fields stay rejected. `managed-extension-fields.test.ts` proves the two
+        // populations are disjoint at the pinned better-auth version.
+        for (const [object, fields] of Object.entries(MANAGED_EXTENSION_EDITABLE_FIELDS)) {
+          if (object === SystemObjectName.USER) continue; // sys_user tiering above
+          registerManagedUpdateWhitelist(object, fields);
+        }
         registerIdentityWriteGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.identity-write-guard',
           logger: ctx.logger,

@@ -1515,10 +1515,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       rowLevelSecurity: {
         label: "行レベルセキュリティ",
         helpText: "RLS ポリシーの配列（rls.zod.ts 参照）"
-      },
-      contextVariables: {
-        label: "コンテキスト変数",
-        helpText: "RLS 述語で参照するカスタム変数"
       }
     }
   },

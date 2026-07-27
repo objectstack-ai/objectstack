@@ -215,6 +215,41 @@ export const SysOrganization = ObjectSchema.create({
       description: 'When true, every member of this organization must enroll an authenticator app to access data.',
     }),
 
+    // ── Group structure (ADR-0105 D6) ────────────────────────────
+    //
+    // ⛔ REPORTING DIMENSION ONLY. These fields describe how organizations roll
+    // up for consolidated reporting, navigation and ordering. They are NOT an
+    // authorization axis, and two red lines keep them that way:
+    //
+    //   1. **No permission inheritance along the org axis.** A parent
+    //      organization confers NOTHING on its children. Cross-org visibility
+    //      comes from membership union (`accessible_org_ids`, ADR-0105 D2) —
+    //      never from walking this tree. Re-adding a second permission
+    //      hierarchy is the mistake ADR-0057 D5 retired and ADR-0090 D3
+    //      finalized for positions; it stays retired for organizations.
+    //   2. **Business-unit trees remain org-internal.** `sys_business_unit` is
+    //      org-scoped, and every BU mechanism (`unit_and_subordinates` sharing,
+    //      `adminScope` delegation, depth scopes) operates within ONE
+    //      organization. There is no cross-org tree.
+    //
+    // Both are lint-enforced (`validateOrgAxisRedLines` in @objectstack/lint):
+    // an RLS policy, sharing rule or scope that reads `parent_organization_id`
+    // is a build error, not a runtime surprise.
+    parent_organization_id: Field.lookup('sys_organization', {
+      label: 'Parent Organization',
+      required: false,
+      group: 'Group Structure',
+      description:
+        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6).',
+    }),
+
+    sort_order: Field.number({
+      label: 'Sort Order',
+      required: false,
+      group: 'Group Structure',
+      description: 'Display order among sibling organizations. Presentation only.',
+    }),
+
     // ── System ───────────────────────────────────────────────────
     id: Field.text({
       label: 'Organization ID',

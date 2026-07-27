@@ -205,7 +205,7 @@ EOF
 | flow | 27 | – | 4 | – | dead = description/template/nodes.outputSchema/errorHandling.fallbackNodeId (engine uses fault edges) |
 | action | 35 | 1 | 0 | – | `disabled` went LIVE via metadata-admin authoring UI (2026-06 audit missed objectui); `type:'form'` CORRECTED to live (objectui ActionRunner.executeForm, #2377); dead `timeout` REMOVED (#2377) |
 | hook | 11 | – | 2 | – | model-healthy; only label/description dead (benign) |
-| permission | 32 | – | 1 | – | CRUD/FLS/RLS live; `contextVariables` dead (RLS uses current_user.* built-ins only) |
+| permission | 32 | – | 0 | – | CRUD/FLS/RLS live; dead `contextVariables` REMOVED (ADR-0105 D11 — RLS resolves only the `current_user.*` built-ins plus runtime-staged `rlsMembership` sets) |
 | position | 4 | – | – | – | (role's ADR-0090 successor) fully live |
 | agent | 14 | 5 | 0 | – | dead `tenantId` + `planning.strategy`/`allowReplan` REMOVED (#2377) — only `planning.maxIterations` live; autonomy tier experimental |
 | tool | 9 | 1 | 1 | – | `permissions` dead — tool invocation not permission-gated by it |

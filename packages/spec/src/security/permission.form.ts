@@ -47,12 +47,11 @@ export const permissionForm = defineForm({
     },
     {
       label: 'Tab & Row-Level Security',
-      description: 'Tab visibility, RLS policies, and custom context variables for predicate evaluation.',
+      description: 'Tab visibility and RLS policies.',
       columns: 1,
       fields: [
         { field: 'tabPermissions', widget: 'json', helpText: '{ "app_crm": "visible", "app_admin": "hidden" }' },
         { field: 'rowLevelSecurity', widget: 'json', helpText: 'Array of RLS policies (see rls.zod.ts)' },
-        { field: 'contextVariables', widget: 'json', helpText: 'Custom variables referenced in RLS predicates' },
       ],
     },
   ],

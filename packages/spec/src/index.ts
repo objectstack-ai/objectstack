@@ -173,5 +173,7 @@ export {
   BUILTIN_IDENTITY_ORG_MEMBER,
   ADMIN_FULL_ACCESS,
   ORGANIZATION_ADMIN,
+  ORGANIZATION_ADMIN_NO_BYPASS,
+  ORGANIZATION_ADMIN_GRANTS,
 } from './identity/eval-user.zod';
 export type { EvalUser, EvalUserInput, BuiltinIdentityName } from './identity/eval-user.zod';

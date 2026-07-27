@@ -9,7 +9,7 @@ import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { computeI18nCoverage, type CoverageIssue } from '../utils/i18n-coverage.js';
 import { lintDataModel } from '../lint/data-model-rules.js';
 import { validateWidgetBindings } from '@objectstack/lint';
-import { validateRecordTitle, validateSemanticRoles, validateCapabilityReferences, validateSecurityPosture, validateApprovalApprovers, validateSeedReplaySafety, validateSeedStateMachine } from '@objectstack/lint';
+import { validateRecordTitle, validateSemanticRoles, validateCapabilityReferences, validateSecurityPosture, validateOrgAxisRedLines, validateApprovalApprovers, validateSeedReplaySafety, validateSeedStateMachine } from '@objectstack/lint';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
@@ -418,6 +418,23 @@ export function lintConfig(config: any): LintIssue[] {
   for (const t of validateSecurityPosture(config)) {
     issues.push({
       severity: t.severity === 'info' ? 'suggestion' : t.severity,
+      rule: t.rule,
+      message: `${t.where}: ${t.message}`,
+      path: t.path,
+      fix: t.hint,
+    });
+  }
+
+  // ── Organization-axis red lines (ADR-0105 D6) ──
+  // The org tree (`parent_organization_id`) is a REPORTING dimension. An RLS
+  // policy or sharing rule that walks it builds a second permission hierarchy —
+  // the dual-hierarchy mistake ADR-0057 D5 retired — and cannot widen Layer 0
+  // anyway, so it grants nothing it appears to. Business-unit grants on
+  // platform-global objects are the other half: no org column to scope against
+  // means the grant spans every organization.
+  for (const t of validateOrgAxisRedLines(config)) {
+    issues.push({
+      severity: t.severity,
       rule: t.rule,
       message: `${t.where}: ${t.message}`,
       path: t.path,

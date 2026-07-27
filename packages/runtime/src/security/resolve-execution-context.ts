@@ -208,6 +208,9 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // value. Present only for an authenticated principal (guest → absent).
   if (authz.posture) ctx.posture = authz.posture;
   (ctx as any).org_user_ids = authz.org_user_ids;
+  // [ADR-0105 D2] The caller's org access set — the `group` posture's Layer 0
+  // wall reads it directly, so every transport must carry it.
+  (ctx as any).accessible_org_ids = authz.accessible_org_ids;
 
   // OAuth provenance: surface the token's granted scopes so the MCP
   // dispatcher can narrow the exposed tool families (undefined for every

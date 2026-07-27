@@ -36,12 +36,31 @@
  * `admin_full_access`.
  */
 
-import { ORGANIZATION_ADMIN } from '@objectstack/spec';
+import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 
 const SYSTEM_CTX = { isSystem: true } as const;
-// [ADR-0095 D3] Single source of truth for the org-admin capability grant name —
-// the same constant the TENANT_ADMIN posture rung derives from.
-const PERMISSION_SET_NAME = ORGANIZATION_ADMIN;
+
+/**
+ * [ADR-0105 D4] Which org-admin capability set this posture may auto-grant.
+ *
+ * `organization_admin` carries wildcard `viewAllRecords`/`modifyAllRecords`.
+ * That is safe ONLY because Layer 0 bounds it to the caller's organization
+ * scope. Under a wall-less posture nothing bounds it, and a deployment that
+ * accumulates organizations turns every owner/admin into an environment-wide
+ * superuser (finding F2) — so the auto-grant hands out the de-VAMA'd variant
+ * there instead. Deliberate blanket visibility remains available through
+ * `admin_full_access` or an explicitly authored set; it just stops being a side
+ * effect of a better-auth membership role.
+ */
+export function orgAdminSetNameForPosture(posture: TenancyPosture): string {
+  return postureEnforcesWall(posture) ? ORGANIZATION_ADMIN : ORGANIZATION_ADMIN_NO_BYPASS;
+}
+
+/** The variant NOT granted under `posture` — reconciled away so a posture change converges. */
+function supersededOrgAdminSetName(posture: TenancyPosture): string {
+  return postureEnforcesWall(posture) ? ORGANIZATION_ADMIN_NO_BYPASS : ORGANIZATION_ADMIN;
+}
 
 interface MaybeLogger {
   info?: (message: string, meta?: Record<string, any>) => void;
@@ -104,15 +123,20 @@ function isAdminRole(raw: unknown): boolean {
  * across calls per ObjectQL instance via a WeakMap so repeated
  * reconciliations do not re-query.
  */
-const permissionSetIdCache = new WeakMap<object, string>();
+const permissionSetIdCache = new WeakMap<object, Map<string, string>>();
 
-async function resolvePermissionSetId(ql: any): Promise<string | null> {
-  const cached = permissionSetIdCache.get(ql);
+async function resolvePermissionSetId(ql: any, name: string): Promise<string | null> {
+  let perQl = permissionSetIdCache.get(ql);
+  if (!perQl) {
+    perQl = new Map<string, string>();
+    permissionSetIdCache.set(ql, perQl);
+  }
+  const cached = perQl.get(name);
   if (cached) return cached;
-  const rows = await tryFind(ql, 'sys_permission_set', { name: PERMISSION_SET_NAME }, 1);
+  const rows = await tryFind(ql, 'sys_permission_set', { name }, 1);
   const id = rows[0]?.id;
   if (typeof id === 'string' && id.length > 0) {
-    permissionSetIdCache.set(ql, id);
+    perQl.set(name, id);
     return id;
   }
   return null;
@@ -134,7 +158,7 @@ export async function reconcileOrgAdminGrant(
   ql: any,
   userId: string,
   orgId: string,
-  options: { logger?: MaybeLogger } = {},
+  options: { logger?: MaybeLogger; posture?: TenancyPosture } = {},
 ): Promise<{
   action: 'granted' | 'revoked' | 'noop' | 'skipped';
   reason?: string;
@@ -147,10 +171,17 @@ export async function reconcileOrgAdminGrant(
     return { action: 'skipped', reason: 'missing_keys' };
   }
 
-  const permSetId = await resolvePermissionSetId(ql);
+  // [ADR-0105 D4] The posture decides WHICH org-admin set is granted. Default
+  // `single` (the wall-less, conservative choice) when a caller does not supply
+  // one: an unknown posture must not hand out unbounded superuser bits.
+  const posture: TenancyPosture = options.posture ?? 'single';
+  const grantSetName = orgAdminSetNameForPosture(posture);
+  const supersededSetName = supersededOrgAdminSetName(posture);
+
+  const permSetId = await resolvePermissionSetId(ql, grantSetName);
   if (!permSetId) {
-    // organization_admin permission set isn't seeded yet (boot ordering)
-    // — caller can retry later (e.g. via kernel:ready backfill).
+    // The permission set isn't seeded yet (boot ordering) — caller can retry
+    // later (e.g. via kernel:ready backfill).
     return { action: 'skipped', reason: 'permission_set_missing' };
   }
 
@@ -165,6 +196,29 @@ export async function reconcileOrgAdminGrant(
     10,
   );
   const shouldGrant = memberships.some((m: any) => isAdminRole(m?.role));
+
+  // 1b. [ADR-0105 D4] Revoke the OTHER variant for this pair, always. A posture
+  //     change (or a downgrade after F2) must converge on exactly one org-admin
+  //     grant; leaving the superseded row would keep the old bits in force.
+  const supersededSetId = await resolvePermissionSetId(ql, supersededSetName);
+  if (supersededSetId) {
+    const stale = await tryFind(
+      ql,
+      'sys_user_permission_set',
+      { user_id: userId, organization_id: orgId, permission_set_id: supersededSetId },
+      5,
+    );
+    for (const row of stale) {
+      if (row?.id && (await tryDelete(ql, 'sys_user_permission_set', String(row.id)))) {
+        logger?.info?.('[security] revoked superseded org-admin grant', {
+          userId,
+          orgId,
+          set: supersededSetName,
+          posture,
+        });
+      }
+    }
+  }
 
   // 2. Look at existing grants for this exact pair.
   const existingGrants = await tryFind(
@@ -190,7 +244,12 @@ export async function reconcileOrgAdminGrant(
       granted_by: null,
     });
     if (created) {
-      logger?.info?.('[security] granted organization_admin', { userId, orgId });
+      logger?.info?.('[security] granted org-admin capability', {
+        userId,
+        orgId,
+        set: grantSetName,
+        posture,
+      });
       return { action: 'granted' };
     }
     return { action: 'skipped', reason: 'insert_failed' };
@@ -207,7 +266,12 @@ export async function reconcileOrgAdminGrant(
     }
   }
   if (removed > 0) {
-    logger?.info?.('[security] revoked organization_admin', { userId, orgId, removed });
+    logger?.info?.('[security] revoked org-admin capability', {
+      userId,
+      orgId,
+      set: grantSetName,
+      removed,
+    });
     return { action: 'revoked' };
   }
   return { action: 'skipped', reason: 'delete_failed' };
@@ -221,18 +285,23 @@ export async function reconcileOrgAdminGrant(
  */
 export async function backfillOrgAdminGrants(
   ql: any,
-  options: { logger?: MaybeLogger; limit?: number } = {},
+  options: { logger?: MaybeLogger; limit?: number; posture?: TenancyPosture } = {},
 ): Promise<{ scanned: number; granted: number; revoked: number; skipped: number }> {
   const logger = options.logger;
   const limit = options.limit ?? 5000;
+  const posture: TenancyPosture = options.posture ?? 'single';
   const summary = { scanned: 0, granted: 0, revoked: 0, skipped: 0 };
   if (!ql || typeof ql.find !== 'function') return summary;
 
-  const permSetId = await resolvePermissionSetId(ql);
+  const permSetId = await resolvePermissionSetId(ql, orgAdminSetNameForPosture(posture));
   if (!permSetId) {
-    logger?.debug?.('[security] organization_admin backfill skipped — permission set missing');
+    logger?.debug?.('[security] org-admin backfill skipped — permission set missing');
     return summary;
   }
+  // [ADR-0105 D4] The orphan sweep below must see BOTH variants: a boot that
+  // changed posture leaves grants of the superseded set behind, and those are
+  // exactly the rows whose bits must stop applying.
+  const supersededId = await resolvePermissionSetId(ql, supersededOrgAdminSetName(posture));
 
   const members = await tryFind(ql, 'sys_member', {}, limit);
   // De-duplicate by (user_id, organization_id) pair — a user with two
@@ -246,7 +315,7 @@ export async function backfillOrgAdminGrants(
     if (seen.has(key)) continue;
     seen.add(key);
     summary.scanned += 1;
-    const res = await reconcileOrgAdminGrant(ql, userId, orgId, { logger });
+    const res = await reconcileOrgAdminGrant(ql, userId, orgId, { logger, posture });
     if (res.action === 'granted') summary.granted += 1;
     else if (res.action === 'revoked') summary.revoked += 1;
     else if (res.action === 'skipped') summary.skipped += 1;
@@ -255,10 +324,11 @@ export async function backfillOrgAdminGrants(
   // Also revoke any organization_admin grant pointing at a (user, org)
   // pair with NO membership row left (orphaned grants from deletes
   // that fired before this hook existed).
+  const grantSetIds = [permSetId, supersededId].filter(Boolean) as string[];
   const allGrants = await tryFind(
     ql,
     'sys_user_permission_set',
-    { permission_set_id: permSetId },
+    { permission_set_id: { $in: grantSetIds } },
     limit,
   );
   for (const g of allGrants) {
@@ -267,11 +337,11 @@ export async function backfillOrgAdminGrants(
     if (!userId || !orgId) continue;
     const key = `${userId}|${orgId}`;
     if (seen.has(key)) continue;
-    const res = await reconcileOrgAdminGrant(ql, userId, orgId, { logger });
+    const res = await reconcileOrgAdminGrant(ql, userId, orgId, { logger, posture });
     if (res.action === 'revoked') summary.revoked += 1;
   }
 
-  logger?.info?.('[security] organization_admin backfill complete', summary);
+  logger?.info?.('[security] org-admin grant backfill complete', { ...summary, posture });
   return summary;
 }
 

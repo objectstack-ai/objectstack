@@ -12,8 +12,8 @@ description: Misc protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { CapabilityDeclaration } from '@objectstack/spec/security';
-import type { CapabilityDeclaration } from '@objectstack/spec/security';
+import { CapabilityDeclaration, TenancyPosture } from '@objectstack/spec/security';
+import type { CapabilityDeclaration, TenancyPosture } from '@objectstack/spec/security';
 
 // Validate data
 const result = CapabilityDeclaration.parse(data);
@@ -32,6 +32,17 @@ const result = CapabilityDeclaration.parse(data);
 | **description** | `string` | optional | What holding this capability permits |
 | **scope** | `Enum<'platform' \| 'org'>` | ✅ | platform = a platform-wide power; org = scoped to an organization |
 | **packageId** | `string` | optional | [ADR-0086 D3] Owning package id (author-declared fallback; absent = registry-stamped) |
+
+
+---
+
+## TenancyPosture
+
+### Allowed Values
+
+* `single`
+* `group`
+* `isolated`
 
 
 ---

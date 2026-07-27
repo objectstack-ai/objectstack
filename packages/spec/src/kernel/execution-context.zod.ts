@@ -146,6 +146,31 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   org_user_ids: z.array(z.string()).optional(),
 
   /**
+   * [ADR-0105 D2] Every organization this principal currently holds a valid
+   * membership in — the caller's **org access set**, resolved once by
+   * `resolveAuthzContext` from `sys_member` under ADR-0091 validity windows.
+   *
+   * This is the read reach of the `group` tenancy posture, where the Layer 0
+   * wall is `organization_id IN accessible_org_ids` (MOAC semantics: union
+   * access across the member's organizations, no context switching). It is a
+   * FIRST-CLASS authorization dimension, not a convenience: the wall compiler
+   * reads it directly, and RLS policies may reference it as
+   * `organization_id IN (current_user.accessible_org_ids)`.
+   *
+   * Relationship to {@link tenantId}: `tenantId` remains the ACTIVE
+   * organization — the default write target and the UI's current context. In
+   * `isolated` posture it also bounds reads (the wall is equality); in `group`
+   * posture it does not — membership does. In `single` posture the set is
+   * resolved but no wall consumes it.
+   *
+   * An authenticated principal with no valid membership resolves to an EMPTY
+   * set, which fails the group wall closed (zero rows) — never fail-open.
+   *
+   * @example ['org_plant_a', 'org_plant_b', 'org_group_hq']
+   */
+  accessible_org_ids: z.array(z.string()).optional(),
+
+  /**
    * Pre-resolved dynamic-membership arrays for RLS (§7.3.1). The runtime
    * resolves set-membership that would otherwise need a subquery — team
    * members under a manager, accounts in a sales rep's territories,

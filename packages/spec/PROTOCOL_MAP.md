@@ -107,7 +107,7 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`sharing.zod.ts`](src/security/sharing.zod.ts) | | **Sharing Rules**. Record-level access rules (sharing calculation). |
 | [`explain.zod.ts`](src/security/explain.zod.ts) | | **Access Explain**. Why a principal can or cannot reach a record. |
 | [`rls.zod.ts`](src/security/rls.zod.ts) | | **Row Level Security**. Database-level RLS definitions. |
-| [`territory.zod.ts`](src/security/territory.zod.ts) | | **Territory Management**. Sales territory models. |
+| [`tenancy-posture.ts`](src/security/tenancy-posture.ts) | | **Tenancy Posture**. `single` / `group` / `isolated` — which organization wall Layer 0 enforces (ADR-0105 D1). |
 | [`scim.zod.ts`](src/identity/scim.zod.ts) | | **SCIM Protocol**. Identity provisioning standards. |
 
 ---

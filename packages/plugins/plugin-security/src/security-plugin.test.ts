@@ -453,15 +453,40 @@ describe('SecurityPlugin', () => {
       await harness.run(opCtx); // must not throw
     });
 
-    it("a write that doesn't supply organization_id is untouched (auto-stamp's job)", async () => {
+    it('[ADR-0105 D5] a write that omits organization_id is STAMPED with the active org', async () => {
       const harness = await boot();
       const opCtx: any = {
         object: 'task', operation: 'insert', data: { name: 'A' },
         context: memberCtx(),
       };
-      await harness.run(opCtx); // must not throw — no cross-tenant check on an absent value
-      // SecurityPlugin never stamps organization_id (that's plugin-org-scoping's job).
-      expect(opCtx.data.organization_id).toBeUndefined();
+      await harness.run(opCtx); // must not throw — the stamped value satisfies the wall
+      // The engine owns the stamp under any wall-enforcing posture; the enterprise
+      // organizations plugin remains free to run too (neither overwrites a value).
+      expect(opCtx.data.organization_id).toBe('org-1');
+    });
+
+    it('[ADR-0105 D5] a BULK insert stamps every row that omits organization_id', async () => {
+      const harness = await boot();
+      const opCtx: any = {
+        object: 'task', operation: 'insert',
+        data: [{ name: 'A' }, { name: 'B', organization_id: 'org-1' }],
+        context: memberCtx(),
+      };
+      await harness.run(opCtx);
+      expect(opCtx.data.map((r: any) => r.organization_id)).toEqual(['org-1', 'org-1']);
+    });
+
+    it('[ADR-0105 D5] a BULK insert with ONE forged row is denied entirely', async () => {
+      // The pre-D5 check required a non-array payload, so an array of rows could
+      // carry a forged organization_id past the wall — the #2937 defect one call
+      // site down. No partial landing: one bad row denies the write.
+      const harness = await boot();
+      const opCtx: any = {
+        object: 'task', operation: 'insert',
+        data: [{ name: 'A', organization_id: 'org-1' }, { name: 'B', organization_id: 'org-2' }],
+        context: memberCtx(),
+      };
+      await expect(harness.run(opCtx)).rejects.toThrow(/another tenant|organization scope/i);
     });
 
     it('a system-context write bypasses the wall (import / migration / SYSTEM_CTX)', async () => {
@@ -474,7 +499,14 @@ describe('SecurityPlugin', () => {
     });
   });
 
-  it('without org-scoping plugin — strips tenant_isolation RLS so find applies no tenant where', async () => {
+  // [ADR-0105 D3] Stripping is decided by PROVENANCE, not by pattern-matching
+  // the `current_user.organization_id` token. `tenantPolicySet` above is an
+  // APP-AUTHORED fixture, so with isolation off it is now RETAINED and fails
+  // closed at compile time — it is no longer silently dropped (finding F1, the
+  // ADR-0049 "declared but unenforced" class). Only the platform's own shipped
+  // tenant policies are stripped; that half is covered in
+  // `platform-tenant-policies.test.ts`.
+  it('without org-scoping — an APP-AUTHORED tenant policy is RETAINED (never silently dropped)', async () => {
     const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
     const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
     await plugin.init(harness.ctx);
@@ -484,7 +516,28 @@ describe('SecurityPlugin', () => {
       context: { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] },
     };
     await harness.run(opCtx);
-    expect(opCtx.ast.where).toBeUndefined();
+    // Layer 0 is inert (no wall), so this filter is the AUTHORED policy alone.
+    expect(opCtx.ast.where).toEqual({ organization_id: 'org-1' });
+    // ...and the operator is told why, once.
+    expect(harness.ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('ADR-0105'),
+      expect.objectContaining({ object: 'task', policy: 'tenant_isolation' }),
+    );
+  });
+
+  it('without org-scoping — a retained authored tenant policy FAILS CLOSED with no active org', async () => {
+    const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+    const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    const opCtx: any = {
+      object: 'task', operation: 'find', ast: { where: undefined },
+      context: { userId: 'u1', positions: [], permissions: [] },
+    };
+    await harness.run(opCtx);
+    // The context variable is unavailable → the policy drops out at compile
+    // time → deny sentinel. Zero rows, loudly — never fail-open.
+    expect(opCtx.ast.where).toEqual(RLS_DENY_FILTER);
   });
 
   it('with org-scoping plugin — applies tenant_isolation RLS to find', async () => {
@@ -1125,13 +1178,16 @@ describe('SecurityPlugin', () => {
       expect(filter).toEqual({ $and: [{ organization_id: 'org-1' }, { organization_id: 'org-1' }] });
     });
 
-    it('returns undefined (no scope) when tenant_isolation is stripped (org-scoping off)', async () => {
+    it('[ADR-0105 D3] keeps an APP-AUTHORED tenant policy in scope even with org-scoping off', async () => {
+      // Parity with the find path: getReadFilter reads the same collection, so an
+      // authored policy must reach analytics/raw-SQL consumers too. Returning
+      // `undefined` here (the pre-D3 behavior) handed them an UNSCOPED read.
       const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
       const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
       await plugin.init(harness.ctx);
       await plugin.start(harness.ctx);
       const filter = await plugin.getReadFilter('task', { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] });
-      expect(filter).toBeUndefined();
+      expect(filter).toEqual({ organization_id: 'org-1' });
     });
 
     it('fail-closed: wildcard org policy on an object missing the column → deny sentinel', async () => {

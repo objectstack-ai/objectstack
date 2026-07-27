@@ -1508,6 +1508,10 @@ describe('AuthManager', () => {
         phoneNumber: false,
         phoneNumberOtp: false,
         multiOrgEnabled: false,
+        // [ADR-0105 D1] Which of `single` | `group` | `isolated` is in force.
+        // A vanilla deployment (no tenancy service wired, no env override) is
+        // `single`, matching `multiOrgEnabled: false`.
+        tenancyPosture: 'single',
         degradedTenancy: false,
         privacyUrl: 'https://objectstack.ai/privacy',
         termsUrl: 'https://objectstack.ai/terms',

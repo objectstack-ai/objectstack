@@ -20,6 +20,11 @@ describe('default permission sets', () => {
       'mcp_agent_restricted',
       'member_default',
       'organization_admin',
+      // [ADR-0105 D4] The wall-less variant of `organization_admin`, DERIVED
+      // from it by dropping the wildcard viewAllRecords/modifyAllRecords bits.
+      // Granted by `auto-org-admin-grant` when the posture enforces no
+      // organization wall, where nothing would bound them (finding F2).
+      'organization_admin_no_bypass',
       'viewer_readonly',
     ]);
   });

@@ -1515,10 +1515,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       rowLevelSecurity: {
         label: "Seguridad a nivel de fila",
         helpText: "Array de políticas RLS (ver rls.zod.ts)"
-      },
-      contextVariables: {
-        label: "Variables de contexto",
-        helpText: "Variables personalizadas referenciadas en predicados RLS"
       }
     }
   },

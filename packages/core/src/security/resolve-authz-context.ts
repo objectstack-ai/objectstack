@@ -29,7 +29,7 @@ import {
   mapMembershipRole,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
   ADMIN_FULL_ACCESS,
-  ORGANIZATION_ADMIN,
+  ORGANIZATION_ADMIN_GRANTS,
 } from '@objectstack/spec';
 import type { AuthzPosture } from '@objectstack/spec/security';
 
@@ -49,6 +49,14 @@ export interface ResolvedAuthzContext {
   tabPermissions?: Record<string, 'visible' | 'hidden' | 'default_on' | 'default_off'>;
   /** Fellow-org user IDs for RLS scoping of identity tables (`id IN (...)`). */
   org_user_ids: string[];
+  /**
+   * [ADR-0105 D2] Every organization this principal currently holds a VALID
+   * membership in — the caller's org access set, and the read reach of the
+   * `group` tenancy posture (Layer 0 becomes `organization_id IN (...)`).
+   * Resolved here, once, so no surface re-derives it; empty for an anonymous or
+   * membership-less principal, which fails the group wall closed.
+   */
+  accessible_org_ids: string[];
   /**
    * [ADR-0095 D2/D3] The monotonic posture rung this principal resolves to,
    * DERIVED once here from held capability grants (never a better-auth role):
@@ -102,6 +110,7 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
     permissions: [],
     systemPermissions: [],
     org_user_ids: [],
+    accessible_org_ids: [],
   };
 
   let userId: string | undefined;
@@ -153,6 +162,7 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   ctx.permissions = grants.permissions;
   ctx.systemPermissions = grants.systemPermissions;
   ctx.org_user_ids = grants.org_user_ids;
+  ctx.accessible_org_ids = grants.accessible_org_ids;
   if (grants.tabPermissions) ctx.tabPermissions = grants.tabPermissions;
   if (grants.posture) ctx.posture = grants.posture;
   if (grants.email && !ctx.email) ctx.email = grants.email;
@@ -167,6 +177,8 @@ export interface UserAuthzGrants {
   systemPermissions: string[];
   /** Fellow-org user IDs for RLS scoping of identity tables (`id IN (...)`). */
   org_user_ids: string[];
+  /** [ADR-0105 D2] Organizations this user holds a currently-valid membership in. */
+  accessible_org_ids: string[];
   tabPermissions?: Record<string, 'visible' | 'hidden' | 'default_on' | 'default_off'>;
   posture?: AuthzPosture;
   /** The user's unique email (`sys_user`), for `current_user.email` owner RLS. */
@@ -222,6 +234,7 @@ export async function resolveUserAuthzGrants(
     permissions: Array.isArray(opts.seedPermissions) ? [...opts.seedPermissions] : [],
     systemPermissions: [],
     org_user_ids: [userId],
+    accessible_org_ids: [],
   };
   if (opts.seedEmail) grants.email = opts.seedEmail;
   if (!ql || typeof ql.find !== 'function') return grants;
@@ -248,18 +261,48 @@ export async function resolveUserAuthzGrants(
     if (u?.email) grants.email = String(u.email);
   }
 
-  // 3. Organization-administration roles via sys_member (better-auth), normalized
-  //    to the canonical built-in names (owner→org_owner, admin→org_admin, …).
-  //    [ADR-0095 D3] This is the ONE PROVISIONING boundary where a better-auth
-  //    role is read: it is projected into `positions` here, and separately drives
-  //    the `organization_admin` capability grant (auto-org-admin-grant.ts). No
-  //    enforcement code path reads the raw role — posture/adjudication run off
-  //    the resulting capability grants, so the #2836 dual-track cannot recur.
-  const memberWhere: any = tenantId
-    ? { user_id: userId, organization_id: tenantId }
-    : { user_id: userId };
-  const members = await tryFind(ql, 'sys_member', memberWhere, 50);
+  // Single clock for every validity-window check in this resolution
+  // (ADR-0091 D2 — a grant row outside [valid_from, valid_until) does not
+  // resolve, fail-closed, with no background job involved).
+  const nowMs = opts.nowMs ?? Date.now();
+
+  // 3. Memberships via sys_member (better-auth). ONE read serves two purposes,
+  //    so the two facts can never disagree about what the user belongs to:
+  //
+  //    (a) [ADR-0095 D3] Org-administration roles for the ACTIVE organization,
+  //        normalized to the canonical built-in names (owner→org_owner,
+  //        admin→org_admin, …). This is the ONE PROVISIONING boundary where a
+  //        better-auth role is read: it is projected into `positions` here, and
+  //        separately drives the `organization_admin` capability grant
+  //        (auto-org-admin-grant.ts). No enforcement code path reads the raw
+  //        role — posture/adjudication run off the resulting capability grants,
+  //        so the #2836 dual-track cannot recur.
+  //
+  //    (b) [ADR-0105 D2] `accessible_org_ids` — EVERY organization the user
+  //        currently belongs to, regardless of which one is active. This is the
+  //        `group` posture's read reach (Layer 0 becomes `organization_id IN
+  //        (...)`), so it must span the whole membership set, not the active
+  //        org. Rows outside their ADR-0091 validity window do not resolve; the
+  //        columns are absent on `sys_member` today, and `isGrantActive` treats
+  //        an absent bound as unbounded, so this is a no-op until they exist and
+  //        correct the moment they do.
+  const members = await tryFind(ql, 'sys_member', { user_id: userId }, 200);
+  const accessibleOrgIds = new Set<string>();
   for (const m of members) {
+    if (!isGrantActive(m, nowMs)) continue;
+    const org = m.organization_id ?? m.organizationId;
+    if (typeof org === 'string' && org) accessibleOrgIds.add(org);
+  }
+  grants.accessible_org_ids = Array.from(accessibleOrgIds);
+
+  // Positions come from the ACTIVE org's membership only (unchanged): a role
+  // held in one organization must not grant its capabilities while the caller
+  // operates in another. With no active org, every membership contributes —
+  // exactly the pre-D2 behavior of the org-less read.
+  const activeMembers = tenantId
+    ? members.filter((m) => (m.organization_id ?? m.organizationId) === tenantId)
+    : members;
+  for (const m of activeMembers) {
     if (m.role && typeof m.role === 'string') {
       for (const raw of m.role.split(',').map((s: string) => s.trim()).filter(Boolean)) {
         const r = mapMembershipRole(raw);
@@ -267,11 +310,6 @@ export async function resolveUserAuthzGrants(
       }
     }
   }
-
-  // Single clock for every validity-window check in this resolution
-  // (ADR-0091 D2 — a grant row outside [valid_from, valid_until) does not
-  // resolve, fail-closed, with no background job involved).
-  const nowMs = opts.nowMs ?? Date.now();
 
   // 4. [ADR-0057 D4] Platform-owned RBAC role assignments (sys_user_position) — the
   //    source of truth for custom roles, decoupled from sys_member.role.
@@ -391,7 +429,9 @@ export async function resolveUserAuthzGrants(
   //     tier. `EXTERNAL` is never derived (no external principal type yet).
   grants.posture = derivePosture({
     isPlatformAdmin: hasPlatformAdminGrant,
-    isTenantAdmin: grants.permissions.includes(ORGANIZATION_ADMIN),
+    // [ADR-0105 D4] Either org-admin capability set resolves the rung — the
+    // wall-less variant differs only by withholding the superuser bits.
+    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n: string) => grants.permissions.includes(n)),
   });
 
   // 7. [ADR-0024] Env-side AI seat: synthesize the `ai_seat` capability from the

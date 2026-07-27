@@ -1,5 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import {
+  postureEnforcesWall,
+  postureUsesUnionScope,
+  type TenancyPosture,
+} from '@objectstack/spec/security';
+
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 
 /**
@@ -25,12 +31,28 @@ import { RLS_DENY_FILTER } from './rls-compiler.js';
 /** Inputs the Layer 0 decision needs — all cheap, already-loaded facts. */
 export interface TenantLayer0Input {
   /**
-   * True iff multi-org isolation is actually active (ADR-0093 `tenancy.mode ===
-   * 'multi'` / `tenancy.isolationActive`). In `single` mode Layer 0 is inert.
+   * [ADR-0105 D1] The tenancy posture actually IN FORCE (`tenancy.posture`) —
+   * the single fact that decides what this layer enforces:
+   *
+   * - `single`   → inert (no wall)
+   * - `group`    → `organization_id IN accessibleOrgIds` (union / MOAC)
+   * - `isolated` → `organization_id = organizationId` (the hard wall)
+   *
+   * A degraded deployment (a wall requested but not enforceable) already
+   * resolves to `single` at the service, so this layer never sees a posture it
+   * cannot honour.
    */
-  isolationActive: boolean;
+  tenancyPosture: TenancyPosture;
   /** The resolved authz context's active organization id (`ExecutionContext.tenantId`). */
   organizationId?: string;
+  /**
+   * [ADR-0105 D2] The caller's org access set
+   * (`ExecutionContext.accessible_org_ids`) — every organization they hold a
+   * currently-valid membership in. Read ONLY under the `group` posture, where
+   * it is the wall. An empty/absent set there denies (fail closed): a principal
+   * with no membership has no group data reach.
+   */
+  accessibleOrgIds?: readonly string[];
   /**
    * Whether the object carries an `organization_id` column. `undefined` = the
    * schema/field-set could not be resolved yet (boot); treated as "assume tenant
@@ -74,17 +96,27 @@ export interface TenantLayer0Input {
 /**
  * Compute the Layer 0 (tenant) filter to AND onto a read/write.
  *
- * - `null` → Layer 0 contributes nothing (single mode; non-tenant object; or an
- *   exempt platform admin). The caller applies only Layer 1.
- * - `{ organization_id }` → the tenant wall, AND-composed unconditionally.
- * - {@link RLS_DENY_FILTER} → multi mode on a tenant object but the context has
- *   no active organization → fail closed (zero rows / write denied).
+ * - `null` → Layer 0 contributes nothing (`single` posture; non-tenant object;
+ *   or an exempt platform admin). The caller applies only Layer 1.
+ * - `{ organization_id: <id> }` → the `isolated` wall, AND-composed unconditionally.
+ * - `{ organization_id: { $in: [...] } }` → the `group` union wall (ADR-0105 D2).
+ * - {@link RLS_DENY_FILTER} → a walled posture on a tenant object, but the
+ *   context carries no organization scope to enforce with (no active org under
+ *   `isolated`, empty access set under `group`) → fail closed (zero rows /
+ *   write denied).
+ *
+ * Only the PREDICATE widens between `isolated` and `group`; the composition
+ * rules do not. Layer 0 is still computed independently of the RLS compiler,
+ * still AND-composed first, and still crossable only by a true `PLATFORM_ADMIN`
+ * — so ADR-0095's W1 (business RLS cannot weaken the wall) and W2 (the
+ * superuser bypass cannot cross it) hold in every posture (ADR-0105 D2/D4).
  */
 export function computeTenantLayer0Filter(
   input: TenantLayer0Input,
 ): Record<string, unknown> | null {
-  // `single` mode / isolation absent → parity with today's policy stripping.
-  if (!input.isolationActive) return null;
+  // `single` posture (incl. a degraded deployment, which resolves to `single`)
+  // → parity with today's policy stripping.
+  if (!postureEnforcesWall(input.tenancyPosture)) return null;
 
   // Not a tenant object: platform-global (tenancy disabled) or simply carries no
   // `organization_id` column (e.g. better-auth identity tables like `sys_user`).
@@ -99,7 +131,18 @@ export function computeTenantLayer0Filter(
   // bypass no longer implies Layer 0's.
   if (input.isPlatformAdmin && input.posturePermitsCrossTenant) return null;
 
-  // Enforce the wall. Missing active org in multi mode → fail closed.
+  // [ADR-0105 D2] `group`: union access over the caller's memberships (MOAC).
+  // The ACTIVE organization no longer bounds reads here — membership does — so
+  // a group-HQ analyst sees every plant they belong to on one screen without
+  // context switching, and a plant admin still sees only their own plants.
+  // An empty access set is the fail-closed case: no membership, no reach.
+  if (postureUsesUnionScope(input.tenancyPosture)) {
+    const orgIds = input.accessibleOrgIds;
+    if (!orgIds || orgIds.length === 0) return { ...RLS_DENY_FILTER };
+    return { organization_id: { $in: [...orgIds] } };
+  }
+
+  // `isolated`: the hard wall. Missing active org → fail closed.
   if (!input.organizationId) return { ...RLS_DENY_FILTER };
   return { organization_id: input.organizationId };
 }
