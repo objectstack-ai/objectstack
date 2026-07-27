@@ -128,40 +128,13 @@ export type DispatcherConfig = z.infer<typeof DispatcherConfigSchema>;
 export type DispatcherConfigInput = z.input<typeof DispatcherConfigSchema>;
 
 // ============================================================================
-// Default Route Table
+// Default Route Table — REMOVED (#3586)
 // ============================================================================
-
-/**
- * Default route table for the ObjectStack HttpDispatcher.
- * Maps all Protocol namespaces to their corresponding services.
- * 
- * This is the recommended baseline configuration. Plugins can extend
- * this table by declaring routes in their manifest's contributes.routes.
- */
-export const DEFAULT_DISPATCHER_ROUTES: DispatcherRouteInput[] = [
-  // Discovery (public)
-  { prefix: '/api/v1/discovery', service: 'metadata', authRequired: false, criticality: 'required' },
-  
-  // Health (public)
-  { prefix: '/api/v1/health', service: 'metadata', authRequired: false, criticality: 'required' },
-  
-  // Required Services
-  { prefix: '/api/v1/meta',     service: 'metadata',  criticality: 'required' },
-  { prefix: '/api/v1/data',     service: 'data',      criticality: 'required' },
-  { prefix: '/api/v1/auth',     service: 'auth',      criticality: 'required' },
-  
-  // Optional Services (plugin-provided)
-  { prefix: '/api/v1/packages',      service: 'metadata' },
-  { prefix: '/api/v1/ui',            service: 'ui' }, // @deprecated — use /api/v1/meta/view and /api/v1/meta/dashboard instead
-  { prefix: '/api/v1/workflow',      service: 'workflow' },
-  { prefix: '/api/v1/analytics',     service: 'analytics' },
-  { prefix: '/api/v1/automation',    service: 'automation' },
-  { prefix: '/api/v1/storage',       service: 'file-storage' },
-  { prefix: '/api/v1/i18n',          service: 'i18n' },
-  { prefix: '/api/v1/notifications', service: 'notification' },
-  { prefix: '/api/v1/realtime',      service: 'realtime' },
-  { prefix: '/api/v1/ai',            service: 'ai' },
-];
+// DEFAULT_DISPATCHER_ROUTES was deleted: nothing in the runtime ever consumed
+// it, it listed routes that never existed (/workflow, /realtime) while
+// omitting eight real ones, and it underwrote a false compliance verdict.
+// The audited, guard-enforced source of truth for the dispatcher's route
+// surface is packages/runtime/src/route-ledger.ts.
 
 // ============================================================================
 // Dispatcher Error Codes
