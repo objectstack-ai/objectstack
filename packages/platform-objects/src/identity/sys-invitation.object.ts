@@ -203,6 +203,12 @@ export const SysInvitation = ObjectSchema.create({
       options: [
         { label: 'Owner', value: 'owner' },
         { label: 'Admin', value: 'admin' },
+        // [ADR-0105 D8 / #3697] Kept in step with `sys_member.role` — this is
+        // the value that lands there on acceptance, and inviting is how a
+        // delegate gets provisioned in the first place. Both selects are
+        // enforced on write, so a role missing from either one is a role that
+        // cannot be handed out.
+        { label: 'Delegated Admin', value: 'delegated_admin' },
         { label: 'Member', value: 'member' },
       ],
       defaultValue: 'member',

@@ -583,6 +583,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "所有者",
           admin: "管理员",
+          delegated_admin: "Delegated Admin",
           member: "成员"
         }
       }
@@ -641,6 +642,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "所有者",
           admin: "管理员",
+          delegated_admin: "Delegated Admin",
           member: "成员"
         }
       },

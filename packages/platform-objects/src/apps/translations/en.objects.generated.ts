@@ -583,6 +583,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "Owner",
           admin: "Admin",
+          delegated_admin: "Delegated Admin",
           member: "Member"
         }
       }
@@ -641,6 +642,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "Owner",
           admin: "Admin",
+          delegated_admin: "Delegated Admin",
           member: "Member"
         }
       },

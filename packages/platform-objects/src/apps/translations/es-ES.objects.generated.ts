@@ -583,6 +583,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "Propietario",
           admin: "Administrador",
+          delegated_admin: "Delegated Admin",
           member: "Miembro"
         }
       }
@@ -641,6 +642,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "Propietario",
           admin: "Administrador",
+          delegated_admin: "Delegated Admin",
           member: "Miembro"
         }
       },

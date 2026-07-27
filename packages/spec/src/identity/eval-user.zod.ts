@@ -102,6 +102,30 @@ export const BUILTIN_IDENTITY_METADATA: Record<BuiltinIdentityName, { label: str
   [BUILTIN_IDENTITY_ORG_MEMBER]: { label: 'Organization Member', description: 'Organization member within a tenant.' },
 };
 
+/**
+ * [ADR-0105 D8 / #3697] The better-auth organization role that makes the
+ * scope-bounded issuance path REACHABLE.
+ *
+ * D8 authorizes invitation *placement* against the issuer's `adminScope`
+ * (ADR-0090 D12) — but better-auth grants `invitation: ["create"]` to `owner`
+ * and `admin` only, and under a wall-enforcing posture those two are
+ * auto-elevated to tenant admins (`auto-org-admin-grant.ts`), for whom the
+ * scope gate narrows nothing. The two sets were disjoint: the gate had no
+ * caller. This role is the missing one — a membership grade that may reach
+ * `/organization/invite-member` **without** being an org admin.
+ *
+ * It carries NO ObjectStack authority by construction: `mapMembershipRole`
+ * passes it through as a position name, and with no
+ * `sys_position_permission_set` binding that name resolves to nothing.
+ * Reaching the endpoint is not authority to place — placement authority comes
+ * solely from a separately-granted `adminScope`. Role = *can reach the
+ * endpoint*; adminScope = *what the endpoint permits*.
+ *
+ * Doubly opt-in, so a default deployment changes not at all: someone must set
+ * the membership role AND grant an adminScope set.
+ */
+export const MEMBERSHIP_ROLE_DELEGATED_ADMIN = 'delegated_admin';
+
 /** Normalize a raw better-auth membership role (owner/admin/member) to its canonical
  * built-in role name (org_owner/org_admin/org_member). Unknown values pass through. */
 export function mapMembershipRole(raw: string): string {

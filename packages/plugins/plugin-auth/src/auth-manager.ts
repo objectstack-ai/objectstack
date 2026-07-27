@@ -13,9 +13,14 @@ import type {
 import type { IDataEngine } from '@objectstack/core';
 import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
 import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveOrgLimit, isMcpServerEnabled } from '@objectstack/types';
-import { mapMembershipRole, BUILTIN_IDENTITY_PLATFORM_ADMIN } from '@objectstack/spec';
+import {
+  mapMembershipRole,
+  BUILTIN_IDENTITY_PLATFORM_ADMIN,
+  MEMBERSHIP_ROLE_DELEGATED_ADMIN,
+} from '@objectstack/spec';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
+import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import type { TenancyService } from './tenancy-service.js';
@@ -1552,31 +1557,50 @@ export class AuthManager {
       // (PermissionSets). Here we register them with minimum org-plugin
       // capabilities (same as the built-in `member` role) so they cannot
       // inadvertently grant org-level admin powers.
+      //
+      // [ADR-0105 D8 / #3697] The map ALSO registers `delegated_admin` — the
+      // one role that may reach `/organization/invite-member` without being an
+      // org admin. Without it D8's scope-bounded issuance gate has no caller:
+      // better-auth grants `invitation:["create"]` to owner/admin only, and
+      // under a wall-enforcing posture those two are auto-elevated to tenant
+      // admins, for whom the gate short-circuits and narrows nothing. So the
+      // map is now built unconditionally, not just when an app supplies extras.
+      //
+      // Deliberately `create` WITHOUT `cancel`: better-auth's cancel route
+      // (`crud-invites.mjs`) checks only `invitation:["cancel"]` — no inviterId
+      // attribution — so the permission would mean "cancel anyone's pending
+      // invitation in the org". Attributed cancel needs its own guard first.
       let customOrgRoles: Record<string, any> | undefined;
-      const extra = this.config.additionalOrgRoles;
-      if (extra && extra.length > 0) {
-        try {
-          const accessMod = await import('better-auth/plugins/organization/access');
-          const { defaultAc, memberAc, defaultRoles: importedDefaultRoles } = accessMod as any;
-          // Better-Auth's `hasPermission` does `{...options.roles || defaultRoles}`
-          // (precedence: `||` then spread). When we pass our own `roles`, the
-          // built-in owner/admin/member are silently dropped, so even the org
-          // owner loses `invitation:create` and every mutation 403s. We must
-          // re-include the defaults alongside our extras.
-          const defaultRoles = importedDefaultRoles || null;
-          if (defaultAc && memberAc && typeof memberAc.statements === 'object') {
-            const built: Record<string, any> = defaultRoles ? { ...defaultRoles } : {};
-            const stmts = memberAc.statements;
-            for (const name of extra) {
-              if (!name) continue;
-              if (built[name]) continue;
-              built[name] = defaultAc.newRole(stmts);
-            }
-            customOrgRoles = built;
+      const extra = this.config.additionalOrgRoles ?? [];
+      try {
+        const accessMod = await import('better-auth/plugins/organization/access');
+        const { defaultAc, memberAc, defaultRoles } = accessMod as any;
+        // Better-Auth's `hasPermission` does `{...options.roles || defaultRoles}`
+        // (precedence: `||` then spread). When we pass our own `roles`, the
+        // built-in owner/admin/member are silently dropped, so even the org
+        // owner loses `invitation:create` and every mutation 403s. We must
+        // re-include the defaults alongside our extras — and if the library
+        // ever stops exporting them, build NOTHING and let better-auth fall
+        // back to its own defaults rather than ship a map missing `owner`.
+        if (defaultAc && memberAc && defaultRoles && typeof memberAc.statements === 'object') {
+          const built: Record<string, any> = { ...defaultRoles };
+          const stmts = memberAc.statements;
+          // Registered BEFORE the app's extras so an app that happens to
+          // declare a same-named permission cannot downgrade it to a plain
+          // member role (the loop below skips names already present).
+          built[MEMBERSHIP_ROLE_DELEGATED_ADMIN] = defaultAc.newRole({
+            ...stmts,
+            invitation: ['create'],
+          });
+          for (const name of extra) {
+            if (!name) continue;
+            if (built[name]) continue;
+            built[name] = defaultAc.newRole(stmts);
           }
-        } catch {
-          customOrgRoles = undefined;
+          customOrgRoles = built;
         }
+      } catch {
+        customOrgRoles = undefined;
       }
       return organization({
         schema: buildOrganizationPluginSchema(),
@@ -1681,6 +1705,25 @@ export class AuthManager {
           // denied (auto-org-admin-grant.ts keeps it read-only on those
           // tables precisely so a fresh org admin cannot rebind themselves).
           beforeCreateInvitation: async ({ invitation, inviter, organization }: any) => {
+            const inviterUserId = inviter?.id ?? inviter?.userId ?? null;
+            const organizationId = organization?.id ?? invitation?.organizationId;
+
+            // [#3697] Role cap — FIRST, and for EVERY invitation, placement or
+            // not: the escalation it closes (invite an `admin`, acceptance
+            // auto-elevates to `organization_admin` → tenant admin) needs no
+            // placement intent at all. Skipped for a plain `member` invitation,
+            // which can never trip the cap — so the ordinary path pays nothing.
+            if (!isPlainMemberInvitation(invitation?.role)) {
+              const capFailure = invitationRoleCapFailure(
+                invitation?.role,
+                await this.resolveMembershipRole(inviterUserId, organizationId),
+              );
+              if (capFailure) {
+                const { APIError } = await import('better-auth/api');
+                throw new APIError('FORBIDDEN', { message: capFailure });
+              }
+            }
+
             const intent = readInvitationPlacementIntent(invitation);
             if (!intent) return;
 
@@ -1693,7 +1736,6 @@ export class AuthManager {
               });
             }
 
-            const organizationId = organization?.id ?? invitation?.organizationId;
             try {
               await svc.assertIssuable({
                 intent,
@@ -1701,7 +1743,7 @@ export class AuthManager {
                 // user's real grants through the shared authz resolver; a
                 // hand-built context here would carry no positions and refuse
                 // every delegate.
-                actorUserId: inviter?.id ?? inviter?.userId ?? null,
+                actorUserId: inviterUserId,
                 organizationId,
               });
             } catch (err: any) {
@@ -3220,6 +3262,47 @@ export class AuthManager {
       return false;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * [#3697] The issuer's own better-auth membership role in `orgId` — the
+   * input to the invitation role cap.
+   *
+   * `beforeCreateInvitation` receives `inviter` as the *session user*, not the
+   * member row (better-auth's `crud-invites.mjs` passes `session.user`), so
+   * the role has to be read back. Read through `withSystemReadContext`: an
+   * org-scoped RLS read performed as a non-privileged delegate could return
+   * nothing and silently grade them as unresolved.
+   *
+   * Returns `null` when the role cannot be established — missing keys, no
+   * engine, no membership row, or a lookup error. That grades BELOW a plain
+   * member, so the cap refuses anything above a `member` invitation: this
+   * backs a security gate, and an unverifiable issuer must confer nothing.
+   * Multiple membership rows (legacy duplicates) are joined so the highest
+   * grade among them wins — the cap must judge the authority they actually
+   * hold, not whichever row came back first.
+   */
+  private async resolveMembershipRole(
+    userId: unknown,
+    orgId: unknown,
+  ): Promise<string | null> {
+    const uid = typeof userId === 'string' && userId !== '' ? userId : null;
+    const oid = typeof orgId === 'string' && orgId !== '' ? orgId : null;
+    if (!uid || !oid) return null;
+    const engine = this.getDataEngine();
+    if (!engine) return null;
+    try {
+      const members = await withSystemReadContext(engine).find('sys_member', {
+        where: { user_id: uid, organization_id: oid },
+        limit: 10,
+      });
+      const roles = (Array.isArray(members) ? members : [])
+        .map((m: any) => (typeof m?.role === 'string' ? m.role : ''))
+        .filter((r: string) => r.length > 0);
+      return roles.length > 0 ? roles.join(',') : null;
+    } catch {
+      return null;
     }
   }
 

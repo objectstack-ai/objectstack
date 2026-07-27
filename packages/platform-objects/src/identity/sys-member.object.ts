@@ -172,6 +172,17 @@ export const SysMember = ObjectSchema.create({
       options: [
         { label: 'Owner', value: 'owner' },
         { label: 'Admin', value: 'admin' },
+        // [ADR-0105 D8 / #3697] The delegated issuer grade — may reach
+        // `/organization/invite-member` WITHOUT being an org admin, which is
+        // what finally gives D8's scope-bounded issuance gate a caller. It
+        // carries no ObjectStack authority by itself: placement authority
+        // comes from a separately-granted `adminScope`, and the invitation
+        // role cap holds it to inviting plain members.
+        //
+        // Listed here because this select is ENFORCED on write: better-auth's
+        // own accept-invitation membership insert is validated like any other
+        // row, so a role missing from this list is a role nobody can hold.
+        { label: 'Delegated Admin', value: 'delegated_admin' },
         { label: 'Member', value: 'member' },
       ],
       defaultValue: 'member',

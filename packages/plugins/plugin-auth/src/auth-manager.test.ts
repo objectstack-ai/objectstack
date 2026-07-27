@@ -865,6 +865,168 @@ describe('AuthManager', () => {
       expect(onInvitationAccepted).toHaveBeenCalledTimes(1);
     });
 
+    // ── [ADR-0105 D8 / #3697] The scope-bounded issuance path gets a caller ──
+    //
+    // Two halves, and they only make sense together: `delegated_admin` is the
+    // one org role that may reach `/organization/invite-member` WITHOUT being
+    // an org admin (giving the D8 gate a caller at last), and the role cap
+    // stops that role from being a ladder to tenant admin.
+    const bootOrgPlugin = async (opts: Record<string, unknown> = {}) => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        plugins: { organization: true },
+        ...opts,
+      });
+      await manager.getAuthInstance();
+      warnSpy.mockRestore();
+      return capturedConfig.plugins.find((p: any) => p.id === 'organization');
+    };
+
+    /** A `sys_member` reader stand-in — the shape `resolveMembershipRole` uses.
+     *  `role: null` = no membership row, i.e. an issuer whose grade cannot be
+     *  established. */
+    const engineWithMemberRole = (role: string | null) => ({
+      find: vi.fn(async (object: string) =>
+        object === 'sys_member' && role !== null ? [{ role }] : [],
+      ),
+      findOne: vi.fn(async () => null),
+      count: vi.fn(async () => 0),
+      insert: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => undefined),
+    });
+
+    it('registers `delegated_admin` with invitation:create — the gate finally has a caller', async () => {
+      const orgPlugin = await bootOrgPlugin();
+
+      const roles = orgPlugin._opts.roles;
+      expect(roles).toBeDefined();
+      // The whole point: a role that can invite without being owner/admin.
+      expect(roles.delegated_admin.statements.invitation).toEqual(['create']);
+      // …and NOT `cancel`: better-auth's cancel route checks only the
+      // permission, with no inviterId attribution, so it would mean "cancel
+      // anyone's pending invitation in the org".
+      expect(roles.delegated_admin.statements.invitation).not.toContain('cancel');
+      // Otherwise it is a plain member — no org/member/team/ac authority.
+      expect(roles.delegated_admin.statements.member).toEqual([]);
+      expect(roles.delegated_admin.statements.organization).toEqual([]);
+      expect(roles.delegated_admin.statements.team).toEqual([]);
+    });
+
+    it('registering roles keeps the built-in owner/admin/member intact', async () => {
+      // better-auth's `hasPermission` does `{...options.roles || defaultRoles}`,
+      // so a custom map that omits the defaults silently strips `owner`'s
+      // `invitation:create` and 403s every mutation.
+      const orgPlugin = await bootOrgPlugin({ additionalOrgRoles: ['sales_rep'] });
+
+      const roles = orgPlugin._opts.roles;
+      expect(Object.keys(roles)).toEqual(
+        expect.arrayContaining(['owner', 'admin', 'member', 'delegated_admin', 'sales_rep']),
+      );
+      expect(roles.owner.statements.invitation).toContain('create');
+      expect(roles.admin.statements.invitation).toContain('create');
+      expect(roles.member.statements.invitation).toEqual([]);
+      // App roles stay at member level — only `delegated_admin` gains invite.
+      expect(roles.sales_rep.statements.invitation).toEqual([]);
+    });
+
+    it('an app cannot downgrade `delegated_admin` by declaring the same name', async () => {
+      const orgPlugin = await bootOrgPlugin({ additionalOrgRoles: ['delegated_admin'] });
+      expect(orgPlugin._opts.roles.delegated_admin.statements.invitation).toEqual(['create']);
+    });
+
+    it('role cap: a delegate inviting an `admin` is REFUSED (the escalation chain)', async () => {
+      // delegate invites admin → sys_member(role='admin') → auto-org-admin-grant
+      // → organization_admin → wildcard modifyAllRecords → isTenantAdmin().
+      const orgPlugin = await bootOrgPlugin({
+        dataEngine: engineWithMemberRole('delegated_admin') as never,
+      });
+
+      await expect(
+        orgPlugin._opts.organizationHooks.beforeCreateInvitation({
+          invitation: { organizationId: 'org-42', email: 'e@x.test', role: 'admin' },
+          inviter: { id: 'u_delegate' },
+          organization: { id: 'org-42' },
+        }),
+      ).rejects.toThrow(/never confer a role above the issuer/);
+    });
+
+    it('role cap: a delegate inviting a plain `member` passes — and costs no lookup', async () => {
+      const engine = engineWithMemberRole('delegated_admin');
+      const orgPlugin = await bootOrgPlugin({ dataEngine: engine as never });
+      engine.find.mockClear();
+
+      await expect(
+        orgPlugin._opts.organizationHooks.beforeCreateInvitation({
+          invitation: { organizationId: 'org-42', email: 'e@x.test', role: 'member' },
+          inviter: { id: 'u_delegate' },
+          organization: { id: 'org-42' },
+        }),
+      ).resolves.toBeUndefined();
+      expect(engine.find).not.toHaveBeenCalled();
+    });
+
+    it('role cap: an org owner inviting an `admin` is unaffected', async () => {
+      const orgPlugin = await bootOrgPlugin({
+        dataEngine: engineWithMemberRole('owner') as never,
+      });
+
+      await expect(
+        orgPlugin._opts.organizationHooks.beforeCreateInvitation({
+          invitation: { organizationId: 'org-42', email: 'e@x.test', role: 'admin' },
+          inviter: { id: 'u_owner' },
+          organization: { id: 'org-42' },
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('role cap: an unresolvable issuer membership fails CLOSED', async () => {
+      const orgPlugin = await bootOrgPlugin({
+        dataEngine: engineWithMemberRole(null) as never,
+      });
+
+      await expect(
+        orgPlugin._opts.organizationHooks.beforeCreateInvitation({
+          invitation: { organizationId: 'org-42', email: 'e@x.test', role: 'admin' },
+          inviter: { id: 'u_ghost' },
+          organization: { id: 'org-42' },
+        }),
+      ).rejects.toThrow(/could not be verified/);
+    });
+
+    it('role cap: it runs BEFORE the placement gate and applies without placement intent', async () => {
+      // The escalation is independent of placement — a role-capped invitation
+      // must be refused whether or not it carries a business unit.
+      const assertIssuable = vi.fn(async () => {});
+      const orgPlugin = await bootOrgPlugin({
+        dataEngine: engineWithMemberRole('delegated_admin') as never,
+        invitationPlacement: async () => ({ assertIssuable, apply: vi.fn() }) as never,
+      });
+
+      await expect(
+        orgPlugin._opts.organizationHooks.beforeCreateInvitation({
+          invitation: {
+            organizationId: 'org-42',
+            email: 'e@x.test',
+            role: 'admin',
+            businessUnitId: 'bu_plant_a',
+            positions: ['qc_inspector'],
+          },
+          inviter: { id: 'u_delegate' },
+          organization: { id: 'org-42' },
+        }),
+      ).rejects.toThrow(/never confer a role above the issuer/);
+      // Refused before the placement gate was ever consulted.
+      expect(assertIssuable).not.toHaveBeenCalled();
+    });
+
     it('should register twoFactor plugin with schema mapping when enabled', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {

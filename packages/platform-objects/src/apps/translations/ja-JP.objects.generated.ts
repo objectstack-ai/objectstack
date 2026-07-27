@@ -583,6 +583,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "所有者",
           admin: "管理者",
+          delegated_admin: "Delegated Admin",
           member: "メンバー"
         }
       }
@@ -641,6 +642,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "所有者",
           admin: "管理者",
+          delegated_admin: "Delegated Admin",
           member: "メンバー"
         }
       },

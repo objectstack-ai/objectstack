@@ -136,6 +136,62 @@ Scoped invitations (ADR-0105 D8) are the first consumer: the invitation form
 narrows its unit/position pickers with this, and the invitation's placement
 intent is then authorized against the *issuer's* scope at issuance time.
 
+## Letting a delegate invite (`delegated_admin`)
+
+A scope is *what* you may administer; it does not by itself let you reach the
+invitation endpoint. The underlying organization plugin grants
+`invitation: ["create"]` to `owner` and `admin` only — and both of those are
+auto-elevated to `organization_admin` (a tenant admin), for whom the scope gate
+narrows nothing. So the scope-bounded issuance path needs a membership grade
+that is neither: **`delegated_admin`**.
+
+```jsonc
+// sys_member — the better-auth membership row
+{ "user_id": "usr_plant_admin", "organization_id": "org_acme", "role": "delegated_admin" }
+```
+
+Two independent switches, and you need both:
+
+| | Grants | Without it |
+|---|---|---|
+| `sys_member.role = delegated_admin` | May *reach* `/organization/invite-member` | Refused by the org plugin before any framework hook runs |
+| An `adminScope`-carrying permission set | *What* the invitation may place (subtree + allowlist) | The gate refuses every placement — the role alone administers nothing |
+
+The role carries no ObjectStack authority of its own: it passes through as a
+position name, and with no `sys_position_permission_set` binding it resolves to
+nothing. **Role = can reach the endpoint. `adminScope` = what the endpoint
+permits.** A default deployment is unaffected — nobody holds the role until you
+set it.
+
+### The invitation role cap
+
+An invitation may add a person; it may never add authority above the issuer's
+own. The framework caps every invitation — placement-carrying or not — at
+issuance:
+
+- an invited role may not outrank the issuer's (`owner` > `admin` > everyone
+  else);
+- an issuer below admin grade may invite as **`member` only**. Not just "not
+  admin/owner": an app-registered role projects into `current_user.positions`
+  and may be bound to permission sets, so it is a capability channel too. A
+  delegate's channel for capability is the invitation's **placement** intent,
+  which this gate allowlists position-by-position;
+- an issuer whose membership cannot be read confers nothing above a plain
+  member (fail-closed).
+
+Without the cap the role would be a ladder: invite an `admin`, and acceptance
+auto-elevates that membership to `organization_admin` → tenant admin — the
+grade the delegation exists to withhold. `sys_member` is not one of the gate's
+governed objects and the acceptance write runs outside the issuer's context, so
+the cap is the defense on that path.
+
+Both halves are pinned end-to-end over the real HTTP route by
+`packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts`: a
+`delegated_admin` issues a `member` invitation successfully, the same principal
+issuing `admin` is refused with no invitation row left behind, and a plain
+member still cannot invite at all — so it is demonstrably the role, not some
+unrelated loosening, that opened the endpoint.
+
 ## See also
 
 - [Permission Sets](/docs/permissions/permission-sets) — the container `adminScope` rides on

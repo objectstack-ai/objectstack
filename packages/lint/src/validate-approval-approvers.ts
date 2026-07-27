@@ -45,6 +45,7 @@ import {
   canonicalApproverType,
   normalizeDecisionOutputs,
 } from '@objectstack/spec/automation';
+import { MEMBERSHIP_ROLE_DELEGATED_ADMIN } from '@objectstack/spec';
 import { collectCelRootIdentifiers } from '@objectstack/formula';
 
 export const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER = 'approval-approver-not-membership-tier';
@@ -105,7 +106,16 @@ type AnyRec = Record<string, unknown>;
  * authored as `{ type: 'org_membership_level' }` (or its deprecated `role`
  * spelling) is almost certainly a position name.
  */
-const MEMBERSHIP_TIERS = new Set(['owner', 'admin', 'member', 'guest']);
+const MEMBERSHIP_TIERS = new Set([
+  'owner',
+  'admin',
+  'member',
+  'guest',
+  // [ADR-0105 D8 / #3697] A real tier since the framework registers it with the
+  // org plugin — the delegated issuer grade. It is storable in
+  // `sys_member.role`, so an approver naming it resolves to people, not nobody.
+  MEMBERSHIP_ROLE_DELEGATED_ADMIN,
+]);
 
 /** Off-spec dialect spellings we can name a canonical fix for. */
 const TYPE_FIX: Record<string, string> = {
