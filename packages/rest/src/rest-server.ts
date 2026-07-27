@@ -4219,6 +4219,11 @@ export class RestServer {
         // their option label, booleans to 是/否, dates to YYYY-MM-DD. When the
         // schema is unavailable the raw stored values stream through unchanged.
         //
+        // A zero-row result still emits the header row when the column set is
+        // authoritative (the security service's readable projection, or an explicit
+        // `fields=`), so an empty export doubles as an import template. Without a
+        // projection it stays headerless, so FLS-hidden column names never leak.
+        //
         // Streams the response so 50k-row exports do not buffer in memory; the
         // xlsx path pipes exceljs' streaming writer straight onto the response.
         // Filename suggests `${objectLabel}-${YYYYMMDD}-${HHMMSS}.${ext}` for
@@ -4481,6 +4486,32 @@ export class RestServer {
                         skip += rows.length;
                         if (rows.length < take) break;
                     }
+                    // [#3547] Zero rows: still emit the header when the column set is
+                    // AUTHORITATIVE. "Export columns don't depend on row content" is
+                    // only true if it also holds at zero rows — and the readable
+                    // projection above is derived from schema + context, so an empty
+                    // result has an exact header to write (which also makes an empty
+                    // export a usable import template). An explicit `?fields=` is
+                    // authoritative for the same reason: the caller named the columns.
+                    //
+                    // Deliberately NOT emitted when the header is schema-derived and
+                    // the projection was unavailable (`fieldsFromSchema &&
+                    // !readableProjected`): the masked-row fallback has no rows to
+                    // narrow with, so writing the full schema header would name
+                    // FLS-hidden columns — precisely the leak #3391 closes. That path
+                    // keeps today's headerless empty file.
+                    if (
+                        firstChunk && includeHeader && fields && fields.length > 0 &&
+                        (readableProjected || !fieldsFromSchema)
+                    ) {
+                        if (format === 'csv') {
+                            res.write(rowsToCsv(fields, [], true, metaMap));
+                        } else if (format === 'xlsx') {
+                            xlsx!.ws.addRow(fields.map((f) => headerLabel(f, metaMap))).commit();
+                        }
+                        // json has no header concept — the empty array is already correct.
+                    }
+
                     if (format === 'json') {
                         res.write(']');
                         res.end();

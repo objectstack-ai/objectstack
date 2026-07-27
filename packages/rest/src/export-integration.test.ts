@@ -490,4 +490,82 @@ describe('export route — FLS column projection via getReadableFields (#3547)',
     const header = parseCsv(csv.chunks.join(''))[0];
     expect(header).toEqual(['ID', '标题']); // requested columns kept as asked
   });
+
+  // -------------------------------------------------------------------------
+  // Empty result sets. "Export columns don't depend on row content" is only
+  // true if it also holds at ZERO rows — the case the masked-row inference
+  // (#3498) could never serve, because it had no rows to narrow with.
+  // -------------------------------------------------------------------------
+
+  it('empty result set: still emits the projected header (an exact, row-independent column set)', async () => {
+    // No rows at all. The service knows the readable columns from schema +
+    // context, so the export carries the precise header — and an empty export
+    // becomes a usable import template instead of a zero-byte file.
+    const { route } = await bootWithSecurity({
+      getReadableFields: () => ['id', 'done', 'priority', 'due', 'owner'],
+      tasks: [],
+    });
+    const csv = makeRes();
+    await route.handler({ params: { object: 'task' }, query: { format: 'csv' } } as any, csv.res);
+    const rows = parseCsv(csv.chunks.join(''));
+    expect(rows).toHaveLength(1); // header only, no data rows
+    expect(rows[0]).toEqual(['ID', '完成', '优先级', '截止', '负责人']);
+    expect(rows[0]).not.toContain('标题'); // the masked column stays out
+  });
+
+  it('empty result set with NO projection available: stays headerless (never names FLS-hidden columns)', async () => {
+    // getReadableFields → undefined (schema unresolvable, or no security service
+    // at all) → the route falls back to masked-row inference, which has no rows.
+    // Writing the full schema header HERE would leak the names of FLS-hidden
+    // columns — the very leak #3391 closes — so the empty file stays headerless.
+    const { route } = await bootWithSecurity({
+      getReadableFields: () => undefined,
+      tasks: [],
+    });
+    const csv = makeRes();
+    await route.handler({ params: { object: 'task' }, query: { format: 'csv' } } as any, csv.res);
+    expect(csv.chunks.join('')).toBe('');
+  });
+
+  it('empty result set + explicit ?fields=: the requested header is echoed back', async () => {
+    // An explicit request is authoritative for the same reason the projection is:
+    // the caller named the columns, so nothing new is disclosed by echoing them.
+    const { route } = await bootWithSecurity({
+      getReadableFields: () => ['id'],
+      tasks: [],
+    });
+    const csv = makeRes();
+    await route.handler(
+      { params: { object: 'task' }, query: { format: 'csv', fields: 'id,title' } } as any,
+      csv.res,
+    );
+    expect(parseCsv(csv.chunks.join(''))).toEqual([['ID', '标题']]);
+  });
+
+  it('empty result set + header=false: no header, as asked', async () => {
+    const { route } = await bootWithSecurity({
+      getReadableFields: () => ['id', 'done'],
+      tasks: [],
+    });
+    const csv = makeRes();
+    await route.handler(
+      { params: { object: 'task' }, query: { format: 'csv', header: 'false' } } as any,
+      csv.res,
+    );
+    expect(csv.chunks.join('')).toBe('');
+  });
+
+  it('xlsx: an empty result set carries the projected header row', async () => {
+    const { route } = await bootWithSecurity({
+      getReadableFields: () => ['id', 'done'],
+      tasks: [],
+    });
+    const { res, getBuffer } = makeBinRes();
+    await route.handler({ params: { object: 'task' }, query: { format: 'xlsx' } } as any, res);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(getBuffer() as any);
+    const ws = wb.worksheets[0];
+    expect((ws.getRow(1).values as any[]).slice(1)).toEqual(['ID', '完成']);
+    expect(ws.rowCount).toBe(1); // header only
+  });
 });
