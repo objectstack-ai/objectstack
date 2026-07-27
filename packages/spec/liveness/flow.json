@@ -1,6 +1,6 @@
 {
   "type": "flow",
-  "_note": "FlowSchema. Seeded from docs/audits/2026-06-flowschema-property-liveness.md. Consumers: service-automation engine + node executors. runAs is marker-driven experimental (spec). status/active gate nothing (engine uses an in-memory flowEnabled map via toggleFlow).",
+  "_note": "FlowSchema. Seeded from docs/audits/2026-06-flowschema-property-liveness.md. Consumers: service-automation engine + node executors. runAs is marker-driven experimental (spec). CORRECTED 2026-07: the previous note claimed 'status/active gate nothing' — that was true when the audit ran but became FALSE with commit 497bda853 (2026-07-05, 'honor flow status for enable/disable'). `status` now gates binding AND execution; `active` remains a deprecated no-op.",
   "props": {
     "name": {
       "status": "live",
@@ -28,13 +28,15 @@
     },
     "status": {
       "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/FlowPreview.tsx:105",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "evidence": "packages/services/service-automation/src/engine.ts:1374-1382 (obsolete/invalid -> flowEnabled=false), :1387 (gates activateFlowTrigger), :1704 + :3097 (execute-time 'Flow is disabled' guard)",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Verdict stands, evidence replaced: it is genuinely engine-consumed since 497bda853. The previously cited FlowPreview line number did not even contain a status read."
     },
     "active": {
-      "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/FlowPreview.tsx:105",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "status": "dead",
+      "evidence": "spec already marks it '(Deprecated: use status)'; the only reader anywhere is a display fallback in objectui FlowPreview.tsx:157 (`d.status ?? (d.active ? ...)`)",
+      "authorWarn": true,
+      "authorHint": "Deprecated no-op — writing `active: false` does NOT stop a flow. Use `status: 'obsolete'` (or 'invalid') to unbind and disable it, `status: 'active'` to arm it.",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Sharper than a plain no-op: the spec default is `false` while the engine treats an unset flow as enabled, so the key reads as if it disabled the flow when it does nothing."
     },
     "runAs": {
       "status": "live",

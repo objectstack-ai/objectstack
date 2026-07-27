@@ -61,13 +61,46 @@ three were re-verified in 2026-07 and **all three were wrong or misleading**:
   the verdict was right for the wrong reason and hid a five-surface silent
   no-op (evidence corrected; the gap itself fixed in objectui#2863)
 
-The remaining ten preview-only claims (`action.execute`/`shortcut`/`bulkEnabled`,
-`flow.status`/`active`, `skill.triggerPhrases`, `tool.category`/
-`requiresConfirmation`/`active`/`builtIn`) are **unverified** — treat them as
-suspect until someone cites a real runtime reader. When in doubt, the honest
-status is `dead` + `authorWarn`: an author who gets a warning for a property
-that turns out to work loses nothing; an author who gets silence for a property
-that does nothing ships a bug.
+**All thirteen have now been re-verified (2026-07, #3686). Final tally: 3 stand
+as `live`, 10 were wrong** — a 77% error rate for the preview-renderer standard:
+
+| Verdict | Properties |
+|---|---|
+| `live`, evidence corrected to the real reader | `action.execute` (ActionRunner + the spec transform), `action.disabled` (six render surfaces), `flow.status` (engine gates binding + execution since `497bda853`) |
+| corrected to `dead` + `authorWarn` | `action.shortcut`, `action.bulkEnabled`, `flow.active`, `skill.triggerPhrases`, `tool.category`, `tool.requiresConfirmation`, `tool.active`, `tool.builtIn`, `skill.permissions`*, `agent.knowledge` |
+
+\* `skill.permissions` was subsequently pruned outright — it was never enforced.
+
+Note the two failure directions the sweep exposed. Most entries **overstated**
+liveness. But `flow.status` was *understated*: the file-level note still said
+"status/active gate nothing", true when written and falsified a month later by
+`497bda853`. **A ledger entry is a claim with a timestamp; code moves under it
+in both directions.**
+
+When in doubt, the honest status is `dead` + `authorWarn`: an author who gets a
+warning for a property that turns out to work loses nothing; an author who gets
+silence for a property that does nothing ships a bug.
+
+### How to verify a claim without fooling yourself
+
+Three false conclusions were published during this sweep, all from the same
+mistake: **a strong negative claim ("nothing reads X") resting on a search whose
+result set was silently truncated or filtered.** Concretely:
+
+1. `… | head -3` hid the real hit further down the list.
+2. A pathspec glob `packages/*/src` never matched the nested
+   `packages/app-shell/src/layout/…`.
+3. **On macOS, `git grep -E` silently does not honour `\b`** — `git grep -cE
+   "\.active\b" flow.zod.ts` returns *nothing* on a file that provably contains
+   three `.active` occurrences (`git grep -cw active` finds them). Any absence
+   conclusion drawn from a `\b` pattern on this platform is a false negative.
+
+So: a grep can only prove **presence**. To prove absence, either close the call
+graph by hand (declaration → registration → accessor → *caller*, which is how
+`action.shortcut` and `tool.active` were settled) or — cheapest and most
+decisive for this ledger — **author the property, boot the app and look**. That
+is how the `app.badge`/`separator` question was finally settled after two wrong
+grep-based rounds.
 
 ## Runtime proofs — prove-it-runs (ADR-0054)
 
@@ -225,14 +258,14 @@ EOF
 |---|---|---|---|---|---|
 | object | 40 | – | 0 | 1 | aspirational tier (versioning/softDelete/search/recordName/keyPrefix) + tags/active/abstract REMOVED (#2377) — tombstoned in UNKNOWN_KEY_GUIDANCE; `enable.trash`/`mru` REMOVED (#2377 close-out) — tombstoned in the now-`.strict()` ObjectCapabilities; `isSystem` + `enable.searchable` CORRECTED to live (#2377 — sharing default-model + global-search opt-out; 2026-06 audit missed both readers); `tenancy.strategy`/`crossTenantAccess` REMOVED post-15.0 (#2763) |
 | field | 55 | – | 0 | – | healthy — full dead set (vectorConfig/fileAttachmentConfig/dependencies, then referenceFilters/columnName/index) REMOVED (#2377); columnName also dropped the ADR-0062 D7 lint + StorageNameMapping column helpers |
-| flow | 27 | – | 4 | – | dead = description/template/nodes.outputSchema/errorHandling.fallbackNodeId (engine uses fault edges) |
-| action | 35 | 1 | 0 | – | `disabled` went LIVE via metadata-admin authoring UI (2026-06 audit missed objectui); `type:'form'` CORRECTED to live (objectui ActionRunner.executeForm, #2377); dead `timeout` REMOVED (#2377) |
+| flow | 26 | – | 5 | – | dead = description/template/nodes.outputSchema/errorHandling.fallbackNodeId (engine uses fault edges) + `active` CORRECTED to dead 2026-07 (deprecated no-op — `status` is what gates binding/execution since 497bda853; the file `_note` claiming otherwise is fixed) |
+| action | 33 | 1 | 2 | – | `type:'form'` CORRECTED to live (objectui ActionRunner.executeForm, #2377); dead `timeout` REMOVED (#2377); `disabled` live for real since objectui#2863 (six surfaces); `shortcut` + `bulkEnabled` CORRECTED to dead 2026-07 — registered into ActionEngine but their accessors have no non-test caller (#3686 sweep) |
 | hook | 11 | – | 2 | – | model-healthy; only label/description dead (benign) |
 | permission | 32 | – | 0 | – | CRUD/FLS/RLS live; dead `contextVariables` REMOVED (ADR-0105 D11 — RLS resolves only the `current_user.*` built-ins plus runtime-staged `rlsMembership` sets) |
 | position | 4 | – | – | – | (role's ADR-0090 successor) fully live |
 | agent | 13 | 5 | 1 | – | dead `tenantId` + `planning.strategy`/`allowReplan` REMOVED (#2377) — only `planning.maxIterations` live; autonomy tier experimental; `knowledge` CORRECTED to dead 2026-07 — `search_knowledge` takes `sourceIds` from the LLM's tool-call args, never from the agent record (#1878 §3 recheck) |
-| tool | 9 | 1 | 1 | – | `permissions` dead — tool invocation not permission-gated by it |
-| skill | 9 | – | – | – | `permissions` REMOVED 2026-07 — never permission-gated anything (the cloud SkillRegistry reads only `active`/`triggerConditions`/`tools`); owner call was prune, not enforce. Gate at the agent (`access`/`permissions`, #1884) or on the tools' underlying actions |
+| tool | 5 | 1 | 5 | – | the whole authoring surface is inert: `permissions` (not permission-gated), plus `category`/`requiresConfirmation`/`active`/`builtIn` CORRECTED to dead 2026-07 (#3686 sweep). ⚠️ `requiresConfirmation` is SAFETY-shaped and unenforced on every path — ADR-0033 already resolved to delete it |
+| skill | 8 | – | 1 | – | `permissions` REMOVED 2026-07 (never gated anything — owner call was prune, #3704); `triggerPhrases` CORRECTED to dead — phrases are never matched against user messages; activation is `triggerConditions` + the agent's `skills[]` + explicit /skill-name pinning (#3686 sweep) |
 | dataset | 19 | – | 0 | – | `measures.certified` (declared-but-unenforced governance flag) REMOVED in 16.0 (#2377) |
 | page | 16 | – | – | 1 | fully live + one planned |
 | view | 70 | 0 | 5 | – | list/form drilled via `children` (#2998 Track B); dead = list.{responsive,performance} + form.{data,defaultSort,aria}, all but aria authorWarn'd; form.{buttons,defaults} now live — objectui ObjectForm folds them onto its flat props (framework#1894 / #2998); audit-era DEAD lines superseded by re-verification (submitBehavior, sharing.lockedBy, list ViewData providers, and the ADR-0021 chart shape — all live now); level-2 dead residue (userActions.buttons, addRecord.mode/formView, tabs[].order) noted on parents — one drill level only |

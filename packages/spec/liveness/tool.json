@@ -32,14 +32,18 @@
       "note": "keys folded into description only; no validation exists."
     },
     "category": {
-      "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/ToolPreview.tsx:99",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "status": "dead",
+      "evidence": "only reader is a serializer pass-through in cloud service-ai/src/routes/tool-routes.ts:48 (GET /api/v1/ai/tools); no client consumes it, nothing groups/filters/routes by it",
+      "authorWarn": true,
+      "authorHint": "Display-only — no runtime groups, filters or routes tools by category.",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed."
     },
     "requiresConfirmation": {
-      "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/ToolPreview.tsx:101",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "status": "dead",
+      "evidence": "zero reads off any TOOL definition in any repo; every requiresConfirmation read is action.ai.requiresConfirmation (a different, live property). Ignored by the LLM tool set (vercel-adapter.ts:263-272), ToolRegistry.execute (tool-registry.ts:183-210), POST /ai/tools/:name/execute (tool-routes.ts:91,105) and the MCP bridge (framework packages/mcp/src/mcp-server-runtime.ts:176, which uses a hardcoded destructive-name list)",
+      "authorWarn": true,
+      "authorHint": "NOT ENFORCED — nothing pauses for confirmation on this flag, on any path. To gate a destructive operation, put it behind an action with `ai.requiresConfirmation` + the HITL approval queue, which is the only path that actually stops execution.",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. SAFETY-SHAPED: tool.form.ts:36-42 places it in a section titled 'Access & safety' with helpText 'Ask user to approve before executing (for destructive actions)', and skills/objectstack-ai/SKILL.md:547 tells authors to rely on it — so the authoring surface actively teaches a guarantee nothing delivers. ADR-0033 (:31, :60) already recorded it as never-enforced and resolved to DELETE the placeholder (the draft/publish workspace is the real approval gate); that deletion was never executed. Prune tracked separately."
     },
     "permissions": {
       "status": "dead",
@@ -48,14 +52,18 @@
       "authorHint": "Not part of AIToolDefinition and no consumer — tool invocation is NOT permission-gated by this list. Gate the underlying action via requiredPermissions / permission sets (ADR-0066)."
     },
     "active": {
-      "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/ToolPreview.tsx:102",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "status": "dead",
+      "evidence": "AIToolDefinition (packages/spec/src/contracts/ai-service.ts:157-191) has no `active` field; ToolRegistry.getAll() returns everything (cloud tool-registry.ts:159-161) and selection is by name only — contrast agent.active (agent-runtime.ts:212,501,510) and skill.active (skill-registry.ts:93,110), which ARE enforced",
+      "authorWarn": true,
+      "authorHint": "`active: false` does NOT withdraw the tool — it still reaches the LLM tool set and POST /ai/tools/:name/execute still runs it (unlike agent.active / skill.active, which are enforced). To withdraw a tool, drop it from the skill/agent that references it.",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Also never set by any registration path."
     },
     "builtIn": {
-      "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/ToolPreview.tsx:103",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "status": "dead",
+      "evidence": "not part of AIToolDefinition; whole-repo search across all three repos finds only a test assertion and the objectui preview pill — nothing branches on it",
+      "authorWarn": true,
+      "authorHint": "A display/authoring hint only — no runtime branches on it; it never affects registration, selection or execution.",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed."
     }
   }
 }

@@ -44,8 +44,8 @@
     },
     "execute": {
       "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/ActionPreview.tsx:154",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "evidence": "objectui packages/core/src/actions/ActionRunner.ts:704 (executeScript reads action.execute) + framework packages/spec/src/ui/action.zod.ts:577-580 (.transform lowers execute -> target)",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Verdict stands but for a different reason: TWO independent runtime readers exist. NOTE a live divergence — the spec transform keeps `target` when both are set (action.test.ts:1032), while ActionRunner does `execute || target`, so an action declaring both runs different code client- vs server-side."
     },
     "params": {
       "status": "live",
@@ -105,14 +105,18 @@
       "note": "EVIDENCE CORRECTED 2026-07 (#1878 §3 recheck): previously cited the metadata-admin PREVIEW renderer, which only echoes the authored value. At that time the predicate was actually enforced on ONE of six surfaces (#1885 wired action:button alone) — the 'live' verdict was right for the wrong reason and hid a real silent no-op on the other five. objectui#2863 wired the rest; showcase specimen `showcase_archive_task` (#3643) dogfoods it."
     },
     "shortcut": {
-      "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/ActionPreview.tsx:158",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "status": "dead",
+      "evidence": "registered into ActionEngine.shortcuts[] (objectui packages/core/src/actions/ActionEngine.ts:150) but getShortcuts()/handleShortcut() have no non-test caller and no keydown listener feeds them",
+      "authorWarn": true,
+      "authorHint": "Not wired — nothing dispatches keydown events to actions. objectui's keyboard stack (useKeyboardShortcuts / KeyboardProtocol) is hand-registered and never touches ActionEngine; register the key there and have its handler invoke the action by name.",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Also declared in action.form.ts:69, so pruning would need a form change + a 4-locale i18n regen."
     },
     "bulkEnabled": {
-      "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/ActionPreview.tsx:159",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "status": "dead",
+      "evidence": "registered into ActionEngine (objectui ActionEngine.ts:151) but getBulkActions()/executeBulk() have no non-test caller; the multi-select toolbar is driven by the LIST VIEW's bulkActions/bulkActionDefs (plugin-grid ObjectGrid.tsx:1602-1612)",
+      "authorWarn": true,
+      "authorHint": "Not wired — the multi-select toolbar reads the list view's `bulkActions` / `bulkActionDefs`, not this flag. Declare the action on the view instead of setting bulkEnabled here.",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Distinct from the live bulk fast-path (core/src/actions/bulkFastPath.ts executeBulkBatch), which never consults this flag. Also in action.form.ts:79."
     },
     "ai": {
       "status": "live",

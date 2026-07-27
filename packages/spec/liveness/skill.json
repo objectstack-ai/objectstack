@@ -42,9 +42,11 @@
       "note": "inactive skills dropped."
     },
     "triggerPhrases": {
-      "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/SkillPreview.tsx:44",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "status": "dead",
+      "evidence": "cloud service-ai/src/skill-registry.ts:266 copies it into toSummary() and assistant-routes.ts:98,129 serve it — but nothing consumes the field; skill activation is triggerConditions + the agent's skills[] allowlist + explicit /skill-name pinning (skill-registry.ts:128-175, assistant-routes.ts:189-196)",
+      "authorWarn": true,
+      "authorHint": "Phrases are never matched against the user's message. Routing is `triggerConditions` (AND of context field/operator/value) intersected with the agent's `skills[]`, plus explicit /skill-name pinning; put routing intent in triggerConditions, and describe intent in description/instructions (the LLM does see those).",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. A runtime path does read it, but only to hand it back to API clients — a dead-end projection, not consumption."
     }
   }
 }
