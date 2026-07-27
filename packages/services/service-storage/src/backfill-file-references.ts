@@ -41,8 +41,6 @@ import type { IStorageService } from '@objectstack/spec/contracts';
 const SYSTEM_CTX = { isSystem: true } as const;
 const SCAN_PAGE_SIZE = 200;
 
-/** `…/storage/files/<id>` (optionally with a trailing `/url` or query). */
-const LOCAL_FILE_URL_RE = /\/storage\/files\/([A-Za-z0-9_-]{1,64})(?:\/url)?(?:[?#].*)?$/;
 /** `data:<mime>;base64,<payload>` — the only inline form carrying real bytes. */
 const DATA_URI_RE = /^data:([^;,]*)(;base64)?,(.*)$/s;
 
@@ -114,6 +112,32 @@ function fileFieldsOf(engine: BackfillEngine, objectName: string): string[] {
 
 function truncate(v: string, n = 96): string {
   return v.length <= n ? v : `${v.slice(0, n)}…`;
+}
+
+/**
+ * The `sys_file` id a URL names, if it points at this platform's own resolver
+ * (`…/storage/files/<id>`, optionally `/url`-suffixed or query-decorated).
+ *
+ * Parsed structurally rather than with a pattern. The obvious regex for this is
+ * unanchored at the head, so a hostile value repeating `/storage/files/` makes
+ * the engine retry from every position — polynomial backtracking on data that,
+ * here, comes straight out of tenant records. Slicing and splitting is linear
+ * in the URL's length no matter what it contains.
+ */
+function localFileIdFrom(url: string): string | null {
+  let path = url;
+  for (const sep of ['?', '#']) {
+    const at = path.indexOf(sep);
+    if (at >= 0) path = path.slice(0, at);
+  }
+  if (path.endsWith('/url')) path = path.slice(0, -'/url'.length);
+  while (path.endsWith('/')) path = path.slice(0, -1);
+
+  const parts = path.split('/');
+  if (parts.length < 3) return null;
+  if (parts[parts.length - 3] !== 'storage' || parts[parts.length - 2] !== 'files') return null;
+  const id = parts[parts.length - 1];
+  return isFileIdToken(id) ? id : null;
 }
 
 /** The URL a legacy value points at, if any (inline blob or bare string). */
@@ -258,9 +282,8 @@ export async function backfillFileReferences(
               continue;
             }
 
-            const local = LOCAL_FILE_URL_RE.exec(url);
-            if (local) {
-              const fileId = local[1];
+            const fileId = localFileIdFrom(url);
+            if (fileId) {
               actions.push({
                 ...record_,
                 kind: 'resolved_local_url',

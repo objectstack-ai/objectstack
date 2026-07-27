@@ -231,6 +231,54 @@ describe('backfillFileReferences (ADR-0104 D3 wave 2)', () => {
     expect(report.scannedObjects).toEqual(['product']);
   });
 
+  /**
+   * The values scanned here come straight out of tenant records, so URL
+   * matching must not be able to backtrack. A pattern anchored only at the tail
+   * retries from every start position, which a value repeating the matched
+   * prefix turns into a polynomial blowup (CodeQL js/polynomial-redos).
+   */
+  it('matches resolver URLs in linear time on an adversarial value', async () => {
+    // Many repetitions of the matched prefix, ending in a segment that is not
+    // an id token — the shape that makes a tail-anchored pattern retry from
+    // every start position.
+    const hostile = '/storage/files/'.repeat(6000) + '!';
+    const engine = fakeEngine({ product: [{ id: 'p1', image: hostile }], sys_file: [] });
+
+    const started = process.hrtime.bigint();
+    const report = await run(engine, {});
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+
+    // Not a reference (the trailing segment is not an id token) — and reaching
+    // that verdict must not depend on how many times the prefix repeats.
+    expect(report.converted).toBe(0);
+    expect(elapsedMs).toBeLessThan(1000);
+  });
+
+  it('accepts the resolver URL shapes and rejects near-misses', async () => {
+    const engine = fakeEngine({
+      product: [
+        { id: 'p1', image: 'https://app.example.com/api/v1/storage/files/aaa' },
+        { id: 'p2', image: '/api/v1/storage/files/bbb/url' },
+        { id: 'p3', image: '/api/v1/storage/files/ccc?v=2' },
+        { id: 'p4', image: '/api/v1/storage/files/ddd/' },
+        { id: 'p5', image: 'https://cdn.example.com/files/eee' }, // no /storage
+        { id: 'p6', image: '/api/v1/storage/files/' }, // no id
+      ],
+      sys_file: [],
+    });
+
+    await run(engine, { apply: true });
+
+    expect(engine.tables.product.map((r) => r.image)).toEqual([
+      'aaa',
+      'bbb',
+      'ccc',
+      'ddd',
+      'https://cdn.example.com/files/eee',
+      '/api/v1/storage/files/',
+    ]);
+  });
+
   it('pages through large objects and flags truncation at the bound', async () => {
     const many = Array.from({ length: 500 }, (_, i) => ({
       id: `p${i}`,
