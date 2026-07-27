@@ -13,7 +13,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ObjectQL, ObjectStackProtocolImplementation } from '@objectstack/objectql';
+import { ObjectQL } from '@objectstack/objectql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
 
 // ---------------------------------------------------------------------------

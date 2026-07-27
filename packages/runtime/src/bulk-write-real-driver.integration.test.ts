@@ -14,7 +14,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
-import { SeedLoaderService } from '@objectstack/objectql';
+import { SeedLoaderService } from '@objectstack/metadata-protocol';
 import { SqlDriver } from '@objectstack/driver-sql';
 
 /**

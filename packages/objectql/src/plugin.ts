@@ -1,19 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectQL } from './engine.js';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
 import { StorageNameMapping } from '@objectstack/spec/system';
-import { SERVICE_SELF_INFO_KEY, type ServiceSelfInfo } from '@objectstack/spec/api';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
-import {
-  SysMetadataObject,
-  SysMetadataHistoryObject,
-  SysMetadataCommitObject,
-  SysMetadataAuditObject,
-  SysViewDefinitionObject,
-} from '@objectstack/metadata-core';
 
 export type { Plugin, PluginContext };
 
@@ -263,114 +255,12 @@ export class ObjectQLPlugin implements Plugin {
     });
 
     if (this.registerProtocol) {
-    // Register the metadata-storage objects this engine's own protocol reads
-    // and writes — `sys_metadata` (loadMetaFromDb / getMetaItems / saveMetaItem),
-    // its history/audit siblings, and `sys_view_definition`. Doing it here
-    // guarantees their tables get schema-synced in start() even when no
-    // MetadataPlugin is present (e.g. standalone "host config" apps, where the
-    // CLI auto-registers a bare ObjectQLPlugin and nothing else owns these
-    // tables → "no such table: sys_metadata" on every read).
-    //
-    // Gated on `environmentId === undefined` — the SAME condition that gates
-    // `restoreMetadataFromDb` below: platform / standalone kernels own their
-    // local sys_metadata, whereas per-project (cloud) kernels source metadata
-    // from the control plane and must NOT provision these tables locally.
-    // Definitions live in @objectstack/metadata-core (shared by this protocol
-    // and the metadata layer's DatabaseLoader). registerApp is idempotent, so
-    // a MetadataPlugin that also registers them is harmless.
-    if (this.environmentId === undefined) {
-      this.ql.registerApp({
-        id: 'com.objectstack.metadata-objects',
-        name: 'Metadata Platform Objects',
-        version: '1.0.0',
-        type: 'plugin',
-        scope: 'system',
-        objects: [
-          SysMetadataObject,
-          SysMetadataHistoryObject,
-          SysMetadataCommitObject,
-          SysMetadataAuditObject,
-          SysViewDefinitionObject,
-        ],
-      });
-    }
-
-    // Register Protocol Implementation
-    const protocolShim = new ObjectStackProtocolImplementation(
-      this.ql,
-      () => ctx.getServices ? ctx.getServices() : new Map(),
-      this.environmentId,
-    );
-
-    ctx.registerService('protocol', protocolShim);
-    ctx.logger.info('Protocol service registered');
-
-    // ── Runtime-authored hook/action rebind on authoring (#2588, #2605) ──
-    // The protocol is the ONE choke point every metadata-authoring surface
-    // funnels through (rest-server PUT /meta, dispatcher, publish-drafts, AI
-    // builders). When a `hook` or `action` row lands (direct-active save,
-    // publish) or is deleted, re-sync the authored set so the change is live
-    // without a restart. Draft saves are skipped — drafts are not live by
-    // design. Fire-and-forget: a resync failure is logged, never fails the
-    // write.
-    this.subscribeMetadataRebind(ctx, protocolShim);
-
-    // Register an `analytics` service adapter that maps the dispatcher's
-    // expected interface (query / getMeta / generateSql) onto the
-    // protocol shim's `analyticsQuery`. Without this, HttpDispatcher's
-    // `handleAnalytics` cannot resolve a service and `/api/v1/analytics/*`
-    // returns ROUTE_NOT_FOUND, even though discovery advertises the route
-    // (objectql's getDiscovery hardcodes `analytics: enabled:true`). The
-    // adapter delegates `query` to the cube → engine.aggregate translator
-    // already implemented in protocol.ts; getMeta/generateSql return a
-    // structured "not implemented" payload so callers see something
-    // useful instead of a 500.
-    ctx.registerService('analytics', {
-      // Honest capabilities (ADR-0076 D12, #2462): this adapter is a
-      // deliberate lightweight fallback, not the full analytics engine —
-      // self-identify so discovery reports it as 'degraded' instead of
-      // 'available'. AnalyticsServicePlugin replaces this service (via
-      // ctx.replaceService) with the real engine, which carries no marker.
-      [SERVICE_SELF_INFO_KEY]: {
-        status: 'degraded',
-        handlerReady: true,
-        message: 'Lightweight ObjectQL analytics fallback — install @objectstack/service-analytics for the full engine',
-      } satisfies ServiceSelfInfo,
-      // HttpDispatcher passes the raw POST body (AnalyticsQuery shape:
-      // `{ cube, measures, dimensions, where?, filters?, ... }`). The
-      // protocol shim's `analyticsQuery` expects the wrapped envelope
-      // `{ cube, query }` and destructures `request.query` for dims /
-      // measures. Reshape here so the destructure resolves to the
-      // analytics query instead of `undefined` (which caused
-      // "Cannot read properties of undefined (reading 'dimensions')").
-      //
-      // `analyticsQuery` also returns its own `{ success, data: { rows,
-      // fields } }` envelope. HttpDispatcher wraps service responses
-      // again with `success(result)`, so without unwrapping here the
-      // client sees `{success, data:{success, data:{rows, fields}}}` —
-      // KPI widgets read `data.rows` and silently get nothing. Unwrap
-      // to the inner `{ rows, fields }` payload so a single wrap from
-      // the dispatcher yields the canonical shape.
-      query: async (body: any) => {
-        const envelope = body && typeof body === 'object' && 'query' in body && 'cube' in body
-          ? body
-          : { cube: body?.cube, query: body };
-        const result = await protocolShim.analyticsQuery(envelope);
-        // Unwrap an inner `{ success, data }` envelope (one level only).
-        if (result && typeof result === 'object' && 'success' in result && 'data' in result) {
-          return (result as any).data;
-        }
-        return result;
-      },
-      getMeta: async () => ({
-        cubes: [],
-        message: 'Analytics meta endpoint not implemented by ObjectQL adapter',
-      }),
-      generateSql: async (_body: any) => ({
-        sql: null,
-        message: 'Analytics SQL generation not implemented by ObjectQL adapter',
-      }),
-    });
+      // ADR-0076 Step 2 PR-C: the ONE assembly lives in
+      // @objectstack/metadata-protocol — this built-in mode is the
+      // single-kernel convenience mount of the same code path the
+      // MetadataProtocolPlugin uses (identical objects/protocol/analytics).
+      const protocolShim = assembleMetadataProtocol(ctx, this.ql, this.environmentId);
+      this.subscribeMetadataRebind(ctx, protocolShim);
     } else {
       ctx.logger.info('registerProtocol=false — protocol assembly delegated to MetadataProtocolPlugin (ADR-0076 Step 2, #2462)');
     }

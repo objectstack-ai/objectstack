@@ -6,4 +6,4 @@
 // packages/rest cannot depend on runtime (runtime → rest), and objectql is the
 // layer that owns both the engine and the publish primitive. This shim keeps
 // the historical runtime import path working.
-export { SeedLoaderService } from '@objectstack/objectql';
+export { SeedLoaderService } from '@objectstack/metadata-protocol';
