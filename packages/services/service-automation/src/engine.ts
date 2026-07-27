@@ -2751,6 +2751,19 @@ export class AutomationEngine implements IAutomationService {
             if (result.suspend) {
                 throw new FlowSuspendSignal(node.id, result.correlation, result.screen);
             }
+
+            // #3447 P2: an executor may pick its own out-edge without suspending
+            // (e.g. an approval node auto-approving an empty slate walks its
+            // `approve` edge directly). The field predates this — it was declared
+            // on NodeExecutionResult "for decision nodes" but never consumed on
+            // the synchronous path; only resume() honoured its signal twin. On a
+            // labelled-edge node, falling through to the unlabelled traversal
+            // would walk EVERY unconditional out-edge (approve AND reject), so
+            // the label must be honoured here.
+            if (result.branchLabel) {
+                await this.traverseNext(node, flow, variables, context, steps, result.branchLabel);
+                return;
+            }
         }
 
         // Continue to the node's successors.

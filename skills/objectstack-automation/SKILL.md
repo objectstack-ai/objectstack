@@ -422,6 +422,15 @@ A decision is recorded through `ApprovalService.decide()` (or the REST routes
 `sys_approval_request` and **resumes** the suspended run down the matching
 branch — you never resume the flow by hand.
 
+A decision may also carry **structured outputs** (`{ outputs: { … } }` in the
+decide body) when the node declares the keys in `decisionOutputs` — the author
+declares keys, approvers only fill values. Accepted outputs resume the run as
+`<nodeId>.<key>` flow variables, so a LATER node reads them as
+`vars.<nodeId>.<key>` — this is how "the previous approver picks the next
+step's approvers" works without writing to a record field (see Dynamic
+approvers below). A decision carrying an undeclared key is rejected;
+`decision` / `requestId` are reserved.
+
 ### Approver Types
 
 | `type` | Resolves to |
@@ -432,8 +441,71 @@ branch — you never resume the flow by hand.
 | `team`       | Members of a flat `sys_team` |
 | `department` | A department + all descendant departments |
 | `manager`    | The submitter's manager (`sys_user.manager_id`) |
-| `field`      | User id read from a record field (`value` = field name) |
+| `field`      | User id read from a record field (`value` = field name). Resolved against the record's **live** state at node entry (#3447), so a field written mid-flow routes correctly; a multi-select user field fans out into one approver per user |
 | `queue`      | A data-ownership queue |
+| `expression` | A **CEL expression** resolved at node entry (`value` = the expression) — see **Dynamic approvers** below. Only `current.*` / `trigger.*` / `vars.*` roots are available; the optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
+
+### Dynamic approvers (`type: 'expression'`, #3447)
+
+An `expression` approver computes WHO approves at the moment the node is
+entered. Its CEL source sees exactly **three roots** — nothing else:
+
+| Root | Meaning | Analog |
+|:-----|:--------|:-------|
+| `current.*` | The record's **live** state at node entry — fields written by earlier steps/approvers are visible | ServiceNow `current` |
+| `trigger.*` | The **submit-time snapshot** (what flow conditions call `record`) | ServiceNow Flow Designer `trigger.record`, Power Automate `triggerBody()` |
+| `vars.*` | Flow variables — node outputs (`vars.<nodeId>.<key>`), `get_record` results, `vars.previous` (the pre-update row) | BPMN process variables |
+
+**`record` and bare field names are NOT available and fail the node loudly.**
+Everywhere else on this platform `record` means "the record at event time"
+(flow conditions: the trigger snapshot; hooks: the write payload) — at an
+approval node that phrase is ambiguous between two different times, so you must
+say which one: `current.x` or `trigger.x`. Do not carry the `record.x` habit
+over from conditions.
+
+Result contract: a user-id string, a CSV string, or an array of ids. An **empty**
+result (present-but-empty field/variable) triggers `onEmptyApprovers`. A
+**missing** key (`vars.never_written`) is a loud error, never a silent empty
+slate — guard genuinely-optional inputs explicitly, e.g.
+`has(vars.picked) ? vars.picked : []`.
+
+```typescript
+// ① Route on a field an EARLIER approver filled in mid-flow (live value):
+{ type: 'expression', value: cel`current.co_review_departments`, resolveAs: 'department' }
+
+// ② The previous approval node's decision outputs pick this node's approvers:
+{ type: 'expression', value: cel`vars.lead_review.next_reviewers` }
+
+// ③ Dynamic co-sign (会签): expression yields department ids; resolveAs expands
+//    each into its members, and with behavior: 'per_group' EACH department is
+//    its own sign-off group:
+{
+  approvers: [{ type: 'expression', value: cel`current.picked_departments`, resolveAs: 'department' }],
+  behavior: 'per_group',
+  onEmptyApprovers: 'fail',
+}
+```
+
+The full "previous approver picks the next step's approvers" loop, end to end:
+
+```typescript
+// Node A declares what a decision may hand to the flow:
+{ id: 'lead_review', type: 'approval',
+  config: { approvers: [{ type: 'user', value: 'lead' }], decisionOutputs: ['next_reviewers'] } },
+// The lead approves with outputs: POST …/approve { outputs: { next_reviewers: ['u2','u3'] } }
+// Node B resolves them at entry:
+{ id: 'co_sign', type: 'approval',
+  config: { approvers: [{ type: 'expression', value: cel`vars.lead_review.next_reviewers` }],
+            behavior: 'unanimous', onEmptyApprovers: 'fail' } },
+```
+
+Time-word cheat sheet across surfaces (do not mix them up):
+
+| Surface | Event-time record | Pre-event record | Live record |
+|:--------|:------------------|:-----------------|:------------|
+| Flow condition / `{…}` template | `record` (trigger snapshot) | `previous` | — (use a `get_record` node) |
+| Object hook (`ctx`) | `ctx.record` (write payload) | `ctx.previous` | — |
+| Approval `expression` approver | `trigger.*` | `vars.previous` | `current.*` |
 
 ### Node Config (`ApprovalNodeConfigSchema`)
 
@@ -444,6 +516,8 @@ branch — you never resume the flow by hand.
 | `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Default `1`; clamped at runtime to the resolvable approver count so a misconfiguration can never deadlock |
 | `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`recalled` onto (should be readonly) |
+| `onEmptyApprovers` | #3447 — what an EMPTY resolved slate does: `admin_rescue` (default — request opens, only a privileged admin can act via Reassign; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through). Declare it explicitly on any node with an `expression` approver (linted) |
+| `decisionOutputs` | #3447 — keys a decision may carry as structured outputs (author declares keys, approvers fill values). Accepted outputs resume the run as `<nodeId>.<key>` variables for downstream nodes; undeclared keys reject the decision; `decision`/`requestId` reserved |
 | `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
 | `maxRevisions` | ADR-0044 — max **send-backs-for-revision** per run before auto-reject. Default `3`; `0` disables send-back. Only meaningful when the node has a `revise` out-edge |
 

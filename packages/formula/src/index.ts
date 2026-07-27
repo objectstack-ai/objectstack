@@ -11,6 +11,10 @@
 
 export { ExpressionEngine, getEngine, hasDialect, register } from './registry';
 export { celEngine, DEFAULT_LIMITS } from './cel-engine';
+// #3447 P2 — root-identifier extraction for closed-root evaluation sites
+// (approval `expression` approvers): lint and the runtime pre-check share this
+// one helper so what they accept can never drift.
+export { collectCelRootIdentifiers } from './cel-engine';
 export { cronEngine } from './cron-engine';
 export { templateEngine, TEMPLATE_FORMATTERS, formatValue } from './template-engine';
 export { registerStdLib, buildScope } from './stdlib';

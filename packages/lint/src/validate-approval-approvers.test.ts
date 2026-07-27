@@ -8,6 +8,9 @@ import {
   APPROVAL_APPROVER_TYPE_UNKNOWN,
   APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
   APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
+  APPROVAL_EXPRESSION_INVALID,
+  APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
+  APPROVAL_DECISION_OUTPUTS_RESERVED,
 } from './validate-approval-approvers.js';
 
 function stackWithApprovers(approvers: unknown[]): Record<string, unknown> {
@@ -184,5 +187,112 @@ describe('validateApprovalApprovers', () => {
       }, null, 'garbage'],
     } as never);
     expect(findings).toEqual([]);
+  });
+});
+
+// ── #3447 P2: expression approvers / decision outputs ─────────────────────
+
+describe('expression approvers (#3447 P2)', () => {
+  const stackWithConfig = (config: Record<string, unknown>): Record<string, unknown> => ({
+    flows: [{
+      name: 'expense_approval',
+      nodes: [
+        { id: 'start', type: 'start', config: {} },
+        { id: 'step1', type: 'approval', config },
+      ],
+      edges: [],
+    }],
+  });
+
+  it('accepts the three legal roots (current/trigger/vars) with an explicit empty policy', () => {
+    const findings = validateApprovalApprovers(stackWithConfig({
+      approvers: [
+        { type: 'expression', value: 'current.approvers_dynamic' },
+        { type: 'expression', value: 'trigger.owner_id' },
+        { type: 'expression', value: 'vars.approval_lead.next_reviewers', resolveAs: 'department' },
+      ],
+      onEmptyApprovers: 'fail',
+    }));
+    expect(findings).toEqual([]);
+  });
+
+  it('errors on a `record` root and prescribes current/trigger', () => {
+    const findings = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: 'record.approvers_dynamic' }],
+      onEmptyApprovers: 'admin_rescue',
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_EXPRESSION_INVALID);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('record');
+    expect(findings[0].hint).toContain('current.<field>');
+    expect(findings[0].hint).toContain('trigger.<field>');
+  });
+
+  it('errors on a bare field reference with the closed-root hint', () => {
+    const findings = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: 'approvers_dynamic' }],
+      onEmptyApprovers: 'admin_rescue',
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_EXPRESSION_INVALID);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].hint).toContain('current.<field>');
+  });
+
+  it('errors on a non-parsing expression and an empty one', () => {
+    const bad = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: 'current..' }],
+      onEmptyApprovers: 'admin_rescue',
+    }));
+    expect(bad).toHaveLength(1);
+    expect(bad[0].rule).toBe(APPROVAL_EXPRESSION_INVALID);
+    expect(bad[0].message).toContain('does not parse');
+
+    const empty = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: '' }],
+      onEmptyApprovers: 'admin_rescue',
+    }));
+    expect(empty).toHaveLength(1);
+    expect(empty[0].rule).toBe(APPROVAL_EXPRESSION_INVALID);
+    expect(empty[0].message).toContain('empty expression');
+  });
+
+  it('flags resolveAs on a non-expression approver as dead config', () => {
+    const findings = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'field', value: 'reviewer', resolveAs: 'department' }],
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_EXPRESSION_INVALID);
+    expect(findings[0].severity).toBe('info');
+    expect(findings[0].path).toContain('resolveAs');
+  });
+
+  it('nudges an expression node to declare onEmptyApprovers explicitly', () => {
+    const findings = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: 'vars.picked' }],
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_EXPRESSION_NO_EMPTY_POLICY);
+    expect(findings[0].severity).toBe('info');
+    expect(findings[0].hint).toContain('admin_rescue');
+  });
+
+  it('errors on reserved decisionOutputs keys', () => {
+    const findings = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'user', value: 'u1' }],
+      decisionOutputs: ['decision', 'next_reviewers'],
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_DECISION_OUTPUTS_RESERVED);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('decision');
+  });
+
+  it('accepts declared non-reserved decisionOutputs', () => {
+    expect(validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'user', value: 'u1' }],
+      decisionOutputs: ['next_reviewers', 'note'],
+    }))).toEqual([]);
   });
 });

@@ -204,6 +204,16 @@ export interface ApprovalDecisionInput {
    * the `sys_approval_action` audit row's `attachments` field.
    */
   attachments?: string[];
+  /**
+   * #3447 P2: structured outputs the approver hands to the flow with their
+   * decision. Keys MUST be declared on the node's `decisionOutputs` config —
+   * the author declares keys, approvers only fill values (a `screen` node's
+   * trust model); a decision carrying undeclared keys is rejected, and
+   * `decision` / `requestId` are reserved. Accepted outputs resume the run as
+   * `<nodeId>.<key>` flow variables, where a later approval node's
+   * `expression` approver can read them (`vars.<nodeId>.picked_departments`).
+   */
+  outputs?: Record<string, unknown>;
 }
 
 /** Input for recalling (withdrawing) a pending request. */
