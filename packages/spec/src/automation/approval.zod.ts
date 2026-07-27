@@ -26,7 +26,14 @@ export const ApproverType = z.enum([
   'department',     // Members of a department + all descendant departments (sys_business_unit)
   'manager',        // Submitter's manager (sys_user.manager_id)
   'field',          // User ID defined in a record field
-  'queue'           // Data ownership queue
+  // @deprecated #3508 — declared-but-unenforced: `resolveApproverSpec` in
+  // `plugin-approvals` has no queue branch, so a queue approver resolves to
+  // nobody (the dead `queue:<value>` fallback literal). The sharing engine
+  // retired its `queue` recipient the same way (sys-sharing-rule). Still
+  // parses so stored flows keep rendering, but designers must not offer it
+  // (see NON_AUTHORABLE_APPROVER_TYPES). Re-admit only together with a real
+  // ownership-queue implementation (queue entity + membership + claim).
+  'queue'
 ]);
 
 /**
@@ -42,6 +49,73 @@ export const DEPRECATED_APPROVER_TYPES = {
 export function canonicalApproverType(type: string): string {
   return (DEPRECATED_APPROVER_TYPES as Record<string, string>)[type] ?? type;
 }
+
+/**
+ * Approver types that still PARSE but must not be offered for new authoring.
+ * Published to designers as `xEnumDeprecated` on the approver `type` (see
+ * {@link ApprovalNodeApproverSchema}): a stored value keeps rendering, the
+ * dropdown just stops handing authors the entry. Two sources:
+ *   - the deprecated spellings in {@link DEPRECATED_APPROVER_TYPES} (ADR-0090 D3);
+ *   - `queue`, declared-but-unenforced in the runtime (#3508) — offering it
+ *     would advertise a capability the engine doesn't deliver (Prime
+ *     Directive #10: declared ≠ enforced).
+ */
+export const NON_AUTHORABLE_APPROVER_TYPES: readonly string[] = [
+  ...Object.keys(DEPRECATED_APPROVER_TYPES),
+  'queue',
+];
+
+/**
+ * How a designer must source an approver row's `value`, per approver type —
+ * the single declaration of the "metadata registry vs data records" split
+ * (#3508). The engine (`plugin-approvals` `resolveApproverSpec` +
+ * `expand*Users`) resolves these against DATA rows in the system directory
+ * objects, so the matching picker is a RECORD lookup via the data API —
+ * `GET /api/v1/meta/user` lists metadata types, never `sys_user` rows.
+ */
+export type ApproverValueBinding =
+  /**
+   * `value` identifies a row of `object`; the designer stores the row's
+   * `valueField`. Note `position` routes by machine **name** (the engine
+   * filters `sys_user_position.position` by name — deliberate, names are
+   * portable across environments the way ids are not), and `department`
+   * resolves against `sys_business_unit`, not a `sys_department`.
+   */
+  | { source: 'record'; object: string; valueField: 'id' | 'name' }
+  /** Closed value set — render a strict select, never free text. */
+  | { source: 'enum'; values: readonly string[] }
+  /**
+   * Resolved by the engine at runtime (submitter's manager via
+   * `sys_user.manager_id`); `value` is optional (an advanced override naming
+   * the record field that holds the subject user) and normally stays empty.
+   */
+  | { source: 'auto' }
+  /** `value` names a field on the flow's trigger object. */
+  | { source: 'trigger-field' }
+  /** Declared-but-unenforced — do not offer for authoring (#3508). */
+  | { source: 'unsupported' };
+
+/** Org-membership tiers (`sys_member.role`: better-auth's closed set). */
+export const ORG_MEMBERSHIP_LEVELS = ['owner', 'admin', 'member'] as const;
+
+/**
+ * The per-type value bindings. `satisfies` keeps this exhaustive: adding an
+ * {@link ApproverType} member without declaring how its value is sourced is a
+ * compile error, so the designer contract can never silently lag the enum.
+ */
+export const APPROVER_VALUE_BINDINGS = {
+  user: { source: 'record', object: 'sys_user', valueField: 'id' },
+  org_membership_level: { source: 'enum', values: ORG_MEMBERSHIP_LEVELS },
+  // Deprecated alias — same binding as its canonical spelling so a stored
+  // legacy row still renders with the right control during its window.
+  role: { source: 'enum', values: ORG_MEMBERSHIP_LEVELS },
+  position: { source: 'record', object: 'sys_position', valueField: 'name' },
+  team: { source: 'record', object: 'sys_team', valueField: 'id' },
+  department: { source: 'record', object: 'sys_business_unit', valueField: 'id' },
+  manager: { source: 'auto' },
+  field: { source: 'trigger-field' },
+  queue: { source: 'unsupported' },
+} as const satisfies Record<z.infer<typeof ApproverType>, ApproverValueBinding>;
 
 // ==========================================================================
 // Approval as a Flow Node (ADR-0019, canonical)
@@ -102,10 +176,11 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
   // `xEnumDeprecated` lists enum members that still PARSE but must not be
   // offered for new authoring. Without it the Studio designer derives its
   // approver-type dropdown straight from this enum and keeps offering `role`
-  // — the exact trap ADR-0090 D3 is retiring — one click away from `position`.
-  // Renderers omit these from pickers while still rendering a stored value.
+  // — the exact trap ADR-0090 D3 is retiring — one click away from `position`
+  // — and `queue`, which the runtime never resolves (#3508). Renderers omit
+  // these from pickers while still rendering a stored value.
   type: ApproverType.meta({
-    xEnumDeprecated: Object.keys(DEPRECATED_APPROVER_TYPES),
+    xEnumDeprecated: [...NON_AUTHORABLE_APPROVER_TYPES],
   }),
   /**
    * The approver reference, interpreted per `type`: a user id (`user`), a
@@ -115,18 +190,21 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
    * `manager` (resolved from the submitter's `manager_id`).
    */
   // `xRef` marks this string as a *polymorphic* typed reference (ADR-0018
-  // §configSchema): the concrete picker follows the sibling `type` column, so
-  // the Studio designer shows a user/membership-tier/position/team/department/
-  // queue picker — or an object-field picker (resolved from the flow's
-  // `$trigger` object) when `type` is `field`. `manager` and any unmapped
-  // value carry no `value` and stay free text. A single `.meta()` carries both
-  // description and annotation.
+  // §configSchema): the concrete picker follows the sibling `type` column.
+  // How each kind is BACKED (a data-record lookup on a directory object, a
+  // closed enum, an auto-resolved value, a trigger-object field) is declared
+  // once in {@link APPROVER_VALUE_BINDINGS} — designers must source the
+  // record-backed kinds from the DATA API, not the metadata registry (#3508).
+  // A single `.meta()` carries both description and annotation.
   //
   // The `role` → `org-membership-level` picker kind is the deprecated alias's
   // entry: it maps to the SAME picker as the canonical spelling, so a stored
-  // legacy node still renders correctly for its deprecation window.
+  // legacy node still renders correctly for its deprecation window. `manager`
+  // maps to a picker kind that renders as "auto-resolved" (no free text);
+  // `queue` stays mapped so stored rows keep rendering even though the type
+  // is no longer authorable (see NON_AUTHORABLE_APPROVER_TYPES).
   value: z.string().optional().meta({
-    description: 'User id / membership tier / position / team / department / field / queue — per `type`',
+    description: 'User id / membership tier / position / team / department / field — per `type`',
     xRef: {
       kindFrom: 'type',
       objectSource: '$trigger',
@@ -137,6 +215,7 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
         position: 'position',
         team: 'team',
         department: 'department',
+        manager: 'manager',
         field: 'object-field',
         queue: 'queue',
       },

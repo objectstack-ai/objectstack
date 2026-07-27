@@ -6,6 +6,7 @@ import {
   APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
   APPROVAL_APPROVER_TYPE_DEPRECATED,
   APPROVAL_APPROVER_TYPE_UNKNOWN,
+  APPROVAL_APPROVER_TYPE_UNSUPPORTED,
   APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
   APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
 } from './validate-approval-approvers.js';
@@ -51,6 +52,20 @@ describe('validateApprovalApprovers', () => {
     expect(findings[0].hint).toContain("type: 'position'");
   });
 
+  // ── queue: declared-but-unenforced (#3508) ────────────────────────────────
+
+  it('flags a queue approver as unsupported — the runtime resolves it to nobody', () => {
+    const findings = validateApprovalApprovers(stackWithApprovers([
+      { type: 'queue', value: 'q_west' },
+      { type: 'user', value: 'u1' }, // a real route keeps the node off the empty-slate rule
+    ]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_APPROVER_TYPE_UNSUPPORTED);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].path).toBe('flows[0].nodes[1].config.approvers[0].type');
+    expect(findings[0].message).toContain('#3508');
+  });
+
   // ── the deprecated `role` spelling (ADR-0090 D3, #3133) ──────────────────
 
   it('flags the deprecated `role` spelling even when its value is a valid tier', () => {
@@ -77,14 +92,15 @@ describe('validateApprovalApprovers', () => {
     expect(findings[0].hint).not.toContain('org_membership_level, value');
   });
 
-  it('accepts the position approver type and the other spec types silently', () => {
+  it('accepts the position approver type and the other RESOLVABLE spec types silently', () => {
+    // `queue` is deliberately absent: it parses but the runtime never resolves
+    // it, so it now draws APPROVAL_APPROVER_TYPE_UNSUPPORTED (#3508).
     const findings = validateApprovalApprovers(stackWithApprovers([
       { type: 'position', value: 'sales_manager' },
       { type: 'user', value: 'u1' },
       { type: 'manager' },
       { type: 'department', value: 'bu_sales' },
       { type: 'field', value: 'owner_id' },
-      { type: 'queue', value: 'q1' },
       { type: 'team', value: 't1' },
     ]));
     expect(findings).toEqual([]);

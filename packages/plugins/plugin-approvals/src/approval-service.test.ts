@@ -1699,3 +1699,28 @@ describe('ApprovalService — listActions attachments mapping (#3266)', () => {
     expect(approve?.attachments).toEqual(['file_a']);
   });
 });
+
+// #3508: `queue` is declared-but-unenforced — resolveApproverSpec has no queue
+// branch, so the spec value falls through to the dead `queue:<id>` literal.
+// The engine must at least WARN so operators can see the silent dead slot;
+// the spec marks the type non-authorable so designers stop offering it.
+describe('ApprovalService — queue approver is unresolved (#3508)', () => {
+  it('falls back to the dead literal and warns', async () => {
+    const engine = makeFakeEngine();
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+    });
+    const req = await svc.openNodeRequest(
+      { ...openInput([]), config: { approvers: [{ type: 'queue', value: 'q_west' }], behavior: 'first_response', lockRecord: false } },
+      CTX,
+    );
+    // No queue expansion exists: the slot is the raw `type:value` literal,
+    // which matches no real user id — the request routes to nobody.
+    expect(req.pending_approvers).toEqual(['queue:q_west']);
+    expect(warnings.some(([msg]) => String(msg).includes("'queue'") && String(msg).includes('#3508'))).toBe(true);
+  });
+});

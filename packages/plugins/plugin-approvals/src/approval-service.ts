@@ -474,6 +474,18 @@ export class ApprovalService implements IApprovalService {
         }
       }
     } catch { /* fall through */ }
+    // #3508: `queue` is declared-but-unenforced — there is no queue branch
+    // above, so a queue approver always lands here and the `queue:<id>` slot
+    // routes to nobody. The spec marks it non-authorable
+    // (NON_AUTHORABLE_APPROVER_TYPES) so designers stop offering it; warn for
+    // the stored flows that still carry one, so the silent dead slot is at
+    // least visible to operators.
+    if (type === 'queue') {
+      this.logger?.warn?.(
+        `[approvals] approver type 'queue' is not implemented — the slot resolves to nobody (#3508)`,
+        { value: a.value },
+      );
+    }
     return [`${a.type}:${a.value}`];
   }
 

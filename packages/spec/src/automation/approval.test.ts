@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   ApproverType,
   DEPRECATED_APPROVER_TYPES,
+  NON_AUTHORABLE_APPROVER_TYPES,
+  APPROVER_VALUE_BINDINGS,
+  ORG_MEMBERSHIP_LEVELS,
   canonicalApproverType,
   APPROVAL_NODE_TYPE,
   ApprovalDecision,
@@ -45,15 +48,71 @@ describe('ApproverType', () => {
   // Cross-repo contract: the published node configSchema must carry
   // `xEnumDeprecated` on the approver type, or the Studio designer (objectui)
   // derives its dropdown straight from `enum` and keeps offering `role` — the
-  // exact trap ADR-0090 D3 retires. Renderers read this to omit deprecated
-  // members from pickers while still rendering a stored value.
-  it('publishes xEnumDeprecated on the approver type so pickers can drop `role`', () => {
+  // exact trap ADR-0090 D3 retires — and `queue`, which the runtime never
+  // resolves (#3508). Renderers read this to omit these members from pickers
+  // while still rendering a stored value.
+  it('publishes xEnumDeprecated on the approver type so pickers drop `role` and `queue`', () => {
     const schema = getApprovalNodeConfigJsonSchema() as any;
     const typeNode = schema?.properties?.approvers?.items?.properties?.type;
     expect(typeNode?.enum).toContain('role');            // still parses (back-compat)
+    expect(typeNode?.enum).toContain('queue');           // still parses (stored rows render)
     expect(typeNode?.enum).toContain('org_membership_level');
-    expect(typeNode?.xEnumDeprecated).toEqual(Object.keys(DEPRECATED_APPROVER_TYPES));
+    expect(typeNode?.xEnumDeprecated).toEqual([...NON_AUTHORABLE_APPROVER_TYPES]);
     expect(typeNode?.xEnumDeprecated).toContain('role');
+    expect(typeNode?.xEnumDeprecated).toContain('queue');
+  });
+
+  // #3508: queue is declared-but-unenforced. It stays parseable (stored flows
+  // keep loading) but is not authorable, and every deprecated spelling is
+  // non-authorable too.
+  it('marks queue non-authorable while keeping it parseable', () => {
+    expect(() => ApproverType.parse('queue')).not.toThrow();
+    expect(NON_AUTHORABLE_APPROVER_TYPES).toContain('queue');
+    for (const spelling of Object.keys(DEPRECATED_APPROVER_TYPES)) {
+      expect(NON_AUTHORABLE_APPROVER_TYPES).toContain(spelling);
+    }
+  });
+});
+
+// #3508: the designer contract for sourcing each approver row's `value`. The
+// record-backed kinds MUST match the engine's resolution semantics
+// (`plugin-approvals` resolveApproverSpec / expand*Users) — these assertions
+// pin the object names and stored fields the engine actually queries.
+describe('APPROVER_VALUE_BINDINGS (#3508)', () => {
+  it('covers every ApproverType member', () => {
+    for (const t of ApproverType.options) {
+      expect(APPROVER_VALUE_BINDINGS[t]).toBeDefined();
+    }
+  });
+
+  it('binds record-backed kinds to the objects and fields the engine queries', () => {
+    // applyOooDelegation(String(value)) — a sys_user id.
+    expect(APPROVER_VALUE_BINDINGS.user).toEqual({ source: 'record', object: 'sys_user', valueField: 'id' });
+    // find('sys_team_member', { team_id: value }) — a sys_team id.
+    expect(APPROVER_VALUE_BINDINGS.team).toEqual({ source: 'record', object: 'sys_team', valueField: 'id' });
+    // find('sys_business_unit', { id: value }) — a sys_business_unit id
+    // (deliberately NOT a `sys_department`).
+    expect(APPROVER_VALUE_BINDINGS.department).toEqual({ source: 'record', object: 'sys_business_unit', valueField: 'id' });
+    // find('sys_user_position', { position: value }) — the position machine
+    // NAME, not an id (portable across environments).
+    expect(APPROVER_VALUE_BINDINGS.position).toEqual({ source: 'record', object: 'sys_position', valueField: 'name' });
+  });
+
+  it('keeps the non-record kinds off the record-lookup path', () => {
+    expect(APPROVER_VALUE_BINDINGS.org_membership_level).toEqual({ source: 'enum', values: ORG_MEMBERSHIP_LEVELS });
+    // The deprecated alias renders with the same control as its replacement.
+    expect(APPROVER_VALUE_BINDINGS.role).toEqual(APPROVER_VALUE_BINDINGS.org_membership_level);
+    expect(APPROVER_VALUE_BINDINGS.manager.source).toBe('auto');
+    expect(APPROVER_VALUE_BINDINGS.field.source).toBe('trigger-field');
+    expect(APPROVER_VALUE_BINDINGS.queue.source).toBe('unsupported');
+  });
+
+  it('publishes a manager mapping in the value xRef so designers can render auto-resolution', () => {
+    const schema = getApprovalNodeConfigJsonSchema() as any;
+    const valueNode = schema?.properties?.approvers?.items?.properties?.value;
+    expect(valueNode?.xRef?.map?.manager).toBe('manager');
+    // queue stays mapped so stored rows keep rendering during the window.
+    expect(valueNode?.xRef?.map?.queue).toBe('queue');
   });
 });
 

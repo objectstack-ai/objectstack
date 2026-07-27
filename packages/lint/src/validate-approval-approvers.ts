@@ -38,12 +38,14 @@ import {
   ApproverType,
   APPROVAL_NODE_TYPE,
   DEPRECATED_APPROVER_TYPES,
+  APPROVER_VALUE_BINDINGS,
   canonicalApproverType,
 } from '@objectstack/spec/automation';
 
 export const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER = 'approval-approver-not-membership-tier';
 export const APPROVAL_APPROVER_TYPE_DEPRECATED = 'approval-approver-type-deprecated';
 export const APPROVAL_APPROVER_TYPE_UNKNOWN = 'approval-approver-type-unknown';
+export const APPROVAL_APPROVER_TYPE_UNSUPPORTED = 'approval-approver-type-unsupported';
 export const APPROVAL_ESCALATION_REASSIGN_NO_TARGET = 'approval-escalation-reassign-no-target';
 export const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY = 'approval-approvers-may-resolve-empty';
 
@@ -181,6 +183,25 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
               `approver type '${type}' is the deprecated spelling of '${fix}' (ADR-0090 D3) and ` +
               `is removed in the next major.`,
             hint: `Author { type: '${fix}', value: '${value}' }. It resolves identically today.`,
+          });
+        } else if (
+          (APPROVER_VALUE_BINDINGS as Record<string, { source: string }>)[canonical]?.source === 'unsupported'
+        ) {
+          // Declared-but-unenforced (#3508): the runtime has no resolution for
+          // this type — the slot degrades to an inert `type:value` literal and
+          // the request routes to nobody. Say it at authoring time instead of
+          // letting the request stall silently (Prime Directive #10).
+          findings.push({
+            severity: 'warning',
+            rule: APPROVAL_APPROVER_TYPE_UNSUPPORTED,
+            where,
+            path: `${path}.type`,
+            message:
+              `approver type '${type}' is declared but not implemented by the runtime (#3508) — ` +
+              `the slot resolves to nobody and the request stalls.`,
+            hint:
+              `Route to people the engine can expand: { type: 'team' | 'department' | 'position', ... }. ` +
+              `Queue approvers need a real ownership-queue implementation before they take effect.`,
           });
         }
       }
