@@ -441,6 +441,21 @@ describe('ApprovalService (node era)', () => {
     }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*reserved/s);
   });
 
+  it('decision outputs: declared keys surface on the request row as decision_outputs (#3447 P2 UI)', async () => {
+    // The decision UI renders one input per declared key — the keys ride the
+    // request read (per-request; the static action params can't carry them).
+    const req = await svc.openNodeRequest(
+      openInput(['u9'], {}, { decisionOutputs: ['next_reviewers', 'note'] }), CTX,
+    ) as any;
+    expect(req.decision_outputs).toEqual(['next_reviewers', 'note']);
+    const listed = await svc.listRequests({ status: 'pending' }, SYS);
+    expect((listed[0] as any).decision_outputs).toEqual(['next_reviewers', 'note']);
+    // A node declaring none omits the field entirely.
+    engine._tables['sys_approval_request'] = [];
+    const plain = await svc.openNodeRequest(openInput(['u9']), CTX) as any;
+    expect(plain.decision_outputs).toBeUndefined();
+  });
+
   it('decision outputs: accepted keys return from decideNode and snapshot as __decisionOutputs', async () => {
     const req = await svc.openNodeRequest(
       openInput(['u9'], {}, { decisionOutputs: ['next_reviewers', 'note'] }), CTX,

@@ -229,6 +229,13 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     sla_due_at: slaDueAt(row.created_at, cfg),
     // ADR-0044 revision round (rides the config snapshot; absent ⇒ round 1).
     round: typeof cfg?.__round === 'number' ? cfg.__round : undefined,
+    // #3447 P2: the node's author-declared decision-output keys, surfaced so a
+    // decision UI can render input fields for them and POST `outputs` on
+    // approve/reject. Per-request (each node declares its own), which is why
+    // this rides the row instead of the static action params.
+    decision_outputs: Array.isArray(cfg?.decisionOutputs) && cfg.decisionOutputs.length
+      ? cfg.decisionOutputs.map(String)
+      : undefined,
   } as any;
 }
 

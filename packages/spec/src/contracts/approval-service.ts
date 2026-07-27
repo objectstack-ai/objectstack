@@ -48,6 +48,13 @@ export interface ApprovalRequestRow {
   /** ADR-0019 correlation: the suspended flow run this request belongs to. */
   flow_run_id?: string;
   flow_node_id?: string;
+  /**
+   * #3447 P2: the node's author-declared decision-output keys
+   * (`config.decisionOutputs`), surfaced from the config snapshot so a
+   * decision UI can render one input per key and POST `outputs` with the
+   * decision. Absent when the node declares none.
+   */
+  decision_outputs?: string[];
   completed_at?: string;
   created_at?: string;
   updated_at?: string;
