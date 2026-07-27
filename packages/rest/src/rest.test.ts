@@ -2535,6 +2535,65 @@ describe('RestServer metadata translation — envelope unwrap', () => {
   });
 });
 
+// ──────────────────────────────────────────────────────────────────────────
+// Page metadata translation (objectstack#3589)
+//
+// Plugin-carried Setup pages hard-code their `page:header` copy in metadata.
+// `page` was missing from TRANSLATABLE_META_TYPES, so the REST boundary
+// returned those pages untranslated no matter what the bundle held.
+// ──────────────────────────────────────────────────────────────────────────
+describe('RestServer metadata translation — page documents', () => {
+  const fakeI18n = {
+    getLocales: () => ['zh-CN'],
+    getDefaultLocale: () => 'zh-CN',
+    getTranslations: (locale: string) =>
+      locale === 'zh-CN'
+        ? {
+            pages: {
+              connect_agent: {
+                label: '连接智能体',
+                subtitle: '让任意支持 MCP 的 AI 客户端受控访问此环境。',
+              },
+            },
+          }
+        : undefined,
+  };
+  const zhReq = { headers: { 'accept-language': 'zh-CN' } };
+  const makePage = () => ({
+    name: 'connect_agent',
+    label: 'Connect an Agent',
+    regions: [
+      {
+        name: 'header',
+        components: [
+          {
+            type: 'page:header',
+            properties: { title: 'Connect an Agent', subtitle: 'Give any MCP-capable client…', icon: 'bot' },
+          },
+        ],
+      },
+    ],
+  });
+
+  it('translates the page:header copy inside a getMetaItem envelope', async () => {
+    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
+    const envelope = { type: 'page', name: 'connect_agent', item: makePage(), lock: null };
+    const out = await (rest as any).translateMetaItem(zhReq, 'page', undefined, envelope, fakeI18n);
+    expect(out.name).toBe('connect_agent');
+    expect(out.item.label).toBe('连接智能体');
+    expect(out.item.regions[0].components[0].properties.title).toBe('连接智能体');
+    expect(out.item.regions[0].components[0].properties.subtitle).toBe('让任意支持 MCP 的 AI 客户端受控访问此环境。');
+    expect(out.item.regions[0].components[0].properties.icon).toBe('bot');
+  });
+
+  it('translates page documents in a list response', async () => {
+    const rest = new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
+    (rest as any).resolveI18nService = async () => fakeI18n;
+    const out = await (rest as any).translateMetaItems(zhReq, 'page', undefined, [makePage()]);
+    expect(out[0].regions[0].components[0].properties.title).toBe('连接智能体');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // ADR-0045 — hidden-app visibility gate (filterAppForUser)
 // ---------------------------------------------------------------------------

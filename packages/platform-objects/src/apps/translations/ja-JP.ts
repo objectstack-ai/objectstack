@@ -34,6 +34,7 @@ export const jaJP: TranslationData = {
         group_apps: { label: 'アプリ' },
         nav_marketplace_browse: { label: 'マーケットプレイスを閲覧' },
         nav_marketplace_installed: { label: 'インストール済みアプリ' },
+        nav_cloud_connection: { label: 'クラウド接続' },
         group_people_org: { label: 'ユーザーと組織' },
         group_access_control: { label: 'アクセス制御' },
         group_approvals: { label: '承認' },
@@ -56,6 +57,7 @@ export const jaJP: TranslationData = {
         nav_sharing_rules: { label: '共有ルール' },
         nav_record_shares: { label: 'レコード共有' },
         nav_api_keys: { label: 'API キー' },
+        nav_connect_agent: { label: 'エージェントを接続' },
 
         nav_approval_processes: { label: 'プロセス' },
         nav_approval_requests: { label: 'リクエスト' },
@@ -139,6 +141,23 @@ export const jaJP: TranslationData = {
         widget_events_by_user: { title: 'ユーザー別イベント', description: 'ユーザー別アクティビティ分布' },
         widget_recent_events: { title: '最近の監査イベント', description: '最新のプラットフォームイベント（ログイン、権限、構成など）' },
       },
+    },
+  },
+
+  pages: {
+    marketplace_installed: {
+      label: 'インストール済みアプリ',
+      subtitle: 'このランタイムのカーネルに現在インストールされているマーケットプレイスパッケージ。',
+    },
+    cloud_connection_settings: {
+      label: 'クラウド接続',
+      subtitle:
+        'このランタイムを ObjectStack コントロールプレーンに接続すると、組織のプライベートパッケージを閲覧してここにインストールできます。',
+    },
+    connect_agent: {
+      label: 'エージェントを接続',
+      subtitle:
+        'MCP 対応の AI クライアントにこの環境への統制されたアクセスを許可します。すべての呼び出しは、呼び出し元自身の権限と行レベルセキュリティのもとで実行されます。',
     },
   },
 };

@@ -48,7 +48,7 @@ const logWarn = (...args: unknown[]) => ((globalThis as any).console?.warn ?? (g
  * via `translateMetadataDocument`. Keep in sync with the type dispatch in
  * `@objectstack/spec/system`'s `translateMetadataDocument`.
  */
-const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'dashboard']);
+const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'dashboard', 'page']);
 
 
 /**

@@ -34,6 +34,7 @@ export const esES: TranslationData = {
         group_apps: { label: 'Aplicaciones' },
         nav_marketplace_browse: { label: 'Explorar Marketplace' },
         nav_marketplace_installed: { label: 'Aplicaciones instaladas' },
+        nav_cloud_connection: { label: 'Conexión a la nube' },
         group_people_org: { label: 'Personas y Organización' },
         group_access_control: { label: 'Control de Acceso' },
         group_approvals: { label: 'Aprobaciones' },
@@ -56,6 +57,7 @@ export const esES: TranslationData = {
         nav_sharing_rules: { label: 'Reglas de Compartición' },
         nav_record_shares: { label: 'Registros Compartidos' },
         nav_api_keys: { label: 'Claves API' },
+        nav_connect_agent: { label: 'Conectar un agente' },
 
         nav_approval_processes: { label: 'Procesos' },
         nav_approval_requests: { label: 'Solicitudes' },
@@ -139,6 +141,25 @@ export const esES: TranslationData = {
         widget_events_by_user: { title: 'Eventos por Usuario', description: 'Distribución de actividad entre usuarios' },
         widget_recent_events: { title: 'Eventos de Auditoría Recientes', description: 'Últimos eventos de la plataforma (inicio de sesión, permisos, configuración, …)' },
       },
+    },
+  },
+
+  pages: {
+    marketplace_installed: {
+      label: 'Aplicaciones instaladas',
+      subtitle: 'Paquetes del marketplace instalados actualmente en el kernel de este runtime.',
+    },
+    cloud_connection_settings: {
+      label: 'Conexión a la nube',
+      subtitle:
+        'Conecta este runtime a un plano de control de ObjectStack para explorar los paquetes '
+        + 'privados de tu organización e instalarlos aquí.',
+    },
+    connect_agent: {
+      label: 'Conectar un agente',
+      subtitle:
+        'Concede a cualquier cliente de IA compatible con MCP acceso controlado a este entorno: '
+        + 'cada llamada se ejecuta con los permisos propios de quien la realiza y con seguridad a nivel de fila.',
     },
   },
 };

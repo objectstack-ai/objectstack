@@ -146,4 +146,19 @@ export const zhCN: TranslationData = {
       },
     },
   },
+
+  pages: {
+    marketplace_installed: {
+      label: '已安装应用',
+      subtitle: '当前已安装到此运行时内核的应用市场包。',
+    },
+    cloud_connection_settings: {
+      label: '云连接',
+      subtitle: '将此运行时连接到 ObjectStack 控制平面，即可浏览并安装组织的私有包。',
+    },
+    connect_agent: {
+      label: '连接智能体',
+      subtitle: '让任意支持 MCP 的 AI 客户端受控访问此环境——每次调用都在调用者自身的权限与行级安全范围内执行。',
+    },
+  },
 };
