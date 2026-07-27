@@ -59,12 +59,7 @@ export {
   ComposeStacksOptionsSchema,
   ConflictStrategySchema,
   ObjectStackDefinitionSchema,
-  ObjectStackSchema,
-  ObjectStackCapabilitiesSchema,
-  ObjectQLCapabilitiesSchema,
-  ObjectUICapabilitiesSchema,
-  KernelCapabilitiesSchema,
-  ObjectOSCapabilitiesSchema
+  ObjectStackSchema
 } from './stack.zod';
 
 export type { DefineStackOptions, ComposeStacksOptions, ConflictStrategy, ObjectStackDefinitionInput } from './stack.zod';
