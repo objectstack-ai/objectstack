@@ -187,12 +187,14 @@ function badRequest(message: string): EndpointResult {
  */
 export function isLikelyEmail(value: string): boolean {
   if (value.length === 0 || value.length > 254 || /\s/.test(value)) return false;
-  // Reject non-ASCII up front so obviously-invalid addresses (e.g. a Chinese
-  // domain like `x@柴仟.com`) fail this pre-filter — and therefore the import
-  // dry-run — instead of passing here only to be rejected later by
-  // better-auth's strict ASCII validator at real-import time (framework#3566).
-  // A single linear char-class test; no backtracking (see the ReDoS note above).
-  if (/[^\x00-\x7f]/.test(value)) return false;
+  // Reject anything outside printable ASCII up front so obviously-invalid
+  // addresses (e.g. a Chinese domain like `x@柴仟.com`) fail this pre-filter —
+  // and therefore the import dry-run — instead of passing here only to be
+  // rejected later by better-auth's strict ASCII validator at real-import time
+  // (framework#3566). A single linear char-class test; no backtracking (see the
+  // ReDoS note above). The range is spelled with printable bounds (0x20–0x7e)
+  // so the pattern itself carries no control character (eslint no-control-regex).
+  if (/[^\x20-\x7e]/.test(value)) return false;
   const at = value.indexOf('@');
   if (at <= 0 || at !== value.lastIndexOf('@') || at === value.length - 1) return false;
   const domain = value.slice(at + 1);
