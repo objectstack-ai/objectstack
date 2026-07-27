@@ -2311,6 +2311,48 @@ export class ObjectStackClient {
           );
           return this.unwrapResponse(res) as Promise<T>;
       },
+      /**
+       * Resume a run suspended at a `screen` (or `approval`) node — the
+       * screen-flow runtime's second half (ADR-0019 durable pause).
+       *
+       * `execute()` returns `{ status: 'paused', runId, screen }` when a flow
+       * reaches a screen node; the collected values go back through here as
+       * `inputs` (applied as bare flow variables). The result is either the
+       * NEXT `{ status: 'paused', screen }` of a multi-step wizard or the
+       * terminal `AutomationResult`. Without this method a paused run can only
+       * be finished by hand-rolling the HTTP call (#3528).
+       */
+      resume: async <T = any>(
+          flowName: string,
+          runId: string,
+          signal?: {
+              /** Screen input values, applied as bare flow variables. */
+              inputs?: Record<string, unknown>;
+              /** Node output, namespaced under the suspended node's id. */
+              output?: Record<string, unknown>;
+              /** Out-edge to follow (e.g. an approval's `approve` / `reject`). */
+              branchLabel?: string;
+          },
+      ): Promise<T> => {
+          const route = this.getRoute('automation');
+          const res = await this.fetch(
+              `${this.baseUrl}${route}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/resume`,
+              { method: 'POST', body: JSON.stringify(signal ?? {}) },
+          );
+          return this.unwrapResponse(res) as Promise<T>;
+      },
+      /**
+       * Fetch the screen a paused run is waiting on — lets a client that did
+       * not launch the run (a reload, a different tab, an inbox) render the
+       * pending step before calling {@link resume}.
+       */
+      getScreen: async <T = any>(flowName: string, runId: string): Promise<T> => {
+          const route = this.getRoute('automation');
+          const res = await this.fetch(
+              `${this.baseUrl}${route}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/screen`,
+          );
+          return this.unwrapResponse(res) as Promise<T>;
+      },
   };
 
   /**
@@ -3641,6 +3683,33 @@ export class ScopedProjectClient {
     getRun: async <T = any>(flowName: string, runId: string): Promise<T> => {
       const res = await this.parent._fetch(
         this.url(`/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}`),
+      );
+      return this.parent._unwrap<T>(res);
+    },
+    /**
+     * Resume a run suspended at a `screen` / `approval` node with the collected
+     * input (ADR-0019 durable pause). Mirrors the unscoped
+     * `client.automation.resume`.
+     */
+    resume: async <T = any>(
+      flowName: string,
+      runId: string,
+      signal?: {
+        inputs?: Record<string, unknown>;
+        output?: Record<string, unknown>;
+        branchLabel?: string;
+      },
+    ): Promise<T> => {
+      const res = await this.parent._fetch(
+        this.url(`/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/resume`),
+        { method: 'POST', body: JSON.stringify(signal ?? {}) },
+      );
+      return this.parent._unwrap<T>(res);
+    },
+    /** Fetch the screen a paused run is waiting on. */
+    getScreen: async <T = any>(flowName: string, runId: string): Promise<T> => {
+      const res = await this.parent._fetch(
+        this.url(`/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/screen`),
       );
       return this.parent._unwrap<T>(res);
     },

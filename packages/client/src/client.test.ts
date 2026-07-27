@@ -852,6 +852,83 @@ describe('ObjectStackClient.automation', () => {
         );
     });
 
+    // ── screen-flow runtime (ADR-0019 durable pause, #3528) ──────────────
+
+    it('should resume a paused run with the collected screen input', async () => {
+        const { client, fetchMock } = createMockClient({
+            success: true,
+            data: { success: true, output: {}, durationMs: 12 },
+        });
+
+        const result = await client.automation.resume('my_flow', 'run_1', {
+            inputs: { new_assignee: 'ada@example.com' },
+        });
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost:3000/api/v1/automation/my_flow/runs/run_1/resume',
+            expect.objectContaining({
+                method: 'POST',
+                body: JSON.stringify({ inputs: { new_assignee: 'ada@example.com' } }),
+            }),
+        );
+        expect(result.success).toBe(true);
+    });
+
+    it('should resume with an approval branch label and node output', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { success: true } });
+
+        await client.automation.resume('my_flow', 'run_1', {
+            output: { comment: 'looks good' },
+            branchLabel: 'approve',
+        });
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost:3000/api/v1/automation/my_flow/runs/run_1/resume',
+            expect.objectContaining({
+                method: 'POST',
+                body: JSON.stringify({ output: { comment: 'looks good' }, branchLabel: 'approve' }),
+            }),
+        );
+    });
+
+    it('should post an empty signal when resuming with no input', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { success: true } });
+
+        await client.automation.resume('my flow', 'run 1');
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost:3000/api/v1/automation/my%20flow/runs/run%201/resume',
+            expect.objectContaining({ method: 'POST', body: '{}' }),
+        );
+    });
+
+    it('should return the next screen when a multi-step wizard pauses again', async () => {
+        const { client } = createMockClient({
+            success: true,
+            data: {
+                success: true,
+                status: 'paused',
+                runId: 'run_1',
+                screen: { nodeId: 'step2', title: 'Opportunity', fields: [] },
+            },
+        });
+
+        const result = await client.automation.resume('my_flow', 'run_1', { inputs: { account_id: 'a1' } });
+        expect(result.status).toBe('paused');
+        expect(result.screen.nodeId).toBe('step2');
+    });
+
+    it('should fetch the screen a paused run awaits', async () => {
+        const { client, fetchMock } = createMockClient({
+            success: true,
+            data: { runId: 'run_1', screen: { nodeId: 'collect', fields: [] } },
+        });
+
+        const result = await client.automation.getScreen('my_flow', 'run_1');
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost:3000/api/v1/automation/my_flow/runs/run_1/screen',
+            expect.any(Object),
+        );
+        expect(result.screen.nodeId).toBe('collect');
+    });
+
     // ==========================================
     // capabilities getter
     // ==========================================
@@ -1061,6 +1138,23 @@ describe('ScopedProjectClient', () => {
         const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000' });
         const scoped = client.project('00000000-0000-0000-0000-000000000001');
         expect(scoped.getProjectId()).toBe('00000000-0000-0000-0000-000000000001');
+    });
+
+    it('prefixes the screen-flow automation.resume / getScreen calls', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { success: true } });
+        const scoped = client.project('proj-123');
+
+        await scoped.automation.resume('my_flow', 'run_1', { inputs: { note: 'ok' } });
+        expect(fetchMock).toHaveBeenLastCalledWith(
+            'http://localhost:3000/api/v1/environments/proj-123/automation/my_flow/runs/run_1/resume',
+            expect.objectContaining({ method: 'POST', body: JSON.stringify({ inputs: { note: 'ok' } }) }),
+        );
+
+        await scoped.automation.getScreen('my_flow', 'run_1');
+        expect(fetchMock).toHaveBeenLastCalledWith(
+            'http://localhost:3000/api/v1/environments/proj-123/automation/my_flow/runs/run_1/screen',
+            expect.any(Object),
+        );
     });
 });
 

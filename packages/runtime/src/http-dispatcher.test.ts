@@ -168,6 +168,9 @@ describe('HttpDispatcher', () => {
                 listRuns: vi.fn().mockResolvedValue([{ id: 'run_1', status: 'completed' }]),
                 getRun: vi.fn().mockResolvedValue({ id: 'run_1', status: 'completed' }),
                 trigger: vi.fn().mockResolvedValue({ success: true }),
+                resume: vi.fn().mockResolvedValue({ success: true, output: {}, durationMs: 7 }),
+                // Sync per IAutomationService — `ScreenSpec | null`, not a promise.
+                getSuspendedScreen: vi.fn().mockReturnValue({ nodeId: 'collect', fields: [] }),
                 getActionDescriptors: vi.fn().mockReturnValue([
                     { type: 'decision', name: 'Decision', category: 'logic', paradigms: ['flow'], source: 'builtin' },
                     { type: 'http_request', name: 'HTTP Request', category: 'io', paradigms: ['flow', 'approval'], source: 'builtin' },
@@ -271,6 +274,80 @@ describe('HttpDispatcher', () => {
         it('should return 404 for non-existent run', async () => {
             mockAutomationService.getRun.mockResolvedValue(null);
             const result = await dispatcher.handleAutomation('flow_a/runs/missing', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(404);
+        });
+
+        // ── screen-flow runtime (ADR-0019 durable pause, #3528) ──────────
+        it('should resume a paused run via POST /:name/runs/:runId/resume', async () => {
+            const result = await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST', { inputs: { new_assignee: 'ada' } }, { request: {} },
+            );
+            expect(result.handled).toBe(true);
+            expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {
+                variables: { new_assignee: 'ada' },
+            });
+            expect(result.response?.body?.data?.success).toBe(true);
+        });
+
+        it('should accept `variables` as an alias for `inputs` on resume', async () => {
+            await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST', { variables: { note: 'hi' } }, { request: {} },
+            );
+            expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {
+                variables: { note: 'hi' },
+            });
+        });
+
+        it('should forward approval-style output + branchLabel on resume', async () => {
+            await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST',
+                { output: { comment: 'ok' }, branchLabel: 'approve' }, { request: {} },
+            );
+            expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {
+                output: { comment: 'ok' },
+                branchLabel: 'approve',
+            });
+        });
+
+        it('should resume with an empty signal when the body carries no input', async () => {
+            await dispatcher.handleAutomation('flow_a/runs/run_1/resume', 'POST', undefined, { request: {} });
+            expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {});
+        });
+
+        it('should surface the next screen when a resumed run pauses again', async () => {
+            mockAutomationService.resume.mockResolvedValue({
+                success: true, status: 'paused', runId: 'run_1',
+                screen: { nodeId: 'step2', title: 'Confirm', fields: [] },
+            });
+            const result = await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, { request: {} },
+            );
+            expect(result.response?.body?.data?.status).toBe('paused');
+            expect(result.response?.body?.data?.screen?.nodeId).toBe('step2');
+        });
+
+        it('should return 501 when the automation service cannot resume', async () => {
+            delete mockAutomationService.resume;
+            const result = await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, { request: {} },
+            );
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(501);
+        });
+
+        it('should get the pending screen via GET /:name/runs/:runId/screen', async () => {
+            const result = await dispatcher.handleAutomation('flow_a/runs/run_1/screen', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(mockAutomationService.getSuspendedScreen).toHaveBeenCalledWith('run_1');
+            expect(result.response?.body?.data?.screen?.nodeId).toBe('collect');
+            // `screen` must NOT be swallowed by the getRun route below it.
+            expect(mockAutomationService.getRun).not.toHaveBeenCalled();
+        });
+
+        it('should return 404 when the run is not awaiting a screen', async () => {
+            mockAutomationService.getSuspendedScreen.mockReturnValue(null);
+            const result = await dispatcher.handleAutomation('flow_a/runs/run_1/screen', 'GET', {}, { request: {} });
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(404);
         });
