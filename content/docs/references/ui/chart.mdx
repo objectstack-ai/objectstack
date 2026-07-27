@@ -18,12 +18,40 @@ Provides a comprehensive set of chart types for data visualization.
 ## TypeScript Usage
 
 ```typescript
-import { ChartAnnotation, ChartAxis, ChartConfig, ChartInteraction, ChartSeries, ChartType } from '@objectstack/spec/ui';
-import type { ChartAnnotation, ChartAxis, ChartConfig, ChartInteraction, ChartSeries, ChartType } from '@objectstack/spec/ui';
+import { ChartAggregate, ChartAggregateFunction, ChartAnnotation, ChartAxis, ChartConfig, ChartGroupBy, ChartInteraction, ChartSeries, ChartType } from '@objectstack/spec/ui';
+import type { ChartAggregate, ChartAggregateFunction, ChartAnnotation, ChartAxis, ChartConfig, ChartGroupBy, ChartInteraction, ChartSeries, ChartType } from '@objectstack/spec/ui';
 
 // Validate data
-const result = ChartAnnotation.parse(data);
+const result = ChartAggregate.parse(data);
 ```
+
+---
+
+## ChartAggregate
+
+Inline aggregation for an object-bound chart
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | optional | Field to aggregate — required for sum/avg/min/max, optional for count |
+| **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregation function |
+| **groupBy** | `string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string }` | ✅ | Field the rows are grouped by — the chart category axis |
+
+
+---
+
+## ChartAggregateFunction
+
+### Allowed Values
+
+* `count`
+* `sum`
+* `avg`
+* `min`
+* `max`
+
 
 ---
 
@@ -83,6 +111,35 @@ const result = ChartAnnotation.parse(data);
 | **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional |  |
 | **interaction** | `{ tooltips: boolean; zoom: boolean; brush: boolean; clickAction?: string }` | optional |  |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+
+---
+
+## ChartGroupBy
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Field to group by
+
+Type: `string`
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field to group by |
+| **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Bucket date values into uniform periods |
+| **alias** | `string` | optional | Alias for the projected group value (defaults to `field`) — this becomes the category column |
+
+---
 
 
 ---

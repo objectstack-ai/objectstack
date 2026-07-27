@@ -640,6 +640,23 @@ dataset, so Level B only surfaces in Studio previews and hand-coded react-page
 - Dataset-bound widgets need at least one `values` entry, and every
   `dataset`/`dimensions`/`values` name must resolve to its `defineDataset` —
   `os validate` fails on an unresolved name (an empty chart otherwise).
+- **The two paths key their result rows differently — this is the #1 way a
+  chart renders blank.** A DATASET returns rows keyed by the declared measure
+  NAME (`sum_amount`), because a measure has an author-chosen `name`. An
+  OBJECT-bound inline `aggregate` has no such name, so its rows are keyed by
+  the RAW FIELD NAMES it was given: `groupBy` for the category column, `field`
+  for the value column (the literal `count` for a fieldless `count`). Bind
+  `<ObjectChart>`'s `xAxisKey` / `series[].dataKey` to *those* names — never to
+  a `sum_`-style measure name, and never to a field the aggregate did not
+  select. `os validate` checks both halves (`react-chart-field-unknown`,
+  `react-chart-axis-unknown`).
+
+  ```jsx
+  <ObjectChart objectName="showcase_invoice" chartType="bar"
+    aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }}
+    xAxisKey="status" series={[{ dataKey: 'total' }]} />
+  // rows: [{ status: 'open', total: 1200 }, …]  ← keyed by the raw field names
+  ```
 - Studio's Dashboard Widget Inspector can author per-widget `dataset`,
   `dimensions`, and `values`; curated metadata-admin forms merge
   server-only fields back into the payload, so saving through Studio should

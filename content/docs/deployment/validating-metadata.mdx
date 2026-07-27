@@ -156,8 +156,12 @@ chart: { type: 'bar', xAxis: 'status', yAxis: 'estimate_hours' }
 
 An axis naming a measure the dataset declares but this chart does not *select*
 (not in `values`) is a **warning**: the query never returns it, so it plots
-nothing. The react `<ObjectChart>` block is object-bound rather than
-dataset-bound and is not checked here.
+nothing.
+
+The react `<ObjectChart>` block is **object-bound** (`objectName` + an inline
+`aggregate`) rather than dataset-bound, so it is checked by the react-page prop
+gate below against a different rule — its result rows are keyed by the raw field
+names, exactly the opposite of the dataset case.
 
 ### 7. Navigation exposing objects nobody can read
 
@@ -176,6 +180,34 @@ Advisory: the grant may come from a permission set another installed package
 ships. Skipped for platform-provided objects (whose own packages grant them),
 for stacks that declare no permission sets at all, and when any set carries a
 wildcard (`objects: { '*': … }`) grant.
+
+### 8. `<ObjectChart>` axes bound to the wrong result column
+
+A `kind:'react'` page's `<ObjectChart>` is **object-bound**: `objectName` plus an
+inline `aggregate`, run as one ad-hoc query. Its rows come back keyed by the
+**raw field names** the aggregate was given — `groupBy` names the category
+column, `field` names the value column (the literal `count` for a fieldless
+`count`). That is the exact opposite of the dataset case in §6, and mixing the
+two conventions up is the usual cause of a chart that renders axes and no bars.
+
+```jsx
+<ObjectChart objectName="invoice" chartType="bar"
+  aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }}
+  xAxisKey="status" series={[{ dataKey: 'sum_total' }]} />
+//                                     ↑ a dataset-style measure name; the rows
+//                                       are keyed `total` → error
+```
+
+Both halves are checked: `aggregate.field` / `aggregate.groupBy` must be fields
+the object declares, and `xAxisKey` / `series[].dataKey` must name a column the
+aggregate actually returns (plus `<field>__comparison` when a comparison overlay
+is on). `ChartConfig`'s `xAxis` / `yAxis` shapes are **not** read by this block
+and are reported as inert (warning).
+
+Skipped, to keep false positives at zero: any prop whose value is not a static
+literal (it comes from React state or a variable), a usage carrying a `{...spread}`,
+a chart given static `data` (its columns are the author's own), and objects
+another package defines.
 
 ## The one gate, two entry points
 

@@ -27,15 +27,14 @@
  *      binding shape as a list chart, but it arrives through the untyped
  *      `properties` bag.
  *
- * Deliberately NOT covered: the react `<ObjectChart>` block. It is
- * OBJECT-bound (`objectName` + an inline `aggregate`), not dataset-bound, and
- * nothing in the repo pins down what the runtime names the aggregated result
- * column — so there is no defensible answer for what its `yAxis[].field`
- * should resolve against. Guessing one would manufacture false positives on
- * the single authored usage. Its `aggregate.field` / `groupBy` ARE checkable
- * against the object's fields, but only by reading JSX attribute values, which
- * `validate-react-page-props` does not do today. Left for a follow-up rather
- * than half-built (ADR-0078 §5: verify, then enforce).
+ * Not covered HERE, and deliberately so: the react `<ObjectChart>` block. It is
+ * OBJECT-bound (`objectName` + an inline `aggregate`), so its result rows are
+ * keyed by the RAW FIELD NAMES rather than by a measure name — the opposite
+ * convention, which would make `chart-measure-unknown`'s message a lie. It also
+ * arrives as JSX rather than config, so it needs the TypeScript compiler this
+ * rule has no business loading. It is checked by `validate-react-page-props`
+ * instead, against the naming convention `chartAggregateResultKeys`
+ * (`@objectstack/spec/ui`) now pins down (#3701).
  */
 
 export const CHART_DIMENSION_UNKNOWN = 'chart-dimension-unknown';

@@ -18,6 +18,11 @@ import { definePage } from '@objectstack/spec/ui';
  *     cross-object reads declaratively (zero data code).
  * (This comparison absorbed the former Account Cockpit page.)
  *
+ * The chart's axes are bound explicitly (#3701) to show the object-bound
+ * result-column rule: an inline `aggregate` returns rows keyed by the RAW
+ * FIELD NAMES — `status` (its `groupBy`) and `total` (its `field`) — not by a
+ * dataset-style measure name. `os validate` now checks both halves.
+ *
  * Styling (ADR-0065): no Tailwind — inline `style={{}}` with `hsl(var(--token))`;
  * data blocks and the drawer bring their own compiled styling. The drawer sets
  * NO pixel width: per #2578 pixel widths are deprecated (the author can't know
@@ -114,7 +119,7 @@ function Page() {
               <Stat label="Open AR" value={related.openInvoices} accent="hsl(38 92% 50%)" />
             </div>
 
-            <ObjectChart objectName="showcase_invoice" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} title="Invoice value by status" showLegend={true} />
+            <ObjectChart objectName="showcase_invoice" chartType="bar" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} xAxisKey="status" series={[{ dataKey: 'total', label: 'Invoice value' }]} title="Invoice value by status" showLegend={true} />
 
             <RecordRelatedList objectName="showcase_account" recordId={sel} relationshipField="account" columns={['name', 'status', 'total']} limit={5} showViewAll={true} title="Invoices" />
 

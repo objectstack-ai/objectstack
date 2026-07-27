@@ -65,18 +65,18 @@ Server-connected object table with toolbar and switchable visualizations (grid/k
 
 ## `<ObjectChart>` — `object-chart`
 
-Chart over an object’s aggregated data. Config props come from the spec Chart config schema.
+Chart over an object’s aggregated data. Bind objectName + aggregate; the axes name the aggregate’s RESULT COLUMNS (see chartAggregateResultKeys).
 
 | prop | type | kind | required | description |
 |------|------|------|:--------:|-------------|
 | `objectName` | `string` | binding | ✓ | The object this block binds to (server-connected). |
-| `aggregate` | `{ field, function, groupBy }` | binding |  | Aggregation: function (sum/avg/count) over field, grouped by groupBy. |
+| `aggregate` | `{ field?: string; function: 'count' \| 'sum' \| 'avg' \| 'min' \| 'max'; groupBy: string \| { field: string; dateGranularity?: 'day' \| 'week' \| 'month' \| 'quarter' \| 'year' } }` | binding |  | Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal "count" for a fieldless count). Bind the axes to those names. |
+| `chartType` | `'bar' \| 'column' \| 'horizontal-bar' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'radar' \| 'scatter' \| 'funnel' \| 'combo' \| 'treemap' \| 'sankey'` | binding |  | Which chart to draw (default bar). |
+| `xAxisKey` | `string` | binding |  | Result column plotted on the category axis. Defaults to the aggregate’s groupBy — set it only to be explicit, and only to that name. |
+| `series` | `Array<{ dataKey: string; label?: string }>` | binding |  | Plotted series. Each dataKey names a result column — the aggregate’s field (or "count"), plus "<field>__comparison" when a comparison overlay is on. NOT the ChartConfig series shape. |
 | `data` | `any[]` | binding |  | Static/precomputed data to chart directly instead of binding via objectName + aggregate. |
 | `filter` | `FilterArray` | controlled |  | ObjectQL filter scoping the data; drive from React state. |
 | `title` | `string` | data |  | Chart title |
-| `series` | `object[]` | data |  | Defined series configuration |
-| `xAxis` | `object` | data |  | X-Axis configuration |
-| `yAxis` | `object[]` | data |  | Y-Axis configuration (support dual axis) |
 | `colors` | `string[] \| object` | data |  | Color palette (string[]) or value→color map ({ value: color }) |
 | `showLegend` | `boolean` | data |  | Display legend |
 

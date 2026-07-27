@@ -11,6 +11,7 @@
  */
 
 export * from './chart.zod';
+export * from './chart-aggregate';
 export * from './i18n.zod';
 export * from './responsive.zod';
 export * from './app.zod';
