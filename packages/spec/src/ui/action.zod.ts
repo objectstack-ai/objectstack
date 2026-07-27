@@ -604,6 +604,27 @@ export const ActionSchema = lazySchema(() => z.object({
     "A 'script' action requires either an inline `body` (sandboxed L1/L2 handler) or a `target` (a registered bundle function name).",
   path: ['body'],
 }).refine((data) => {
+  // The mirror image of the rule above: a `body` on a NON-script action never
+  // runs. `type: 'modal' | 'url' | 'flow' | 'api' | 'form'` all dispatch on
+  // `target` (the page to open, the URL, the flow, the endpoint), so the
+  // renderer has no point at which it would invoke a body — the action opens
+  // its target and the body is silently skipped.
+  //
+  // This is the same invisible-failure shape as #2169: it passes build, passes
+  // shape tests, and only shows up as "the modal opened but nothing was
+  // written" (#3530, where `type: 'modal'` + `params` + `body` was authored
+  // expecting the body to run on submit). Reject it at author time and name the
+  // fix — `type: 'script'` collects the same `params` and DOES run the body.
+  if (data.type !== 'script' && data.body) {
+    return false;
+  }
+  return true;
+}, {
+  message:
+    "`body` only runs for `type: 'script'` — a non-script action dispatches on `target` and silently ignores its body. " +
+    "To collect `params` and then run the body, use `type: 'script'`; to open a page/modal, drop the `body` and keep `type: 'modal'` with `target` naming the page.",
+  path: ['body'],
+}).refine((data) => {
   // ADR-0011: an exposed action must carry an LLM-facing description.
   if (data.ai?.exposed === true && !data.ai.description) {
     return false;

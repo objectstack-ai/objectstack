@@ -54,8 +54,9 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'user' \| 'org_membership_level' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue'>` | ✅ |  |
-| **value** | `string` | optional | User id / membership tier / position / team / department / field / queue — per `type` |
+| **type** | `Enum<'user' \| 'org_membership_level' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue' \| 'expression'>` | ✅ |  |
+| **value** | `string` | optional | User id / membership tier / position / team / department / field / queue — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
+| **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
 | **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
 
 
@@ -67,11 +68,13 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **approvers** | `{ type: Enum<'user' \| 'org_membership_level' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue'>; value?: string; group?: string }[]` | ✅ | Allowed approvers for this node |
+| **approvers** | `{ type: Enum<'user' \| 'org_membership_level' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue' \| 'expression'>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string }[]` | ✅ | Allowed approvers for this node |
 | **behavior** | `Enum<'first_response' \| 'unanimous' \| 'quorum' \| 'per_group'>` | ✅ | How to combine multiple approvers |
 | **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Default 1 |
 | **lockRecord** | `boolean` | ✅ | Lock the record from editing while pending |
 | **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
+| **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve'>` | ✅ | Behavior when no concrete approver resolves at node entry |
+| **decisionOutputs** | `string[]` | optional | Author-declared output keys a decision may carry (approvers fill values only) |
 | **escalation** | `{ enabled: boolean; timeoutHours: number; action: Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>; escalateTo?: string; … }` | optional | Per-node SLA escalation |
 | **maxRevisions** | `integer` | ✅ | Max send-backs for revision before auto-reject (0 = send-back disabled) |
 
@@ -91,6 +94,7 @@ const result = ApprovalDecision.parse(data);
 * `manager`
 * `field`
 * `queue`
+* `expression`
 
 
 ---

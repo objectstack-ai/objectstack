@@ -24,9 +24,12 @@ const OWNED_OBJECTS = new Set([
   'sys_user_preference', 'sys_oauth_application', 'sys_oauth_access_token',
   'sys_oauth_refresh_token', 'sys_oauth_consent', 'sys_oauth_resource',
   'sys_oauth_client_resource', 'sys_oauth_client_assertion', 'sys_jwks',
+  // identity — external SSO / SCIM providers (admin-facing, better-auth-managed)
+  'sys_sso_provider', 'sys_scim_provider',
   // audit / messaging-adjacent (still owned here)
   'sys_notification', 'sys_attachment', 'sys_email', 'sys_email_template',
   'sys_saved_report', 'sys_report_schedule', 'sys_job', 'sys_job_run', 'sys_job_queue',
+  'sys_import_job',
   // metadata
   'sys_metadata', 'sys_metadata_history', 'sys_view_definition', 'sys_metadata_audit',
   // system

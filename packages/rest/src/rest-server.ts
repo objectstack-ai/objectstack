@@ -4049,7 +4049,20 @@ export class RestServer {
                     // re-writes the row's earlier state, which need not be a legal
                     // transition from where it is now — an undo reinstates an established
                     // fact, it does not walk the FSM.
-                    const writeCtx = { ...(context ?? {}), skipAutomations: true, skipStateMachine: true };
+                    //
+                    // For a historical import (#3493/#3549), the undo write must mirror
+                    // the import's own write context: carry `preserveAudit` so restoring
+                    // `u.before` re-writes the captured `updated_at`/`updated_by` (and any
+                    // business `readonly` fields in the snapshot) verbatim, rather than
+                    // stamping-now / stripping them. Without this, undoing a historical
+                    // import would silently rewrite the audit timeline the import took
+                    // pains to preserve. A normal import keeps the default (stamp/strip).
+                    const writeCtx = {
+                        ...(context ?? {}),
+                        skipAutomations: true,
+                        skipStateMachine: true,
+                        ...(row.treat_as_historical ? { preserveAudit: true } : {}),
+                    };
                     let deleted = 0, restored = 0, failed = 0;
 
                     // Delete created records first (they didn't exist before).
@@ -6058,6 +6071,10 @@ export class RestServer {
                                 actorId: body.actorId ?? body.actor_id ?? context?.userId,
                                 comment: body.comment,
                                 attachments: body.attachments,
+                                // #3447 P2: author-declared decision outputs — the
+                                // service validates keys against the node's
+                                // `decisionOutputs` whitelist before any write.
+                                outputs: body.outputs,
                             }, context ?? {});
                             res.json(out);
                         } catch (err: any) {

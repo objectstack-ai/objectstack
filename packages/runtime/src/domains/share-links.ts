@@ -1,0 +1,223 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * `/share-links` domain — extracted dispatcher body (ADR-0076 D11 step ③,
+ * PR-4). Share-link capability tokens — "anyone with the link" publication
+ * of a single record (ADR-0047). The `shareLinks` service is resolved from
+ * the request's environment kernel, so links live in (and resolve against)
+ * the same per-environment database that owns the record. This domain owns
+ * URL parsing and the auth/public split.
+ *
+ * NOTE (cross-repo, see #2462 step-① re-scope): for cloud's per-env kernels
+ * this is the DESIGNED PRIMARY surface (`registerShareLinkRoutes: false`;
+ * the host dispatcher serves it after kernel swap) — the handler must keep
+ * working from the registry exactly as it did from the if-chain.
+ *
+ *   POST   /share-links                   → create a link (authenticated)
+ *   GET    /share-links?object&recordId    → list the caller's links (authenticated)
+ *   DELETE /share-links/:idOrToken         → revoke (authenticated)
+ *   GET    /share-links/:token/resolve     → resolve token → record (PUBLIC)
+ *   GET    /share-links/:token/messages    → ai_conversations messages (PUBLIC)
+ *
+ * The resolve / messages routes are intentionally public — the token IS
+ * the authorisation. The underlying record is fetched with a SYSTEM
+ * context (per-env RLS is bypassed because the token gates access), and
+ * `redactFields` are stripped before the record leaves the server.
+ */
+
+import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
+import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+
+export function createShareLinksDomain(deps: DomainHandlerDeps): DomainRoute {
+    return {
+        prefix: '/share-links',
+        match: 'segment',
+        handler: (req, context) =>
+            handleShareLinksRequest(deps, req.path.substring('/share-links'.length), req.method, req.body, req.query, context),
+    };
+}
+
+/** Body kept signature-compatible with the legacy `HttpDispatcher.handleShareLinks`. */
+export async function handleShareLinksRequest(
+    deps: DomainHandlerDeps,
+    subPath: string,
+    method: string,
+    body: any,
+    query: any,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult> {
+    const svc: any = await deps.resolveService('shareLinks', context.environmentId);
+    if (!svc) {
+        return { handled: true, response: deps.error('Sharing is not configured for this environment', 501) };
+    }
+
+    const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+    const m = method.toUpperCase();
+    const parts = subPath.replace(/^\/+/, '').split('/').filter(Boolean);
+    const ec: any = context.executionContext;
+    const callerCtx = { userId: ec?.userId as string | undefined, tenantId: ec?.tenantId as string | undefined };
+
+    const headerOf = (name: string): string | undefined => {
+        const h = context.request?.headers;
+        if (!h) return undefined;
+        const v = typeof h.get === 'function' ? h.get(name) : (h[name] ?? h[name.toLowerCase()]);
+        return Array.isArray(v) ? v[0] : (v ?? undefined);
+    };
+    const sendErr = (status: number, code: string, msg: string): HttpDispatcherResult => ({
+        handled: true,
+        response: deps.error(msg, status, { code }),
+    });
+    // Engine for fetching the shared record + token probes — the same
+    // per-env ObjectQL the shareLinks service is bound to. Read from the
+    // request's RESOLVED (per-env) kernel first: `resolveService('objectql',
+    // env)` can hand back a different (host/scoped) engine that lacks the
+    // per-env rows.
+    const getEngine = async (): Promise<any> => {
+        try {
+            const e = await deps.getRequestKernelService('objectql');
+            if (e) return e;
+        } catch { /* fall through to scoped resolution */ }
+        return deps.resolveService('objectql', context.environmentId);
+    };
+    const asArray = (rows: any): any[] => (Array.isArray(rows) ? rows : Array.isArray(rows?.value) ? rows.value : []);
+    const applyRedaction = (record: any, redactFields: string[]): any => {
+        if (!record || typeof record !== 'object' || redactFields.length === 0) return record;
+        const out: any = {};
+        for (const [k, v] of Object.entries(record)) {
+            if (redactFields.includes(k)) continue;
+            out[k] = v;
+        }
+        return out;
+    };
+
+    try {
+        // ── PUBLIC: resolve a token → record ──────────────────────────
+        if (parts.length === 2 && parts[1] === 'resolve' && m === 'GET') {
+            const token = decodeURIComponent(parts[0]);
+            const signedInUserId = ec?.userId;
+            const recipientEmail = typeof query?.email === 'string' ? query.email : undefined;
+            const providedPassword =
+                typeof query?.password === 'string' ? (query.password as string) : headerOf('x-share-password');
+
+            const resolved = await svc.resolveToken(token, { signedInUserId, recipientEmail, providedPassword });
+            if (!resolved) {
+                // Probe the row to return a more useful status (401 vs 410 vs 404).
+                const engine = await getEngine();
+                const probe = engine
+                    ? asArray(await engine.find('sys_share_link', { where: { token }, limit: 1, context: SYSTEM_CTX } as any))
+                    : [];
+                const row = probe[0] ?? null;
+                const live = row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now());
+                if (live && row.password_hash) {
+                    return sendErr(401, providedPassword ? 'WRONG_PASSWORD' : 'NEEDS_PASSWORD',
+                        providedPassword ? 'Incorrect password' : 'This link requires a password');
+                }
+                if (live && row.audience === 'signed_in' && !signedInUserId) {
+                    return sendErr(401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
+                }
+                if (row && (row.revoked_at || (row.expires_at && Date.parse(row.expires_at) <= Date.now()))) {
+                    return sendErr(410, 'EXPIRED_OR_REVOKED', 'Share link has expired or been revoked');
+                }
+                return sendErr(404, 'INVALID_OR_EXPIRED', 'Share link is invalid, expired, or revoked');
+            }
+
+            const engine = await getEngine();
+            const rows = engine
+                ? asArray(await engine.find(resolved.link.object_name, { where: { id: resolved.link.record_id }, limit: 1, context: SYSTEM_CTX } as any))
+                : [];
+            const record = rows[0] ?? null;
+            if (!record) return sendErr(410, 'RECORD_GONE', 'The shared record no longer exists');
+
+            return {
+                handled: true,
+                response: deps.success({
+                    record: applyRedaction(record, resolved.redactFields),
+                    link: {
+                        id: resolved.link.id,
+                        token: resolved.link.token,
+                        object_name: resolved.link.object_name,
+                        record_id: resolved.link.record_id,
+                        permission: resolved.link.permission,
+                        audience: resolved.link.audience,
+                        expires_at: resolved.link.expires_at,
+                        label: resolved.link.label,
+                        created_at: resolved.link.created_at,
+                    },
+                    redactFields: resolved.redactFields,
+                }),
+            };
+        }
+
+        // ── PUBLIC: ai_conversations messages for a resolved token ────
+        if (parts.length === 2 && parts[1] === 'messages' && m === 'GET') {
+            const token = decodeURIComponent(parts[0]);
+            const providedPassword =
+                typeof query?.password === 'string' ? (query.password as string) : headerOf('x-share-password');
+            const resolved = await svc.resolveToken(token, { signedInUserId: ec?.userId, providedPassword });
+            if (!resolved) return sendErr(404, 'NOT_FOUND', 'Share link not found');
+            if (resolved.link.object_name !== 'ai_conversations') {
+                return sendErr(400, 'UNSUPPORTED', 'This share link does not expose messages');
+            }
+            const engine = await getEngine();
+            const rows = engine
+                ? asArray(await engine.find('ai_messages', {
+                    where: { conversation_id: resolved.link.record_id },
+                    sort: [{ field: 'created_at', order: 'asc' }],
+                    limit: 500,
+                    context: SYSTEM_CTX,
+                } as any))
+                : [];
+            return { handled: true, response: deps.success(rows) };
+        }
+
+        // ── AUTHENTICATED: create / list / revoke ─────────────────────
+        if (!callerCtx.userId) return sendErr(401, 'UNAUTHENTICATED', 'Sign in to manage share links');
+
+        // POST /share-links → create
+        if (parts.length === 0 && m === 'POST') {
+            const b: any = body ?? {};
+            if (!b.object || !b.recordId) return sendErr(400, 'VALIDATION_FAILED', 'object and recordId are required');
+            const link = await svc.createLink(
+                {
+                    object: b.object,
+                    recordId: b.recordId,
+                    permission: b.permission,
+                    audience: b.audience,
+                    expiresAt: b.expiresAt ?? null,
+                    emailAllowlist: b.emailAllowlist,
+                    password: b.password,
+                    redactFields: b.redactFields,
+                    label: b.label,
+                },
+                callerCtx,
+            );
+            return { handled: true, response: { status: 201, body: { success: true, data: link, link } } };
+        }
+
+        // GET /share-links?object&recordId → list the caller's own links
+        if (parts.length === 0 && m === 'GET') {
+            const links = await svc.listLinks(
+                {
+                    object: typeof query?.object === 'string' ? query.object : undefined,
+                    recordId: typeof query?.recordId === 'string' ? query.recordId : undefined,
+                    // Constrain to links the caller created so a guessed
+                    // recordId can never enumerate another user's tokens.
+                    createdBy: callerCtx.userId,
+                    includeRevoked: query?.includeRevoked === 'true' || query?.includeRevoked === '1',
+                },
+                callerCtx,
+            );
+            return { handled: true, response: { status: 200, body: { success: true, data: links, links } } };
+        }
+
+        // DELETE /share-links/:idOrToken → revoke
+        if (parts.length === 1 && m === 'DELETE') {
+            await svc.revokeLink(decodeURIComponent(parts[0]), callerCtx);
+            return { handled: true, response: deps.success({ ok: true }) };
+        }
+
+        return { handled: true, response: deps.routeNotFound(`/share-links${subPath}`) };
+    } catch (err: any) {
+        return sendErr(err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Share link request failed');
+    }
+}

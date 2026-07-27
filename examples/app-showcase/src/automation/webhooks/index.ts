@@ -3,8 +3,8 @@
 import { defineWebhook } from '@objectstack/spec/automation';
 
 /**
- * Outbound webhook — fans out task changes to an external endpoint with a
- * retry policy. Authored via `defineStack({ webhooks })`; on boot the webhooks
+ * Outbound webhook — fans out task changes to an external endpoint.
+ * Authored via `defineStack({ webhooks })`; on boot the webhooks
  * plugin materializes this into a `sys_webhook` row (#3461) that the
  * auto-enqueuer dispatches off.
  *
@@ -21,7 +21,6 @@ export const TaskChangedWebhook = defineWebhook({
   triggers: ['create', 'update', 'delete'],
   url: 'https://hooks.example/showcase/task',
   method: 'POST',
-  retryPolicy: { maxRetries: 3, backoffStrategy: 'exponential', initialDelayMs: 1000, maxDelayMs: 30000 },
   isActive: false,
   description: 'Sends task lifecycle events to an external system. Activate in Setup and point at a real endpoint.',
 });

@@ -5,7 +5,6 @@
     "connector",
     "connector-auth",
     "mapping",
-    "translation",
     "---Transport & Storage---",
     "http",
     "message-queue",

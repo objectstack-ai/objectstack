@@ -118,3 +118,41 @@ describe('IntervalJobAdapter', () => {
     expect(await adapter.listJobs()).toEqual([]);
   });
 });
+
+describe('IntervalJobAdapter retryPolicy / timeout (#3494)', () => {
+  let adapter: IntervalJobAdapter;
+  afterEach(async () => { await adapter?.destroy(); });
+
+  it('retries a failing handler per retryPolicy and succeeds', async () => {
+    adapter = new IntervalJobAdapter();
+    let calls = 0;
+    await adapter.schedule(
+      'flaky',
+      { type: 'interval', intervalMs: 100000 },
+      async () => {
+        calls++;
+        if (calls < 2) throw new Error('boom');
+      },
+      { retryPolicy: { maxRetries: 2, backoffMs: 1 } },
+    );
+    await adapter.trigger('flaky');
+    expect(calls).toBe(2);
+    const execs = await adapter.getExecutions('flaky');
+    expect(execs).toHaveLength(1);
+    expect(execs[0].status).toBe('success');
+  });
+
+  it('enforces a per-attempt timeout and records status "timeout"', async () => {
+    adapter = new IntervalJobAdapter();
+    await adapter.schedule(
+      'slow',
+      { type: 'interval', intervalMs: 100000 },
+      async () => { await new Promise((r) => setTimeout(r, 150)); },
+      { timeout: 25 },
+    );
+    await adapter.trigger('slow');
+    const execs = await adapter.getExecutions('slow');
+    expect(execs[0].status).toBe('timeout');
+    expect(execs[0].error).toMatch(/timed out after 25ms/);
+  });
+});

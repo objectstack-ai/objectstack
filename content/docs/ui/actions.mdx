@@ -126,6 +126,17 @@ rejected at authoring time.) Also note the handler's `engine` facade is
 caller-specific rules yourself.
 </Callout>
 
+<Callout type="warn">
+**`body` belongs to `script` only.** Every other type dispatches on `target`
+— the page to open, the URL, the flow, the endpoint — so a `body` on a
+`modal`/`url`/`flow`/`api`/`form` action would never be invoked. Writing one
+(typically `type: 'modal'` with `params` and a `body`, expecting the body to
+run when the modal is submitted) is rejected at authoring time rather than
+shipping a button that opens a modal and silently writes nothing. To collect
+input *and* run logic, use `type: 'script'` with `params` — the same dialog
+is collected, then the body runs with those values as its `input`.
+</Callout>
+
 ## Bind it to the UI
 
 `locations` is the primary binding — the action appears wherever it declares:

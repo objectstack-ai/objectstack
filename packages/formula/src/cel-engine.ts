@@ -60,6 +60,11 @@ const SCOPE_ROOTS = [
   // Master-detail inline grids inject the header record as `parent` for a
   // child field's `readonlyWhen`/`requiredWhen` predicate (ADR-0036, #1581).
   'parent',
+  // Approval-node `expression` approvers (#3447 P2): the record's LIVE state
+  // at node entry — bound only in that evaluation site, alongside `trigger`
+  // (the submit-time snapshot) and `vars`. Declared here so the strict lint
+  // env doesn't misread `current.x` as a bare field reference.
+  'current',
 ] as const;
 
 /**
@@ -125,6 +130,51 @@ export function firstUndeclaredReference(
     // helper only reports the undeclared-variable case.
   }
   return null;
+}
+
+/**
+ * The distinct top-level identifiers (namespace roots) a CEL expression
+ * references — `current.x + vars.step.y` → `['current', 'vars']`, a bare
+ * `amount > 100` → `['amount']`. Member names and function names are not
+ * identifiers and are never reported.
+ *
+ * Built for evaluation sites that expose a CLOSED set of roots (#3447 P2:
+ * approval-node `expression` approvers allow only `current`/`trigger`/`vars`).
+ * Such a site must reject any other root BEFORE evaluating: the runtime env is
+ * `unlistedVariablesAreDyn: true`, so an out-of-contract root (`record.x`, a
+ * bare field) would otherwise evaluate to `null` and silently produce an empty
+ * result instead of an error. Both the lint rule and the runtime pre-check
+ * consume this one helper so the two can never drift.
+ *
+ * Returns `{ ok: false }` with the classifier's message when the source does
+ * not parse — callers surface that as a config error, not an empty root set.
+ */
+export function collectCelRootIdentifiers(
+  source: string,
+): { ok: true; roots: string[] } | { ok: false; error: string } {
+  if (typeof source !== 'string' || !source.trim()) {
+    return { ok: false, error: 'expression is empty' };
+  }
+  try {
+    // Same nullable-ternary rewrite as compile/evaluate so "what parses" agrees
+    // across build, lint, and runtime (#3306).
+    const compiled = buildEnv(() => new Date(0)).parse(rewriteNullableTernary(source));
+    const roots = new Set<string>();
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) { for (const child of node) walk(child); return; }
+      if (!isCelNode(node)) return; // member/function-name strings, literals
+      if (node.op === 'id' && typeof node.args === 'string') { roots.add(node.args); return; }
+      // Member access: only the receiver can hold identifiers — `args[1]` is the
+      // member NAME, which must not be reported as a root.
+      if (node.op === '.' && Array.isArray(node.args)) { walk(node.args[0]); return; }
+      walk(node.args);
+    };
+    walk(compiled.ast);
+    return { ok: true, roots: [...roots] };
+  } catch (err) {
+    const classified = classifyError(err);
+    return { ok: false, error: classified.ok === false ? classified.error.message : String(err) };
+  }
 }
 
 /**

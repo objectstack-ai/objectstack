@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { IJobService, JobSchedule, JobHandler, JobExecution } from '@objectstack/spec/contracts';
+import type { IJobService, JobSchedule, JobHandler, JobExecution, JobScheduleOptions } from '@objectstack/spec/contracts';
+import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
 
 /**
  * Internal record for a scheduled job.
@@ -9,6 +10,7 @@ interface JobRecord {
   name: string;
   schedule: JobSchedule;
   handler: JobHandler;
+  options?: JobScheduleOptions;
   timerId?: ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>;
   executions: JobExecution[];
 }
@@ -38,11 +40,11 @@ export class IntervalJobAdapter implements IJobService {
     this.maxExecutions = options.maxExecutions ?? 100;
   }
 
-  async schedule(name: string, schedule: JobSchedule, handler: JobHandler): Promise<void> {
+  async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
     // Cancel any existing job with the same name
     await this.cancel(name);
 
-    const record: JobRecord = { name, schedule, handler, executions: [] };
+    const record: JobRecord = { name, schedule, handler, options, executions: [] };
 
     if (schedule.type === 'interval' && schedule.intervalMs) {
       record.timerId = setInterval(async () => {
@@ -111,10 +113,10 @@ export class IntervalJobAdapter implements IJobService {
 
     const startMs = Date.now();
     try {
-      await record.handler({ jobId: record.name, data });
+      await runWithPolicy(record.name, () => record.handler({ jobId: record.name, data }), record.options);
       execution.status = 'success';
     } catch (err) {
-      execution.status = 'failed';
+      execution.status = err instanceof JobTimeoutError ? 'timeout' : 'failed';
       execution.error = err instanceof Error ? err.message : String(err);
     } finally {
       execution.completedAt = new Date().toISOString();

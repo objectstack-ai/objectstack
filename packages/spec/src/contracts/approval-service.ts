@@ -48,6 +48,13 @@ export interface ApprovalRequestRow {
   /** ADR-0019 correlation: the suspended flow run this request belongs to. */
   flow_run_id?: string;
   flow_node_id?: string;
+  /**
+   * #3447 P2: the node's author-declared decision-output keys
+   * (`config.decisionOutputs`), surfaced from the config snapshot so a
+   * decision UI can render one input per key and POST `outputs` with the
+   * decision. Absent when the node declares none.
+   */
+  decision_outputs?: string[];
   completed_at?: string;
   created_at?: string;
   updated_at?: string;
@@ -204,6 +211,16 @@ export interface ApprovalDecisionInput {
    * the `sys_approval_action` audit row's `attachments` field.
    */
   attachments?: string[];
+  /**
+   * #3447 P2: structured outputs the approver hands to the flow with their
+   * decision. Keys MUST be declared on the node's `decisionOutputs` config —
+   * the author declares keys, approvers only fill values (a `screen` node's
+   * trust model); a decision carrying undeclared keys is rejected, and
+   * `decision` / `requestId` are reserved. Accepted outputs resume the run as
+   * `<nodeId>.<key>` flow variables, where a later approval node's
+   * `expression` approver can read them (`vars.<nodeId>.picked_departments`).
+   */
+  outputs?: Record<string, unknown>;
 }
 
 /** Input for recalling (withdrawing) a pending request. */

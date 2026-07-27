@@ -9,16 +9,23 @@ import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } f
 import { CoreServiceName } from '@objectstack/spec/system';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
-import { pluralToSingular, PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { pluralToSingular } from '@objectstack/spec/shared';
 import { validateActionParams, type ResolvedActionParam } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { setPackageDisabled } from './package-state-store.js';
 import { checkApiExposure } from './api-exposure.js';
 import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
 import { createAnalyticsDomain, handleAnalyticsRequest } from './domains/analytics.js';
 import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
 import { createNotificationsDomain, handleNotificationRequest } from './domains/notifications.js';
 import { createSecurityDomain, handleSecurityRequest } from './domains/security.js';
+import { createKeysDomains, handleKeysRequest } from './domains/keys.js';
+import { createStorageDomain, handleStorageRequest } from './domains/storage.js';
+import { createUiDomain, handleUiRequest } from './domains/ui.js';
+import { createShareLinksDomain, handleShareLinksRequest } from './domains/share-links.js';
+import { createPackagesDomain, handlePackagesRequest } from './domains/packages.js';
+import { createAutomationDomain, handleAutomationRequest } from './domains/automation.js';
+import { createAuthDomain, handleAuthRequest } from './domains/auth.js';
+import { createAiDomain, handleAIRequest } from './domains/ai.js';
 
 /** Minimal local interface — full EnvironmentScopeManager was removed in Phase R. */
 interface EnvironmentScopeManager {
@@ -28,19 +35,8 @@ import {
     resolveExecutionContext,
     isPermissionDeniedError,
 } from './security/resolve-execution-context.js';
-import { generateApiKey } from './security/api-key.js';
 
-/** Browser-safe UUID generator — prefers Web Crypto, falls back to RFC 4122 v4 */
-function randomUUID(): string {
-    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
-        return globalThis.crypto.randomUUID();
-    }
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-        const r = (Math.random() * 16) | 0;
-        const v = c === 'x' ? r : (r & 0x3) | 0x8;
-        return v.toString(16);
-    });
-}
+// randomUUID moved to ./domains/auth.ts with its only consumer (D11③ PR-7).
 
 /** A `sys_`-prefixed object is a system table — off-limits to external MCP agents. */
 function isSystemObjectName(name: string): boolean {
@@ -241,8 +237,27 @@ export class HttpDispatcher {
         // Deps take plain strings (domain modules pass CoreServiceName enum
         // values anyway); the dispatcher method's parameter is the enum type.
         getService: (name) => this.getService(name as Parameters<HttpDispatcher['getService']>[0]),
+        getObjectQL: (environmentId) => this.getObjectQLService(environmentId),
+        // Reads off the per-request RESOLVED kernel (`this.kernel` is set by
+        // dispatch() before any handler runs) — see the deps contract note.
+        getRequestKernelService: async (name) => {
+            const k: any = this.kernel;
+            return typeof k?.getServiceAsync === 'function'
+                ? k.getServiceAsync(name)
+                : k?.getService?.(name);
+        },
         success: (data, meta) => this.success(data, meta),
         error: (message, code, details) => this.error(message, code, details),
+        routeNotFound: (route) => this.routeNotFound(route),
+        errorFromThrown: (e, fallbackStatus) => this.errorFromThrown(e, fallbackStatus),
+        resolveActiveOrganizationId: (context) => this.resolveActiveOrganizationId(context),
+        announceKernelEvent: async (event, payload) => {
+            const k: any = this.kernel;
+            if (k?.context?.trigger) await k.context.trigger(event, payload);
+        },
+        logger: (this as any).logger,
+        isAuthRequired: () => this.requireAuth,
+        getRegisteredAiRoutes: () => (this.kernel as any)?.__aiRoutes,
     };
 
     /**
@@ -287,6 +302,14 @@ export class HttpDispatcher {
         this.domainRegistry.register(createI18nDomain(this.domainDeps));
         this.domainRegistry.register(createNotificationsDomain(this.domainDeps));
         this.domainRegistry.register(createSecurityDomain(this.domainDeps));
+        for (const route of createKeysDomains(this.domainDeps)) this.domainRegistry.register(route);
+        this.domainRegistry.register(createStorageDomain(this.domainDeps));
+        this.domainRegistry.register(createUiDomain(this.domainDeps));
+        this.domainRegistry.register(createShareLinksDomain(this.domainDeps));
+        this.domainRegistry.register(createPackagesDomain(this.domainDeps));
+        this.domainRegistry.register(createAutomationDomain(this.domainDeps));
+        this.domainRegistry.register(createAuthDomain(this.domainDeps));
+        this.domainRegistry.register(createAiDomain(this.domainDeps));
     }
 
     /**
@@ -1473,101 +1496,9 @@ export class HttpDispatcher {
         return 'global';
     }
 
-    /**
-     * Generate a `sys_api_key` and return the raw secret EXACTLY ONCE
-     * (`POST /keys`). This is the only mint path — the raw key is never stored
-     * (only its sha256 hash) and never re-displayable.
-     *
-     * Security (zero-tolerance):
-     *  - Requires an authenticated principal; `user_id` is PINNED to that
-     *    caller and is NEVER read from the request body (no impersonation).
-     *  - Body is whitelisted to `name` (+ optional `expires_at`); any
-     *    `key` / `id` / `user_id` / `revoked` in the body is ignored, so a
-     *    caller cannot forge a known-secret or escalate.
-     *  - `scopes` are intentionally NOT accepted from the body in v1: the
-     *    verify path ADDS scopes to the principal's permissions, so honouring
-     *    arbitrary body scopes would be an escalation vector. A generated key
-     *    therefore acts exactly AS the caller (via `user_id` resolution).
-     *    Narrowing/scoped keys need subset-enforcement — deferred.
-     *  - The raw key and its hash never enter logs or error messages.
-     *  - The row is written with an elevated `{ isSystem: true }` context
-     *    because `sys_api_key` is protection-locked; safe because the row's
-     *    contents are fully server-controlled (user_id pinned to caller).
-     */
+    /** Thin delegate — body (incl. the zero-tolerance security contract) extracted to `./domains/keys.ts` (D11③ PR-3). */
     async handleKeys(method: string, body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        if (method !== 'POST') {
-            return { handled: true, response: this.error('Method not allowed', 405) };
-        }
-
-        const ec = context.executionContext;
-        if (!ec || !ec.userId) {
-            return { handled: true, response: this.error('Unauthorized: sign in to generate an API key', 401) };
-        }
-
-        // ── Whitelist the body. Only `name` and optional `expires_at`. ──
-        const rawName = typeof body?.name === 'string' ? body.name.trim() : '';
-        const name = rawName || 'API Key';
-
-        let expiresAt: string | undefined;
-        if (body?.expires_at != null && body.expires_at !== '') {
-            const ms = typeof body.expires_at === 'number'
-                ? (body.expires_at < 1e12 ? body.expires_at * 1000 : body.expires_at)
-                : Date.parse(String(body.expires_at));
-            if (Number.isNaN(ms)) {
-                return { handled: true, response: this.error('Invalid expires_at: must be a parseable date', 400) };
-            }
-            if (ms <= Date.now()) {
-                return { handled: true, response: this.error('Invalid expires_at: must be in the future', 400) };
-            }
-            expiresAt = new Date(ms).toISOString();
-        }
-
-        const ql = (await this.getObjectQLService(context.environmentId))
-            ?? (await this.resolveService('objectql', context.environmentId));
-        if (!ql || typeof ql.insert !== 'function') {
-            return { handled: true, response: this.error('Data service not available', 503) };
-        }
-
-        // Generate AFTER validation so we never mint on a rejected request.
-        const generated = generateApiKey();
-
-        // Server-controlled row. user_id is pinned to the caller; only the hash
-        // is persisted. NOTHING from the body can set key/id/user_id/revoked.
-        const row: Record<string, unknown> = {
-            name,
-            key: generated.hash,
-            prefix: generated.prefix,
-            user_id: ec.userId,
-            revoked: false,
-        };
-        if (expiresAt) row.expires_at = expiresAt;
-
-        let inserted: any;
-        try {
-            inserted = await ql.insert('sys_api_key', row, { context: { isSystem: true } });
-        } catch {
-            // Never surface the underlying error (could echo row contents).
-            return { handled: true, response: this.error('Failed to create API key', 500) };
-        }
-        const id = inserted?.id ?? (Array.isArray(inserted) ? inserted[0]?.id : undefined);
-
-        // Raw key returned ONCE. Do not log it.
-        return {
-            handled: true,
-            response: {
-                status: 201,
-                body: {
-                    success: true,
-                    data: {
-                        id,
-                        name,
-                        prefix: generated.prefix,
-                        key: generated.raw,
-                        ...(expiresAt ? { expires_at: expiresAt } : {}),
-                    },
-                },
-            },
-        };
+        return handleKeysRequest(this.domainDeps, method, body, context);
     }
 
     /**
@@ -2027,80 +1958,11 @@ export class HttpDispatcher {
         }
     }
 
-    /**
-     * Handles Auth requests
-     * path: sub-path after /auth/
-     */
+    /** Thin delegate — body extracted to `./domains/auth.ts` (D11③ PR-7). */
     async handleAuth(path: string, method: string, body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        // 1. Try generic Auth Service
-        const authService = await this.getService(CoreServiceName.enum.auth);
-        if (authService && typeof authService.handler === 'function') {
-            const response = await authService.handler(context.request, context.response);
-            return { handled: true, result: response };
-        }
-
-        // 2. Mock fallback for MSW/test environments when no auth service is registered
-        const normalizedPath = path.replace(/^\/+/, '');
-        return this.mockAuthFallback(normalizedPath, method, body);
+        return handleAuthRequest(this.domainDeps, path, method, body, context);
     }
 
-    /**
-     * Provides mock auth responses for core better-auth endpoints when
-     * AuthPlugin is not loaded (e.g. MSW/browser-only environments).
-     * This ensures registration/sign-in flows do not 404 in mock mode.
-     */
-    private mockAuthFallback(path: string, method: string, body: any): HttpDispatcherResult {
-        const m = method.toUpperCase();
-        const MOCK_SESSION_EXPIRY_MS = 86_400_000; // 24 hours
-
-        // POST sign-up/email
-        if ((path === 'sign-up/email' || path === 'register') && m === 'POST') {
-            const id = `mock_${randomUUID()}`;
-            return {
-                handled: true,
-                response: {
-                    status: 200,
-                    body: {
-                        user: { id, name: body?.name || 'Mock User', email: body?.email || 'mock@test.local', emailVerified: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-                        session: { id: `session_${id}`, userId: id, token: `mock_token_${id}`, expiresAt: new Date(Date.now() + MOCK_SESSION_EXPIRY_MS).toISOString() },
-                    },
-                },
-            };
-        }
-
-        // POST sign-in/email or login
-        if ((path === 'sign-in/email' || path === 'login') && m === 'POST') {
-            const id = `mock_${randomUUID()}`;
-            return {
-                handled: true,
-                response: {
-                    status: 200,
-                    body: {
-                        user: { id, name: 'Mock User', email: body?.email || 'mock@test.local', emailVerified: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-                        session: { id: `session_${id}`, userId: id, token: `mock_token_${id}`, expiresAt: new Date(Date.now() + MOCK_SESSION_EXPIRY_MS).toISOString() },
-                    },
-                },
-            };
-        }
-
-        // GET get-session
-        if (path === 'get-session' && m === 'GET') {
-            return {
-                handled: true,
-                response: { status: 200, body: { session: null, user: null } },
-            };
-        }
-
-        // POST sign-out
-        if (path === 'sign-out' && m === 'POST') {
-            return {
-                handled: true,
-                response: { status: 200, body: { success: true } },
-            };
-        }
-
-        return { handled: false };
-    }
 
     /**
      * Handles Metadata requests
@@ -2626,576 +2488,11 @@ export class HttpDispatcher {
         return handleI18nRequest(this.domainDeps, path, method, query, _context);
     }
 
-    /**
-     * Handles Package Management requests
-     * 
-     * REST Endpoints:
-     * - GET    /packages          → list all installed packages
-     * - GET    /packages/:id      → get a specific package
-     * - POST   /packages          → install a new package
-     * - DELETE  /packages/:id      → uninstall a package
-     * - PATCH  /packages/:id/enable  → enable a package
-     * - PATCH  /packages/:id/disable → disable a package
-     * - POST   /packages/:id/publish → publish a package (metadata snapshot)
-     * - POST   /packages/:id/revert  → revert a package to last published state
-     * 
-     * Uses ObjectQL SchemaRegistry directly (via the 'objectql' service).
-     */
+    /** Thin delegate — body extracted to `./domains/packages.ts` (D11③ PR-5). */
     async handlePackages(path: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        const m = method.toUpperCase();
-        const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
-
-        // Try to get SchemaRegistry from the ObjectQL service
-        const qlService = await this.getObjectQLService();
-        const registry = qlService?.registry;
-
-        // If no registry available, return 503
-        if (!registry) {
-            return { handled: true, response: this.error('Package service not available', 503) };
-        }
-
-        try {
-            // GET /packages → list packages
-            if (parts.length === 0 && m === 'GET') {
-                let packages = registry.getAllPackages();
-                // Apply optional filters
-                if (query?.status) {
-                    packages = packages.filter((p: any) => p.status === query.status);
-                }
-                if (query?.type) {
-                    packages = packages.filter((p: any) => p.manifest?.type === query.type);
-                }
-                return { handled: true, response: this.success({ packages, total: packages.length }) };
-            }
-
-            // POST /packages → install package.
-            // Route through the canonical `protocol.installPackage` primitive so
-            // the install lands in BOTH the in-memory registry (what this list/detail
-            // reads) AND the durable `sys_packages` table. Fall back to the bare
-            // registry write only when the protocol service/method is unavailable.
-            if (parts.length === 0 && m === 'POST') {
-                const manifest = body.manifest || body;
-                const pkgId = typeof manifest?.id === 'string' ? manifest.id.trim() : '';
-                // A package id is mandatory — without one the install cannot be keyed.
-                if (!pkgId) {
-                    return { handled: true, response: this.error('Package id is required', 400) };
-                }
-                // Duplicate-detection: POST /packages CREATES a package. If one with
-                // this id already exists, silently overwriting it destroys the existing
-                // manifest (name/version/…) with no warning — a data-loss footgun
-                // surfaced in Studio package-create dogfooding. Reject with 409 Conflict
-                // instead. Intentional upgrade / re-install flows opt back in with
-                // `overwrite: true` (body) or `?overwrite=true`.
-                const overwrite =
-                    body?.overwrite === true || query?.overwrite === 'true' || query?.overwrite === true;
-                if (!overwrite && registry.getPackage(pkgId)) {
-                    return {
-                        handled: true,
-                        response: this.error(`Package '${pkgId}' already exists`, 409),
-                    };
-                }
-                let pkg: any;
-                const protocolSvc: any = await this.resolveService('protocol').catch(() => null);
-                if (protocolSvc && typeof protocolSvc.installPackage === 'function') {
-                    const out = await protocolSvc.installPackage({ manifest, settings: body.settings });
-                    pkg = out?.package ?? out;
-                } else {
-                    pkg = registry.installPackage(manifest, body.settings);
-                }
-                const res = this.success(pkg);
-                res.status = 201;
-                return { handled: true, response: res };
-            }
-
-            // PATCH /packages/:id/enable
-            if (parts.length === 2 && parts[1] === 'enable' && m === 'PATCH') {
-                const id = decodeURIComponent(parts[0]);
-                const pkg = registry.enablePackage(id);
-                if (!pkg) return { handled: true, response: this.error(`Package '${id}' not found`, 404) };
-                try {
-                    setPackageDisabled(_context?.environmentId, id, false);
-                } catch (err) {
-                    console.warn('[handlePackages] failed to persist enable state', { id, error: (err as Error)?.message });
-                }
-                return { handled: true, response: this.success(pkg) };
-            }
-
-            // PATCH /packages/:id/disable
-            if (parts.length === 2 && parts[1] === 'disable' && m === 'PATCH') {
-                const id = decodeURIComponent(parts[0]);
-                const pkg = registry.disablePackage(id);
-                if (!pkg) return { handled: true, response: this.error(`Package '${id}' not found`, 404) };
-                try {
-                    setPackageDisabled(_context?.environmentId, id, true);
-                } catch (err) {
-                    console.warn('[handlePackages] failed to persist disable state', { id, error: (err as Error)?.message });
-                }
-                return { handled: true, response: this.success(pkg) };
-            }
-
-            // POST /packages/:id/publish → publish package metadata
-            if (parts.length === 2 && parts[1] === 'publish' && m === 'POST') {
-                const id = decodeURIComponent(parts[0]);
-                const metadataService = await this.getService(CoreServiceName.enum.metadata);
-                if (metadataService && typeof (metadataService as any).publishPackage === 'function') {
-                    const result = await (metadataService as any).publishPackage(id, body || {});
-                    return { handled: true, response: this.success(result) };
-                }
-                return { handled: true, response: this.error('Metadata service not available', 503) };
-            }
-
-            // POST /packages/:id/publish-drafts → promote every pending DRAFT
-            // bound to the package to active in one shot ("publish whole app",
-            // ADR-0033). Routes through protocol.publishPackageDrafts (which
-            // reuses the per-item publish primitive) — no metadata service
-            // dependency, unlike /publish above.
-            if (parts.length === 2 && parts[1] === 'publish-drafts' && m === 'POST') {
-                const id = decodeURIComponent(parts[0]);
-                const protocol = await this.resolveService('protocol');
-                if (protocol && typeof (protocol as any).publishPackageDrafts === 'function') {
-                    try {
-                        const organizationId = await this.resolveActiveOrganizationId(_context);
-                        const result = await (protocol as any).publishPackageDrafts({
-                            packageId: id,
-                            ...(organizationId ? { organizationId } : {}),
-                            ...(body?.actor ? { actor: body.actor } : {}),
-                        });
-                        // Publishing a `seed` draft is what actually loads its
-                        // rows. The objectql protocol now batch-applies seeds
-                        // inside `publishPackageDrafts` itself (so EVERY publish
-                        // path — incl. the per-ref REST publish — materializes
-                        // data) and reports under `seedApplied`. Only fall back
-                        // to the route-level apply for custom protocols that
-                        // don't self-apply — never run both, or an externalId-less
-                        // seed would double-insert.
-                        if ((result as any)?.seedApplied === undefined) {
-                            try {
-                                const seedNames = ((result as any)?.published ?? [])
-                                    .filter((p: any) => p?.type === 'seed')
-                                    .map((p: any) => p.name as string);
-                                if (seedNames.length > 0) {
-                                    (result as any).seedApplied = await this.applyPublishedSeeds(
-                                        seedNames,
-                                        organizationId,
-                                        _context,
-                                    );
-                                }
-                            } catch (e: any) {
-                                (result as any).seedApplied = { success: false, error: e?.message ?? 'seed apply failed' };
-                            }
-                        }
-                        // ADR-0045: "Publish" makes the package live AND visible.
-                        // A materialized (additive) build has no drafts left to
-                        // promote — its app sits at `hidden: true` awaiting the
-                        // visibility flip. Unhide every hidden app bound to this
-                        // package so ONE publish verb serves both regimes (the
-                        // caller never needs to know how the package was built).
-                        // Best-effort: a custom protocol without the meta
-                        // primitives keeps plain draft-publish semantics.
-                        try {
-                            if (
-                                typeof (protocol as any).getMetaItems === 'function' &&
-                                typeof (protocol as any).saveMetaItem === 'function'
-                            ) {
-                                const appsRes = await (protocol as any).getMetaItems({
-                                    type: 'app',
-                                    packageId: id,
-                                    ...(organizationId ? { organizationId } : {}),
-                                });
-                                const apps: any[] = Array.isArray(appsRes)
-                                    ? appsRes
-                                    : Array.isArray((appsRes as any)?.items) ? (appsRes as any).items : [];
-                                const unhidden: string[] = [];
-                                for (const app of apps) {
-                                    if (app && typeof app === 'object' && app.hidden === true && typeof app.name === 'string') {
-                                        await (protocol as any).saveMetaItem({
-                                            type: 'app',
-                                            name: app.name,
-                                            item: { ...app, hidden: false },
-                                            packageId: id,
-                                            ...(organizationId ? { organizationId } : {}),
-                                            ...(body?.actor ? { actor: body.actor } : {}),
-                                        });
-                                        unhidden.push(app.name);
-                                    }
-                                }
-                                if (unhidden.length > 0) (result as any).unhiddenApps = unhidden;
-                            }
-                        } catch (e: any) {
-                            (result as any).unhideError = e?.message ?? 'visibility flip failed';
-                        }
-                        // A publish promoted drafts to active (or unhid an additive
-                        // app) at RUNTIME — but boot-cached consumers still hold the
-                        // pre-publish view. The load-bearing one is the automation
-                        // engine: a record-triggered flow authored + published in the
-                        // Studio does NOT bind its trigger (record-change automations
-                        // never fire) until the next restart. Announce
-                        // 'metadata:reloaded' — the same signal a dev artifact reload
-                        // fires (MetadataPlugin._reloadAndAnnounce) — so subscribers
-                        // re-sync WITHOUT a restart. #2560 covers the cold-boot bind;
-                        // this covers publish-while-running. `this.kernel.context` is
-                        // the same handle the service resolver uses above. Best-effort:
-                        // a subscriber failure must never fail the publish (the drafts
-                        // are already live), so it rides the response instead.
-                        try {
-                            const changed = [
-                                ...(((result as any)?.published ?? []) as Array<{ type: string; name: string }>)
-                                    .map((p) => `${p.type}/${p.name}`),
-                                ...(((result as any)?.unhiddenApps ?? []) as string[]).map((n) => `app/${n}`),
-                            ];
-                            if (changed.length > 0 && this.kernel?.context?.trigger) {
-                                await this.kernel.context.trigger('metadata:reloaded', { changed });
-                            }
-                        } catch (e: any) {
-                            (result as any).rebindError = e?.message ?? 'metadata:reloaded announce failed';
-                        }
-                        return { handled: true, response: this.success(result) };
-                    } catch (e: any) {
-                        // Carry spec-validation `issues` (and the real 422 status —
-                        // the protocol sets `.status`, not `.statusCode`) through to
-                        // the publish surface so failures are field-anchored.
-                        return { handled: true, response: this.errorFromThrown(e, 500) };
-                    }
-                }
-                return { handled: true, response: this.error('Draft publishing not supported', 501) };
-            }
-
-            // POST /packages/:id/discard-drafts → drop every pending DRAFT bound
-            // to the package, reverting it to its last published baseline
-            // ("abandon all my changes"). NON-destructive: active metadata and
-            // physical tables are untouched. Routes through the sys_metadata
-            // path (no metadata-service dependency, unlike /revert below).
-            if (parts.length === 2 && parts[1] === 'discard-drafts' && m === 'POST') {
-                const id = decodeURIComponent(parts[0]);
-                const protocol = await this.resolveService('protocol');
-                if (protocol && typeof (protocol as any).discardPackageDrafts === 'function') {
-                    try {
-                        const organizationId = await this.resolveActiveOrganizationId(_context);
-                        const result = await (protocol as any).discardPackageDrafts({
-                            packageId: id,
-                            ...(organizationId ? { organizationId } : {}),
-                            ...(body?.actor ? { actor: body.actor } : {}),
-                        });
-                        return { handled: true, response: this.success(result) };
-                    } catch (e: any) {
-                        return { handled: true, response: this.error(e.message, e.statusCode || 500) };
-                    }
-                }
-                return { handled: true, response: this.error('Draft discarding not supported', 501) };
-            }
-
-            // ── ADR-0067: package-scoped commit history & rollback ──────────
-
-            // GET /packages/:id/commits → the commit timeline (newest-first).
-            if (parts.length === 2 && parts[1] === 'commits' && m === 'GET') {
-                const id = decodeURIComponent(parts[0]);
-                const protocol = await this.resolveService('protocol');
-                if (protocol && typeof (protocol as any).listCommits === 'function') {
-                    try {
-                        const organizationId = await this.resolveActiveOrganizationId(_context);
-                        const commits = await (protocol as any).listCommits({
-                            packageId: id,
-                            ...(organizationId ? { organizationId } : {}),
-                        });
-                        return { handled: true, response: this.success({ commits }) };
-                    } catch (e: any) {
-                        return { handled: true, response: this.error(e.message, e.statusCode || 500) };
-                    }
-                }
-                return { handled: true, response: this.error('Commit history not supported', 501) };
-            }
-
-            // POST /packages/:id/commits/:commitId/revert → revert ONE commit
-            // (ADR-0067). Created artifacts are soft-removed, edited ones are
-            // restored to their pre-commit version; the revert is itself a commit.
-            if (parts.length === 4 && parts[1] === 'commits' && parts[3] === 'revert' && m === 'POST') {
-                const commitId = decodeURIComponent(parts[2]);
-                const protocol = await this.resolveService('protocol');
-                if (protocol && typeof (protocol as any).revertCommit === 'function') {
-                    try {
-                        const organizationId = await this.resolveActiveOrganizationId(_context);
-                        const result = await (protocol as any).revertCommit({
-                            commitId,
-                            ...(organizationId ? { organizationId } : {}),
-                            ...(body?.actor ? { actor: body.actor } : {}),
-                        });
-                        return { handled: true, response: this.success(result) };
-                    } catch (e: any) {
-                        return { handled: true, response: this.error(e.message, e.statusCode || 500) };
-                    }
-                }
-                return { handled: true, response: this.error('Commit revert not supported', 501) };
-            }
-
-            // POST /packages/:id/rollback  body { commitId } → roll the package
-            // back THROUGH every commit newer than `commitId` (ADR-0067).
-            if (parts.length === 2 && parts[1] === 'rollback' && m === 'POST') {
-                const protocol = await this.resolveService('protocol');
-                if (protocol && typeof (protocol as any).rollbackToPackageCommit === 'function') {
-                    if (!body?.commitId) {
-                        return { handled: true, response: this.error('Body { commitId } is required', 400) };
-                    }
-                    try {
-                        const organizationId = await this.resolveActiveOrganizationId(_context);
-                        const result = await (protocol as any).rollbackToPackageCommit({
-                            commitId: String(body.commitId),
-                            ...(organizationId ? { organizationId } : {}),
-                            ...(body?.actor ? { actor: body.actor } : {}),
-                        });
-                        return { handled: true, response: this.success(result) };
-                    } catch (e: any) {
-                        return { handled: true, response: this.error(e.message, e.statusCode || 500) };
-                    }
-                }
-                return { handled: true, response: this.error('Commit rollback not supported', 501) };
-            }
-
-            // POST /packages/:id/revert → revert package to last published state
-            if (parts.length === 2 && parts[1] === 'revert' && m === 'POST') {
-                const id = decodeURIComponent(parts[0]);
-                const metadataService = await this.getService(CoreServiceName.enum.metadata);
-                if (metadataService && typeof (metadataService as any).revertPackage === 'function') {
-                    await (metadataService as any).revertPackage(id);
-                    return { handled: true, response: this.success({ success: true }) };
-                }
-                return { handled: true, response: this.error('Metadata service not available', 503) };
-            }
-
-            // GET /packages/:id/export → assemble a portable manifest from
-            // sys_metadata overlay rows bound to this package (offline export).
-            if (parts.length === 2 && parts[1] === 'export' && m === 'GET') {
-                const id = decodeURIComponent(parts[0]);
-                const manifest = await this.assemblePackageManifest(id, registry, _context);
-                if (!manifest) {
-                    return { handled: true, response: this.error(`Package '${id}' not found`, 404) };
-                }
-                return { handled: true, response: this.success(manifest) };
-            }
-
-            // POST /packages/:id/adopt-orphans → bulk-rebind package-less (legacy
-            // null / 'sys_metadata') metadata INTO this base (ADR-0070 D5 migration;
-            // lets the env retire the "Local / Custom" scope once it has no orphans).
-            if (parts.length === 2 && parts[1] === 'adopt-orphans' && m === 'POST') {
-                const id = decodeURIComponent(parts[0]);
-                const protocol = await this.resolveService('protocol');
-                if (!protocol || typeof (protocol as any).reassignOrphanedMetadata !== 'function') {
-                    return { handled: true, response: this.error('Orphan adoption not supported', 501) };
-                }
-                try {
-                    const organizationId = await this.resolveActiveOrganizationId(_context);
-                    const result = await (protocol as any).reassignOrphanedMetadata({
-                        targetPackageId: id,
-                        ...(organizationId ? { organizationId } : {}),
-                        ...(body?.actor ? { actor: body.actor } : {}),
-                    });
-                    return { handled: true, response: this.success(result) };
-                } catch (e: any) {
-                    return { handled: true, response: this.error(e.message, e.statusCode || 500) };
-                }
-            }
-
-            // POST /packages/:id/duplicate → clone this base into a NEW writable
-            // package, re-namespacing objects + rewriting references (ADR-0070 D4
-            // "duplicate base"). Body { targetPackageId, targetName?, targetNamespace? }.
-            if (parts.length === 2 && parts[1] === 'duplicate' && m === 'POST') {
-                const id = decodeURIComponent(parts[0]);
-                const protocol = await this.resolveService('protocol');
-                if (!protocol || typeof (protocol as any).duplicatePackage !== 'function') {
-                    return { handled: true, response: this.error('Package duplication not supported', 501) };
-                }
-                const targetPackageId = typeof body?.targetPackageId === 'string' ? body.targetPackageId.trim() : '';
-                if (!targetPackageId) {
-                    return { handled: true, response: this.error('Body { targetPackageId } is required', 400) };
-                }
-                try {
-                    const organizationId = await this.resolveActiveOrganizationId(_context);
-                    const result = await (protocol as any).duplicatePackage({
-                        sourcePackageId: id,
-                        targetPackageId,
-                        ...(typeof body?.targetName === 'string' ? { targetName: body.targetName } : {}),
-                        ...(typeof body?.targetNamespace === 'string' ? { targetNamespace: body.targetNamespace } : {}),
-                        ...(organizationId ? { organizationId } : {}),
-                        ...(body?.actor ? { actor: body.actor } : {}),
-                    });
-                    return { handled: true, response: this.success(result) };
-                } catch (e: any) {
-                    return { handled: true, response: this.error(e.message, e.statusCode || 500) };
-                }
-            }
-
-            // GET /packages/:id → get package
-            if (parts.length === 1 && m === 'GET') {
-                const id = decodeURIComponent(parts[0]);
-                const pkg = registry.getPackage(id);
-                if (!pkg) return { handled: true, response: this.error(`Package '${id}' not found`, 404) };
-                return { handled: true, response: this.success(pkg) };
-            }
-
-            // PATCH /packages/:id → edit the manifest (name / description /
-            // version). A partial patch: only the fields present are changed;
-            // lifecycle state (enabled / status / installedAt) is preserved.
-            // `id` / `scope` / `type` are identity/structure and are NOT editable
-            // here. Body accepts the fields flat or under a `manifest` wrapper.
-            if (parts.length === 1 && m === 'PATCH') {
-                const id = decodeURIComponent(parts[0]);
-                const src = (body?.manifest && typeof body.manifest === 'object' ? body.manifest : body) ?? {};
-                const patch: { name?: string; description?: string; version?: string } = {};
-                if (typeof src.name === 'string') patch.name = src.name.trim();
-                if (typeof src.description === 'string') patch.description = src.description;
-                if (typeof src.version === 'string') patch.version = src.version.trim();
-
-                if (patch.name !== undefined && patch.name === '') {
-                    return { handled: true, response: this.error('name must not be empty', 400) };
-                }
-                if (patch.version !== undefined && !/^\d+\.\d+\.\d+$/.test(patch.version)) {
-                    return { handled: true, response: this.error('version must be semantic (e.g. 1.0.0)', 400) };
-                }
-                if (patch.name === undefined && patch.description === undefined && patch.version === undefined) {
-                    return { handled: true, response: this.error('Body { name?, description?, version? } — nothing to update', 400) };
-                }
-
-                const protocol = await this.resolveService('protocol');
-                if (protocol && typeof (protocol as any).updatePackage === 'function') {
-                    try {
-                        const updated = await (protocol as any).updatePackage({ packageId: id, patch });
-                        return { handled: true, response: this.success((updated as any)?.package ?? updated) };
-                    } catch (e: any) {
-                        return { handled: true, response: this.error(e.message, e.statusCode || 500) };
-                    }
-                }
-                // Fallback: no protocol service — in-memory registry only.
-                const pkg = registry.updatePackageManifest(id, patch);
-                if (!pkg) return { handled: true, response: this.error(`Package '${id}' not found`, 404) };
-                return { handled: true, response: this.success(pkg) };
-            }
-
-            // DELETE /packages/:id → delete the package. Unregisters it from the
-            // in-memory registry AND removes its persisted sys_metadata rows
-            // (active + draft), tearing down each object's physical table by
-            // default. `?keepData=true` preserves object tables (metadata-only
-            // delete). Use case: "I don't want this package anymore."
-            if (parts.length === 1 && m === 'DELETE') {
-                const id = decodeURIComponent(parts[0]);
-                const registryRemoved = registry.uninstallPackage(id);
-
-                // Persisted removal (AI/runtime packages live in sys_metadata, not
-                // just the in-memory registry — the registry uninstall alone would
-                // leave the rows and tables behind).
-                let persisted: unknown = undefined;
-                const protocol = await this.resolveService('protocol');
-                if (protocol && typeof (protocol as any).deletePackage === 'function') {
-                    try {
-                        const organizationId = await this.resolveActiveOrganizationId(_context);
-                        const keepData = query?.keepData === 'true' || query?.keepData === '1';
-                        persisted = await (protocol as any).deletePackage({
-                            packageId: id,
-                            ...(organizationId ? { organizationId } : {}),
-                            ...(keepData ? { keepData: true } : {}),
-                        });
-                    } catch (e: any) {
-                        return { handled: true, response: this.error(e.message, e.statusCode || 500) };
-                    }
-                }
-
-                const deletedCount = (persisted as any)?.deletedCount ?? 0;
-                if (!registryRemoved && deletedCount === 0) {
-                    return { handled: true, response: this.error(`Package '${id}' not found`, 404) };
-                }
-                return { handled: true, response: this.success({ success: true, registryRemoved, persisted }) };
-            }
-        } catch (e: any) {
-            return { handled: true, response: this.error(e.message, e.statusCode || 500) };
-        }
-
-        return { handled: false };
+        return handlePackagesRequest(this.domainDeps, path, method, body, query, _context);
     }
 
-    /**
-     * Assemble a portable, offline-installable package manifest from the
-     * `sys_metadata` overlay rows bound to `packageId`.
-     *
-     * The resulting shape mirrors what `marketplace-install-local` →
-     * `manifestService.register()` → `engine.registerApp()` consumes:
-     *   `{ id, name, version, objects:[…], views:[…], flows:[…], … }`
-     * where each category key is the PLURAL manifest name and its value is
-     * an array of clean metadata bodies (provenance decorations stripped).
-     *
-     * Only the metadata categories that `registerApp` can actually consume
-     * are exported. `datasources` and `emailTemplates` are intentionally
-     * excluded (not registered by the import path). `tools` / `skills` ARE
-     * round-tripped: they are registered by `registerApp` on import and
-     * surfaced by `getMetaItems('tool' | 'skill')` on export.
-     *
-     * @returns the manifest object, or `null` if the package id is unknown
-     *          AND has no overlay-authored metadata.
-     */
-    private async assemblePackageManifest(
-        packageId: string,
-        registry: any,
-        context: HttpProtocolContext,
-    ): Promise<Record<string, any> | null> {
-        const protocol = await this.resolveService('protocol');
-        if (!protocol || typeof protocol.getMetaItems !== 'function') return null;
-
-        const organizationId = await this.resolveActiveOrganizationId(context);
-
-        // Provenance / overlay-bookkeeping keys that must never leak into a
-        // portable manifest. Stripped at top level only — nested field bodies
-        // are left untouched.
-        const PROVENANCE_KEYS = new Set([
-            '_packageId', '_packageVersionId', '_provenance', '_state',
-            '_version', '_organizationId', '_source', '_id', '_rowId',
-        ]);
-        const clean = (item: any) => {
-            if (!item || typeof item !== 'object') return item;
-            const out: Record<string, any> = {};
-            for (const [k, v] of Object.entries(item)) {
-                if (k.startsWith('_') || PROVENANCE_KEYS.has(k)) continue;
-                out[k] = v;
-            }
-            return out;
-        };
-
-        // Categories the local-install register path understands. Excludes
-        // datasources / emailTemplates (not consumed by registerApp).
-        const exportPluralKeys = Object.keys(PLURAL_TO_SINGULAR).filter(
-            (k) => k !== 'datasources' && k !== 'emailTemplates',
-        );
-
-        const manifest: Record<string, any> = {};
-        let total = 0;
-        for (const plural of exportPluralKeys) {
-            const singular = PLURAL_TO_SINGULAR[plural];
-            let items: any[] = [];
-            try {
-                // getMetaItems applies the packageId filter at the
-                // registry/overlay query level, so the returned items are
-                // already scoped to this package — no client-side re-filter.
-                const res = await protocol.getMetaItems({ type: singular, packageId, organizationId });
-                items = Array.isArray(res?.items) ? res.items : [];
-            } catch {
-                // Unknown/unsupported type for this runtime — skip.
-                continue;
-            }
-            if (items.length === 0) continue;
-            manifest[plural] = items.map(clean);
-            total += items.length;
-        }
-
-        const pkg = (() => {
-            try { return registry?.getPackage?.(packageId); } catch { return undefined; }
-        })();
-
-        if (total === 0 && !pkg) return null;
-
-        manifest.id = packageId;
-        manifest.name = pkg?.manifest?.name ?? pkg?.name ?? packageId;
-        manifest.version = pkg?.manifest?.version ?? pkg?.version ?? '1.0.0';
-        if (pkg?.manifest?.label ?? pkg?.label) {
-            manifest.label = pkg?.manifest?.label ?? pkg?.label;
-        }
-        return manifest;
-    }
 
     /**
      * Cloud / Environment Control-Plane routes.
@@ -3235,86 +2532,6 @@ export class HttpDispatcher {
      * Physical database addressing (database_url, database_driver, etc.)
      * is stored directly on the sys_environment row.
      */
-    /**
-     * Apply just-published `seed` metadata: load each seed's rows into its
-     * target object so publishing a seed draft makes the data live (the runtime
-     * counterpart to staging it). Reads each seed body via the protocol, then
-     * runs the {@link SeedLoaderService} for the active org. Best-effort and
-     * idempotent (upsert) — callers must never let this fail the publish.
-     *
-     * Lives at the runtime layer (not in the objectql publish primitive)
-     * because the seed loader needs the data engine + metadata service, which
-     * objectql cannot depend on without a layering cycle.
-     */
-    private async applyPublishedSeeds(
-        names: string[],
-        organizationId: string | undefined,
-        _context: HttpProtocolContext,
-    ): Promise<{ success: boolean; inserted?: number; updated?: number; errors?: unknown[]; error?: string }> {
-        const protocol: any = await this.resolveService('protocol');
-        const metadata: any = await this.getService(CoreServiceName.enum.metadata);
-        const ql: any = await this.resolveService('objectql');
-        if (!protocol || typeof protocol.getMetaItem !== 'function' || !ql || !metadata) {
-            return { success: false, error: 'seed apply: required services unavailable' };
-        }
-        const datasets: any[] = [];
-        const readErrors: string[] = [];
-        for (const name of names) {
-            // Read the just-published seed body. Try the active org first, then
-            // fall back to an env-wide read — a workspace seed is often stored
-            // org-wide (organization_id IS NULL), and resolving the wrong scope
-            // here is what silently produced "0 rows loaded".
-            const attempts = organizationId
-                ? [{ type: 'seed', name, organizationId }, { type: 'seed', name }]
-                : [{ type: 'seed', name }];
-            let item: any;
-            for (const args of attempts) {
-                try {
-                    item = await protocol.getMetaItem(args);
-                    if (item) break;
-                } catch (e) {
-                    readErrors.push(`read ${name}: ${(e as Error)?.message ?? String(e)}`);
-                }
-            }
-            // protocol.getMetaItem (called directly, unlike the HTTP endpoint
-            // which unwraps) returns a WRAPPER: `{ type, name, item, lock,
-            // editable, … }` — the seed body (object/records) lives under
-            // `.item`. Tolerate the wrapper (`.item`) plus the body-direct and
-            // `.metadata`/`.body` shapes other protocols may return.
-            const seed = item?.object && Array.isArray(item?.records)
-                ? item
-                : (item?.item ?? item?.metadata ?? item?.body);
-            if (seed?.object && Array.isArray(seed?.records)) {
-                datasets.push(seed);
-            } else {
-                readErrors.push(`seed "${name}" body unreadable (keys: ${item ? Object.keys(item).join(',') : 'none'})`);
-            }
-        }
-        // Seeds were published but none could be read back → surface it (do NOT
-        // report success with 0 rows, which hides the failure).
-        if (datasets.length === 0) {
-            return { success: false, inserted: 0, updated: 0, error: 'seed apply: no readable seed bodies', errors: readErrors };
-        }
-
-        const { SeedLoaderService } = await import('./seed-loader.js');
-        const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
-        const loader = new SeedLoaderService(ql, metadata, (this as any).logger ?? console);
-        const request = SeedLoaderRequestSchema.parse({
-            seeds: datasets,
-            config: {
-                defaultMode: 'upsert',
-                multiPass: true,
-                ...(organizationId ? { organizationId } : {}),
-            },
-        });
-        const r = await loader.load(request);
-        return {
-            success: r.success,
-            inserted: r.summary.totalInserted,
-            updated: r.summary.totalUpdated,
-            errors: [...readErrors, ...(r.errors ?? [])],
-        };
-    }
 
     /**
      * Resolve the calling user id from the request session, if any.
@@ -3346,348 +2563,19 @@ export class HttpDispatcher {
         }
     }
 
-    /**
-     * Handles Storage requests
-     * path: sub-path after /storage/
-     */
+    /** Thin delegate — body extracted to `./domains/storage.ts` (D11③ PR-3). */
     async handleStorage(path: string, method: string, file: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        const storageService = await this.getService(CoreServiceName.enum['file-storage']) || this.kernel.services?.['file-storage'];
-        if (!storageService) {
-             return { handled: true, response: this.error('File storage not configured', 501) };
-        }
-        
-        const m = method.toUpperCase();
-        const parts = path.replace(/^\/+/, '').split('/');
-        
-        // POST /storage/upload
-        if (parts[0] === 'upload' && m === 'POST') {
-            if (!file) {
-                 return { handled: true, response: this.error('No file provided', 400) };
-            }
-            const result = await storageService.upload(file, { request: context.request });
-            return { handled: true, response: this.success(result) };
-        }
-        
-        // GET /storage/file/:id
-        if (parts[0] === 'file' && parts[1] && m === 'GET') {
-            const id = parts[1];
-            const result = await storageService.download(id, { request: context.request });
-            
-            // Result can be URL (redirect), Stream/Blob, or metadata
-            if (result.url && result.redirect) {
-                // Must be handled by adapter to do actual redirect
-                return { handled: true, result: { type: 'redirect', url: result.url } };
-            }
-            
-            if (result.stream) {
-                 // Must be handled by adapter to pipe stream
-                 return { 
-                     handled: true, 
-                     result: { 
-                         type: 'stream', 
-                         stream: result.stream, 
-                         headers: {
-                             'Content-Type': result.mimeType || 'application/octet-stream',
-                             'Content-Length': result.size
-                         }
-                     } 
-                 };
-            }
-            
-            return { handled: true, response: this.success(result) };
-        }
-        
-        return { handled: false };
+        return handleStorageRequest(this.domainDeps, path, method, file, context);
     }
 
-    /**
-     * Handles UI requests
-     * path: sub-path after /ui/
-     */
+    /** Thin delegate — body extracted to `./domains/ui.ts` (D11③ PR-3). */
     async handleUi(path: string, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
-        
-        // GET /ui/view/:object (with optional type param)
-        if (parts[0] === 'view' && parts[1]) {
-            const objectName = parts[1];
-            // Support both path param /view/obj/list AND query param /view/obj?type=list
-            const type = parts[2] || query?.type || 'list';
-
-            const protocol = await this.resolveService('protocol');
-            
-            if (protocol && typeof protocol.getUiView === 'function') {
-                try {
-                    const result = await protocol.getUiView({ object: objectName, type });
-                    return { handled: true, response: this.success(result) };
-                } catch (e: any) {
-                    return { handled: true, response: this.error(e.message, 500) };
-                }
-            } else {
-                 return { handled: true, response: this.error('Protocol service not available', 503) };
-            }
-        }
-
-        return { handled: false };
+        return handleUiRequest(this.domainDeps, path, query, _context);
     }
 
-    /**
-     * Handles Automation requests
-     * path: sub-path after /automation/
-     *
-     * Routes:
-     *   GET    /                     → listFlows
-     *   GET    /actions              → getActionDescriptors (ADR-0018; ?paradigm/?source/?category filters)
-     *   GET    /connectors           → getConnectorDescriptors (ADR-0022; ?type filter)
-     *   GET    /:name                → getFlow
-     *   POST   /                     → createFlow (registerFlow)
-     *   PUT    /:name                → updateFlow
-     *   DELETE /:name                → deleteFlow (unregisterFlow)
-     *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported)
-     *   POST   /:name/toggle         → toggleFlow
-     *   GET    /:name/runs           → listRuns
-     *   GET    /:name/runs/:runId    → getRun
-     *   POST   /:name/runs/:runId/resume → resume a paused run (screen input / ADR-0019)
-     *   GET    /:name/runs/:runId/screen → the screen a paused run awaits
-     */
+    /** Thin delegate — body extracted to `./domains/automation.ts` (D11③ PR-6). */
     async handleAutomation(path: string, method: string, body: any, context: HttpProtocolContext, query?: any): Promise<HttpDispatcherResult> {
-        const automationService = await this.getService(CoreServiceName.enum.automation);
-        if (!automationService) return { handled: false };
-
-        const m = method.toUpperCase();
-        const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
-
-        // Legacy: POST /automation/trigger/:name
-        if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
-             const triggerName = parts[1];
-             if (typeof automationService.trigger === 'function') {
-                 const result = await automationService.trigger(triggerName, body, { request: context.request });
-                 return { handled: true, response: this.success(result) };
-             }
-             // Fallback to execute
-             if (typeof automationService.execute === 'function') {
-                 const result = await automationService.execute(triggerName, body);
-                 return { handled: true, response: this.success(result) };
-             }
-        }
-
-        // GET / → listFlows
-        if (parts.length === 0 && m === 'GET') {
-            if (typeof automationService.listFlows === 'function') {
-                const names = await automationService.listFlows();
-                return { handled: true, response: this.success({ flows: names, total: names.length, hasMore: false }) };
-            }
-        }
-
-        // POST / → createFlow
-        if (parts.length === 0 && m === 'POST') {
-            if (typeof automationService.registerFlow === 'function') {
-                automationService.registerFlow(body?.name, body);
-                return { handled: true, response: this.success(body) };
-            }
-        }
-
-        // GET /actions → list registered action descriptors (ADR-0018).
-        // MUST precede the `/:name → getFlow` catch-all below, otherwise a
-        // flow lookup for a flow literally named "actions" would shadow it.
-        // Backs the designer palette + flow validation; the registry is open
-        // and marketplace-extensible (built-in + plugin-contributed actions).
-        if (parts[0] === 'actions' && parts.length === 1 && m === 'GET') {
-            if (typeof automationService.getActionDescriptors === 'function') {
-                let actions = automationService.getActionDescriptors() ?? [];
-                // Optional filters mirror descriptor fields.
-                if (query?.paradigm) {
-                    actions = actions.filter((a: any) => Array.isArray(a?.paradigms) && a.paradigms.includes(query.paradigm));
-                }
-                if (query?.source) {
-                    actions = actions.filter((a: any) => a?.source === query.source);
-                }
-                if (query?.category) {
-                    actions = actions.filter((a: any) => a?.category === query.category);
-                }
-                return { handled: true, response: this.success({ actions, total: actions.length }) };
-            }
-            // Service present but does not implement the optional method:
-            // report an empty (but valid) registry rather than a 404.
-            return { handled: true, response: this.success({ actions: [], total: 0 }) };
-        }
-
-        // GET /connectors → list registered connector descriptors (ADR-0022).
-        // Like /actions, MUST precede the `/:name → getFlow` catch-all so a flow
-        // named "connectors" cannot shadow it. Backs the designer's
-        // `connector_action` connector/action/input pickers; the registry is
-        // empty in baseline and populated by connector plugins (e.g.
-        // @objectstack/connector-rest, @objectstack/connector-slack).
-        if (parts[0] === 'connectors' && parts.length === 1 && m === 'GET') {
-            if (typeof automationService.getConnectorDescriptors === 'function') {
-                let connectors = automationService.getConnectorDescriptors() ?? [];
-                // Optional filter mirrors the descriptor's connector type.
-                if (query?.type) {
-                    connectors = connectors.filter((c: any) => c?.type === query.type);
-                }
-                return { handled: true, response: this.success({ connectors, total: connectors.length }) };
-            }
-            // Service present but does not implement the optional method:
-            // report an empty (but valid) registry rather than a 404.
-            return { handled: true, response: this.success({ connectors: [], total: 0 }) };
-        }
-
-        // GET /_status → runtime enable/bound state for every flow (backs the
-        // Studio's Automations status badges: persisted `status` is metadata, but
-        // whether a flow is actually enabled + bound to its trigger is engine
-        // state). Underscore-prefixed so no flow name can shadow it; MUST precede
-        // the `/:name → getFlow` catch-all.
-        if (parts[0] === '_status' && parts.length === 1 && m === 'GET') {
-            const svc = automationService as { getFlowRuntimeStates?: () => Array<{ name: string; enabled: boolean; bound: boolean }> };
-            if (typeof svc.getFlowRuntimeStates === 'function') {
-                const flows = svc.getFlowRuntimeStates();
-                return { handled: true, response: this.success({ flows, total: flows.length }) };
-            }
-            // Service present but older / does not implement the method.
-            return { handled: true, response: this.success({ flows: [], total: 0 }) };
-        }
-
-        // Routes with :name
-        if (parts.length >= 1) {
-            const name = parts[0];
-
-            // POST /:name/trigger → execute
-            if (parts[1] === 'trigger' && m === 'POST') {
-                if (typeof automationService.execute === 'function') {
-                    const ctxBody = body && typeof body === 'object' ? body : {};
-                    // Translate UI/SDK request shape `{recordId, objectName, params}`
-                    // into the canonical AutomationContext shape expected by the engine.
-                    // Key transformations:
-                    //  - `recordId` is exposed in `params.recordId` AND aliased to
-                    //    `<objectName>Id` (camelCase) so flow variables like `leadId`,
-                    //    `caseId`, `opportunityId` resolve from a single REST contract.
-                    //  - `objectName` is mapped to the canonical `object` field.
-                    //  - The user identity from the auth context (if any) is forwarded
-                    //    as `userId` so node executors / template interpolation can
-                    //    expand `{$User.Id}`.
-                    const recordId = ctxBody.recordId;
-                    const objectName = ctxBody.objectName ?? ctxBody.object;
-                    const baseParams = (ctxBody.params && typeof ctxBody.params === 'object') ? { ...ctxBody.params } : {};
-                    // Back-compat: when callers POST a flat body (no `params` wrapper),
-                    // forward unknown top-level keys as flow params so the original
-                    // `{ foo: 'bar' }` payload is not silently dropped.
-                    if (!ctxBody.params) {
-                        const reserved = new Set(['recordId', 'objectName', 'object', 'event', 'params']);
-                        for (const [k, v] of Object.entries(ctxBody)) {
-                            if (reserved.has(k)) continue;
-                            if (baseParams[k] === undefined) baseParams[k] = v;
-                        }
-                    }
-                    if (recordId !== undefined && baseParams.recordId === undefined) {
-                        baseParams.recordId = recordId;
-                    }
-                    if (recordId !== undefined && objectName) {
-                        const alias = `${String(objectName).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase())}Id`;
-                        if (baseParams[alias] === undefined) baseParams[alias] = recordId;
-                    }
-                    const automationContext: any = {
-                        params: baseParams,
-                        object: objectName,
-                        event: ctxBody.event ?? 'manual',
-                    };
-                    // Forward the FULLY-RESOLVED caller identity (not just the
-                    // user id) so a `runAs:'user'` flow enforces RLS exactly as the
-                    // triggering user — their roles/tenant, not a member fallback
-                    // (#1888). The engine elevates to a system principal only when
-                    // the flow itself declares `runAs:'system'`.
-                    const ec = (context as any)?.executionContext;
-                    const userIdFromAuth = (context as any)?.user?.id ?? (context as any)?.userId ?? ec?.userId;
-                    if (userIdFromAuth) automationContext.userId = userIdFromAuth;
-                    if (Array.isArray(ec?.positions) && ec.positions.length) automationContext.positions = ec.positions;
-                    if (Array.isArray(ec?.permissions) && ec.permissions.length) automationContext.permissions = ec.permissions;
-                    if (ec?.tenantId) automationContext.tenantId = ec.tenantId;
-                    const result = await automationService.execute(name, automationContext);
-                    return { handled: true, response: this.success(result) };
-                }
-            }
-
-            // POST /:name/toggle → toggleFlow
-            if (parts[1] === 'toggle' && m === 'POST') {
-                if (typeof automationService.toggleFlow === 'function') {
-                    await automationService.toggleFlow(name, body?.enabled ?? true);
-                    return { handled: true, response: this.success({ name, enabled: body?.enabled ?? true }) };
-                }
-            }
-
-            // POST /:name/runs/:runId/resume → resume a paused run (screen-flow
-            // runtime / ADR-0019). Body `{ inputs }` = a screen node's collected
-            // values, applied as bare flow variables; `output`/`branchLabel` also
-            // forwarded for approval-style resumes. Returns the next paused
-            // `{ screen }` (multi-screen) or the completed result.
-            if (parts[1] === 'runs' && parts[2] && parts[3] === 'resume' && m === 'POST') {
-                if (typeof automationService.resume === 'function') {
-                    const b = (body && typeof body === 'object') ? body : {};
-                    const inputs = (b.inputs ?? b.variables);
-                    const signal: any = {};
-                    if (inputs && typeof inputs === 'object') signal.variables = inputs;
-                    if (b.output && typeof b.output === 'object') signal.output = b.output;
-                    if (typeof b.branchLabel === 'string') signal.branchLabel = b.branchLabel;
-                    const result = await automationService.resume(parts[2], signal);
-                    return { handled: true, response: this.success(result) };
-                }
-                return { handled: true, response: this.error('Resume not supported', 501) };
-            }
-
-            // GET /:name/runs/:runId/screen → the screen a paused run awaits
-            // (refresh-safe re-fetch for the UI flow-runner).
-            if (parts[1] === 'runs' && parts[2] && parts[3] === 'screen' && m === 'GET') {
-                if (typeof automationService.getSuspendedScreen === 'function') {
-                    const screen = automationService.getSuspendedScreen(parts[2]);
-                    if (!screen) return { handled: true, response: this.error('No pending screen for run', 404) };
-                    return { handled: true, response: this.success({ runId: parts[2], screen }) };
-                }
-                return { handled: true, response: this.error('Screen lookup not supported', 501) };
-            }
-
-            // GET /:name/runs/:runId → getRun
-            if (parts[1] === 'runs' && parts[2] && !parts[3] && m === 'GET') {
-                if (typeof automationService.getRun === 'function') {
-                    const run = await automationService.getRun(parts[2]);
-                    if (!run) return { handled: true, response: this.error('Execution not found', 404) };
-                    return { handled: true, response: this.success(run) };
-                }
-            }
-
-            // GET /:name/runs → listRuns
-            if (parts[1] === 'runs' && !parts[2] && m === 'GET') {
-                if (typeof automationService.listRuns === 'function') {
-                    const options = query ? { limit: query.limit ? Number(query.limit) : undefined, cursor: query.cursor } : undefined;
-                    const runs = await automationService.listRuns(name, options);
-                    return { handled: true, response: this.success({ runs, hasMore: false }) };
-                }
-            }
-
-            // GET /:name → getFlow (no sub-path)
-            if (parts.length === 1 && m === 'GET') {
-                if (typeof automationService.getFlow === 'function') {
-                    const flow = await automationService.getFlow(name);
-                    if (!flow) return { handled: true, response: this.error('Flow not found', 404) };
-                    return { handled: true, response: this.success(flow) };
-                }
-            }
-
-            // PUT /:name → updateFlow
-            if (parts.length === 1 && m === 'PUT') {
-                if (typeof automationService.registerFlow === 'function') {
-                    automationService.registerFlow(name, body?.definition ?? body);
-                    return { handled: true, response: this.success(body?.definition ?? body) };
-                }
-            }
-
-            // DELETE /:name → deleteFlow
-            if (parts.length === 1 && m === 'DELETE') {
-                if (typeof automationService.unregisterFlow === 'function') {
-                    automationService.unregisterFlow(name);
-                    return { handled: true, response: this.success({ name, deleted: true }) };
-                }
-            }
-        }
-        
-        return { handled: false };
+        return handleAutomationRequest(this.domainDeps, path, method, body, context, query);
     }
 
     private getServicesMap(): Record<string, any> {
@@ -3974,183 +2862,12 @@ export class HttpDispatcher {
         }
     }
 
-    /**
-     * Handle AI service routes (/ai/chat, /ai/models, /ai/conversations, etc.)
-     * Resolves the AI service and its built-in route handlers, then dispatches.
-     */
+    /** Thin delegate — body extracted to `./domains/ai.ts` (D11③ PR-7). */
     async handleAI(subPath: string, method: string, body: any, query: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        let aiService: any;
-        try {
-            aiService = await this.resolveService('ai');
-        } catch {
-            // AI service not registered
-        }
-
-        if (!aiService) {
-            // The console polls `GET /ai/agents` on every navigation to decide
-            // whether to show AI affordances. Reporting that as a 404 turns the
-            // normal "no AI service configured" state (the open-source default —
-            // service-ai is a Cloud/Enterprise package) into console error-log
-            // spam on every page. An empty list conveys the same information
-            // without looking like a fault. Every other /ai/* route still 404s.
-            if (method === 'GET' && subPath === '/ai/agents') {
-                return { handled: true, response: { status: 200, body: { agents: [] } } };
-            }
-            return {
-                handled: true,
-                response: {
-                    status: 404,
-                    body: { success: false, error: { message: 'AI service is not configured', code: 404 } },
-                },
-            };
-        }
-
-        // The AI service exposes route definitions via buildAIRoutes.
-        // We match the request path against known AI route patterns.
-        const fullPath = `/api/v1${subPath}`;
-
-        // Build a simple param-extracting matcher for route patterns like /api/v1/ai/conversations/:id
-        const matchRoute = (pattern: string, path: string): Record<string, string> | null => {
-            const patternParts = pattern.split('/');
-            const pathParts = path.split('/');
-            if (patternParts.length !== pathParts.length) return null;
-            const params: Record<string, string> = {};
-            for (let i = 0; i < patternParts.length; i++) {
-                if (patternParts[i].startsWith(':')) {
-                    params[patternParts[i].substring(1)] = pathParts[i];
-                } else if (patternParts[i] !== pathParts[i]) {
-                    return null;
-                }
-            }
-            return params;
-        };
-
-        // Try to get route definitions from the AI service's cached routes
-        const routes = (this.kernel as any).__aiRoutes as Array<{
-            method: string; path: string; handler: (req: any) => Promise<any>; auth?: boolean;
-        }> | undefined;
-
-        if (!routes) {
-            return {
-                handled: true,
-                response: {
-                    status: 503,
-                    body: { success: false, error: { message: 'AI service routes not yet initialized', code: 503 } },
-                },
-            };
-        }
-
-        for (const route of routes) {
-            if (route.method !== method) continue;
-            const params = matchRoute(route.path, fullPath);
-            if (params === null) continue;
-
-            // Enforce the route's declared `auth` contract. Nothing upstream
-            // does: `enforceAuthGate` only covers ADR-0069 password/MFA gates
-            // and `enforceProjectMembership` bails when the request is
-            // anonymous or unscoped — so without this an anonymous caller
-            // reached `auth: true` handlers (e.g. GET /ai/status) and got the
-            // adapter/model config back. Gate when the deployment requires
-            // auth; an authenticated user (or an internal system context)
-            // passes, matching the REST `enforceAuth` seam. Off → unchanged.
-            if (route.auth !== false) {
-                const gec: any = context.executionContext;
-                // `requireAuth && route.auth !== false` is the AI-route contract;
-                // the shared function owns the anonymous decision itself.
-                if (shouldDenyAnonymous({ requireAuth: this.requireAuth, userId: gec?.userId, isSystem: gec?.isSystem })) {
-                    return {
-                        handled: true,
-                        response: this.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
-                    };
-                }
-            }
-
-            // Resolve `req.user` from the already-resolved ExecutionContext so
-            // AI route handlers can attribute the call to the authenticated
-            // actor (drives auto-titled conversations, permission-aware
-            // tools, HITL conversation linkage, …). Falls back to undefined
-            // for anonymous requests (only reachable when the deployment does
-            // NOT require auth — the gate above rejects them otherwise).
-            const ec: any = context.executionContext;
-            // `ai_seat` is synthesized into ec.permissions by resolveExecutionContext
-            // (the single, scope-correct source — security/resolve-execution-context.ts),
-            // so it flows through here with no extra per-request lookup.
-            const user = ec?.userId
-                ? {
-                    userId: ec.userId,
-                    id: ec.userId,
-                    displayName: ec.userDisplayName ?? ec.userName ?? ec.userId,
-                    email: ec.userEmail,
-                    roles: Array.isArray(ec.positions) ? ec.positions : [],
-                    permissions: Array.isArray(ec.permissions) ? ec.permissions : [],
-                    organizationId: ec.tenantId,
-                }
-                : undefined;
-
-            const result = await route.handler({
-                body,
-                params,
-                query,
-                headers: context.request?.headers,
-                user,
-            });
-
-            if (result.stream && result.events) {
-                // Return a streaming result for the adapter to handle
-                return {
-                    handled: true,
-                    result: {
-                        type: 'stream',
-                        contentType: result.vercelDataStream
-                            ? 'text/plain; charset=utf-8'
-                            : 'text/event-stream',
-                        events: result.events,
-                        vercelDataStream: result.vercelDataStream,
-                        headers: {
-                            'Content-Type': result.vercelDataStream
-                                ? 'text/plain; charset=utf-8'
-                                : 'text/event-stream',
-                            'Cache-Control': 'no-cache',
-                            'Connection': 'keep-alive',
-                        },
-                    },
-                };
-            }
-
-            return {
-                handled: true,
-                response: {
-                    status: result.status,
-                    body: result.body,
-                },
-            };
-        }
-
-        return {
-            handled: true,
-            response: this.routeNotFound(subPath),
-        };
+        return handleAIRequest(this.domainDeps, subPath, method, body, query, context);
     }
 
-    /**
-     * Share-link capability tokens — "anyone with the link" publication of a
-     * single record (ADR-0047). Mirrors the per-env service-dispatch pattern
-     * used by {@link handleI18n} / {@link handleAI}: the `shareLinks` service
-     * is resolved from the request's environment kernel, so links live in (and
-     * resolve against) the same per-environment database that owns the record.
-     * This branch owns URL parsing and the auth/public split.
-     *
-     *   POST   /share-links                   → create a link (authenticated)
-     *   GET    /share-links?object&recordId    → list the caller's links (authenticated)
-     *   DELETE /share-links/:idOrToken         → revoke (authenticated)
-     *   GET    /share-links/:token/resolve     → resolve token → record (PUBLIC)
-     *   GET    /share-links/:token/messages    → ai_conversations messages (PUBLIC)
-     *
-     * The resolve / messages routes are intentionally public — the token IS
-     * the authorisation. The underlying record is fetched with a SYSTEM
-     * context (per-env RLS is bypassed because the token gates access), and
-     * `redactFields` are stripped before the record leaves the server.
-     */
+    /** Thin delegate — body extracted to `./domains/share-links.ts` (D11③ PR-4). */
     async handleShareLinks(
         subPath: string,
         method: string,
@@ -4158,185 +2875,7 @@ export class HttpDispatcher {
         query: any,
         context: HttpProtocolContext,
     ): Promise<HttpDispatcherResult> {
-        const svc: any = await this.resolveService('shareLinks', context.environmentId);
-        if (!svc) {
-            return { handled: true, response: this.error('Sharing is not configured for this environment', 501) };
-        }
-
-        const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
-        const m = method.toUpperCase();
-        const parts = subPath.replace(/^\/+/, '').split('/').filter(Boolean);
-        const ec: any = context.executionContext;
-        const callerCtx = { userId: ec?.userId as string | undefined, tenantId: ec?.tenantId as string | undefined };
-
-        const headerOf = (name: string): string | undefined => {
-            const h = context.request?.headers;
-            if (!h) return undefined;
-            const v = typeof h.get === 'function' ? h.get(name) : (h[name] ?? h[name.toLowerCase()]);
-            return Array.isArray(v) ? v[0] : (v ?? undefined);
-        };
-        const sendErr = (status: number, code: string, msg: string): HttpDispatcherResult => ({
-            handled: true,
-            response: this.error(msg, status, { code }),
-        });
-        // Engine for fetching the shared record + token probes — the same
-        // per-env ObjectQL the shareLinks service is bound to.
-        const getEngine = async (): Promise<any> => {
-            // Read objectql from the request's RESOLVED (per-env) kernel — the
-            // same engine SharingServicePlugin bound the shareLinks service to,
-            // so the shared record + messages live in the SAME store as
-            // sys_share_link. `resolveService('objectql', env)` can hand back a
-            // different (host/scoped) engine that lacks the per-env rows.
-            try {
-                const k: any = this.kernel;
-                const e = typeof k?.getServiceAsync === 'function'
-                    ? await k.getServiceAsync('objectql')
-                    : k?.getService?.('objectql');
-                if (e) return e;
-            } catch { /* fall through to scoped resolution */ }
-            return this.resolveService('objectql', context.environmentId);
-        };
-        const asArray = (rows: any): any[] => (Array.isArray(rows) ? rows : Array.isArray(rows?.value) ? rows.value : []);
-        const applyRedaction = (record: any, redactFields: string[]): any => {
-            if (!record || typeof record !== 'object' || redactFields.length === 0) return record;
-            const out: any = {};
-            for (const [k, v] of Object.entries(record)) {
-                if (redactFields.includes(k)) continue;
-                out[k] = v;
-            }
-            return out;
-        };
-
-        try {
-            // ── PUBLIC: resolve a token → record ──────────────────────────
-            if (parts.length === 2 && parts[1] === 'resolve' && m === 'GET') {
-                const token = decodeURIComponent(parts[0]);
-                const signedInUserId = ec?.userId;
-                const recipientEmail = typeof query?.email === 'string' ? query.email : undefined;
-                const providedPassword =
-                    typeof query?.password === 'string' ? (query.password as string) : headerOf('x-share-password');
-
-                const resolved = await svc.resolveToken(token, { signedInUserId, recipientEmail, providedPassword });
-                if (!resolved) {
-                    // Probe the row to return a more useful status (401 vs 410 vs 404).
-                    const engine = await getEngine();
-                    const probe = engine
-                        ? asArray(await engine.find('sys_share_link', { where: { token }, limit: 1, context: SYSTEM_CTX } as any))
-                        : [];
-                    const row = probe[0] ?? null;
-                    const live = row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now());
-                    if (live && row.password_hash) {
-                        return sendErr(401, providedPassword ? 'WRONG_PASSWORD' : 'NEEDS_PASSWORD',
-                            providedPassword ? 'Incorrect password' : 'This link requires a password');
-                    }
-                    if (live && row.audience === 'signed_in' && !signedInUserId) {
-                        return sendErr(401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
-                    }
-                    if (row && (row.revoked_at || (row.expires_at && Date.parse(row.expires_at) <= Date.now()))) {
-                        return sendErr(410, 'EXPIRED_OR_REVOKED', 'Share link has expired or been revoked');
-                    }
-                    return sendErr(404, 'INVALID_OR_EXPIRED', 'Share link is invalid, expired, or revoked');
-                }
-
-                const engine = await getEngine();
-                const rows = engine
-                    ? asArray(await engine.find(resolved.link.object_name, { where: { id: resolved.link.record_id }, limit: 1, context: SYSTEM_CTX } as any))
-                    : [];
-                const record = rows[0] ?? null;
-                if (!record) return sendErr(410, 'RECORD_GONE', 'The shared record no longer exists');
-
-                return {
-                    handled: true,
-                    response: this.success({
-                        record: applyRedaction(record, resolved.redactFields),
-                        link: {
-                            id: resolved.link.id,
-                            token: resolved.link.token,
-                            object_name: resolved.link.object_name,
-                            record_id: resolved.link.record_id,
-                            permission: resolved.link.permission,
-                            audience: resolved.link.audience,
-                            expires_at: resolved.link.expires_at,
-                            label: resolved.link.label,
-                            created_at: resolved.link.created_at,
-                        },
-                        redactFields: resolved.redactFields,
-                    }),
-                };
-            }
-
-            // ── PUBLIC: ai_conversations messages for a resolved token ────
-            if (parts.length === 2 && parts[1] === 'messages' && m === 'GET') {
-                const token = decodeURIComponent(parts[0]);
-                const providedPassword =
-                    typeof query?.password === 'string' ? (query.password as string) : headerOf('x-share-password');
-                const resolved = await svc.resolveToken(token, { signedInUserId: ec?.userId, providedPassword });
-                if (!resolved) return sendErr(404, 'NOT_FOUND', 'Share link not found');
-                if (resolved.link.object_name !== 'ai_conversations') {
-                    return sendErr(400, 'UNSUPPORTED', 'This share link does not expose messages');
-                }
-                const engine = await getEngine();
-                const rows = engine
-                    ? asArray(await engine.find('ai_messages', {
-                        where: { conversation_id: resolved.link.record_id },
-                        sort: [{ field: 'created_at', order: 'asc' }],
-                        limit: 500,
-                        context: SYSTEM_CTX,
-                    } as any))
-                    : [];
-                return { handled: true, response: this.success(rows) };
-            }
-
-            // ── AUTHENTICATED: create / list / revoke ─────────────────────
-            if (!callerCtx.userId) return sendErr(401, 'UNAUTHENTICATED', 'Sign in to manage share links');
-
-            // POST /share-links → create
-            if (parts.length === 0 && m === 'POST') {
-                const b: any = body ?? {};
-                if (!b.object || !b.recordId) return sendErr(400, 'VALIDATION_FAILED', 'object and recordId are required');
-                const link = await svc.createLink(
-                    {
-                        object: b.object,
-                        recordId: b.recordId,
-                        permission: b.permission,
-                        audience: b.audience,
-                        expiresAt: b.expiresAt ?? null,
-                        emailAllowlist: b.emailAllowlist,
-                        password: b.password,
-                        redactFields: b.redactFields,
-                        label: b.label,
-                    },
-                    callerCtx,
-                );
-                return { handled: true, response: { status: 201, body: { success: true, data: link, link } } };
-            }
-
-            // GET /share-links?object&recordId → list the caller's own links
-            if (parts.length === 0 && m === 'GET') {
-                const links = await svc.listLinks(
-                    {
-                        object: typeof query?.object === 'string' ? query.object : undefined,
-                        recordId: typeof query?.recordId === 'string' ? query.recordId : undefined,
-                        // Constrain to links the caller created so a guessed
-                        // recordId can never enumerate another user's tokens.
-                        createdBy: callerCtx.userId,
-                        includeRevoked: query?.includeRevoked === 'true' || query?.includeRevoked === '1',
-                    },
-                    callerCtx,
-                );
-                return { handled: true, response: { status: 200, body: { success: true, data: links, links } } };
-            }
-
-            // DELETE /share-links/:idOrToken → revoke
-            if (parts.length === 1 && m === 'DELETE') {
-                await svc.revokeLink(decodeURIComponent(parts[0]), callerCtx);
-                return { handled: true, response: this.success({ ok: true }) };
-            }
-
-            return { handled: true, response: this.routeNotFound(`/share-links${subPath}`) };
-        } catch (err: any) {
-            return sendErr(err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Share link request failed');
-        }
+        return handleShareLinksRequest(this.domainDeps, subPath, method, body, query, context);
     }
 
     /**
@@ -4455,9 +2994,7 @@ export class HttpDispatcher {
         // probes were temporary debugging tools used during the SSO rollout.
 
         // 1. System Protocols (Prefix-based)
-        if (cleanPath.startsWith('/auth')) {
-            return this.handleAuth(cleanPath.substring(5), method, body, context);
-        }
+        // /auth moved to the domain registry (D11 step ③).
         
         if (cleanPath.startsWith('/meta')) {
              return this.handleMetadata(cleanPath.substring(5), context, method, body, query);
@@ -4479,26 +3016,16 @@ export class HttpDispatcher {
             return this.handleMcp(body, context);
         }
 
-        if (cleanPath === '/keys' || cleanPath.startsWith('/keys/') || cleanPath.startsWith('/keys?')) {
-            return this.handleKeys(method, body, context);
-        }
+        // /keys moved to the domain registry (D11 step ③).
 
         if (cleanPath.startsWith('/graphql')) {
              if (method === 'POST') return this.handleGraphQL(body, context);
              // GraphQL usually GET for Playground is handled by middleware but we can return 405 or handle it
         }
 
-        if (cleanPath.startsWith('/storage')) {
-             return this.handleStorage(cleanPath.substring(8), method, body, context); // body here is file/stream for upload
-        }
-        
-        if (cleanPath.startsWith('/ui')) {
-             return this.handleUi(cleanPath.substring(3), query, context);
-        }
+        // /storage and /ui moved to the domain registry (D11 step ③).
 
-        if (cleanPath.startsWith('/automation')) {
-             return this.handleAutomation(cleanPath.substring(11), method, body, context, query);
-        }
+        // /automation moved to the domain registry (D11 step ③).
 
         if (cleanPath.startsWith('/actions')) {
              return this.handleActions(cleanPath.substring(8), method, body, context);
@@ -4508,22 +3035,11 @@ export class HttpDispatcher {
 
         // /notifications and /security moved to the domain registry (D11 step ③).
 
-        if (cleanPath.startsWith('/packages')) {
-             return this.handlePackages(cleanPath.substring(9), method, body, query, context);
-        }
+        // /packages and /i18n moved to the domain registry (D11 step ③).
 
-        // /i18n moved to the domain registry (D11 step ③).
+        // /ai moved to the domain registry (D11 step ③).
 
-        // AI Service — delegate to the registered AI route handlers
-        if (cleanPath.startsWith('/ai')) {
-             return this.handleAI(cleanPath, method, body, query, context);
-        }
-
-        // Share links — capability-token record sharing, dispatched to the
-        // per-env `shareLinks` service (links + record live in the same kernel).
-        if (cleanPath === '/share-links' || cleanPath.startsWith('/share-links/')) {
-             return this.handleShareLinks(cleanPath.substring('/share-links'.length), method, body, query, context);
-        }
+        // /share-links moved to the domain registry (D11 step ③).
 
         // OpenAPI Specification
         if (cleanPath === '/openapi.json' && method === 'GET') {

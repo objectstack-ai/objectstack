@@ -103,6 +103,25 @@ export const FILE_REFERENCE_TYPES: ReadonlySet<string> = new Set([
   'image', 'file', 'avatar', 'video', 'audio',
 ] as const satisfies readonly FieldType[]);
 
+/**
+ * Does a stored file-field string look like an opaque `sys_file` id, rather
+ * than the URL a file field legitimately holds in the legacy/dual-mode world?
+ *
+ * ADR-0104 D3 wave 2 makes this the SINGLE arbiter for both directions of the
+ * reference path — the read resolver (which ids does the engine expand?) and
+ * the write claimer (which ids does storage take ownership of?). Two
+ * hand-copied predicates that drift by one character would silently claim
+ * files nobody expands, or expand files nobody owns; there is exactly one
+ * definition so that cannot happen.
+ *
+ * A minted id is uuid/nanoid-shaped: word characters and `-`, nothing else. A
+ * URL — `https://…`, `/api/…`, `data:…`, `blob:…` — always carries a `:`, `/`
+ * or `.` and so can never match.
+ */
+export function isFileIdToken(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+}
+
 /** Structured JSON payloads persisted in JSON columns. */
 export const STRUCTURED_JSON_TYPES: ReadonlySet<string> = new Set([
   'json', 'composite', 'repeater', 'record', 'location', 'address', 'vector',

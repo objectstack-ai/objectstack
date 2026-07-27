@@ -99,6 +99,44 @@ export const SystemFile = ObjectSchema.create({
 
     owner_id: Field.text({
       label: 'Owner ID',
+      description: 'User who uploaded the file (authorship, not the field-reference owner)',
+    }),
+
+    // ── Field-reference ownership (ADR-0104 D3 wave 2) ──────────────
+    // A `file`/`image`/`avatar`/`video`/`audio` FIELD value references a file
+    // by opaque id. Unlike the attachments surface — where one file is
+    // deliberately SHARED across many `sys_attachment` join rows — a field
+    // reference is EXCLUSIVE: at most one (object, record, field) slot owns a
+    // given file. Writing an already-owned id into a second slot copies the
+    // bytes into a fresh `sys_file` rather than sharing the row.
+    //
+    // Exclusivity is what makes the lifecycle safe to reason about: release is
+    // an OBSERVED transition ("my one owner let go"), never an inferred absence
+    // ("I counted and found nobody"), and a file's read authorization derives
+    // from exactly one parent record instead of the union of every referrer's.
+    // See ADR-0104 §"D3 wave 2 — ownership model".
+    //
+    // NULL on: freshly uploaded but not yet claimed by a record write, and on
+    // every attachments-surface file (those are governed by sys_attachment).
+    ref_object: Field.text({
+      label: 'Referencing Object',
+      maxLength: 128,
+      description: 'Short object name of the record whose field owns this file',
+      group: 'Field Reference',
+    }),
+
+    ref_id: Field.text({
+      label: 'Referencing Record',
+      maxLength: 64,
+      description: 'Primary key of the record whose field owns this file',
+      group: 'Field Reference',
+    }),
+
+    ref_field: Field.text({
+      label: 'Referencing Field',
+      maxLength: 128,
+      description: 'Field name on the owning record that holds this file id',
+      group: 'Field Reference',
     }),
 
     metadata: Field.text({
@@ -119,6 +157,13 @@ export const SystemFile = ObjectSchema.create({
         'Tombstone timestamp — set when the last sys_attachment reference to an attachments-scope file is removed; the lifecycle TTL reaps the row (and its storage bytes, via the sys_file reap guard) after the grace window. NULL for live rows.',
     }),
   },
+
+  indexes: [
+    // "which file does this record's field own" / "release everything this
+    // record owned" — the release path is a single keyed write against this
+    // index, so a delete never has to re-read the record's field values.
+    { fields: ['ref_object', 'ref_id'] },
+  ],
 
   // ADR-0057 (#2755): sys_file rows are mostly permanent business truth, but
   // two terminal states are garbage that would otherwise grow forever:

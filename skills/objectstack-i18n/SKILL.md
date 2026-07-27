@@ -82,8 +82,6 @@ export default defineStack({
     defaultLocale: 'en',
     supportedLocales: ['en', 'zh-CN', 'ja-JP', 'es-ES'],
     fallbackLocale: 'en',
-    fileOrganization: 'per_locale',
-    messageFormat: 'simple',
   },
   // translations: [MyTranslations],  ← register your bundles here (see below)
 });
@@ -94,10 +92,6 @@ export default defineStack({
 | `defaultLocale` | `string` | **required** | Default BCP-47 locale code |
 | `supportedLocales` | `string[]` | **required** | All supported locales |
 | `fallbackLocale` | `string` | optional | Fallback when translation missing |
-| `fileOrganization` | `'bundled'` \| `'per_locale'` \| `'per_namespace'` | `'per_locale'` | Declared authoring convention — no runtime consumer (see below) |
-| `messageFormat` | `'simple'` \| `'icu'` | `'simple'` | `'icu'` is EXPERIMENTAL — not enforced (see Message Interpolation) |
-| `lazyLoad` | `boolean` | `false` | Declared only — no runtime consumer yet |
-| `cache` | `boolean` | `true` | EXPERIMENTAL — not enforced; no runtime consumer reads it |
 
 > **BCP-47 Locale Codes**: Use standard locale tags (e.g., `en-US`, `zh-CN`, `pt-BR`, `en-GB`).
 
@@ -148,9 +142,8 @@ i18n/
 **When to use:** Large projects (20+ objects), 5+ locales, team collaboration, CI/CD pipelines.
 
 > These are **authoring conventions**: your import graph assembles whichever layout you
-> choose into the `TranslationBundle` values you register on the stack. The
-> `fileOrganization` config field declares the convention but has no runtime consumer,
-> and `FileI18nAdapter`'s `localesDir` loads only flat top-level `{locale}.json` files
+> choose into the `TranslationBundle` values you register on the stack.
+> `FileI18nAdapter`'s `localesDir` loads only flat top-level `{locale}.json` files
 > (subdirectories are skipped) — a per-namespace tree must be assembled by your own
 > imports or build step.
 
@@ -377,14 +370,13 @@ i18n.t('messages.welcome', 'en', { userName: 'Alice' });
 // "Welcome, Alice!"
 ```
 
-### ICU MessageFormat [EXPERIMENTAL]
+### No ICU MessageFormat
 
-`messageFormat: 'icu'` is accepted by the config schema but **not enforced**. The
-schema's own liveness annotation reads: "[EXPERIMENTAL — 'icu' not enforced] No ICU
-MessageFormat engine is wired; messageFormat:'icu' is accepted but interpolation
-falls back to simple substitution." Until an engine ships, author messages for
-simple `{{variable}}` substitution — ICU plural/select strings like
-`{count, plural, one {1 message} other {# messages}}` will not be evaluated.
+There is no ICU MessageFormat engine — interpolation is always simple
+`{{variable}}` substitution (the aspirational `messageFormat` config knob was
+removed in #3494). Author messages for simple substitution; ICU plural/select
+strings like `{count, plural, one {1 message} other {# messages}}` will not be
+evaluated. To pluralize, select the form in application code before calling `t()`.
 
 ---
 
@@ -543,7 +535,7 @@ Use this structure for metadata apps:
 
 | Layer | CRM Pattern |
 |:--|:--|
-| Stack config | `i18n.fileOrganization = 'per_locale'` with explicit locale list |
+| Stack config | `i18n` with an explicit locale list; per-locale source files by convention |
 | Translation assembly | One `defineTranslationBundle` call that imports per-locale files |
 | Locale content | Object-scoped translations (`objects.account.fields.*`, `_views`, `_actions`) + global app/messages |
 | Naming integrity | Translation object/field keys exactly match metadata machine names |

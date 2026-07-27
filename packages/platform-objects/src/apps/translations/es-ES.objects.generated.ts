@@ -1667,6 +1667,203 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_sso_provider: {
+    label: "Proveedor SSO",
+    pluralLabel: "Proveedores SSO",
+    description: "Proveedores de identidad SSO externos (OIDC / SAML) a los que este entorno federa el inicio de sesión",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      provider_id: {
+        label: "ID de proveedor",
+        help: "Identificador de proveedor estable (único dentro del entorno)"
+      },
+      issuer: {
+        label: "Emisor",
+        help: "URL del emisor del IdP"
+      },
+      domain: {
+        label: "Dominio de correo",
+        help: "Dominio de correo enrutado a este IdP (p. ej. acme.com)"
+      },
+      domain_verified: {
+        label: "Dominio verificado",
+        help: "Si se ha probado la propiedad DNS del dominio de correo (ADR-0024 ②). Lo establece «Verificar dominio» tras resolverse el registro DNS TXT. Gestionado por better-auth: no editable directamente. Solo se aplica cuando la verificación de dominio está habilitada para el entorno."
+      },
+      oidc_config: {
+        label: "Configuración OIDC",
+        help: "JSON: clientId, clientSecret, endpoints, scopes, mapeo, pkce (gestionado por better-auth)"
+      },
+      saml_config: {
+        label: "Configuración SAML",
+        help: "JSON: entryPoint, cert, identifierFormat, mapeo (gestionado por better-auth)"
+      },
+      user_id: {
+        label: "Registrado por",
+        help: "Usuario que registró este proveedor"
+      },
+      organization_id: {
+        label: "Organización",
+        help: "Ámbito de organización (cuando se usa SSO por organización)"
+      },
+      created_at: {
+        label: "Creado el"
+      },
+      updated_at: {
+        label: "Actualizado el"
+      }
+    },
+    _views: {
+      all: {
+        label: "Todos",
+        emptyState: {
+          title: "Aún no hay proveedores SSO",
+          message: "Registre el IdP externo de su organización: OIDC (Okta, Entra, Auth0, …) con «Registrar proveedor SSO», o SAML 2.0 con «Registrar proveedor SAML». Los miembros cuyo dominio de correo coincida podrán iniciar sesión a través de él."
+        }
+      }
+    },
+    _actions: {
+      register_sso_provider: {
+        label: "Registrar proveedor SSO",
+        params: {
+          providerId: {
+            label: "ID de proveedor",
+            helpText: "Identificador estable, p. ej. «okta» o «acme-entra»."
+          },
+          issuer: {
+            label: "URL del emisor",
+            helpText: "Emisor del IdP, p. ej. https://acme.okta.com. El descubrimiento se obtiene de aquí salvo que se indique una URL explícita abajo."
+          },
+          domain: {
+            label: "Dominio de correo",
+            helpText: "Los usuarios con este dominio de correo se enrutan a este IdP, p. ej. acme.com."
+          },
+          clientId: {
+            label: "ID de cliente",
+            helpText: "ID de cliente OAuth emitido por el IdP para este entorno."
+          },
+          clientSecret: {
+            label: "Secreto de cliente",
+            helpText: "Secreto de cliente OAuth (almacenado cifrado por better-auth)."
+          },
+          discoveryEndpoint: {
+            label: "URL de descubrimiento",
+            helpText: "Opcional. URL del documento de descubrimiento OIDC. Déjelo en blanco para derivar `<issuer>/.well-known/openid-configuration`."
+          },
+          scopes: {
+            label: "Ámbitos (scopes)",
+            helpText: "Opcional. Ámbitos OAuth separados por espacios o comas. Valor predeterminado: «openid email profile».",
+            placeholder: "openid email profile"
+          },
+          mapId: {
+            label: "Mapeo: reclamo de ID de usuario",
+            helpText: "Opcional. Reclamo del token de ID asignado al ID de usuario. Valor predeterminado: «sub».",
+            placeholder: "sub"
+          },
+          mapEmail: {
+            label: "Mapeo: reclamo de correo",
+            helpText: "Opcional. Reclamo asignado al correo. Valor predeterminado: «email».",
+            placeholder: "email"
+          },
+          mapName: {
+            label: "Mapeo: reclamo de nombre",
+            helpText: "Opcional. Reclamo asignado al nombre visible. Valor predeterminado: «name».",
+            placeholder: "name"
+          }
+        }
+      },
+      register_saml_provider: {
+        label: "Registrar proveedor SAML",
+        params: {
+          providerId: {
+            label: "ID de proveedor",
+            helpText: "Identificador estable, p. ej. «acme-saml»."
+          },
+          issuer: {
+            label: "ID de entidad del IdP",
+            helpText: "El EntityID SAML del IdP (emisor), p. ej. https://saml.acme.com/entityid."
+          },
+          domain: {
+            label: "Dominio de correo",
+            helpText: "Los usuarios con este dominio de correo se enrutan a este IdP, p. ej. acme.com."
+          },
+          entryPoint: {
+            label: "URL de SSO del IdP",
+            helpText: "Endpoint de inicio de sesión único (redirección) SAML del IdP que recibe la SAMLRequest."
+          },
+          cert: {
+            label: "Certificado de firma del IdP",
+            helpText: "Certificado de firma X.509 del IdP (cuerpo PEM). Se usa para verificar las firmas de las aserciones."
+          },
+          identifierFormat: {
+            label: "Formato de NameID",
+            helpText: "Opcional. Formato de NameID SAML solicitado. Por defecto, el formato configurado en el IdP.",
+            placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          }
+        }
+      },
+      request_domain_verification: {
+        label: "Solicitar verificación de dominio",
+        resultDialog: {
+          title: "Verifique su dominio",
+          description: "Añada el siguiente registro DNS TXT en el proveedor DNS de su dominio y luego ejecute «Verificar dominio». El token se muestra una sola vez.",
+          acknowledge: "Hecho",
+          fields: {
+            dnsRecordType: "Tipo de registro",
+            dnsRecordName: "Nombre / Host",
+            dnsRecordValue: "Valor"
+          }
+        }
+      },
+      verify_domain: {
+        label: "Verificar dominio",
+        successMessage: "Propiedad del dominio verificada"
+      },
+      delete_sso_provider: {
+        label: "Eliminar proveedor SSO",
+        confirmText: "¿Eliminar este proveedor SSO? Los usuarios de su dominio ya no podrán iniciar sesión a través de él.",
+        successMessage: "Proveedor SSO eliminado"
+      }
+    }
+  },
+  sys_scim_provider: {
+    label: "Proveedor SCIM",
+    pluralLabel: "Proveedores SCIM",
+    description: "Conexiones SCIM 2.0 (tokens bearer) que los IdP externos usan para aprovisionar/desaprovisionar los usuarios de este entorno",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      provider_id: {
+        label: "ID de proveedor",
+        help: "Identificador de proveedor SCIM estable (p. ej. «okta-scim»)"
+      },
+      scim_token: {
+        label: "Token SCIM (hash)",
+        help: "Credencial bearer con hash de esta conexión SCIM: el texto plano se muestra una sola vez al generar el token. Sensible; no lo exponga."
+      },
+      organization_id: {
+        label: "Organización",
+        help: "Ámbito de organización de este token (los tokens por organización limitan el aprovisionamiento a esa organización)"
+      },
+      user_id: {
+        label: "Propiedad de",
+        help: "Usuario que generó este token (cuando la propiedad de proveedor está habilitada)"
+      },
+      created_at: {
+        label: "Creado el"
+      },
+      updated_at: {
+        label: "Actualizado el"
+      }
+    },
+    _views: {
+      all: {
+        label: "Todos"
+      }
+    }
+  },
   sys_notification: {
     label: "Notificación",
     pluralLabel: "Notificaciones",
@@ -2233,6 +2430,92 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Actualizado el"
+      }
+    }
+  },
+  sys_import_job: {
+    label: "Trabajo de importación",
+    pluralLabel: "Trabajos de importación",
+    description: "Estado, progreso e historial de trabajos de importación masiva asíncrona",
+    fields: {
+      id: {
+        label: "ID de trabajo"
+      },
+      object_name: {
+        label: "Objeto",
+        help: "Nombre de API del objeto en el que se importa"
+      },
+      status: {
+        label: "Estado",
+        options: {
+          pending: "Pendiente",
+          running: "En ejecución",
+          succeeded: "Completado",
+          failed: "Fallido",
+          cancelled: "Cancelado"
+        }
+      },
+      total_rows: {
+        label: "Filas totales"
+      },
+      processed_rows: {
+        label: "Filas procesadas"
+      },
+      created_count: {
+        label: "Creados"
+      },
+      updated_count: {
+        label: "Actualizados"
+      },
+      skipped_count: {
+        label: "Omitidos"
+      },
+      error_count: {
+        label: "Errores"
+      },
+      write_mode: {
+        label: "Modo de escritura",
+        options: {
+          insert: "Insertar",
+          update: "Actualizar",
+          upsert: "Insertar o actualizar"
+        }
+      },
+      dry_run: {
+        label: "Simulación"
+      },
+      run_automations: {
+        label: "Ejecutar automatizaciones"
+      },
+      treat_as_historical: {
+        label: "Tratar como histórico"
+      },
+      error: {
+        label: "Error fatal"
+      },
+      results: {
+        label: "Resultados por fila (muestra)",
+        help: "Muestra limitada de resultados por fila (primero los fallos) para la interfaz"
+      },
+      undo_log: {
+        label: "Registro de deshacer",
+        help: "Instrucciones de reversión ({created:[ids], updated:[{id,before}]}) capturadas para trabajos pequeños que no son simulación, de modo que la importación pueda deshacerse"
+      },
+      reverted_at: {
+        label: "Deshecho el",
+        help: "Se establece cuando se deshizo la importación (los registros creados se eliminan, los actualizados se restauran)"
+      },
+      started_at: {
+        label: "Iniciado el"
+      },
+      completed_at: {
+        label: "Completado el"
+      },
+      created_by: {
+        label: "Creado por"
+      },
+      created_at: {
+        label: "Creado el"
       }
     }
   },

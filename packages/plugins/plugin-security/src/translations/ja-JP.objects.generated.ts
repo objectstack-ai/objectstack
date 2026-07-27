@@ -253,5 +253,66 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "更新日時"
       }
     }
+  },
+  sys_user_position: {
+    label: "ユーザーポジション",
+    pluralLabel: "ユーザーポジション",
+    description: "ポジション（sys_position.name）をユーザーに割り当てます。プラットフォーム管理（ADR-0057 D4、ADR-0090 D3）。",
+    fields: {
+      id: {
+        label: "割り当て ID",
+        help: "ユーザーポジション割り当ての UUID。"
+      },
+      user_id: {
+        label: "ユーザー",
+        help: "sys_user への外部キー。"
+      },
+      position: {
+        label: "ポジション",
+        help: "ポジションのマシン名（sys_position.name を参照）。"
+      },
+      business_unit_id: {
+        label: "ビジネスユニット",
+        help: "[ADR-0090 補遺] 割り当てレベルの BU アンカー：このポジション割り当てが適用される範囲。readScope/writeScope の深さアンカー、委任管理の境界（D12）、監査事実として機能します。Null = アンカーなし（レガシー/テナント全体）。委任管理者は割り当てを自身のサブツリー内にアンカーする必要があります。"
+      },
+      organization_id: {
+        label: "組織",
+        help: "この割り当てを所有するテナント。Null = グローバル（テナント横断）。"
+      },
+      granted_by: {
+        label: "付与者",
+        help: "このポジション割り当てを付与したユーザー（委任書き込み時に委任管理ゲートが記録）。"
+      },
+      valid_from: {
+        label: "有効開始",
+        help: "[ADR-0091 D1] この時点より前は付与が無効です。Null = 即時有効。解決時にフェイルクローズで適用されます（D2）——バックグラウンドジョブでは行いません。"
+      },
+      valid_until: {
+        label: "有効終了",
+        help: "[ADR-0091 D1] この時点以降は付与が無効です（半開区間 [from, until)、UTC）。Null = 無期限。委任行では必須（D3）。解決時に適用されます（D2）。"
+      },
+      reason: {
+        label: "理由",
+        help: "[ADR-0091 D1] この付与が存在する理由。自由記述。委任（D3）およびブレークグラス（D4）の行では必須。"
+      },
+      delegated_from: {
+        label: "委任元",
+        help: "[ADR-0091 D3] この行が担う権限の委任者（職務代理）。delegated_from が設定された行は、それ自体を再委任できず、自己更新もできません——連鎖は双方向で断ち切られます。"
+      },
+      last_certified_at: {
+        label: "最終認証日時",
+        help: "[ADR-0091 D5] この付与が再認証レビューで最後に証明された日時。Null = 未認証。"
+      },
+      certified_by: {
+        label: "認証者",
+        help: "[ADR-0091 D5] この付与を最後に証明したレビュアー。"
+      },
+      created_at: {
+        label: "作成日時"
+      },
+      updated_at: {
+        label: "更新日時"
+      }
+    }
   }
 };

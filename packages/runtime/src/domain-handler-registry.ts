@@ -80,10 +80,52 @@ export interface DomainHandlerDeps {
     resolveService(name: string, environmentId?: string): any;
     /** Unscoped service lookup on the current kernel (may return a Promise). */
     getService(name: string): any;
+    /**
+     * Environment-scoped ObjectQL lookup with a registry-shape check
+     * (resolves the `objectql` service and returns it only when it exposes
+     * `.registry`; null otherwise). The data-plane domains (/keys today,
+     * /data /meta when they migrate) depend on this.
+     */
+    getObjectQL(environmentId?: string): Promise<any>;
+    /**
+     * Service lookup on the request's RESOLVED (per-environment) kernel —
+     * NOT the default kernel and NOT the scoped-factory path. Domains whose
+     * data must live in the same store as their service bindings (e.g.
+     * share-links: the token row and the shared record sit next to the
+     * `shareLinks` service's engine) read through this and fall back to
+     * `resolveService` themselves.
+     */
+    getRequestKernelService(name: string): Promise<any>;
     /** Standard success envelope. */
     success(data: any, meta?: any): { status: number; body: any };
     /** Standard error envelope. */
     error(message: string, code?: number, details?: any): { status: number; body: any };
+    /** Standard ROUTE_NOT_FOUND envelope (404 + discovery hint). */
+    routeNotFound(route: string): { status: number; body: any };
+    /**
+     * Error envelope derived from a thrown value: honours `.status` /
+     * `.statusCode`, carries spec-validation `issues` and `.code` through as
+     * details (the ADR-0033 publish surface relies on field-anchored 422s).
+     */
+    errorFromThrown(e: any, fallbackStatus?: number): { status: number; body: any };
+    /** Active organization id from the request session (undefined if anonymous / no auth). */
+    resolveActiveOrganizationId(context: HttpProtocolContext): Promise<string | undefined>;
+    /**
+     * Fire a kernel-context event on the request's resolved kernel (no-op
+     * when the kernel exposes no trigger). Used by the packages domain to
+     * announce `metadata:reloaded` after a publish so boot-cached consumers
+     * (the automation engine above all) re-sync without a restart.
+     */
+    announceKernelEvent(event: string, payload: unknown): Promise<void>;
+    /** Host logger when one is attached to the dispatcher; domains fall back to console. */
+    logger?: any;
+    /** The deployment's `requireAuth` posture (lazily read — construction-order safe). */
+    isAuthRequired(): boolean;
+    /**
+     * The AI route table the AI plugin caches on the request kernel
+     * (`__aiRoutes`); undefined until the plugin initializes it.
+     */
+    getRegisteredAiRoutes(): Array<{ method: string; path: string; handler: (req: any) => Promise<any>; auth?: boolean }> | undefined;
 }
 
 /**

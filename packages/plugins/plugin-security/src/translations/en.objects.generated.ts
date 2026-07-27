@@ -253,5 +253,66 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Updated At"
       }
     }
+  },
+  sys_user_position: {
+    label: "User Position",
+    pluralLabel: "User Positions",
+    description: "Assigns a position (sys_position.name) to a user. Platform-owned (ADR-0057 D4, ADR-0090 D3).",
+    fields: {
+      id: {
+        label: "Assignment ID",
+        help: "UUID of the user-position assignment."
+      },
+      user_id: {
+        label: "User",
+        help: "Foreign key to sys_user."
+      },
+      position: {
+        label: "Position",
+        help: "Position machine name (references sys_position.name)."
+      },
+      business_unit_id: {
+        label: "Business Unit",
+        help: "[ADR-0090 Addendum] Assignment-level BU anchor: where this position assignment applies. Depth anchor for readScope/writeScope, delegated-admin boundary (D12), and audit fact. Null = unanchored (legacy/tenant-wide); delegated admins MUST anchor assignments inside their subtree."
+      },
+      organization_id: {
+        label: "Organization",
+        help: "Tenant that owns this assignment; null = global (cross-tenant)."
+      },
+      granted_by: {
+        label: "Granted By",
+        help: "User who granted this position assignment (stamped by the delegated-admin gate for delegate writes)."
+      },
+      valid_from: {
+        label: "Valid From",
+        help: "[ADR-0091 D1] Grant is inactive before this instant. Null = active immediately. Enforced fail-closed at resolution time (D2) — never by a background job."
+      },
+      valid_until: {
+        label: "Valid Until",
+        help: "[ADR-0091 D1] Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires. Mandatory on delegation rows (D3). Enforced at resolution time (D2)."
+      },
+      reason: {
+        label: "Reason",
+        help: "[ADR-0091 D1] Why this grant exists. Free text; REQUIRED on delegation (D3) and break-glass (D4) rows."
+      },
+      delegated_from: {
+        label: "Delegated From",
+        help: "[ADR-0091 D3] The delegator whose authority this row carries (职务代理). A row with delegated_from set is not itself delegatable and not self-renewable — chains are cut both ways."
+      },
+      last_certified_at: {
+        label: "Last Certified At",
+        help: "[ADR-0091 D5] When this grant was last attested in a recertification review. Null = never certified."
+      },
+      certified_by: {
+        label: "Certified By",
+        help: "[ADR-0091 D5] Reviewer who last attested this grant."
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    }
   }
 };

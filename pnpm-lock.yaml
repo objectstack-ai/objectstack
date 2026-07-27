@@ -1596,6 +1596,12 @@ importers:
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../../plugins/plugin-security
+      '@objectstack/plugin-webhooks':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-webhooks
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../../services/service-messaging
       '@objectstack/service-storage':
         specifier: workspace:*
         version: link:../../services/service-storage

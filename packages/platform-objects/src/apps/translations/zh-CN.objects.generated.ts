@@ -1667,6 +1667,203 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_sso_provider: {
+    label: "SSO 提供方",
+    pluralLabel: "SSO 提供方",
+    description: "本环境用于联合登录的外部 SSO 身份提供方（OIDC / SAML）",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      provider_id: {
+        label: "提供方 ID",
+        help: "稳定的提供方标识符（在本环境内唯一）"
+      },
+      issuer: {
+        label: "颁发者",
+        help: "IdP 颁发者 URL"
+      },
+      domain: {
+        label: "邮箱域名",
+        help: "路由到该 IdP 的邮箱域名（如 acme.com）"
+      },
+      domain_verified: {
+        label: "域名已验证",
+        help: "是否已证明对该邮箱域名的 DNS 所有权（ADR-0024 ②）。在 DNS TXT 记录解析后由“验证域名”设置。由 better-auth 管理——不可直接编辑。仅在本环境启用域名验证时强制执行。"
+      },
+      oidc_config: {
+        label: "OIDC 配置",
+        help: "JSON：clientId、clientSecret、端点、scopes、映射、pkce（由 better-auth 管理）"
+      },
+      saml_config: {
+        label: "SAML 配置",
+        help: "JSON：entryPoint、cert、identifierFormat、映射（由 better-auth 管理）"
+      },
+      user_id: {
+        label: "注册人",
+        help: "注册该提供方的用户"
+      },
+      organization_id: {
+        label: "组织",
+        help: "组织范围（使用组织级 SSO 时）"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      }
+    },
+    _views: {
+      all: {
+        label: "全部",
+        emptyState: {
+          title: "尚无 SSO 提供方",
+          message: "注册贵组织的外部 IdP——使用“注册 SSO 提供方”接入 OIDC（Okta、Entra、Auth0 等），或使用“注册 SAML 提供方”接入 SAML 2.0。邮箱域名匹配的成员即可通过它登录。"
+        }
+      }
+    },
+    _actions: {
+      register_sso_provider: {
+        label: "注册 SSO 提供方",
+        params: {
+          providerId: {
+            label: "提供方 ID",
+            helpText: "稳定标识符，如 “okta” 或 “acme-entra”。"
+          },
+          issuer: {
+            label: "颁发者 URL",
+            helpText: "IdP 颁发者，如 https://acme.okta.com。除非在下方提供显式 URL，否则从此处获取发现文档。"
+          },
+          domain: {
+            label: "邮箱域名",
+            helpText: "使用该邮箱域名的用户将被路由到此 IdP，如 acme.com。"
+          },
+          clientId: {
+            label: "客户端 ID",
+            helpText: "IdP 为本环境签发的 OAuth 客户端 ID。"
+          },
+          clientSecret: {
+            label: "客户端密钥",
+            helpText: "OAuth 客户端密钥（由 better-auth 加密存储）。"
+          },
+          discoveryEndpoint: {
+            label: "发现文档 URL",
+            helpText: "可选。OIDC 发现文档 URL。留空则推导为 `<issuer>/.well-known/openid-configuration`。"
+          },
+          scopes: {
+            label: "授权范围",
+            helpText: "可选。以空格或逗号分隔的 OAuth 授权范围（scopes）。默认为 “openid email profile”。",
+            placeholder: "openid email profile"
+          },
+          mapId: {
+            label: "映射：用户 ID claim",
+            helpText: "可选。映射到用户 ID 的 ID-token claim。默认为 “sub”。",
+            placeholder: "sub"
+          },
+          mapEmail: {
+            label: "映射：邮箱 claim",
+            helpText: "可选。映射到邮箱的 claim。默认为 “email”。",
+            placeholder: "email"
+          },
+          mapName: {
+            label: "映射：姓名 claim",
+            helpText: "可选。映射到显示名称的 claim。默认为 “name”。",
+            placeholder: "name"
+          }
+        }
+      },
+      register_saml_provider: {
+        label: "注册 SAML 提供方",
+        params: {
+          providerId: {
+            label: "提供方 ID",
+            helpText: "稳定标识符，如 “acme-saml”。"
+          },
+          issuer: {
+            label: "IdP 实体 ID",
+            helpText: "IdP 的 SAML EntityID（颁发者），如 https://saml.acme.com/entityid。"
+          },
+          domain: {
+            label: "邮箱域名",
+            helpText: "使用该邮箱域名的用户将被路由到此 IdP，如 acme.com。"
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "接收 SAMLRequest 的 IdP SAML 单点登录（重定向）端点。"
+          },
+          cert: {
+            label: "IdP 签名证书",
+            helpText: "IdP 的 X.509 签名证书（PEM 主体）。用于验证断言签名。"
+          },
+          identifierFormat: {
+            label: "NameID 格式",
+            helpText: "可选。请求的 SAML NameID 格式。默认为 IdP 配置的格式。",
+            placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          }
+        }
+      },
+      request_domain_verification: {
+        label: "申请域名验证",
+        resultDialog: {
+          title: "验证您的域名",
+          description: "在您域名的 DNS 提供商处添加下方 DNS TXT 记录，然后运行“验证域名”。该令牌仅显示一次。",
+          acknowledge: "完成",
+          fields: {
+            dnsRecordType: "记录类型",
+            dnsRecordName: "名称 / 主机",
+            dnsRecordValue: "值"
+          }
+        }
+      },
+      verify_domain: {
+        label: "验证域名",
+        successMessage: "域名所有权已验证"
+      },
+      delete_sso_provider: {
+        label: "删除 SSO 提供方",
+        confirmText: "删除该 SSO 提供方吗？其域名下的用户将无法再通过它登录。",
+        successMessage: "SSO 提供方已删除"
+      }
+    }
+  },
+  sys_scim_provider: {
+    label: "SCIM 提供方",
+    pluralLabel: "SCIM 提供方",
+    description: "外部 IdP 用于开通/停用本环境用户的 SCIM 2.0 连接（Bearer 令牌）",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      provider_id: {
+        label: "提供方 ID",
+        help: "稳定的 SCIM 提供方标识符（如 “okta-scim”）"
+      },
+      scim_token: {
+        label: "SCIM 令牌（哈希）",
+        help: "该 SCIM 连接的哈希 Bearer 凭据——明文仅在生成令牌时显示一次。敏感信息，请勿泄露。"
+      },
+      organization_id: {
+        label: "组织",
+        help: "该令牌的组织范围（组织级令牌将开通限制在该组织内）"
+      },
+      user_id: {
+        label: "所有者",
+        help: "生成该令牌的用户（启用提供方归属时）"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      }
+    },
+    _views: {
+      all: {
+        label: "全部"
+      }
+    }
+  },
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
@@ -2233,6 +2430,92 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "更新时间"
+      }
+    }
+  },
+  sys_import_job: {
+    label: "导入任务",
+    pluralLabel: "导入任务",
+    description: "异步批量导入任务的状态、进度与历史",
+    fields: {
+      id: {
+        label: "任务 ID"
+      },
+      object_name: {
+        label: "对象",
+        help: "导入目标对象的 API 名称"
+      },
+      status: {
+        label: "状态",
+        options: {
+          pending: "待处理",
+          running: "运行中",
+          succeeded: "成功",
+          failed: "失败",
+          cancelled: "已取消"
+        }
+      },
+      total_rows: {
+        label: "总行数"
+      },
+      processed_rows: {
+        label: "已处理行数"
+      },
+      created_count: {
+        label: "已创建"
+      },
+      updated_count: {
+        label: "已更新"
+      },
+      skipped_count: {
+        label: "已跳过"
+      },
+      error_count: {
+        label: "错误数"
+      },
+      write_mode: {
+        label: "写入模式",
+        options: {
+          insert: "插入",
+          update: "更新",
+          upsert: "插入或更新"
+        }
+      },
+      dry_run: {
+        label: "试运行"
+      },
+      run_automations: {
+        label: "运行自动化"
+      },
+      treat_as_historical: {
+        label: "视为历史数据"
+      },
+      error: {
+        label: "致命错误"
+      },
+      results: {
+        label: "行结果（样本）",
+        help: "供 UI 使用的按行结果样本（失败项优先，数量有上限）"
+      },
+      undo_log: {
+        label: "撤销日志",
+        help: "为小型非试运行任务记录的回滚指令（{created:[ids], updated:[{id,before}]}），以便撤销导入"
+      },
+      reverted_at: {
+        label: "撤销时间",
+        help: "在导入被撤销时设置（已创建记录被删除，已更新记录被还原）"
+      },
+      started_at: {
+        label: "开始时间"
+      },
+      completed_at: {
+        label: "完成时间"
+      },
+      created_by: {
+        label: "创建人"
+      },
+      created_at: {
+        label: "创建时间"
       }
     }
   },

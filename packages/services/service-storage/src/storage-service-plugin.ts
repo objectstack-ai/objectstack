@@ -17,6 +17,7 @@ import type { FileRecord } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
 import type { FileReadVerdict } from './storage-routes.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard } from './attachment-lifecycle.js';
+import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
 // ADR-0052 §3 ownership: `sys_attachment` (a file↔record link) belongs with the
@@ -238,6 +239,13 @@ export class StorageServicePlugin implements Plugin {
         if (typeof (engine as any).registerMiddleware === 'function') {
           installAttachmentReadVisibility(engine as any, ctx.logger);
         }
+        // Field-reference ownership (ADR-0104 D3 wave 2) — keeps
+        // sys_file.ref_object/ref_id/ref_field in step with what records hold,
+        // and copies bytes rather than sharing a row when a second field slot
+        // writes an already-owned id. Records ownership only: it never
+        // tombstones, so the `scope==='attachments'` reap guardrail above
+        // still keeps field-referenced files out of collection entirely.
+        installFileReferenceHooks(engine as any, () => this.storage, ctx.logger);
         try {
           const lifecycle = ctx.getService<any>('lifecycle');
           if (lifecycle && typeof lifecycle.registerReapGuard === 'function') {
@@ -455,12 +463,20 @@ function buildAuthSessionResolver(
 }
 
 /**
- * Authorize an `attachments`-scope download (#2970 item 2). Builds the FULL
- * caller ExecutionContext via `resolveAuthzContext` (the same shared resolver
- * rest-server uses — a bare `{ userId }` would lack the resolved permissions
- * the parent RLS needs), then allows when the caller is the file's owner or
- * can READ a record the file is attached to. Returns `undefined` (routes stay
- * open) when the auth service or engine is absent.
+ * Authorize a parent-governed download (#2970 item 2; extended for field-owned
+ * files by ADR-0104 D3 wave 2). Builds the FULL caller ExecutionContext via
+ * `resolveAuthzContext` (the same shared resolver rest-server uses — a bare
+ * `{ userId }` would lack the resolved permissions the parent RLS needs), then
+ * allows when the caller is the file's owner or can READ the file's parent
+ * record. Returns `undefined` (routes stay open) when the auth service or
+ * engine is absent.
+ *
+ * "Parent" resolves differently for the two surfaces, and that asymmetry is the
+ * point of the ownership model: an attachment may hang off MANY records, so its
+ * readable-by set is the union over its join rows; a field-owned file belongs
+ * to exactly ONE record, so its readable-by set is that record's and nothing
+ * more. A shared model would have had to union field references too, silently
+ * widening access whenever one file id was copied into a more public record.
  */
 function buildFileReadAuthorizer(
   ctx: PluginContext,
@@ -478,6 +494,22 @@ function buildFileReadAuthorizer(
 
       // Uploader / owner may always download.
       if (file.owner_id && String(file.owner_id) === String(authz.userId)) return 'allow';
+
+      // Field-owned (ADR-0104 D3 wave 2): exactly ONE record's field holds
+      // this file, so access is that record's READ access — never a union.
+      if (file.ref_object && file.ref_id != null && file.ref_id !== '') {
+        try {
+          const visible = (await (engine as any).find(String(file.ref_object), {
+            where: { id: file.ref_id },
+            fields: ['id'],
+            limit: 1,
+            context: authz,
+          })) as Array<Record<string, unknown>>;
+          return visible?.length ? 'allow' : 'deny';
+        } catch {
+          return 'deny'; // unknown/failing owner object — fail closed
+        }
+      }
 
       // Otherwise: readable via any parent record this file is attached to.
       const links = (await (engine as any).find('sys_attachment', {

@@ -63,10 +63,13 @@ const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'po
 // touch these, so nothing else notices when the spec surface goes stale.
 //
 // `webhook` is deliberately NOT registered: registering it would turn on Studio
-// webhook CRUD + saveMetaItem overlay acceptance + diagnostics sweeping, which is
-// the wrong move while the WebhookSchema authoring surface is still disconnected
-// from the sys_webhook dispatcher (enforce-or-remove pending, #3461). The gate
-// only needs to WALK the schema, not register it — so we resolve it directly.
+// webhook CRUD + saveMetaItem overlay acceptance + diagnostics sweeping. The
+// WebhookSchema authoring surface was disconnected from the sys_webhook
+// dispatcher when this override landed (#3461/#3462); the materializer bridge
+// has since closed that (#3489, and the mapped props are now `live` in
+// webhook.json), and whether to fold `webhook` back onto the metadata-type
+// registry is the reassessment tracked in #3490. The gate only needs to WALK
+// the schema, not register it — so we resolve it directly.
 const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   webhook: WebhookSchema,
 };

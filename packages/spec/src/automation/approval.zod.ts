@@ -33,7 +33,18 @@ export const ApproverType = z.enum([
   // parses so stored flows keep rendering, but designers must not offer it
   // (see NON_AUTHORABLE_APPROVER_TYPES). Re-admit only together with a real
   // ownership-queue implementation (queue entity + membership + claim).
-  'queue'
+  'queue',
+  /**
+   * #3447 P2: a CEL expression resolved AT NODE ENTRY against three explicit
+   * roots — `current.*` (the record's live state), `trigger.*` (the submit-time
+   * snapshot) and `vars.*` (flow variables, incl. upstream node outputs). The
+   * result (a user-id string, CSV, or string array — or intermediate ids
+   * re-expanded per `resolveAs`) becomes the approver slate. `record` and bare
+   * field names are deliberately NOT available: `record` means "the record at
+   * event time" everywhere else on the platform (flow conditions, hooks), and
+   * reusing it here would silently alias one of the two times.
+   */
+  'expression'
 ]);
 
 /**
@@ -92,11 +103,23 @@ export type ApproverValueBinding =
   | { source: 'auto' }
   /** `value` names a field on the flow's trigger object. */
   | { source: 'trigger-field' }
+  /**
+   * `value` is a CEL expression evaluated at node entry (#3447 P2) over the
+   * closed root set in `roots` — an expression editor, not a picker.
+   */
+  | { source: 'expression'; roots: readonly string[] }
   /** Declared-but-unenforced — do not offer for authoring (#3508). */
   | { source: 'unsupported' };
 
 /** Org-membership tiers (`sys_member.role`: better-auth's closed set). */
 export const ORG_MEMBERSHIP_LEVELS = ['owner', 'admin', 'member'] as const;
+
+/**
+ * The CLOSED root set an `expression` approver may reference (#3447 P2).
+ * Mirrored by `APPROVER_EXPRESSION_ROOTS` in `plugin-approvals` and the
+ * `approval-expression-invalid` lint, so what lints clean is what runs.
+ */
+export const APPROVER_EXPRESSION_ROOTS = ['current', 'trigger', 'vars'] as const;
 
 /**
  * The per-type value bindings. `satisfies` keeps this exhaustive: adding an
@@ -115,6 +138,7 @@ export const APPROVER_VALUE_BINDINGS = {
   manager: { source: 'auto' },
   field: { source: 'trigger-field' },
   queue: { source: 'unsupported' },
+  expression: { source: 'expression', roots: APPROVER_EXPRESSION_ROOTS },
 } as const satisfies Record<z.infer<typeof ApproverType>, ApproverValueBinding>;
 
 // ==========================================================================
@@ -203,8 +227,12 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
   // maps to a picker kind that renders as "auto-resolved" (no free text);
   // `queue` stays mapped so stored rows keep rendering even though the type
   // is no longer authorable (see NON_AUTHORABLE_APPROVER_TYPES).
+  // `expression` is intentionally ABSENT from the map: an unmapped type keeps
+  // the value as free text, so the designer renders a plain input for the CEL
+  // source until a dedicated expression editor lands (objectui follow-up).
   value: z.string().optional().meta({
-    description: 'User id / membership tier / position / team / department / field — per `type`',
+    description: 'User id / membership tier / position / team / department / field — per `type`; '
+      + 'for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*`',
     xRef: {
       kindFrom: 'type',
       objectSource: '$trigger',
@@ -221,6 +249,18 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
       },
     },
   }),
+  /**
+   * #3447 P2, `expression` approvers only: how the expression's resolved values
+   * are turned into people. `user` (default) treats each value as a user id.
+   * `department` / `position` / `team` treat each value as that kind of id and
+   * expand it through the same graph lookups the static approver types use —
+   * e.g. an expression yielding department ids + `resolveAs: 'department'`
+   * fans out into every member of every returned department. With
+   * `behavior: 'per_group'`, each intermediate value forms its own group (one
+   * sign-off per returned department), keyed by that value.
+   */
+  resolveAs: z.enum(['user', 'department', 'position', 'team']).optional()
+    .describe("How an `expression` result is expanded into approvers (default 'user')"),
   /**
    * Optional group label (#3266). With `behavior: 'per_group'`, approvers that
    * share a label form one group and the node advances only once EACH group has
@@ -315,6 +355,37 @@ export const ApprovalNodeConfigSchema = lazySchema(() => z.object({
       description: 'Business-object field to mirror request status onto',
       xRef: { kind: 'object-field', objectSource: '$trigger' },
     }),
+
+  /**
+   * #3447 P2: what happens when approver resolution yields NO concrete person
+   * at node entry (an empty expression result, an unstaffed position, an empty
+   * multi-select field, …):
+   *  - `admin_rescue` (default) — open the request anyway and warn loudly; a
+   *    privileged admin can take it over via Reassign (#3424). The only option
+   *    that neither waves the record through nor kills the run — approval's job
+   *    is to gatekeep, so an empty slate must never silently pass.
+   *  - `fail` — the node fails (fault edge / run failure). Choose when an empty
+   *    slate can only mean a configuration bug.
+   *  - `auto_approve` — skip the request and continue down the `approve` edge
+   *    with `output.autoApproved = true`. The DingTalk/Feishu default; opt-in
+   *    here because it silently waves the record through.
+   */
+  onEmptyApprovers: z.enum(['admin_rescue', 'fail', 'auto_approve']).default('admin_rescue')
+    .describe('Behavior when no concrete approver resolves at node entry'),
+
+  /**
+   * #3447 P2: keys a decision may carry as structured outputs
+   * (`decide(..., { outputs })`). The AUTHOR declares the keys; approvers only
+   * fill values — the same trust model as a `screen` node's author-defined
+   * fields. Accepted outputs resume the run as `<nodeId>.<key>` flow variables
+   * (never bare names, so an approver can't shadow author variables), where a
+   * later node's `expression` approver can read them
+   * (`vars.<nodeId>.picked_departments`) — "the previous approver picks the
+   * next step's approvers" without a record-field detour. A decision carrying
+   * undeclared keys is rejected; `decision` / `requestId` are reserved.
+   */
+  decisionOutputs: z.array(z.string()).optional()
+    .describe('Author-declared output keys a decision may carry (approvers fill values only)'),
 
   /** Optional per-node SLA escalation. */
   escalation: ApprovalEscalationSchema.optional().describe('Per-node SLA escalation'),

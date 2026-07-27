@@ -6,7 +6,9 @@ import type {
   JobSchedule,
   JobHandler,
   JobExecution,
+  JobScheduleOptions,
 } from '@objectstack/spec/contracts';
+import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
 
 /** Minimal cluster lock surface for scheduler leader-election (structural — no hard dep on the cluster contract). */
 interface SchedulerCluster {
@@ -35,6 +37,7 @@ interface CronJobRecord {
   name: string;
   schedule: JobSchedule;
   handler: JobHandler;
+  options?: JobScheduleOptions;
   task?: Cron;
   executions: JobExecution[];
 }
@@ -60,10 +63,10 @@ export class CronJobAdapter implements IJobService {
     this.leaseMs = options.leaseMs ?? 60_000;
   }
 
-  async schedule(name: string, schedule: JobSchedule, handler: JobHandler): Promise<void> {
+  async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
     await this.cancel(name);
 
-    const record: CronJobRecord = { name, schedule, handler, executions: [] };
+    const record: CronJobRecord = { name, schedule, handler, options, executions: [] };
 
     if (schedule.type === 'cron') {
       if (!schedule.expression) {
@@ -152,10 +155,10 @@ export class CronJobAdapter implements IJobService {
     };
     const startMs = Date.now();
     try {
-      await record.handler({ jobId: record.name, data });
+      await runWithPolicy(record.name, () => record.handler({ jobId: record.name, data }), record.options);
       execution.status = 'success';
     } catch (err) {
-      execution.status = 'failed';
+      execution.status = err instanceof JobTimeoutError ? 'timeout' : 'failed';
       execution.error = err instanceof Error ? err.message : String(err);
     } finally {
       execution.completedAt = new Date().toISOString();

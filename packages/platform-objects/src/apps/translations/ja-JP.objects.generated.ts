@@ -1667,6 +1667,203 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_sso_provider: {
+    label: "SSO プロバイダー",
+    pluralLabel: "SSO プロバイダー",
+    description: "この環境がログインをフェデレーションする外部 SSO ID プロバイダー（OIDC / SAML）",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      provider_id: {
+        label: "プロバイダー ID",
+        help: "安定したプロバイダー識別子（環境内で一意）"
+      },
+      issuer: {
+        label: "発行者",
+        help: "IdP 発行者 URL"
+      },
+      domain: {
+        label: "メールドメイン",
+        help: "この IdP にルーティングされるメールドメイン（例: acme.com）"
+      },
+      domain_verified: {
+        label: "ドメイン検証済み",
+        help: "メールドメインの DNS 所有権が証明済みかどうか（ADR-0024 ②）。DNS TXT レコードが解決した後、「ドメインを検証」により設定されます。better-auth が管理し、直接編集はできません。環境でドメイン検証が有効な場合にのみ適用されます。"
+      },
+      oidc_config: {
+        label: "OIDC 設定",
+        help: "JSON: clientId、clientSecret、エンドポイント、scopes、マッピング、pkce（better-auth が管理）"
+      },
+      saml_config: {
+        label: "SAML 設定",
+        help: "JSON: entryPoint、cert、identifierFormat、マッピング（better-auth が管理）"
+      },
+      user_id: {
+        label: "登録者",
+        help: "このプロバイダーを登録したユーザー"
+      },
+      organization_id: {
+        label: "組織",
+        help: "組織スコープ（組織スコープの SSO を使用する場合）"
+      },
+      created_at: {
+        label: "作成日時"
+      },
+      updated_at: {
+        label: "更新日時"
+      }
+    },
+    _views: {
+      all: {
+        label: "すべて",
+        emptyState: {
+          title: "SSO プロバイダーがまだありません",
+          message: "組織の外部 IdP を登録します——「SSO プロバイダーを登録」で OIDC（Okta、Entra、Auth0 など）を、「SAML プロバイダーを登録」で SAML 2.0 を接続します。メールドメインが一致するメンバーは、それを通じてサインインできます。"
+        }
+      }
+    },
+    _actions: {
+      register_sso_provider: {
+        label: "SSO プロバイダーを登録",
+        params: {
+          providerId: {
+            label: "プロバイダー ID",
+            helpText: "安定した識別子（例: 「okta」や「acme-entra」）。"
+          },
+          issuer: {
+            label: "発行者 URL",
+            helpText: "IdP 発行者（例: https://acme.okta.com）。下で明示的な URL を指定しない限り、ここからディスカバリを取得します。"
+          },
+          domain: {
+            label: "メールドメイン",
+            helpText: "このメールドメインのユーザーはこの IdP にルーティングされます（例: acme.com）。"
+          },
+          clientId: {
+            label: "クライアント ID",
+            helpText: "この環境向けに IdP が発行した OAuth クライアント ID。"
+          },
+          clientSecret: {
+            label: "クライアントシークレット",
+            helpText: "OAuth クライアントシークレット（better-auth により暗号化して保存）。"
+          },
+          discoveryEndpoint: {
+            label: "ディスカバリ URL",
+            helpText: "任意。OIDC ディスカバリドキュメントの URL。空欄の場合は `<issuer>/.well-known/openid-configuration` を導出します。"
+          },
+          scopes: {
+            label: "スコープ",
+            helpText: "任意。スペースまたはカンマ区切りの OAuth スコープ。既定値は「openid email profile」。",
+            placeholder: "openid email profile"
+          },
+          mapId: {
+            label: "マッピング: ユーザー ID クレーム",
+            helpText: "任意。ユーザー ID にマッピングする ID トークンのクレーム。既定値は「sub」。",
+            placeholder: "sub"
+          },
+          mapEmail: {
+            label: "マッピング: メールクレーム",
+            helpText: "任意。メールにマッピングするクレーム。既定値は「email」。",
+            placeholder: "email"
+          },
+          mapName: {
+            label: "マッピング: 名前クレーム",
+            helpText: "任意。表示名にマッピングするクレーム。既定値は「name」。",
+            placeholder: "name"
+          }
+        }
+      },
+      register_saml_provider: {
+        label: "SAML プロバイダーを登録",
+        params: {
+          providerId: {
+            label: "プロバイダー ID",
+            helpText: "安定した識別子（例: 「acme-saml」）。"
+          },
+          issuer: {
+            label: "IdP エンティティ ID",
+            helpText: "IdP の SAML EntityID（発行者）（例: https://saml.acme.com/entityid）。"
+          },
+          domain: {
+            label: "メールドメイン",
+            helpText: "このメールドメインのユーザーはこの IdP にルーティングされます（例: acme.com）。"
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "SAMLRequest を受け取る IdP の SAML シングルサインオン（リダイレクト）エンドポイント。"
+          },
+          cert: {
+            label: "IdP 署名証明書",
+            helpText: "IdP の X.509 署名証明書（PEM 本文）。アサーション署名の検証に使用します。"
+          },
+          identifierFormat: {
+            label: "NameID フォーマット",
+            helpText: "任意。要求する SAML NameID フォーマット。既定では IdP に設定されたフォーマットを使用します。",
+            placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          }
+        }
+      },
+      request_domain_verification: {
+        label: "ドメイン検証をリクエスト",
+        resultDialog: {
+          title: "ドメインを検証",
+          description: "以下の DNS TXT レコードをドメインの DNS プロバイダーに追加し、「ドメインを検証」を実行してください。トークンは一度だけ表示されます。",
+          acknowledge: "完了",
+          fields: {
+            dnsRecordType: "レコードタイプ",
+            dnsRecordName: "名前 / ホスト",
+            dnsRecordValue: "値"
+          }
+        }
+      },
+      verify_domain: {
+        label: "ドメインを検証",
+        successMessage: "ドメイン所有権を確認しました"
+      },
+      delete_sso_provider: {
+        label: "SSO プロバイダーを削除",
+        confirmText: "この SSO プロバイダーを削除しますか？そのドメインのユーザーは、これを通じてサインインできなくなります。",
+        successMessage: "SSO プロバイダーを削除しました"
+      }
+    }
+  },
+  sys_scim_provider: {
+    label: "SCIM プロバイダー",
+    pluralLabel: "SCIM プロバイダー",
+    description: "外部 IdP がこの環境のユーザーをプロビジョニング/デプロビジョニングするために使用する SCIM 2.0 接続（ベアラートークン）",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      provider_id: {
+        label: "プロバイダー ID",
+        help: "安定した SCIM プロバイダー識別子（例: 「okta-scim」）"
+      },
+      scim_token: {
+        label: "SCIM トークン（ハッシュ）",
+        help: "この SCIM 接続のハッシュ化されたベアラー資格情報——平文はトークン生成時に一度だけ表示されます。機密情報のため、公開しないでください。"
+      },
+      organization_id: {
+        label: "組織",
+        help: "このトークンの組織スコープ（組織スコープのトークンはプロビジョニングをその組織に限定します）"
+      },
+      user_id: {
+        label: "所有者",
+        help: "このトークンを生成したユーザー（プロバイダー所有権が有効な場合）"
+      },
+      created_at: {
+        label: "作成日時"
+      },
+      updated_at: {
+        label: "更新日時"
+      }
+    },
+    _views: {
+      all: {
+        label: "すべて"
+      }
+    }
+  },
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
@@ -2233,6 +2430,92 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "更新日時"
+      }
+    }
+  },
+  sys_import_job: {
+    label: "インポートジョブ",
+    pluralLabel: "インポートジョブ",
+    description: "非同期一括インポートジョブの状態、進捗、履歴",
+    fields: {
+      id: {
+        label: "ジョブ ID"
+      },
+      object_name: {
+        label: "オブジェクト",
+        help: "インポート先オブジェクトの API 名"
+      },
+      status: {
+        label: "ステータス",
+        options: {
+          pending: "保留中",
+          running: "実行中",
+          succeeded: "成功",
+          failed: "失敗",
+          cancelled: "キャンセル済み"
+        }
+      },
+      total_rows: {
+        label: "総行数"
+      },
+      processed_rows: {
+        label: "処理済み行数"
+      },
+      created_count: {
+        label: "作成済み"
+      },
+      updated_count: {
+        label: "更新済み"
+      },
+      skipped_count: {
+        label: "スキップ済み"
+      },
+      error_count: {
+        label: "エラー数"
+      },
+      write_mode: {
+        label: "書き込みモード",
+        options: {
+          insert: "挿入",
+          update: "更新",
+          upsert: "挿入または更新"
+        }
+      },
+      dry_run: {
+        label: "ドライラン"
+      },
+      run_automations: {
+        label: "自動化を実行"
+      },
+      treat_as_historical: {
+        label: "履歴データとして扱う"
+      },
+      error: {
+        label: "致命的なエラー"
+      },
+      results: {
+        label: "行ごとの結果（サンプル）",
+        help: "UI 用の行ごとの結果サンプル（失敗を優先、件数に上限あり）"
+      },
+      undo_log: {
+        label: "取り消しログ",
+        help: "インポートを取り消せるように、小規模な非ドライランジョブ向けに記録された巻き戻し手順（{created:[ids], updated:[{id,before}]}）"
+      },
+      reverted_at: {
+        label: "取り消し日時",
+        help: "インポートが取り消されたときに設定されます（作成されたレコードは削除され、更新されたレコードは復元されます）"
+      },
+      started_at: {
+        label: "開始日時"
+      },
+      completed_at: {
+        label: "完了日時"
+      },
+      created_by: {
+        label: "作成者"
+      },
+      created_at: {
+        label: "作成日時"
       }
     }
   },

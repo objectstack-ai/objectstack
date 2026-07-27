@@ -674,6 +674,10 @@ export class AppPlugin implements Plugin {
                                 async (jobCtx: any) => {
                                     await handler({ ...jobCtx, jobId: jobName, bundle: this.bundle });
                                 },
+                                // #3494: thread the authored retryPolicy/timeout to the adapter
+                                (job.retryPolicy || job.timeout)
+                                    ? { retryPolicy: job.retryPolicy, timeout: job.timeout }
+                                    : undefined,
                             );
                             ok++;
                         } catch (err: any) {

@@ -12,8 +12,8 @@ description: Misc protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { AckMode, ApiVersionConfig, BuildConfig, CdcConfig, DatabaseConnector, DatabasePoolConfig, DatabaseTable, DeliveryGuarantee, DeploymentConfig, DlqConfig, DomainConfig, EdgeFunctionConfig, EnvironmentVariables, FileAccessPattern, FileFilterConfig, FileMetadataConfig, FileStorageConnector, FileStorageProvider, FileVersioningConfig, GitHubActionsWorkflow, GitHubCommitConfig, GitHubConnector, GitHubIssueTracking, GitHubProvider, GitHubPullRequestConfig, GitHubReleaseConfig, GitHubRepository, GitRepositoryConfig, MessageQueueConnector, ProducerConfig, SaasConnector, SaasObjectType, SaasProvider, SslConfig, StorageBucket, TopicQueue, VercelConnector, VercelFramework, VercelMonitoring, VercelProject, VercelProvider, VercelTeam } from '@objectstack/spec/integration';
-import type { AckMode, ApiVersionConfig, BuildConfig, CdcConfig, DatabaseConnector, DatabasePoolConfig, DatabaseTable, DeliveryGuarantee, DeploymentConfig, DlqConfig, DomainConfig, EdgeFunctionConfig, EnvironmentVariables, FileAccessPattern, FileFilterConfig, FileMetadataConfig, FileStorageConnector, FileStorageProvider, FileVersioningConfig, GitHubActionsWorkflow, GitHubCommitConfig, GitHubConnector, GitHubIssueTracking, GitHubProvider, GitHubPullRequestConfig, GitHubReleaseConfig, GitHubRepository, GitRepositoryConfig, MessageQueueConnector, ProducerConfig, SaasConnector, SaasObjectType, SaasProvider, SslConfig, StorageBucket, TopicQueue, VercelConnector, VercelFramework, VercelMonitoring, VercelProject, VercelProvider, VercelTeam } from '@objectstack/spec/integration';
+import { AckMode, ApiVersionConfig, BuildConfig, CdcConfig, DatabaseConnector, DatabasePoolConfig, DatabaseTable, DeliveryGuarantee, DeploymentConfig, DlqConfig, DomainConfig, EdgeFunctionConfig, EnvironmentVariables, FileAccessPattern, FileFilterConfig, FileMetadataConfig, FileStorageConnector, FileStorageProvider, FileVersioningConfig, GitHubActionsWorkflow, GitHubCommitConfig, GitHubConnector, GitHubIssueTracking, GitHubProvider, GitHubPullRequestConfig, GitHubReleaseConfig, GitHubRepository, GitRepositoryConfig, MessageFormat, MessageQueueConnector, ProducerConfig, SaasConnector, SaasObjectType, SaasProvider, SslConfig, StorageBucket, TopicQueue, VercelConnector, VercelFramework, VercelMonitoring, VercelProject, VercelProvider, VercelTeam } from '@objectstack/spec/integration';
+import type { AckMode, ApiVersionConfig, BuildConfig, CdcConfig, DatabaseConnector, DatabasePoolConfig, DatabaseTable, DeliveryGuarantee, DeploymentConfig, DlqConfig, DomainConfig, EdgeFunctionConfig, EnvironmentVariables, FileAccessPattern, FileFilterConfig, FileMetadataConfig, FileStorageConnector, FileStorageProvider, FileVersioningConfig, GitHubActionsWorkflow, GitHubCommitConfig, GitHubConnector, GitHubIssueTracking, GitHubProvider, GitHubPullRequestConfig, GitHubReleaseConfig, GitHubRepository, GitRepositoryConfig, MessageFormat, MessageQueueConnector, ProducerConfig, SaasConnector, SaasObjectType, SaasProvider, SslConfig, StorageBucket, TopicQueue, VercelConnector, VercelFramework, VercelMonitoring, VercelProject, VercelProvider, VercelTeam } from '@objectstack/spec/integration';
 
 // Validate data
 const result = AckMode.parse(data);
@@ -525,6 +525,22 @@ GitHub provider type
 | **productionBranch** | `string` | ✅ | Production branch name |
 | **autoDeployProduction** | `boolean` | ✅ | Auto-deploy production branch |
 | **autoDeployPreview** | `boolean` | ✅ | Auto-deploy preview branches |
+
+
+---
+
+## MessageFormat
+
+Message format/serialization
+
+### Allowed Values
+
+* `json`
+* `xml`
+* `protobuf`
+* `avro`
+* `text`
+* `binary`
 
 
 ---

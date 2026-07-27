@@ -38,6 +38,12 @@ function makeKernel(services: Record<string, any> = {}, state = 'running') {
     return kernel;
 }
 
+function makeDispatcherWithKernelExtras(services: Record<string, any>, extras: Record<string, any>) {
+    const kernel = makeKernel(services, 'running');
+    Object.assign(kernel, extras);
+    return new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+}
+
 function makeDispatcher(services: Record<string, any> = {}, state = 'running') {
     return new HttpDispatcher(makeKernel(services, state), undefined, {
         enforceProjectMembership: false,
@@ -234,5 +240,250 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
         const result = await makeDispatcher({ security }).dispatch('GET', '/securityfoo', undefined, {}, {} as any);
         expect(security.listAudienceBindingSuggestions).not.toHaveBeenCalled();
         expect(result.response?.status ?? 404).not.toBe(200);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PR-3 — keys / storage / ui extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
+    it('POST /keys rejects anonymous callers with 401 (identity gate inside the extracted body)', async () => {
+        const result = await makeDispatcher().dispatch('POST', '/keys', { name: 'k' }, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(401);
+    });
+
+    it('GET /keys answers 405 (mint is POST-only), and /keysfoo is NOT claimed (segment semantics)', async () => {
+        const dispatcher = makeDispatcher();
+        const wrongMethod = await dispatcher.dispatch('GET', '/keys', undefined, {}, {} as any);
+        expect(wrongMethod.response?.status).toBe(405);
+        const lexical = await dispatcher.dispatch('POST', '/keysfoo', { name: 'k' }, {}, {} as any);
+        expect(lexical.response?.status ?? 404).not.toBe(405);
+    });
+
+    it('POST /keys mints a key pinned to the caller (thin delegate carries the extracted body)', async () => {
+        const insert = vi.fn().mockResolvedValue({ id: 'key-row-1' });
+        const objectql = {
+            insert,
+            find: vi.fn().mockResolvedValue([]),
+            getObjects: vi.fn().mockReturnValue({}),
+            registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
+        };
+        const context: any = { executionContext: { userId: 'caller-1' } };
+        // Direct delegate call — dispatch() would re-resolve identity off the
+        // auth-less mock kernel and overwrite the seeded executionContext.
+        const result = await makeDispatcher({ objectql }).handleKeys('POST', { name: 'CI Key', user_id: 'attacker' }, context);
+        expect(result.response?.status).toBe(201);
+        const row = insert.mock.calls[0][1];
+        expect(insert.mock.calls[0][0]).toBe('sys_api_key');
+        // user_id pinned to caller; body's user_id ignored; only the hash stored.
+        expect(row.user_id).toBe('caller-1');
+        expect(row.key).not.toBe(result.response?.body?.data?.key);
+        expect(result.response?.body?.data?.key).toBeTruthy();
+    });
+
+    it('/storage responds 501 when file-storage is not configured (extracted body keeps in-handler semantics)', async () => {
+        const result = await makeDispatcher().dispatch('POST', '/storage/upload', { blob: 1 }, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(501);
+    });
+
+    it('/storage/upload uploads through the file-storage service', async () => {
+        const upload = vi.fn().mockResolvedValue({ id: 'f1' });
+        const result = await makeDispatcher({ 'file-storage': { upload, download: vi.fn() } })
+            .dispatch('POST', '/storage/upload', { some: 'file' }, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(upload).toHaveBeenCalledTimes(1);
+    });
+
+    it('/ui/view/:object serves the protocol getUiView result; 503 without a protocol service', async () => {
+        const getUiView = vi.fn().mockResolvedValue({ view: 'list-def' });
+        const ok = await makeDispatcher({ protocol: { getUiView } }).dispatch('GET', '/ui/view/account/list', undefined, {}, {} as any);
+        expect(ok.response?.status).toBe(200);
+        expect(getUiView).toHaveBeenCalledWith({ object: 'account', type: 'list' });
+
+        const missing = await makeDispatcher().dispatch('GET', '/ui/view/account', undefined, {}, {} as any);
+        expect(missing.response?.status).toBe(503);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PR-4 — share-links extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
+    it('/share-links responds 501 when the shareLinks service is absent', async () => {
+        const result = await makeDispatcher().dispatch('GET', '/share-links', undefined, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(501);
+    });
+
+    it('/share-linksfoo is NOT claimed (segment semantics)', async () => {
+        const shareLinks = { resolveToken: vi.fn(), createLink: vi.fn(), listLinks: vi.fn(), revokeLink: vi.fn() };
+        const result = await makeDispatcher({ shareLinks }).dispatch('GET', '/share-linksfoo', undefined, {}, {} as any);
+        expect(shareLinks.listLinks).not.toHaveBeenCalled();
+        expect(result.response?.status ?? 404).not.toBe(501);
+    });
+
+    it('management routes reject anonymous callers with UNAUTHENTICATED', async () => {
+        const shareLinks = { resolveToken: vi.fn(), createLink: vi.fn(), listLinks: vi.fn(), revokeLink: vi.fn() };
+        const result = await makeDispatcher({ shareLinks })
+            .handleShareLinks('', 'POST', { object: 'account', recordId: 'r1' }, {}, {} as any);
+        expect(result.response?.status).toBe(401);
+        expect(result.response?.body?.error?.details?.code).toBe('UNAUTHENTICATED');
+    });
+
+    it('public resolve route serves the record through the request-kernel engine with redaction', async () => {
+        const resolveToken = vi.fn().mockResolvedValue({
+            link: { id: 'l1', token: 't1', object_name: 'account', record_id: 'r1', permission: 'view', audience: 'anyone' },
+            redactFields: ['secret'],
+        });
+        const find = vi.fn().mockResolvedValue([{ id: 'r1', name: 'Acme', secret: 'hide-me' }]);
+        const dispatcher = makeDispatcher({
+            shareLinks: { resolveToken },
+            objectql: {
+                find,
+                getObjects: vi.fn().mockReturnValue({}),
+                registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
+            },
+        });
+        const result = await dispatcher.handleShareLinks('/t1/resolve', 'GET', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        const record = result.response?.body?.data?.record;
+        expect(record?.name).toBe('Acme');
+        // redactFields stripped before the record leaves the server.
+        expect(record?.secret).toBeUndefined();
+    });
+
+    it('unmatched sub-path returns the standard ROUTE_NOT_FOUND envelope', async () => {
+        const shareLinks = { resolveToken: vi.fn(), createLink: vi.fn(), listLinks: vi.fn(), revokeLink: vi.fn() };
+        const context: any = { executionContext: { userId: 'u1' } };
+        const result = await makeDispatcher({ shareLinks }).handleShareLinks('/a/b/c', 'GET', undefined, {}, context);
+        expect(result.response?.status).toBe(404);
+        expect(result.response?.body?.error?.type).toBe('ROUTE_NOT_FOUND');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PR-5 — packages extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-5: packages)', () => {
+    function qlWithRegistry(extra: Partial<Record<string, any>> = {}) {
+        return {
+            find: vi.fn().mockResolvedValue([]),
+            getObjects: vi.fn().mockReturnValue({}),
+            registry: {
+                getObject: vi.fn().mockReturnValue(null),
+                getRegisteredTypes: vi.fn().mockReturnValue([]),
+                getAllPackages: vi.fn().mockReturnValue([{ id: 'pkg-a', status: 'active' }]),
+                getPackage: vi.fn().mockReturnValue(undefined),
+                installPackage: vi.fn().mockImplementation((m: any) => ({ id: m.id, manifest: m })),
+                ...extra,
+            },
+        };
+    }
+
+    it('GET /packages lists packages from the ObjectQL registry', async () => {
+        const objectql = qlWithRegistry();
+        const result = await makeDispatcher({ objectql }).dispatch('GET', '/packages', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.total).toBe(1);
+    });
+
+    it('responds 503 when no ObjectQL registry is available', async () => {
+        const objectql = { find: vi.fn(), getObjects: vi.fn() }; // no .registry → getObjectQL returns null
+        const result = await makeDispatcher({ objectql }).dispatch('GET', '/packages', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(503);
+    });
+
+    it('POST /packages rejects a duplicate id with 409 unless ?overwrite=true (data-loss footgun guard)', async () => {
+        const objectql = qlWithRegistry({ getPackage: vi.fn().mockReturnValue({ id: 'pkg-a' }) });
+        const dispatcher = makeDispatcher({ objectql });
+        const dup = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, {}, {} as any);
+        expect(dup.response?.status).toBe(409);
+        const forced = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, { overwrite: 'true' }, {} as any);
+        expect(forced.response?.status).toBe(201);
+    });
+
+    it('POST /packages without an id is rejected with 400', async () => {
+        const objectql = qlWithRegistry();
+        const result = await makeDispatcher({ objectql }).dispatch('POST', '/packages', { name: 'no-id' }, {}, {} as any);
+        expect(result.response?.status).toBe(400);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PR-6 — automation extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
+    it('GET /automation lists flows via the automation service', async () => {
+        const automation = { listFlows: vi.fn().mockResolvedValue(['flow-a', 'flow-b']) };
+        const result = await makeDispatcher({ automation }).dispatch('GET', '/automation', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.total).toBe(2);
+    });
+
+    it('GET /automation/actions keeps its guard position before the /:name catch-all and applies filters', async () => {
+        const automation = {
+            listFlows: vi.fn(),
+            getFlow: vi.fn(),
+            getActionDescriptors: vi.fn().mockReturnValue([
+                { name: 'a1', source: 'builtin', paradigms: ['flow'] },
+                { name: 'a2', source: 'plugin', paradigms: ['workflow'] },
+            ]),
+        };
+        const result = await makeDispatcher({ automation }).dispatch('GET', '/automation/actions', undefined, { source: 'plugin' }, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.actions).toHaveLength(1);
+        // The /:name→getFlow catch-all must NOT have shadowed the guard route.
+        expect(automation.getFlow).not.toHaveBeenCalled();
+    });
+
+    it('falls through unhandled when no automation service is registered', async () => {
+        const result = await makeDispatcher().dispatch('GET', '/automation', undefined, {}, {} as any);
+        expect(result.response?.status ?? 404).not.toBe(200);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PR-7 — auth + ai extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-7: auth/ai)', () => {
+    it('/auth delegates to the auth service handler when registered', async () => {
+        const handler = vi.fn().mockResolvedValue({ ok: true });
+        const result = await makeDispatcher({ auth: { handler } }).dispatch('POST', '/auth/sign-in/email', { email: 'x@y.z' }, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it('/auth mock fallback serves sign-up when no auth service is registered', async () => {
+        const result = await makeDispatcher().dispatch('POST', '/auth/sign-up/email', { email: 'a@b.c', name: 'A' }, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.user?.email).toBe('a@b.c');
+        expect(result.response?.body?.session?.token).toMatch(/^mock_token_/);
+    });
+
+    it('/ai/agents returns an empty list (not 404) when no AI service is configured', async () => {
+        const result = await makeDispatcher().dispatch('GET', '/ai/agents', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.agents).toEqual([]);
+    });
+
+    it('/ai routes 404 (service missing) for non-agents paths', async () => {
+        const result = await makeDispatcher().dispatch('POST', '/ai/chat', { q: 'hi' }, {}, {} as any);
+        expect(result.response?.status).toBe(404);
+    });
+
+    it('/ai dispatches to a matching cached kernel route with params + user threading', async () => {
+        const routeHandler = vi.fn().mockResolvedValue({ status: 200, body: { answer: 42 } });
+        const kernelExtras = { __aiRoutes: [{ method: 'GET', path: '/api/v1/ai/conversations/:id', handler: routeHandler, auth: false }] };
+        const dispatcher = makeDispatcherWithKernelExtras({ ai: { name: 'ai' } }, kernelExtras);
+        const result = await dispatcher.dispatch('GET', '/ai/conversations/c-1', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(routeHandler.mock.calls[0][0].params).toMatchObject({ id: 'c-1' });
     });
 });

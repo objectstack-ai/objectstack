@@ -96,6 +96,7 @@ const SYS_IMPORT_JOB = {
     write_mode: { name: 'write_mode', type: 'text' as const },
     dry_run: { name: 'dry_run', type: 'boolean' as const },
     run_automations: { name: 'run_automations', type: 'boolean' as const },
+    treat_as_historical: { name: 'treat_as_historical', type: 'boolean' as const },
     error: { name: 'error', type: 'textarea' as const },
     results: { name: 'results', type: 'json' as const },
     started_at: { name: 'started_at', type: 'text' as const },
@@ -386,5 +387,67 @@ describe('async import job — real engine + protocol integration', () => {
   it('404s undo for an unknown job id', async () => {
     const res = await callJob(ctx.undo, 'imp_nope');
     expect(res._status).toBe(404);
+  });
+
+  // #3549 — the undo write context must mirror the import's own write context.
+  // A historical import carries `preserveAudit` (#3493) so it keeps the original
+  // `updated_at`/`updated_by` (and business `readonly` fields) instead of
+  // stamping-now / stripping them. The undo restores the captured pre-import
+  // snapshot; if that restore write does NOT also carry `preserveAudit`, the
+  // audit auto-stamp re-writes `updated_at`/`updated_by` to "now" — silently
+  // corrupting the very timeline the historical import preserved. So undo of a
+  // historical import must set `preserveAudit`, and undo of a normal import
+  // must not. We assert on the write context the route hands the protocol.
+  function spyUpdateContexts() {
+    const seen: Array<{ object: string; context: any }> = [];
+    const orig = (ctx.protocol as any).updateData.bind(ctx.protocol);
+    (ctx.protocol as any).updateData = async (args: any) => {
+      seen.push({ object: args.object, context: args.context });
+      return orig(args);
+    };
+    return seen;
+  }
+
+  it('undo of a historical import carries preserveAudit on the restore write (#3549)', async () => {
+    // Seed an existing row so the historical upsert updates it (populates the undo log).
+    await ctx.protocol.createData({ object: 'task', data: { id: 'h_existing', title: 'orig', score: 1 } });
+
+    const created = await callCreate(ctx.create, {
+      format: 'json', writeMode: 'upsert', matchFields: ['id'], treatAsHistorical: true,
+      rows: [{ id: 'h_existing', title: 'historical', score: 42 }],
+    });
+    const jobId = created._json.jobId;
+    const done = await waitForTerminal(ctx.progress, jobId);
+    expect(done).toMatchObject({ status: 'succeeded', updated: 1 });
+    expect(done.undoable).toBe(true);
+
+    // Observe only the undo phase.
+    const seen = spyUpdateContexts();
+    const u = await callJob(ctx.undo, jobId);
+    expect(u._json).toMatchObject({ success: true, restored: 1 });
+
+    const restoreWrites = seen.filter((s) => s.object === 'task');
+    expect(restoreWrites.length).toBeGreaterThan(0);
+    for (const w of restoreWrites) expect(w.context?.preserveAudit).toBe(true);
+  });
+
+  it('undo of a normal import does NOT set preserveAudit — default stamp/strip (#3549)', async () => {
+    await ctx.protocol.createData({ object: 'task', data: { id: 'n_existing', title: 'orig', score: 1 } });
+
+    const created = await callCreate(ctx.create, {
+      format: 'json', writeMode: 'upsert', matchFields: ['id'], // treatAsHistorical omitted
+      rows: [{ id: 'n_existing', title: 'updated', score: 7 }],
+    });
+    const jobId = created._json.jobId;
+    const done = await waitForTerminal(ctx.progress, jobId);
+    expect(done).toMatchObject({ status: 'succeeded', updated: 1 });
+
+    const seen = spyUpdateContexts();
+    const u = await callJob(ctx.undo, jobId);
+    expect(u._json).toMatchObject({ success: true, restored: 1 });
+
+    const restoreWrites = seen.filter((s) => s.object === 'task');
+    expect(restoreWrites.length).toBeGreaterThan(0);
+    for (const w of restoreWrites) expect(w.context?.preserveAudit).toBeUndefined();
   });
 });

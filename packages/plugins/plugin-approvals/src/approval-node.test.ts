@@ -193,4 +193,124 @@ describe('Approval node bridge (ADR-0019)', () => {
       service.decideNode(request.id, { decision: 'approve', actorId: 'intruder' }, { isSystem: false, positions: [], permissions: [] } as any),
     ).rejects.toThrow(/FORBIDDEN/);
   });
+
+  // ── #3447 P2: dynamic approvers end-to-end ────────────────────────
+  //
+  // The issue's headline scenario as one flow: the first approver PICKS the
+  // next step's approvers in their decision, the next approval node resolves
+  // them from `vars.*` at entry — no record-field detour, no snapshot staleness.
+
+  it('decide outputs feed the NEXT approval node via vars.<nodeId>.<key> (#3447 P2)', async () => {
+    automation.registerFlow('two_stage', {
+      name: 'two_stage',
+      label: 'Two Stage',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        {
+          id: 'lead_review', type: 'approval', label: 'Lead Review',
+          config: { approvers: [{ type: 'user', value: 'lead' }], decisionOutputs: ['next_reviewers'] },
+        },
+        {
+          id: 'co_sign', type: 'approval', label: 'Co-sign',
+          config: {
+            approvers: [{ type: 'expression', value: 'vars.lead_review.next_reviewers' }],
+            behavior: 'unanimous',
+          },
+        },
+        { id: 'on_approved', type: 'mark', label: 'Approved' },
+        { id: 'on_rejected', type: 'mark', label: 'Rejected' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'lead_review' },
+        { id: 'e2', source: 'lead_review', target: 'co_sign', label: 'approve' },
+        { id: 'e3', source: 'lead_review', target: 'on_rejected', label: 'reject' },
+        { id: 'e4', source: 'co_sign', target: 'on_approved', label: 'approve' },
+        { id: 'e5', source: 'co_sign', target: 'on_rejected', label: 'reject' },
+      ],
+    });
+
+    const paused = await automation.execute('two_stage', {
+      object: 'crm_deal', record: { id: 'd1' }, userId: 'submitter',
+    });
+    expect(paused.status).toBe('paused');
+
+    // The lead approves AND hands the co-reviewers to the flow.
+    const first = (await fake.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    await service.decide(first.id, {
+      decision: 'approve', actorId: 'lead', outputs: { next_reviewers: ['u2', 'u3'] },
+    }, SYSTEM_CTX);
+
+    // The co-sign node resolved its slate from the lead's decision outputs.
+    const second = (await fake.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    expect(second).toBeDefined();
+    expect(second.flow_node_id).toBe('co_sign');
+    expect(String(second.pending_approvers).split(',').sort()).toEqual(['u2', 'u3']);
+    expect(marks).toHaveLength(0);
+
+    // Both picked reviewers sign off → the run completes down `approve`.
+    await service.decide(second.id, { decision: 'approve', actorId: 'u2' }, SYSTEM_CTX);
+    await service.decide(second.id, { decision: 'approve', actorId: 'u3' }, SYSTEM_CTX);
+    expect(marks).toEqual(['on_approved']);
+    expect(automation.listSuspendedRuns()).toHaveLength(0);
+  });
+
+  it('expression current.* resolves against the LIVE row at node entry (#3447 P2)', async () => {
+    fake.tables.set('crm_deal', [{ id: 'd1', reviewers: ['u7', 'u8'] }]);
+    registerDecisionFlow(automation, [{ type: 'expression', value: 'current.reviewers' }], 'unanimous');
+    // The trigger snapshot carries an EMPTY reviewers field — only the live
+    // row names them, exactly the mid-flow-written-field shape of the issue.
+    await automation.execute('deal_approval', {
+      object: 'crm_deal', record: { id: 'd1', reviewers: [] }, userId: 'submitter',
+    });
+    const request = (await fake.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    expect(String(request.pending_approvers).split(',').sort()).toEqual(['u7', 'u8']);
+  });
+
+  it("onEmptyApprovers 'auto_approve' completes down the approve edge without suspending (#3447 P2)", async () => {
+    automation.registerFlow('auto_ok', {
+      name: 'auto_ok',
+      label: 'Auto OK',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        {
+          id: 'gate', type: 'approval', label: 'Gate',
+          config: {
+            // Present-but-empty (a missing key would fail loudly instead).
+            approvers: [{ type: 'expression', value: 'trigger.reviewers' }],
+            onEmptyApprovers: 'auto_approve',
+          },
+        },
+        { id: 'on_approved', type: 'mark', label: 'Approved' },
+        { id: 'on_rejected', type: 'mark', label: 'Rejected' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'gate' },
+        { id: 'e2', source: 'gate', target: 'on_approved', label: 'approve' },
+        { id: 'e3', source: 'gate', target: 'on_rejected', label: 'reject' },
+      ],
+    });
+
+    const result = await automation.execute('auto_ok', {
+      object: 'crm_deal', record: { id: 'd1', reviewers: [] }, userId: 'submitter',
+    });
+
+    // No pause, no request row — the empty slate waved through, down `approve`
+    // ONLY (the branchLabel wiring; unlabelled traversal would hit both marks).
+    expect(result.status).not.toBe('paused');
+    expect(marks).toEqual(['on_approved']);
+    expect(await fake.find('sys_approval_request', {})).toHaveLength(0);
+    expect(automation.listSuspendedRuns()).toHaveLength(0);
+  });
+
+  it('an expression referencing `record` fails the node loudly, not as an empty slate (#3447 P2)', async () => {
+    registerDecisionFlow(automation, [{ type: 'expression', value: 'record.reviewers' }]);
+    const result = await automation.execute('deal_approval', {
+      object: 'crm_deal', record: { id: 'd1', reviewers: ['u1'] }, userId: 'submitter',
+    });
+    expect(result.success).toBe(false);
+    expect(String(result.error ?? '')).toMatch(/current\.<field>|current\./);
+    expect(await fake.find('sys_approval_request', {})).toHaveLength(0);
+  });
 });
