@@ -248,7 +248,8 @@ export function isOAuthEligibleBaseUrl(url: string): boolean {
 export interface InvitationPlacementServiceLike {
   assertIssuable(args: {
     intent: { businessUnitId: string; positions: string[] };
-    actorContext: unknown;
+    /** The ISSUER's user id — the service resolves their grants itself. */
+    actorUserId?: string | null;
     organizationId?: string | null;
   }): Promise<void>;
   apply(args: {
@@ -1696,9 +1697,11 @@ export class AuthManager {
             try {
               await svc.assertIssuable({
                 intent,
-                // The gate resolves the issuer's permission sets from this
-                // context, exactly as the CRUD middleware would.
-                actorContext: { userId: inviter?.id, tenantId: organizationId },
+                // WHO is issuing — not a context. The service resolves this
+                // user's real grants through the shared authz resolver; a
+                // hand-built context here would carry no positions and refuse
+                // every delegate.
+                actorUserId: inviter?.id ?? inviter?.userId ?? null,
                 organizationId,
               });
             } catch (err: any) {

@@ -34,6 +34,8 @@
  * no placement — fail closed, never a silently unchecked assignment).
  */
 
+import { resolveUserAuthzGrants } from '@objectstack/core';
+
 const SYSTEM_CTX = { isSystem: true } as const;
 
 /** The kernel service name plugin-auth probes. */
@@ -54,8 +56,13 @@ export interface InvitationPlacementService {
    */
   assertIssuable(args: {
     intent: InvitationPlacementIntent;
-    /** The ISSUER's execution context — authority is judged at issuance time. */
-    actorContext: unknown;
+    /**
+     * The ISSUER's user id — authority is judged at issuance time, and the
+     * grants behind it are resolved HERE (see below). A caller-supplied
+     * context is deliberately not accepted: an invitation hook has no request
+     * to resolve one from, and a hand-built one silently carries no grants.
+     */
+    actorUserId?: string | null;
     organizationId?: string | null;
   }): Promise<void>;
 
@@ -132,16 +139,35 @@ export function createInvitationPlacementService(
     }));
 
   return {
-    async assertIssuable({ intent, actorContext, organizationId }) {
+    async assertIssuable({ intent, actorUserId, organizationId }) {
+      // Resolve the issuer's REAL grants through the one authz resolver. The
+      // gate judges authority from `context.positions` / `context.permissions`
+      // (`resolvePermissionSetsForContext`), so a hand-built `{ userId,
+      // tenantId }` resolves to the additive baseline and NOTHING else — every
+      // delegate would be refused, and the feature would be fail-closed but
+      // dead. There is no request here to resolve a context from, so we ask the
+      // userId-driven half of the shared resolver for exactly the envelope a
+      // transport would have carried.
+      const userId = typeof actorUserId === 'string' && actorUserId !== '' ? actorUserId : null;
+      const grants = userId
+        ? await resolveUserAuthzGrants(ql, userId, {
+            tenantId: organizationId ?? undefined,
+          })
+        : null;
+
       // Dry-run the REAL gate against the REAL operation shape. No user_id is
       // supplied — the invitee may not even have an account yet, and
       // `assertAssignmentWrite` judges the unit + the positions' bound sets,
-      // never the target principal.
+      // never the target principal. A principal-less call passes an empty
+      // context on purpose: the gate owns that refusal too, so there is exactly
+      // one place an issuance can be denied.
       await gate.assert({
         object: 'sys_user_position',
         operation: 'insert',
         data: rowsFor(intent, organizationId ? { organization_id: organizationId } : {}),
-        context: actorContext,
+        context: grants
+          ? { ...grants, userId, ...(organizationId ? { tenantId: organizationId } : {}) }
+          : {},
       });
     },
 

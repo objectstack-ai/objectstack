@@ -750,9 +750,13 @@ describe('AuthManager', () => {
       });
 
       expect(assertIssuable).toHaveBeenCalledTimes(1);
+      // WHO issued, not a context: the service resolves the issuer's real
+      // grants through the shared authz resolver. Handing it a hand-built
+      // context was the #3663 defect — it carried no positions, so the gate
+      // refused every delegate.
       expect(assertIssuable).toHaveBeenCalledWith({
         intent: { businessUnitId: 'bu_plant_a', positions: ['qc_inspector'] },
-        actorContext: { userId: 'u_issuer', tenantId: 'org-42' },
+        actorUserId: 'u_issuer',
         organizationId: 'org-42',
       });
     });
