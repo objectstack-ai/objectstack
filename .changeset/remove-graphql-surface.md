@@ -1,5 +1,5 @@
 ---
-"@objectstack/spec": major
+"@objectstack/spec": minor
 ---
 
 feat(spec)!: remove the never-implemented GraphQL surface from the product plan (#2462 follow-on)
@@ -15,7 +15,7 @@ maintained:
   `graphql` removed from `CoreServiceName`, `ApiProtocolType`, the
   query-adapter dialects, `graphql-playground` from testing-UI types; the
   `graphqlApi`/network capability booleans, discovery/router route fields
-  dropped. BREAKING for consumers referencing those exports/enum members.
+  dropped. Breaking for consumers referencing those exports/enum members (shipped as minor per the launch-window convention, cf. #3486/#2377).
 - **runtime**: `handleGraphQL`, the if-chain branch, the dispatcher-plugin
   and hono-adapter mounts, discovery advertisement, and the now-dead
   `resolveRequestExecutionContext` helper removed.

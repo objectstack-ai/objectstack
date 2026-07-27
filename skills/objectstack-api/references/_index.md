@@ -13,7 +13,6 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/api/batch.zod.ts` — Batch Operations API
 - `node_modules/@objectstack/spec/src/api/endpoint.zod.ts` — API Mapping Schema
 - `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
-- `node_modules/@objectstack/spec/src/api/graphql.zod.ts` — GraphQL Protocol Support
 - `node_modules/@objectstack/spec/src/api/realtime.zod.ts` — Transport Protocol Enum
 - `node_modules/@objectstack/spec/src/api/rest-server.zod.ts` — REST API Server Protocol
 - `node_modules/@objectstack/spec/src/api/versioning.zod.ts` — API Versioning Protocol
@@ -24,12 +23,10 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/api/contract.zod.ts` — Standard Create Request
 - `node_modules/@objectstack/spec/src/api/realtime-shared.zod.ts` — Realtime Shared Protocol
 - `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol
-- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Field Type Enum
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/data/query.zod.ts` — Sort Node
 - `node_modules/@objectstack/spec/src/kernel/execution-context.zod.ts` — Execution Context Schema
 - `node_modules/@objectstack/spec/src/security/explain.zod.ts` — [ADR-0090 D6] Access-explanation contract — `explain(principal, object,
-- `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/http.zod.ts` — Shared HTTP Schemas
 - `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
 

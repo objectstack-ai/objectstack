@@ -72,7 +72,6 @@ const SKILL_MAP: Record<string, string[]> = {
     'api/auth.zod.ts',
     'api/realtime.zod.ts',
     'api/rest-server.zod.ts',
-    'api/graphql.zod.ts',
     'api/websocket.zod.ts',
     'api/errors.zod.ts',
     'api/batch.zod.ts',
