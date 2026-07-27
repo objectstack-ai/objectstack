@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': major
+'@objectstack/spec': minor
 '@objectstack/plugin-security': minor
 '@objectstack/plugin-auth': minor
 '@objectstack/core': minor
@@ -16,6 +16,12 @@
 
 ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
 first-class authorization dimension.
+
+> This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+> but is recorded as `minor`: every publishable package is in the Changesets
+> lockstep group, so one `major` would promote the whole monorepo. Breaking
+> changes ship as `minor` during the launch window — the migration notes below
+> are what reach consumers in `CHANGELOG.md`.
 
 ## Tenancy is now a spectrum (D1)
 
