@@ -104,8 +104,49 @@ selects `dimensions` (X / group / split) and `values` (the measures to plot):
 | `chartConfig` | `object` | optional | Advanced chart configuration |
 | `colorVariant` | `enum` | optional | KPI/card accent color |
 | `compareTo` | `enum \| object` | optional | Period-over-period comparison window |
-| `options` | `object` | optional | Additional display options |
+| `options` | `object` | optional | Renderer extras **plus** the query keys below |
 | `responsive` | `object` | optional | Responsive behavior |
+
+### Widget `options`
+
+`options` is an open bag: keys the renderer understands (`icon`, `columns`,
+`striped`, `density`, …) pass through untouched. Five keys are **declared**,
+because they are not presentation-only — four of them change the query the
+dataset compiles to:
+
+| Key | Type | Effect |
+| :--- | :--- | :--- |
+| `dateGranularity` | `day \| week \| month \| quarter \| year` | Buckets this widget's selected **date** dimensions. Overrides the dataset dimension's own default for this widget only. |
+| `sortBy` | `string` | Orders rows by a dimension or measure **this widget selects**. |
+| `sortOrder` | `asc \| desc` | Direction for `sortBy` (default `asc`). |
+| `limit` | `number` | Max rows, applied **after** ordering. |
+| `stageOrder` | `(string \| number \| boolean)[]` | Explicit stage order for `funnel` / `pyramid`, as the dimension's **stored values**. Omit to use the dimension field's picklist option order. |
+
+Because they are declared, a misspelling (`sortDirection`, `granularity`) is an
+author-time error rather than an option that reads as if it works.
+
+```ts
+{
+  id: 'revenue_trend',
+  type: 'area',
+  dataset: 'opportunity_metrics',
+  dimensions: ['close_date'],
+  values: ['total_amount'],
+  // Group by month rather than by raw timestamp.
+  options: { dateGranularity: 'month' },
+}
+```
+
+Notes on behaviour:
+
+- `sortBy` must name something the widget selects; the server rejects an order
+  key it cannot resolve rather than ignoring it.
+- A `limit` with no `sortBy` orders by the selected dimensions first, so it
+  truncates a reproducible window instead of an arbitrary subset.
+- Ordering is applied to the finished grid, so a **derived measure** is a valid
+  `sortBy` even though no single SQL statement computes it.
+- A `funnel` with no declared stage order falls back to sorting by value
+  descending.
 
 ## Datasets
 

@@ -14,8 +14,8 @@ Color variant for dashboard widgets (e.g., KPI cards).
 ## TypeScript Usage
 
 ```typescript
-import { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant } from '@objectstack/spec/ui';
-import type { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant } from '@objectstack/spec/ui';
+import { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, DashboardWidgetOptions, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant } from '@objectstack/spec/ui';
+import type { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, DashboardWidgetOptions, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant } from '@objectstack/spec/ui';
 
 // Validate data
 const result = Dashboard.parse(data);
@@ -107,11 +107,28 @@ Dashboard header action
 | **dimensions** | `string[]` | optional | Dimension names — X/group/split |
 | **values** | `string[]` | ✅ | Measure names — Y (at least one) |
 | **layout** | `{ x: number; y: number; w: number; h: number }` | optional | Grid layout position (auto-flowed when omitted) |
-| **options** | `any` | optional | Widget specific configuration |
+| **options** | `Record<string, any>` | optional | Widget specific configuration |
 | **filterBindings** | `Record<string, string \| 'false'>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out |
 | **suppressWarnings** | `string[]` | optional | Build diagnostic rule ids suppressed on this widget |
 | **responsive** | `{ breakpoint?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>; hiddenOn?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>[]; columns?: object; order?: object }` | optional | Responsive layout configuration |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+
+---
+
+## DashboardWidgetOptions
+
+Widget configuration — declared query keys + open renderer extras
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Bucket selected date dimensions (day/week/month/quarter/year) |
+| **sortBy** | `string` | optional | Dimension/measure name to order by |
+| **sortOrder** | `Enum<'asc' \| 'desc'>` | optional | Sort direction for sortBy |
+| **limit** | `integer` | optional | Max rows (applied after ordering) |
+| **stageOrder** | `string \| number \| boolean[]` | optional | Explicit category order for funnel/pyramid stages (stored values) |
 
 
 ---
