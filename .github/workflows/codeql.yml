@@ -11,6 +11,13 @@ on:
     # Run at 02:00 UTC every Monday
     - cron: '0 2 * * 1'
 
+# A superseded analysis of an outdated commit has no value — cancel it. PR runs
+# group by PR number; push/schedule runs group by ref, so a newer main push
+# cancels only an in-flight main analysis (the newer commit gets analyzed).
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze:
     name: Analyze

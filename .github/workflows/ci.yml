@@ -130,18 +130,25 @@ jobs:
       # --concurrency=4: turbo's default (10) oversubscribes the 4-vCPU
       # hosted runner; matching the core count bounds peak memory and the
       # job is CPU-bound anyway.
+      # !@objectstack/dogfood: the ~7½-minute dogfood suite is the dedicated
+      # Dogfood job's whole purpose, and both jobs run under the same `core`
+      # filter — without the exclusion every core PR executed the suite twice
+      # in parallel, and it dominated this job's critical path. The exclusion
+      # subtracts from the affected set (verified: turbo unions inclusive
+      # filters, then applies `!` negations to the result).
       - name: Run affected tests (PR)
         if: github.event_name == 'pull_request'
         env:
           TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
-        run: pnpm turbo run test --affected --concurrency=4
+        run: pnpm turbo run test --affected --filter=!@objectstack/dogfood --concurrency=4
 
       # Push to main: full run, but exclude spec's plain test task — the
       # coverage step below executes the exact same 250-file spec suite once,
-      # with coverage. Previously the spec suite ran twice per push.
+      # with coverage. Previously the spec suite ran twice per push. Dogfood is
+      # excluded for the same reason as the PR step: the Dogfood job runs it.
       - name: Run all tests (push)
         if: github.event_name == 'push'
-        run: pnpm turbo run test --filter=!@objectstack/spec --concurrency=4
+        run: pnpm turbo run test --filter=!@objectstack/spec --filter=!@objectstack/dogfood --concurrency=4
 
       - name: Generate coverage report
         if: github.event_name == 'push'
@@ -156,12 +163,22 @@ jobs:
           retention-days: 30
 
   dogfood:
-    name: Dogfood Regression Gate
+    # Sharded 2-way: the suite is ~60 independent test files, each booting its
+    # own in-process app, and a single 4-vCPU runner needed ~7½ minutes for the
+    # lot — the longest pole in the whole workflow. vitest partitions the file
+    # list deterministically across shards; both shards must pass. If branch
+    # protection lists "Dogfood Regression Gate" as a required check, it must be
+    # updated to the two sharded check names.
+    name: Dogfood Regression Gate (${{ matrix.shard }}/2)
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Checkout repository
@@ -191,14 +208,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-v3-
 
+      # Shard-scoped key: the turbo test hash differs per shard (pass-through
+      # args are part of the task hash), and two same-named matrix jobs would
+      # otherwise race to save one cache entry per sha.
       - name: Setup Turbo cache
         uses: actions/cache@v6
         with:
           path: .turbo/cache
-          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
-            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -206,15 +226,19 @@ jobs:
       # Boots real example apps in-process (in-memory SQLite) and exercises them
       # through the real HTTP + service stack — catches runtime regressions that
       # build / unit tests / spec-liveness pass over (e.g. the #2018 tz-bucketing
-      # break, which was green on every static gate).
+      # break, which was green on every static gate). The `--` args reach the
+      # package's `vitest run` and are hashed into the turbo task, so each
+      # shard caches independently.
       - name: Boot example apps and exercise real user flows
-        run: pnpm turbo run test --filter=@objectstack/dogfood
+        run: pnpm turbo run test --filter=@objectstack/dogfood -- --shard=${{ matrix.shard }}/2
 
       # Replaces the former auto-verify dogfood tests: runs the published
       # `objectstack verify` engine over each example app through the CLI —
       # auto-derived CRUD round-trip fidelity + the cross-owner RLS invariant.
       # Exits non-zero on a real runtime failure, so it gates like the tests did.
+      # Not shard-dependent, so shard 1 alone runs it.
       - name: Verify example apps via the `objectstack verify` CLI
+        if: matrix.shard == 1
         run: |
           pnpm turbo run build --filter=@objectstack/cli
           for app in examples/app-crm examples/app-showcase; do
