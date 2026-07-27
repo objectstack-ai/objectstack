@@ -2356,6 +2356,61 @@ export class ObjectStackClient {
   };
 
   /**
+   * Server-registered Actions (#3563 gap closure)
+   *
+   * Dispatches named action handlers registered server-side via
+   * `engine.registerAction(objectName, actionName, handler)`. Until this
+   * surface existed, `POST /api/v1/actions/...` was entirely unreachable from
+   * the SDK — every console hand-rolled `fetch` for it (the largest functional
+   * hole found by the #3563 route audit).
+   *
+   * The path is fixed (`/api/v1/actions`), not discovery-routed: `actions` is
+   * not part of `ApiRoutesSchema`, so `getRoute()` cannot resolve it — same
+   * precedent as the `projects` surface's `/api/v1/cloud`.
+   *
+   * The dispatcher accepts the record id either in the URL or in the body;
+   * this client always sends it in the body (`{ recordId, params }`), which
+   * both server shapes honor. The HTTP envelope is
+   * `{ success, data: { success, data | error } }` — the OUTER envelope is
+   * transport success; the INNER `success:false` + `error` is the action
+   * handler's own (business) failure, deliberately not thrown so callers can
+   * surface it as a toast rather than a crash.
+   */
+  actions = {
+      /**
+       * Invoke a server-registered action on an object.
+       * Falls back to the server's wildcard ('*') handler when no
+       * object-specific handler is registered.
+       */
+      invoke: async <T = any>(
+          objectName: string,
+          actionName: string,
+          opts?: { recordId?: string; params?: Record<string, unknown> },
+      ): Promise<{ success: boolean; data?: T; error?: string }> => {
+          const res = await this.fetch(
+              `${this.baseUrl}/api/v1/actions/${encodeURIComponent(objectName)}/${encodeURIComponent(actionName)}`,
+              {
+                  method: 'POST',
+                  body: JSON.stringify({ recordId: opts?.recordId, params: opts?.params ?? {} }),
+              },
+          );
+          return this.unwrapResponse(res) as Promise<{ success: boolean; data?: T; error?: string }>;
+      },
+
+      /**
+       * Invoke a global (object-less) action — the server's
+       * `POST /actions/global/:action` shape, dispatched to the wildcard
+       * handler registry.
+       */
+      invokeGlobal: async <T = any>(
+          actionName: string,
+          opts?: { recordId?: string; params?: Record<string, unknown> },
+      ): Promise<{ success: boolean; data?: T; error?: string }> => {
+          return this.actions.invoke<T>('global', actionName, opts);
+      },
+  };
+
+  /**
    * Event Subscription API
    * Provides real-time event subscriptions for metadata and data changes
    */

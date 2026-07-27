@@ -11,8 +11,8 @@ The official TypeScript client for ObjectStack.
 - **Batch Operations**: Efficient bulk create/update/delete with transaction support.
 - **View Storage**: Save, load, and share custom UI view configurations.
 - **Standardized Errors**: Machine-readable error codes with retry guidance.
-- **Full Protocol Coverage**: Implements all 13 API namespaces defined in `@objectstack/spec`
-- **95+ Methods**: Complete implementation of discovery, metadata, data, auth, workflow, realtime, AI, and more.
+- **Broad Protocol Coverage**: 20 top-level surfaces (~170 methods) over the ObjectStack HTTP API.
+- **Audited Surface**: coverage against the server's routes is tracked by the #3563 route ledger (`@objectstack/runtime` `route-ledger.ts`), enforced in CI.
 
 ## 🤖 AI Development Context
 
@@ -47,7 +47,7 @@ async function main() {
   await client.connect();
 
   // 3. Metadata Access
-  const todoSchema = await client.meta.getObject('todo_task');
+  const todoSchema = await client.meta.getItem('object', 'todo_task');
   console.log('Fields:', todoSchema.fields);
   
   // Save Metadata (New Feature)
@@ -93,10 +93,9 @@ async function main() {
   }
 
   // 8. View Storage (New!)
-  const view = await client.views.create({
+  const view = await client.views.create('todo_task', {
     name: 'active_tasks',
     label: 'Active Tasks',
-    object: 'todo_task',
     type: 'list',
     visibility: 'public',
     query: {
@@ -121,9 +120,10 @@ async function main() {
 Initializes the client by fetching the system discovery manifest from `/api/v1`.
 
 ### `client.meta`
-- `getObject(name: string)`: Get object schema.
-- `getCached(name: string, options?)`: Get object schema with ETag-based caching.
-- `getView(name: string)`: Get view configuration.
+- `getTypes()` / `getItems(type)` / `getItem(type, name)`: Read metadata (e.g. `getItem('object', 'todo_task')`).
+- `saveItem(type, name, data)` / `deleteItem(type, name)`: Write metadata.
+- `getCached(name, options?)`: Get object schema with ETag-based caching.
+- `getView(object, type?)`: Get rendered view configuration.
 
 ### `client.data`
 - `find<T>(object, options)`: Advanced query with filtering, sorting, selection.
@@ -137,14 +137,12 @@ Initializes the client by fetching the system discovery manifest from `/api/v1`.
 - `delete(object, id)`: Delete record.
 - `deleteMany(object, ids[], options?)`: Batch delete records (convenience method).
 
-### `client.views` (New!)
-- `create(request)`: Create a new saved view.
-- `get(id)`: Get a saved view by ID.
-- `list(request?)`: List saved views with optional filters.
-- `update(request)`: Update an existing view.
-- `delete(id)`: Delete a saved view.
-- `share(id, userIds[])`: Share a view with users/teams.
-- `setDefault(id, object)`: Set a view as default for an object.
+### `client.views`
+- `create(object, data)`: Create a new saved view.
+- `get(object, viewId)`: Get a saved view by ID.
+- `list(object, type?)`: List saved views.
+- `update(object, viewId, data)`: Update an existing view.
+- `delete(object, viewId)`: Delete a saved view.
 
 ### Query Options
 The `find` method accepts an options object with canonical field names:
@@ -226,25 +224,16 @@ const data = await retryableRequest(() =>
 
 ## Protocol Compliance
 
-The `@objectstack/client` SDK implements all 13 API namespaces defined in the `@objectstack/spec` protocol specification:
+The SDK ships 20 top-level surfaces: `meta`, `data`, `auth`, `oauth`,
+`organizations`, `projects`, `packages`, `views`, `permissions`, `workflow`,
+`approvals`, `analytics`, `automation`, `actions`, `storage`, `i18n`,
+`notifications`, `realtime`, `ai`, and `events`.
 
-| Namespace | Purpose | Status |
-|-----------|---------|:------:|
-| `discovery` | API version & capabilities detection | ✅ |
-| `meta` | Metadata operations (objects, plugins, etc.) | ✅ |
-| `data` | CRUD & query operations | ✅ |
-| `auth` | Authentication & user management | ✅ |
-| `packages` | Plugin/package lifecycle management | ✅ |
-| `views` | UI view definitions | ✅ |
-| `workflow` | Workflow state transitions | ✅ |
-| `analytics` | Analytics queries | ✅ |
-| `automation` | Automation triggers | ✅ |
-| `i18n` | Internationalization | ✅ |
-| `notifications` | Push notifications | ✅ |
-| `realtime` | WebSocket subscriptions | ✅ |
-| `ai` | AI services (NLQ, chat, insights) | ✅ |
-
-For detailed compliance verification, see [CLIENT_SPEC_COMPLIANCE.md](./CLIENT_SPEC_COMPLIANCE.md).
+Coverage against the server's actual route surface is no longer asserted by a
+hand-written table — it is audited and CI-enforced by the #3563 route ledger
+(`packages/runtime/src/route-ledger.ts` + its conformance tests, one half in
+runtime, one half in this package). See
+`docs/audits/2026-07-dispatcher-client-route-coverage.md` for the audit.
 
 ## Available Namespaces
 
@@ -291,8 +280,10 @@ await client.permissions.getEffectivePermissions();
 await client.workflow.getConfig('approval');
 await client.workflow.getState('approval', recordId);
 await client.workflow.transition({ object: 'approval', recordId, transition: 'submit' });
-await client.workflow.approve({ object: 'approval', recordId });
-await client.workflow.reject({ object: 'approval', recordId, reason: 'Incomplete' });
+
+// Approvals (approve/reject live here, not on workflow)
+await client.approvals.approve(requestId, 'LGTM');
+await client.approvals.reject(requestId, 'Incomplete');
 
 // Realtime
 await client.realtime.connect({ protocol: 'websocket' });
@@ -306,7 +297,6 @@ await client.notifications.markRead(['notif-1', 'notif-2']);
 
 // AI Services
 await client.ai.nlq({ query: 'Show me all active contacts' });
-await client.ai.chat({ message: 'Summarize this project', context: projectId });
 await client.ai.suggest({ object: 'contact', field: 'industry' });
 await client.ai.insights({ object: 'sales', recordId: dealId });
 

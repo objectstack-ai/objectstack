@@ -189,10 +189,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: '* /mcp/**', domain: '/mcp', disposition: 'server-only', note: 'MCP Streamable HTTP transport — consumed by MCP clients, not this SDK' },
 
   // ── actions ───────────────────────────────────────────────────────────────
-  { route: 'POST /actions/:object/:action', domain: '/actions', disposition: 'gap',
-    note: 'server-registered actions (engine.registerAction) are entirely unreachable from the SDK — the largest functional hole' },
-  { route: 'POST /actions/:object/:action/:recordId', domain: '/actions', disposition: 'gap', note: 'record-scoped variant — same hole' },
-  { route: 'POST /actions/global/:action', domain: '/actions', disposition: 'gap', note: 'wildcard variant — same hole' },
+  { route: 'POST /actions/:object/:action', domain: '/actions', disposition: 'sdk', client: 'actions.invoke' },
+  { route: 'POST /actions/:object/:action/:recordId', domain: '/actions', disposition: 'sdk', client: 'actions.invoke',
+    note: 'client sends recordId in the body — both server shapes honor it' },
+  { route: 'POST /actions/global/:action', domain: '/actions', disposition: 'sdk', client: 'actions.invokeGlobal' },
 
   // ── misc legacy ───────────────────────────────────────────────────────────
   { route: 'GET /openapi.json', domain: '/openapi.json', disposition: 'server-only', note: 'docs tooling; falls through when metadata service lacks a generator' },

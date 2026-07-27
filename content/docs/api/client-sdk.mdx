@@ -117,7 +117,8 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | **views** | ✅ | 5 | UI view definitions |
 | **workflow** | ✅ | 3 | Workflow state transitions |
 | **analytics** | ✅ | 3 | Analytics queries |
-| **automation** | ✅ | 1 | Automation triggers |
+| **automation** | ✅ | 15 | Flow CRUD, trigger/execute, runs, screen-flow resume |
+| **actions** | ✅ | 2 | Server-registered action handlers (`engine.registerAction`) |
 | **storage** | ✅ | 2 | File upload & download |
 | **i18n** | ✅ | 3 | Internationalization |
 | **notifications** | 🟡 | 7 | Legacy notification helpers; receipt/inbox cut-over pending |
@@ -125,7 +126,13 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | **ai** | ✅ | 3 | AI services (NLQ, suggest, insights) |
 
 <Callout type="info">
-**Protocol compliance & verification**: See [`CLIENT_SPEC_COMPLIANCE.md`](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/CLIENT_SPEC_COMPLIANCE.md) for detailed method-by-method verification and [`CLIENT_SERVER_INTEGRATION_TESTS.md`](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md) for comprehensive integration test specifications.
+**Coverage is CI-enforced, not hand-asserted**: the #3563 route ledger
+([`route-ledger.ts`](https://github.com/objectstack-ai/objectstack/blob/main/packages/runtime/src/route-ledger.ts))
+records the audited disposition of every server route, and conformance tests
+on both sides fail when a route lands without a reviewed disposition or the
+ledger names a client method that doesn't exist. Integration test
+specifications live in
+[`CLIENT_SERVER_INTEGRATION_TESTS.md`](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md).
 </Callout>
 
 ---
@@ -331,6 +338,19 @@ if (run.status === 'paused') {
 // Re-fetch the pending screen when the client did not launch the run itself
 // (a page reload, another tab, an inbox):
 await client.automation.getScreen('convert_lead', runId);
+
+// Actions — Invoke server-registered action handlers
+// (engine.registerAction). The result envelope is the HANDLER's own
+// `{ success, data | error }` — a business failure comes back as
+// `success: false` + `error` instead of a thrown exception, so it can be
+// surfaced as a toast.
+const res = await client.actions.invoke('crm_lead', 'convert', {
+  recordId,
+  params: { create_opportunity: true },
+});
+if (!res.success) console.warn(res.error);
+// Global (object-less) actions dispatch to the wildcard handler:
+await client.actions.invokeGlobal('nightly_cleanup', { params: { dryRun: true } });
 
 // Storage — File upload and management
 await client.storage.upload(fileData, 'user');
