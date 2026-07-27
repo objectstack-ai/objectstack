@@ -131,6 +131,8 @@ export interface DomainHandlerDeps {
      * dispatch()-routed requests (they already swapped).
      */
     resolveProjectKernelObjectQL(context: HttpProtocolContext): Promise<any | null>;
+    /** True when a host KernelResolver is registered (multi-tenant deployment). */
+    isMultiTenantHost(): boolean;
     /** The deployment's `requireAuth` posture (lazily read — construction-order safe). */
     isAuthRequired(): boolean;
     /**

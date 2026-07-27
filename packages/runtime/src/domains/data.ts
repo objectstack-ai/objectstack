@@ -1,0 +1,149 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * `/data` domain — extracted dispatcher body (ADR-0076 D11 step ③, PR-10,
+ * the terminal cut). CRUD + query over `callData` (protocol-first with
+ * ObjectQL fallback, ADR-0049 exposure gate inside). On a multi-tenant
+ * host (a KernelResolver is registered) an unresolved environment answers
+ * 428 instead of silently serving the control plane.
+ */
+
+import * as actionExec from '../action-execution.js';
+import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
+import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+
+export function createDataDomain(deps: DomainHandlerDeps): DomainRoute {
+    return {
+        prefix: '/data',
+        handler: (req, context) =>
+            handleDataRequest(deps, req.path.substring(5), req.method, req.body, req.query, context),
+    };
+}
+
+/**
+ * Handles Data requests
+ * path: sub-path after /data/ (e.g. "contacts", "contacts/123", "contacts/query")
+ */
+export async function handleDataRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
+    const parts = path.replace(/^\/+/, '').split('/');
+    const objectName = parts[0];
+
+    if (!objectName) {
+        return { handled: true, response: deps.error('Object name required', 400) };
+    }
+
+    // Check if environment is resolved for data-plane requests. A
+    // registered KernelResolver marks this host as multi-tenant (ADR-0006
+    // Phase 5 — previously signalled by the env-registry service): a
+    // data-plane request that the resolver did not attach to an
+    // environment must not silently fall through to the host kernel.
+    if (!_context.dataDriver && deps.isMultiTenantHost()) {
+        return {
+            handled: true,
+            response: deps.error('Project not resolved. Please specify X-Environment-Id header or ensure hostname maps to a project.', 428)
+        };
+    }
+
+    const m = method.toUpperCase();
+
+    // 1. Custom Actions (query, batch)
+    if (parts.length > 1) {
+        const action = parts[1];
+
+        // POST /data/:object/query
+        if (action === 'query' && m === 'POST') {
+            // Spec: returns FindDataResponse = { object, records, total?, hasMore? }
+            const result = await actionExec.callData(deps, 'query', { object: objectName, ...body }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            return { handled: true, response: deps.success(result) };
+        }
+
+        // GET /data/:object/:id
+        if (parts.length === 2 && m === 'GET') {
+            const id = parts[1];
+            // Spec: Only select/expand are allowlisted query params for GET by ID.
+            // All other query parameters are discarded to prevent parameter pollution.
+            const { select, expand } = query || {};
+            const allowedParams: Record<string, unknown> = {};
+            if (select != null) allowedParams.select = select;
+            if (expand != null) allowedParams.expand = expand;
+            // Spec: returns GetDataResponse = { object, id, record }
+            const result = await actionExec.callData(deps, 'get', { object: objectName, id, ...allowedParams }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            return { handled: true, response: deps.success(result) };
+        }
+
+        // PATCH /data/:object/:id
+        if (parts.length === 2 && m === 'PATCH') {
+            const id = parts[1];
+            // Spec: returns UpdateDataResponse = { object, id, record }
+            const result = await actionExec.callData(deps, 'update', { object: objectName, id, data: body }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            return { handled: true, response: deps.success(result) };
+        }
+
+        // DELETE /data/:object/:id
+        if (parts.length === 2 && m === 'DELETE') {
+            const id = parts[1];
+            // Spec: returns DeleteDataResponse = { object, id, deleted }
+            const result = await actionExec.callData(deps, 'delete', { object: objectName, id }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            return { handled: true, response: deps.success(result) };
+        }
+    } else {
+        // GET /data/:object (List)
+        if (m === 'GET') {
+            // ── Normalize HTTP transport params → Spec canonical (QueryAST) ──
+            // HTTP GET query params use transport-level names (filter, sort, top,
+            // skip, select, expand) which are normalized here to canonical
+            // QueryAST field names (where, orderBy, limit, offset, fields,
+            // expand) before forwarding to the data service layer.
+            // The protocol.ts findData() method performs a deeper normalization
+            // pass, but pre-normalizing here ensures the data service always receives
+            // Spec-canonical keys.
+            const normalized: Record<string, unknown> = { ...query };
+
+            // filter/filters → where
+            // Note: `filter` is the canonical HTTP *transport* parameter name
+            // (see HttpFindQueryParamsSchema). It is normalized here to the
+            // canonical *QueryAST* field name `where` before data dispatch.
+            // `filters` (plural) is a deprecated alias for `filter`.
+            if (normalized.filter != null || normalized.filters != null) {
+                normalized.where = normalized.where ?? normalized.filter ?? normalized.filters;
+                delete normalized.filter;
+                delete normalized.filters;
+            }
+            // select → fields
+            if (normalized.select != null && normalized.fields == null) {
+                normalized.fields = normalized.select;
+                delete normalized.select;
+            }
+            // sort → orderBy
+            if (normalized.sort != null && normalized.orderBy == null) {
+                normalized.orderBy = normalized.sort;
+                delete normalized.sort;
+            }
+            // top → limit
+            if (normalized.top != null && normalized.limit == null) {
+                normalized.limit = normalized.top;
+                delete normalized.top;
+            }
+            // skip → offset
+            if (normalized.skip != null && normalized.offset == null) {
+                normalized.offset = normalized.skip;
+                delete normalized.skip;
+            }
+
+            // Spec: returns FindDataResponse = { object, records, total?, hasMore? }
+            const result = await actionExec.callData(deps, 'query', { object: objectName, query: normalized }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            return { handled: true, response: deps.success(result) };
+        }
+
+        // POST /data/:object (Create)
+        if (m === 'POST') {
+            // Spec: returns CreateDataResponse = { object, id, record }
+            const result = await actionExec.callData(deps, 'create', { object: objectName, data: body }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const res = deps.success(result);
+            res.status = 201;
+            return { handled: true, response: res };
+        }
+    }
+
+    return { handled: false };
+}
