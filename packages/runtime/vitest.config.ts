@@ -6,6 +6,11 @@ import path from 'node:path';
 export default defineConfig({
   resolve: {
     alias: {
+      // Subpath before the bare package: the object form prefix-replaces, so
+      // without this entry `@objectstack/core/logger` (imported by the built
+      // client, see route-ledger.conformance.test.ts) resolves to the garbage
+      // path `…/core/src/index.ts/logger`.
+      '@objectstack/core/logger': path.resolve(__dirname, '../core/src/logger.ts'),
       '@objectstack/core': path.resolve(__dirname, '../core/src/index.ts'),
       '@objectstack/rest': path.resolve(__dirname, '../rest/src/index.ts'),
       '@objectstack/spec/ai': path.resolve(__dirname, '../spec/src/ai/index.ts'),
