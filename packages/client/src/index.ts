@@ -2953,6 +2953,101 @@ export class ObjectStackClient {
     }
   };
 
+  /**
+   * Saved reports (#3587 gap closure)
+   *
+   * Tenant-wide report definitions, execution, and recurring email
+   * schedules, served by `@objectstack/plugin-reports` behind the REST
+   * surface. Every route 501s [NOT_IMPLEMENTED] on deployments without the
+   * reports service. Fixed path — `reports` is not in `ApiRoutesSchema`.
+   */
+  reports = {
+    /** List saved reports, optionally filtered by object or owner. */
+    list: async (opts?: { object?: string; ownerId?: string }): Promise<any[]> => {
+        const params = new URLSearchParams();
+        if (opts?.object) params.set('object', opts.object);
+        if (opts?.ownerId) params.set('ownerId', opts.ownerId);
+        const qs = params.toString();
+        const res = await this.fetch(`${this.baseUrl}/api/v1/reports${qs ? `?${qs}` : ''}`);
+        const body = await this.unwrapResponse<{ data?: any[] } | any[]>(res);
+        return Array.isArray(body) ? body : (body?.data ?? []);
+    },
+
+    /** Create or update a saved report definition. 400 [VALIDATION_FAILED] on a bad spec. */
+    save: async (report: any): Promise<any> => {
+        const res = await this.fetch(`${this.baseUrl}/api/v1/reports`, {
+            method: 'POST',
+            body: JSON.stringify(report ?? {}),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /** Get a saved report by id. 404 [REPORT_NOT_FOUND] when absent. */
+    get: async (id: string): Promise<any> => {
+        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}`);
+        return this.unwrapResponse<any>(res);
+    },
+
+    /** Delete a saved report; its schedules cascade. */
+    delete: async (id: string): Promise<{ deleted: boolean }> => {
+        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+        });
+        if (res.status === 204) return { deleted: true };
+        return this.unwrapResponse<{ deleted: boolean }>(res);
+    },
+
+    /** Execute a saved report and return its rendered output. */
+    run: async (id: string): Promise<any> => {
+        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}/run`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * Create a recurring email schedule for a report. Provide either
+     * `intervalMinutes` or `cronExpression`; `recipients` is required.
+     */
+    schedule: async (
+        id: string,
+        opts: {
+            recipients: string[];
+            name?: string;
+            intervalMinutes?: number;
+            cronExpression?: string;
+            timezone?: string;
+            format?: string;
+            subjectTemplate?: string;
+            ownerId?: string;
+            active?: boolean;
+        },
+    ): Promise<any> => {
+        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}/schedule`, {
+            method: 'POST',
+            body: JSON.stringify(opts),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /** List the recurring schedules attached to a report. */
+    listSchedules: async (id: string): Promise<any[]> => {
+        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}/schedules`);
+        const body = await this.unwrapResponse<{ data?: any[] } | any[]>(res);
+        return Array.isArray(body) ? body : (body?.data ?? []);
+    },
+
+    /** Delete a schedule by its id (report-independent path). */
+    unschedule: async (scheduleId: string): Promise<{ deleted: boolean }> => {
+        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/schedules/${encodeURIComponent(scheduleId)}`, {
+            method: 'DELETE',
+        });
+        if (res.status === 204) return { deleted: true };
+        return this.unwrapResponse<{ deleted: boolean }>(res);
+    },
+  };
+
   // The former `views` CRUD namespace was removed in #3612 — no server
   // surface mounts /ui/views (both surfaces serve only /ui/view/:object…).
   // View definitions are metadata: read and save them via `meta.*`.

@@ -198,6 +198,70 @@ describe('ObjectStackClient', () => {
     });
 });
 
+describe('Reports namespace (#3587 gap closure)', () => {
+    it('reports.list pins GET /reports with filters and unwraps {data}', async () => {
+        const { client, fetchMock } = createMockClient({ data: [{ id: 'r1' }] });
+        const rows = await client.reports.list({ object: 'lead', ownerId: 'u1' });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/reports?object=lead&ownerId=u1',
+        );
+        expect(rows).toEqual([{ id: 'r1' }]);
+    });
+
+    it('reports.save pins POST /reports', async () => {
+        const { client, fetchMock } = createMockClient({ id: 'r1' });
+        await client.reports.save({ name: 'Pipeline', object: 'lead' });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/reports');
+        expect(init.method).toBe('POST');
+        expect(JSON.parse(init.body)).toEqual({ name: 'Pipeline', object: 'lead' });
+    });
+
+    it('reports.get / delete pin /reports/:id and delete tolerates 204', async () => {
+        const { client, fetchMock } = createMockClient({ id: 'r1' });
+        await client.reports.get('r1');
+        expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/reports/r1');
+
+        const del = createMockClient(undefined, 204);
+        // A 204 has no JSON body — the method must not try to parse one.
+        del.fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', json: async () => { throw new Error('no body'); }, headers: new Headers() });
+        const out = await del.client.reports.delete('r1');
+        expect(String(del.fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/reports/r1');
+        expect(del.fetchMock.mock.calls[0][1].method).toBe('DELETE');
+        expect(out).toEqual({ deleted: true });
+    });
+
+    it('reports.run pins POST /reports/:id/run', async () => {
+        const { client, fetchMock } = createMockClient({ rows: [] });
+        await client.reports.run('r1');
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/reports/r1/run');
+        expect(init.method).toBe('POST');
+    });
+
+    it('reports.schedule pins POST /reports/:id/schedule with the schedule body', async () => {
+        const { client, fetchMock } = createMockClient({ id: 's1' });
+        await client.reports.schedule('r1', { recipients: ['a@example.com'], cronExpression: '0 8 * * 1' });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/reports/r1/schedule');
+        expect(JSON.parse(init.body)).toEqual({ recipients: ['a@example.com'], cronExpression: '0 8 * * 1' });
+    });
+
+    it('reports.listSchedules / unschedule pin the schedule routes', async () => {
+        const { client, fetchMock } = createMockClient({ data: [{ id: 's1' }] });
+        const rows = await client.reports.listSchedules('r1');
+        expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/reports/r1/schedules');
+        expect(rows).toEqual([{ id: 's1' }]);
+
+        const del = createMockClient(undefined, 204);
+        del.fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', json: async () => { throw new Error('no body'); }, headers: new Headers() });
+        const out = await del.client.reports.unschedule('s1');
+        expect(String(del.fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/reports/schedules/s1');
+        expect(del.fetchMock.mock.calls[0][1].method).toBe('DELETE');
+        expect(out).toEqual({ deleted: true });
+    });
+});
+
 describe('Approvals namespace (ADR-0019)', () => {
     it('should list approval requests with filters', async () => {
         const { client, fetchMock } = createMockClient({
