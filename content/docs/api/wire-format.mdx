@@ -384,6 +384,27 @@ Returned when an `If-Match` / `expectedVersion` token no longer matches the stor
 **Error Codes:** See the [Error Catalog](/docs/api/error-catalog) for the complete list of error codes and their meanings.
 </Callout>
 
+### Service-mounted routes use the declared envelope
+
+The flat envelope above is what the kernel REST server emits for `/api/v1/data/*`.
+Routes mounted directly by a service plugin — `/api/v1/storage/*` and
+`/api/v1/i18n/*` — instead return the `BaseResponse` shape their contract
+declares, with the code **inside** the error object:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "ATTACHMENT_DOWNLOAD_DENIED",
+    "message": "You do not have access to a record this file is attached to"
+  }
+}
+```
+
+Read `body.error.code`, not `body.code`, on these routes. `ObjectStackClient`
+normalizes both — `error.code` and `error.message` are populated whichever
+envelope the server used — so SDK callers do not need to branch.
+
 ---
 
 ## 8. Batch Operations
