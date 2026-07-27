@@ -41,6 +41,7 @@ import { prepareImportRequest, isMetaEnvelope } from './import-prepare.js';
 
 // Node-safe logger — avoids importing 'console' which is absent from ES2020 lib typings.
 const logError = (...args: unknown[]) => (globalThis as any).console?.error(...args);
+const logWarn = (...args: unknown[]) => ((globalThis as any).console?.warn ?? (globalThis as any).console?.error)?.(...args);
 
 /**
  * Metadata types whose user-facing labels are localized at the REST boundary
@@ -1159,7 +1160,23 @@ export class RestServer {
                 ...(environmentId ? { environmentId } : {}),
             });
             return Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
-        } catch {
+        } catch (err) {
+            // [#3545] The API-exposure gate fails OPEN when object metadata can't
+            // be read: the exposure whitelist is a SURFACE-AREA control, not the
+            // authorization boundary (auth + CRUD/FLS/RLS still enforce on the
+            // data call, which needs the same metadata and surfaces the real
+            // error), and failing closed here would 405 every request during the
+            // normal cold-start window. But a THROWN read is a real fault
+            // (metadata store down / corrupt schema doc), NOT a legitimately-empty
+            // registry (a `[]` return, e.g. a fresh deployment) — so LOG it. Left
+            // silent, a persistent metadata outage, during which the gate allows
+            // every operation unchecked, is indistinguishable from healthy
+            // operation. Still returns `[]` (fail-open preserved). See #3545.
+            logWarn(
+                '[REST] api-exposure gate: object metadata read failed — failing open ' +
+                    '(auth + CRUD/FLS/RLS still enforce on the data call)',
+                (err as Error)?.message ?? err,
+            );
             return [];
         }
     }

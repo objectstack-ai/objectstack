@@ -27,6 +27,28 @@
  * defaults (`apiEnabled` true, no `apiMethods`) and avoids breaking traffic when
  * metadata is briefly unavailable. The gate is a no-op for system/internal
  * contexts (callers pass `isSystem` and skip this check entirely).
+ *
+ * ## #3545 — fail-open residual-risk decision
+ *
+ * This gate is a SURFACE-AREA control (which API operations an object exposes),
+ * NOT the authorization boundary — every request still passes auth and the
+ * ObjectQL security middleware (CRUD / FLS / RLS) on the data call regardless of
+ * the outcome here. So a fail-open on unresolvable metadata cannot bypass data
+ * authorization; at worst an operation the author meant to HIDE from the API is
+ * transiently reachable (still fully access-controlled). Given that, the tiered
+ * decision is:
+ *   • Metadata service not ready / whole registry unavailable (cold start,
+ *     registration race, scoped kernel warming) → KEEP fail-open. Failing closed
+ *     would 405 every request during the normal startup window for no security
+ *     gain (the data call fails or is authorized independently). Callers that
+ *     read metadata (e.g. the REST `loadObjectItems`) LOG a thrown read so a
+ *     PERSISTENT outage is observable instead of a silent blanket-allow.
+ *   • Object resolvable but its `enable`/`apiMethods` is present-yet-unreadable
+ *     (a non-array policy) → `resolveEffectiveApiMethods` currently treats it as
+ *     `unrestricted` (silent widen). This path is unreachable through the
+ *     Zod-validated registration flow (only a raw/out-of-band metadata write
+ *     could produce it), so tightening it to fail-CLOSED is deferred to the
+ *     exposure-semantics window (#3543) rather than changed here unilaterally.
  */
 
 import {

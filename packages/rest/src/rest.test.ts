@@ -2827,4 +2827,56 @@ describe('RestServer — object API exposure (apiEnabled / apiMethods)', () => {
     expect(res.statusCode).toBe(404);
     expect(protocol.createManyData).not.toHaveBeenCalled();
   });
+
+  // [#3545] fail-open residual-risk decision: the exposure gate is a
+  // surface-area control (not the authz boundary — auth + CRUD/FLS/RLS still
+  // enforce on the data call), so an unresolvable metadata read fails OPEN to
+  // avoid 405ing every request during the cold-start window. The one change is
+  // OBSERVABILITY: a THROWN metadata read (a real fault) is logged, while a
+  // legitimately-empty registry stays silent — so a persistent outage, during
+  // which the gate silently allows every op, is no longer invisible.
+  describe('metadata-unavailable fail-open observability (#3545)', () => {
+    it('loadObjectItems fails OPEN (returns []) AND logs a THROWN metadata read', async () => {
+      const { rest, protocol } = setup(undefined);
+      protocol.getMetaItems = vi.fn().mockRejectedValue(new Error('metadata store down'));
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const items = await (rest as any).loadObjectItems(protocol, undefined);
+        expect(items).toEqual([]); // fail-open preserved: gate abstains
+        expect(warnSpy).toHaveBeenCalled();
+        expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('api-exposure gate');
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('loadObjectItems stays SILENT on a legitimately-empty registry (no false alarm)', async () => {
+      const { rest, protocol } = setup(undefined);
+      protocol.getMetaItems = vi.fn().mockResolvedValue([]); // empty, not thrown
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const items = await (rest as any).loadObjectItems(protocol, undefined);
+        expect(items).toEqual([]);
+        expect(warnSpy).not.toHaveBeenCalled(); // distinguishes real fault from empty
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('enforceApiAccess does NOT block when the metadata read throws (fail-open)', async () => {
+      const { rest, protocol } = setup(undefined);
+      protocol.getMetaItems = vi.fn().mockRejectedValue(new Error('metadata store down'));
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const res = makeRes();
+        const blocked = await (rest as any).enforceApiAccess(
+          { params: { object: 'widget' } }, res, protocol, undefined, 'list',
+        );
+        expect(blocked).toBe(false); // request proceeds — data path + security enforce
+        expect(res.status).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+  });
 });
