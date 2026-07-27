@@ -310,7 +310,10 @@ describe('AuthManager', () => {
       expect(capturedConfig.account.fields).toEqual(expect.objectContaining({
         userId: 'user_id',
         providerId: 'provider_id',
-        accountId: 'account_id',
+        // 1.7 identity key: (issuer, providerAccountId), the latter renamed
+        // from `accountId` but still living in the `account_id` column.
+        issuer: 'issuer',
+        providerAccountId: 'account_id',
         accessToken: 'access_token',
         refreshToken: 'refresh_token',
         idToken: 'id_token',

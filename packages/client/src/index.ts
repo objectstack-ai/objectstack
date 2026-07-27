@@ -2162,7 +2162,10 @@ export class ObjectStackClient {
         return { accounts: accounts as Array<{
           id: string;
           providerId: string;
-          accountId: string;
+          /** Authority that vouched for `providerAccountId` — an OIDC issuer, or `local:…`. */
+          issuer: string;
+          /** The user's id at the provider — better-auth 1.7 renamed this from `accountId`. */
+          providerAccountId: string;
           createdAt?: string;
           updatedAt?: string;
         }> };
@@ -2170,11 +2173,12 @@ export class ObjectStackClient {
 
       /**
        * Unlink a provider connection.
-       * better-auth: POST /unlink-account — `{ providerId, accountId? }`.
-       * `accountId` is required when the user has more than one account
-       * for the same provider.
+       * better-auth: POST /unlink-account — `{ accountId }`, where `accountId`
+       * is the account ROW id (the `id` from `accounts.list()`), NOT the user's
+       * id at the provider. 1.7 narrowed the body from the old
+       * `{ providerId, accountId? }` pair; the row id implies the provider.
        */
-      unlink: async (req: { providerId: string; accountId?: string }) => {
+      unlink: async (req: { accountId: string }) => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/unlink-account`, {
           method: 'POST',

@@ -382,6 +382,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Provider ID",
         help: "OAuth provider identifier (google, github, etc.)"
       },
+      issuer: {
+        label: "Issuer",
+        help: "Authority that vouched for the provider account id — an OIDC issuer, or local:… for providers without one"
+      },
       account_id: {
         label: "Provider Account ID",
         help: "User's ID in the provider's system"

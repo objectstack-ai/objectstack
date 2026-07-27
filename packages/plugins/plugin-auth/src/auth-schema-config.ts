@@ -87,7 +87,8 @@ export const AUTH_SESSION_CONFIG = {
  * |:--------------------------|:-------------------------------|
  * | userId                    | user_id                        |
  * | providerId                | provider_id                    |
- * | accountId                 | account_id                     |
+ * | issuer                    | issuer                         |
+ * | providerAccountId         | account_id                     |
  * | accessToken               | access_token                   |
  * | refreshToken              | refresh_token                  |
  * | idToken                   | id_token                       |
@@ -95,13 +96,28 @@ export const AUTH_SESSION_CONFIG = {
  * | refreshTokenExpiresAt     | refresh_token_expires_at       |
  * | createdAt                 | created_at                     |
  * | updatedAt                 | updated_at                     |
+ *
+ * better-auth 1.7.0-rc.2 restructured account identity: the field formerly
+ * called `accountId` is now `providerAccountId`, and a new REQUIRED `issuer`
+ * names the authority that vouched for that id. Every account lookup keys on
+ * (issuer, providerAccountId) — `findAccountByKey` / `findAccountOwnerByKey`
+ * filter on `issuer` — so an unmapped or unstamped `issuer` means sign-in
+ * finds no account at all.
+ *
+ * `providerAccountId` keeps the existing `account_id` column: same value,
+ * renamed upstream, so no data moves. `issuer` is a new column, stamped on
+ * legacy rows by backfillAccountIssuer() at boot (see backfill-account-issuer.ts)
+ * with the synthetic issuers better-auth mints itself: `local:credential` for
+ * password accounts and `local:oauth:<providerId>` for OAuth providers that
+ * carry no issuer of their own.
  */
 export const AUTH_ACCOUNT_CONFIG = {
   modelName: SystemObjectName.ACCOUNT, // 'sys_account'
   fields: {
     userId: 'user_id',
     providerId: 'provider_id',
-    accountId: 'account_id',
+    issuer: 'issuer',
+    providerAccountId: 'account_id',
     accessToken: 'access_token',
     refreshToken: 'refresh_token',
     idToken: 'id_token',

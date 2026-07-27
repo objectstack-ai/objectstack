@@ -140,8 +140,12 @@ describe('@objectstack/platform-objects', () => {
       const unlink = (SysAccount.actions ?? []).find((a) => a.name === 'unlink_account');
       expect(unlink).toBeDefined();
       expect(unlink?.target).toBe('/api/v1/auth/unlink-account');
-      const paramNames = (unlink?.params ?? []).map((p) => p.name);
-      expect(paramNames).toEqual(['providerId', 'accountId']);
+      // better-auth 1.7 narrowed the body to `{ accountId }`, where accountId
+      // is the account ROW id — the old `{ providerId, accountId }` pair (in
+      // which accountId meant the provider's id for the user) is gone.
+      const params = unlink?.params ?? [];
+      expect(params.map((p) => p.name)).toEqual(['accountId']);
+      expect(params[0]?.field).toBe('id');
     });
 
     it('SysOauthApplication routes all mutations through better-auth, not the data layer', () => {

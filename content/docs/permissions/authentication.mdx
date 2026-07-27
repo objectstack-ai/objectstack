@@ -945,9 +945,16 @@ The plugin bridges this gap using better-auth's official **`modelName` / `fields
 // Declared in the betterAuth() config via AUTH_*_CONFIG constants:
 user:         { modelName: 'sys_user',         fields: { emailVerified: 'email_verified', … } },
 session:      { modelName: 'sys_session',      fields: { userId: 'user_id', expiresAt: 'expires_at', … } },
-account:      { modelName: 'sys_account',      fields: { providerId: 'provider_id', accountId: 'account_id', … } },
+account:      { modelName: 'sys_account',      fields: { providerId: 'provider_id', issuer: 'issuer', providerAccountId: 'account_id', … } },
 verification: { modelName: 'sys_verification', fields: { expiresAt: 'expires_at', … } },
 ```
+
+better-auth 1.7 identifies an account by `(issuer, providerAccountId)` — `providerAccountId` is
+the field formerly called `accountId` (same `account_id` column) and `issuer` names the authority
+that vouched for it: an OIDC `iss` for federated logins, or a synthetic `local:credential` /
+`local:oauth:<providerId>` for providers that carry none. Rows written before 1.7 have no issuer,
+so the auth plugin stamps them once at boot; accounts from a federated IdP that is no longer
+registered cannot be derived and are reported in the boot log instead of guessed.
 
 The ObjectQL adapter factory (`createObjectQLAdapterFactory`) then uses better-auth's `createAdapterFactory`
 which automatically transforms all data and where-clauses using these mappings — no manual

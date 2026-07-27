@@ -61,7 +61,14 @@ export interface AuthContextLike {
     createAccount(account: {
       userId: string;
       providerId: string;
-      accountId: string;
+      /**
+       * better-auth 1.7 keys accounts on (issuer, providerAccountId) and
+       * requires both. A local password account carries the synthetic issuer
+       * better-auth mints for itself, `local:credential` — write anything else
+       * and the row exists but no sign-in ever finds it.
+       */
+      issuer: string;
+      providerAccountId: string;
       password: string;
     }): Promise<unknown>;
   };
@@ -122,6 +129,7 @@ export interface EndpointResult {
   };
 }
 
+import { CREDENTIAL_ISSUER } from './backfill-account-issuer.js';
 import { generatePlaceholderEmail } from './placeholder-email.js';
 import { reconcileMembership } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
@@ -533,7 +541,8 @@ export async function runAdminSetUserPassword(
       await authCtx.internalAdapter.createAccount({
         userId,
         providerId: 'credential',
-        accountId: userId,
+        issuer: CREDENTIAL_ISSUER,
+        providerAccountId: userId,
         password: hashed,
       });
     }

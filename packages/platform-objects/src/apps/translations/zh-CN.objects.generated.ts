@@ -382,6 +382,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "提供方 ID",
         help: "OAuth 提供方标识（google、github 等）"
       },
+      issuer: {
+        label: "颁发者",
+        help: "为该提供方账号 ID 背书的权威方 —— OIDC 的 issuer，或对自身没有 issuer 的提供方使用 local:…"
+      },
       account_id: {
         label: "提供方账号 ID",
         help: "用户在该提供方系统中的 ID"

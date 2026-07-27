@@ -565,6 +565,31 @@ export class AuthPlugin implements Plugin {
       await this.maybeSeedDevAdmin(ctx);
     });
 
+    // better-auth 1.7 resolves every account by (issuer, providerAccountId).
+    // Rows written before the upgrade have no issuer and are therefore
+    // invisible to sign-in, so stamp them once at boot. Idempotent: a database
+    // whose rows already carry an issuer costs one empty query.
+    ctx.hook('kernel:ready', async () => {
+      try {
+        const ql: any = ctx.getService<any>('objectql');
+        if (!ql) return;
+        const { backfillAccountIssuer } = await import('./backfill-account-issuer.js');
+        await backfillAccountIssuer(ql, {
+          logger: ctx.logger,
+          socialProviderIds: Object.keys(this.configuredSocialProviders ?? {}),
+          oidcProviderIssuers: Object.fromEntries(
+            (this.options.oidcProviders ?? [])
+              .filter((p): p is typeof p & { issuer: string } => typeof p.issuer === 'string' && !!p.issuer)
+              .map((p) => [p.providerId, p.issuer]),
+          ),
+        });
+      } catch (e) {
+        ctx.logger.warn?.('[auth] account issuer backfill failed', {
+          error: (e as Error).message,
+        });
+      }
+    });
+
     // ADR-0081 D1 — single-org default-organization bootstrap. Every WALLED
     // posture (`group` and `isolated`) keeps its existing owner: the enterprise
     // organizations package, which runs the same idempotent helper with the

@@ -86,11 +86,15 @@ describe('AUTH_*_CONFIG schema mappings', () => {
     });
   });
 
+  // better-auth 1.7 renamed `accountId` → `providerAccountId` and added the
+  // required `issuer`. Lookups key on (issuer, providerAccountId), so a
+  // missing mapping here reads as "no such account" on every sign-in.
   it('should map account camelCase fields to snake_case', () => {
     expect(AUTH_ACCOUNT_CONFIG.fields).toEqual({
       userId: 'user_id',
       providerId: 'provider_id',
-      accountId: 'account_id',
+      issuer: 'issuer',
+      providerAccountId: 'account_id',
       accessToken: 'access_token',
       refreshToken: 'refresh_token',
       idToken: 'id_token',
