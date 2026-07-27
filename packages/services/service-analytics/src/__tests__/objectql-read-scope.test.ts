@@ -218,52 +218,62 @@ describe('ObjectQLStrategy — read scope (ADR-0021 D-C, #3597)', () => {
   });
 });
 
-describe('ObjectQLStrategy — cross-object references are fail-closed (#3654, subsumes #3597)', () => {
-  const joined = DatasetSchema.parse({
-    name: 'sales_by_account',
-    label: 'Sales by account',
-    object: 'opportunity',
-    include: ['account'],
-    dimensions: [{ name: 'region', field: 'account.region', type: 'string' }],
-    measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
-  });
-
-  function makeJoinedService(scopeFor?: (o: string) => FilterCondition | undefined) {
-    const compiled = compileDataset(joined);
-    // A stub that would happily "succeed" with a garbage single-(null) bucket if
-    // the guard didn't fire — so a passing test proves the REJECTION, not luck.
-    let called = false;
-    const svc = new AnalyticsService({
+describe('ObjectQLStrategy — OUT-OF-ENVELOPE cross-object is fail-closed (#3654)', () => {
+  // In-envelope cross-object DIMENSIONS are now served by FK-expand
+  // (objectql-crossobj-expand.test.ts). What the engine still cannot serve —
+  // cross-object in a MEASURE or FILTER, multi-hop, or a non-recombinable
+  // measure — must fail LOUD rather than silently mis-bucket (the #3654 class).
+  let reached = false;
+  function svcFor(ds: unknown) {
+    const compiled = compileDataset(DatasetSchema.parse(ds));
+    reached = false;
+    return new AnalyticsService({
       cubes: [compiled.cube],
       queryCapabilities: objectqlOnly,
-      executeAggregate: async () => { called = true; return [{ 'account.region': null, revenue: 999 }]; },
-      getReadScope: scopeFor ? (o: string) => scopeFor(o) : undefined,
+      // Would "succeed" with garbage if the guard failed to fire — so a passing
+      // rejection test proves the guard, not luck.
+      executeAggregate: async () => { reached = true; return [{ x: null, revenue: 999 }]; },
+      getReadScope: (o: string) => ({ organization_id: 'org_A', _o: o }),
       getAllowedRelationships: () => compiled.allowedRelationships,
     });
-    return { svc, wasExecuted: () => called };
   }
 
-  const q = { cube: 'sales_by_account', dimensions: ['region'], measures: ['revenue'] };
-
-  it('rejects a cross-object grouping the engine cannot join — even with a joined-object scope', async () => {
-    const { svc, wasExecuted } = makeJoinedService(() => ({ organization_id: 'org_A' }));
-    await expect(svc.query(q, ctxA)).rejects.toThrow(
-      /cannot group or aggregate across a relationship .*"account\.region"/,
-    );
-    expect(wasExecuted()).toBe(false); // never reached the engine
+  it('rejects a cross-object MEASURE (needs a real join to evaluate)', async () => {
+    const svc = svcFor({
+      name: 'xobj_measure', label: 'X-obj measure', object: 'opportunity', include: ['account'],
+      dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+      measures: [{ name: 'acct_rev', aggregate: 'sum', field: 'account.annual_revenue' }],
+    });
+    await expect(
+      svc.query({ cube: 'xobj_measure', dimensions: ['stage'], measures: ['acct_rev'] }, ctxA),
+    ).rejects.toThrow(/cannot evaluate a cross-object measure .*"account\.annual_revenue"/);
+    expect(reached).toBe(false);
   });
 
-  it('rejects when only the base object carries a scope (the query is still unjoinable)', async () => {
-    const { svc } = makeJoinedService((o) => (o === 'opportunity' ? { organization_id: 'org_A' } : undefined));
-    await expect(svc.query(q, ctxA)).rejects.toThrow(/cannot group or aggregate across a relationship/);
+  it('rejects a cross-object FILTER', async () => {
+    const svc = svcFor({
+      name: 'xobj_filter', label: 'X-obj filter', object: 'opportunity', include: ['account'],
+      dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+    });
+    await expect(
+      svc.query(
+        { cube: 'xobj_filter', dimensions: ['stage'], measures: ['revenue'], where: { 'account.region': 'West' } },
+        ctxA,
+      ),
+    ).rejects.toThrow(/cannot evaluate a cross-object filter/);
+    expect(reached).toBe(false);
   });
 
-  it('rejects with NO read-scope provider at all — the #3654 silent-(null) case (security off)', async () => {
-    // Before #3654 this path ran unguarded (the guard early-returned without a
-    // getReadScope), and the member got a single mislabelled `(null)` bucket
-    // summing the whole table. Now it fails loud.
-    const { svc, wasExecuted } = makeJoinedService(/* no provider */);
-    await expect(svc.query(q)).rejects.toThrow(/cannot group or aggregate across a relationship/);
-    expect(wasExecuted()).toBe(false);
+  it('rejects a non-recombinable measure (avg) with a cross-object dimension', async () => {
+    const svc = svcFor({
+      name: 'xobj_avg', label: 'X-obj avg', object: 'opportunity', include: ['account'],
+      dimensions: [{ name: 'region', field: 'account.region', type: 'string' }],
+      measures: [{ name: 'avg_amt', aggregate: 'avg', field: 'amount' }],
+    });
+    await expect(
+      svc.query({ cube: 'xobj_avg', dimensions: ['region'], measures: ['avg_amt'] }, ctxA),
+    ).rejects.toThrow(/cannot group by a cross-object dimension with a "avg" measure/);
+    expect(reached).toBe(false);
   });
 });

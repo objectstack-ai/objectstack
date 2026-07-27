@@ -304,19 +304,20 @@ describe('ObjectQLStrategy.generateSql reflects the executed query (#3602 item 3
     expect(params).toEqual(['West', 'East', 10]);
   });
 
-  it('renders nothing for a cross-object query `execute()` would reject', async () => {
-    // The rendering must not describe a query that cannot run. #3654 made the
-    // cross-object guard unconditional in `execute()`; running the SAME guard
-    // here is what keeps the two in step — a rendering that outlives its
-    // execution path is the mismatch this item exists to remove.
+  it('renders nothing for an OUT-OF-ENVELOPE cross-object query `execute()` would reject', async () => {
+    // The rendering must not describe a query that cannot run. #3654 now SERVES
+    // in-envelope cross-object DIMENSIONS by FK-expand (generateSql renders the
+    // equivalent LEFT JOIN — see objectql-crossobj-expand.test.ts). What execute()
+    // still rejects — a cross-object MEASURE — generateSql must reject too, so the
+    // preview and the executed path stay in step over the same set.
     const compiled = compileDataset(
       DatasetSchema.parse({
         name: 'sales_by_account',
         label: 'Sales by account',
         object: 'opportunity',
         include: ['account'],
-        dimensions: [{ name: 'region', field: 'account.region', type: 'string' }],
-        measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+        dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+        measures: [{ name: 'acct_rev', aggregate: 'sum', field: 'account.annual_revenue' }],
       }),
     );
     const service = new AnalyticsService({
@@ -328,7 +329,7 @@ describe('ObjectQLStrategy.generateSql reflects the executed query (#3602 item 3
     });
 
     await expect(
-      service.generateSql({ cube: 'sales_by_account', dimensions: ['region'], measures: ['revenue'] }, ctxA),
-    ).rejects.toThrow(/cannot group or aggregate across a relationship .*"account\.region"/);
+      service.generateSql({ cube: 'sales_by_account', dimensions: ['stage'], measures: ['acct_rev'] }, ctxA),
+    ).rejects.toThrow(/cannot evaluate a cross-object measure/);
   });
 });
