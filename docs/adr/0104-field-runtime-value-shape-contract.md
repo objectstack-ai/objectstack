@@ -567,14 +567,17 @@ sequences as:
    actually holds an id, so it lands safely ahead of the cutover.
 2. **Governed download** — read authorisation derived from the one owning
    record; anonymous capability URL demoted to opt-in `acl: 'public_read'`.
-3. **Write cutover** (protocol major) — stored form narrows to an id;
+3. **Backfill** — converts legacy inline blobs and own-resolver URLs to
+   `sys_file` references, which the claim hooks then own; external URLs are
+   reported, never re-hosted. Dry-run by default, idempotent.
+4. **Write cutover** (protocol major) — stored form narrows to an id;
    `accept` / `maxSize` enforced. Still deletes nothing.
-4. **Backfill** — `os migrate` converts legacy inline blobs to `sys_file` rows
-   and claims them; external URLs reported, not converted.
-5. **Reconciliation soak** — `os storage verify-references` compares what
-   records actually hold against recorded ownership, reporting *over-claim*
-   (safe: file retained longer than needed), *under-claim* (**blocking**: a held
-   file with no owner would be treated as free), and unclaimed orphans.
+5. **Reconciliation soak** — `verify-references` compares what records actually
+   hold against recorded ownership, and splits disagreements by whether they can
+   cause data loss: *blocking* (a held file nothing owns; a file held by a slot
+   that does not own it; one file held by two slots) versus *advisory* (owned
+   but no longer held — fails toward retention; unreferenced committed files —
+   storage cost only).
 6. **GC enable** — *gated, irreversible*. Relaxing the `scope === 'attachments'`
    tombstone guardrail and extending the `sys_file` reap guard's sweep-time
    re-verify to the ownership columns **must ship in the same change**. Half of
@@ -582,9 +585,24 @@ sequences as:
    re-verifies only `sys_attachment` — always empty for a field file — turns
    every release into a guaranteed byte delete rather than a risky one.
 
+Backfill precedes the cutover for the same reason it precedes collection, one
+step further back: narrowing the accepted stored form while records still hold
+legacy values would reject any update that rewrites such a field, breaking
+working apps until the backfill catches up. Backfilling first leaves the cutover
+nothing legacy to reject.
+
 R4's acceptance gate is now executable rather than aspirational: step 6 may not
-merge until step 5 reports **zero under-claims for ≥7 consecutive days** on real
-tenant data. R5 (public-posture inventory) and R6 (sub-key read scan) stand.
+merge until step 5 reports **zero blocking discrepancies for ≥7 consecutive
+days** on real tenant data. R5 (public-posture inventory) and R6 (sub-key read
+scan) stand.
+
+Steps 4 and 6 are the two that can break something. Step 4 is a declared
+protocol major and breaks *loudly* — a rejected write, recoverable. Step 6
+breaks *silently and permanently* — deleted bytes. They are therefore held to
+different standards: step 4 rides the planned v17 window paired with the client
+adoption that consumes the new form, while step 6 additionally requires the
+reconciliation evidence above, and neither the enable nor the migration run
+should be performed without an explicit human decision.
 
 ### Why this stays inside ADR-0104 rather than a new ADR
 
