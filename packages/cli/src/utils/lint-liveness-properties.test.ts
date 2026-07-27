@@ -177,9 +177,11 @@ describe('lintLivenessProperties', () => {
   });
 
   it('emits exactly one warning for a fully-authored (showcase-shaped) webhook', () => {
-    // object/triggers/method/retryPolicy/isActive/description are all dead too,
-    // but only `url` carries authorWarn — so the whole no-op artifact yields ONE
-    // finding, not one-per-prop. (isActive is default(true), deliberately unmarked.)
+    // object/triggers/method/isActive/description are dead too, but only `url`
+    // carries authorWarn — so the whole no-op artifact yields ONE finding, not
+    // one-per-prop. (isActive is default(true), deliberately unmarked.
+    // #3494 pruned the aspirational body/payloadFields/includeSession/
+    // authentication/retryPolicy/tags props outright.)
     const findings = lintLivenessProperties({
       webhooks: [{
         name: 'showcase_task_changed',
@@ -187,20 +189,12 @@ describe('lintLivenessProperties', () => {
         triggers: ['create', 'update', 'delete'],
         url: 'https://hooks.example/showcase/task',
         method: 'POST',
-        retryPolicy: { maxRetries: 3, backoffStrategy: 'exponential' },
         isActive: true,
         description: 'Sends task lifecycle events to an external system.',
       }],
     });
     expect(findings.length).toBe(1);
     expect(findings[0].message).toContain('`url`');
-  });
-
-  it('also warns on authentication (experimental — HMAC-secret-only)', () => {
-    const findings = lintLivenessProperties({
-      webhooks: [{ name: 'w1', url: 'https://hooks.example/x', authentication: { type: 'bearer' } }],
-    });
-    expect(paths(findings).some((m) => m.includes('`authentication`'))).toBe(true);
   });
 
   it('does NOT warn on isActive (default(true) boolean, deliberately unmarked)', () => {
