@@ -1,0 +1,63 @@
+# Spec coverage, nightly. Moved off the per-push path: the coverage-
+# instrumented spec suite added minutes of instrumentation overhead to every
+# main push (ci.yml previously excluded spec's plain test task and ran this
+# instead), for a trend artifact that is consulted occasionally at best. The
+# plain (uninstrumented) spec suite still runs on every main push in ci.yml's
+# Test Core; this workflow owns the coverage report.
+name: Spec Coverage
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * *' # 05:00 UTC nightly
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: Spec coverage report
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Restore-only: scheduled runs read main's store cache; the per-push
+      # workflows own saving it.
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The spec package sits at the root of the workspace graph (no workspace
+      # deps) and its suite reads src/ directly, so no build step is needed —
+      # same reason lint.yml's typecheck gates run pre-build.
+      - name: Generate coverage report
+        run: pnpm --filter @objectstack/spec test:coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: packages/spec/coverage/
+          retention-days: 30
