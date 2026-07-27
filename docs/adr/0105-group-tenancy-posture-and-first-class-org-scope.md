@@ -1,9 +1,9 @@
 # ADR-0105: Group Tenancy Posture — Organization Scope as a First-Class Authorization Dimension
 
-**Status**: Proposed (2026-07-25, draft)
+**Status**: Accepted (2026-07-27; proposed 2026-07-25) — Phase 0/1 implemented (#3559). Amended 2026-07-27: **D12 correction** — `group` posture activation is entitled, not open (#3570; see the D12 Amendment)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (business units + scope depth), [ADR-0066](./0066-unified-authorization-model.md) (unified authz, superuser bypass), [ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (permission set / position / business unit), [ADR-0091](./0091-grant-lifecycle-and-recertification.md) (validity windows), [ADR-0092](./0092-sys-user-profile-field-delegation.md) (identity write guard + field whitelist), [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) (tenancy service), [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md) (tenant Layer 0, posture ladder), [ADR-0103](./0103-managedby-write-policy-and-engine-write-guard.md); cloud ADR-0016 (open/paid boundary: 强制免费、治理收费), cloud ADR-0081 (`@objectstack/organizations`)
-**Tracking**: issue to be filed on acceptance; P0 findings F1/F2 below warrant their own issues immediately
+**Tracking**: #3541 (P0 findings F1/F2 became #3539/#3540, closed by #3559); cloud-side tracking cloud #874
 **Consumers**: `@objectstack/plugin-security`, `@objectstack/core` (`resolve-authz-context`), `@objectstack/plugin-auth` (tenancy service), `@objectstack/plugin-sharing`, `@objectstack/plugin-approvals`, `@objectstack/lint`, dogfood conformance suite, `@objectstack/organizations` (cloud)
 
 ---
@@ -280,16 +280,41 @@ reserves the concept and its place in Phase 2.
   with its own ADR.
 
 **D12 — Edition split, per the cloud ADR-0016 iron rule (强制免费、治理收费).**
-Enforcement primitives ship open: D3/D4 correctness, the `group` wall + D5
-stamping/validation, `accessible_org_ids` resolution, the D6 red-line lints.
-An open deployment configured into the group shape must be safe by default —
-the wall's correctness is never paid. Commercial (`@objectstack/organizations`
-and successors): org lifecycle management, grouping/registry UI, scoped
-invitations UX, cross-org approval templates, master-data distribution
-management, per-org seed/config replay, org analytics, and the D13 promotion
-tooling. (This re-draws the current line, under which the wall itself lives in
-the commercial package; the correctness floor moves into the open edition, the
-management surface stays commercial.)
+*(As amended 2026-07-27, #3570 — see the Amendment below for the original
+text and why it was wrong.)* The split is **code vs. activation**, not code
+vs. code. The wall's *implementation* ships open — D3/D4 correctness, the
+Layer 0 predicates, D5 stamping/validation, `accessible_org_ids` resolution,
+the D6 red-line lints — exactly as `isolated`'s wall has always lived in
+`plugin-security`. Posture *activation* is entitled: `group` probes the
+enterprise `org-scoping` runtime (`@objectstack/organizations`) exactly like
+`isolated`; without it the tenancy service resolves the posture to `single` +
+`degraded`, and an `os serve` boot configured for `group` **refuses to
+start** (the ADR-0093 D5 guard, keyed off the resolved posture) rather than
+silently running unwalled. The iron rule guarantees a deployment *running* a
+multi-org shape is safe by default; that is satisfied by refusing to run one
+unwalled — **open code is not free activation**. ADR-0081 D2's commercial
+line stands: both multi-org postures are `@objectstack/organizations`
+capability. Commercial surface (unchanged): org lifecycle management,
+grouping/registry UI, scoped invitations UX, cross-org approval templates,
+master-data distribution management, per-org seed/config replay, org
+analytics, and the D13 promotion tooling.
+
+> **Amendment (2026-07-27, #3570).** As proposed, this section read "the
+> `group` wall ships open — an open deployment configured into the group
+> shape must be safe by default; the wall's correctness is never paid", and
+> #3559 implemented that reading: a self-activating `group` posture with no
+> entitlement probe. That was the founder decision flagged in #3559, and the
+> founder ruled it wrong on review. Two defects in the original reading:
+> it made the *stronger* multi-org posture (union wall) free while the
+> *weaker* one (`isolated`) stayed entitled — inverting ADR-0081 D2 and
+> handing out a free path around the `org-scoping` gate — and it opened a
+> silent-degradation hole (`os serve` gated the enterprise package load on
+> `OS_MULTI_ORG_ENABLED`, so `OS_TENANCY_POSTURE=group` skipped both the
+> load and the ADR-0093 D5 fail-fast, booting single-org without saying so).
+> The iron rule's obligation is a *security* property (never run a multi-org
+> shape unwalled), not a *packaging* one (give the posture away). #3570
+> restored the entitled model above; safety stays free because an unwalled
+> `group` boot is refused, not run.
 
 **D13 — Migration along the spectrum; BU-subtree → organization promotion.**
 Deployments move `single → group → isolated` without schema rework because
@@ -371,8 +396,10 @@ boundary honest per cloud ADR-0016.
 **Negative / costs**: a third posture multiplies the authz test matrix (every
 conformance row × posture); `accessible_org_ids` adds a resolver read path
 that must respect ADR-0091 validity windows and the existing 60s cache
-staleness envelope; the D12 line re-draw moves wall enforcement into the open
-edition — a deliberate commercial concession justified by the iron rule; D13
+staleness envelope; the D12 split is code-vs-activation — the wall's
+implementation is open while both multi-org postures stay entitled (the
+original open-activation concession shipped in #3559 and was reverted by
+#3570, see the D12 Amendment); D13
 promotion is a data migration with real blast radius and needs its own
 verification harness.
 
