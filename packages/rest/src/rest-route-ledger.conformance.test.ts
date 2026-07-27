@@ -144,13 +144,13 @@ describe('REST route ledger hygiene', () => {
   });
 
   it('gap count only shrinks — update the ledger (and this number) when closing gaps', () => {
-    // Ratchet, not aspiration: 43 audited gaps at #3587 PR-1; 26 after the
-    // metadata batch closed its 9 and the reports batch its 8 (data-actions 2,
-    // search 1, email 1, analytics 1, security-explain 2, record-shares 3,
-    // sharing-rules 5, approvals 6, external-datasource 5 remain). Closing a
-    // gap = reclassify to `sdk` AND lower this bound. Raising it demands an
+    // Ratchet, not aspiration: 43 audited gaps at #3587 PR-1; 17 after the
+    // metadata (9), reports (8), and approvals+record-shares (9) batches
+    // (data-actions 2, search 1, email 1, analytics 1, security-explain 2,
+    // sharing-rules 5, external-datasource 5 remain). Closing a gap =
+    // reclassify to `sdk` AND lower this bound. Raising it demands an
     // explicit, reviewed decision.
     const gaps = REST_ROUTE_LEDGER.filter((e) => e.disposition === 'gap').length;
-    expect(gaps).toBeLessThanOrEqual(26);
+    expect(gaps).toBeLessThanOrEqual(17);
   });
 });

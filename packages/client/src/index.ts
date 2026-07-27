@@ -2943,6 +2943,75 @@ export class ObjectStackClient {
     },
 
     /**
+     * Recall (withdraw) a pending request. Submitter-only — the service
+     * enforces access. (#3587 gap closure)
+     */
+    recall: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<any> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/recall`, {
+        method: 'POST',
+        body: JSON.stringify({ actorId: opts?.actorId, comment: opts?.comment }),
+      });
+      return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0044 send-back-for-revision: the request finalizes `returned` and
+     * the flow run parks at a wait point. Pending-approver-only.
+     */
+    revise: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<any> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/revise`, {
+        method: 'POST',
+        body: JSON.stringify({ actorId: opts?.actorId, comment: opts?.comment }),
+      });
+      return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0044 resubmit-after-revision: re-enters the approval node.
+     * Submitter-only. Returns the flow outcome (`resumed` / `autoRejected`).
+     */
+    resubmit: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<any> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/resubmit`, {
+        method: 'POST',
+        body: JSON.stringify({ actorId: opts?.actorId, comment: opts?.comment }),
+      });
+      return this.unwrapResponse<any>(res);
+    },
+
+    /** Nudge the pending approver(s); a thread interaction — the flow does not move. */
+    remind: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<any> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/remind`, {
+        method: 'POST',
+        body: JSON.stringify({ actorId: opts?.actorId, comment: opts?.comment }),
+      });
+      return this.unwrapResponse<any>(res);
+    },
+
+    /** Ask the submitter for more information (thread interaction). */
+    requestInfo: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<any> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/request-info`, {
+        method: 'POST',
+        body: JSON.stringify({ actorId: opts?.actorId, comment: opts?.comment }),
+      });
+      return this.unwrapResponse<any>(res);
+    },
+
+    /** Append a comment (optionally with attachments) to the request thread. */
+    comment: async (requestId: string, opts: { comment: string; actorId?: string; attachments?: string[] }): Promise<any> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/comment`, {
+        method: 'POST',
+        body: JSON.stringify({ actorId: opts.actorId, comment: opts.comment, attachments: opts.attachments }),
+      });
+      return this.unwrapResponse<any>(res);
+    },
+
+    /**
      * Audit trail (the immutable action log) for an approval request.
      */
     listActions: async (requestId: string): Promise<ApprovalActionRow[]> => {
@@ -2951,6 +3020,60 @@ export class ObjectStackClient {
       const body = await this.unwrapResponse<{ data?: ApprovalActionRow[] } | ApprovalActionRow[]>(res);
       return Array.isArray(body) ? body : (body?.data ?? []);
     }
+  };
+
+  /**
+   * Per-record sharing grants (#3587 gap closure)
+   *
+   * Manual (and rule-materialised) row-level access grants on a specific
+   * record, served under the data surface. Every route 501s
+   * [NOT_IMPLEMENTED] on deployments without the sharing service.
+   */
+  shares = {
+    /** List the sharing grants on a record. */
+    list: async (object: string, recordId: string): Promise<any[]> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(recordId)}/shares`,
+        );
+        const body = await this.unwrapResponse<{ data?: any[] } | any[]>(res);
+        return Array.isArray(body) ? body : (body?.data ?? []);
+    },
+
+    /**
+     * Grant a principal access to a record. 400 [VALIDATION_FAILED] on a
+     * bad recipient/level combination.
+     */
+    grant: async (
+        object: string,
+        recordId: string,
+        opts: {
+            recipientType: string;
+            recipientId: string;
+            accessLevel: string;
+            source?: string;
+            sourceId?: string;
+            reason?: string;
+        },
+    ): Promise<any> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(recordId)}/shares`,
+            { method: 'POST', body: JSON.stringify(opts) },
+        );
+        return this.unwrapResponse<any>(res);
+    },
+
+    /** Revoke a share by its id. */
+    revoke: async (object: string, recordId: string, shareId: string): Promise<{ deleted: boolean }> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(recordId)}/shares/${encodeURIComponent(shareId)}`,
+            { method: 'DELETE' },
+        );
+        if (res.status === 204) return { deleted: true };
+        return this.unwrapResponse<{ deleted: boolean }>(res);
+    },
   };
 
   /**

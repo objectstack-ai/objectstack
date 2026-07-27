@@ -262,6 +262,62 @@ describe('Reports namespace (#3587 gap closure)', () => {
     });
 });
 
+describe('Approvals lifecycle & thread routes (#3587 gap closure)', () => {
+    it.each([
+        ['recall', 'recall'],
+        ['revise', 'revise'],
+        ['resubmit', 'resubmit'],
+        ['remind', 'remind'],
+        ['requestInfo', 'request-info'],
+    ] as const)('approvals.%s pins POST /approvals/requests/:id/%s', async (method, segment) => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { status: 'ok' } });
+        await (client.approvals as any)[method]('req-1', { comment: 'hi' });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe(`http://localhost:3000/api/v1/approvals/requests/req-1/${segment}`);
+        expect(init.method).toBe('POST');
+        expect(JSON.parse(init.body).comment).toBe('hi');
+    });
+
+    it('approvals.comment pins the comment route and carries attachments', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { status: 'ok' } });
+        await client.approvals.comment('req-1', { comment: 'note', attachments: ['f1'] });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/approvals/requests/req-1/comment');
+        expect(JSON.parse(init.body)).toEqual({ comment: 'note', attachments: ['f1'] });
+    });
+});
+
+describe('Record shares namespace (#3587 gap closure)', () => {
+    it('shares.list pins GET /data/:object/:id/shares and unwraps {data}', async () => {
+        const { client, fetchMock } = createMockClient({ data: [{ id: 'sh1' }] });
+        const rows = await client.shares.list('lead', 'rec1');
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/data/lead/rec1/shares',
+        );
+        expect(rows).toEqual([{ id: 'sh1' }]);
+    });
+
+    it('shares.grant pins POST /data/:object/:id/shares with the grant body', async () => {
+        const { client, fetchMock } = createMockClient({ id: 'sh1' });
+        await client.shares.grant('lead', 'rec1', { recipientType: 'user', recipientId: 'u1', accessLevel: 'read' });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/data/lead/rec1/shares');
+        expect(init.method).toBe('POST');
+        expect(JSON.parse(init.body)).toEqual({ recipientType: 'user', recipientId: 'u1', accessLevel: 'read' });
+    });
+
+    it('shares.revoke pins DELETE /data/:object/:id/shares/:shareId and tolerates 204', async () => {
+        const del = createMockClient(undefined, 204);
+        del.fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', json: async () => { throw new Error('no body'); }, headers: new Headers() });
+        const out = await del.client.shares.revoke('lead', 'rec1', 'sh1');
+        expect(String(del.fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/data/lead/rec1/shares/sh1',
+        );
+        expect(del.fetchMock.mock.calls[0][1].method).toBe('DELETE');
+        expect(out).toEqual({ deleted: true });
+    });
+});
+
 describe('Approvals namespace (ADR-0019)', () => {
     it('should list approval requests with filters', async () => {
         const { client, fetchMock } = createMockClient({

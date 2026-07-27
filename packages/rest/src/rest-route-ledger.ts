@@ -153,12 +153,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'authorization explain (body form) with no SDK expression' },
 
   // ── per-record shares ─────────────────────────────────────────────────────
-  { route: 'GET /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'gap',
-    note: 'per-record sharing grants listing with no SDK expression' },
-  { route: 'POST /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'gap',
-    note: 'grant a per-record share with no SDK expression' },
-  { route: 'DELETE /api/v1/data/:object/:id/shares/:shareId', family: 'record-shares', source: 'route-manager', disposition: 'gap',
-    note: 'revoke a per-record share with no SDK expression' },
+  { route: 'GET /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.list' },
+  { route: 'POST /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.grant' },
+  { route: 'DELETE /api/v1/data/:object/:id/shares/:shareId', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.revoke' },
 
   // ── sharing rules ─────────────────────────────────────────────────────────
   { route: 'GET /api/v1/sharing/rules', family: 'sharing-rules', source: 'route-manager', disposition: 'gap',
@@ -195,19 +192,13 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/approvals/requests/:id', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.getRequest' },
   { route: 'POST /api/v1/approvals/requests/:id/approve', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.approve' },
   { route: 'POST /api/v1/approvals/requests/:id/reject', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.reject' },
-  { route: 'POST /api/v1/approvals/requests/:id/recall', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'recall/withdraw with no SDK expression' },
-  { route: 'POST /api/v1/approvals/requests/:id/revise', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'send-back-for-revision (ADR-0044) with no SDK expression' },
-  { route: 'POST /api/v1/approvals/requests/:id/resubmit', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'resubmit-after-revision with no SDK expression' },
+  { route: 'POST /api/v1/approvals/requests/:id/recall', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.recall' },
+  { route: 'POST /api/v1/approvals/requests/:id/revise', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.revise' },
+  { route: 'POST /api/v1/approvals/requests/:id/resubmit', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.resubmit' },
   { route: 'POST /api/v1/approvals/requests/:id/reassign', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.reassign' },
-  { route: 'POST /api/v1/approvals/requests/:id/remind', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'thread reminder with no SDK expression' },
-  { route: 'POST /api/v1/approvals/requests/:id/request-info', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'thread request-info with no SDK expression' },
-  { route: 'POST /api/v1/approvals/requests/:id/comment', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'thread comment with no SDK expression' },
+  { route: 'POST /api/v1/approvals/requests/:id/remind', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.remind' },
+  { route: 'POST /api/v1/approvals/requests/:id/request-info', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.requestInfo' },
+  { route: 'POST /api/v1/approvals/requests/:id/comment', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.comment' },
   { route: 'GET /api/v1/approvals/requests/:id/actions', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.listActions' },
 
   // ── batch ─────────────────────────────────────────────────────────────────
