@@ -73,15 +73,20 @@ export const MATRIX: FieldCase[] = [
   { field: 'f_vector', type: 'vector', check: { kind: 'equal', write: [0.1, 0.2, 0.3] } },
   // object-valued types that must store/parse as JSON, not stringify to TEXT
   { field: 'f_record', type: 'record', check: { kind: 'equal', write: { home: '+1', work: '+2' } } },
-  { field: 'f_video', type: 'video', check: { kind: 'equal', write: { url: 'https://cdn/v.mp4', duration: 12 } } },
-  { field: 'f_audio', type: 'audio', check: { kind: 'equal', write: { url: 'https://cdn/a.mp3', duration: 30 } } },
+  // media — the STORED form is an opaque sys_file id (ADR-0104 D3 wave 2); the
+  // inline `{url, …}` blob is the expanded READ form, derived by the resolver
+  // rather than written. These ids match no sys_file row here, which is the
+  // point: the round-trip must return the stored id verbatim when there is
+  // nothing to expand it into.
+  { field: 'f_video', type: 'video', check: { kind: 'equal', write: 'file_zoo_video' } },
+  { field: 'f_audio', type: 'audio', check: { kind: 'equal', write: 'file_zoo_audio' } },
   { field: 'f_composite', type: 'composite', check: { kind: 'equal', write: { label: 'x', n: 1 } } },
   { field: 'f_repeater', type: 'repeater', check: { kind: 'equal', write: [{ a: 1 }, { a: 2 }] } },
   { field: 'f_location', type: 'location', check: { kind: 'equal', write: { lat: 37.77, lng: -122.42 } } },
   { field: 'f_address', type: 'address', check: { kind: 'equal', write: { street: '1 Main', city: 'SF', country: 'US' } } },
-  { field: 'f_image', type: 'image', check: { kind: 'equal', write: { url: 'https://cdn/i.png', alt: 'i' } } },
-  { field: 'f_file', type: 'file', check: { kind: 'equal', write: { url: 'https://cdn/f.pdf', name: 'f.pdf', size: 1024 } } },
-  { field: 'f_avatar', type: 'avatar', check: { kind: 'equal', write: { url: 'https://cdn/a.png' } } },
+  { field: 'f_image', type: 'image', check: { kind: 'equal', write: 'file_zoo_image' } },
+  { field: 'f_file', type: 'file', check: { kind: 'equal', write: 'file_zoo_doc' } },
+  { field: 'f_avatar', type: 'avatar', check: { kind: 'equal', write: 'file_zoo_avatar' } },
   // relational — store a reference id as a string and read it back verbatim.
   // FK enforcement is off in this harness, so this asserts value fidelity
   // (id string → id string), not referential integrity / $expand (covered

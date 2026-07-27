@@ -58,8 +58,8 @@ this contract has (ADR-0104 performance budget).
 ## TypeScript Usage
 
 ```typescript
-import { AddressValue, CalendarDateValue, ClockTimeValue, FileLikeValue, FileValue, InstantValue, LocationValue, ReferenceIdValue } from '@objectstack/spec/data';
-import type { AddressValue, CalendarDateValue, ClockTimeValue, FileLikeValue, FileValue, InstantValue, LocationValue, ReferenceIdValue } from '@objectstack/spec/data';
+import { AddressValue, CalendarDateValue, ClockTimeValue, FileLikeValue, FileReferenceIdValue, FileValue, InstantValue, LocationValue, ReferenceIdValue } from '@objectstack/spec/data';
+import type { AddressValue, CalendarDateValue, ClockTimeValue, FileLikeValue, FileReferenceIdValue, FileValue, InstantValue, LocationValue, ReferenceIdValue } from '@objectstack/spec/data';
 
 // Validate data
 const result = AddressValue.parse(data);
@@ -114,6 +114,9 @@ Type: `string`
 | **mimeType** | `string` | optional |  |
 | **alt** | `string` | optional |  |
 | **duration** | `number` | optional |  |
+
+---
+
 
 ---
 

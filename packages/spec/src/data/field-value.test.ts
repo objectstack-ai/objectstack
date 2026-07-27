@@ -154,24 +154,41 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     ok({ type: 'lookup' }, 'acc_1', 'expanded'); // unresolvable ids stay ids
   });
 
-  it('file-likes admit the transitional inline object OR an opaque id/url string (pre-D3-wave-2)', () => {
-    ok({ type: 'file' }, { url: 'https://cdn/f.pdf', name: 'f.pdf', size: 1024 });
-    ok({ type: 'image' }, { url: 'https://cdn/i.png', alt: 'i' });
-    ok({ type: 'file' }, { url: 'https://cdn/f.pdf', mimeType: 'application/pdf' });
+  it('D3 wave 2: the STORED media form is an opaque sys_file id', () => {
     ok({ type: 'file' }, 'file_01HXYZ');
-    ok({ type: 'image', multiple: true }, ['a.png', 'b.png']);
+    ok({ type: 'file' }, '0e2f4c1a-9b7d-4e3f-8a1b-2c3d4e5f6a7b');
+    ok({ type: 'image', multiple: true }, ['file_a', 'file_b']);
     bad({ type: 'file' }, 42);
     bad({ type: 'file' }, {});
+    // The inline blob is no longer STORED — it is the expanded read form.
+    bad({ type: 'file' }, { url: 'https://cdn/f.pdf', name: 'f.pdf', size: 1024 });
+    // An external URL was never a managed file; ADR-0104 R7 retires it toward
+    // an explicit `url` field. Both of these reach authors as warn-first
+    // value-shape warnings, not hard failures, until strict is opted into.
+    bad({ type: 'file' }, 'https://cdn/f.pdf');
+    bad({ type: 'image' }, '/api/v1/storage/files/file_a');
+    bad({ type: 'image' }, 'data:image/png;base64,aGk=');
+  });
+
+  it('D3 wave 2: the EXPANDED media form is the resolved object, or a still-unresolved id', () => {
+    ok({ type: 'file' }, { url: 'https://cdn/f.pdf', name: 'f.pdf', size: 1024 }, 'expanded');
+    ok({ type: 'image' }, { url: 'https://cdn/i.png', alt: 'i' }, 'expanded');
+    ok({ type: 'file' }, { url: 'https://cdn/f.pdf', mimeType: 'application/pdf' }, 'expanded');
+    // Expansion may not have happened — storage service absent, file not
+    // committed — exactly as an unexpanded lookup id stays valid.
+    ok({ type: 'file' }, 'file_01HXYZ', 'expanded');
+    bad({ type: 'file' }, 42, 'expanded');
   });
 
   it('D3 wave 1: the media object form requires a url — a url-less fragment is no longer waved through', () => {
-    // The whole FILE_REFERENCE_TYPES class shares the one contract.
+    // The whole FILE_REFERENCE_TYPES class shares the one contract, now carried
+    // by the expanded form (wave 2 moved the object out of `stored`).
     for (const type of ['file', 'image', 'avatar', 'video', 'audio']) {
-      ok({ type }, { url: 'https://cdn/x' });
-      bad({ type }, { name: 'x' });        // object without url — the tightening
-      bad({ type }, { size: 10 });         // ditto
+      ok({ type }, { url: 'https://cdn/x' }, 'expanded');
+      bad({ type }, { name: 'x' }, 'expanded');   // object without url — the tightening
+      bad({ type }, { size: 10 }, 'expanded');    // ditto
     }
-    ok({ type: 'video' }, { url: 'https://cdn/v.mp4', duration: 12 });
+    ok({ type: 'video' }, { url: 'https://cdn/v.mp4', duration: 12 }, 'expanded');
   });
 
   it('structured JSON types', () => {

@@ -760,6 +760,7 @@
     "data/FieldReference",
     "data/FieldType",
     "data/FileLikeValue",
+    "data/FileReferenceIdValue",
     "data/FileValue",
     "data/FilterCondition",
     "data/FormatValidation",

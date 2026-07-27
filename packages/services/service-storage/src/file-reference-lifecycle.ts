@@ -103,6 +103,18 @@ export class FileReferenceCopyError extends Error {
   }
 }
 
+/**
+ * Raised when a referenced file violates its field's declared `accept` /
+ * `maxSize`. Fails the write: a stored value that breaks its own field's
+ * declaration is the "declared but not enforced" state ADR-0104 removes.
+ */
+export class FileConstraintError extends Error {
+  readonly code = 'ERR_FILE_CONSTRAINT';
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 function asIdList(id: unknown): Array<string | number> | null {
   if (typeof id === 'string' || typeof id === 'number') return [id];
   if (id && typeof id === 'object' && Array.isArray((id as any).$in)) {
@@ -118,6 +130,83 @@ function fileFieldsOf(engine: FileReferenceEngine, objectName: string): string[]
   return Object.entries(schema.fields)
     .filter(([, def]: [string, any]) => def && FILE_REFERENCE_TYPES.has(def.type))
     .map(([name]) => name);
+}
+
+/** One field's definition, or undefined. */
+function fieldDefOf(engine: FileReferenceEngine, objectName: string, field: string): any {
+  return (engine.getObject(objectName) as any)?.fields?.[field];
+}
+
+/**
+ * Does `mime` satisfy one `accept` entry? Accepts the same vocabulary the file
+ * picker does: an exact MIME type, a `type/*` wildcard, or a `.ext` suffix
+ * (matched against the file NAME, since a browser-supplied extension is what
+ * the author is describing).
+ */
+function matchesAcceptEntry(entry: string, mime: string, name: string): boolean {
+  const e = entry.trim().toLowerCase();
+  if (!e) return false;
+  if (e === '*' || e === '*/*') return true;
+  if (e.startsWith('.')) return name.toLowerCase().endsWith(e);
+  if (e.endsWith('/*')) return mime.startsWith(e.slice(0, -1));
+  return mime === e;
+}
+
+/**
+ * Enforce a media field's declared `accept` / `maxSize` against the file the
+ * record is about to reference.
+ *
+ * The upload widget checks both before uploading, but that check is a
+ * convenience rather than a control — any caller talking to the API directly
+ * bypasses it. Now that the platform owns the file, `sys_file` carries the
+ * authoritative MIME type and byte size, so the constraint can be re-checked
+ * where it actually binds. Throws {@link FileConstraintError}, failing the
+ * write, because a stored value violating its own field's declaration is
+ * exactly the "declared but not enforced" state ADR-0104 exists to remove.
+ *
+ * Only checks what the file actually reports: a `sys_file` row with no
+ * `mime_type` cannot fail an `accept` test, and one with no `size` cannot fail
+ * `maxSize`. Missing metadata is not evidence of a violation.
+ */
+function assertFileConstraints(
+  fieldDef: any,
+  field: string,
+  file: Record<string, unknown>,
+): void {
+  const accept: unknown = fieldDef?.accept;
+  const maxSize: unknown = fieldDef?.maxSize;
+
+  if (typeof maxSize === 'number' && maxSize > 0 && typeof file.size === 'number') {
+    if (file.size > maxSize) {
+      throw new FileConstraintError(
+        `File exceeds the maximum size declared for '${field}' ` +
+          `(${file.size} bytes > ${maxSize} bytes)`,
+      );
+    }
+  }
+
+  if (Array.isArray(accept) && accept.length > 0) {
+    const mime = typeof file.mime_type === 'string' ? file.mime_type.toLowerCase() : '';
+    const name = typeof file.name === 'string' ? file.name : '';
+    const hasExtension = name.includes('.');
+
+    // An entry can only be judged against metadata the file actually reports:
+    // a MIME entry needs a recorded MIME type, an extension entry needs a name
+    // carrying an extension. Entries that cannot be evaluated are not failures
+    // — rejecting on them would turn "we don't know" into "not permitted".
+    const testable = accept.filter((e): e is string => {
+      if (typeof e !== 'string' || !e.trim()) return false;
+      return e.trim().startsWith('.') ? hasExtension : !!mime;
+    });
+    if (testable.length === 0) return;
+
+    if (!testable.some((e) => matchesAcceptEntry(e, mime, name))) {
+      throw new FileConstraintError(
+        `File type '${mime || name}' is not permitted by the accept list declared for ` +
+          `'${field}' (${accept.join(', ')})`,
+      );
+    }
+  }
 }
 
 /** The id tokens a field value carries (a `multiple: true` field holds an
@@ -207,9 +296,15 @@ async function copyOwnedFile(
 
 /**
  * Rewrite, in place, any id in `data` that is already owned by a different
- * slot so it points at a fresh copy instead. Runs in the BEFORE hooks, where
- * mutating `input.data` is what the driver goes on to persist — so the record
- * never transiently holds a reference it does not own.
+ * slot so it points at a fresh copy instead, and enforce each referenced
+ * file's declared `accept` / `maxSize` on the way past. Runs in the BEFORE
+ * hooks, where mutating `input.data` is what the driver goes on to persist —
+ * so the record never transiently holds a reference it does not own, and never
+ * persists one that violates its field's declaration.
+ *
+ * The constraint check rides here because this pass already loads every
+ * referenced `sys_file` row; enforcing it anywhere else would mean a second
+ * read of the same rows.
  *
  * `recordId` is null on insert: a new record can never be the current owner,
  * so every already-owned id is copied.
@@ -238,6 +333,11 @@ async function applyCopyOnClaim(
       // Unknown id: not a file this platform manages (external/legacy value).
       // Left verbatim — the read resolver ignores it for the same reason.
       if (!row) continue;
+
+      // The file is real and about to be referenced by this field, so its
+      // declared constraints bind now — before ownership, before any copy.
+      assertFileConstraints(fieldDefOf(engine, object, field), field, row);
+
       // Unclaimed: the after-hook will claim it for this slot. Nothing to copy.
       if (row.ref_id == null) continue;
       // Already ours (an update rewriting the same value) — no-op.

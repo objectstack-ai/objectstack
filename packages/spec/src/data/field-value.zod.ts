@@ -214,9 +214,34 @@ export const FileValueSchema = lazySchema(() => z.looseObject({
 }));
 
 /**
- * Media/attachment STORED value — TRANSITIONAL (pre-D3-wave-2): an opaque
- * file-id / url string, or the declared inline metadata object
- * ({@link FileValueSchema}). Wave 2 narrows this to a `sys_file` id string.
+ * Media/attachment STORED value (ADR-0104 D3 wave 2) — an opaque `sys_file` id.
+ *
+ * Deliberately id-SHAPED rather than any non-empty string. The two legacy forms
+ * a file field used to hold are both strings-or-objects that this rejects, and
+ * rejecting them is the point:
+ *
+ *  - an **inline metadata blob** is no longer the stored form; it is the
+ *    `expanded` READ form ({@link FileValueSchema}), derived rather than stored;
+ *  - an **external URL** was never a managed file. ADR-0104 R7 retires it toward
+ *    an explicit `url` field, which under AI authoring is what stops "managed
+ *    file" and "external link" from being the same declaration.
+ *
+ * Both surface through the warn-first value-shape rollout (R1/R2) rather than
+ * as hard failures, so a deployment sees exactly which values still need the
+ * backfill before it opts into strict enforcement.
+ */
+export const FileReferenceIdValueSchema = lazySchema(() =>
+  z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'Expected an opaque sys_file id'),
+);
+
+/**
+ * Media/attachment value in either form — the TRANSITIONAL union that was the
+ * stored contract before wave 2.
+ *
+ * @deprecated The stored form is {@link FileReferenceIdValueSchema}; the
+ * expanded read form is {@link FileValueSchema}. Retained for consumers that
+ * genuinely need to accept both during the migration window, so they say so
+ * explicitly rather than by default.
  */
 export const FileLikeValueSchema = lazySchema(() => z.union([
   z.string().min(1),
@@ -267,7 +292,15 @@ export function valueSchemaFor(def: ValueShapeFieldDef, form: ValueForm = 'store
         ? z.union([ReferenceIdValueSchema, z.record(z.string(), z.unknown())])
         : ReferenceIdValueSchema;
     }
-    if (FILE_REFERENCE_TYPES.has(t)) return FileLikeValueSchema;
+    if (FILE_REFERENCE_TYPES.has(t)) {
+      // Expanded form: the read path replaces a stored id in place with the
+      // resolved `{ id, name, size, mimeType, url }` — same polymorphism the
+      // reference types have, and for the same reason, so an unresolved id
+      // (storage service absent, file not committed) stays valid.
+      return form === 'expanded'
+        ? z.union([FileReferenceIdValueSchema, FileValueSchema])
+        : FileReferenceIdValueSchema;
+    }
     if (t === 'location') return LocationValueSchema;
     if (t === 'address') return AddressValueSchema;
     if (t === 'composite') return z.record(z.string(), z.unknown());

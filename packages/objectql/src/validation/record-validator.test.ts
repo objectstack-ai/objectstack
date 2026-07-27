@@ -372,11 +372,23 @@ describe('validateRecord — ADR-0104 value shapes (warn-first / strict)', () =>
     const data = {
       account: 'acc_0001',
       geo: { lat: 37.77, lng: -122.42 },
-      doc: { url: 'https://cdn/f.pdf', name: 'f.pdf', size: 1024 },
+      // The STORED form of a media field is an opaque sys_file id (ADR-0104 D3
+      // wave 2); the inline blob is now the expanded READ form.
+      doc: 'file_01HXYZ',
       dims: [0.1, 0.2],
     };
     expect(() => validateRecord(schema, { ...data }, 'update')).not.toThrow();
     withStrict(() => expect(() => validateRecord(schema, { ...data }, 'update')).not.toThrow());
+  });
+
+  it('warn-first keeps a legacy inline blob writable until strict is opted into', () => {
+    // The migration path that makes narrowing the stored form safe to ship: a
+    // not-yet-backfilled row still saves and the author gets a value-shape
+    // warning naming the field, rather than the write failing on data that was
+    // valid when it was written.
+    const legacy = { doc: { url: 'https://cdn/f.pdf', name: 'f.pdf', size: 1024 } };
+    expect(() => validateRecord(schema, { ...legacy }, 'update')).not.toThrow();
+    withStrict(() => expect(() => validateRecord(schema, { ...legacy }, 'update')).toThrow());
   });
 
   it('warn-first: malformed shapes pass by default (legacy rows must not strand records)', () => {

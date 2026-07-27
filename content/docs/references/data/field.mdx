@@ -113,6 +113,8 @@ const result = Address.parse(data);
 | **scale** | `number` | optional | Decimal places |
 | **min** | `number` | optional | Minimum value |
 | **max** | `number` | optional | Maximum value |
+| **accept** | `string[]` | optional | Permitted upload types for media fields, as MIME types or extensions (e.g. ["image/*", ".pdf"]). Offered to the file picker AND enforced on write. |
+| **maxSize** | `integer` | optional | Maximum permitted file size in BYTES for media fields. Enforced on write against the stored file size, not just checked in the browser. |
 | **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Static options for select/multiselect |
 | **reference** | `string` | optional | Target object name (snake_case) for lookup/master_detail fields. Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. |
 | **deleteBehavior** | `Enum<'set_null' \| 'cascade' \| 'restrict'>` | optional | What happens if referenced record is deleted |

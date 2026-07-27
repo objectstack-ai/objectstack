@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   installFileReferenceHooks,
   FileReferenceCopyError,
+  FileConstraintError,
   type FileReferenceEngine,
 } from './file-reference-lifecycle.js';
 
@@ -491,6 +492,109 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
       // and hand its read authorisation to a different parent record.
       expect(engine.tables.sys_file[0]).toMatchObject({ ref_id: 'p1', ref_field: 'image' });
       expect(logger.warn).toHaveBeenCalled();
+    });
+  });
+
+  // ── Declared media constraints (ADR-0104 D3 wave 2) ──────────────
+  describe('accept / maxSize enforcement', () => {
+    const constrained = (over: Record<string, any> = {}) => ({
+      sys_file: REGISTRY.sys_file,
+      product: {
+        name: 'product',
+        fields: {
+          id: { type: 'text' },
+          image: { type: 'image', accept: ['image/*'], maxSize: 1000, ...over },
+          gallery: { type: 'image', multiple: true },
+        },
+      },
+    });
+
+    it('rejects a file larger than the declared maxSize', async () => {
+      const engine = fakeEngine({
+        files: [file({ size: 5000 })],
+        registry: constrained(),
+      });
+      install(engine);
+
+      await expect(driveInsert(engine, 'product', { image: 'file_a' }, 'p1')).rejects.toThrow(
+        FileConstraintError,
+      );
+      // The write failed, so nothing was claimed.
+      expect(engine.tables.sys_file[0].ref_id).toBeUndefined();
+    });
+
+    it('rejects a file whose MIME type is outside the declared accept list', async () => {
+      const engine = fakeEngine({
+        files: [file({ mime_type: 'application/pdf', name: 'a.pdf', size: 10 })],
+        registry: constrained(),
+      });
+      install(engine);
+
+      await expect(driveInsert(engine, 'product', { image: 'file_a' }, 'p1')).rejects.toThrow(
+        /not permitted by the accept list/,
+      );
+    });
+
+    it('accepts a file that satisfies both declarations', async () => {
+      const engine = fakeEngine({ files: [file({ size: 10 })], registry: constrained() });
+      install(engine);
+
+      await driveInsert(engine, 'product', { image: 'file_a' }, 'p1');
+
+      expect(engine.tables.sys_file[0].ref_id).toBe('p1');
+    });
+
+    it.each([
+      [['image/png'], 'image/png', 'a.png', true],
+      [['image/*'], 'image/jpeg', 'a.jpg', true],
+      [['.pdf'], 'application/pdf', 'report.pdf', true],
+      [['.pdf'], 'application/pdf', 'report.txt', false],
+      [['image/png'], 'image/jpeg', 'a.jpg', false],
+      [['*/*'], 'anything/at-all', 'x', true],
+    ])('accept %j vs %s/%s → %s', async (accept, mime, name, allowed) => {
+      const engine = fakeEngine({
+        files: [file({ mime_type: mime, name, size: 10 })],
+        registry: constrained({ accept, maxSize: undefined }),
+      });
+      install(engine);
+
+      const write = driveInsert(engine, 'product', { image: 'file_a' }, 'p1');
+      if (allowed) {
+        await write;
+        expect(engine.tables.sys_file[0].ref_id).toBe('p1');
+      } else {
+        await expect(write).rejects.toThrow(FileConstraintError);
+      }
+    });
+
+    /**
+     * Missing metadata is not evidence of a violation — a sys_file row with no
+     * recorded size or MIME type must not be rejected by a constraint it
+     * cannot be tested against.
+     */
+    it('does not reject a file whose size or MIME type is unrecorded', async () => {
+      const engine = fakeEngine({
+        files: [{ id: 'file_a', key: 'user/file_a', name: 'file_a', status: 'committed' }],
+        registry: constrained(),
+      });
+      install(engine);
+
+      await driveInsert(engine, 'product', { image: 'file_a' }, 'p1');
+
+      expect(engine.tables.sys_file[0].ref_id).toBe('p1');
+    });
+
+    it('leaves a field with no declared constraints alone', async () => {
+      const engine = fakeEngine({
+        files: [file({ mime_type: 'application/pdf', size: 10_000_000 })],
+        registry: constrained(),
+      });
+      install(engine);
+
+      // `gallery` declares neither accept nor maxSize.
+      await driveInsert(engine, 'product', { gallery: ['file_a'] }, 'p1');
+
+      expect(engine.tables.sys_file[0].ref_field).toBe('gallery');
     });
   });
 

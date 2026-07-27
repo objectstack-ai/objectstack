@@ -288,6 +288,32 @@ export const FieldSchema = lazySchema(() => z.object({
   min: z.number().optional().describe('Minimum value'),
   max: z.number().optional().describe('Maximum value'),
 
+  /**
+   * Media Constraints (ADR-0104 D3 wave 2)
+   *
+   * Apply to the media family — `file`, `image`, `avatar`, `video`, `audio`.
+   * Declared here rather than only in the upload widget because the client's
+   * check is a convenience, not a control: it can be bypassed by any caller
+   * that talks to the API directly. Once the platform owns the file (`sys_file`
+   * carries its MIME type and byte size), the server re-checks a record write
+   * against these declarations authoritatively.
+   *
+   * Both were read by the upload widgets long before this — `field.accept`,
+   * `field.maxSize` — while `FieldSchema` did not declare them, so an author
+   * writing them had them silently stripped at parse and the constraint simply
+   * never existed. That is the ADR-0104 failure class (a declaration accepted
+   * in source, dropped in the contract, with no feedback); declaring them here
+   * and enforcing them server-side is what closes it.
+   */
+  accept: z.array(z.string()).optional().describe(
+    'Permitted upload types for media fields, as MIME types or extensions '
+    + '(e.g. ["image/*", ".pdf"]). Offered to the file picker AND enforced on write.',
+  ),
+  maxSize: z.number().int().positive().optional().describe(
+    'Maximum permitted file size in BYTES for media fields. Enforced on write against '
+    + 'the stored file size, not just checked in the browser.',
+  ),
+
   /** Selection Options */
   options: z.array(SelectOptionSchema).optional().describe('Static options for select/multiselect'),
 
