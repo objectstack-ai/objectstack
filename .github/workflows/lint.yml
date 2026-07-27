@@ -247,6 +247,26 @@ jobs:
       - name: Check skills TypeScript examples compile
         run: pnpm --filter @objectstack/spec run check:skill-examples
 
+      # Same anti-drift class as the gates above, for the generated translation
+      # bundles in packages/platform-objects/src/apps/translations/. Nothing
+      # regenerated them either, so they rotted three ways at once (#3670):
+      # translations left behind for keys the schema had REMOVED (`enable.trash`
+      # / `enable.mru`, #2377; agent `visibility`, #1901), keys the schema had
+      # GAINED with no entry at all (`summaryOperations.*`, the ADR-0105 D8
+      # invitation-placement fields, and the better-auth 1.7 columns from
+      # #3647), and `sys_migration` sitting on EMPTY STRINGS in ja-JP/es-ES —
+      # which renders blank rather than falling back to anything readable.
+      #
+      # Every one of those was found by a human happening to re-run the
+      # extractor. This turns the next one into a red build. Runs in merge
+      # mode, so it never asks anyone to re-translate: a fresh extract of an
+      # up-to-date bundle is byte-identical to what is committed.
+      #
+      # Reads the built @objectstack/spec dist through the extract config, so
+      # it belongs after the build step with the other consumer gates.
+      - name: Check generated translation bundles are in sync with the schema
+        run: pnpm check:i18n
+
       # Seed the shared Turbo cache from main only (see the restore step above).
       - name: Save Turbo cache (main only)
         if: always() && github.event_name == 'push'

@@ -85,6 +85,10 @@ export default class I18nExtract extends Command {
       description: 'Print to stdout instead of writing to --out',
       default: false,
     }),
+    check: Flags.boolean({
+      description: 'Write nothing; fail if the committed bundles in --out differ from a fresh extract',
+      default: false,
+    }),
   };
 
   async run(): Promise<void> {
@@ -153,6 +157,10 @@ export default class I18nExtract extends Command {
       }
       console.log('');
 
+      if (flags.check && !flags.out) {
+        throw new Error('--check needs --out=<dir> — it compares a fresh extract against the bundles committed there.');
+      }
+
       if (flags['dry-run'] || !flags.out) {
         for (const locale of localesEmitted) {
           if (result.counts[locale] === 0 && metadataFormsCounts[locale] === 0) continue;
@@ -174,29 +182,58 @@ export default class I18nExtract extends Command {
       }
 
       const outDir = path.resolve(process.cwd(), flags.out);
-      fs.mkdirSync(outDir, { recursive: true });
-      let written = 0;
+
+      // Every file a normal run would emit, paired with its rendered content.
+      // Both branches below iterate this, so `--check` can never diverge from
+      // what a real extract writes.
+      const emitted: Array<{ file: string; content: string; keys: number }> = [];
       for (const locale of localesEmitted) {
         if (result.counts[locale] > 0) {
-          const file = path.join(outDir, `${locale}.objects.generated.ts`);
-          fs.writeFileSync(
-            file,
-            renderTranslationModule(result.bundles[locale], { locale, objectsOnly }),
-            'utf8',
-          );
-          written += 1;
-          printInfo(`Wrote ${chalk.white(path.relative(process.cwd(), file))} (${result.counts[locale]} keys)`);
+          emitted.push({
+            file: path.join(outDir, `${locale}.objects.generated.ts`),
+            content: renderTranslationModule(result.bundles[locale], { locale, objectsOnly }),
+            keys: result.counts[locale],
+          });
         }
         if (metadataFormsCounts[locale] > 0) {
-          const file = path.join(outDir, `${locale}.metadata-forms.generated.ts`);
-          fs.writeFileSync(
-            file,
-            renderTranslationModule(result.bundles[locale], { locale, kind: 'metadataForms' }),
-            'utf8',
-          );
-          written += 1;
-          printInfo(`Wrote ${chalk.white(path.relative(process.cwd(), file))} (${metadataFormsCounts[locale]} keys)`);
+          emitted.push({
+            file: path.join(outDir, `${locale}.metadata-forms.generated.ts`),
+            content: renderTranslationModule(result.bundles[locale], { locale, kind: 'metadataForms' }),
+            keys: metadataFormsCounts[locale],
+          });
         }
+      }
+
+      if (flags.check) {
+        const stale: string[] = [];
+        const missing: string[] = [];
+        for (const { file, content } of emitted) {
+          const rel = path.relative(process.cwd(), file);
+          if (!fs.existsSync(file)) missing.push(rel);
+          else if (fs.readFileSync(file, 'utf8') !== content) stale.push(rel);
+        }
+        if (missing.length === 0 && stale.length === 0) {
+          console.log('');
+          printSuccess(`${emitted.length} bundle(s) are in sync with the schema ${chalk.dim(`(${timer.display()})`)}`);
+          return;
+        }
+        for (const rel of missing) printError(`missing:    ${rel}`);
+        for (const rel of stale) printError(`out of date: ${rel}`);
+        console.log('');
+        printError(
+          'Translation bundles have drifted from the schema. Regenerate and commit:\n' +
+          `  os i18n extract ${args.config ?? ''} --locales=${localesEmitted.filter((l) => l !== flags['default-locale']).join(',')} ` +
+          `--fill=${flags.fill} --out=${flags.out}`.replace(/\s+/g, ' '),
+        );
+        process.exit(1);
+      }
+
+      fs.mkdirSync(outDir, { recursive: true });
+      let written = 0;
+      for (const { file, content, keys } of emitted) {
+        fs.writeFileSync(file, content, 'utf8');
+        written += 1;
+        printInfo(`Wrote ${chalk.white(path.relative(process.cwd(), file))} (${keys} keys)`);
       }
       if (!anyMetadataForms) {
         printInfo('(no metadataForms keys discovered for these locales)');
