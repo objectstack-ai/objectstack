@@ -373,6 +373,11 @@ export class ObjectQL implements IDataEngine {
   // persists cleartext). Injected by the host via setCryptoProvider().
   private cryptoProvider?: ICryptoProvider;
 
+  // [ADR-0105 D2 / #3623] Posture accessor for driver-scope widening under the
+  // `group` posture. Injected by SecurityPlugin via setTenancyPostureProvider();
+  // absent = equality scoping (fail toward isolation).
+  private tenancyPostureProvider?: () => string | undefined;
+
   // Per-engine SchemaRegistry instance.
   //
   // Historically SchemaRegistry was a process-wide singleton of static state,
@@ -870,6 +875,20 @@ export class ObjectQL implements IDataEngine {
     }
     if (hasTenant && opts.tenantId === undefined) {
       opts.tenantId = execCtx!.tenantId;
+    }
+    // [ADR-0105 D2 / #3623] Under the `group` posture the caller's read reach
+    // is their whole membership set, not the active org — thread it so the
+    // driver's native scope widens to the SAME union Layer 0 enforces, instead
+    // of ANDing an active-org equality under it (which collapsed group reads
+    // to isolated semantics). Inserts still stamp from `tenantId` (the active
+    // org is the write target, D5). No provider / other postures / absent set
+    // → no `tenantIds`, and drivers fall back to equality: fail toward
+    // isolation, never toward exposure.
+    if (hasTenant && opts.tenantIds === undefined && this.tenancyPostureProvider?.() === 'group') {
+      const set = (execCtx as any)?.accessible_org_ids;
+      if (Array.isArray(set) && set.length > 0) {
+        opts.tenantIds = set.map(String);
+      }
     }
     if (hasTz && opts.timezone === undefined) {
       // Thread the business timezone so date-dependent driver generation
@@ -1471,6 +1490,23 @@ export class ObjectQL implements IDataEngine {
   setCryptoProvider(provider: ICryptoProvider): void {
     this.cryptoProvider = provider;
     this.logger.info('CryptoProvider configured for secret fields');
+  }
+
+  /**
+   * [ADR-0105 D2 / #3623] Inject the tenancy-posture accessor that decides
+   * whether driver-level native tenant scoping widens to the caller's whole
+   * membership set (`DriverOptions.tenantIds`, the `group` posture's union)
+   * instead of the active-org equality (`DriverOptions.tenantId`).
+   *
+   * Wired by the enforcement layer (SecurityPlugin) — deliberately NOT
+   * self-derived from env here: the posture in force is an entitlement
+   * question (`tenancy` service), and widening the driver wall is only safe
+   * when the Layer 0 union wall is actually enforcing above it. No provider
+   * (an embedding without plugin-security) keeps today's equality scoping —
+   * fail toward isolation, never toward exposure.
+   */
+  setTenancyPostureProvider(provider: () => string | undefined): void {
+    this.tenancyPostureProvider = provider;
   }
 
   /**

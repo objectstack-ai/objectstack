@@ -39,6 +39,27 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
   tenantId: z.string().optional().describe('Tenant Isolation identifier'),
 
   /**
+   * [ADR-0105 D2 / #3623] Tenant access SET for union-scoped postures.
+   *
+   * Under the `group` tenancy posture a caller's read reach is every
+   * organization they hold a membership in (`organization_id IN (...)`), not
+   * just the active one. The engine threads `ExecutionContext.accessible_org_ids`
+   * here so the driver's NATIVE tenant scoping widens to the same union the
+   * Layer 0 authorization wall enforces — otherwise the driver's
+   * `organization_id = tenantId` equality ANDs under the union and collapses
+   * group reads back to active-org reach.
+   *
+   * Semantics for drivers that implement native scoping:
+   * - non-empty array → scope reads/updates/deletes/aggregates with `IN`,
+   *   keeping any NULL-tenant global-row carve-out the equality path has;
+   * - absent or empty → fall back to `tenantId` equality (fail toward
+   *   isolation, never toward exposure);
+   * - insert-side tenant injection ALWAYS uses `tenantId` (the active
+   *   organization is the write target — ADR-0105 D5).
+   */
+  tenantIds: z.array(z.string()).optional().describe('Union tenant access set (group posture): native read scoping widens to organization_id IN (...); inserts still stamp from tenantId'),
+
+  /**
    * Business reference timezone (IANA name, e.g. `Asia/Shanghai`) for the
    * request, threaded from `ExecutionContext.timezone` (ADR-0053). Drivers that
    * generate date-dependent values — notably `autonumber` date tokens

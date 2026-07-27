@@ -2830,6 +2830,23 @@ export class SqlDriver implements IDataDriver {
     if (tenantId === undefined || tenantId === null || tenantId === '') return builder;
     const field = this.resolveTenantField(object);
     if (!field) return builder;
+    // [ADR-0105 D2 / #3623] Union tenant scope: under the `group` posture the
+    // engine threads the caller's whole membership set as `tenantIds`, and the
+    // native wall widens to `IN (...)` — the SAME union the Layer 0
+    // authorization wall enforces above. Equality here would AND under that
+    // union and collapse group reads to active-org reach. A malformed or
+    // empty set falls through to the equality path: fail toward isolation,
+    // never toward exposure. Insert-side injection (injectTenantOnInsert)
+    // deliberately keeps `tenantId` — the active org is the write target (D5).
+    const rawIds = (options as any)?.tenantIds;
+    const tenantIds = Array.isArray(rawIds)
+      ? rawIds.filter((v: unknown) => typeof v === 'string' && v !== '')
+      : [];
+    if (tenantIds.length > 0) {
+      return builder.where((b) => {
+        void b.whereIn(field, tenantIds.map(String)).orWhereNull(field);
+      });
+    }
     // `(field = :tenantId OR field IS NULL)` — a NULL tenant column marks a
     // GLOBAL/platform row (bootstrap-seeded positions and permission sets,
     // business units, pre-org first-boot seeds). Such a row belongs to no
