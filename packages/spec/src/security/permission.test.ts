@@ -46,13 +46,22 @@ describe('AdminScopeSchema (ADR-0090 D12)', () => {
 describe('ObjectPermissionSchema', () => {
   it('should apply default values to false', () => {
     const result = ObjectPermissionSchema.parse({});
-    
+
     expect(result.allowCreate).toBe(false);
     expect(result.allowRead).toBe(false);
     expect(result.allowEdit).toBe(false);
     expect(result.allowDelete).toBe(false);
     expect(result.viewAllRecords).toBe(false);
     expect(result.modifyAllRecords).toBe(false);
+  });
+
+  it('allowExport is optional with no default — unset stays undefined (#3544)', () => {
+    // Deliberately NOT defaulted: unset = inherit read (backward-compatible
+    // opt-out), so adding the key changes nothing for existing permission sets.
+    const result = ObjectPermissionSchema.parse({});
+    expect(result.allowExport).toBeUndefined();
+    expect(ObjectPermissionSchema.parse({ allowExport: false }).allowExport).toBe(false);
+    expect(ObjectPermissionSchema.parse({ allowExport: true }).allowExport).toBe(true);
   });
 
   it('should accept CRUD permissions', () => {

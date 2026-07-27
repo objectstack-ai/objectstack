@@ -66,6 +66,49 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
     expect(objects.deal.apiOperations).toContain('upsert');
     expect(objects.deal.apiOperations).not.toContain('restore');
   });
+
+  // [#3544] user-level export axis: allowExport on the per-object perm entry
+  // drives userExportAllowed → export derives from list ∧ that bit.
+  describe('user-level export axis (#3544)', () => {
+    it('allowExport:false removes export from a restricting object', () => {
+      const objects: Record<string, any> = { deal: { allowRead: true, allowExport: false } };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        deal: { name: 'deal', enable: { apiMethods: ['get', 'list'] } },
+      }));
+      expect(objects.deal.apiOperations).toContain('list');
+      expect(objects.deal.apiOperations).not.toContain('export');
+    });
+
+    it('allowExport:false removes export even from an otherwise-open object (annotation forced)', () => {
+      const objects: Record<string, any> = { deal: { allowRead: true, allowExport: false } };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        deal: { name: 'deal', enable: {} }, // no apiMethods → unrestricted
+      }));
+      // Even though unrestricted, the export axis forces an annotation that
+      // excludes export while keeping the rest.
+      expect(objects.deal.apiOperations).toBeDefined();
+      expect(objects.deal.apiOperations).not.toContain('export');
+      expect(objects.deal.apiOperations).toContain('create');
+      expect(objects.deal.apiOperations).toContain('import');
+    });
+
+    it('unset allowExport inherits read — export kept; unrestricted object still unannotated', () => {
+      const objects: Record<string, any> = { deal: { allowRead: true } }; // allowExport unset
+      annotateEffectiveApiOperations(objects, schemaOf({
+        deal: { name: 'deal', enable: {} },
+      }));
+      // Unrestricted + export allowed → no annotation (client default-allow).
+      expect('apiOperations' in objects.deal).toBe(false);
+    });
+
+    it('allowExport:true keeps export on a list-derived restricting object', () => {
+      const objects: Record<string, any> = { deal: { allowRead: true, allowExport: true } };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        deal: { name: 'deal', enable: { apiMethods: ['get', 'list'] } },
+      }));
+      expect(objects.deal.apiOperations).toContain('export');
+    });
+  });
 });
 
 describe('seedSuperUserRestrictedObjects (#3391)', () => {

@@ -31,7 +31,27 @@ export const ObjectPermissionSchema = lazySchema(() => z.object({
   allowEdit: z.boolean().default(false).describe('Edit permission'),
   /** D: Delete (Owned records or Shared records) */
   allowDelete: z.boolean().default(false).describe('Delete permission'),
-  
+
+  /**
+   * Export (data portability) — the user-level export axis (#3391 / #3544).
+   *
+   * `export` derives from `list` AND this bit
+   * (`@objectstack/spec/data` `resolveEffectiveApiMethods` →
+   * `ResolveApiOptions.userExportAllowed`). Deliberately OPTIONAL with no
+   * default so it is a backward-compatible **opt-out**, not an opt-in:
+   *   - UNSET (undefined) → inherits read — the current "anyone who can list can
+   *     one-click export" behavior — so adding this key changes nothing for
+   *     existing permission sets.
+   *   - `false` → deny export while KEEPING read (Salesforce "Export Reports",
+   *     Dynamics "Export to Excel", NetSuite "Export Lists", SAP S_GUI 61 parity).
+   *   - `true` → explicitly granted.
+   *
+   * The server resolves this into the per-object effective operation set
+   * (`apiOperations` on `/me/permissions`); the frontend renders that set and
+   * never reads this bit directly.
+   */
+  allowExport: z.boolean().optional().describe('[#3544] User-level export axis over read. Unset = inherit read (can-list ⇒ can-export, backward-compatible); false = deny export while keeping read; true = granted.'),
+
   /**
    * Lifecycle Operations.
    *

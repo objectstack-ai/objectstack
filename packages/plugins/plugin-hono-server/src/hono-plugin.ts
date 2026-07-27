@@ -344,8 +344,16 @@ export function annotateEffectiveApiOperations(
         if (obj === '*' || !acc) continue;
         const schema = schemaOf(obj);
         if (!schema) continue; // schema missing → no annotation (client falls back)
-        const eff = resolveEffectiveApiMethods(schema.enable ?? undefined);
-        if (eff.mode === 'unrestricted') continue; // open object → no annotation
+        // [#3544] User-level export axis: `export` derives from `list ∧ this bit`.
+        // Unset → inherit read (backward-compatible: can-list ⇒ can-export);
+        // explicit `allowExport:false` → export removed from the effective set.
+        const userExportAllowed = acc.allowExport !== false;
+        const eff = resolveEffectiveApiMethods(schema.enable ?? undefined, { userExportAllowed });
+        // Annotate when the object tightens via `apiMethods`, OR when the export
+        // axis removes `export` from an otherwise-open object (so the client
+        // hides the Export button). An unrestricted object with export still
+        // allowed needs no annotation — the client keeps its default-allow path.
+        if (eff.mode === 'unrestricted' && userExportAllowed) continue;
         acc.apiOperations = effectiveOperationsArray(eff);
     }
 }

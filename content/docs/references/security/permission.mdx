@@ -59,6 +59,7 @@ const result = AdminScope.parse(data);
 | **allowRead** | `boolean` | ✅ | Read permission |
 | **allowEdit** | `boolean` | ✅ | Edit permission |
 | **allowDelete** | `boolean` | ✅ | Delete permission |
+| **allowExport** | `boolean` | optional | [#3544] User-level export axis over read. Unset = inherit read (can-list ⇒ can-export, backward-compatible); false = deny export while keeping read; true = granted. |
 | **allowTransfer** | `boolean` | ✅ | [RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id) |
 | **allowRestore** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
 | **allowPurge** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
@@ -106,6 +107,7 @@ const result = AdminScope.parse(data);
 | **allowRead** | `boolean` | ✅ | Read permission |
 | **allowEdit** | `boolean` | ✅ | Edit permission |
 | **allowDelete** | `boolean` | ✅ | Delete permission |
+| **allowExport** | `boolean` | optional | [#3544] User-level export axis over read. Unset = inherit read (can-list ⇒ can-export, backward-compatible); false = deny export while keeping read; true = granted. |
 | **allowTransfer** | `boolean` | ✅ | [RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id) |
 | **allowRestore** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
 | **allowPurge** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
