@@ -72,6 +72,18 @@ jobs:
         # typecheck + `objectstack validate`. A red here blocks the publish.
         # The deterministic in-repo floor is @objectstack/downstream-contract;
         # this is the live ceiling.
+        #
+        # RC pre-mode amendment (#3600): while .changeset/pre.json says
+        # mode:"pre", the smoke still runs and reports but does NOT block. A
+        # major train exists precisely to ship deliberate surface removals, and
+        # a hotcrm release migrated off them cannot exist until the rc.N
+        # artifacts it would migrate against are published — blocking here
+        # deadlocks the train (observed 2026-07-27: every Release run red on
+        # the v17 window's removals, so the changesets step never even created
+        # the Version Packages PR). The gate re-arms by itself the moment
+        # `changeset pre exit` lands (mode flips / pre.json is consumed) —
+        # exactly when a migrated hotcrm must exist and HOTCRM_REF gets bumped
+        # per the note below.
         env:
           # v2.1.0: hotcrm upgraded to ObjectStack 14.7 (hotcrm#448) and
           # dropped the agent `visibility` field that spec 15 removes as
@@ -79,7 +91,17 @@ jobs:
           # Bump this ref whenever a deliberate spec surface removal ships a
           # matching hotcrm release.
           HOTCRM_REF: v2.1.0
-        run: bash scripts/downstream-smoke.sh
+        run: |
+          if [ "$(jq -r '.mode // empty' .changeset/pre.json 2>/dev/null)" = "pre" ]; then
+            echo "::notice::Changesets pre-mode active — the hotcrm smoke is advisory (reported, non-blocking) until 'changeset pre exit'."
+            if bash scripts/downstream-smoke.sh; then
+              echo "::notice::hotcrm@${HOTCRM_REF} is still compatible with the pre-release train."
+            else
+              echo "::warning::hotcrm@${HOTCRM_REF} is incompatible with the pre-release train — expected for the window's deliberate removals. Ship a migrated hotcrm release and bump HOTCRM_REF before 'changeset pre exit' re-arms this gate."
+            fi
+          else
+            bash scripts/downstream-smoke.sh
+          fi
 
       - name: Create Release Pull Request or Publish to npm
         id: changesets
