@@ -740,8 +740,10 @@ describe('ApprovalService (node era)', () => {
     expect(asApprover!.viewer).toEqual({ can_act: true, is_submitter: false, can_override: false });
     const asSubmitter = await svc.getRequest(req.id, { userId: 'u1', tenantId: 't1' } as any);
     expect(asSubmitter!.viewer).toEqual({ can_act: false, is_submitter: true, can_override: false });
-    const asOther = await svc.getRequest(req.id, { userId: 'u_stranger', tenantId: 't1' } as any);
-    expect(asOther!.viewer).toEqual({ can_act: false, is_submitter: false, can_override: false });
+    // #3590: a same-tenant stranger participates in nothing, so the request is
+    // not readable at all — previously it came back with an all-false viewer
+    // block, which meant every authenticated user could read every request.
+    expect(await svc.getRequest(req.id, { userId: 'u_stranger', tenantId: 't1' } as any)).toBeNull();
   });
 
   it('getRequest: viewer.can_act drops to false once the request is finalized', async () => {
@@ -1477,11 +1479,21 @@ describe('ApprovalService — admin override (#3424)', () => {
     const req = await svc.openNodeRequest(stuckInput(), CTX);
     const asAdmin = await svc.getRequest(req.id, TENANT_ADMIN);
     expect(asAdmin!.viewer).toMatchObject({ can_act: false, can_override: true });
-    const asMember = await svc.getRequest(req.id, MEMBER);
-    expect(asMember!.viewer!.can_override).toBe(false);
+    // Someone who CAN see the request but holds no override privilege — the
+    // submitter. `can_override` is about the privilege, not about access, so
+    // the check needs a participant rather than a stranger.
+    const asSubmitter = await svc.getRequest(req.id, CTX);
+    expect(asSubmitter!.viewer!.can_override).toBe(false);
     await svc.decide(req.id, { decision: 'approve', actorId: 'owner' }, TENANT_ADMIN);
     const after = await svc.getRequest(req.id, TENANT_ADMIN);
     expect(after!.viewer!.can_override).toBe(false);
+  });
+
+  // #3590: a plain member who participates in nothing now sees nothing — a
+  // request is no longer readable merely because you are in the same tenant.
+  it('a non-participant member cannot read the request at all', async () => {
+    const req = await svc.openNodeRequest(stuckInput(), CTX);
+    expect(await svc.getRequest(req.id, MEMBER)).toBeNull();
   });
 });
 
@@ -2112,5 +2124,103 @@ describe('ApprovalService — authorizeFileRead delegate (ADR-0104 D3 wave 2)', 
   it('sys_approval_action declares the delegate, so the storage gate asks the service', async () => {
     const { SysApprovalAction } = await import('./sys-approval-action.object.js');
     expect((SysApprovalAction as any).fileAccessDelegate).toBe('approvals');
+  });
+});
+
+// ── Participant visibility (#3590) ───────────────────────────────────
+//
+// getRequest/listRequests deliberately query with SYSTEM_CTX (the
+// approver-visibility rule spans identity forms RLS cannot model), but only
+// the TENANT half of that rule was ever applied — so any authenticated user
+// could read any request in their tenant, and after #3580 its decision
+// attachments too. These lock in the participant half.
+describe('ApprovalService — participant visibility (#3590)', () => {
+  const svcFor = (engine: any) => {
+    let n = 0;
+    return new ApprovalService({ engine, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
+  };
+  const asUser = (userId: string) => ({ userId, tenantId: 't1', positions: [], permissions: [] } as any);
+  const ADMIN = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+
+  it('the submitter and a pending approver can read it; a same-tenant stranger cannot', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX); // submitter u1, approver u9
+
+    expect(await svc.getRequest(req.id, asUser('u1'))).not.toBeNull();
+    expect(await svc.getRequest(req.id, asUser('u9'))).not.toBeNull();
+    expect(await svc.getRequest(req.id, asUser('u_stranger'))).toBeNull();
+  });
+
+  it('someone who already acted keeps access after their slot moves on', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+
+    // u9 is no longer a pending approver, but the decision is theirs — the
+    // audit trail (and its attachments) must not vanish from under them.
+    expect(await svc.getRequest(req.id, asUser('u9'))).not.toBeNull();
+  });
+
+  it('an override admin keeps the unrestricted view the console depends on', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+
+    expect(await svc.getRequest(req.id, ADMIN)).not.toBeNull();
+  });
+
+  it('a tokenless context sees nothing — the gate fails closed', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+
+    expect(await svc.getRequest(req.id, { tenantId: 't1', positions: [], permissions: [] } as any)).toBeNull();
+  });
+
+  it('listRequests no longer returns the whole tenant when no approverId filter is passed', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const mine = await svc.openNodeRequest(openInput(['u9']), CTX);            // submitter u1
+    await svc.openNodeRequest(openInput(['u7'], { recordId: 'opp2', record: { id: 'opp2' } }), asUser('u_other')); // unrelated to u1
+
+    // The old behaviour: omit approverId and receive every request in the
+    // tenant. `approverId` is a filter, never authorization.
+    const seen = await svc.listRequests(undefined, asUser('u1'));
+    expect(seen.map(r => r.id)).toEqual([mine.id]);
+
+    const strangerSees = await svc.listRequests(undefined, asUser('u_stranger'));
+    expect(strangerSees).toEqual([]);
+
+    // The admin console still sees everything.
+    expect((await svc.listRequests(undefined, ADMIN)).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('countRequests agrees with the list it paginates', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    await svc.openNodeRequest(openInput(['u9']), CTX);
+    await svc.openNodeRequest(openInput(['u7'], { recordId: 'opp2', record: { id: 'opp2' } }), asUser('u_other'));
+
+    expect(await svc.countRequests(undefined, asUser('u_stranger'))).toBe(0);
+    expect(await svc.countRequests(undefined, asUser('u1'))).toBe(1);
+  });
+
+  it('a write path still echoes back its own result when the context has no userId', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+
+    // Flow-driven resumes and service-to-service calls carry no userId. The
+    // operation authorized itself; re-gating the echo would turn a successful
+    // write into a null result.
+    const res = await svc.decideNode(
+      req.id,
+      { decision: 'approve', actorId: 'u9' },
+      { isSystem: false, positions: [], permissions: [] } as any,
+    );
+    expect(res.request).not.toBeNull();
+    expect(res.request.status).toBe('approved');
   });
 });

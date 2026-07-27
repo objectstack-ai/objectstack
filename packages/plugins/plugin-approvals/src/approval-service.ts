@@ -1377,7 +1377,7 @@ export class ApprovalService implements IApprovalService {
           } : {}),
         }, { context: SYSTEM_CTX });
         await this.syncApproverIndex(requestId, stillPending, org, now);
-        const fresh = await this.getRequest(requestId, context);
+        const fresh = await this.readBackRequest(requestId, context);
         return { request: fresh!, runId, nodeId, finalized: false, decision: input.decision };
       }
     }
@@ -1400,7 +1400,7 @@ export class ApprovalService implements IApprovalService {
     if (config.approvalStatusField) {
       await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, finalStatus);
     }
-    const fresh = await this.getRequest(requestId, context);
+    const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh!, runId, nodeId, finalized: true, decision: input.decision, outputs: mergedOutputs };
   }
 
@@ -1535,7 +1535,7 @@ export class ApprovalService implements IApprovalService {
       }
     }
 
-    const fresh = await this.getRequest(requestId, context);
+    const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh!, runId, resumed };
   }
 
@@ -1634,7 +1634,7 @@ export class ApprovalService implements IApprovalService {
           },
         });
       }
-      const fresh = await this.getRequest(requestId, context);
+      const fresh = await this.readBackRequest(requestId, context);
       return { request: fresh!, runId, resumed, autoRejected: true };
     }
 
@@ -1675,7 +1675,7 @@ export class ApprovalService implements IApprovalService {
       });
     }
 
-    const fresh = await this.getRequest(requestId, context);
+    const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh!, runId, resumed };
   }
 
@@ -1748,7 +1748,7 @@ export class ApprovalService implements IApprovalService {
       }
     }
 
-    const fresh = await this.getRequest(requestId, context);
+    const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh!, runId, resumed };
   }
 
@@ -1876,7 +1876,7 @@ export class ApprovalService implements IApprovalService {
       },
     });
 
-    const fresh = await this.getRequest(requestId, context);
+    const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh! };
   }
 
@@ -1959,7 +1959,7 @@ export class ApprovalService implements IApprovalService {
       });
     }
 
-    const fresh = await this.getRequest(requestId, context);
+    const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh!, notified };
   }
 
@@ -2098,7 +2098,7 @@ export class ApprovalService implements IApprovalService {
       });
     }
 
-    const fresh = await this.getRequest(requestId, context);
+    const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh! };
   }
 
@@ -2140,7 +2140,7 @@ export class ApprovalService implements IApprovalService {
       },
     });
 
-    const fresh = await this.getRequest(requestId, context);
+    const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh! };
   }
 
@@ -2691,6 +2691,98 @@ export class ApprovalService implements IApprovalService {
     return [...new Set<string>(list.map(r => String(r.request_id)))];
   }
 
+  /**
+   * The request ids this caller is a PARTICIPANT of, or `null` for a caller
+   * who may see everything in scope (#3590).
+   *
+   * These reads deliberately run with `SYSTEM_CTX` to bypass RLS — the
+   * approver-visibility rule spans several identity forms that RLS cannot model
+   * cleanly, which is why it has to be expressed here. Until now only the
+   * TENANT half of that rule was applied, so any authenticated user could read
+   * any request in their tenant (and, once attachments derived their access
+   * from the request, its files too). This adds the participant half.
+   *
+   * A participant is the submitter, a current approver, or someone who has
+   * already acted on the request (a past approver whose slot has moved on, a
+   * commenter). Admins with override authority keep the unrestricted view the
+   * "all requests" console surface depends on.
+   *
+   * Keying on the concrete user id is sufficient rather than an approximation:
+   * position/team/manager/field approvers are resolved to concrete user ids at
+   * open time, and the `type:value` literal is only the fallback for a spec
+   * that resolved to NOBODY — a slot no one can act on either way (`can_act`
+   * is a plain membership test over the resolved ids). So this cannot hide a
+   * request from someone who could actually act on it.
+   */
+  private async visibleRequestIds(
+    context: SharingExecutionContext,
+    tenantOrg: string | null,
+  ): Promise<Set<string> | null> {
+    if (this.isOverrideActor(context, tenantOrg)) return null;
+    const uid = (context as any)?.userId != null ? String((context as any).userId) : '';
+    // A tokenless/anonymous caller participates in nothing. Fail closed.
+    if (!uid) return new Set<string>();
+
+    const ids = new Set<string>();
+    const cap = ApprovalService.APPROVER_INDEX_CAP;
+    const add = (rows: unknown, key: string) => {
+      const list: any[] = Array.isArray(rows) ? rows : [];
+      for (const r of list) if (r?.[key] != null) ids.add(String(r[key]));
+      if (list.length >= cap) {
+        this.logger?.warn?.(
+          '[approvals] participant-visibility probe hit its window — some requests may be hidden from a legitimate participant',
+          { cap, key },
+        );
+      }
+    };
+
+    try {
+      // Current approver — via the normalized index, so every identity form
+      // the write path recorded is covered.
+      for (const id of (await this.approverRequestIds([uid], tenantOrg)) ?? []) ids.add(id);
+
+      const orgWhere = tenantOrg ? { organization_id: tenantOrg } : {};
+      add(
+        await this.engine.find('sys_approval_request', {
+          where: { submitter_id: uid, ...orgWhere },
+          fields: ['id'], limit: cap, context: SYSTEM_CTX,
+        }),
+        'id',
+      );
+      // Already acted on it: a past approver whose slot has moved on, or a
+      // commenter. They saw it legitimately; keep it that way.
+      add(
+        await this.engine.find('sys_approval_action', {
+          where: { actor_id: uid },
+          fields: ['request_id'], limit: cap, context: SYSTEM_CTX,
+        }),
+        'request_id',
+      );
+    } catch (err) {
+      // Never widen on error: a failed probe yields whatever was collected.
+      this.logger?.warn?.('[approvals] participant-visibility probe failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return ids;
+  }
+
+  /** Intersect an existing `where.id` constraint with the participant set. */
+  private applyVisibility(where: any, visible: Set<string> | null): boolean {
+    if (!visible) return true;
+    if (visible.size === 0) return false;
+    let allowed = [...visible];
+    const current = where.id;
+    if (typeof current === 'string') allowed = allowed.filter((x) => x === current);
+    else if (current && typeof current === 'object' && Array.isArray(current.$in)) {
+      const set = new Set(current.$in.map((v: unknown) => String(v)));
+      allowed = allowed.filter((x) => set.has(x));
+    }
+    if (allowed.length === 0) return false;
+    where.id = allowed.length === 1 ? allowed[0] : { $in: allowed };
+    return true;
+  }
+
   async listRequests(
     filter: {
       object?: string;
@@ -2717,6 +2809,11 @@ export class ApprovalService implements IApprovalService {
       if (ids.length === 0) return [];
       where.id = ids.length === 1 ? ids[0] : { $in: ids };
     }
+
+    // #3590: the caller-supplied `approverId` is a FILTER, not authorization —
+    // omitting it used to return every request in the tenant. Intersect with
+    // what this caller actually participates in.
+    if (!this.applyVisibility(where, await this.visibleRequestIds(context, tenantOrg))) return [];
 
     const findOpts: any = {
       where,
@@ -2753,6 +2850,9 @@ export class ApprovalService implements IApprovalService {
       where.id = ids.length === 1 ? ids[0] : { $in: ids };
     }
 
+    // #3590 — the count must agree with the list it paginates.
+    if (!this.applyVisibility(where, await this.visibleRequestIds(context, tenantOrg))) return 0;
+
     const countFn = (this.engine as any).count;
     if (typeof countFn === 'function') {
       try {
@@ -2769,7 +2869,33 @@ export class ApprovalService implements IApprovalService {
     return Array.isArray(rows) ? rows.length : 0;
   }
 
+  /**
+   * Read the request a write path just changed, to echo back as its result.
+   *
+   * NOT participant-gated (#3590), deliberately: the operation authorized
+   * itself by its own rule before writing, so re-asking "may you see this?"
+   * for the echo answers a question that has already been settled — and would
+   * answer it WRONG for a caller context that carries no `userId` (a
+   * flow-driven resume, a service-to-service call), turning a successful write
+   * into a `null` result. Gating belongs on the read API, not on an
+   * operation's own return value.
+   */
+  private async readBackRequest(
+    requestId: string,
+    context: SharingExecutionContext,
+  ): Promise<ApprovalRequestRow | null> {
+    return this.loadRequest(requestId, context, false);
+  }
+
   async getRequest(requestId: string, context: SharingExecutionContext): Promise<ApprovalRequestRow | null> {
+    return this.loadRequest(requestId, context, true);
+  }
+
+  private async loadRequest(
+    requestId: string,
+    context: SharingExecutionContext,
+    enforceVisibility: boolean,
+  ): Promise<ApprovalRequestRow | null> {
     if (!requestId) return null;
     const where: any = { id: requestId };
     const tenantOrg = (context as any)?.organizationId ?? (context as any)?.tenantId;
@@ -2778,6 +2904,13 @@ export class ApprovalService implements IApprovalService {
       where, limit: 1, context: SYSTEM_CTX,
     });
     if (!Array.isArray(rows) || !rows[0]) return null;
+    // #3590: tenant scoping alone let any authenticated user read any request
+    // — and, once decision attachments derived their access from the request
+    // (#3580), its files too. Participation is the rest of the rule.
+    if (enforceVisibility) {
+      const visible = await this.visibleRequestIds(context, tenantOrg ?? null);
+      if (visible && !visible.has(String(rows[0].id))) return null;
+    }
     const row = rowFromRequest(rows[0]);
     await this.enrichRows([row]);
     await this.attachFlowSteps(row);
