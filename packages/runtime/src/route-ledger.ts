@@ -17,7 +17,8 @@
  * dispatcher-internal `cleanPath` patterns (prepend `/api/v1` for the wire
  * path). The REST server (`@objectstack/rest`) mounts a second, larger surface
  * (search, forms, reports, sharing rules, …) that the client also reaches;
- * auditing that surface is follow-up work tracked in #3563 — see
+ * that surface has its own ledger + guard since #3587 —
+ * `packages/rest/src/rest-route-ledger.ts`. Background:
  * `docs/audits/2026-07-dispatcher-client-route-coverage.md`.
  *
  * This module is runtime-internal (not exported from the package index): it is
