@@ -147,6 +147,9 @@ describe('AUTH_*_SCHEMA plugin table mappings', () => {
     expect(AUTH_TEAM_SCHEMA.modelName).toBe('sys_team');
     expect(AUTH_TEAM_SCHEMA.fields).toEqual({
       organizationId: 'organization_id',
+      // 1.7.0-rc.1's seat counter — unmapped, better-auth wrote a camelCase
+      // `memberCount` column and every org create 500'd (#3624).
+      memberCount: 'member_count',
       createdAt: 'created_at',
       updatedAt: 'updated_at',
     });
@@ -157,6 +160,8 @@ describe('AUTH_*_SCHEMA plugin table mappings', () => {
     expect(AUTH_TEAM_MEMBER_SCHEMA.fields).toEqual({
       teamId: 'team_id',
       userId: 'user_id',
+      // Derived uniqueness digest, same 1.7.0-rc.1 addition (#3624).
+      membershipKey: 'membership_key',
       createdAt: 'created_at',
     });
   });
@@ -166,6 +171,10 @@ describe('AUTH_*_SCHEMA plugin table mappings', () => {
     expect(AUTH_TWO_FACTOR_SCHEMA.fields).toEqual({
       backupCodes: 'backup_codes',
       userId: 'user_id',
+      // 1.7's 2FA lockout pair — same unprovisioned-column class as #3624,
+      // on the wrong-code path.
+      failedVerificationCount: 'failed_verification_count',
+      lockedUntil: 'locked_until',
     });
   });
 

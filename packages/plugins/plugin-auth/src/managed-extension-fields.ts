@@ -33,6 +33,12 @@
  * derives better-auth's real field surface from `getAuthTables()` at the PINNED
  * version and fails the build on any overlap, so the upgrade that would cause
  * this is the moment someone finds out.
+ *
+ * D7 catches only the OVERLAP — a field on both sides. A better-auth upgrade
+ * that adds a field we have nothing named like sails straight through it and
+ * fails at runtime instead (`team.memberCount`, #3624). That complementary
+ * direction — every column better-auth writes must be provisioned — is gated
+ * by `better-auth-schema-parity.test.ts`.
  */
 
 /** Object name → the extension fields ObjectStack declares on it. */
