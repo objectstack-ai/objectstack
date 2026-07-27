@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { SchemaRegistry, applySystemFields, reconcileManagedApiMethods, warnDeprecatedExplicitApiMethods, computeFQN, parseFQN } from './registry';
+import { SchemaRegistry, applySystemFields, reconcileManagedApiMethods, warnStrippedLegacyApiMethods, computeFQN, parseFQN } from './registry';
 
 describe('SchemaRegistry', () => {
     let registry: SchemaRegistry;
@@ -848,14 +848,14 @@ describe('reconcileManagedApiMethods', () => {
 });
 
 // ==========================================
-// warnDeprecatedExplicitApiMethods — #3391
-// One-shot deprecation warning for standalone LEGACY apiMethods values (the
+// warnStrippedLegacyApiMethods — #3543
+// One-shot per-object diagnostic for retired LEGACY apiMethods values (the
 // derived 8). Pure observation — never mutates the schema.
 // ==========================================
-describe('warnDeprecatedExplicitApiMethods (#3391)', () => {
-    it('warns when a whitelist declares a derived legacy value (import/export)', () => {
+describe('warnStrippedLegacyApiMethods (#3543)', () => {
+    it('diagnoses a whitelist declaring a retired legacy value (import/export)', () => {
         const warn = vi.fn();
-        warnDeprecatedExplicitApiMethods(
+        warnStrippedLegacyApiMethods(
             { name: 'crm_deal_a', enable: { apiMethods: ['get', 'list', 'create', 'update', 'delete', 'import', 'export'] } } as any,
             { warn },
         );
@@ -863,12 +863,25 @@ describe('warnDeprecatedExplicitApiMethods (#3391)', () => {
         expect(warn.mock.calls[0][0]).toContain('crm_deal_a');
         expect(warn.mock.calls[0][0]).toContain('import');
         expect(warn.mock.calls[0][0]).toContain('export');
-        expect(warn.mock.calls[0][0]).toContain('#3391');
+        expect(warn.mock.calls[0][0]).toContain('IGNORED');
+        expect(warn.mock.calls[0][0]).toContain('#3543');
+        // primitives remain, so no deny-all escalation
+        expect(warn.mock.calls[0][0]).not.toContain('deny-all');
+    });
+
+    it('escalates when ignoring legacy values leaves NO primitives (deny-all cliff)', () => {
+        const warn = vi.fn();
+        warnStrippedLegacyApiMethods(
+            { name: 'crm_deal_denyall', enable: { apiMethods: ['upsert'] } } as any,
+            { warn },
+        );
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('deny-all');
     });
 
     it('stays silent for a pure-primitive whitelist', () => {
         const warn = vi.fn();
-        warnDeprecatedExplicitApiMethods(
+        warnStrippedLegacyApiMethods(
             { name: 'crm_deal_b', enable: { apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk'] } } as any,
             { warn },
         );
@@ -877,16 +890,16 @@ describe('warnDeprecatedExplicitApiMethods (#3391)', () => {
 
     it('stays silent for an undefined / empty whitelist', () => {
         const warn = vi.fn();
-        warnDeprecatedExplicitApiMethods({ name: 'crm_deal_c', enable: {} } as any, { warn });
-        warnDeprecatedExplicitApiMethods({ name: 'crm_deal_d', enable: { apiMethods: [] } } as any, { warn });
+        warnStrippedLegacyApiMethods({ name: 'crm_deal_c', enable: {} } as any, { warn });
+        warnStrippedLegacyApiMethods({ name: 'crm_deal_d', enable: { apiMethods: [] } } as any, { warn });
         expect(warn).not.toHaveBeenCalled();
     });
 
     it('warns only once per object name (hot path stays free)', () => {
         const warn = vi.fn();
         const schema: any = { name: 'crm_deal_once', enable: { apiMethods: ['list', 'aggregate'] } };
-        warnDeprecatedExplicitApiMethods(schema, { warn });
-        warnDeprecatedExplicitApiMethods(schema, { warn });
+        warnStrippedLegacyApiMethods(schema, { warn });
+        warnStrippedLegacyApiMethods(schema, { warn });
         expect(warn).toHaveBeenCalledTimes(1);
     });
 });

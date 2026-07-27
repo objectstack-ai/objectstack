@@ -14,17 +14,113 @@ import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 export const ApiMethod = z.enum([
-  'get', 'list',          // Read
+  'get', 'list',                // Read
   'create', 'update', 'delete', // Write
-  'upsert',               // Idempotent Write
-  'bulk',                 // Batch operations
-  'aggregate',            // Analytics (count, sum)
-  'history',              // Audit access
-  'search',               // Search access
-  'restore', 'purge',     // Trash management
-  'import', 'export',     // Data portability
+  'bulk',                       // Batch operations
 ]);
 export type ApiMethod = z.infer<typeof ApiMethod>;
+
+/**
+ * The eight RETIRED legacy `apiMethods` values (#3543, P2 of #3391). Each is
+ * DERIVED from the six primitives by the spec's single derivation table
+ * (`API_METHOD_DERIVATION` in `api-derivation.ts`) — an author never declares
+ * them. A stored/authored legacy value is stripped at parse by
+ * {@link stripLegacyApiMethods} (canonicalize-and-warn, never a hard parse
+ * failure): real metadata does not upgrade in lockstep with the spec, so this
+ * tolerance is a PERMANENT compatibility layer, not a one-release transition.
+ */
+export const LEGACY_API_METHODS = [
+  'upsert', 'aggregate', 'history', 'search', 'restore', 'purge', 'import', 'export',
+] as const;
+export type LegacyApiMethod = (typeof LEGACY_API_METHODS)[number];
+
+/**
+ * Tombstones for the retired legacy values — same doctrine as
+ * `CAPABILITIES_RETIRED_KEY_GUIDANCE` below: the strip warning must carry the
+ * FROM → TO prescription, because it is the one channel a consumer whose
+ * metadata still declares a legacy value is guaranteed to hit.
+ */
+export const LEGACY_API_METHOD_GUIDANCE: Record<LegacyApiMethod, string> = {
+  upsert: "declare ['create','update'] — `upsert` derives from create ∧ update",
+  aggregate: "declare ['list'] — `aggregate` derives from list",
+  history: "declare ['get'] with `enable.trackHistory: true` — `history` derives from get ∧ trackHistory",
+  search: "declare ['list'] (with `searchable` not false) — `search` derives from list ∧ searchable",
+  restore: "delete the value — `restore` never derives (`enable.trash` retired, #2377); it returns only with a real recycle bin (#1893)",
+  purge: "delete the value — `purge` never derives (`enable.trash` retired, #2377)",
+  import: "declare ['create'] and/or ['update'] — `import` derives from create ∨ update (writeMode-precise at the gate)",
+  export: "declare ['list'] — `export` derives from list",
+};
+
+/**
+ * The canonical serialization order of the EFFECTIVE operation vocabulary —
+ * the declaration order of the pre-#3543 fourteen-value enum, preserved
+ * verbatim so the wire contract (405 `allowed` array, `/me/permissions`
+ * `apiOperations`) is byte-stable across the shrink.
+ */
+export const API_OPERATION_ORDER = [
+  'get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk',
+  'aggregate', 'history', 'search', 'restore', 'purge', 'import', 'export',
+] as const;
+
+/**
+ * An effective API operation — the vocabulary of gates and wire serialization:
+ * the six authored primitives plus the eight derived verbs. Authors declare
+ * {@link ApiMethod}; servers derive and speak THIS (see `api-derivation.ts`).
+ */
+export type ApiOperation = (typeof API_OPERATION_ORDER)[number];
+
+/**
+ * Zod schema for {@link ApiOperation} — response-side surfaces that carry an
+ * effective operation set (e.g. `EffectiveObjectPermissionSchema.apiOperations`)
+ * validate against THIS, never against the authored {@link ApiMethod} enum.
+ */
+export const ApiOperationSchema = z.enum(API_OPERATION_ORDER);
+
+const LEGACY_API_METHOD_SET: ReadonlySet<string> = new Set(LEGACY_API_METHODS);
+
+/** Distinct legacy combinations already warned about (bounded; parse is hot). */
+const warnedLegacyApiMethods = new Set<string>();
+
+/**
+ * Strip retired legacy values from an `apiMethods` whitelist before enum
+ * validation (#3543). Non-arrays pass through untouched (the schema reports
+ * them). Emits a single warning per distinct legacy combination — parse runs
+ * on hot paths and carries no object-name context; the registration-time
+ * diagnostic in objectql `registry.ts` adds the per-object view.
+ *
+ * The one behavioral cliff is called out loudly: a whitelist that becomes
+ * EMPTY after stripping is `[]` = deny-all under the three-state contract,
+ * so a pure-legacy whitelist (e.g. `['upsert']`) now closes the object's API
+ * entirely instead of widening it.
+ */
+export function stripLegacyApiMethods(
+  raw: unknown,
+  opts?: { warn?: (msg: string) => void },
+): unknown {
+  if (!Array.isArray(raw)) return raw;
+  const legacy = [...new Set(raw.filter(
+    (v): v is LegacyApiMethod => typeof v === 'string' && LEGACY_API_METHOD_SET.has(v),
+  ))];
+  if (legacy.length === 0) return raw;
+  const kept = raw.filter((v) => !(typeof v === 'string' && LEGACY_API_METHOD_SET.has(v)));
+  const key = `${[...legacy].sort().join(',')}${kept.length === 0 ? '|deny-all' : ''}`;
+  if (!warnedLegacyApiMethods.has(key)) {
+    warnedLegacyApiMethods.add(key);
+    const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
+    warn(
+      `[spec] enable.apiMethods declares retired legacy value(s) [${legacy.join(', ')}] — ` +
+        `the ApiMethod enum is the six primitives get/list/create/update/delete/bulk (#3543). ` +
+        `Legacy values are stripped at parse; their semantics are DERIVED from the primitives:\n` +
+        legacy.map((v) => `  • \`${v}\`: ${LEGACY_API_METHOD_GUIDANCE[v]}`).join('\n') +
+        (kept.length === 0
+          ? `\n  ⚠ After stripping, this whitelist is EMPTY — \`[]\` means DENY-ALL (fully closed ` +
+            `API). Declare the underlying primitives if the object should stay reachable.`
+          : '') +
+        `\nCodemod: node scripts/codemod/apimethods-legacy-to-primitives.mjs`,
+    );
+  }
+  return kept;
+}
 
 /**
  * Tombstones for RETIRED capability flags — same doctrine as the tenancy
@@ -115,9 +211,17 @@ export const ObjectCapabilities = z.object({
 
   /**
    * API Supported Operations
-   * Granular control over API exposure.
+   * Granular control over API exposure — a whitelist over the SIX PRIMITIVES
+   * (#3391/#3543): `undefined` = unrestricted, `[]` = deny-all, a subset = the
+   * derived closure (see `api-derivation.ts`). Retired legacy values are
+   * stripped at parse by {@link stripLegacyApiMethods} (permanent tolerance
+   * for stored metadata); the cast below keeps the AUTHORING type at the six
+   * primitives so TS authors get the compile-time migration signal instead of
+   * the `unknown` input a raw `z.preprocess` would infer.
    */
-  apiMethods: z.array(ApiMethod).optional().describe('Whitelist of allowed API operations'),
+  apiMethods: (z.preprocess((raw) => stripLegacyApiMethods(raw), z.array(ApiMethod))
+    .optional() as unknown as z.ZodOptional<z.ZodType<ApiMethod[], ApiMethod[]>>)
+    .describe('Whitelist of allowed API operations (six primitives; undefined = all, [] = none)'),
 
   /**
    * Generic Attachments panel (Salesforce "Notes & Attachments" parity) —

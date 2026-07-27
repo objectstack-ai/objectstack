@@ -62,8 +62,13 @@ Data CRUD lives under the `/data` prefix. There is no `/bulk` route and no
 aggregation goes through `POST /api/v1/data/{object}/query` with
 `groupBy`/`aggregations` in the body.
 
-> **Key rule:** If your object defines `apiMethods`, only those operations are
-> exposed. For example, `apiMethods: ['get', 'list']` creates a read-only API.
+> **Key rule:** If your object defines `apiMethods`, only those operations (and
+> what derives from them) are exposed. For example, `apiMethods: ['get', 'list']`
+> creates a read-only API. The authorable values are the SIX PRIMITIVES
+> (`get/list/create/update/delete/bulk`, #3543); everything else (`export`,
+> `search`, `upsert`, …) is DERIVED from them by the server — `['list']` grants
+> aggregate/search/export for free, `['create','update']` grants upsert/import.
+> An empty array `[]` means deny-all (fully closed).
 
 ### Metadata API (`/meta`)
 
@@ -167,9 +172,12 @@ only the scoped routes are registered; with `optional`/`auto` the bare
 
 ## API Methods (Operations)
 
-The full set of operations an object can expose (the `ApiMethod` enum, 14
-values). Not every enum value has its own generated route — some only gate
-access:
+The authorable `ApiMethod` enum is the SIX PRIMITIVES (#3543). The wider
+EFFECTIVE operation vocabulary (`ApiOperation`, 14 values) is what gates and
+responses speak — the eight extra verbs are DERIVED from the primitives, never
+declared in `apiMethods`:
+
+**Authorable primitives:**
 
 | Method | HTTP surface today | Purpose |
 |:-------|:-------------------|:--------|
@@ -178,15 +186,20 @@ access:
 | `create` | `POST /data/{object}` | Create a new record |
 | `update` | `PATCH /data/{object}/:id` | Update an existing record |
 | `delete` | `DELETE /data/{object}/:id` | Delete a record |
-| `upsert` | Enum value gating access — no dedicated generated route in `@objectstack/rest` today | Create or update by external ID |
-| `bulk` | `POST /data/{object}/batch` | Batch create/update/delete |
-| `aggregate` | No dedicated route — use `POST /data/{object}/query` with `groupBy`/`aggregations` | Count, sum, avg, min, max |
-| `history` | Enum value gating access — no dedicated generated route today | Audit trail access |
-| `search` | Global `GET /api/v1/search` (cross-object), not per-object | Full-text search |
-| `restore` | Enum value gating access — no dedicated generated route today | Restore a soft-deleted record (reserved — platform deletes are hard today) |
-| `purge` | Enum value gating access — no dedicated generated route today | Permanent deletion |
-| `import` | `POST /data/{object}/import` | Bulk data import |
-| `export` | `GET /data/{object}/export` | Data export |
+| `bulk` | `POST /data/{object}/batch` | Batch create/update/delete (bulk ∧ child op) |
+
+**Derived operations (granted automatically, never authored):**
+
+| Operation | Derives from | HTTP surface today | Purpose |
+|:----------|:-------------|:-------------------|:--------|
+| `upsert` | `create` ∧ `update` | No dedicated generated route in `@objectstack/rest` today | Create or update by external ID |
+| `aggregate` | `list` | No dedicated route — use `POST /data/{object}/query` with `groupBy`/`aggregations` | Count, sum, avg, min, max |
+| `history` | `get` ∧ `trackHistory` | Gating only — no dedicated generated route today | Audit trail access |
+| `search` | `list` ∧ `searchable` | Global `GET /api/v1/search` (cross-object), not per-object | Full-text search |
+| `restore` | never (trash retired, #2377) | Gating only | Restore a soft-deleted record (reserved — platform deletes are hard today) |
+| `purge` | never (trash retired, #2377) | Gating only | Permanent deletion |
+| `import` | `create` ∨ `update` (writeMode-precise) | `POST /data/{object}/import` | Bulk data import |
+| `export` | `list` | `GET /data/{object}/export` | Data export |
 
 ---
 

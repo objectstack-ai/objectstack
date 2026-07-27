@@ -154,7 +154,7 @@
         "apiMethods": {
           "status": "live",
           "evidence": "packages/spec/src/data/api-derivation.ts, packages/rest/src/rest-server.ts, packages/runtime/src/api-exposure.ts",
-          "note": "three-state whitelist over the six primitives (get/list/create/update/delete/bulk): undefined = unrestricted, [] = deny-all (fully closed), subset = the derived closure. resolveEffectiveApiMethods (the single derivation table) is consumed by the REST gate (405 outside the effective set) and the runtime dispatcher gate; the legacy 8 values (upsert/aggregate/history/search/restore/purge/import/export) are DERIVED, not declared standalone (#3391)."
+          "note": "three-state whitelist over the six primitives (get/list/create/update/delete/bulk): undefined = unrestricted, [] = deny-all (fully closed), subset = the derived closure; a present-but-non-array value fails CLOSED (#3545). resolveEffectiveApiMethods (the single derivation table) is consumed by the REST gate (405 outside the effective set) and the runtime dispatcher gate. Since #3543 the enum IS the six primitives; the legacy 8 values (upsert/aggregate/history/search/restore/purge/import/export) are DERIVED effective operations (ApiOperation vocabulary) — a stored legacy value is stripped at parse (stripLegacyApiMethods, canonicalize-and-warn, permanent tolerance)."
         },
         "trackHistory": {
           "status": "live",

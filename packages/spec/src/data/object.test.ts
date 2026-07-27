@@ -1521,3 +1521,65 @@ describe('ObjectSchema.create() password-field author warning (ADR-0100)', () =>
     expect(msg).toContain('ackPlaintextMasking');
   });
 });
+
+// ---------------------------------------------------------------------------
+// #3543 — ApiMethod enum shrink: stripLegacyApiMethods parse-time compat layer
+// Legacy values in stored metadata are stripped (canonicalize-and-warn), never
+// a hard parse failure — real metadata does not upgrade in lockstep with the
+// spec, so this tolerance is permanent. Unknown values (typos) still fail.
+// NOTE: the strip warning dedups per distinct legacy combination for the
+// process lifetime, so each test below uses a distinct combination.
+// ---------------------------------------------------------------------------
+describe('#3543 apiMethods legacy-value strip (ObjectCapabilities)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('strips a legacy value and keeps the declared primitives', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = ObjectCapabilities.parse({ apiMethods: ['get', 'list', 'export'] });
+    expect(result.apiMethods).toEqual(['get', 'list']);
+    const msg = warn.mock.calls.map((c) => c[0]).join('\n');
+    expect(msg).toContain('export');
+    expect(msg).toContain('#3543');
+    expect(msg).toContain("declare ['list']"); // FROM → TO prescription
+  });
+
+  it('warns LOUDLY when stripping empties the whitelist (deny-all cliff)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = ObjectCapabilities.parse({ apiMethods: ['upsert'] });
+    expect(result.apiMethods).toEqual([]);
+    const msg = warn.mock.calls.map((c) => c[0]).join('\n');
+    expect(msg).toContain('DENY-ALL');
+    expect(msg).toContain("declare ['create','update']");
+  });
+
+  it('warns once per distinct legacy combination (parse is hot)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ObjectCapabilities.parse({ apiMethods: ['list', 'aggregate'] });
+    ObjectCapabilities.parse({ apiMethods: ['list', 'aggregate'] });
+    const hits = warn.mock.calls.filter((c) => String(c[0]).includes('aggregate'));
+    expect(hits.length).toBe(1);
+  });
+
+  it('still hard-rejects unknown (non-legacy) values — typos stay loud', () => {
+    const result = ObjectCapabilities.safeParse({ apiMethods: ['get', 'lst'] });
+    expect(result.success).toBe(false);
+  });
+
+  it('restore/purge strip carries the retired-trash guidance', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = ObjectCapabilities.parse({ apiMethods: ['delete', 'restore', 'purge'] });
+    expect(result.apiMethods).toEqual(['delete']);
+    const msg = warn.mock.calls.map((c) => c[0]).join('\n');
+    expect(msg).toContain('#2377');
+  });
+
+  it('the authored enum itself no longer admits legacy values', () => {
+    const result = ObjectCapabilities.safeParse({ apiMethods: ['get'] });
+    expect(result.success).toBe(true);
+    // sanity: primitives round-trip untouched, no warning
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const clean = ObjectCapabilities.parse({ apiMethods: ['get', 'list', 'bulk'] });
+    expect(clean.apiMethods).toEqual(['get', 'list', 'bulk']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});

@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { RowLevelSecurityPolicySchema } from './rls.zod';
-import { ApiMethod } from '../data/object.zod';
+import { ApiOperationSchema } from '../data/object.zod';
 
 /**
  * Entity (Object) Level Permissions
@@ -123,8 +123,8 @@ export const ObjectPermissionSchema = lazySchema(() => z.object({
  */
 export const EffectiveObjectPermissionSchema = lazySchema(() =>
   (ObjectPermissionSchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
-    apiOperations: z.array(ApiMethod).optional().describe(
-      'Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist.',
+    apiOperations: z.array(ApiOperationSchema).optional().describe(
+      'Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs, #3543), not the authored six-value ApiMethod enum.',
     ),
   }),
 );

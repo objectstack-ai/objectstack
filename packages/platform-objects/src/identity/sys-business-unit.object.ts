@@ -216,12 +216,10 @@ export const SysBusinessUnit = ObjectSchema.create({
     trackHistory: true,
     searchable: true,
     apiEnabled: true,
-    // Data portability is expected for the org tree: fields like `external_ref`
-    // and `effective_from/to` are designed for HRIS batch sync (#3025). Import
-    // reuses the create/update affordances this object already grants.
-    // `bulk` grants the createMany/updateMany/deleteMany + batch surfaces, which
-    // after #3391 require the `bulk` primitive (bulk ∧ child). `bulk` is a
-    // primitive — a permanent, legitimate declaration, not P0/P2 debt.
-    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk', 'import', 'export'],
+    // No `apiMethods` — default-open (#3543 audit). The HRIS org-tree sync
+    // scenario (#3025) needs every primitive, and a whitelist naming all six is
+    // equivalent to no whitelist while NOT tracking future primitives; the P1
+    // explicit `import`/`export` entries were reclaimed (both verbs derive:
+    // import ⊆ create∨update, export ⊆ list).
   },
 });

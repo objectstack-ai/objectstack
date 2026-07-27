@@ -92,7 +92,7 @@ enable: {
 | `trackHistory` | `false` | Field history tracking for audit compliance |
 | `searchable` | `true` | Index records for global search |
 | `apiEnabled` | `true` | Expose object via automatic APIs |
-| `apiMethods` | all | Whitelist of allowed API operations |
+| `apiMethods` | all | Whitelist over the six primitives (`get/list/create/update/delete/bulk`); derived verbs (search/export/upsert/…) follow automatically. `undefined` = all, `[]` = none |
 | `files` | `false` | Enable file attachments |
 | `feeds` | `true` | Enable social feed and comments |
 | `activities` | `true` | Enable tasks and events tracking |

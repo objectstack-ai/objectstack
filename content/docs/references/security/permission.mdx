@@ -67,7 +67,7 @@ const result = AdminScope.parse(data);
 | **modifyAllRecords** | `boolean` | ✅ | Modify All Data (Bypass Sharing) |
 | **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
 | **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
-| **apiOperations** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| 'aggregate' \| 'history' \| 'search' \| 'restore' \| 'purge' \| 'import' \| 'export'>[]` | optional | Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. |
+| **apiOperations** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| 'aggregate' \| 'history' \| 'search' \| 'restore' \| 'purge' \| 'import' \| 'export'>[]` | optional | Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs, #3543), not the authored six-value ApiMethod enum. |
 
 
 ---

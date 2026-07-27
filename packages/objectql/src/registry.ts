@@ -397,8 +397,10 @@ export function applySystemFields(
  * `@objectstack/spec/data` `API_METHOD_DERIVATION` / `resolveEffectiveApiMethods`
  * (#3391). The identical-shaped `WRITE_OP_AFFORDANCE` in plugin-security
  * `system-write-guard.ts` is the runtime enforcement of this same UI-intent
- * axis. Unifying the three is deferred to the enum-shrink (P2 of #3391); until
- * then keep the axes separate — see ADR-0103.
+ * axis. The enum shrink (#3543) DELIBERATELY kept the three tables separate —
+ * merging would blur a UX-affordance concern into a security concern (ADR-0103).
+ * The `upsert`/`purge` keys survive the shrink: raw (un-parsed) whitelists may
+ * still carry legacy verbs, and stripping here must keep covering them.
  */
 const MANAGED_WRITE_VERB_AFFORDANCE: Record<string, 'create' | 'edit' | 'delete'> = {
   create: 'create',
@@ -473,21 +475,27 @@ export function reconcileManagedApiMethods(
   };
 }
 
-/** Objects already warned about explicit legacy `apiMethods` (once per object). */
-const warnedDeprecatedApiMethods = new Set<string>();
+/** Objects already warned about stripped legacy `apiMethods` (once per object). */
+const warnedLegacyApiMethods = new Set<string>();
 
 /**
- * Registration-time deprecation warning for standalone LEGACY `apiMethods`
- * values (#3391). The 8 legacy verbs (`upsert`/`aggregate`/`history`/`search`/
- * `restore`/`purge`/`import`/`export`) are DERIVED from the six primitives; an
- * object that declares one explicitly is honored verbatim for one release
- * ("explicit wins"), then the value is removed in the enum-shrink (P2 of #3391).
+ * Registration-time diagnostic for retired LEGACY `apiMethods` values (#3543,
+ * P2 of #3391). Since the enum shrink, the 8 legacy verbs (`upsert`/
+ * `aggregate`/`history`/`search`/`restore`/`purge`/`import`/`export`) are no
+ * longer authorable: a declared legacy value is IGNORED — the effective API
+ * surface derives from the six primitives alone. The Zod parse path already
+ * strips-and-warns (`stripLegacyApiMethods` in `@objectstack/spec/data`), but
+ * carries no object name; this registration-time diagnostic adds the per-object
+ * view for schemas that reach the registry without passing through Zod (raw
+ * `ServiceObject` literals, out-of-band metadata). Real metadata does not
+ * upgrade in lockstep with the spec, so this is a PERMANENT compatibility
+ * diagnostic, not a transition.
  *
- * Emitted once per object (not per request — the hot path stays free), mirroring
- * the {@link reconcileManagedApiMethods} warning format and pointing at P2. Pure
- * observation: it never mutates the schema.
+ * Emitted once per object (not per request — the hot path stays free). Pure
+ * observation: it never mutates the schema (the derivation resolver ignores
+ * legacy values on its own).
  */
-export function warnDeprecatedExplicitApiMethods(
+export function warnStrippedLegacyApiMethods(
   schema: ServiceObject,
   opts?: { warn?: (msg: string) => void },
 ): void {
@@ -496,17 +504,22 @@ export function warnDeprecatedExplicitApiMethods(
   const legacy = methods.filter((m: string) => (LEGACY_API_METHODS as readonly string[]).includes(m));
   if (legacy.length === 0) return;
   const name = String((schema as any).name ?? '');
-  if (warnedDeprecatedApiMethods.has(name)) return;
-  warnedDeprecatedApiMethods.add(name);
+  if (warnedLegacyApiMethods.has(name)) return;
+  warnedLegacyApiMethods.add(name);
+  const remaining = methods.filter((m: string) => !(LEGACY_API_METHODS as readonly string[]).includes(m));
   const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
   warn(
-    `[Registry] Object "${name}" declares derived legacy apiMethods value(s) ` +
-      `[${legacy.join(', ')}] in enable.apiMethods — these derive from the six ` +
-      `primitives (get/list/create/update/delete/bulk) and are honored verbatim ` +
-      `for now, but standalone declaration is deprecated and will be removed in ` +
-      `the enum-shrink (P2 of #3391). Declare the underlying primitives instead ` +
-      `(e.g. ['create','update'] grants upsert/import; ['list'] grants ` +
-      `aggregate/export/search).`,
+    `[Registry] Object "${name}" declares retired legacy apiMethods value(s) ` +
+      `[${legacy.join(', ')}] in enable.apiMethods — since the enum shrink ` +
+      `(#3543) these are IGNORED: the effective API surface derives from the ` +
+      `six primitives (get/list/create/update/delete/bulk) alone ` +
+      `(['create','update'] ⇒ upsert/import; ['list'] ⇒ aggregate/search/export; ` +
+      `['get'] + trackHistory ⇒ history).` +
+      (remaining.length === 0
+        ? ` ⚠ Ignoring them leaves NO primitives — this object's API resolves ` +
+          `to deny-all (fully closed).`
+        : '') +
+      ` Remove the value(s); codemod: node scripts/codemod/apimethods-legacy-to-primitives.mjs.`,
   );
 }
 
@@ -761,10 +774,11 @@ export class SchemaRegistry {
     // every non-`better-auth` object.
     schema = reconcileManagedApiMethods(schema);
 
-    // [#3391] One-shot deprecation warning for standalone LEGACY apiMethods
-    // values (the derived 8) — honored this release, removed in the enum-shrink.
-    // Runs after reconcile so we warn about what actually ships.
-    warnDeprecatedExplicitApiMethods(schema);
+    // [#3543] One-shot per-object diagnostic for retired LEGACY apiMethods
+    // values (the derived 8) — ignored by the derivation resolver; this adds
+    // the object-name context the parse-time strip warning lacks. Runs after
+    // reconcile so we diagnose what actually ships.
+    warnStrippedLegacyApiMethods(schema);
 
     // [ADR-0079] Object-materialization seam — DESIGNATE-ONLY primary-title
     // provisioning. Runs AFTER `applySystemFields` (so any designated field

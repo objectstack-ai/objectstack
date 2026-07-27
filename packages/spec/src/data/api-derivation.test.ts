@@ -7,8 +7,8 @@ import {
   effectiveOperationsArray,
   DATA_ACTION_TO_API_OPERATION,
   API_PRIMITIVES,
-  LEGACY_API_METHODS,
 } from './api-derivation';
+import { ApiMethod, API_OPERATION_ORDER, LEGACY_API_METHODS } from './object.zod';
 
 describe('api-derivation (#3391)', () => {
   describe('three-state mode', () => {
@@ -130,17 +130,43 @@ describe('api-derivation (#3391)', () => {
     });
   });
 
-  describe('explicit legacy wins (deprecated compatibility)', () => {
-    it('honors a standalone explicit import even without create/update', () => {
+  describe('legacy values are ignored — strip semantics (#3543)', () => {
+    it('a whitelist of ONLY legacy values resolves to deny-all', () => {
       const eff = resolveEffectiveApiMethods({ apiMethods: ['import'] });
-      expect(isApiOperationAllowed(eff, 'import')).toBe(true);
-      // even precise writeMode checks pass when explicitly declared
-      expect(isApiOperationAllowed(eff, 'import', { writeMode: 'update' })).toBe(true);
+      expect(eff.mode).toBe('deny-all');
+      expect(isApiOperationAllowed(eff, 'import')).toBe(false);
+      expect(isApiOperationAllowed(eff, 'import', { writeMode: 'update' })).toBe(false);
+      expect(effectiveOperationsArray(eff)).toEqual([]);
     });
 
-    it('honors a standalone explicit export even without list', () => {
-      const eff = resolveEffectiveApiMethods({ apiMethods: ['export'] });
-      expect(isApiOperationAllowed(eff, 'export')).toBe(true);
+    it('legacy values mixed into a primitive whitelist change nothing (already derived)', () => {
+      const withLegacy = resolveEffectiveApiMethods({ apiMethods: ['list', 'export'] });
+      const primitivesOnly = resolveEffectiveApiMethods({ apiMethods: ['list'] });
+      expect(withLegacy.mode).toBe('restricted');
+      expect(effectiveOperationsArray(withLegacy)).toEqual(effectiveOperationsArray(primitivesOnly));
+      expect(isApiOperationAllowed(withLegacy, 'export')).toBe(true); // derived from list
+    });
+
+    it('a legacy value NOT derivable from the declared primitives stays denied', () => {
+      // pre-#3543 "explicit wins" honored this; now the derivation table is the
+      // only adjudicator: export needs list, and get does not grant it.
+      const eff = resolveEffectiveApiMethods({ apiMethods: ['get', 'export'] });
+      expect(isApiOperationAllowed(eff, 'export')).toBe(false);
+      expect(isApiOperationAllowed(eff, 'get')).toBe(true);
+    });
+  });
+
+  describe('present-but-unreadable policy fails CLOSED (#3545)', () => {
+    it('a non-array apiMethods resolves to deny-all, not unrestricted', () => {
+      const eff = resolveEffectiveApiMethods({ apiMethods: 'get,list' as unknown as string[] });
+      expect(eff.mode).toBe('deny-all');
+      expect(isApiOperationAllowed(eff, 'get')).toBe(false);
+      expect(effectiveOperationsArray(eff)).toEqual([]);
+    });
+
+    it('null stays unrestricted (absent policy, not unreadable policy)', () => {
+      const eff = resolveEffectiveApiMethods({ apiMethods: null });
+      expect(eff.mode).toBe('unrestricted');
     });
   });
 
@@ -212,8 +238,25 @@ describe('api-derivation (#3391)', () => {
     });
   });
 
-  it('legacy list and primitive list are disjoint and cover the enum', () => {
+  it('legacy list and primitive list are disjoint', () => {
     const overlap = LEGACY_API_METHODS.filter((m) => (API_PRIMITIVES as readonly string[]).includes(m));
     expect(overlap).toEqual([]);
+  });
+
+  describe('vocabulary split (#3543)', () => {
+    it('the authored enum is exactly the six primitives', () => {
+      expect(ApiMethod.options).toEqual([...API_PRIMITIVES]);
+    });
+
+    it('the effective vocabulary is primitives ∪ legacy in the stable wire order', () => {
+      expect([...API_OPERATION_ORDER].sort()).toEqual(
+        [...API_PRIMITIVES, ...LEGACY_API_METHODS].sort(),
+      );
+      // wire order is the pre-#3543 enum declaration order, byte-stable
+      expect(API_OPERATION_ORDER).toEqual([
+        'get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk',
+        'aggregate', 'history', 'search', 'restore', 'purge', 'import', 'export',
+      ]);
+    });
   });
 });

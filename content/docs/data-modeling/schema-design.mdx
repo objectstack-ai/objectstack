@@ -68,14 +68,12 @@ enable: {
   trackHistory: true,        // Track field changes over time
   searchable: true,          // Include in global search
   apiEnabled: true,          // Expose via REST/GraphQL
-  apiMethods: [              // Whitelist API operations
-    'get',
-    'list',
-    'create',
+  apiMethods: [              // Whitelist API operations — six primitives only;
+    'get',                   // search/export/… DERIVE from them (list grants
+    'list',                  // aggregate/search/export; create+update grants
+    'create',                // upsert/import). undefined = all, [] = none.
     'update',
-    'delete',
-    'search',
-    'export'
+    'delete'
   ],
   files: true,               // Allow file attachments
   feeds: true,               // Enable activity feed (Chatter-like)

@@ -3,7 +3,7 @@
 /**
  * API-method derivation — the spec's ONE source of truth for turning an
  * object's `enable.apiMethods` whitelist into the effective set of operations
- * the automatic API exposes (issue #3391, design in #3026).
+ * the automatic API exposes (issue #3391, design in #3026; enum shrink #3543).
  *
  * ## The contract (one sentence)
  *
@@ -14,6 +14,18 @@
  * annotation, managed-write clamp) consumes THIS table. The frontend renders
  * only the effective result the server hands down; it never reads the raw
  * `apiMethods` nor derives anything itself.
+ *
+ * ## Two vocabularies — authored vs effective (#3543)
+ *
+ * Since the enum shrink, the AUTHORED vocabulary ({@link ApiMethod}) is the six
+ * primitives only. The EFFECTIVE vocabulary ({@link ApiOperation}) is wider: it
+ * still carries the eight derived verbs, because the wire contract — the 405
+ * `allowed` array, `/me/permissions` `apiOperations`, and the REST/dispatcher
+ * gate checks — speaks in operations (`export`, `search`, …), not in authored
+ * primitives. Authors write primitives; the server derives and serializes
+ * operations. Do not narrow {@link ApiOperation} to {@link ApiMethod}: the
+ * frontend gates affordances (e.g. the Export button) on derived verbs being
+ * present in the effective set.
  *
  * ## Two orthogonal axes
  *
@@ -33,35 +45,45 @@
  * | `[]`         | `deny-all`     | no operation is exposed (fully closed)    |
  * | `[..subset]` | `restricted`   | only the derived closure of the subset    |
  *
- * ## Derived verbs are never declared standalone
+ * A PRESENT but non-array `apiMethods` (only producible by a raw/out-of-band
+ * metadata write — the Zod path rejects it) resolves to `deny-all`: a policy
+ * that exists but cannot be read fails CLOSED (#3545 residual-risk decision,
+ * tightened in the #3543 exposure-semantics window).
+ *
+ * ## Derived verbs are never declared
  *
  * The legacy 8 values (`upsert/aggregate/history/search/restore/purge/import/
  * export`) are DERIVED from the primitives — an author who whitelists
  * `['create','update']` gets `upsert`/`import` for free; one who whitelists
- * `['list']` gets `aggregate`/`export`/`search` for free. A standalone legacy
- * value in a whitelist is honored verbatim for one release ("explicit wins",
- * with a registration-time deprecation warning) but is slated for removal in
- * the enum-shrink (P2 of #3391).
+ * `['list']` gets `aggregate`/`export`/`search` for free. Since #3543 they are
+ * no longer part of the authored enum: a stored legacy value is stripped at
+ * parse (`stripLegacyApiMethods` in `object.zod.ts`, canonicalize-and-warn)
+ * and IGNORED by this resolver on un-parsed inputs — both paths converge on
+ * the same effective set.
  */
 
-import { ApiMethod } from './object.zod';
+import {
+  ApiMethod,
+  API_OPERATION_ORDER,
+  LEGACY_API_METHODS,
+  type ApiOperation,
+  type LegacyApiMethod,
+} from './object.zod';
 
 /**
  * The six irreducible API primitives. Every effective operation is derived
  * from a subset of these — they are the only values an author needs to declare.
+ * Identical to the {@link ApiMethod} enum since the #3543 shrink.
  */
 export const API_PRIMITIVES = ['get', 'list', 'create', 'update', 'delete', 'bulk'] as const;
 export type ApiPrimitive = (typeof API_PRIMITIVES)[number];
 
 /**
- * The eight legacy values that are DERIVED from primitives. Declaring one
- * standalone is deprecated (still honored one release; see
- * `warnDeprecatedExplicitApiMethods` in objectql `registry.ts`).
+ * @deprecated Renamed {@link API_OPERATION_ORDER} in the #3543 type split —
+ * the order is a property of the effective-operation vocabulary, not of the
+ * (now six-value) authored enum. Alias kept for import continuity.
  */
-export const LEGACY_API_METHODS = [
-  'upsert', 'aggregate', 'history', 'search', 'restore', 'purge', 'import', 'export',
-] as const;
-export type LegacyApiMethod = (typeof LEGACY_API_METHODS)[number];
+export const API_METHOD_ORDER: readonly ApiOperation[] = API_OPERATION_ORDER;
 
 const PRIMITIVE_SET: ReadonlySet<string> = new Set(API_PRIMITIVES);
 const LEGACY_SET: ReadonlySet<string> = new Set(LEGACY_API_METHODS);
@@ -124,7 +146,7 @@ export const API_METHOD_DERIVATION: Record<LegacyApiMethod, DerivationRule> = {
 
 /**
  * Alias table normalizing the two runtime vocabularies onto the canonical
- * {@link ApiMethod} operation names:
+ * {@link ApiOperation} names:
  * - runtime `callData` actions (`query`/`find`→`list`, `batch`→`bulk`);
  * - REST operation literals (already canonical, listed for completeness).
  *
@@ -132,7 +154,7 @@ export const API_METHOD_DERIVATION: Record<LegacyApiMethod, DerivationRule> = {
  * the resolver, treated as ungated (custom actions were never gated by
  * `apiMethods`).
  */
-export const DATA_ACTION_TO_API_OPERATION: Record<string, ApiMethod> = {
+export const DATA_ACTION_TO_API_OPERATION: Record<string, ApiOperation> = {
   // runtime callData actions
   get: 'get',
   query: 'list',
@@ -143,7 +165,7 @@ export const DATA_ACTION_TO_API_OPERATION: Record<string, ApiMethod> = {
   delete: 'delete',
   batch: 'bulk',
   bulk: 'bulk',
-  // legacy / derived operation literals (identity)
+  // derived operation literals (identity)
   upsert: 'upsert',
   aggregate: 'aggregate',
   history: 'history',
@@ -167,20 +189,17 @@ export interface ResolveApiOptions {
 export type ApiMethodsMode = 'unrestricted' | 'restricted' | 'deny-all';
 
 /**
- * The resolved, effective view of an object's API exposure. Carries both the
- * granted primitives and the explicitly-declared legacy values so callers can
- * distinguish "derived" from "author asked for it" (needed by import `writeMode`
- * precision and bulk∧child), and a pre-computed `operations` closure for
- * serialization to the 405 body / `/me/permissions`.
+ * The resolved, effective view of an object's API exposure. Carries the
+ * granted primitives and a pre-computed `operations` closure (primitives ∪
+ * derived verbs) for gate checks and serialization to the 405 body /
+ * `/me/permissions`.
  */
 export interface EffectiveApiMethods {
   mode: ApiMethodsMode;
   /** Granted primitives (subset of {@link API_PRIMITIVES}). */
   primitives: ReadonlySet<ApiPrimitive>;
-  /** Legacy values the author declared explicitly (honored verbatim, deprecated). */
-  explicitLegacy: ReadonlySet<LegacyApiMethod>;
-  /** Full effective operation closure (primitives ∪ derived ∪ explicit legacy). */
-  operations: ReadonlySet<ApiMethod>;
+  /** Full effective operation closure (primitives ∪ derived verbs). */
+  operations: ReadonlySet<ApiOperation>;
   /** The user-level export slot captured at resolve time. */
   userExportAllowed: boolean;
 }
@@ -204,16 +223,13 @@ function isLegacyDerivable(
 function computeOperations(
   mode: ApiMethodsMode,
   primitives: ReadonlySet<ApiPrimitive>,
-  explicitLegacy: ReadonlySet<LegacyApiMethod>,
   enable: EnableLike,
   userExportAllowed: boolean,
-): Set<ApiMethod> {
-  const ops = new Set<ApiMethod>();
+): Set<ApiOperation> {
+  const ops = new Set<ApiOperation>();
   if (mode === 'deny-all') return ops;
   for (const p of primitives) ops.add(p);
-  for (const l of explicitLegacy) ops.add(l); // explicit wins
   for (const legacy of LEGACY_API_METHODS) {
-    if (ops.has(legacy)) continue;
     if (isLegacyDerivable(legacy, primitives, enable, userExportAllowed)) ops.add(legacy);
   }
   return ops;
@@ -221,8 +237,13 @@ function computeOperations(
 
 /**
  * Resolve an object's `enable` block into its effective API exposure. Pure and
- * silent (the deprecation warning for explicit legacy values fires only at
- * registration time — see objectql `registry.ts`).
+ * silent (the strip warning for stored legacy values fires at parse time — see
+ * `stripLegacyApiMethods` in `object.zod.ts` — and the per-object diagnostic
+ * at registration time in objectql `registry.ts`).
+ *
+ * Legacy/unknown strings in a raw (un-parsed) whitelist are IGNORED — the same
+ * strip semantics the Zod path applies — so a whitelist containing ONLY legacy
+ * values resolves to `deny-all` on either path.
  *
  * @param enable The object's `enable` capability block (or `undefined`).
  * @param opts   Resolve-time options (e.g. the user-level export slot).
@@ -235,37 +256,36 @@ export function resolveEffectiveApiMethods(
   const e: EnableLike = enable ?? {};
   const raw = e.apiMethods;
 
-  // undefined / non-array → unrestricted (default-open, every operation).
-  if (raw == null || !Array.isArray(raw)) {
+  // undefined/null → unrestricted (default-open, every operation).
+  if (raw == null) {
     const primitives = new Set<ApiPrimitive>(API_PRIMITIVES);
-    const explicitLegacy = new Set<LegacyApiMethod>();
-    const operations = computeOperations('unrestricted', primitives, explicitLegacy, e, userExportAllowed);
-    return { mode: 'unrestricted', primitives, explicitLegacy, operations, userExportAllowed };
+    const operations = computeOperations('unrestricted', primitives, e, userExportAllowed);
+    return { mode: 'unrestricted', primitives, operations, userExportAllowed };
   }
 
-  // [] → deny-all (fully closed). This is the flipped semantics of #3391: an
-  // empty whitelist means "expose nothing", not "no restriction".
-  if (raw.length === 0) {
+  // Present but not an array → fails CLOSED (#3545 tightening, see module
+  // docs). Arrays keep only the granted primitives; legacy/unknown strings
+  // are ignored (strip semantics).
+  const declared = Array.isArray(raw)
+    ? new Set<ApiPrimitive>(raw.map((m) => String(m)).filter(isApiPrimitive))
+    : new Set<ApiPrimitive>();
+
+  // No granted primitives → deny-all (fully closed) — whether authored `[]`,
+  // empty after legacy values were stripped/ignored, or a non-array policy.
+  // This is the flipped semantics of #3391: an empty whitelist means "expose
+  // nothing", not "no restriction".
+  if (declared.size === 0) {
     return {
       mode: 'deny-all',
       primitives: new Set<ApiPrimitive>(),
-      explicitLegacy: new Set<LegacyApiMethod>(),
-      operations: new Set<ApiMethod>(),
+      operations: new Set<ApiOperation>(),
       userExportAllowed,
     };
   }
 
-  // subset → restricted. Partition the declared values into granted primitives
-  // and explicitly-declared legacy values.
-  const primitives = new Set<ApiPrimitive>();
-  const explicitLegacy = new Set<LegacyApiMethod>();
-  for (const m of raw) {
-    const v = String(m);
-    if (isApiPrimitive(v)) primitives.add(v);
-    else if (isLegacyApiMethod(v)) explicitLegacy.add(v);
-  }
-  const operations = computeOperations('restricted', primitives, explicitLegacy, e, userExportAllowed);
-  return { mode: 'restricted', primitives, explicitLegacy, operations, userExportAllowed };
+  // subset → restricted: the derived closure of the granted primitives.
+  const operations = computeOperations('restricted', declared, e, userExportAllowed);
+  return { mode: 'restricted', primitives: declared, operations, userExportAllowed };
 }
 
 /** Extra context for a single operation check. */
@@ -287,8 +307,8 @@ export interface OperationCheckOptions {
  * Decide whether a single operation is allowed for a resolved effective state.
  *
  * @param eff       The resolved effective methods (from {@link resolveEffectiveApiMethods}).
- * @param operation A canonical {@link ApiMethod} name (normalize runtime action
- *                  names through {@link DATA_ACTION_TO_API_OPERATION} first).
+ * @param operation A canonical {@link ApiOperation} name (normalize runtime
+ *                  action names through {@link DATA_ACTION_TO_API_OPERATION} first).
  * @param opts      `writeMode` (import precision) / `bulkChild` (bulk∧child).
  */
 export function isApiOperationAllowed(
@@ -311,8 +331,6 @@ export function isApiOperationAllowed(
   }
 
   if (isLegacyApiMethod(operation)) {
-    // Explicitly-declared legacy value → honored verbatim (deprecated).
-    if (eff.explicitLegacy.has(operation)) return true;
     // import: refine the coarse any-of into a writeMode-precise judgement.
     // (Unrestricted grants every primitive, so precision is moot → allowed.)
     if (operation === 'import' && opts?.writeMode && !unrestricted) {
@@ -330,22 +348,16 @@ export function isApiOperationAllowed(
   }
 
   // Unknown/custom operation → not gated by apiMethods (matches prior behavior:
-  // actions with no ApiMethod mapping still respect `apiEnabled` only).
+  // actions with no ApiOperation mapping still respect `apiEnabled` only).
   return true;
 }
 
 /**
- * The canonical serialization order for effective operations — the declaration
- * order of the {@link ApiMethod} enum. Used for the deterministic 405 `allowed`
- * array and the `/me/permissions` `apiOperations` field.
+ * Serialize an effective state's operation closure into a stable array in
+ * {@link API_OPERATION_ORDER} — the single "effective set" the server hands
+ * down (405 body, `/me/permissions`). The frontend consumes this, never the
+ * raw whitelist.
  */
-export const API_METHOD_ORDER: readonly ApiMethod[] = ApiMethod.options;
-
-/**
- * Serialize an effective state's operation closure into a stable, enum-ordered
- * array — the single "effective set" the server hands down (405 body,
- * `/me/permissions`). The frontend consumes this, never the raw whitelist.
- */
-export function effectiveOperationsArray(eff: EffectiveApiMethods): ApiMethod[] {
-  return API_METHOD_ORDER.filter((m) => eff.operations.has(m));
+export function effectiveOperationsArray(eff: EffectiveApiMethods): ApiOperation[] {
+  return API_OPERATION_ORDER.filter((m) => eff.operations.has(m));
 }

@@ -17,8 +17,10 @@ the REST data surface, the runtime HTTP/MCP dispatcher, and the
 `/me/permissions` annotation. The `apiMethods` whitelist is three-state —
 `undefined` = unrestricted, `[]` = deny-all, a subset = the derived closure — and
 the legacy 8 verbs (`upsert/aggregate/history/search/restore/purge/import/
-export`) are DERIVED from the primitives, never declared standalone (a standalone
-declaration is honored one release with a registration-time deprecation warning).
+export`) are DERIVED from the primitives, never declared standalone. (This
+release also ships the enum shrink — see the `#3543` changeset: the authored
+enum IS the six primitives, and a stored legacy value is stripped at parse
+with a warning rather than honored.)
 
 **Derivation:** `import` ⊆ create∨update (writeMode-precise: insert→create,
 update→update, upsert→create∧update); `export` ⊆ list (reserved user-export slot,

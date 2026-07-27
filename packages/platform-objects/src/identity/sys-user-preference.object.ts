@@ -115,9 +115,8 @@ export const SysUserPreference = ObjectSchema.create({
     trackHistory: false,
     searchable: false,
     apiEnabled: true,
-    // `bulk` grants the createMany/updateMany/deleteMany + batch surfaces, which
-    // after #3391 require the `bulk` primitive (bulk ∧ child). `bulk` is a
-    // primitive — a permanent, legitimate declaration.
-    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk'],
+    // No `apiMethods` — default-open (#3543 audit): the previous whitelist
+    // named all six primitives, which is equivalent to no whitelist while NOT
+    // tracking future primitives.
   },
 });

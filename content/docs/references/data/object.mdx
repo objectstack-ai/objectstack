@@ -14,8 +14,8 @@ API Operations Enum
 ## TypeScript Usage
 
 ```typescript
-import { ApiMethod, Index, Lifecycle, LifecycleClass, Object, ObjectAccessConfig, ObjectCapabilities, ObjectExtension, ObjectExternalBinding, ObjectFieldGroup, ObjectOwnershipEnum, ObjectRequiredPermissions, PerOperationRequiredPermissions, RowCrudActionOverride, TenancyConfig } from '@objectstack/spec/data';
-import type { ApiMethod, Index, Lifecycle, LifecycleClass, Object, ObjectAccessConfig, ObjectCapabilities, ObjectExtension, ObjectExternalBinding, ObjectFieldGroup, ObjectOwnershipEnum, ObjectRequiredPermissions, PerOperationRequiredPermissions, RowCrudActionOverride, TenancyConfig } from '@objectstack/spec/data';
+import { ApiMethod, ApiOperation, Index, Lifecycle, LifecycleClass, Object, ObjectAccessConfig, ObjectCapabilities, ObjectExtension, ObjectExternalBinding, ObjectFieldGroup, ObjectOwnershipEnum, ObjectRequiredPermissions, PerOperationRequiredPermissions, RowCrudActionOverride, TenancyConfig } from '@objectstack/spec/data';
+import type { ApiMethod, ApiOperation, Index, Lifecycle, LifecycleClass, Object, ObjectAccessConfig, ObjectCapabilities, ObjectExtension, ObjectExternalBinding, ObjectFieldGroup, ObjectOwnershipEnum, ObjectRequiredPermissions, PerOperationRequiredPermissions, RowCrudActionOverride, TenancyConfig } from '@objectstack/spec/data';
 
 // Validate data
 const result = ApiMethod.parse(data);
@@ -24,6 +24,20 @@ const result = ApiMethod.parse(data);
 ---
 
 ## ApiMethod
+
+### Allowed Values
+
+* `get`
+* `list`
+* `create`
+* `update`
+* `delete`
+* `bulk`
+
+
+---
+
+## ApiOperation
 
 ### Allowed Values
 
@@ -123,7 +137,7 @@ const result = ApiMethod.parse(data);
 | **stageField** | `string \| 'false'` | optional | [ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed. |
 | **listViews** | `Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>` | optional | Built-in named list views (segmented tabs) shipped with the object schema — "views" mode, dropdown userFilters allowed, no page-only tabs (ADR-0047) |
 | **searchableFields** | `string[]` | optional | Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields. |
-| **enable** | `{ trackHistory?: boolean; searchable?: boolean; apiEnabled?: boolean; apiMethods?: Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| 'aggregate' \| 'history' \| 'search' \| 'restore' \| 'purge' \| 'import' \| 'export'>[]; … }` | optional | Enabled system features modules |
+| **enable** | `{ trackHistory?: boolean; searchable?: boolean; apiEnabled?: boolean; apiMethods?: Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'bulk'>[]; … }` | optional | Enabled system features modules |
 | **sharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | Org-Wide Default record visibility (OWD) for INTERNAL users. Canonical four only (legacy aliases removed, ADR-0090 D4): private (owner-only) \| public_read (everyone reads, owner writes) \| public_read_write (everyone reads+writes) \| controlled_by_parent (derived from the master record). A CUSTOM object that omits this resolves to private at runtime (ADR-0090 D1). |
 | **externalSharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | [ADR-0090 D11] OWD for external (portal/partner) principals. Defaults to private; must be &lt;= sharingModel in openness. |
 | **publicSharing** | `{ enabled?: boolean; allowedAudiences?: Enum<'public' \| 'link_only' \| 'signed_in' \| 'email'>[]; allowedPermissions?: Enum<'view' \| 'comment' \| 'edit'>[]; maxExpiryDays?: integer; … }` | optional | Public share-link policy (Notion/Figma-style link sharing) |
@@ -160,7 +174,7 @@ const result = ApiMethod.parse(data);
 | **trackHistory** | `boolean` | ✅ | Show the record History tab (audit-trail UI). Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance |
 | **searchable** | `boolean` | ✅ | Index records for global search |
 | **apiEnabled** | `boolean` | ✅ | Expose object via automatic APIs |
-| **apiMethods** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| 'aggregate' \| 'history' \| 'search' \| 'restore' \| 'purge' \| 'import' \| 'export'>[]` | optional | Whitelist of allowed API operations |
+| **apiMethods** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'bulk'>[]` | optional | Whitelist of allowed API operations (six primitives; undefined = all, [] = none) |
 | **files** | `boolean` | ✅ | Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments targeting this object; otherwise creation is rejected. Field.file/Field.image are independent |
 | **feeds** | `boolean` | ✅ | Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects new comments for this object |
 | **activities** | `boolean` | ✅ | Record activity timeline (sys_activity mirror of CRUD). Default on; explicit false stops mirroring and hides the timeline |

@@ -5,7 +5,7 @@
 // `isApiOperationAllowed`). This suite pins the gate DECISION
 // (`apiAccessDenialFromEnable`) against the derivation contract: reverse-derived
 // import/export, writeMode-precise import, deny-all, bulk∧child, and the
-// explicit-legacy compatibility path. Route-level plumbing (createMany/batch,
+// legacy-strip semantics (#3543). Route-level plumbing (createMany/batch,
 // import two-stage, export projection) is covered by rest.test.ts,
 // rest-batch-endpoint.test.ts, and export-integration.test.ts.
 
@@ -90,12 +90,16 @@ describe('REST gate — import writeMode precision (#3391)', () => {
   });
 });
 
-describe('REST gate — explicit legacy wins (deprecated, #3391)', () => {
-  it("explicit ['import'] admits import in every writeMode", () => {
+describe('REST gate — legacy values ignored, strip semantics (#3543)', () => {
+  it("a whitelist of ONLY ['import'] resolves to deny-all (legacy is not authorable)", () => {
     const e = { apiMethods: ['import'] };
-    expect(allowed(e, 'import')).toBe(true);
-    expect(allowed(e, 'import', { writeMode: 'insert' })).toBe(true);
-    expect(allowed(e, 'import', { writeMode: 'update' })).toBe(true);
+    expect(allowed(e, 'import')).toBe(false);
+    expect(allowed(e, 'import', { writeMode: 'insert' })).toBe(false);
+    expect(allowed(e, 'import', { writeMode: 'update' })).toBe(false);
+    // the gate reports the closed surface, not the raw whitelist
+    const d = denial(e, 'import');
+    expect(d?.status).toBe(405);
+    expect(d?.body.allowed).toEqual([]);
   });
 });
 

@@ -667,6 +667,7 @@
     "data/AggregationStage",
     "data/AnalyticsQuery",
     "data/ApiMethod",
+    "data/ApiOperation",
     "data/BaseEngineOptions",
     "data/CalendarDateValue",
     "data/ClockTimeValue",

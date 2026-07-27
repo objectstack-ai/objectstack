@@ -44,11 +44,10 @@
  *     read metadata (e.g. the REST `loadObjectItems`) LOG a thrown read so a
  *     PERSISTENT outage is observable instead of a silent blanket-allow.
  *   • Object resolvable but its `enable`/`apiMethods` is present-yet-unreadable
- *     (a non-array policy) → `resolveEffectiveApiMethods` currently treats it as
- *     `unrestricted` (silent widen). This path is unreachable through the
- *     Zod-validated registration flow (only a raw/out-of-band metadata write
- *     could produce it), so tightening it to fail-CLOSED is deferred to the
- *     exposure-semantics window (#3543) rather than changed here unilaterally.
+ *     (a non-array policy) → `resolveEffectiveApiMethods` resolves it to
+ *     `deny-all` (fails CLOSED) since the #3543 exposure-semantics window. The
+ *     path is unreachable through the Zod-validated registration flow (only a
+ *     raw/out-of-band metadata write can produce it).
  */
 
 import {

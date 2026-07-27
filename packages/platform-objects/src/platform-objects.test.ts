@@ -38,6 +38,7 @@ import {
 import { SysSecret, SysSetting } from './system/index.js';
 import { ACCOUNT_APP, SETUP_APP, SETUP_NAV_CONTRIBUTIONS, STUDIO_APP } from './apps/index.js';
 import { AppSchema } from '@objectstack/spec/ui';
+import { resolveEffectiveApiMethods, isApiOperationAllowed } from '@objectstack/spec/data';
 
 const systemObjects = [
   ['SysUser', SysUser, 'sys_user'],
@@ -232,41 +233,31 @@ describe('@objectstack/platform-objects', () => {
     });
   });
 
-  describe('data portability whitelist (#3025)', () => {
-    it('sys_business_unit allows import/export so the org tree can be batch-synced', () => {
-      // The Business Units list exposes Import/Export buttons and the object's
-      // schema (external_ref, effective_from/to) is designed for HRIS batch
-      // sync. The REST data plane gates these routes on `enable.apiMethods`
-      // (ADR-0049), so both verbs must be present or the buttons 405 with
-      // OBJECT_API_METHOD_NOT_ALLOWED. Regression guard for #3025.
-      expect(SysBusinessUnit.enable?.apiMethods).toContain('import');
-      expect(SysBusinessUnit.enable?.apiMethods).toContain('export');
-      // The five CRUD verbs it already granted must remain — import writes
-      // reuse the create/update affordances.
-      for (const verb of ['get', 'list', 'create', 'update', 'delete'] as const) {
-        expect(SysBusinessUnit.enable?.apiMethods).toContain(verb);
-      }
+  describe('data portability — derived, not declared (#3025 / #3543)', () => {
+    it('sys_business_unit is default-open and the derivation grants import/export', () => {
+      // The Business Units list exposes Import/Export buttons for HRIS batch
+      // sync (#3025). Since the enum shrink (#3543) neither verb is declarable:
+      // the object carries NO whitelist (default-open) and the REST gate
+      // derives import (⊆ create∨update) and export (⊆ list) from the
+      // effective set. Regression guard: the whitelist must stay ABSENT — a
+      // whitelist naming all six primitives is equivalent but stops tracking
+      // future primitives, and any narrower whitelist would 405 the buttons.
+      expect(SysBusinessUnit.enable?.apiMethods).toBeUndefined();
+      const eff = resolveEffectiveApiMethods(SysBusinessUnit.enable);
+      expect(eff.mode).toBe('unrestricted');
+      expect(isApiOperationAllowed(eff, 'import')).toBe(true);
+      expect(isApiOperationAllowed(eff, 'export')).toBe(true);
+      expect(isApiOperationAllowed(eff, 'bulk', { bulkChild: 'create' })).toBe(true);
     });
 
-    it('sys_business_unit_member allows import/export and keeps CRUD (#3391 P0)', () => {
+    it('sys_business_unit_member is default-open and derives import/export (#3391 P0 pairing)', () => {
       // HRIS org-tree sync imports TWO tables together — the units (above) AND
-      // their memberships. The sibling membership table carries the same kind
-      // of restrictive whitelist, so it needs import/export too or the
-      // membership import path 405s (OBJECT_API_METHOD_NOT_ALLOWED). #3391's P0
-      // checklist pairs both tables; this is the half #3392 did not cover.
-      const methods = SysBusinessUnitMember.enable?.apiMethods ?? [];
-      expect(methods).toContain('import');
-      expect(methods).toContain('export');
-      // CRUD must remain — import writes reuse create/update; the membership
-      // grid depends on the rest.
-      for (const verb of ['get', 'list', 'create', 'update', 'delete'] as const) {
-        expect(methods).toContain(verb);
-      }
-      // Transitional: #3391 P2 derives import/export (import ⊆ create/update,
-      // export ⊆ list) and reclaims both objects' explicit entries together.
-      // Reconcile-safe: import/export are not generic write verbs, so
-      // reconcileManagedApiMethods (managedBy:'platform') never strips them —
-      // this static whitelist IS what apiAccessDenialFromEnable enforces.
+      // their memberships. Both were reclaimed together in the #3543 audit.
+      expect(SysBusinessUnitMember.enable?.apiMethods).toBeUndefined();
+      const eff = resolveEffectiveApiMethods(SysBusinessUnitMember.enable);
+      expect(eff.mode).toBe('unrestricted');
+      expect(isApiOperationAllowed(eff, 'import')).toBe(true);
+      expect(isApiOperationAllowed(eff, 'export')).toBe(true);
     });
   });
 
