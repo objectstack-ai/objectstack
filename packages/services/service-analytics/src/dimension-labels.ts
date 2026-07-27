@@ -95,6 +95,17 @@ export function formatDateBucket(value: unknown, granularity?: DateGranularity |
   if (value == null || value instanceof Date === false) {
     if (typeof value !== 'number' && typeof value !== 'string') return value;
   }
+  // A YEAR bucket's canonical key IS the bare year ("2026" / 2026) — which the
+  // epoch heuristic below would read as 2026 milliseconds and relabel "1970".
+  // Being idempotent over already-formatted bucket keys is this function's whole
+  // contract, and every other granularity's key already survives the round trip
+  // ("2026-Q2", "2026-07", "2026-07-15" all fail the pure-digit test); only the
+  // year key collides with it. Recognised before parsing, for both the string
+  // and numeric forms drivers return.
+  if (granularity === 'year') {
+    const y = typeof value === 'number' ? value : Number(String(value).trim());
+    if (Number.isInteger(y) && y >= 1000 && y <= 9999) return String(y);
+  }
   let d: Date;
   if (value instanceof Date) d = value;
   else if (typeof value === 'number') d = new Date(value);

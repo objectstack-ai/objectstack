@@ -17,7 +17,7 @@ import type { AnalyticsStrategy, DriverCapabilities, StrategyContext } from './s
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
-import { DatasetExecutor } from './dataset-executor.js';
+import { DatasetExecutor, resolveDimensionGranularity, type DateGranularityValue } from './dataset-executor.js';
 import { resolveDimensionLabels, type DimensionLabelDeps } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
 
@@ -567,13 +567,21 @@ export class AnalyticsService implements IAnalyticsService {
     //   - unknown field type → safe only under UTC (where the calendar day and
     //     its instant coincide); under a non-UTC tz we can't tell whether to
     //     shift, so the dim is omitted and the host drills a superset.
-    const rangeDims: Array<{ d: (typeof selectedDims)[number]; instant: boolean }> = [];
+    // The bucket size to invert MUST be the one the query actually grouped by —
+    // `selection.dateGranularity` overrides the dataset dimension's default
+    // (#3588). Reading `d.dateGranularity` here meant a widget that bucketed by
+    // quarter or year got its ranges computed from the dataset's month (or,
+    // when the dataset declared none, dropped entirely) — so drilling a bucket
+    // opened the wrong span, or the chart lost drill-through altogether.
+    const rangeDims: Array<{ d: (typeof selectedDims)[number]; granularity: DateGranularityValue; instant: boolean }> = [];
     for (const d of selectedDims) {
-      if (!d.field || d.type !== 'date' || !d.dateGranularity) continue;
+      if (!d.field || d.type !== 'date') continue;
+      const granularity = resolveDimensionGranularity(selection, d.name, d.dateGranularity);
+      if (!granularity) continue;
       const ftype = this.measureCurrency?.(dataset.object, d.field as string)?.type;
-      if (ftype === 'datetime') rangeDims.push({ d, instant: true });
-      else if (ftype === 'date') rangeDims.push({ d, instant: false });
-      else if (rangeTz === 'UTC') rangeDims.push({ d, instant: false });
+      if (ftype === 'datetime') rangeDims.push({ d, granularity, instant: true });
+      else if (ftype === 'date') rangeDims.push({ d, granularity, instant: false });
+      else if (rangeTz === 'UTC') rangeDims.push({ d, granularity, instant: false });
       // else: unknown field type under a non-UTC reference tz → omit (superset).
     }
     if (rangeDims.length && result.rows.length) {
@@ -581,8 +589,8 @@ export class AnalyticsService implements IAnalyticsService {
         instant ? new Date(zonedDateStartToUtcMs(ymd, rangeTz)).toISOString() : ymd;
       (result as AnalyticsResultWithDrill).drillRanges = result.rows.map((row) => {
         const ranges: Record<string, { field: string; gte: string; lt: string }> = {};
-        for (const { d, instant } of rangeDims) {
-          const cal = bucketKeyToCalendarRange(row[d.name] as string, d.dateGranularity!);
+        for (const { d, granularity, instant } of rangeDims) {
+          const cal = bucketKeyToCalendarRange(row[d.name] as string, granularity);
           if (cal) {
             ranges[d.name] = { field: d.field as string, gte: bound(cal.start, instant), lt: bound(cal.end, instant) };
           }
@@ -600,9 +608,18 @@ export class AnalyticsService implements IAnalyticsService {
     // dimension key verbatim, so this is the single place that turns a stored
     // value / FK id into the text a user expects to read.
     if (this.labelResolver && selectedDims.length) {
+      // Same single-source rule as the drill ranges above: a date bucket must be
+      // LABELLED with the granularity it was actually grouped by (#3588).
+      // Formatting a `year` bucket with the dataset's `month` default rendered
+      // it as "1970-01" — the year key re-parsed as an epoch millisecond count.
       const dims = selectedDims
         .filter((d) => !!d.field)
-        .map((d) => ({ name: d.name, field: d.field, type: d.type, dateGranularity: d.dateGranularity }));
+        .map((d) => ({
+          name: d.name,
+          field: d.field,
+          type: d.type,
+          dateGranularity: resolveDimensionGranularity(selection, d.name, d.dateGranularity),
+        }));
       if (dims.length) {
         // #3602 — bind the referenced object's read scope to THIS request so the
         // label lookup (a per-record read of the related object) cannot surface a

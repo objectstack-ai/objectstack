@@ -110,6 +110,52 @@ function computeDerived(d: DerivedMeasureSpec, row: Record<string, unknown>): nu
   }
 }
 
+// ── date bucketing (#3588) ───────────────────────────────────────────────────
+
+/** The date-bucket vocabulary shared by the dataset, the selection, and the
+ *  bucketing utilities in `@objectstack/core`. */
+export type DateGranularityValue = NonNullable<DatasetSelection['dateGranularity']>;
+
+/**
+ * The EFFECTIVE bucket size for one date dimension of a selection — the single
+ * source of truth for granularity precedence.
+ *
+ * Precedence, per dimension:
+ *   1. a `granularity` already stated on that dimension's `timeDimensions`
+ *      entry — never overridden;
+ *   2. `selection.dateGranularity` — the presentation's choice, so a widget can
+ *      bucket by month without the dataset committing every consumer to it;
+ *   3. `datasetDefault` — the dataset dimension's own `dateGranularity`.
+ *
+ * The unit of precedence is the GRANULARITY, not the entry: a `timeDimensions`
+ * entry carrying only a `dateRange` (what `compareTo` needs) states a WINDOW,
+ * not a bucket size, and must not suppress bucketing.
+ *
+ * **Why this is exported.** The bucket size chosen here decides three things
+ * that MUST agree: the `GROUP BY` the query compiles to, the humanized label
+ * each bucket key is rendered as, and the half-open `[gte, lt)` range a bucket
+ * drills into. When the query layer resolved granularity and the post-processing
+ * in `analytics-service` read the dataset default instead, they silently
+ * disagreed for every selection that overrode it — a `year` query came back
+ * labelled `1970-01` (a year bucket re-formatted as a month), a `day` query
+ * collapsed to duplicate month labels, and `quarter`/`year` lost their drill
+ * ranges entirely. One function, called from all three sites, is what stops
+ * that drift recurring.
+ */
+export function resolveDimensionGranularity(
+  selection: Pick<DatasetSelection, 'timeDimensions' | 'dateGranularity'>,
+  dimension: string,
+  datasetDefault?: string,
+): DateGranularityValue | undefined {
+  // `timeDimensions[].granularity` and the compiled cube's `granularities` are
+  // both typed as bare strings by their own layers (Cube.js heritage), but the
+  // only values that reach here come from the dataset/selection granularity
+  // vocabulary — the same five the bucketing utilities accept.
+  const stated = (selection.timeDimensions ?? []).find((t) => t.dimension === dimension)?.granularity;
+  if (stated) return stated as DateGranularityValue;
+  return selection.dateGranularity ?? (datasetDefault as DateGranularityValue | undefined);
+}
+
 // ── ordering + windowing (#3588) ─────────────────────────────────────────────
 
 /**
@@ -463,12 +509,11 @@ export class DatasetExecutor {
     // no dimension key and every `__compare` column came back empty.
     const selTimeDims = opts.selection.timeDimensions ?? [];
     const selDims = new Set(selTimeDims.map((t) => t.dimension));
-    const selectionGranularity = opts.selection.dateGranularity;
     const granularityFor = (name: string): string | undefined => {
       const cd = compiled.cube.dimensions[name];
       if (cd?.type !== 'time') return undefined;
       const datasetDefault = cd.granularities?.length === 1 ? String(cd.granularities[0]) : undefined;
-      return selectionGranularity ?? datasetDefault;
+      return resolveDimensionGranularity(opts.selection, name, datasetDefault);
     };
     // Fill in a bucket size for caller-supplied entries that named none.
     const resolvedTimeDims = selTimeDims.map((t) => {
