@@ -31,3 +31,22 @@ an inline blob or an external URL, never a `sys_file` id, so no existing file
 has an owner recorded and none of them start being gated. The gate engages only
 for files a record's field has actually claimed, and disengages again when
 ownership is released.
+
+---
+
+Also adds `verifyFileReferences()` — the executable form of ADR-0104's R4
+acceptance gate. It compares ground truth (what records' file fields actually
+hold) against recorded ownership, and classifies disagreements by whether they
+could cause data loss once collection is enabled:
+
+- **blocking** — `unowned_reference` (a held file nothing owns), `foreign_owner`
+  (a record holds a file owned by another slot), `shared_reference` (one file
+  held by two slots, i.e. exclusivity was violated). Each would let a later reap
+  delete bytes a record still points at.
+- **advisory** — `stale_owner` (owned but no longer held; fails toward
+  retention) and `unreferenced_file` (storage cost, not a correctness problem).
+
+The scan is read-only — it never writes, tombstones, or deletes. A ledger may
+not be given authority over irreversible deletes until it has been shown to
+agree with reality, so this must report zero blocking discrepancies on real
+tenant data, on consecutive runs, before the gated collection change may merge.

@@ -16,5 +16,17 @@ export { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSe
 export type { AttachmentLifecycleEngine, AttachmentLifecycleLogger } from './attachment-lifecycle.js';
 export { installFileReferenceHooks, FileReferenceCopyError } from './file-reference-lifecycle.js';
 export type { FileReferenceEngine, FileReferenceLogger } from './file-reference-lifecycle.js';
+export {
+  verifyFileReferences,
+  formatFileReferenceReport,
+  BLOCKING_ISSUE_KINDS,
+} from './verify-file-references.js';
+export type {
+  FileReferenceIssue,
+  FileReferenceIssueKind,
+  FileReferenceReport,
+  VerifyReferencesEngine,
+  VerifyReferencesOptions,
+} from './verify-file-references.js';
 export { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 export type { AttachmentSharingLike } from './attachment-access-hooks.js';
