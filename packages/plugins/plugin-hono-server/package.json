@@ -10,12 +10,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hono/node-server": "^2.0.10",
+    "@hono/node-server": "^2.0.12",
     "@objectstack/core": "workspace:*",
     "@objectstack/observability": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "hono": "^4.12.31"
+    "hono": "^4.12.32"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
