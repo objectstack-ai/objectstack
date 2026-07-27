@@ -187,6 +187,14 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
         expect(notification.listInbox).toHaveBeenCalledWith('u1', expect.objectContaining({ limit: 5 }));
     });
 
+    it('/notifications tolerates redundant slashes in the sub-path (split+filter, CodeQL redos fix)', async () => {
+        const notification = { listInbox: vi.fn(), markRead: vi.fn().mockResolvedValue({ updated: 1 }), markAllRead: vi.fn() };
+        const context: any = { executionContext: { userId: 'u1' } };
+        const result = await makeDispatcher({ notification }).handleNotification('//read//', 'POST', { ids: ['n1'] }, {}, context);
+        expect(result.response?.status).toBe(200);
+        expect(notification.markRead).toHaveBeenCalledWith('u1', ['n1']);
+    });
+
     it('/security responds 503 when no security service is wired (legacy in-handler semantics)', async () => {
         const result = await makeDispatcher().dispatch('GET', '/security/suggested-bindings', undefined, {}, {} as any);
         expect(result.handled).toBe(true);
