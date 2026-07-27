@@ -3494,24 +3494,39 @@ export class ObjectStackClient {
     },
 
     /**
-     * Get translations for a locale
+     * Get translations for a locale.
+     *
+     * Speaks the path-param dialect (`/translations/:locale`) — the shape
+     * `plugin-rest-api.zod.ts` declares and the ONLY shape any serving surface
+     * mounts (service-i18n's autonomous routes, the dispatcher's HTTP mounts).
+     * The `?locale=` query form this used to send matched no route anywhere
+     * and 404'd on the wire; the dispatcher's domain body accepts it, but
+     * nothing ever routes a bare `/translations` to that body (#3636).
      */
     getTranslations: async (locale: string, options?: { namespace?: string; keys?: string[] }): Promise<GetTranslationsResponse> => {
       const route = this.getRoute('i18n');
       const params = new URLSearchParams();
-      params.set('locale', locale);
       if (options?.namespace) params.set('namespace', options.namespace);
       if (options?.keys) params.set('keys', options.keys.join(','));
-      const res = await this.fetch(`${this.baseUrl}${route}/translations?${params.toString()}`);
+      const query = params.toString();
+      const res = await this.fetch(
+        `${this.baseUrl}${route}/translations/${encodeURIComponent(locale)}${query ? `?${query}` : ''}`,
+      );
       return this.unwrapResponse<GetTranslationsResponse>(res);
     },
 
     /**
-     * Get translated field labels for an object
+     * Get translated field labels for an object.
+     *
+     * Both the object and the locale ride the path (`/labels/:object/:locale`)
+     * — same reason as `getTranslations` above: the `?locale=` form could
+     * never match the two-path-param mount (#3636).
      */
     getFieldLabels: async (object: string, locale: string): Promise<GetFieldLabelsResponse> => {
       const route = this.getRoute('i18n');
-      const res = await this.fetch(`${this.baseUrl}${route}/labels/${encodeURIComponent(object)}?locale=${encodeURIComponent(locale)}`);
+      const res = await this.fetch(
+        `${this.baseUrl}${route}/labels/${encodeURIComponent(object)}/${encodeURIComponent(locale)}`,
+      );
       return this.unwrapResponse<GetFieldLabelsResponse>(res);
     }
   };

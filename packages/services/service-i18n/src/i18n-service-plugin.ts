@@ -129,10 +129,21 @@ export class I18nServicePlugin implements Plugin {
   /**
    * Register i18n REST routes with the HTTP server.
    *
-   * Routes:
+   * Routes (ledgered in `i18n-route-ledger.ts`, guarded by
+   * `i18n-route-ledger.conformance.test.ts` — #3636):
    * - GET /api/v1/i18n/locales           → list available locales
    * - GET /api/v1/i18n/translations/:locale → get translations for a locale
    * - GET /api/v1/i18n/labels/:object/:locale → get field labels for an object
+   *
+   * Success bodies carry the `{ success: true, data }` BaseResponse envelope
+   * the `i18n` route group declares (`plugin-rest-api.zod.ts` →
+   * `response_envelope`), matching what the dispatcher's `/i18n` domain emits
+   * for the same three shapes. They used to omit the `success` flag, which is
+   * the flag `ObjectStackClient.unwrapResponse` keys on — so the SDK handed
+   * callers the raw `{ data: … }` wrapper against THIS provider while
+   * returning the declared unwrapped shape against the dispatcher. Same
+   * method, two shapes, decided by which plugin happened to mount the route
+   * (#3636). `data` did not move, so direct body readers are unaffected.
    */
   private registerI18nRoutes(httpServer: IHttpServer, ctx: PluginContext): void {
     if (!this.i18n) return;
@@ -146,6 +157,7 @@ export class I18nServicePlugin implements Plugin {
         const locales = i18n.getLocales();
         const defaultLocale = i18n.getDefaultLocale?.() ?? 'en';
         res.json({
+          success: true,
           data: {
             locales: locales.map((code) => ({
               code,
@@ -168,7 +180,7 @@ export class I18nServicePlugin implements Plugin {
           return;
         }
         const translations = i18n.getTranslations(locale);
-        res.json({ data: { locale, translations } });
+        res.json({ success: true, data: { locale, translations } });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -189,7 +201,7 @@ export class I18nServicePlugin implements Plugin {
         if (hasGetFieldLabels) {
           const labels = (i18n as II18nService & { getFieldLabels(obj: string, loc: string): Record<string, string> })
             .getFieldLabels(objectName, locale);
-          res.json({ data: { object: objectName, locale, labels } });
+          res.json({ success: true, data: { object: objectName, locale, labels } });
         } else {
           // Fallback: derive field labels from full translation bundle
           const translations = i18n.getTranslations(locale);
@@ -200,7 +212,7 @@ export class I18nServicePlugin implements Plugin {
               labels[key.substring(prefix.length)] = value as string;
             }
           }
-          res.json({ data: { object: objectName, locale, labels } });
+          res.json({ success: true, data: { object: objectName, locale, labels } });
         }
       } catch (error: any) {
         res.status(500).json({ error: error.message });
