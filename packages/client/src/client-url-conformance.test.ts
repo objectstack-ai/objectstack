@@ -126,7 +126,20 @@ function matches(verb: string, path: string): Pattern | undefined {
  * not by anything in this one — this repo's dispatcher explicitly REFUSES those
  * paths (`http-dispatcher.ts`: "Guard against matching control-plane routes
  * like /cloud/environments"). No in-repo ledger can vouch for them, so they are
- * exempt here and tracked separately (#3655).
+ * exempt here.
+ *
+ * NO LONGER UNGUARDED — guarded on the OTHER side of the boundary (#3655).
+ * `cloud`'s `packages/service-cloud/src/cloud-route-ledger.ts` gives all 90
+ * routes its artifact API plugin mounts a reviewed disposition, and
+ * `projects-namespace-coverage.test.ts` there drives this very SDK with a
+ * recording `fetch` and matches every `projects.*` URL against it. That had to
+ * live in `cloud`: it depends on this repo, never the reverse, so the cloud
+ * repo is the only place the mounted route set and the SDK are both in scope.
+ * The exemption below stays because THIS suite still cannot see those routes —
+ * it is a statement about where the coverage lives, not that there is none.
+ *
+ * That guard immediately found `projects.listTemplates` building
+ * `/api/v1/cloud/templates`, which no registrar in either repo mounts (#3702).
  *
  * Exempt by PREFIX, and bounded from both ends: the assertions below pin which
  * methods are allowed to use it, so the hole cannot quietly widen into a place

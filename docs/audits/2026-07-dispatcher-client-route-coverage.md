@@ -302,6 +302,59 @@ questions, and the second one needs the contract imported into the assertion —
 `BaseResponseSchema.safeParse(body)`, not a hand-copied restatement that drifts
 from the schema it claims to check.
 
+## 13. The control plane, from the other side (#3655)
+
+The one surface this repo could never audit. §10's capstone drives every SDK
+method and matches its URL against the union of the in-repo ledgers; 196 of
+~219 matched, and **every** unmatched one was in `projects.*` — 23 methods on
+`/api/v1/cloud/*`, served by the sibling `cloud` repo. The dispatcher here does
+not merely lack those routes, it refuses them
+(`if (path.includes('/cloud/environments/')) return undefined;`), so no ledger
+here could honestly carry a row and the capstone exempts the prefix.
+
+The ledger therefore lives in `cloud`
+(`packages/service-cloud/src/cloud-route-ledger.ts`), and it had to: **cloud
+depends on this repo, never the reverse**, so it is the only place where the
+mounted route set and `@objectstack/client` are both in scope. Same shape as
+tranche 3 — 90 routes, each with a reviewed disposition, enumerated for real by
+driving all 17 registrars against a capturing mock `IHttpServer`.
+
+The client half is the part that actually closes the boundary. Without it a
+route could be renamed there, the ledger updated to match, and all 23 methods
+404 with the server-side guard still green — so
+`projects-namespace-coverage.test.ts` drives the real SDK with a recording
+`fetch` and matches each URL against the ledger. Mutation-checked against
+exactly that scenario.
+
+| Disposition | Count |
+|---|---|
+| `sdk` | 22 |
+| `gap` | 14 |
+| `mismatch` | 6 |
+| `server-only` / `public` | 48 |
+
+Two findings, both pinned by tests rather than prose:
+
+- **`projects.listTemplates` is dead** — it builds `/api/v1/cloud/templates`,
+  which the string search finds exactly once in each repo: the call itself.
+  Templates exist as a filtered `sys_package` view, never as a route (#3702).
+  The sixth instance of the `#3584 / #3611 / #3636` class, and the first one
+  only a cross-repo guard could have seen.
+- **A duplicate route registration** — `POST /actions/sys_environment/:actionName`
+  mounted twice with an identical path, the second commented "legacy alias"
+  and aliasing nothing (cloud#887).
+
+The six `mismatch` rows are all one operation with two live spellings
+(`change-hostname` / `hostname`, `rotate-credential` / `credentials/rotate`,
+`install-package` / `packages`, a `PUT`/`POST` hostname twin, two
+installation-scoped routes). Each is the spelling the SDK does *not* use, so
+none is a live break — but each is a rename waiting to pick the wrong one.
+
+The SDK is pinned by cloud's `.objectstack-sha`, so the contract is asserted
+against the framework revision cloud builds and ships against. That is the
+right revision to check — but it means a `projects.*` change landing here is
+not verified against the control plane until that pin moves.
+
 ## Follow-up slicing (proposed)
 
 1. **`client.actions.invoke(...)`** — closes the largest hole (3 routes).
@@ -314,7 +367,8 @@ from the schema it claims to check.
 8. **REST-surface tranche** (§8) with the same ledger+guard treatment — done in #3587.
 9. **Autonomous service mounts** (§9) — done in #3636.
 10. **Cross-surface URL conformance** (§10, the reverse direction) — done in #3642.
-11. **Control-plane surface** (§10) — #3655, needs a ledger in the `cloud` repo.
+11. **Control-plane surface** (§10) — done in #3655; the ledger lives in `cloud`
+    (§13), which is the only repo where both halves are in scope.
 12. **Enumerate `/auth/**`** (§11) — done in #3656; wildcard ratchet 60 → 3.
 13. **Enumerate `/ai/**`** — the last dynamic family, 3 SDK methods.
 14. **Response-shape conformance** (§12) — error path done in #3675 for both
