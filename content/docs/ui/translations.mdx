@@ -141,12 +141,28 @@ npx os i18n extract --locales zh-CN --fill todo --out src/translations
 
 # Report coverage; fail the build when it slips
 npx os i18n check --strict --threshold 95
+
+# Fail if the committed bundles have fallen behind the schema
+npx os i18n extract --locales zh-CN --fill todo --out src/translations --check
 ```
 
 `os i18n check` exits non-zero on violations, so it works as a CI gate.
 A missing string in the **default** locale is an error; missing strings in
 other locales are warnings until you set `--strict` / `--threshold`. The Todo
 example ships a completeness test alongside its bundles — worth copying.
+
+The two gates answer different questions, and you want both. `os i18n check`
+asks *are the strings translated?* — a coverage number about human work.
+`os i18n extract --check` asks *are the generated bundles still what the schema
+produces?* — a freshness check about machine output. Renaming a field's label,
+adding an object, or removing a spec key leaves coverage at 100% while the
+bundles quietly go stale, which is exactly how this repo's own bundles ended up
+carrying translations for keys the schema had deleted (#3670).
+
+`--check` writes nothing: it re-renders and diffs against `--out`, naming each
+stale file and printing the regenerate command. It runs in the same **merge
+mode** as a normal extract, so it never asks anyone to re-translate — an
+up-to-date bundle re-extracts byte-identically.
 
 ## Current boundaries
 

@@ -398,6 +398,32 @@ locale are errors; `--strict` promotes non-default gaps to errors and
 `--show-keys` lists every missing key. `os lint --i18n-strict` folds the same
 gate into linting.
 
+### `os i18n extract --check` — freshness, not coverage
+
+If you commit **generated** bundles (`*.generated.ts` produced by
+`os i18n extract`), coverage is only half the gate:
+
+```bash
+os i18n extract <config> --locales=zh-CN,ja-JP --fill=default \
+  --out=src/translations --check
+```
+
+`--check` writes nothing. It re-renders what a real extract would produce and
+fails if that differs from what is committed in `--out`, naming each stale or
+missing file and printing the regenerate command.
+
+**Use both gates — they answer different questions.** `os i18n check` asks *are
+the strings translated?* (coverage: human work). `extract --check` asks *are the
+generated bundles still what the schema produces?* (freshness: machine output).
+Renaming a label, adding an object, or removing a spec key leaves coverage at
+100% while the bundles quietly go stale — which is exactly how the platform's
+own bundles ended up carrying translations for keys the schema had already
+deleted, plus fields with no entry in any locale.
+
+It runs in the same **merge mode** as a normal extract, so it never asks for
+re-translation: an up-to-date bundle re-extracts byte-identically. Requires
+`--out` — there is nothing to compare against without it.
+
 ### Diff & Coverage Schemas
 
 The spec models coverage results for tooling: `TranslationCoverageResult`
