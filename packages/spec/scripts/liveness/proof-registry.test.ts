@@ -112,6 +112,7 @@ describe('registry invariants', () => {
         'object/sharingModel',
         'position/delegatable',
         'object/lifecycle',
+        'webhook/object',
       ].sort(),
     );
   });
@@ -133,6 +134,7 @@ describe('real proof wiring resolves', () => {
     dataset: 'packages/spec/liveness/dataset.json',
     object: 'packages/spec/liveness/object.json',
     position: 'packages/spec/liveness/position.json',
+    webhook: 'packages/spec/liveness/webhook.json',
   };
 
   function ledgerEntry(type: string, path: string): any {
