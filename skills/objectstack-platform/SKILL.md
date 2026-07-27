@@ -1051,16 +1051,15 @@ const metrics = kernel.getPluginMetrics();
 ## Feature Flags
 
 Feature flags are a **protocol shape, not a config key**. `FeatureFlagSchema` (from
-`@objectstack/spec/kernel`) defines the flag document; in the protocol it appears only on
-the runtime capabilities descriptor (`ObjectStackCapabilities.system.features`) that a
-platform serves for introspection. There is **no `featureFlags:` / `features:` key on
-`defineStack`** — strict parsing silently strips unknown keys, so such config would be a
-no-op.
+`@objectstack/spec/kernel`) defines the flag document. There is **no `featureFlags:` /
+`features:` key on `defineStack`** — strict parsing silently strips unknown keys, so such
+config would be a no-op. (The static `ObjectStackCapabilities.system.features` descriptor
+that once carried flags was removed with the dead capabilities-descriptor cluster — no
+endpoint ever served it; runtime capability discovery is `GET /api/v1/discovery`.)
 
 <!-- os:check -->
 ```typescript
 import { FeatureFlag } from '@objectstack/spec/kernel';
-import type { ObjectStackCapabilities } from '@objectstack/spec';
 
 // FeatureFlag.create() gives you a compile-checked flag value:
 const aiCopilot = FeatureFlag.create({
@@ -1072,19 +1071,14 @@ const aiCopilot = FeatureFlag.create({
   environment: 'prod',              // 'dev' | 'staging' | 'prod' | 'all' (default 'all')
 });
 
-// Where flags live in the protocol — the runtime capabilities descriptor:
-type SystemFeatures = NonNullable<ObjectStackCapabilities['system']['features']>;
-const features: SystemFeatures = [
-  aiCopilot,
-  {
-    name: 'beta_kanban_view',
-    label: 'Kanban View',
-    enabled: true,
-    strategy: 'group',
-    conditions: { groups: ['beta_testers'] },
-    environment: 'all',
-  },
-];
+const betaKanban = FeatureFlag.create({
+  name: 'beta_kanban_view',
+  label: 'Kanban View',
+  enabled: true,
+  strategy: 'group',
+  conditions: { groups: ['beta_testers'] },
+  environment: 'all',
+});
 ```
 
 Strategies: `boolean` | `percentage` | `user_list` | `group` | `custom`
