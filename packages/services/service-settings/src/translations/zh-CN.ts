@@ -49,6 +49,43 @@ export const zhCN: TranslationData = {
       },
     },
 
+    sms: {
+      title: '短信投递',
+      description: '用于 OTP 登录、邀请与通知的短信服务商配置。',
+      groups: {
+        provider: { title: '服务商', description: '选择此工作区如何发送外发短信。' },
+        aliyun: { title: '阿里云短信' },
+        twilio: { title: 'Twilio' },
+      },
+      keys: {
+        provider: {
+          label: '服务商',
+          options: {
+            log: '无(仅记录日志 — 不真实发送)',
+            aliyun: '阿里云短信',
+            twilio: 'Twilio',
+          },
+        },
+        aliyun_access_key_id: { label: 'AccessKey ID' },
+        aliyun_access_key_secret: { label: 'AccessKey Secret' },
+        aliyun_sign_name: { label: '短信签名' },
+        aliyun_template_code: {
+          label: '默认短信模板',
+          help: '当发送未指定模板时使用。含单个 ${content} 变量的通用模板可用于发送通用通知短信。',
+        },
+        twilio_account_sid: { label: 'Account SID' },
+        twilio_auth_token: { label: 'Auth Token' },
+        twilio_from_number: {
+          label: '发信号码',
+          help: 'E.164 格式的发信方,例如 +15005550006。此项与 Messaging Service SID 二选一。',
+        },
+        twilio_messaging_service_sid: { label: 'Messaging Service SID' },
+      },
+      actions: {
+        test: { label: '发送测试短信' },
+      },
+    },
+
     branding: {
       title: '品牌',
       description: '工作区名称、Logo 与主题色。',
@@ -126,9 +163,21 @@ export const zhCN: TranslationData = {
           title: '密码策略',
           description: '由认证提供商在注册和重置密码时强制的长度限制。',
         },
+        anti_abuse: {
+          title: '防滥用',
+          description: '暴力破解防护:按身份的账户锁定,以及按 IP 对认证端点的限流。',
+        },
+        multi_factor: {
+          title: '多因素',
+          description: '要求成员使用身份验证器应用(TOTP)保护账户。',
+        },
         sessions: {
           title: '会话',
           description: '登录会话的有效时长。',
+        },
+        network: {
+          title: '网络',
+          description: '限制用户可以从哪里登录。',
         },
         social: {
           title: '社交登录',
@@ -141,8 +190,68 @@ export const zhCN: TranslationData = {
         require_email_verification: { label: '要求邮箱验证' },
         password_min_length: { label: '密码最小长度' },
         password_max_length: { label: '密码最大长度', help: '防止超长密码哈希导致的拒绝服务。' },
+        password_reject_breached: {
+          label: '拒绝已泄露的密码',
+          help: '通过 Have I Been Pwned 拦截出现在公开泄露库中的密码(k-匿名区间校验,绝不发送完整密码)。',
+        },
+        password_require_complexity: {
+          label: '要求复杂密码',
+          help: '在注册及修改/重置密码时,要求密码混合多种字符类别(大写、小写、数字、符号)。',
+        },
+        password_min_classes: {
+          label: '最少字符类别数',
+          help: '密码至少需包含四类(大写/小写/数字/符号)中的几类。',
+        },
+        password_history_count: {
+          label: '密码历史(禁止重用)',
+          help: '在修改/重置时禁止重用最近这么多个旧密码。0 表示关闭该检查。',
+        },
+        password_expiry_days: {
+          label: '密码有效期(天)',
+          help: '超过这么多天后强制修改密码。0 表示不过期。密码过期期间,用户在修改密码前将被阻止访问数据。',
+        },
+        lockout_threshold: {
+          label: '账户锁定阈值',
+          help: '连续登录失败达到此次数后锁定账户。0 表示关闭锁定。锁定期间即使密码正确也会拒绝登录。',
+        },
+        lockout_duration_minutes: {
+          label: '锁定时长(分钟)',
+          help: '越过阈值后账户保持锁定的时长。',
+        },
+        rate_limit_max: {
+          label: '认证限流:最大请求数',
+          help: '每个 IP、每个时间窗内对登录 / 注册 / 重置密码端点的最大请求数。',
+        },
+        rate_limit_window_seconds: {
+          label: '认证限流:时间窗(秒)',
+          help: '统计上述请求上限所用的滑动时间窗。',
+        },
+        mfa_required: {
+          label: '要求多因素认证',
+          help: '未注册身份验证器的用户在宽限期结束后将被阻止访问数据。启用此项也会开启两步验证功能,以便用户注册。',
+        },
+        mfa_grace_period_days: {
+          label: 'MFA 宽限期(天)',
+          help: '用户在被硬阻断前可延迟注册的时长。0 表示立即阻断。',
+        },
         session_expiry_days: { label: '会话有效期(天)', help: '登录后会话在此天数后过期。' },
         session_refresh_days: { label: '刷新阈值(天)', help: '活跃会话在超过此时长后自动续期。' },
+        session_idle_timeout_minutes: {
+          label: '空闲超时(分钟)',
+          help: '在这么多分钟无活动后将用户登出。0 表示关闭。',
+        },
+        session_absolute_max_hours: {
+          label: '会话绝对有效期(小时)',
+          help: '登录后经过这么多小时强制重新认证,与是否活跃无关。0 表示关闭。',
+        },
+        max_concurrent_sessions_per_user: {
+          label: '每用户最大并发会话数',
+          help: '限制每个用户同时在线的会话数;超出上限后最旧的会话会被登出。0 表示不限制。',
+        },
+        allowed_ip_ranges: {
+          label: '允许的 IP 段',
+          help: 'CIDR 段或精确 IP(每行一个,或用逗号分隔),例如 203.0.113.0/24。设置后,来自这些范围之外的登录将被拒绝。留空表示不限制。需要可信代理设置 X-Forwarded-For。',
+        },
         google_enabled: {
           label: '启用 Google 登录',
           help: '需要在 Google Cloud Console 中创建的 Google OAuth 客户端 ID 与密钥。',
@@ -222,6 +331,12 @@ export const zhCN: TranslationData = {
         openai: { title: 'OpenAI' },
         anthropic: { title: 'Anthropic' },
         google: { title: 'Google' },
+        deepseek: { title: 'DeepSeek', description: 'https://api.deepseek.com 上的 OpenAI 兼容 API,Base URL 自动填充。' },
+        dashscope: { title: '阿里通义 DashScope', description: 'dashscope.aliyuncs.com/compatible-mode/v1 上的 OpenAI 兼容端点,Base URL 自动填充。' },
+        cloudflare: { title: 'Cloudflare AI Gateway', description: '通过 Cloudflare AI Gateway 代理 OpenAI 兼容模型。' },
+        siliconflow: { title: '硅基流动 SiliconFlow', description: 'api.siliconflow.cn/v1 上的 OpenAI 兼容端点,Base URL 自动填充。' },
+        openrouter: { title: 'OpenRouter', description: 'openrouter.ai/api/v1 上的多提供商路由,Base URL 自动填充。' },
+        titles: { title: '会话标题', description: '为新会话自动生成简短的摘要标题。' },
         defaults: { title: '生成默认值', description: '当 Agent 或聊天请求未指定时使用。' },
         observability: { title: '可观测性' },
         embedder: { title: 'Embedder', description: '知识库和 RAG 使用的文本→向量提供商,与上方聊天提供商相互独立。' },
@@ -235,6 +350,11 @@ export const zhCN: TranslationData = {
             openai: 'OpenAI',
             anthropic: 'Anthropic',
             google: 'Google Generative AI',
+            deepseek: 'DeepSeek(OpenAI 兼容)',
+            dashscope: '阿里通义 DashScope(OpenAI 兼容)',
+            cloudflare: 'Cloudflare AI Gateway(OpenAI 兼容)',
+            siliconflow: '硅基流动 SiliconFlow(OpenAI 兼容)',
+            openrouter: 'OpenRouter(OpenAI 兼容)',
           },
         },
         gateway_model: { label: 'Gateway 模型', help: '作为 AI_GATEWAY_MODEL 转发。示例:openai/gpt-4o' },
@@ -246,6 +366,20 @@ export const zhCN: TranslationData = {
         anthropic_model: { label: '模型' },
         google_api_key: { label: 'Google API Key', help: '作为 GOOGLE_GENERATIVE_AI_API_KEY 转发,加密存储。' },
         google_model: { label: '模型' },
+        deepseek_api_key: { label: 'DeepSeek API Key', help: 'sk-…,在 platform.deepseek.com 签发。' },
+        deepseek_model: { label: '模型', help: '示例:deepseek-chat(V3)、deepseek-reasoner(R1 推理)。' },
+        dashscope_api_key: { label: 'DashScope API Key', help: 'sk-…,在 dashscope.console.aliyun.com 签发。' },
+        dashscope_model: { label: '模型' },
+        cloudflare_account_id: { label: 'Cloudflare Account ID', help: '来自 Cloudflare 控制台 URL 的 32 位十六进制 ID。' },
+        cloudflare_gateway_id: { label: 'Gateway ID', help: '在 Cloudflare → AI Gateway 中配置的网关名称,默认为 `default`。' },
+        cloudflare_api_key: { label: 'Cloudflare AI Gateway Token', help: '在 AI Gateway →「API tokens」标签页签发(cfut_… 或 sk_…)。' },
+        cloudflare_model: { label: '模型' },
+        siliconflow_api_key: { label: 'SiliconFlow API Key' },
+        siliconflow_model: { label: '模型', help: '示例:Qwen/Qwen2.5-72B-Instruct、deepseek-ai/DeepSeek-V3、meta-llama/Meta-Llama-3.1-8B-Instruct。' },
+        openrouter_api_key: { label: 'OpenRouter API Key' },
+        openrouter_model: { label: '模型', help: '格式:provider/model(例如 anthropic/claude-3.5-sonnet、deepseek/deepseek-chat)。' },
+        title_generation_enabled: { label: '自动为会话生成摘要标题' },
+        title_max_length: { label: '标题最大长度(字符)', help: '生成标题的硬上限,超出部分在服务端截断。' },
         temperature: { label: '温度', help: '0 = 确定性,2 = 高度发散。' },
         max_tokens: { label: '最大输出 tokens', help: '单次响应生成的硬上限。' },
         request_timeout_ms: { label: '请求超时(毫秒)' },
