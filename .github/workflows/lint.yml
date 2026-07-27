@@ -145,8 +145,11 @@ jobs:
       # package from scratch on every run (~4½ min) while ci.yml's jobs — which
       # do carry this cache — finished the same build in under a minute. Same
       # key scheme as ci.yml so the fallback prefix can also hit main's caches.
-      - name: Setup Turbo cache
-        uses: actions/cache@v6
+      # Restore-only on PRs (same policy as ci.yml): PR-side saves churned the
+      # 10 GB Actions cache pool and evicted the main seeds; only main pushes
+      # save (the "Save Turbo cache" step at the end of the job).
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
@@ -243,3 +246,11 @@ jobs:
       # so it runs after the build step alongside the other consumer gates.
       - name: Check skills TypeScript examples compile
         run: pnpm --filter @objectstack/spec run check:skill-examples
+
+      # Seed the shared Turbo cache from main only (see the restore step above).
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}

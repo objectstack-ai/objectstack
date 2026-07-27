@@ -85,10 +85,17 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
     }
 
-    // ADR-0021 D-C — the read scope (tenant + RLS) MUST be ANDed in before the
-    // query leaves the strategy. Rejects the query outright when a joined object
-    // carries a scope this path cannot express (#3597).
-    this.assertJoinedScopesEnforceable(cube, query, ctx);
+    // Reject cross-object grouping/aggregation this path cannot perform — the
+    // engine has no join, so it would silently mis-bucket or error (#3654). This
+    // runs BEFORE scope injection and subsumes the #3597 joined-scope concern:
+    // a rejected query never loads the joined object, so nothing is left
+    // unscoped. Independent of read scope, so it fires with security off too.
+    this.assertNoCrossObjectReferences(cube, query);
+
+    // ADR-0021 D-C — the base object's read scope (tenant + RLS) MUST be ANDed
+    // in before the query leaves the strategy (#3597).
+    // (`assertNoCrossObjectReferences` above guarantees `objectName` is the only
+    // object in play, so a single base-object scope is sufficient here.)
 
     const rows = await ctx.executeAggregate!(objectName, {
       // Structured groupBy items ({field, dateGranularity}) pass through the
@@ -220,15 +227,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // stay in `params`, which `execute()`'s echo discards — but a rendering
     // that contradicts execution is worse than no rendering.
     //
-    // The joined-scope guard runs here for the same reason: this must not
-    // render SQL for a query `execute()` would reject outright.
+    // The cross-object guard runs here for the same reason: this must not
+    // render SQL for a query `execute()` would reject outright (#3654).
     //
     // Faithfulness cuts both ways: `execute()` does NOT apply
     // `timeDimensions[].dateRange` on this path (only `where` reaches the
     // engine), so neither does this. Rendering a BETWEEN here would invent a
     // predicate the ObjectQL path never applies. That gap is real but separate
     // — filed as #3650, not papered over here.
-    this.assertJoinedScopesEnforceable(cube, query, ctx);
+    this.assertNoCrossObjectReferences(cube, query);
 
     const whereParts: string[] = [];
     for (const f of normalizeAnalyticsFilters(query)) {
@@ -307,50 +314,61 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   /**
-   * Fail-closed guard for cross-object queries (#3597).
+   * Fail-closed guard for cross-object references on the ObjectQL path
+   * (#3654, subsuming #3597).
    *
-   * `engine.aggregate`'s `where` addresses the BASE object. A dotted member
-   * (`account.region`) is traversed by the engine through the lookup field, but
-   * there is no place in this call shape to hang a predicate on the JOINED
-   * object — so a joined object's read scope cannot be enforced here.
+   * `engine.aggregate()` has NO join: it never expands a lookup, and the SQL
+   * driver's aggregate emits no `JOIN`. A dotted member like `account.region`
+   * therefore reaches the engine as a bare column that no table in the query
+   * provides. The failure is SILENT and wrong, not loud:
+   *   - native SQL path → "column account.region does not exist" (a hard error);
+   *   - in-memory path  → `row['account.region']` is always `undefined`, so every
+   *     row collapses into ONE `(null)` bucket and the measure is summed across
+   *     the whole table — a plausible-looking number that is actually a
+   *     full-table total mislabelled `(null)`.
    *
-   * `NativeSQLStrategy` can express it (alias-qualified WHERE per join) and does.
-   * When this path cannot, we reject rather than run a partially-scoped query:
-   * the same posture as `resolveReadScopes` (throws rather than emit unscoped
-   * SQL) and `compileScopedFilterToSql` (throws rather than drop a predicate).
+   * So we reject any cross-object reference OUTRIGHT — regardless of read scope.
+   * This also subsumes the #3597 concern: because the joined object is never
+   * loaded on this path, there is nothing to leave unscoped. Cross-object
+   * datasets are served by `NativeSQLStrategy`, which hand-compiles the LEFT
+   * JOINs (and scopes each one); this path is the fallback NativeSQL declines
+   * (date-granularity bucketing, in-memory driver, federated objects), and it
+   * cannot join, so "loud rejection" beats "silent wrong answer".
    *
-   * Only joins the query ACTUALLY references are considered — the scope map is
-   * a deliberate superset of what gets scanned, so keying off the map alone
-   * would reject queries that never touch the joined table.
+   * Detection is on the RESOLVED field names (post-`resolveFieldName`), so a
+   * dotted dimension the cube flattens to a real column is NOT flagged — only
+   * genuinely-unresolved relationship traversals are.
    */
-  private assertJoinedScopesEnforceable(
+  private assertNoCrossObjectReferences(
     cube: Cube,
     query: AnalyticsQuery,
-    ctx: StrategyContext,
   ): void {
-    if (typeof ctx.getReadScope !== 'function') return;
-
+    // Derived from `(cube, query)` alone rather than from `execute()`'s built
+    // `groupBy`/`filter`, so `generateSql()` runs the IDENTICAL check (#3602):
+    // the rendered string must never describe a query `execute()` would reject.
     const referenced = this.referencedFieldNames(cube, query);
 
+    const baseObject = this.extractObjectName(cube);
     const offending = new Set<string>();
     for (const fieldName of referenced) {
       if (!fieldName.includes('.')) continue;
       const alias = fieldName.split('.')[0];
       const joinedObject = cube.joins?.[alias]?.name ?? alias;
-      if (joinedObject === this.extractObjectName(cube)) continue;
-      const scope = ctx.getReadScope(joinedObject);
-      if (scope !== undefined && scope !== null) offending.add(joinedObject);
+      if (joinedObject === baseObject) continue;
+      offending.add(fieldName);
     }
     if (offending.size === 0) return;
 
     throw new Error(
-      `[Analytics] ObjectQLStrategy cannot enforce the read scope of joined ` +
-      `object(s) ${[...offending].map((o) => `"${o}"`).join(', ')} — denying the ` +
-      `query (fail-closed, ADR-0021 D-C). This path reaches the joined table ` +
-      `through the base object's lookup, where a per-join security predicate ` +
-      `cannot be expressed. Run this query on a driver that supports native SQL ` +
-      `(NativeSQLStrategy scopes each join), or drop the cross-object ` +
-      `dimension/measure from the query.`,
+      `[Analytics] ObjectQLStrategy cannot group or aggregate across a ` +
+      `relationship (cross-object reference(s): ` +
+      `${[...offending].map((f) => `"${f}"`).join(', ')}). ` +
+      `engine.aggregate() does not join, so the referenced object is never ` +
+      `loaded — this path would silently bucket every row under a single ` +
+      `"(null)" group (or error outright on a SQL driver), and could not scope ` +
+      `the joined object's rows. Run this query where NativeSQLStrategy handles ` +
+      `it (a raw-SQL/JOIN-capable driver with no date-granularity bucketing), or ` +
+      `drop the cross-object dimension/measure from the query.`,
     );
   }
 

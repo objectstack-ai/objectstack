@@ -11,6 +11,7 @@ import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpoints
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
     isApiOperationAllowed,
@@ -4542,8 +4543,15 @@ export class RestServer {
      * Mirrors the resolver in registerSecurityExplainEndpoints. Returns
      * `undefined` when no security service is reachable (no plugin-security /
      * single-kernel without a provider), so callers degrade gracefully.
+     *
+     * Typed as a PARTIAL {@link ISecurityService}: an implementation may omit a
+     * method it cannot honour, so every call site must keep feature-detecting
+     * (`typeof svc.x === 'function'`) rather than assume the full surface.
      */
-    private async resolveSecurityService(environmentId?: string, req?: any): Promise<any | undefined> {
+    private async resolveSecurityService(
+        environmentId?: string,
+        req?: any,
+    ): Promise<Partial<ISecurityService> | undefined> {
         try {
             const envId = await this.resolveRequestEnvironmentId(environmentId, req);
             if (envId && envId !== 'platform' && this.kernelManager) {

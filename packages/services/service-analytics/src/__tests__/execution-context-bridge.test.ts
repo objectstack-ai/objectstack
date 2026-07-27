@@ -304,9 +304,11 @@ describe('ObjectQLStrategy.generateSql reflects the executed query (#3602 item 3
     expect(params).toEqual(['West', 'East', 10]);
   });
 
-  it('denies the preview when a joined object carries an unenforceable scope', async () => {
-    // The preview must not render SQL for a query `execute()` would reject —
-    // that mismatch is the whole defect this item fixes.
+  it('renders nothing for a cross-object query `execute()` would reject', async () => {
+    // The rendering must not describe a query that cannot run. #3654 made the
+    // cross-object guard unconditional in `execute()`; running the SAME guard
+    // here is what keeps the two in step — a rendering that outlives its
+    // execution path is the mismatch this item exists to remove.
     const compiled = compileDataset(
       DatasetSchema.parse({
         name: 'sales_by_account',
@@ -327,6 +329,6 @@ describe('ObjectQLStrategy.generateSql reflects the executed query (#3602 item 3
 
     await expect(
       service.generateSql({ cube: 'sales_by_account', dimensions: ['region'], measures: ['revenue'] }, ctxA),
-    ).rejects.toThrow(/cannot enforce the read scope of joined object\(s\) "account"/);
+    ).rejects.toThrow(/cannot group or aggregate across a relationship .*"account\.region"/);
   });
 });

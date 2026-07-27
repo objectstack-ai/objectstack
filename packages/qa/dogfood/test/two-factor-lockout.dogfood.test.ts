@@ -213,4 +213,78 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     ).toBe(0);
     expect(after.lockedUntil ?? null).toBeNull();
   });
+
+  it('locks the account once the budget is spent, and refuses even a correct code', async () => {
+    // Two budgets stack here, and the test has to respect both. better-auth
+    // allows MAX_PER_CHALLENGE verifications per two-factor cookie
+    // (`beginAttempt(5)`) and MAX_FAILURES consecutive failures per ACCOUNT
+    // (`accountLockout.maxFailedAttempts`, default 10). Only the second one
+    // touches the columns under test, so reaching it takes a fresh challenge
+    // every MAX_PER_CHALLENGE tries. Both are better-auth's defaults — the
+    // auth manager passes no `accountLockout` config.
+    const MAX_PER_CHALLENGE = 5;
+    const MAX_FAILURES = 10;
+
+    expect((await lockoutState()).count, 'precondition: a clean budget').toBe(0);
+
+    let failures = 0;
+    while (failures < MAX_FAILURES) {
+      const cookie = await beginChallenge();
+      for (let i = 0; i < MAX_PER_CHALLENGE && failures < MAX_FAILURES; i++) {
+        const res = await verifyWithCookie(cookie, '000000');
+        expect(res.status, `wrong code #${failures + 1} produced a server error`).toBeLessThan(500);
+        failures++;
+        expect(
+          (await lockoutState()).count,
+          `the counter must advance on every failure (after #${failures})`,
+        ).toBe(failures);
+      }
+    }
+
+    const locked = await lockoutState();
+    expect(
+      locked.lockedUntil ?? null,
+      `budget spent (${MAX_FAILURES} failures) but locked_until was never stamped`,
+    ).not.toBeNull();
+    expect(new Date(String(locked.lockedUntil)).getTime()).toBeGreaterThan(Date.now());
+
+    // The lock has to bite BEFORE the code is checked — otherwise it is not a
+    // lockout, just a slower guess loop.
+    const cookie = await beginChallenge();
+    const rejected = await verifyWithCookie(cookie, totp(secret));
+    expect(
+      rejected.status,
+      `a locked account must refuse even a valid code: ${await rejected.clone().text()}`,
+    ).toBe(429);
+  });
+
+  it('lazily clears an expired lock on the next attempt', async () => {
+    const before = await lockoutState();
+    expect(before.lockedUntil ?? null, 'precondition: carries the lock from the previous test').not.toBeNull();
+
+    // Expire the lock rather than waiting out `durationSeconds` (900 by
+    // default). This is the one place the test reaches past the API: there is
+    // no endpoint that ages a lock.
+    const users = await ql.find('sys_user', { where: { email: adminEmail }, limit: 1 }, SYS);
+    const rows = await ql.find('sys_two_factor', { where: { user_id: String(users[0]?.id) }, limit: 1 }, SYS);
+    await ql.update(
+      'sys_two_factor',
+      { id: rows[0].id, locked_until: new Date(Date.now() - 60_000).toISOString() },
+      SYS,
+    );
+
+    // better-auth clears an expired lock through a GUARDED incrementOne —
+    // `where locked_until <= now`, `set { failedVerificationCount: 0,
+    // lockedUntil: null }`. That is the only place the adapter has to handle
+    // `lte` against a datetime, so this covers the operator as much as the
+    // columns: a driver that mishandled it would leave the user locked out
+    // forever with no error anywhere.
+    const cookie = await beginChallenge();
+    const ok = await verifyWithCookie(cookie, totp(secret));
+    expect(ok.status, `expired lock was not cleared: ${await ok.clone().text()}`).toBe(200);
+
+    const after = await lockoutState();
+    expect(after.lockedUntil ?? null, 'the expired lock must be cleared, not merely ignored').toBeNull();
+    expect(after.count, 'clearing an expired lock must reset the failure budget too').toBe(0);
+  });
 });

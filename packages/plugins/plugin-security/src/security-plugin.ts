@@ -51,6 +51,7 @@ import {
   RLS_MEMBERSHIP_RESOLVER_SERVICE,
   RESERVED_RLS_MEMBERSHIP_KEYS,
   type IRlsMembershipResolver,
+  type ISecurityService,
 } from '@objectstack/spec/contracts';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
@@ -630,7 +631,11 @@ export class SecurityPlugin implements Plugin {
         resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
         logger: ctx.logger,
       };
-      ctx.registerService('security', {
+      // Typed against the published contract so the registered surface cannot
+      // drift from what cross-package consumers are promised: a renamed method,
+      // a dropped one, or a changed return type fails THIS build rather than
+      // silently degrading a consumer's feature detection at runtime.
+      const securityService: ISecurityService = {
         getReadFilter: (object: string, context?: any) => this.getReadFilter(object, context),
         // [#3547] Readable-field projection for a context — the authoritative
         // column set for a read-derived export (`export ⊆ list`, #3391).
@@ -651,8 +656,11 @@ export class SecurityPlugin implements Plugin {
         // [ADR-0090 D6] First-class access explanation. Same code paths as
         // the middleware (resolution/evaluator/RLS compiler) — explained by
         // construction. Explaining ANOTHER user requires `manage_users`.
-        explain: (request: { object: string; operation: string; userId?: string }, callerContext?: any) =>
-          this.explainAccessForCaller(request, callerContext),
+        explain: (request, callerContext?: any) =>
+          this.explainAccessForCaller(
+            { ...request, operation: String(request.operation) },
+            callerContext,
+          ),
         // [ADR-0090 D5/D9] Install-time suggestion surface: packages suggest
         // audience-anchor bindings; a tenant admin confirms (the binding is
         // written under the anchor + delegated-admin gates) or dismisses.
@@ -662,7 +670,8 @@ export class SecurityPlugin implements Plugin {
           confirmAudienceBindingSuggestion(suggestionDeps, callerContext, id),
         dismissAudienceBindingSuggestion: (callerContext: any, id: string) =>
           dismissAudienceBindingSuggestion(suggestionDeps, callerContext, id),
-      });
+      };
+      ctx.registerService('security', securityService);
       ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / #3547');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
@@ -2112,7 +2121,7 @@ export class SecurityPlugin implements Plugin {
   async getReadFilter(
     object: string,
     context?: any,
-  ): Promise<Record<string, unknown> | null | undefined> {
+  ): Promise<Record<string, unknown> | undefined> {
     // System operations bypass scoping (mirrors the middleware's isSystem skip).
     if (context?.isSystem) return undefined;
     const positions = context?.positions ?? [];
