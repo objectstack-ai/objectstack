@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FieldSchema } from './field.zod';
+import { FieldSchema, UniqueScopeSchema } from './field.zod';
 import { ValidationRuleSchema } from './validation.zod';
 import { ActionSchema } from '../ui/action.zod';
 import { ObjectListViewSchema } from '../ui/view.zod';
@@ -276,7 +276,18 @@ export const IndexSchema = lazySchema(() => z.object({
   name: z.string().optional().describe('Index name (auto-generated if not provided)'),
   fields: z.array(z.string()).describe('Fields included in the index'),
   type: z.enum(['btree', 'hash', 'gin', 'gist', 'fulltext']).optional().default('btree').describe('Index algorithm type'),
-  unique: z.boolean().optional().default(false).describe('Whether the index enforces uniqueness'),
+  // A DECLARED index is materialized over exactly the columns listed in
+  // `fields` — no tenant column is injected, unlike field-level `unique`
+  // (#3696). The distinction is deliberate: field-level `unique` has no syntax
+  // for a composite, so its default had to carry the tenant scope; here the
+  // author already spells the columns out, and many declared indexes are
+  // legitimately platform-wide (a DNS hostname, a reserved slug, an external
+  // provider id). Tenant-scoped declared indexes are written explicitly and
+  // always have been — `fields: ['organization_id', 'code']`.
+  //
+  // `'global'` is accepted as a synonym of `true` so a schema can state the
+  // intent in one vocabulary across both spellings; it changes nothing here.
+  unique: UniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness. Materialized over exactly `fields` — no tenant column is injected; list the tenant column explicitly for a per-tenant index. 'global' is a synonym of true, for symmetry with field-level `unique`"),
   partial: z.string().optional().describe('Partial index condition (SQL WHERE clause for conditional indexes)'),
 }));
 

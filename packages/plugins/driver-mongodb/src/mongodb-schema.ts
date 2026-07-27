@@ -14,7 +14,19 @@ import type { Db, CreateIndexesOptions, IndexSpecification } from 'mongodb';
  */
 interface FieldDef {
   type?: string;
-  unique?: boolean;
+  /**
+   * `true` | `'global'` — see `UniqueScopeSchema` in @objectstack/spec.
+   *
+   * Both spellings materialize the SAME single-field unique index here, and
+   * that is currently correct for this driver: unlike the SQL driver it
+   * implements NO row-level tenancy at all (no tenant predicate on read, no
+   * tenant stamp on write), so there is no tenant column to compose with. A
+   * `(tenant, field)` index would advertise an isolation this driver does not
+   * deliver — worse than the single-field index, because it would read as
+   * fixed. The tenancy gap itself is tracked separately; when it lands, this
+   * must adopt the same scoping rule as `SqlDriver.uniqueIndexesFromFields`.
+   */
+  unique?: boolean | 'global';
   indexed?: boolean;
   required?: boolean;
   reference_to?: string;

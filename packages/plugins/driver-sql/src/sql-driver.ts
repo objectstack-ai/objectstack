@@ -8,7 +8,7 @@
  */
 
 import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, isGlobalUnique, isUniqueDeclared, type AutonumberToken } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { StorageNameMapping } from '@objectstack/spec/system';
@@ -2257,16 +2257,29 @@ export class SqlDriver implements IDataDriver {
         });
       }
 
-      // Materialize object-level declared indexes (`indexes: [{ fields,
-      // unique }]`). These are distinct from field-level `unique` (handled
-      // in `createColumn`) and carry the multi-column UNIQUE guarantees that
-      // dedup/convergence paths rely on (ADR-0030). Done after the table is
-      // created/altered so every referenced column physically exists.
+      // Materialize the table's index set: field-level `unique` (tenancy-aware
+      // — #3696) plus object-level declared indexes (`indexes: [{ fields,
+      // unique }]`, carrying the multi-column UNIQUE guarantees dedup/
+      // convergence paths rely on, ADR-0030). Both go through one path so the
+      // create and alter branches above cannot produce different constraints
+      // for the same metadata. Done after the table is created/altered so every
+      // referenced column physically exists — which is also why field-level
+      // `unique` can no longer be emitted inline by `createColumn`: a composite
+      // needs the tenant column to already be there.
       const declaredIndexes = (obj as any).indexes;
-      if (Array.isArray(declaredIndexes) && declaredIndexes.length > 0) {
+      const uniqueFields = Object.values<any>(obj.fields ?? {}).some((f) =>
+        isUniqueDeclared(f?.unique),
+      );
+      if (uniqueFields || (Array.isArray(declaredIndexes) && declaredIndexes.length > 0)) {
         const colInfo = await this.knex(tableName).columnInfo();
         const physicalColumns = new Set(Object.keys(colInfo));
-        await this.syncDeclaredIndexes(tableName, declaredIndexes, physicalColumns);
+        await this.syncTableIndexes(
+          tableName,
+          obj.fields ?? {},
+          declaredIndexes,
+          tenantField,
+          physicalColumns,
+        );
       }
 
       // #2186: the additive sync above only ever ADDs tables/columns. For a
@@ -2556,19 +2569,22 @@ export class SqlDriver implements IDataDriver {
       await this.knex.raw('PRAGMA foreign_keys = ON');
     }
 
-    // Recreate unique constraints + declared indexes from metadata.
+    // Recreate unique constraints + declared indexes from metadata. The rebuild
+    // dropped the original table, so every index went with it — this is a fresh
+    // materialization, and it must produce the SAME constraints as
+    // `initObjects` would. It used to inline its own `uniq_<table>_<col>`
+    // single-column DDL, which is how a tenant-scoped field could silently
+    // regain a global unique index after any drift rebuild (#3696); both paths
+    // now share {@link syncTableIndexes}.
     try {
       const keptSet = new Set(keptNames);
-      for (const [name, field] of Object.entries<any>(fields)) {
-        if (field?.unique && keptSet.has(name)) {
-          const idx = `uniq_${table}_${name}`;
-          await this.knex.raw('CREATE UNIQUE INDEX IF NOT EXISTS ?? ON ?? (??)', [idx, table, name]);
-        }
-      }
-      const declared = this.managedObjectIndexes.get(table);
-      if (Array.isArray(declared) && declared.length > 0) {
-        await this.syncDeclaredIndexes(table, declared, keptSet);
-      }
+      await this.syncTableIndexes(
+        table,
+        fields,
+        this.managedObjectIndexes.get(table),
+        this.resolveTenantField(table),
+        keptSet,
+      );
     } catch (e: any) {
       this.logger.warn(`[schema-drift] could not fully recreate indexes for '${table}' after rebuild`, e?.message ?? e);
     }
@@ -2638,6 +2654,167 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Translate field-level `unique` declarations into concrete index
+   * descriptors, applying tenant scoping (#3696).
+   *
+   * This is the ONLY place field-level uniqueness becomes physical, so the
+   * create-table, alter-table and SQLite-rebuild paths cannot drift apart the
+   * way they had (each used to inline its own single-column DDL).
+   *
+   * Scoping rule:
+   *   - `unique: 'global'` → single-column `(field)`, platform-wide.
+   *   - `unique: true` on a tenant-scoped table → composite `(tenantField,
+   *     field)`: unique *within* the tenant, matching the per-tenant autonumber
+   *     sequence, the RLS read predicate and the write-path tenant stamp.
+   *   - `unique: true` with no tenant column → single-column `(field)`. Single-
+   *     tenant deployments therefore see byte-identical DDL to before.
+   *
+   * The tenant column comes FIRST in the composite so the index also serves the
+   * `WHERE tenant = ?` prefix scans every tenant-scoped read issues.
+   */
+  protected uniqueIndexesFromFields(
+    tableName: string,
+    fields: Record<string, any>,
+    tenantField: string | null,
+  ): Array<{ name: string; fields: string[]; unique: true }> {
+    const out: Array<{ name: string; fields: string[]; unique: true }> = [];
+    for (const [name, field] of Object.entries<any>(fields ?? {})) {
+      if (!isUniqueDeclared(field?.unique)) continue;
+      // A unique declaration ON the tenant column itself ("one row per tenant")
+      // cannot be tenant-scoped — `(organization_id, organization_id)` is not a
+      // constraint. Keep it single-column.
+      const scoped =
+        !isGlobalUnique(field.unique) && tenantField != null && tenantField !== name;
+      const cols = scoped ? [tenantField, name] : [name];
+      out.push({ name: this.buildIndexName(tableName, cols, true), fields: cols, unique: true });
+    }
+    return out;
+  }
+
+  /**
+   * Legacy single-column unique indexes that a tenant-scoped field's constraint
+   * used to be materialized as, and which must be dropped once the composite
+   * replaces them (#3696). Two spellings ever existed:
+   *
+   *   - `<table>_<column>_unique` — knex's default name for `col.unique()`,
+   *     emitted by the old `createColumn`. A real CONSTRAINT on Postgres, a
+   *     plain index on SQLite/MySQL.
+   *   - `uniq_<table>_<column>` — {@link buildIndexName}, emitted by the old
+   *     SQLite rebuild path.
+   *
+   * Dropping them is a pure RELAXATION: the old global constraint is strictly
+   * stronger than the new per-tenant one, so existing data satisfies the
+   * replacement by construction. No dedup, no cleanup, no possible failure —
+   * which is why this converges inline at sync time instead of waiting for a
+   * deliberate `os migrate` run (a deployment that never ran migrate would
+   * otherwise stay broken, and the failure mode is cross-tenant data loss on
+   * insert).
+   */
+  protected legacySingleColumnUniqueNames(tableName: string, column: string): string[] {
+    return [`${tableName}_${column}_unique`, this.buildIndexName(tableName, [column], true)];
+  }
+
+  /**
+   * Drop a unique index/constraint by name if present, across dialects.
+   *
+   * Postgres materializes knex's `col.unique()` as a table CONSTRAINT (not a
+   * bare index), so `DROP INDEX` alone silently leaves it in place — the exact
+   * failure that would have made this migration a no-op on the deployments that
+   * matter most. Try the constraint form first, then the index form.
+   *
+   * Returns true when something was actually dropped.
+   */
+  protected async dropUniqueIndexIfExists(tableName: string, indexName: string): Promise<boolean> {
+    const attempts: string[] = this.isPostgres
+      ? [
+          `ALTER TABLE ?? DROP CONSTRAINT IF EXISTS ??`,
+          `DROP INDEX IF EXISTS ??`,
+        ]
+      : this.isMysql
+        ? [`ALTER TABLE ?? DROP INDEX ??`]
+        : [`DROP INDEX IF EXISTS ??`];
+
+    let dropped = false;
+    for (const sql of attempts) {
+      try {
+        const bindings = sql.startsWith('ALTER TABLE') ? [tableName, indexName] : [indexName];
+        await this.knex.raw(sql, bindings);
+        dropped = true;
+      } catch (e: any) {
+        const msg = String(e?.message ?? e);
+        // "does not exist" / "check that column/key exists" — nothing to drop.
+        if (/does not exist|doesn't exist|no such index|check that column/i.test(msg)) continue;
+        throw e;
+      }
+    }
+    return dropped;
+  }
+
+  /**
+   * Retire the legacy global unique indexes for every field whose constraint is
+   * now tenant-scoped (#3696). Runs before the composites are created so a
+   * Postgres constraint and its replacement never contend for a name.
+   */
+  protected async dropLegacyGlobalUniques(
+    tableName: string,
+    fields: Record<string, any>,
+    tenantField: string | null,
+    physicalColumns: Set<string>,
+  ): Promise<void> {
+    if (!tenantField) return; // Nothing was ever mis-scoped on a tenant-less table.
+    const existing = await this.getExistingIndexNames(tableName);
+    for (const [name, field] of Object.entries<any>(fields ?? {})) {
+      if (!isUniqueDeclared(field?.unique)) continue;
+      // `'global'` keeps its single-column index — that is now the declared
+      // intent, not legacy debt.
+      if (isGlobalUnique(field.unique)) continue;
+      if (name === tenantField || !physicalColumns.has(name)) continue;
+
+      for (const legacy of this.legacySingleColumnUniqueNames(tableName, name)) {
+        // On Postgres a unique CONSTRAINT may not surface in `pg_indexes` under
+        // a name we can match, so attempt the drop when either the name is
+        // known to exist or the dialect hides constraints from us.
+        if (!existing.has(legacy) && !this.isPostgres) continue;
+        try {
+          const dropped = await this.dropUniqueIndexIfExists(tableName, legacy);
+          if (dropped) {
+            (this.logger.info ?? this.logger.warn)(
+              `[sql-driver] dropped legacy global unique index '${legacy}' on '${tableName}' — ` +
+                `${tableName}.${name} is now unique per '${tenantField}' (#3696). ` +
+                `Declare \`unique: 'global'\` if platform-wide uniqueness was intended.`,
+            );
+          }
+        } catch (e: any) {
+          this.logger.warn(
+            `[sql-driver] could not drop legacy unique index '${legacy}' on '${tableName}'`,
+            e?.message ?? e,
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Materialize a table's full index set: field-level `unique` (tenancy-aware,
+   * see {@link uniqueIndexesFromFields}) plus the object's declared `indexes`.
+   * Single entry point so every caller — create, alter, SQLite rebuild — lands
+   * on identical DDL.
+   */
+  protected async syncTableIndexes(
+    tableName: string,
+    fields: Record<string, any>,
+    declaredIndexes: any[] | undefined,
+    tenantField: string | null,
+    physicalColumns: Set<string>,
+  ): Promise<void> {
+    await this.dropLegacyGlobalUniques(tableName, fields, tenantField, physicalColumns);
+    const fromFields = this.uniqueIndexesFromFields(tableName, fields, tenantField);
+    const declared = Array.isArray(declaredIndexes) ? declaredIndexes : [];
+    if (fromFields.length === 0 && declared.length === 0) return;
+    await this.syncDeclaredIndexes(tableName, [...fromFields, ...declared], physicalColumns);
+  }
+
+  /**
    * Materialize declared object-level indexes.
    *
    * - Multi-column and single-column indexes are both supported.
@@ -2645,6 +2822,11 @@ export class SqlDriver implements IDataDriver {
    *   default across SQLite/Postgres/MySQL, so multiple NULL rows remain
    *   allowed while non-NULL duplicates are rejected — matching the
    *   convergence-on-conflict pattern the messaging pipeline relies on.
+   * - The column list is taken VERBATIM — no tenant column is injected here.
+   *   Field-level `unique` is tenancy-scoped upstream in
+   *   {@link uniqueIndexesFromFields}; a declared index already names its
+   *   columns and is frequently platform-wide on purpose (a DNS hostname, a
+   *   reserved slug, an external provider id), so guessing would break it.
    * - Idempotent: indexes already present (by deterministic name) are
    *   skipped, and an "already exists" race is absorbed.
    * - Indexes referencing a column that wasn't materialized (e.g. a virtual
@@ -2652,7 +2834,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected async syncDeclaredIndexes(
     tableName: string,
-    indexes: Array<{ name?: string; fields?: string[]; unique?: boolean }>,
+    indexes: Array<{ name?: string; fields?: string[]; unique?: boolean | 'global' }>,
     physicalColumns: Set<string>,
   ): Promise<void> {
     const existing = await this.getExistingIndexNames(tableName);
@@ -2672,7 +2854,7 @@ export class SqlDriver implements IDataDriver {
         continue;
       }
 
-      const unique = idx.unique === true;
+      const unique = isUniqueDeclared(idx.unique);
       const name =
         typeof idx.name === 'string' && idx.name.trim()
           ? idx.name.trim()
@@ -3617,7 +3799,18 @@ export class SqlDriver implements IDataDriver {
     }
 
     if (col) {
-      if (field.unique) col.unique();
+      // NOTE: field-level `unique` is deliberately NOT emitted here (#3696).
+      // A column builder can only express a SINGLE-column constraint, but on a
+      // tenant-scoped object `unique: true` means unique *within the tenant* —
+      // a composite `(tenantField, field)` index. Emitting `col.unique()` here
+      // is what made every tenant share one global namespace, which collided
+      // head-on with the per-tenant autonumber sequence (each tenant counts
+      // from 1, so the second tenant's `PROD-00001` was rejected by an index it
+      // could not see). All unique materialization now goes through the single
+      // tenancy-aware path — {@link uniqueIndexesFromFields} +
+      // {@link syncDeclaredIndexes} — which runs after the table exists and can
+      // therefore build composites. `createColumn` owns type/nullability/
+      // defaults only.
       if (field.required) col.notNullable();
       // `defaultValue: 'NOW()'` is a framework convention for "use the
       // database clock at insert time". Translate it to the driver-native

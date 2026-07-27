@@ -258,6 +258,54 @@ export const ComputedFieldCacheSchema = lazySchema(() => z.object({
  *   defaultValue: "open"
  * }
  */
+/**
+ * Uniqueness scope for a `unique` constraint (#3696).
+ *
+ * `unique: true` on a tenant-scoped object materializes as a COMPOSITE unique
+ * index `(tenantField, field)` — "unique within the tenant" — matching how
+ * every other tenant-aware subsystem already behaves (reads are RLS-filtered,
+ * writes stamp the tenant column, and the autonumber sequence table is keyed by
+ * `(object, tenant_id, field, scope)` so each tenant counts from 1). A
+ * single-column global index contradicted that: two tenants each issuing
+ * `PROD-00001` collided on an index neither of them could see, and the
+ * resulting UNIQUE violation doubled as a cross-tenant existence oracle
+ * (a rejected insert told tenant B that *somebody else* holds the value).
+ *
+ * `unique: 'global'` opts back into the old single-column behavior for the
+ * genuinely platform-wide identifiers where it is correct: an external
+ * provider id (`stripe_customer_id`), a DNS hostname, a globally reserved
+ * slug, a device identity. Global uniqueness is the special case and now has
+ * to say so.
+ *
+ * On an object with no tenant column (`tenancy.enabled: false`, or simply no
+ * tenant field) both spellings materialize identically — single-column unique.
+ * Single-tenant deployments are therefore unaffected: the tenant column is
+ * constant, so the composite index degenerates to the single-column one.
+ */
+export const UniqueScopeSchema = lazySchema(() =>
+  z.union([z.boolean(), z.literal('global')]),
+);
+
+/** @see UniqueScopeSchema */
+export type UniqueScope = boolean | 'global';
+
+/**
+ * Does this `unique` declaration ask for platform-wide (cross-tenant)
+ * uniqueness? Single source of truth for every driver that materializes a
+ * unique constraint (SQL DDL, Mongo index sync) so they cannot drift.
+ */
+export function isGlobalUnique(unique: unknown): boolean {
+  return unique === 'global';
+}
+
+/**
+ * Does this `unique` declaration ask for a unique constraint at all?
+ * Both `true` and `'global'` do; `false`/absent do not.
+ */
+export function isUniqueDeclared(unique: unknown): boolean {
+  return unique === true || unique === 'global';
+}
+
 export const FieldSchema = lazySchema(() => z.object({
   /** Identity */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Machine name (snake_case)').optional(),
@@ -275,7 +323,10 @@ export const FieldSchema = lazySchema(() => z.object({
   required: z.boolean().default(false).describe('Is required'),
   searchable: z.boolean().default(false).describe('Is searchable'),
   multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image.'),
-  unique: z.boolean().default(false).describe('Is unique constraint'),
+  // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
+  // `(tenantField, field)` index); `'global'` = platform-wide single-column
+  // unique. See {@link UniqueScopeSchema} for why `true` is tenant-scoped.
+  unique: UniqueScopeSchema.default(false).describe("Unique constraint. true = unique within the tenant (composite with the tenant column on tenant-scoped objects); 'global' = unique platform-wide across all tenants"),
   defaultValue: z.unknown().optional().describe('Default value'),
   
   /** Text/String Constraints */

@@ -814,6 +814,7 @@
     "data/TenancyConfig",
     "data/TimeUpdateInterval",
     "data/TransformType",
+    "data/UniqueScope",
     "data/ValidationRule",
     "data/WindowFunction",
     "data/WindowFunctionNode",
