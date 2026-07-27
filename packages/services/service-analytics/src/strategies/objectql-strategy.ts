@@ -1,9 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
-import type { Cube } from '@objectstack/spec/data';
+import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext } from './types.js';
 import { normalizeAnalyticsFilters, coerceFilterValueForObjectQL } from './filter-normalizer.js';
+import { compileScopedFilterToSql } from '../read-scope-sql.js';
 
 /**
  * ObjectQLStrategy — Priority 2
@@ -178,6 +179,21 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return gran ? `date_trunc('${gran}', ${col})` : col;
     };
 
+    // #3654 — reject a cross-object query HERE too, so `/analytics/sql` never
+    // previews a dotted-column statement that `execute()` refuses to run (the
+    // engine cannot join in an aggregate). Reconstruct the resolved field names
+    // the shared guard inspects.
+    const guardGroupBy = [
+      ...(query.dimensions ?? []).map((d) => this.resolveFieldName(cube, d, 'dimension')),
+      ...[...granByDim.keys()]
+        .filter((d) => !query.dimensions?.includes(d))
+        .map((d) => this.resolveFieldName(cube, d, 'dimension')),
+    ];
+    const guardFilter = Object.fromEntries(
+      normalizeAnalyticsFilters(query).map((f) => [this.resolveFieldName(cube, f.member, 'any'), true]),
+    );
+    this.assertNoCrossObjectReferences(cube, query, guardGroupBy, guardFilter);
+
     if (query.dimensions) {
       for (const dim of query.dimensions) {
         const expr = dimExpr(dim);
@@ -230,6 +246,24 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         whereParts.push(`${col} ${op} $${params.length}`);
       }
     }
+
+    // #3654 — render the READ SCOPE (tenant + RLS) that `execute()` injects via
+    // `withReadScope`, so the previewed WHERE is an honest account of what runs.
+    // Without this the query's own filters showed but the security predicate
+    // silently didn't — the preview understated the real constraint set. Base
+    // object only: cross-object queries are already rejected above.
+    if (typeof ctx.getReadScope === 'function') {
+      const scope = ctx.getReadScope(tableName);
+      if (scope != null) {
+        const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope as FilterCondition, tableName);
+        if (scopeSql) {
+          let i = 0;
+          const rendered = scopeSql.replace(/\?/g, () => { params.push(scopeParams[i++]); return `$${params.length}`; });
+          whereParts.push(`(${rendered})`);
+        }
+      }
+    }
+
     if (whereParts.length > 0) sql += ` WHERE ${whereParts.join(' AND ')}`;
 
     if (groupByParts.length > 0) {

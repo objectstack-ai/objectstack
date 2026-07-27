@@ -267,3 +267,63 @@ describe('ObjectQLStrategy — cross-object references are fail-closed (#3654, s
     expect(wasExecuted()).toBe(false);
   });
 });
+
+describe('ObjectQLStrategy.generateSql — read scope in the previewed WHERE (#3654 residual 2)', () => {
+  it('renders the tenant/RLS predicate the query actually runs with', async () => {
+    const { sql, params } = await makeService([]).generateSql(
+      { cube: 'sales', dimensions: ['region'], measures: ['revenue'] },
+      ctxA,
+    );
+    // The previewed SQL must carry the scope, not just the SELECT/GROUP BY —
+    // before #3654 residual 2 the WHERE omitted it and understated what runs.
+    expect(sql).toMatch(/WHERE .*"opportunity"\."organization_id" = \$\d+/);
+    expect(params).toContain('org_A');
+  });
+
+  it('ANDs the query filter and the scope together in the preview', async () => {
+    const { sql, params } = await makeService([]).generateSql(
+      {
+        cube: 'sales',
+        dimensions: ['region'],
+        measures: ['revenue'],
+        where: { region: 'West' },
+      },
+      ctxA,
+    );
+    expect(sql).toContain('WHERE');
+    expect(sql).toMatch(/region .*=.* \$\d+/);
+    expect(sql).toMatch(/"opportunity"\."organization_id" = \$\d+/);
+    expect(params).toEqual(expect.arrayContaining(['West', 'org_A']));
+  });
+
+  it('omits the scope predicate when no provider is configured (unchanged)', async () => {
+    const { sql } = await makeService([], { getReadScope: undefined }).generateSql(
+      { cube: 'sales', dimensions: ['region'], measures: ['revenue'] },
+      ctxA,
+    );
+    expect(sql).not.toContain('organization_id');
+  });
+
+  it('rejects a cross-object preview (no dotted-column SQL for a query execute() refuses)', async () => {
+    const compiled = compileDataset(
+      DatasetSchema.parse({
+        name: 'sql_by_account',
+        label: 'x',
+        object: 'opportunity',
+        include: ['account'],
+        dimensions: [{ name: 'region', field: 'account.region', type: 'string' }],
+        measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+      }),
+    );
+    const svc = new AnalyticsService({
+      cubes: [compiled.cube],
+      queryCapabilities: objectqlOnly,
+      executeAggregate: async () => [],
+      getReadScope: readScope,
+      getAllowedRelationships: () => compiled.allowedRelationships,
+    });
+    await expect(
+      svc.generateSql({ cube: 'sql_by_account', dimensions: ['region'], measures: ['revenue'] }, ctxA),
+    ).rejects.toThrow(/cannot group or aggregate across a relationship/);
+  });
+});
