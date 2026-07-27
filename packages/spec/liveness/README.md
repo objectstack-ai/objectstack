@@ -46,6 +46,29 @@ Resolution per property: **ledger entry → spec `.describe()` marker → UNCLAS
 Framework provenance/lock fields (`_lock*`, `_provenance`, `_packageId/Version`,
 `protection` — ADR-0010) are auto-classified `live`.
 
+### ⚠️ An authoring/preview renderer is NOT a runtime consumer
+
+`live` means **authoring the property changes runtime behaviour**. A Studio
+`*.form.ts` input or a `metadata-admin/previews/*Preview.tsx` panel merely
+*echoes back what the author typed* — it proves the property round-trips, never
+that anything acts on it. A 2026-06 sweep that "missed objectui" over-corrected
+and marked **13 properties `live` citing only a preview renderer**; of those,
+three were re-verified in 2026-07 and **all three were wrong or misleading**:
+
+- `skill.permissions` — no gate anywhere (corrected → `dead` + `authorWarn`)
+- `agent.knowledge` — retrieval scope comes from the LLM's tool args (corrected → `dead`)
+- `action.disabled` — enforced on **one of six** rendering surfaces at the time;
+  the verdict was right for the wrong reason and hid a five-surface silent
+  no-op (evidence corrected; the gap itself fixed in objectui#2863)
+
+The remaining ten preview-only claims (`action.execute`/`shortcut`/`bulkEnabled`,
+`flow.status`/`active`, `skill.triggerPhrases`, `tool.category`/
+`requiresConfirmation`/`active`/`builtIn`) are **unverified** — treat them as
+suspect until someone cites a real runtime reader. When in doubt, the honest
+status is `dead` + `authorWarn`: an author who gets a warning for a property
+that turns out to work loses nothing; an author who gets silence for a property
+that does nothing ships a bug.
+
 ## Runtime proofs — prove-it-runs (ADR-0054)
 
 `live` today means only *a static pointer to a consumer* — proof that something
@@ -207,9 +230,9 @@ EOF
 | hook | 11 | – | 2 | – | model-healthy; only label/description dead (benign) |
 | permission | 32 | – | 0 | – | CRUD/FLS/RLS live; dead `contextVariables` REMOVED (ADR-0105 D11 — RLS resolves only the `current_user.*` built-ins plus runtime-staged `rlsMembership` sets) |
 | position | 4 | – | – | – | (role's ADR-0090 successor) fully live |
-| agent | 14 | 5 | 0 | – | dead `tenantId` + `planning.strategy`/`allowReplan` REMOVED (#2377) — only `planning.maxIterations` live; autonomy tier experimental |
+| agent | 13 | 5 | 1 | – | dead `tenantId` + `planning.strategy`/`allowReplan` REMOVED (#2377) — only `planning.maxIterations` live; autonomy tier experimental; `knowledge` CORRECTED to dead 2026-07 — `search_knowledge` takes `sourceIds` from the LLM's tool-call args, never from the agent record (#1878 §3 recheck) |
 | tool | 9 | 1 | 1 | – | `permissions` dead — tool invocation not permission-gated by it |
-| skill | 10 | – | – | – | fully live |
+| skill | 9 | – | 1 | – | `permissions` CORRECTED to dead 2026-07 — the cloud SkillRegistry reads only `active`/`triggerConditions`/`tools`; mirrors the identical `tool.permissions` entry (#1878 §3 recheck) |
 | dataset | 19 | – | 0 | – | `measures.certified` (declared-but-unenforced governance flag) REMOVED in 16.0 (#2377) |
 | page | 16 | – | – | 1 | fully live + one planned |
 | view | 70 | 0 | 5 | – | list/form drilled via `children` (#2998 Track B); dead = list.{responsive,performance} + form.{data,defaultSort,aria}, all but aria authorWarn'd; form.{buttons,defaults} now live — objectui ObjectForm folds them onto its flat props (framework#1894 / #2998); audit-era DEAD lines superseded by re-verification (submitBehavior, sharing.lockedBy, list ViewData providers, and the ADR-0021 chart shape — all live now); level-2 dead residue (userActions.buttons, addRecord.mode/formView, tabs[].order) noted on parents — one drill level only |

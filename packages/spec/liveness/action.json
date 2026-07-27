@@ -101,8 +101,8 @@
     },
     "disabled": {
       "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/ActionPreview.tsx:169",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "evidence": "objectui: components action-button/-group/-icon/-menu + app-shell DeclaredActionsBar + plugin-detail record-quick-actions — all six rendering surfaces gate the Button on the predicate",
+      "note": "EVIDENCE CORRECTED 2026-07 (#1878 §3 recheck): previously cited the metadata-admin PREVIEW renderer, which only echoes the authored value. At that time the predicate was actually enforced on ONE of six surfaces (#1885 wired action:button alone) — the 'live' verdict was right for the wrong reason and hid a real silent no-op on the other five. objectui#2863 wired the rest; showcase specimen `showcase_archive_task` (#3643) dogfoods it."
     },
     "shortcut": {
       "status": "live",

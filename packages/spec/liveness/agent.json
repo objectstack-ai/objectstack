@@ -65,9 +65,11 @@
       "note": "evaluateAgentAccess() — caller must hold ALL required permissions/roles; enforced at the chat route. #1884."
     },
     "knowledge": {
-      "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/AgentPreview.tsx:69 (d.knowledge; KnowledgeSummary renders sources/indexes)",
-      "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+      "status": "dead",
+      "evidence": "agent.form.ts + objectui AgentPreview.tsx:69 (both authoring-side echo only); the RAG path never reads it",
+      "authorWarn": true,
+      "authorHint": "Declaring `knowledge.sources` does NOT scope retrieval — the `search_knowledge` tool takes `sourceIds` from the LLM's tool-call arguments (cloud service-ai/src/tools/knowledge-tools.ts:96), never from the agent record. Restrict retrieval at the knowledge-service / source level instead.",
+      "note": "CORRECTED 2026-07 (#1878 §3 recheck): was marked live on the evidence of the metadata-admin PREVIEW renderer — an echo of what the author typed, not runtime consumption. The `topics`→`sources` NAMING drift is genuinely fixed (#1891 alias fold); the block is nonetheless behaviourally inert. Wiring it would also close a scope gap (an agent can search sources it was never scoped to) — tracked separately."
     },
     "lifecycle": {
       "status": "experimental",
